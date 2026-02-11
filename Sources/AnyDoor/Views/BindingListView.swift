@@ -32,13 +32,15 @@ struct BindingListView: View {
                 }
             }
 
-            HStack {
+            HStack(spacing: 6) {
                 Button {
                     showingEditor = true
                     selection = nil
                 } label: {
                     Image(systemName: "plus")
+                        .frame(width: 28, height: 22)
                 }
+                .buttonStyle(.bordered)
 
                 Button {
                     if let selected = selection {
@@ -49,7 +51,9 @@ struct BindingListView: View {
                     }
                 } label: {
                     Image(systemName: "minus")
+                        .frame(width: 28, height: 22)
                 }
+                .buttonStyle(.bordered)
                 .disabled(selection == nil)
 
                 Spacer()
