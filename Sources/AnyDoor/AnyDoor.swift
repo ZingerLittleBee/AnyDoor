@@ -1,9 +1,20 @@
-// The Swift Programming Language
-// https://docs.swift.org/swift-book
+import SwiftUI
+import SwiftData
 
 @main
-struct AnyDoor {
-    static func main() {
-        print("Hello, world!")
+struct AnyDoorApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        MenuBarExtra("AnyDoor", systemImage: "door.left.hand.open") {
+            MenuBarView()
+                .modelContainer(appDelegate.modelContainer)
+        }
+        .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView()
+                .modelContainer(appDelegate.modelContainer)
+        }
     }
 }
