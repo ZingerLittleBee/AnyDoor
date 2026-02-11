@@ -70,3 +70,10 @@ Sources/AnyDoor/
 - 事件 tap 使用 `.cghidEventTap` 确保最高优先级
 - `displayKey` 是 `@Transient` 计算属性，不持久化
 - 界面语言为中文
+
+## Code Conventions
+
+- **All code comments must be written in English.**
+- **All commit messages must be written in English.**
+- **All PR titles and descriptions must be written in English.**
+- UI-facing strings (labels, messages shown to the user) remain in Chinese.
