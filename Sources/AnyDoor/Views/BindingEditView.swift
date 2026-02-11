@@ -85,7 +85,13 @@ struct BindingEditView: View {
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             self.keyCode = Int(event.keyCode)
-            self.modifierFlags = Int(event.modifierFlags.intersection([.command, .control, .option, .shift]).rawValue)
+            // Use CGEvent modifier mask values to match the callback comparison
+            let cgFlags = event.cgEvent?.flags ?? []
+            let mask: UInt64 = CGEventFlags.maskCommand.rawValue
+                | CGEventFlags.maskControl.rawValue
+                | CGEventFlags.maskAlternate.rawValue
+                | CGEventFlags.maskShift.rawValue
+            self.modifierFlags = Int(cgFlags.rawValue & mask)
 
             var parts: [String] = []
             if event.modifierFlags.contains(.control) { parts.append("⌃") }

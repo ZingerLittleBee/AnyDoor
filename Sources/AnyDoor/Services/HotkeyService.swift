@@ -6,7 +6,6 @@ final class HotkeyService {
 
     fileprivate nonisolated(unsafe) var eventTap: CFMachPort?
     private nonisolated(unsafe) var runLoopSource: CFRunLoopSource?
-    // Snapshot of bindings used by the callback — simple value types
     fileprivate nonisolated(unsafe) var bindingSnapshots: [BindingSnapshot] = []
 
     struct BindingSnapshot: Sendable {
@@ -23,12 +22,17 @@ final class HotkeyService {
             BindingSnapshot(keyCode: $0.keyCode, modifierFlags: $0.modifierFlags,
                             appBundleID: $0.appBundleID, appPath: $0.appPath)
         }
+        print("AnyDoor: Updated \(bindingSnapshots.count) binding(s)")
+        for b in bindingSnapshots {
+            print("  keyCode=\(b.keyCode) modifiers=\(b.modifierFlags) app=\(b.appBundleID)")
+        }
     }
 
     func start() {
         guard eventTap == nil else { return }
 
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.flagsChanged.rawValue)
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
@@ -39,7 +43,7 @@ final class HotkeyService {
             callback: hotkeyCallback,
             userInfo: selfPtr
         ) else {
-            print("AnyDoor: Failed to create event tap. Check Accessibility permissions.")
+            print("AnyDoor: Failed to create event tap. Accessibility permission granted: \(AXIsProcessTrusted())")
             return
         }
 
@@ -47,6 +51,7 @@ final class HotkeyService {
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        print("AnyDoor: Event tap started successfully")
     }
 
     func stop() {
@@ -70,6 +75,12 @@ final class HotkeyService {
     }
 }
 
+// Modifier mask that covers only Cmd/Ctrl/Opt/Shift, stripping device-dependent bits
+private let modifierMask: UInt64 = CGEventFlags.maskCommand.rawValue
+    | CGEventFlags.maskControl.rawValue
+    | CGEventFlags.maskAlternate.rawValue
+    | CGEventFlags.maskShift.rawValue
+
 private func hotkeyCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
@@ -77,7 +88,7 @@ private func hotkeyCallback(
     userInfo: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
     guard let userInfo else {
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     let service = Unmanaged<HotkeyService>.fromOpaque(userInfo).takeUnretainedValue()
@@ -86,16 +97,15 @@ private func hotkeyCallback(
         if let tap = service.eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)
         }
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     guard type == .keyDown else {
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-    let flags = event.flags
-    let modifiers = Int(flags.intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift]).rawValue)
+    let modifiers = Int(event.flags.rawValue & modifierMask)
 
     for binding in service.bindingSnapshots {
         if binding.keyCode == keyCode && binding.modifierFlags == modifiers {
@@ -108,5 +118,5 @@ private func hotkeyCallback(
         }
     }
 
-    return Unmanaged.passRetained(event)
+    return Unmanaged.passUnretained(event)
 }
