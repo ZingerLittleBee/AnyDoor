@@ -22,6 +22,12 @@ final class HotkeyService {
             BindingSnapshot(keyCode: $0.keyCode, modifierFlags: $0.modifierFlags,
                             appBundleID: $0.appBundleID, appPath: $0.appPath)
         }
+        // Ensure the tap is running and re-enabled after updates
+        if eventTap == nil {
+            start()
+        } else {
+            resume()
+        }
         print("AnyDoor: Updated \(bindingSnapshots.count) binding(s)")
         for b in bindingSnapshots {
             print("  keyCode=\(b.keyCode) modifiers=\(b.modifierFlags) app=\(b.appBundleID)")

@@ -47,7 +47,7 @@ struct BindingListView: View {
                         modelContext.delete(selected)
                         try? modelContext.save()
                         selection = nil
-                        notifyBindingsChanged()
+                        HotkeyService.shared.updateBindings(bindings.filter { $0.id != selected.id })
                     }
                 } label: {
                     Image(systemName: "minus")
@@ -64,14 +64,12 @@ struct BindingListView: View {
             BindingEditView { newBinding in
                 modelContext.insert(newBinding)
                 try? modelContext.save()
-                notifyBindingsChanged()
+                HotkeyService.shared.updateBindings(bindings + [newBinding])
             }
         }
-    }
-
-    private func notifyBindingsChanged() {
-        if let delegate = NSApplication.shared.delegate as? AppDelegate {
-            delegate.refreshBindings()
+        .onChange(of: bindings.map(\.isEnabled)) {
+            try? modelContext.save()
+            HotkeyService.shared.updateBindings(bindings)
         }
     }
 }
