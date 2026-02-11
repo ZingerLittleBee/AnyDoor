@@ -82,6 +82,7 @@ struct BindingEditView: View {
         stopRecording()
         isRecording = true
         keyDisplay = "按下快捷键..."
+        HotkeyService.shared.suspend()
 
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             self.keyCode = Int(event.keyCode)
@@ -111,6 +112,7 @@ struct BindingEditView: View {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)
             eventMonitor = nil
+            HotkeyService.shared.resume()
         }
     }
 
