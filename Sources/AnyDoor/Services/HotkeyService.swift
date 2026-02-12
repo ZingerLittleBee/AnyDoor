@@ -113,20 +113,31 @@ final class HotkeyService {
         runLoopSource = nil
     }
 
-    /// Watchdog timer: checks every 5 seconds whether the event tap was disabled by the system.
+    /// Destroy and recreate the event tap from scratch.
+    /// A simple re-enable may not restore full functionality when the underlying
+    /// CFMachPort or RunLoop source is in a bad state (e.g. after IMK errors).
+    func restart() {
+        print("AnyDoor: Restarting event tap")
+        stop()
+        start()
+    }
+
+    /// Watchdog timer: checks every 2 seconds whether the event tap was disabled by the system.
     ///
     /// macOS enforces a ~1 second timeout on event tap callbacks. If the callback takes
     /// too long, the system auto-disables the tap (firing `.tapDisabledByTimeout`).
-    /// Although the callback already handles re-enabling, the system may not deliver
-    /// further events to a disabled tap, so this external timer acts as a safety net.
+    /// The callback attempts an inline re-enable for fast recovery, but if that fails
+    /// (e.g. corrupted mach port), this watchdog performs a full restart as a safety net.
     private func startWatchdog() {
         watchdogTimer?.invalidate()
-        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+        watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
             guard let tap = self.eventTap else { return }
             if !CGEvent.tapIsEnabled(tap: tap) {
-                CGEvent.tapEnable(tap: tap, enable: true)
-                print("AnyDoor: Watchdog re-enabled event tap")
+                print("AnyDoor: Watchdog detected disabled tap, performing full restart")
+                MainActor.assumeIsolated {
+                    self.restart()
+                }
             }
         }
     }
@@ -167,8 +178,11 @@ private func hotkeyCallback(
 
     let service = Unmanaged<HotkeyService>.fromOpaque(userInfo).takeUnretainedValue()
 
-    // System disabled tap due to timeout or user input — re-enable immediately
+    // System disabled tap due to timeout or user input — attempt inline re-enable.
+    // The watchdog timer will perform a full restart if this doesn't stick.
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        let reason = type == .tapDisabledByTimeout ? "timeout" : "user input"
+        print("AnyDoor: Event tap disabled by \(reason), attempting inline re-enable")
         if let tap = service.eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)
         }
