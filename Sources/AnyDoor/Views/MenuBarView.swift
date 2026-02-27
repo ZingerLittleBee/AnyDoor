@@ -43,6 +43,8 @@ struct MenuBarView: View {
                 .padding(.horizontal, 4)
             }
 
+            Spacer(minLength: 0)
+
             // Footer actions
             HStack(spacing: 8) {
                 SettingsLink {
@@ -68,6 +70,7 @@ struct MenuBarView: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 4)
         .frame(width: 260)
+        .frame(minHeight: 120)
     }
 }
 
