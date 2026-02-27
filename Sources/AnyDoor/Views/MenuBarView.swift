@@ -6,71 +6,68 @@ struct MenuBarView: View {
     @Environment(\.modelContext) private var modelContext
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            VStack(alignment: .leading, spacing: 8) {
-                // Header
-                HStack {
-                    Text("AnyDoor")
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                    Spacer()
-                    Text("\(bindings.filter(\.isEnabled).count) 个快捷键")
+        VStack(alignment: .leading, spacing: 6) {
+            // Header
+            HStack {
+                Text("AnyDoor")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text("\(bindings.filter(\.isEnabled).count) 个快捷键")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12)
+
+            // Bindings list
+            if bindings.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "keyboard")
+                        .font(.system(size: 24))
+                        .foregroundStyle(.quaternary)
+                    Text("尚未配置快捷键")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text("点击下方「设置」添加")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-
-                // Bindings list
-                if bindings.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "keyboard")
-                            .font(.system(size: 24))
-                            .foregroundStyle(.quaternary)
-                        Text("尚未配置快捷键")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Text("点击下方「设置」添加")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+            } else {
+                VStack(spacing: 4) {
+                    ForEach(bindings) { binding in
+                        BindingRow(binding: binding)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                } else {
-                    VStack(spacing: 4) {
-                        ForEach(bindings) { binding in
-                            BindingRow(binding: binding)
-                        }
-                    }
-                    .padding(.horizontal, 8)
                 }
-
-                // Footer actions
-                HStack(spacing: 8) {
-                    SettingsLink {
-                        Label("设置", systemImage: "gear")
-                    }
-                    .buttonStyle(.glass)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        NSApplication.shared.activate()
-                    })
-
-                    Button {
-                        NSApplication.shared.terminate(nil)
-                    } label: {
-                        Label("退出", systemImage: "power")
-                    }
-                    .buttonStyle(.glass)
-
-                    Spacer()
-                }
-                .focusEffectDisabled()
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 4)
             }
+
+            // Footer actions
+            HStack(spacing: 8) {
+                SettingsLink {
+                    Label("设置", systemImage: "gear")
+                }
+                .buttonStyle(.glass)
+                .simultaneousGesture(TapGesture().onEnded {
+                    NSApplication.shared.activate()
+                })
+
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Label("退出", systemImage: "power")
+                }
+                .buttonStyle(.glass)
+
+                Spacer()
+            }
+            .focusEffectDisabled()
+            .padding(.horizontal, 8)
         }
-        .frame(width: 280)
-        .frame(minHeight: 140)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .frame(width: 260)
     }
 }
 
