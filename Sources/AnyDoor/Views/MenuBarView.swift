@@ -70,7 +70,7 @@ struct MenuBarView: View {
         .padding(.vertical, 8)
         .padding(.horizontal, 4)
         .frame(width: 260)
-        .frame(minHeight: 120)
+        .frame(minHeight: 400)
     }
 }
 
