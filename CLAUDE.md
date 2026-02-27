@@ -63,6 +63,9 @@ Sources/AnyDoor/
 - **axiom-swiftdata** — SwiftData 模式，@Model、@Query、@Relationship、ModelContext 模式、Swift 6 并发时使用。
 - **axiom-swiftui-26-ref** — iOS/macOS 26 SwiftUI 新特性，Liquid Glass 设计系统、@Animatable 宏等。
 - **swiftui-liquid-glass** — Liquid Glass API 实现和审查。
+- **axiom-swift-concurrency** — Swift 并发模式，@MainActor、Sendable、nonisolated(unsafe)、Task、Actor 等并发安全模式。
+- **swift-expert** — Swift 语言专家知识，覆盖语言特性和最佳实践。
+- **macos-developer** — macOS 应用开发，CGEvent、NSWorkspace、辅助功能权限等底层 API。
 
 ## 注意事项
 
