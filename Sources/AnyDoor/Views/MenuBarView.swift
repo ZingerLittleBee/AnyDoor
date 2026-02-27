@@ -64,8 +64,9 @@ struct MenuBarView: View {
 
                     Spacer()
                 }
+                .focusEffectDisabled()
                 .padding(.horizontal, 12)
-                .padding(.bottom, 10)
+                .padding(.bottom, 8)
             }
         }
         .frame(width: 280)
