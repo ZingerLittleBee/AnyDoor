@@ -5,7 +5,7 @@
     <key>CFBundleExecutable</key>
     <string>AnyDoor</string>
     <key>CFBundleIdentifier</key>
-    <string>com.zingerbee.AnyDoor</string>
+    <string>dev.bybee.AnyDoor</string>
     <key>CFBundleName</key>
     <string>AnyDoor</string>
     <key>CFBundleVersion</key>

@@ -24,6 +24,10 @@ final class HotkeyService {
     /// Periodically checks and re-enables the event tap if the system disabled it
     private var watchdogTimer: Timer?
 
+    /// Whether the tap is intentionally suspended (e.g. during hotkey recording).
+    /// Prevents the watchdog from restarting the tap while recording is in progress.
+    private var isSuspended = false
+
     /// Sendable value type for safely passing binding data across threads to the C callback
     struct BindingSnapshot: Sendable {
         let keyCode: Int
@@ -40,11 +44,13 @@ final class HotkeyService {
             BindingSnapshot(keyCode: $0.keyCode, modifierFlags: $0.modifierFlags,
                             appBundleID: $0.appBundleID, appPath: $0.appPath)
         }
-        // Ensure tap is running (may have been suspended during recording or disabled by system)
-        if eventTap == nil {
-            start()
-        } else {
-            resume()
+        // Ensure tap is running unless intentionally suspended during recording
+        if !isSuspended {
+            if eventTap == nil {
+                start()
+            } else {
+                resume()
+            }
         }
         print("AnyDoor: Updated \(bindingSnapshots.count) binding(s)")
         for b in bindingSnapshots {
@@ -87,6 +93,7 @@ final class HotkeyService {
 
     /// Suspend event listening (called during hotkey recording to avoid triggering existing bindings)
     func suspend() {
+        isSuspended = true
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -94,6 +101,7 @@ final class HotkeyService {
 
     /// Resume event listening
     func resume() {
+        isSuspended = false
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)
         }
@@ -133,7 +141,9 @@ final class HotkeyService {
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
             guard let tap = self.eventTap else { return }
-            if !CGEvent.tapIsEnabled(tap: tap) {
+            // Skip restart when intentionally suspended (e.g. during hotkey recording)
+            let suspended = MainActor.assumeIsolated { self.isSuspended }
+            if !suspended && !CGEvent.tapIsEnabled(tap: tap) {
                 print("AnyDoor: Watchdog detected disabled tap, performing full restart")
                 MainActor.assumeIsolated {
                     self.restart()
