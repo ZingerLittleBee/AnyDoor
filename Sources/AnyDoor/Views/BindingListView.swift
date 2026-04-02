@@ -1,5 +1,8 @@
 import SwiftUI
 import SwiftData
+import OSLog
+
+private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
 
 struct BindingListView: View {
     @Query(sort: \KeyBinding.createdAt) private var bindings: [KeyBinding]
@@ -44,7 +47,7 @@ struct BindingListView: View {
                 Button {
                     if let selected = selection {
                         modelContext.delete(selected)
-                        try? modelContext.save()
+                        save()
                         selection = nil
                     }
                 } label: {
@@ -61,12 +64,20 @@ struct BindingListView: View {
         .sheet(isPresented: $showingEditor) {
             BindingEditView { newBinding in
                 modelContext.insert(newBinding)
-                try? modelContext.save()
+                save()
             }
         }
         .onChange(of: bindings.map(\.isEnabled)) {
-            try? modelContext.save()
+            save()
             HotkeyService.shared.updateBindings(bindings)
+        }
+    }
+
+    private func save() {
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save model context: \(error)")
         }
     }
 }
