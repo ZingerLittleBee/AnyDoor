@@ -5,7 +5,6 @@ import UniformTypeIdentifiers
 struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
     @State private var conflictAlert: ConflictAlert?
-    @Environment(\.modelContext) private var modelContext
 
     var body: some View {
         VStack(spacing: 0) {
@@ -217,31 +216,11 @@ struct PanelSettingsView: View {
             ?? (bundle?.infoDictionary?["CFBundleDisplayName"] as? String)
             ?? url.deletingPathExtension().lastPathComponent
 
-        // Default order: append at end of children
-        let nextOrder = (PanelStore.shared.appShortcutChildren.map(\.displayOrder).max() ?? 0) + 100
-
-        let new = KeyBinding(
-            keyCode: -1, // sentinel: no hotkey yet
-            modifierFlags: 0,
-            appBundleID: appBundleID,
-            appName: appName,
-            appPath: url.path,
-            isEnabled: false, // disabled until user records a hotkey
-            isVisible: true,
-            displayOrder: nextOrder
-        )
-        modelContext.insert(new)
-        try? modelContext.save()
-        PanelStore.shared.rebuild()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        PanelStore.shared.addAppShortcut(appBundleID: appBundleID, appName: appName, appPath: url.path)
     }
 
     private func deleteAppShortcut(id: UUID) {
-        guard let binding = PanelStore.shared.binding(id: id) else { return }
-        modelContext.delete(binding)
-        try? modelContext.save()
-        PanelStore.shared.rebuild()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        PanelStore.shared.deleteAppShortcut(id: id)
     }
 }
 

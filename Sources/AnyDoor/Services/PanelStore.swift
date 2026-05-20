@@ -26,6 +26,9 @@ final class PanelStore {
     /// Cached permission states by item key.
     private var permissionStates: [BuiltinItem: PermissionStatus] = [:]
 
+    /// Per-item in-flight guard preventing overlapping toggles from desynchronizing state.
+    private var togglesInFlight: Set<BuiltinItem> = []
+
     private init() {}
 
     func bootstrap(
@@ -127,8 +130,14 @@ final class PanelStore {
     }
 
     /// Toggle a built-in. Reads current state and flips it.
+    ///
+    /// Guarded against overlapping calls: a second invocation while the first is mid-flight
+    /// is dropped, preventing two reads from observing the same stale state and double-flipping.
     func toggle(_ item: BuiltinItem) async {
         guard let provider = providers[item] as? any ToggleProvider else { return }
+        guard !togglesInFlight.contains(item) else { return }
+        togglesInFlight.insert(item)
+        defer { togglesInFlight.remove(item) }
         do {
             let current = try await provider.readState()
             try await provider.setState(!current)
@@ -304,5 +313,39 @@ final class PanelStore {
             if entry.hotkey == hotkey { return entry }
         }
         return nil
+    }
+
+    /// Create a new app shortcut row from an NSOpenPanel selection.
+    ///
+    /// The new row is inserted with `isEnabled: false` and `keyCode: -1` as a sentinel,
+    /// meaning it appears in the submenu but doesn't fire until the user records a hotkey
+    /// via `updateAppShortcut(id:hotkey:)` (which flips `isEnabled = true`).
+    func addAppShortcut(appBundleID: String, appName: String, appPath: String) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        let nextOrder = (appShortcutChildren.map(\.displayOrder).max() ?? 0) + 100
+        let new = KeyBinding(
+            keyCode: -1,
+            modifierFlags: 0,
+            appBundleID: appBundleID,
+            appName: appName,
+            appPath: appPath,
+            isEnabled: false,
+            isVisible: true,
+            displayOrder: nextOrder
+        )
+        context.insert(new)
+        try? context.save()
+        rebuild()
+        rebuildHotkeySnapshots()
+    }
+
+    /// Delete an app shortcut by id.
+    func deleteAppShortcut(id: UUID) {
+        guard let binding = binding(id: id), let container = modelContainer else { return }
+        container.mainContext.delete(binding)
+        try? container.mainContext.save()
+        rebuild()
+        rebuildHotkeySnapshots()
     }
 }
