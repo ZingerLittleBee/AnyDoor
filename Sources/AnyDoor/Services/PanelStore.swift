@@ -212,4 +212,92 @@ final class PanelStore {
         let descriptor = FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.id == id })
         return try? context.fetch(descriptor).first
     }
+
+    // MARK: - Mutations
+
+    /// Update visibility for a built-in.
+    func setBuiltinVisibility(_ item: BuiltinItem, isVisible: Bool) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        let key = item.rawValue
+        if let pref = try? context.fetch(
+            FetchDescriptor<BuiltinPreference>(predicate: #Predicate { $0.itemKey == key })
+        ).first {
+            pref.isVisible = isVisible
+            try? context.save()
+            rebuild()
+            rebuildHotkeySnapshots()
+        }
+    }
+
+    /// Update hotkey for a built-in. Pass nil to clear.
+    func setBuiltinHotkey(_ item: BuiltinItem, hotkey: HotkeyDescriptor?) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        let key = item.rawValue
+        if let pref = try? context.fetch(
+            FetchDescriptor<BuiltinPreference>(predicate: #Predicate { $0.itemKey == key })
+        ).first {
+            pref.keyCode = hotkey?.keyCode
+            pref.modifierFlags = hotkey?.modifierFlags
+            try? context.save()
+            rebuild()
+            rebuildHotkeySnapshots()
+        }
+    }
+
+    /// Update KeyBinding fields (visibility / hotkey).
+    func updateAppShortcut(id: UUID, isVisible: Bool? = nil, hotkey: HotkeyDescriptor? = nil) {
+        guard let binding = binding(id: id), let container = modelContainer else { return }
+        if let v = isVisible { binding.isVisible = v }
+        if let hk = hotkey {
+            binding.keyCode = hk.keyCode
+            binding.modifierFlags = hk.modifierFlags
+        }
+        try? container.mainContext.save()
+        rebuild()
+        rebuildHotkeySnapshots()
+    }
+
+    /// Reorder top-level entries by new keys array (ordered).
+    func reorderTopLevel(by newOrder: [BuiltinItem]) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        guard let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) else { return }
+        let prefsByKey = Dictionary(uniqueKeysWithValues: prefs.map { ($0.itemKey, $0) })
+        var order: Double = 100
+        for item in newOrder {
+            if let pref = prefsByKey[item.rawValue] {
+                pref.displayOrder = order
+                order += 100
+            }
+        }
+        try? context.save()
+        rebuild()
+        rebuildHotkeySnapshots()
+    }
+
+    /// Reorder app shortcuts by new id array (ordered).
+    func reorderAppShortcuts(by newOrder: [UUID]) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        var order: Double = 100
+        for id in newOrder {
+            if let binding = binding(id: id) {
+                binding.displayOrder = order
+                order += 100
+            }
+        }
+        try? context.save()
+        rebuild()
+    }
+
+    /// Find which entry currently owns a given hotkey (used for conflict detection).
+    func entryUsingHotkey(_ hotkey: HotkeyDescriptor, excluding: PanelEntry.Source? = nil) -> PanelEntry? {
+        for entry in topLevelEntries + appShortcutChildren {
+            if entry.source == excluding { continue }
+            if entry.hotkey == hotkey { return entry }
+        }
+        return nil
+    }
 }

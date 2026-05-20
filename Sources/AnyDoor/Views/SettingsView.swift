@@ -3,13 +3,13 @@ import SwiftUI
 struct SettingsView: View {
     var body: some View {
         TabView {
-            Tab("快捷键", systemImage: "keyboard") {
-                BindingListView()
+            Tab("面板", systemImage: "rectangle.stack") {
+                PanelSettingsView()
             }
             Tab("通用", systemImage: "gear") {
                 GeneralSettingsView()
             }
         }
-        .frame(width: 520, height: 380)
+        .frame(width: 560, height: 480)
     }
 }
