@@ -17,14 +17,25 @@ macOS 菜单栏应用，通过全局快捷键一键切换（打开/隐藏）指�
 # 构建
 swift build
 
-# 运行
+# 运行（开发模式，进程身份不带 Bundle ID）
 swift run AnyDoor
 
 # Release 构建
 swift build -c release
+
+# 安装为 /Applications/AnyDoor.app（写入 Info.plist，Bundle ID = dev.bybee.AnyDoor）
+make install
+
+# 卸载
+make uninstall
+
+# 热重载开发（需要 watchexec）
+make
 ```
 
 运行需要 macOS 辅助功能权限（系统设置 → 隐私与安全性 → 辅助功能）。
+
+`swift run` 和 `make install` 后的 `.app` 是**两个不同的进程身份**，需要分别授权辅助功能。生产使用走 `make install`；日常开发用 `swift run`。SwiftData 存储路径已被固定，两种方式共享同一份数据（见下文）。
 
 ## 项目结构
 
@@ -50,10 +61,17 @@ Sources/AnyDoor/
 ## 架构要点
 
 - **ModelContainer 共享**：在 `AppDelegate.init()` 中创建，通过 `.modelContainer()` 传递给所有 SwiftUI 视图。不要创建多个 ModelContainer 实例。
+- **固定存储路径**：ModelContainer 显式配置 `url: ~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store`，避免 `swift run` 和 `.app` 因 Bundle ID 差异写入不同位置。`AppDelegate` 启动时会一次性从遗留 `default.store` 迁移并清理（见 `migrateLegacyStore`）。**修改 ModelConfiguration 时必须保留这条路径**，否则用户数据会"丢失"。
 - **CGEvent 回调并发安全**：回调函数是 C 风格的自由函数，不在 `@MainActor` 上。使用 `BindingSnapshot`（Sendable 值类型）+ `nonisolated(unsafe)` 存储来安全传递数据。
+- **CGEvent tap 超时与 watchdog**：系统对 tap 回调有 ~1 秒预算，超时会触发 `.tapDisabledByTimeout` 自动禁用 tap。当前防御方式：
+  - 回调只做按键匹配，实际工作 `DispatchQueue.main.async` 派发
+  - 收到 `tapDisabledBy*` 时回调内 inline 重新启用
+  - 2 秒 watchdog 检测 `CGEvent.tapIsEnabled`，必要时 `restart()`（销毁并重建 tap）
+  - **绝不要在回调里做同步耗时工作**（I/O、SwiftData fetch、模态弹窗等）
 - **修饰键对齐**：录入和检测都使用 `CGEventFlags` 位掩码（`maskCommand | maskControl | maskAlternate | maskShift`），不要用 `NSEvent.ModifierFlags`。
-- **录入时暂停监听**：录入快捷键时调用 `HotkeyService.suspend()`，完成后 `resume()`，避免录入触发已有绑定。
+- **录入时暂停监听**：录入快捷键时调用 `HotkeyService.suspend()`，完成后 `resume()`，避免录入触发已有绑定。watchdog 通过 `isSuspended` 跳过自动重启。
 - **数据变更通知**：增删绑定后显式调用 `modelContext.save()` 和 `AppDelegate.refreshBindings()` 刷新 HotkeyService。
+- **切换语义**：`AppSwitcher.toggle` 用 `app.isActive`（最前应用判定）而非 `app.isHidden`。当目标已是最前则 `hide()`，否则 `activate()`；未运行则 `openApplication`。改判定条件会改变交互语义。
 
 ## 相关 Skills
 
