@@ -247,12 +247,17 @@ final class PanelStore {
     }
 
     /// Update KeyBinding fields (visibility / hotkey).
+    ///
+    /// Setting a non-nil hotkey also flips `isEnabled = true` so newly-added rows
+    /// (created via the settings UI with the sentinel `isEnabled: false`) become
+    /// active as soon as the user records a hotkey.
     func updateAppShortcut(id: UUID, isVisible: Bool? = nil, hotkey: HotkeyDescriptor? = nil) {
         guard let binding = binding(id: id), let container = modelContainer else { return }
         if let v = isVisible { binding.isVisible = v }
         if let hk = hotkey {
             binding.keyCode = hk.keyCode
             binding.modifierFlags = hk.modifierFlags
+            binding.isEnabled = true
         }
         try? container.mainContext.save()
         rebuild()
