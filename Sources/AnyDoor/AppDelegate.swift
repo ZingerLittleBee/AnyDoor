@@ -41,6 +41,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Register providers
         let providers: [any BuiltinProvider] = [
             KeepAwakeProvider(),
+            HideDesktopIconsProvider(),
+            ShowHiddenFilesProvider(),
+            MuteAudioProvider(),
+            DarkModeProvider(),
+            LockScreenProvider(),
+            EmptyTrashProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
 
