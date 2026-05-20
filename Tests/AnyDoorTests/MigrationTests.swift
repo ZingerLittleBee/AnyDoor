@@ -24,3 +24,20 @@ final class MigrationTests: XCTestCase {
         XCTAssertEqual(fetched[0].displayOrder, 0)
     }
 }
+
+final class BuiltinItemTests: XCTestCase {
+    func testAllCasesHaveDistinctOrder() {
+        let orders = BuiltinItem.allCases.map(\.defaultOrder)
+        XCTAssertEqual(Set(orders).count, orders.count)
+    }
+
+    func testAppShortcutsIsSubmenu() {
+        XCTAssertEqual(BuiltinItem.appShortcuts.kind, .submenu)
+    }
+
+    func testAutomationItemsAreFlagged() {
+        XCTAssertTrue(BuiltinItem.darkMode.requiresAutomation)
+        XCTAssertTrue(BuiltinItem.emptyTrash.requiresAutomation)
+        XCTAssertFalse(BuiltinItem.keepAwake.requiresAutomation)
+    }
+}
