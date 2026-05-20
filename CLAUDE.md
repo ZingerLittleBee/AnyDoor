@@ -41,21 +41,42 @@ make
 
 ```
 Sources/AnyDoor/
-├── AnyDoor.swift              # @main 入口，MenuBarExtra + Settings Scene
-├── AppDelegate.swift           # 生命周期管理，ModelContainer 创建，HotkeyService 启动
+├── AnyDoor.swift              # @main, MenuBarExtra + Settings Scene
+├── AppDelegate.swift           # ModelContainer, providers registry, HotkeyService bootstrap
 ├── Models/
-│   └── KeyBinding.swift        # SwiftData @Model，存储快捷键绑定
+│   ├── KeyBinding.swift        # App shortcut bindings (SwiftData)
+│   ├── BuiltinItem.swift       # Code-defined catalog of system toggle/action items
+│   ├── BuiltinPreference.swift # User customization (visibility / order / hotkey) for built-ins
+│   ├── PanelEntry.swift        # Unified view model + HotkeyDescriptor + PermissionStatus
+│   └── HotkeyAction.swift      # HotkeyAction enum + HotkeySnapshot
 ├── Services/
-│   ├── HotkeyService.swift     # CGEvent tap 全局热键监听（.cghidEventTap 最高优先级）
-│   └── AppSwitcher.swift       # 应用切换逻辑（打开/隐藏/激活）
+│   ├── HotkeyService.swift     # CGEvent tap, dispatches HotkeyAction via injected closure
+│   ├── PanelStore.swift        # @Observable, merges all three sources, owns provider registry
+│   ├── AppSwitcher.swift       # App launch/hide/activate
+│   ├── AppleScriptRunner.swift # NSAppleScript wrapper
+│   ├── ShellRunner.swift       # Process + timeout wrapper
+│   ├── BuiltinPreferenceSeeder.swift
+│   ├── KeyBindingOrderBackfill.swift
+│   └── Providers/
+│       ├── BuiltinProvider.swift
+│       ├── KeepAwakeProvider.swift
+│       ├── HideDesktopIconsProvider.swift
+│       ├── ShowHiddenFilesProvider.swift
+│       ├── MuteAudioProvider.swift
+│       ├── DarkModeProvider.swift
+│       ├── LockScreenProvider.swift
+│       └── EmptyTrashProvider.swift
 ├── Utilities/
-│   └── KeyCodeMap.swift        # 虚拟键码 ↔ 可读名称映射
+│   └── KeyCodeMap.swift
 └── Views/
-    ├── MenuBarView.swift       # 菜单栏弹出窗口 UI
-    ├── SettingsView.swift      # 设置窗口 TabView
-    ├── BindingListView.swift   # 快捷键列表（增删改）
-    ├── BindingEditView.swift   # 快捷键录入 + 应用选择
-    └── GeneralSettingsView.swift # 通用设置
+    ├── MenuBarView.swift              # Menu bar panel root
+    ├── PanelRowView.swift             # Single row: toggle / action / submenu
+    ├── HoverPopover.swift             # NSWindow side popover + HoverGate timing
+    ├── AppShortcutsPopoverView.swift  # Popover content for app shortcuts
+    ├── HotkeyRecorder.swift           # Inline hotkey recording field
+    ├── SettingsView.swift             # TabView host
+    ├── PanelSettingsView.swift        # 面板 tab: drag / visibility / hotkey
+    └── GeneralSettingsView.swift      # 通用 tab (placeholder)
 ```
 
 ## 架构要点
@@ -72,6 +93,9 @@ Sources/AnyDoor/
 - **录入时暂停监听**：录入快捷键时调用 `HotkeyService.suspend()`，完成后 `resume()`，避免录入触发已有绑定。watchdog 通过 `isSuspended` 跳过自动重启。
 - **数据变更通知**：增删绑定后显式调用 `modelContext.save()` 和 `AppDelegate.refreshBindings()` 刷新 HotkeyService。
 - **切换语义**：`AppSwitcher.toggle` 用 `app.isActive`（最前应用判定）而非 `app.isHidden`。当目标已是最前则 `hide()`，否则 `activate()`；未运行则 `openApplication`。改判定条件会改变交互语义。
+- **PanelStore 是单一真相源**：三路数据（BuiltinItem 静态清单 + BuiltinPreference 偏好 + KeyBinding 应用快捷键）在 `PanelStore` 合并；视图只读 `topLevelEntries` 与 `appShortcutChildren`。**写入路径都要经过 PanelStore 的 mutation 方法**（setBuiltinVisibility、setBuiltinHotkey、reorderTopLevel 等），它们会自动 save SwiftData、rebuild 视图状态、并 `rebuildHotkeySnapshots()` 推到 HotkeyService。
+- **HotkeyAction 派发**：HotkeyService 的回调使用注入的 `dispatcher` 闭包，在 `AppDelegate.applicationDidFinishLaunching` 中绑定到 `PanelStore.shared.dispatch`；不要直接在 HotkeyService 内引用 PanelStore，保持 HotkeyService 与具体业务解耦。
+- **Provider 隔离**：每个 ToggleProvider / ActionProvider 是独立 actor，setState 在自己的 actor 上串行；`PanelStore` 是 `@MainActor`，跨 Provider 的写操作通过 `Task { await … }` 在 MainActor 调度。
 
 ## 相关 Skills
 
