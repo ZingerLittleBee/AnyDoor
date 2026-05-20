@@ -2,49 +2,36 @@ import Cocoa
 
 /// Global hotkey listener service.
 ///
-/// Uses a CGEvent tap at the HID level to intercept keyboard events, matches them
-/// against registered key bindings, and invokes AppSwitcher to toggle the target app.
-/// Requires Accessibility permission.
+/// Owns the CGEvent tap at the HID level. On match, dispatches the associated `HotkeyAction`
+/// to the main thread for execution by `PanelStore.shared`.
 ///
-/// - Note: The callback `hotkeyCallback` is a C-style free function that runs off
-///   the main thread. Data is safely shared between this @MainActor-isolated class
-///   and the C callback via `BindingSnapshot` (a Sendable value type) stored in
-///   `nonisolated(unsafe)` properties.
+/// - Note: The C callback `hotkeyCallback` runs off the main thread. Snapshots are shared
+///   via `nonisolated(unsafe)` storage; HotkeySnapshot is Sendable.
 @MainActor
 final class HotkeyService {
     static let shared = HotkeyService()
 
-    /// CGEvent tap port; fileprivate so the free callback function in this file can read it
     fileprivate nonisolated(unsafe) var eventTap: CFMachPort?
     private nonisolated(unsafe) var runLoopSource: CFRunLoopSource?
 
-    /// Binding snapshots read by the callback on a non-main thread for key matching
-    fileprivate nonisolated(unsafe) var bindingSnapshots: [BindingSnapshot] = []
+    /// Snapshots read by the callback on a non-main thread for matching.
+    fileprivate nonisolated(unsafe) var snapshots: [HotkeySnapshot] = []
 
-    /// Periodically checks and re-enables the event tap if the system disabled it
     private var watchdogTimer: Timer?
-
-    /// Whether the tap is intentionally suspended (e.g. during hotkey recording).
-    /// Prevents the watchdog from restarting the tap while recording is in progress.
     private var isSuspended = false
 
-    /// Sendable value type for safely passing binding data across threads to the C callback
-    struct BindingSnapshot: Sendable {
-        let keyCode: Int
-        let modifierFlags: Int
-        let appBundleID: String
-        let appPath: String
-    }
+    /// Dispatcher injected at bootstrap. The callback packs the matched action and the
+    /// dispatcher decides what to do with it.
+    fileprivate nonisolated(unsafe) var dispatcher: (@MainActor @Sendable (HotkeyAction) -> Void)?
 
     private init() {}
 
-    /// Update snapshots with the latest bindings and ensure the event tap is enabled
-    func updateBindings(_ bindings: [KeyBinding]) {
-        bindingSnapshots = bindings.filter(\.isEnabled).map {
-            BindingSnapshot(keyCode: $0.keyCode, modifierFlags: $0.modifierFlags,
-                            appBundleID: $0.appBundleID, appPath: $0.appPath)
-        }
-        // Ensure tap is running unless intentionally suspended during recording
+    func setDispatcher(_ dispatcher: @escaping @MainActor @Sendable (HotkeyAction) -> Void) {
+        self.dispatcher = dispatcher
+    }
+
+    func updateSnapshots(_ newSnapshots: [HotkeySnapshot]) {
+        snapshots = newSnapshots
         if !isSuspended {
             if eventTap == nil {
                 start()
@@ -52,23 +39,14 @@ final class HotkeyService {
                 resume()
             }
         }
-        print("AnyDoor: Updated \(bindingSnapshots.count) binding(s)")
-        for b in bindingSnapshots {
-            print("  keyCode=\(b.keyCode) modifiers=\(b.modifierFlags) app=\(b.appBundleID)")
-        }
+        print("AnyDoor: Updated \(snapshots.count) hotkey snapshot(s)")
     }
 
-    /// Create a CGEvent tap and register it on the main RunLoop.
-    ///
-    /// - `.cghidEventTap`: highest priority, intercepts events before all apps
-    /// - `.headInsertEventTap`: inserted at the head of the tap chain
-    /// - `.defaultTap` (not listenOnly): allows consuming matched events
     func start() {
         guard eventTap == nil else { return }
 
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
-        // passUnretained: HotkeyService is a singleton with app-lifetime, no retain needed
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
@@ -79,7 +57,7 @@ final class HotkeyService {
             callback: hotkeyCallback,
             userInfo: selfPtr
         ) else {
-            print("AnyDoor: Failed to create event tap. Accessibility permission granted: \(AXIsProcessTrusted())")
+            print("AnyDoor: Failed to create event tap. AX granted: \(AXIsProcessTrusted())")
             return
         }
 
@@ -88,32 +66,23 @@ final class HotkeyService {
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         startWatchdog()
-        print("AnyDoor: Event tap started successfully")
+        print("AnyDoor: Event tap started")
     }
 
-    /// Suspend event listening (called during hotkey recording to avoid triggering existing bindings)
     func suspend() {
         isSuspended = true
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
     }
 
-    /// Resume event listening
     func resume() {
         isSuspended = false
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: true)
-        }
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
     }
 
-    /// Fully stop event listening and clean up all resources
     func stop() {
         watchdogTimer?.invalidate()
         watchdogTimer = nil
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
@@ -121,40 +90,26 @@ final class HotkeyService {
         runLoopSource = nil
     }
 
-    /// Destroy and recreate the event tap from scratch.
-    /// A simple re-enable may not restore full functionality when the underlying
-    /// CFMachPort or RunLoop source is in a bad state (e.g. after IMK errors).
     func restart() {
         print("AnyDoor: Restarting event tap")
         stop()
         start()
     }
 
-    /// Watchdog timer: checks every 2 seconds whether the event tap was disabled by the system.
-    ///
-    /// macOS enforces a ~1 second timeout on event tap callbacks. If the callback takes
-    /// too long, the system auto-disables the tap (firing `.tapDisabledByTimeout`).
-    /// The callback attempts an inline re-enable for fast recovery, but if that fails
-    /// (e.g. corrupted mach port), this watchdog performs a full restart as a safety net.
     private func startWatchdog() {
         watchdogTimer?.invalidate()
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             guard let self else { return }
             guard let tap = self.eventTap else { return }
-            // Skip restart when intentionally suspended (e.g. during hotkey recording)
             let suspended = MainActor.assumeIsolated { self.isSuspended }
             if !suspended && !CGEvent.tapIsEnabled(tap: tap) {
-                print("AnyDoor: Watchdog detected disabled tap, performing full restart")
-                MainActor.assumeIsolated {
-                    self.restart()
-                }
+                print("AnyDoor: Watchdog detected disabled tap, restarting")
+                MainActor.assumeIsolated { self.restart() }
             }
         }
     }
 
-    static var hasAccessibilityPermission: Bool {
-        AXIsProcessTrusted()
-    }
+    static var hasAccessibilityPermission: Bool { AXIsProcessTrusted() }
 
     nonisolated static func requestAccessibilityPermission() {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
@@ -162,62 +117,46 @@ final class HotkeyService {
     }
 }
 
-// MARK: - CGEvent Tap Callback
+// MARK: - CGEvent Callback
 
-/// Mask retaining only Cmd/Ctrl/Opt/Shift, stripping device-dependent bits (NumLock, CapsLock, etc.)
-/// Ensures recording and detection use the same mask for comparison
 private let modifierMask: UInt64 = CGEventFlags.maskCommand.rawValue
     | CGEventFlags.maskControl.rawValue
     | CGEventFlags.maskAlternate.rawValue
     | CGEventFlags.maskShift.rawValue
 
-/// CGEvent tap callback (C-style free function, not @MainActor).
-///
-/// - Returns nil to consume a matched event (prevents delivery to other apps)
-/// - Returns the original event to pass through unmatched events
-/// - Handles system-disabled tap by immediately re-enabling
 private func hotkeyCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
     event: CGEvent,
     userInfo: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
-    guard let userInfo else {
-        return Unmanaged.passUnretained(event)
-    }
-
+    guard let userInfo else { return Unmanaged.passUnretained(event) }
     let service = Unmanaged<HotkeyService>.fromOpaque(userInfo).takeUnretainedValue()
 
-    // System disabled tap due to timeout or user input — attempt inline re-enable.
-    // The watchdog timer will perform a full restart if this doesn't stick.
     if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
         let reason = type == .tapDisabledByTimeout ? "timeout" : "user input"
-        print("AnyDoor: Event tap disabled by \(reason), attempting inline re-enable")
+        print("AnyDoor: Tap disabled by \(reason), inline re-enable")
         if let tap = service.eventTap {
             CGEvent.tapEnable(tap: tap, enable: true)
         }
         return Unmanaged.passUnretained(event)
     }
 
-    // Only handle keyDown events, ignore flagsChanged etc.
-    guard type == .keyDown else {
-        return Unmanaged.passUnretained(event)
-    }
+    guard type == .keyDown else { return Unmanaged.passUnretained(event) }
 
     let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
     let modifiers = Int(event.flags.rawValue & modifierMask)
 
-    for binding in service.bindingSnapshots {
-        if binding.keyCode == keyCode && binding.modifierFlags == modifiers {
-            let bundleID = binding.appBundleID
-            let appPath = binding.appPath
-            // Dispatch to main thread to avoid blocking the callback and triggering system timeout
+    for snapshot in service.snapshots {
+        if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
+            let action = snapshot.action
+            let dispatcher = service.dispatcher
             DispatchQueue.main.async {
-                AppSwitcher.toggle(bundleID: bundleID, appPath: appPath)
+                dispatcher?(action)
             }
-            return nil // consume event
+            return nil // consume
         }
     }
 
-    return Unmanaged.passUnretained(event) // pass through
+    return Unmanaged.passUnretained(event)
 }

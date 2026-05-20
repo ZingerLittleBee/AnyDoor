@@ -148,4 +148,68 @@ final class PanelStore {
             logger.error("Run \(item.rawValue) failed: \(error)")
         }
     }
+
+    // MARK: - Hotkey dispatch + snapshot rebuild
+
+    /// Handle a matched hotkey. Called on the main thread by HotkeyService.
+    func dispatch(_ action: HotkeyAction) {
+        switch action {
+        case .launchApp(let bundleID, let path):
+            AppSwitcher.toggle(bundleID: bundleID, appPath: path)
+        case .toggleBuiltin(let key):
+            guard let item = BuiltinItem(rawValue: key) else { return }
+            Task { await self.toggle(item) }
+        case .runBuiltin(let key):
+            guard let item = BuiltinItem(rawValue: key) else { return }
+            Task { await self.run(item) }
+        }
+    }
+
+    /// Build a snapshot list for HotkeyService from current SwiftData state.
+    /// Called whenever bindings or preferences change.
+    func rebuildHotkeySnapshots() {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+
+        var out: [HotkeySnapshot] = []
+
+        if let bindings = try? context.fetch(
+            FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.isEnabled })
+        ) {
+            for binding in bindings {
+                out.append(HotkeySnapshot(
+                    keyCode: binding.keyCode,
+                    modifierFlags: binding.modifierFlags,
+                    action: .launchApp(bundleID: binding.appBundleID, path: binding.appPath)
+                ))
+            }
+        }
+
+        if let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) {
+            for pref in prefs {
+                guard let item = BuiltinItem(rawValue: pref.itemKey),
+                      let code = pref.keyCode,
+                      let mods = pref.modifierFlags,
+                      item.kind != .submenu else { continue }
+                let action: HotkeyAction = item.kind == .toggle
+                    ? .toggleBuiltin(itemKey: item.rawValue)
+                    : .runBuiltin(itemKey: item.rawValue)
+                out.append(HotkeySnapshot(
+                    keyCode: code,
+                    modifierFlags: mods,
+                    action: action
+                ))
+            }
+        }
+
+        HotkeyService.shared.updateSnapshots(out)
+    }
+
+    /// Look up a KeyBinding by id from the SwiftData store.
+    func binding(id: UUID) -> KeyBinding? {
+        guard let container = modelContainer else { return nil }
+        let context = container.mainContext
+        let descriptor = FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.id == id })
+        return try? context.fetch(descriptor).first
+    }
 }
