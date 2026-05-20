@@ -83,7 +83,7 @@ Sources/AnyDoor/
 
 - **ModelContainer 共享**：在 `AppDelegate.init()` 中创建，通过 `.modelContainer()` 传递给所有 SwiftUI 视图。不要创建多个 ModelContainer 实例。
 - **固定存储路径**：ModelContainer 显式配置 `url: ~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store`，避免 `swift run` 和 `.app` 因 Bundle ID 差异写入不同位置。`AppDelegate` 启动时会一次性从遗留 `default.store` 迁移并清理（见 `migrateLegacyStore`）。**修改 ModelConfiguration 时必须保留这条路径**，否则用户数据会"丢失"。
-- **CGEvent 回调并发安全**：回调函数是 C 风格的自由函数，不在 `@MainActor` 上。使用 `BindingSnapshot`（Sendable 值类型）+ `nonisolated(unsafe)` 存储来安全传递数据。
+- **CGEvent 回调并发安全**：回调函数是 C 风格的自由函数，不在 `@MainActor` 上。使用 `HotkeySnapshot`（Sendable 值类型，含 `HotkeyAction`）+ `nonisolated(unsafe)` 存储来安全传递数据。
 - **CGEvent tap 超时与 watchdog**：系统对 tap 回调有 ~1 秒预算，超时会触发 `.tapDisabledByTimeout` 自动禁用 tap。当前防御方式：
   - 回调只做按键匹配，实际工作 `DispatchQueue.main.async` 派发
   - 收到 `tapDisabledBy*` 时回调内 inline 重新启用
