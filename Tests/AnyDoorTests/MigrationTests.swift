@@ -42,6 +42,52 @@ final class BuiltinItemTests: XCTestCase {
     }
 }
 
+final class KeyBindingOrderBackfillTests: XCTestCase {
+    @MainActor
+    func testBackfillAssignsAscendingOrderByCreatedAt() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: KeyBinding.self, configurations: config)
+        let context = ModelContext(container)
+
+        let a = KeyBinding(keyCode: 122, modifierFlags: 0,
+                           appBundleID: "a", appName: "A", appPath: "/a")
+        let b = KeyBinding(keyCode: 120, modifierFlags: 0,
+                           appBundleID: "b", appName: "B", appPath: "/b")
+        a.createdAt = Date(timeIntervalSinceReferenceDate: 0)
+        b.createdAt = Date(timeIntervalSinceReferenceDate: 10)
+        context.insert(a)
+        context.insert(b)
+        try context.save()
+
+        KeyBindingOrderBackfill.runIfNeeded(in: context)
+
+        let rows = try context.fetch(FetchDescriptor<KeyBinding>(
+            sortBy: [SortDescriptor(\.displayOrder)]
+        ))
+        XCTAssertEqual(rows[0].appBundleID, "a")
+        XCTAssertEqual(rows[1].appBundleID, "b")
+        XCTAssertLessThan(rows[0].displayOrder, rows[1].displayOrder)
+    }
+
+    @MainActor
+    func testBackfillIsNoOpIfAlreadyDone() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: KeyBinding.self, configurations: config)
+        let context = ModelContext(container)
+
+        let a = KeyBinding(keyCode: 122, modifierFlags: 0,
+                           appBundleID: "a", appName: "A", appPath: "/a",
+                           displayOrder: 500)
+        context.insert(a)
+        try context.save()
+
+        KeyBindingOrderBackfill.runIfNeeded(in: context)
+
+        let rows = try context.fetch(FetchDescriptor<KeyBinding>())
+        XCTAssertEqual(rows[0].displayOrder, 500)
+    }
+}
+
 final class BuiltinPreferenceSeederTests: XCTestCase {
     @MainActor
     func testSeedsAllItemsOnEmptyStore() throws {
