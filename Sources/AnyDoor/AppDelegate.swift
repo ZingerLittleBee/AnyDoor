@@ -55,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             RestartFinderProvider(),
             RestartDockProvider(),
             RestartMenuBarProvider(),
+            FlushDNSProvider(),
+            KeyboardLockProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
 

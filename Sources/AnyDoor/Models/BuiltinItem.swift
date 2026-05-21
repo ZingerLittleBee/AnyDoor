@@ -19,6 +19,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case restartFinder
     case restartDock
     case restartMenuBar
+    case flushDNS
+    case keyboardLock
 
     enum Kind: Sendable {
         case toggle
@@ -30,9 +32,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         switch self {
         case .appShortcuts: return .submenu
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
-             .hideDock, .autoHideMenuBar: return .toggle
+             .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .displaySleep, .systemSleep,
-             .restartFinder, .restartDock, .restartMenuBar: return .action
+             .restartFinder, .restartDock, .restartMenuBar, .flushDNS: return .action
         }
     }
 
@@ -54,6 +56,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .restartFinder: return "重启访达"
         case .restartDock: return "重启 Dock"
         case .restartMenuBar: return "重启菜单栏"
+        case .flushDNS: return "刷新 DNS"
+        case .keyboardLock: return "禁用键盘"
         }
     }
 
@@ -75,6 +79,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .restartFinder: return "macwindow.on.rectangle"
         case .restartDock: return "dock.arrow.down.rectangle"
         case .restartMenuBar: return "menubar.arrow.up.rectangle"
+        case .flushDNS: return "network"
+        case .keyboardLock: return "keyboard.fill"
         }
     }
 
@@ -97,6 +103,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .restartFinder: return 1400
         case .restartDock: return 1500
         case .restartMenuBar: return 1600
+        case .flushDNS: return 1700
+        case .keyboardLock: return 1800
         }
     }
 
