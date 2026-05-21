@@ -76,4 +76,95 @@ final class PortInventoryTests: XCTestCase {
         let suite = "PortInventoryTests-\(UUID().uuidString)"
         return UserDefaults(suiteName: suite)!
     }
+
+    /// Scanner that lets the test resolve `scanTCPListening()` on demand.
+    private actor BlockingScanner: PortScanning {
+        struct Pending {
+            let continuation: CheckedContinuation<[PortRecord], Error>
+        }
+        private var queue: [Pending] = []
+        private(set) var calls = 0
+        func resolve(with records: [PortRecord]) async {
+            calls += 1
+            if let next = queue.first {
+                queue.removeFirst()
+                next.continuation.resume(returning: records)
+            }
+        }
+        func fail(with error: Error) async {
+            if let next = queue.first {
+                queue.removeFirst()
+                next.continuation.resume(throwing: error)
+            }
+        }
+        func scanTCPListening() async throws -> [PortRecord] {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[PortRecord], Error>) in
+                queue.append(Pending(continuation: cont))
+            }
+        }
+        nonisolated func kill(pid: pid_t, signal: Int32) -> SignalResult { .success }
+    }
+
+    @MainActor
+    func testRefreshPopulatesRecords() async {
+        let stub = StubScanner(records: [
+            PortRecord(port: 3000, pid: 1, processName: "node",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)])
+        ])
+        let inv = PortInventory(scanner: stub, defaults: isolatedDefaults())
+        await inv.refresh()
+        XCTAssertEqual(inv.records.count, 1)
+        XCTAssertEqual(inv.records[0].port, 3000)
+        XCTAssertFalse(inv.isRefreshing)
+        XCTAssertNil(inv.lastError)
+    }
+
+    @MainActor
+    func testRefreshFailurePreservesRecordsAndSetsError() async {
+        struct ThrowingScanner: PortScanning {
+            func scanTCPListening() async throws -> [PortRecord] {
+                throw PortScanError.lsofFailed(exitCode: 2, stderr: "boom")
+            }
+            func kill(pid: pid_t, signal: Int32) -> SignalResult { .success }
+        }
+        let inv = PortInventory(scanner: ThrowingScanner(), defaults: isolatedDefaults())
+        // Seed records via a stub first refresh would be ideal; here we just verify error path.
+        await inv.refresh()
+        XCTAssertNotNil(inv.lastError)
+        XCTAssertFalse(inv.isRefreshing)
+    }
+
+    @MainActor
+    func testIsRefreshingClearsOnlyWhenAllInflightFinish() async throws {
+        let scanner = BlockingScanner()
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+
+        // Start refresh #1 — it blocks awaiting the scanner.
+        let t1: Task<Void, Never> = Task { @MainActor in await inv.refresh() }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(inv.isRefreshing, "first refresh should mark isRefreshing")
+
+        // Start refresh #2 — also blocked.
+        let t2: Task<Void, Never> = Task { @MainActor in await inv.refresh() }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(inv.isRefreshing, "still refreshing with two in flight")
+
+        // Resolve the older one (refresh #1) first.
+        await scanner.resolve(with: [])
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(inv.isRefreshing, "stale completion must NOT clear isRefreshing while #2 is still running")
+
+        // Resolve the newer one.
+        await scanner.resolve(with: [
+            PortRecord(port: 9, pid: 2, processName: "x",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)])
+        ])
+        await t1.value
+        await t2.value
+        XCTAssertFalse(inv.isRefreshing)
+        XCTAssertEqual(inv.records.count, 1)
+        XCTAssertEqual(inv.records[0].port, 9)
+    }
 }

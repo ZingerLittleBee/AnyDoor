@@ -50,7 +50,29 @@ final class PortInventory {
     // Placeholder methods — real implementations land in Task 10 and Task 11.
 
     func refresh() async {
-        // Implemented in Task 10.
+        refreshGeneration &+= 1
+        let myGen = refreshGeneration
+        inflightCount += 1
+        isRefreshing = true
+
+        do {
+            let scanned = try await scanner.scanTCPListening()
+            inflightCount -= 1
+            if myGen == refreshGeneration {
+                records = scanned
+                lastError = nil
+            } else {
+                Self.logger.debug("dropping stale scan result (gen \(myGen), now \(self.refreshGeneration))")
+            }
+            isRefreshing = inflightCount > 0
+        } catch {
+            inflightCount -= 1
+            if myGen == refreshGeneration {
+                lastError = .scanFailed(String(describing: error))
+                // records intentionally preserved
+            }
+            isRefreshing = inflightCount > 0
+        }
     }
 
     func kill(pid: pid_t) async {
