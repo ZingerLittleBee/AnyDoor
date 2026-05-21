@@ -20,6 +20,7 @@ install: release
 	@cp $(BINARY) $(APP_DIR)/Contents/MacOS/
 	@cp Info.plist $(APP_DIR)/Contents/
 	@cp Resources/AppIcon.icns $(APP_DIR)/Contents/Resources/
+	@codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 || true
 	@touch $(APP_DIR)
 	@echo "Installed $(APP_DIR)"
 
