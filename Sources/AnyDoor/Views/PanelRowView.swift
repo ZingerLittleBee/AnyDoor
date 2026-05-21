@@ -3,9 +3,11 @@ import SwiftUI
 /// Renders a single PanelEntry in the menu bar panel.
 ///
 /// Three visual variants driven by `entry.kind`:
-/// - `.toggle`  — icon + title + (subtitle) + right-side switch; entire row toggles
-/// - `.action`  — icon + title + right-side hotkey label; entire row triggers
-/// - `.submenu` — icon + title + (subtitle) + right-side chevron; entire row opens popover
+/// - `.toggle`  — icon + title + (subtitle) + right-side switch
+/// - `.action`  — icon + title + optional right-side hotkey label (HIG menu-item style)
+/// - `.submenu` — icon + title + (subtitle) + right-side chevron
+///
+/// All rows are tappable on the whole row, matching Apple-menu / NSMenuItem behavior.
 struct PanelRowView: View {
     let entry: PanelEntry
     var onToggle: () -> Void
@@ -13,7 +15,6 @@ struct PanelRowView: View {
     var onSubmenu: () -> Void
     var onPermission: () -> Void
 
-    @State private var isHovered = false
     @State private var activationPulse = 0
 
     private var needsPermission: Bool { entry.permission == .denied }
@@ -29,10 +30,6 @@ struct PanelRowView: View {
                         .foregroundStyle(Color.orange)
                 } else if let subtitle = entry.subtitle {
                     Text(subtitle).font(.caption2).foregroundStyle(.secondary)
-                } else if let hotkey = entry.hotkey {
-                    Text(hotkey.displayString)
-                        .font(.system(.caption2, design: .monospaced))
-                        .foregroundStyle(.tertiary)
                 }
             }
             Spacer(minLength: 0)
@@ -40,22 +37,21 @@ struct PanelRowView: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
-        .onHover { isHovered = $0 }
         .contentShape(Rectangle())
         .onTapGesture {
             if needsPermission { onPermission(); return }
             triggerFeedback()
             switch entry.kind {
             case .toggle:  onToggle()
-            case .action:  onAction()
             case .submenu: onSubmenu()
+            case .action:  onAction()
             }
         }
     }
 
-    /// Visual + auditory feedback fired the instant the user taps the row.
+    /// Visual + auditory feedback fired the instant the user activates an entry.
     ///
-    /// Animation runs for every row (so users get the same affordance everywhere);
+    /// Animation runs for every kind (so users get the same affordance everywhere);
     /// sound only fires for items that opt in via `BuiltinItem.feedbackSound`.
     private func triggerFeedback() {
         activationPulse &+= 1
@@ -91,10 +87,8 @@ struct PanelRowView: View {
         case .action:
             if let hk = entry.hotkey {
                 Text(hk.displayString)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-            } else {
-                Text("—").foregroundStyle(.tertiary).font(.caption2)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
             }
         case .submenu:
             Image(systemName: "chevron.right")
