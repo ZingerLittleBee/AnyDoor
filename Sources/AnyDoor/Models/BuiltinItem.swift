@@ -11,6 +11,14 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case darkMode
     case lockScreen
     case emptyTrash
+    case screenshot
+    case displaySleep
+    case systemSleep
+    case hideDock
+    case autoHideMenuBar
+    case restartFinder
+    case restartDock
+    case restartMenuBar
 
     enum Kind: Sendable {
         case toggle
@@ -21,8 +29,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     var kind: Kind {
         switch self {
         case .appShortcuts: return .submenu
-        case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode: return .toggle
-        case .lockScreen, .emptyTrash: return .action
+        case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
+             .hideDock, .autoHideMenuBar: return .toggle
+        case .lockScreen, .emptyTrash, .screenshot, .displaySleep, .systemSleep,
+             .restartFinder, .restartDock, .restartMenuBar: return .action
         }
     }
 
@@ -36,6 +46,14 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .darkMode: return "深色模式"
         case .lockScreen: return "锁定屏幕"
         case .emptyTrash: return "清空废纸篓"
+        case .screenshot: return "截图到剪贴板"
+        case .displaySleep: return "显示器睡眠"
+        case .systemSleep: return "系统休眠"
+        case .hideDock: return "隐藏 Dock"
+        case .autoHideMenuBar: return "自动隐藏菜单栏"
+        case .restartFinder: return "重启访达"
+        case .restartDock: return "重启 Dock"
+        case .restartMenuBar: return "重启菜单栏"
         }
     }
 
@@ -49,6 +67,14 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .darkMode: return "moon.fill"
         case .lockScreen: return "lock.fill"
         case .emptyTrash: return "trash.fill"
+        case .screenshot: return "camera.viewfinder"
+        case .displaySleep: return "moon.zzz.fill"
+        case .systemSleep: return "powersleep"
+        case .hideDock: return "dock.rectangle"
+        case .autoHideMenuBar: return "menubar.rectangle"
+        case .restartFinder: return "macwindow.on.rectangle"
+        case .restartDock: return "dock.arrow.down.rectangle"
+        case .restartMenuBar: return "menubar.arrow.up.rectangle"
         }
     }
 
@@ -63,6 +89,14 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .darkMode: return 600
         case .lockScreen: return 700
         case .emptyTrash: return 800
+        case .screenshot: return 900
+        case .displaySleep: return 1000
+        case .systemSleep: return 1100
+        case .hideDock: return 1200
+        case .autoHideMenuBar: return 1300
+        case .restartFinder: return 1400
+        case .restartDock: return 1500
+        case .restartMenuBar: return 1600
         }
     }
 
