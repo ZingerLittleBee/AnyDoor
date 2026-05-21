@@ -1,0 +1,7 @@
+p67035
+cnode
+LZinger
+f17
+PTCP
+tIPv4
+n*:3000

@@ -1,57 +1,87 @@
 import SwiftUI
 import AppKit
+import Observation
 
-/// Hover-triggered NSWindow popover for the App Shortcuts submenu.
+/// Hover-triggered NSPanel popover.
 ///
-/// Owns its own NSWindow so it can position itself relative to the host view's screen frame,
-/// regardless of which window the trigger lives in. Uses a `HoverGate` to coordinate
-/// show/hide timing across the trigger view and the popover content.
+/// Used by both App Shortcuts (`needsKeyFocus = false`, read-only) and Port Manager
+/// (`needsKeyFocus = true`, needs to receive text input and local key events).
 ///
 /// Lifecycle:
-/// - Trigger view installs an `onHover` that arms the gate after 400ms.
-/// - Once shown, the popover keeps itself open while either the trigger or popover area
-///   contains the cursor; closes after 300ms of cursor leaving both.
+/// - Trigger view installs `onHover` that arms the gate after 400ms.
+/// - Popover stays open while either trigger or popover is hovered (gate manages).
+/// - Closes 300ms after both lose hover, OR immediately via `hide()`.
 @MainActor
+@Observable
 final class HoverPopover {
-    private let window: NSWindow
+    /// True while the underlying panel is keyWindow. Read by MenuBarView.onDisappear
+    /// to avoid hiding the popover when the menu bar panel collapses because we just
+    /// took key focus.
+    private(set) var isHoldingFocus: Bool = false
+
+    private let panel: KeyableHoverPanel
     private let hostingController: NSHostingController<AnyView>
     private var hideTask: Task<Void, Never>?
+    // nonisolated(unsafe) so deinit can access them without MainActor hop.
+    nonisolated(unsafe) private var keyObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var resignObserver: NSObjectProtocol?
+
+    /// Set to `true` for popovers whose SwiftUI content needs first-responder focus
+    /// (e.g. TextField). Leave `false` for read-only popovers — they keep the
+    /// historical "never becomes key" behaviour.
+    var needsKeyFocus: Bool = false {
+        didSet { panel.allowKey = needsKeyFocus }
+    }
 
     init<Content: View>(@ViewBuilder content: () -> Content) {
         let controller = NSHostingController(rootView: AnyView(content()))
-        // Let the hosting controller resize itself to match SwiftUI's fitting size,
-        // so the NSWindow tracks the content's intrinsic dimensions automatically.
         controller.sizingOptions = [.preferredContentSize]
         self.hostingController = controller
 
-        let window = NSWindow(
+        let panel = KeyableHoverPanel(
             contentRect: NSRect(x: 0, y: 0, width: 240, height: 200),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        window.isOpaque = false
-        window.backgroundColor = .clear
-        window.hasShadow = true
-        window.level = .floating
-        window.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        window.contentViewController = controller
-        // .nonactivating equivalent: ignoresMouseEvents = false + level floating + don't make key
-        self.window = window
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .floating
+        panel.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
+        panel.contentViewController = controller
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.hidesOnDeactivate = false
+        self.panel = panel
+
+        // Track key state so MenuBarView can guard onDisappear.
+        keyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isHoldingFocus = true }
+        }
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isHoldingFocus = false }
+        }
+    }
+
+    deinit {
+        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
     }
 
     func updateContent<Content: View>(@ViewBuilder content: () -> Content) {
         hostingController.rootView = AnyView(content())
-        // Force layout so fittingSize reflects the new content before show() reads it.
         hostingController.view.layoutSubtreeIfNeeded()
         let fitting = hostingController.view.fittingSize
         if fitting.width > 0 && fitting.height > 0 {
-            window.setContentSize(fitting)
+            panel.setContentSize(fitting)
         }
     }
 
     /// Show the popover anchored to the right side of `referenceFrame` (screen coordinates).
-    /// If insufficient space on the right, flips to the left.
     func show(anchoredTo referenceFrame: NSRect) {
         hideTask?.cancel()
         hideTask = nil
@@ -59,8 +89,7 @@ final class HoverPopover {
         let screen = NSScreen.screens.first(where: { $0.frame.intersects(referenceFrame) }) ?? NSScreen.main
         let screenFrame = screen?.visibleFrame ?? .zero
 
-        let size = window.frame.size
-
+        let size = panel.frame.size
         let rightX = referenceFrame.maxX + 4
         let leftX = referenceFrame.minX - 4 - size.width
         let originX = (rightX + size.width <= screenFrame.maxX) ? rightX : leftX
@@ -68,17 +97,19 @@ final class HoverPopover {
                           min(referenceFrame.midY - size.height / 2,
                               screenFrame.maxY - size.height))
 
-        window.setFrameOrigin(NSPoint(x: originX, y: originY))
-        window.orderFrontRegardless()
+        panel.setFrameOrigin(NSPoint(x: originX, y: originY))
+        panel.orderFrontRegardless()
+        if needsKeyFocus {
+            panel.makeKey()
+        }
     }
 
-    /// Schedule a hide. Cancelled if `keepOpen()` is called within the delay.
     func scheduleHide(after delay: TimeInterval = 0.3) {
         hideTask?.cancel()
         hideTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard let self, !Task.isCancelled else { return }
-            self.window.orderOut(nil)
+            self.panel.orderOut(nil)
         }
     }
 
@@ -90,15 +121,20 @@ final class HoverPopover {
     func hide() {
         hideTask?.cancel()
         hideTask = nil
-        window.orderOut(nil)
+        panel.orderOut(nil)
     }
 }
 
-/// Coordinates hover-to-open / leave-to-close timing between a trigger view and a popover.
-///
-/// Use one instance per popover. The trigger view calls `hoverEnter()`/`hoverExit()`
-/// from a `.onHover` modifier; the popover content view does the same from its own
-/// `.onHover`. The popover stays open while either reports hovered.
+/// NSPanel subclass whose key-eligibility is controlled by an opt-in flag.
+/// App Shortcuts uses `allowKey = false` (read-only), Port Manager uses `true`.
+final class KeyableHoverPanel: NSPanel {
+    var allowKey: Bool = false
+    override var canBecomeKey: Bool { allowKey }
+    override var canBecomeMain: Bool { false }
+}
+
+// MARK: - HoverGate (unchanged plus new reset())
+
 @MainActor
 @Observable
 final class HoverGate {
@@ -130,12 +166,27 @@ final class HoverGate {
         }
     }
 
+    /// Forcibly reset all tracked hover state. Used by the port-manager ESC
+    /// path to clear the gate before the popover is dismissed programmatically.
+    func reset() {
+        showTask?.cancel()
+        hideTask?.cancel()
+        showTask = nil
+        hideTask = nil
+        triggerHovered = false
+        popoverHovered = false
+        if isShown {
+            isShown = false
+            onHide()
+        }
+    }
+
     private func scheduleShow() {
         guard !isShown else { return }
         hideTask?.cancel()
         showTask?.cancel()
         showTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000) // 400ms
+            try? await Task.sleep(nanoseconds: 400_000_000)
             guard let self, !Task.isCancelled, self.triggerHovered else { return }
             self.isShown = true
             self.onShow()
@@ -146,7 +197,7 @@ final class HoverGate {
         guard isShown else { return }
         hideTask?.cancel()
         hideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms
+            try? await Task.sleep(nanoseconds: 300_000_000)
             guard let self, !Task.isCancelled else { return }
             guard !self.triggerHovered && !self.popoverHovered else { return }
             self.isShown = false

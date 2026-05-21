@@ -14,6 +14,7 @@ let package = Package(
         .testTarget(
             name: "AnyDoorTests",
             dependencies: ["AnyDoor"],
+            resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

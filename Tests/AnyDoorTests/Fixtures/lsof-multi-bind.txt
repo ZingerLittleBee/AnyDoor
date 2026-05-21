@@ -1,0 +1,11 @@
+p4242
+cmyserver
+LZinger
+f10
+PTCP
+tIPv4
+n127.0.0.1:5000
+f11
+PTCP
+tIPv4
+n0.0.0.0:5000

@@ -89,9 +89,10 @@ struct PanelSettingsView: View {
 
     @ViewBuilder
     private func hotkeyField(for entry: PanelEntry) -> some View {
-        if case .builtin(.appShortcuts) = entry.source {
-            // The submenu itself has no hotkey (children do); reserve column width
-            // for alignment without showing a meaningless placeholder.
+        // Any submenu-kind builtin has no hotkey (children carry their own, or
+        // the submenu is opened by hovering). Reserve the column width so the
+        // grid stays aligned.
+        if case let .builtin(item) = entry.source, item.kind == .submenu {
             Color.clear.frame(width: 130)
         } else {
             HotkeyRecorder(hotkey: .constant(entry.hotkey)) { newValue in
