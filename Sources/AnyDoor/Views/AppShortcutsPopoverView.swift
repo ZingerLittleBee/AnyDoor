@@ -3,44 +3,38 @@ import AppKit
 
 /// SwiftUI content shown inside the HoverPopover for the App Shortcuts submenu.
 ///
-/// Lists each KeyBinding with hotkey + app name + a small running-state indicator.
-/// "+ 添加应用快捷键" at the bottom opens the Settings window.
+/// Lists each KeyBinding with its hotkey and app name. Read-only mapping view —
+/// editing happens in the Settings window.
 struct AppShortcutsPopoverView: View {
     let entries: [PanelEntry]
     var onHoverChange: (Bool) -> Void
     var onSelect: (PanelEntry) -> Void
-    var onAddNew: () -> Void
+
+    private var visibleEntries: [PanelEntry] {
+        entries.filter(\.isVisible)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
             HStack(spacing: 6) {
                 Text("应用快捷键").font(.headline)
-                Text("· \(entries.count) 个").font(.caption).foregroundStyle(.tertiary)
+                Text("· \(visibleEntries.count) 个").font(.caption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
 
-            Divider().padding(.horizontal, 8)
+            if !visibleEntries.isEmpty {
+                Divider().padding(.horizontal, 8)
 
-            // Rows
-            VStack(spacing: 2) {
-                ForEach(entries.filter(\.isVisible)) { entry in
-                    AppShortcutRow(entry: entry, onSelect: { onSelect(entry) })
+                VStack(spacing: 2) {
+                    ForEach(visibleEntries) { entry in
+                        AppShortcutRow(entry: entry, onSelect: { onSelect(entry) })
+                    }
                 }
+                .padding(.horizontal, 6).padding(.vertical, 4)
             }
-            .padding(.horizontal, 6).padding(.vertical, 4)
-
-            Divider().padding(.horizontal, 8)
-
-            // Footer
-            Button(action: onAddNew) {
-                Label("添加应用快捷键", systemImage: "plus")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.glass)
-            .padding(8)
         }
-        .frame(width: 240, height: 240)
+        .frame(minWidth: 240, maxWidth: 320)
+        .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onHover(perform: onHoverChange)

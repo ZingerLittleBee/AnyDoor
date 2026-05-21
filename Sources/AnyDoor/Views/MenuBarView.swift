@@ -109,12 +109,6 @@ struct MenuBarView: View {
                                 appPath: binding.appPath
                             )
                         }
-                    },
-                    onAddNew: {
-                        // Open the Settings window (no custom URL scheme registered).
-                        // User can use the "+ 添加应用" button inside the Panel tab.
-                        NSApplication.shared.activate()
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
                     }
                 )
             }

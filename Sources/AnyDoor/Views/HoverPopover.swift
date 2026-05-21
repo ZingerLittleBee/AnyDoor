@@ -19,6 +19,9 @@ final class HoverPopover {
 
     init<Content: View>(@ViewBuilder content: () -> Content) {
         let controller = NSHostingController(rootView: AnyView(content()))
+        // Let the hosting controller resize itself to match SwiftUI's fitting size,
+        // so the NSWindow tracks the content's intrinsic dimensions automatically.
+        controller.sizingOptions = [.preferredContentSize]
         self.hostingController = controller
 
         let window = NSWindow(
@@ -39,6 +42,12 @@ final class HoverPopover {
 
     func updateContent<Content: View>(@ViewBuilder content: () -> Content) {
         hostingController.rootView = AnyView(content())
+        // Force layout so fittingSize reflects the new content before show() reads it.
+        hostingController.view.layoutSubtreeIfNeeded()
+        let fitting = hostingController.view.fittingSize
+        if fitting.width > 0 && fitting.height > 0 {
+            window.setContentSize(fitting)
+        }
     }
 
     /// Show the popover anchored to the right side of `referenceFrame` (screen coordinates).
@@ -50,8 +59,7 @@ final class HoverPopover {
         let screen = NSScreen.screens.first(where: { $0.frame.intersects(referenceFrame) }) ?? NSScreen.main
         let screenFrame = screen?.visibleFrame ?? .zero
 
-        var size = window.frame.size
-        if size == .zero { size = NSSize(width: 240, height: 200) }
+        let size = window.frame.size
 
         let rightX = referenceFrame.maxX + 4
         let leftX = referenceFrame.minX - 4 - size.width
