@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
     @State private var conflictAlert: ConflictAlert?
+    @State private var pendingDelete: PendingDelete?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +27,16 @@ struct PanelSettingsView: View {
                 message: Text("\(alert.hotkey.displayString) 已被「\(alert.existingTitle)」占用"),
                 primaryButton: .default(Text("替换")) {
                     alert.onReplace()
+                },
+                secondaryButton: .cancel(Text("取消"))
+            )
+        }
+        .alert(item: $pendingDelete) { item in
+            Alert(
+                title: Text("删除「\(item.appName)」?"),
+                message: Text("将一并清除快捷键绑定，无法撤销。"),
+                primaryButton: .destructive(Text("删除")) {
+                    PanelStore.shared.deleteAppShortcut(id: item.bindingID)
                 },
                 secondaryButton: .cancel(Text("取消"))
             )
@@ -96,12 +107,13 @@ struct PanelSettingsView: View {
                 .frame(width: 20)
         } else if case let .appShortcut(id) = entry.source {
             Button {
-                deleteAppShortcut(id: id)
+                pendingDelete = PendingDelete(bindingID: id, appName: entry.title)
             } label: {
                 Image(systemName: "xmark").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .frame(width: 20)
+            .help("删除 \(entry.title)")
         }
     }
 
@@ -219,9 +231,6 @@ struct PanelSettingsView: View {
         PanelStore.shared.addAppShortcut(appBundleID: appBundleID, appName: appName, appPath: url.path)
     }
 
-    private func deleteAppShortcut(id: UUID) {
-        PanelStore.shared.deleteAppShortcut(id: id)
-    }
 }
 
 private struct ConflictAlert: Identifiable {
@@ -229,4 +238,10 @@ private struct ConflictAlert: Identifiable {
     let hotkey: HotkeyDescriptor
     let existingTitle: String
     let onReplace: () -> Void
+}
+
+private struct PendingDelete: Identifiable {
+    let id = UUID()
+    let bindingID: UUID
+    let appName: String
 }
