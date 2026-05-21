@@ -135,6 +135,79 @@ final class PortInventoryTests: XCTestCase {
         XCTAssertFalse(inv.isRefreshing)
     }
 
+    /// Records every kill call and lets the test choose what `SignalResult` to return.
+    private final class RecordingKillScanner: PortScanning, @unchecked Sendable {
+        var records: [PortRecord]
+        let killHandler: (pid_t, Int32) -> SignalResult
+        private(set) var killCalls: [(pid: pid_t, sig: Int32)] = []
+        init(records: [PortRecord], killHandler: @escaping (pid_t, Int32) -> SignalResult) {
+            self.records = records
+            self.killHandler = killHandler
+        }
+        func scanTCPListening() async throws -> [PortRecord] { records }
+        func kill(pid: pid_t, signal: Int32) -> SignalResult {
+            killCalls.append((pid, signal))
+            return killHandler(pid, signal)
+        }
+    }
+
+    @MainActor
+    func testKillEPERMRecordsPermissionDenied() async {
+        let r = PortRecord(port: 80, pid: 99, processName: "root-thing",
+                           executablePath: nil, commandLine: nil,
+                           binds: [PortBind(address: "*", family: .ipv4)])
+        let scanner = RecordingKillScanner(records: [r]) { _, _ in .failure(.EPERM) }
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+        await inv.refresh()
+        await inv.kill(pid: 99)
+        XCTAssertEqual(inv.failedKillPIDs[99]?.reason, .permissionDenied)
+        XCTAssertFalse(inv.killingPIDs.contains(99))
+    }
+
+    @MainActor
+    func testKillESRCHIsNotRecordedAsFailure() async {
+        let r = PortRecord(port: 80, pid: 99, processName: "x",
+                           executablePath: nil, commandLine: nil,
+                           binds: [PortBind(address: "*", family: .ipv4)])
+        let scanner = RecordingKillScanner(records: [r]) { _, _ in .failure(.ESRCH) }
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+        await inv.refresh()
+        scanner.records = [] // pretend the process is already gone
+        await inv.kill(pid: 99)
+        XCTAssertNil(inv.failedKillPIDs[99])
+        XCTAssertFalse(inv.killingPIDs.contains(99))
+    }
+
+    @MainActor
+    func testKillSuccessEscalatesToSIGKILLWhenProcessSurvives() async {
+        let r = PortRecord(port: 80, pid: 99, processName: "stubborn",
+                           executablePath: nil, commandLine: nil,
+                           binds: [PortBind(address: "*", family: .ipv4)])
+        let scanner = RecordingKillScanner(records: [r]) { _, _ in .success }
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+        await inv.refresh()
+        // Pid still present after SIGTERM, so SIGKILL should be sent.
+        await inv.kill(pid: 99)
+        let sigs = scanner.killCalls.map(\.sig)
+        XCTAssertTrue(sigs.contains(SIGTERM))
+        XCTAssertTrue(sigs.contains(SIGKILL))
+    }
+
+    @MainActor
+    func testKillSuccessNoEscalateWhenProcessExits() async {
+        let r = PortRecord(port: 80, pid: 99, processName: "fast-exit",
+                           executablePath: nil, commandLine: nil,
+                           binds: [PortBind(address: "*", family: .ipv4)])
+        let scanner = RecordingKillScanner(records: [r]) { _, _ in .success }
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+        await inv.refresh()
+        // After SIGTERM, simulate the process being gone before refresh checks.
+        scanner.records = []
+        await inv.kill(pid: 99)
+        let sigs = scanner.killCalls.map(\.sig)
+        XCTAssertEqual(sigs, [SIGTERM])
+    }
+
     @MainActor
     func testIsRefreshingClearsOnlyWhenAllInflightFinish() async throws {
         let scanner = BlockingScanner()

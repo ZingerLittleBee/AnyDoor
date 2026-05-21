@@ -76,7 +76,56 @@ final class PortInventory {
     }
 
     func kill(pid: pid_t) async {
-        // Implemented in Task 11.
+        killingPIDs.insert(pid)
+
+        // Step 1: SIGTERM
+        switch scanner.kill(pid: pid, signal: SIGTERM) {
+        case .failure(.ESRCH):
+            // Process already gone — treat as success.
+            await refresh()
+            killingPIDs.remove(pid)
+            return
+        case .failure(let code):
+            let reason: KillFailure.Reason =
+                (code == .EPERM) ? .permissionDenied : .other(code.rawValue)
+            failedKillPIDs[pid] = KillFailure(reason: reason, timestamp: .now)
+            scheduleAutoDismiss(for: pid)
+            killingPIDs.remove(pid)
+            return
+        case .success:
+            break
+        }
+
+        // Step 2: give the process time to handle SIGTERM, then re-scan.
+        try? await Task.sleep(for: .milliseconds(500))
+        await refresh()
+
+        // Step 3: if still alive, escalate.
+        if records.contains(where: { $0.pid == pid }) {
+            switch scanner.kill(pid: pid, signal: SIGKILL) {
+            case .success:
+                try? await Task.sleep(for: .milliseconds(200))
+                await refresh()
+            case .failure(.ESRCH):
+                await refresh()
+            case .failure(let code):
+                let reason: KillFailure.Reason =
+                    (code == .EPERM) ? .permissionDenied : .other(code.rawValue)
+                failedKillPIDs[pid] = KillFailure(reason: reason, timestamp: .now)
+                scheduleAutoDismiss(for: pid)
+            }
+        }
+
+        killingPIDs.remove(pid)
+    }
+
+    private func scheduleAutoDismiss(for pid: pid_t) {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            await MainActor.run {
+                self?.failedKillPIDs.removeValue(forKey: pid)
+            }
+        }
     }
 
     func dismissError(for pid: pid_t) {
