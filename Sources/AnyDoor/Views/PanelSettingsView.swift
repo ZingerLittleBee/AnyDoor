@@ -90,7 +90,9 @@ struct PanelSettingsView: View {
     @ViewBuilder
     private func hotkeyField(for entry: PanelEntry) -> some View {
         if case .builtin(.appShortcuts) = entry.source {
-            Text("—").font(.caption2).foregroundStyle(.tertiary).frame(width: 130, alignment: .trailing)
+            // The submenu itself has no hotkey (children do); reserve column width
+            // for alignment without showing a meaningless placeholder.
+            Color.clear.frame(width: 130)
         } else {
             HotkeyRecorder(hotkey: .constant(entry.hotkey)) { newValue in
                 handleHotkeyChange(entry: entry, newValue: newValue)
@@ -101,11 +103,7 @@ struct PanelSettingsView: View {
 
     @ViewBuilder
     private func deleteButton(for entry: PanelEntry) -> some View {
-        if case .builtin(_) = entry.source {
-            Image(systemName: "xmark")
-                .foregroundStyle(.tertiary.opacity(0.5))
-                .frame(width: 20)
-        } else if case let .appShortcut(id) = entry.source {
+        if case let .appShortcut(id) = entry.source {
             Button {
                 pendingDelete = PendingDelete(bindingID: id, appName: entry.title)
             } label: {
@@ -114,6 +112,9 @@ struct PanelSettingsView: View {
             .buttonStyle(.plain)
             .frame(width: 20)
             .help("删除 \(entry.title)")
+        } else {
+            // Reserve the same width so other columns stay aligned across rows.
+            Color.clear.frame(width: 20)
         }
     }
 
@@ -174,7 +175,7 @@ struct PanelSettingsView: View {
                     }
                 ))
                 .toggleStyle(.checkbox).labelsHidden()
-                Image(systemName: child.symbol).frame(width: 16)
+                appIcon(for: child)
                 Text(child.title).font(.body)
                 Spacer()
                 HotkeyRecorder(hotkey: .constant(child.hotkey)) { newValue in
@@ -187,6 +188,21 @@ struct PanelSettingsView: View {
             .opacity(child.isVisible ? 1.0 : 0.5)
         }
         .onMove(perform: moveChildren)
+    }
+
+    /// Renders the real Finder app icon for an app shortcut row, falling back to
+    /// the generic SF Symbol if the binding or its file can't be resolved.
+    @ViewBuilder
+    private func appIcon(for entry: PanelEntry) -> some View {
+        if case let .appShortcut(id) = entry.source,
+           let binding = panel.binding(id: id) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: binding.appPath))
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 18, height: 18)
+        } else {
+            Image(systemName: entry.symbol).frame(width: 18)
+        }
     }
 
     private func moveChildren(from source: IndexSet, to destination: Int) {
