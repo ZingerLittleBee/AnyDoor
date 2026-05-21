@@ -87,6 +87,24 @@ New case in `Sources/AnyDoor/Models/BuiltinItem.swift`:
 
 No changes to `HotkeyAction`, `PanelStore.rebuildHotkeySnapshots`, or `HotkeyService` in this iteration. `PanelStore` already skips snapshot generation for items whose `kind == .submenu` (see `PanelStore.swift:202`), and the menu bar only resolves the popover anchor for the App Shortcuts row (`MenuBarView.swift:62`). Designing a "global hotkey opens menu bar then mounts a submenu popover" flow requires its own design pass and is intentionally out of scope.
 
+**Settings UI must also hide the hotkey recorder for every submenu, not just App Shortcuts.** `PanelSettingsView.swift:92` currently special-cases `.builtin(.appShortcuts)`:
+
+```swift
+if case .builtin(.appShortcuts) = entry.source {
+    Color.clear.frame(width: 130)   // reserve column width
+}
+```
+
+Generalise this to all submenu-kind items so `.portManager` (and any future submenu) does not render a recorder the user can fill in but the system silently ignores:
+
+```swift
+if case let .builtin(item) = entry.source, item.kind == .submenu {
+    Color.clear.frame(width: 130)
+}
+```
+
+This is a one-line change and ships in the same iteration.
+
 ### 3. `PortScanner` (actor)
 
 Files:
@@ -149,44 +167,84 @@ Capturing `errno` **immediately after** the `Darwin.kill` call (before any other
 
 The existing `ShellRunner` calls `pipe.fileHandleForReading.readToEnd()` after the process has already exited, which deadlocks once stdout exceeds the pipe buffer (~16 KiB). `lsof` listing 50–200 open TCP files reliably exceeds that.
 
-`PortScanner` ships its own private runner that drains pipes concurrently with the running process. Sketch:
+`PortScanner` defines a `SubprocessRunning` protocol so the runner can be stubbed in tests (the "lsof exit 1 with empty stdout/stderr" case lives at the runner layer, not the parser layer):
 
 ```swift
-private func runProcess(
-    path: String, args: [String], timeout: Duration
-) async throws -> (stdout: String, stderr: String, exit: Int32) {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: path)
-    process.arguments = args
-    let outPipe = Pipe(), errPipe = Pipe()
-    process.standardOutput = outPipe
-    process.standardError = errPipe
-    try process.run()
+protocol SubprocessRunning: Sendable {
+    func run(
+        path: String, args: [String], timeout: Duration
+    ) async throws -> SubprocessResult
+}
 
-    // Drain pipes on detached tasks so the kernel buffer never fills.
-    async let outData = readAll(outPipe.fileHandleForReading)
-    async let errData = readAll(errPipe.fileHandleForReading)
+struct SubprocessResult: Sendable, Equatable {
+    let stdout: String
+    let stderr: String
+    let exit: Int32
+    let timedOut: Bool
+}
 
-    // Timeout watchdog terminates the process. The read tasks then finish
-    // naturally because the file handles hit EOF.
-    let watchdog = Task {
-        try? await Task.sleep(for: timeout)
-        if process.isRunning { process.terminate() }
-    }
-
-    let (out, err) = await (outData, errData)
-    watchdog.cancel()
-    process.waitUntilExit()  // already returned, but ensures status is set
-
-    return (
-        stdout: String(data: out, encoding: .utf8) ?? "",
-        stderr: String(data: err, encoding: .utf8) ?? "",
-        exit: process.terminationStatus
-    )
+enum SubprocessError: Error, Equatable {
+    case spawnFailed(String)
 }
 ```
 
-The runner is private to `PortScanner` — other features keep using `ShellRunner` for short outputs.
+`PortScanner.init(runner:)` accepts any `any SubprocessRunning` (defaulting to the real one). Tests inject a stub that returns canned `SubprocessResult` values.
+
+The real implementation drains pipes concurrently with the running process and honors both timeout and Task cancellation:
+
+```swift
+struct LsofRunner: SubprocessRunning {
+    func run(
+        path: String, args: [String], timeout: Duration
+    ) async throws -> SubprocessResult {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = args
+        let outPipe = Pipe(), errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        do { try process.run() }
+        catch { throw SubprocessError.spawnFailed("\(error)") }
+
+        // Honor cancellation: if the awaiting Task is cancelled, terminate
+        // the child. The read async-lets then hit EOF and unblock.
+        return try await withTaskCancellationHandler {
+            // Drain pipes concurrently so the kernel buffer never fills.
+            async let outData: Data = readAll(outPipe.fileHandleForReading)
+            async let errData: Data = readAll(errPipe.fileHandleForReading)
+
+            // Timeout watchdog terminates the child on deadline.
+            let timedOut = ManagedAtomic(false)   // or actor-isolated Bool
+            let watchdog = Task {
+                try? await Task.sleep(for: timeout)
+                if process.isRunning {
+                    timedOut.store(true, ordering: .relaxed)
+                    process.terminate()
+                }
+            }
+
+            let (out, err) = await (outData, errData)
+            watchdog.cancel()
+            process.waitUntilExit()   // already returned; ensures status set
+
+            return SubprocessResult(
+                stdout: String(data: out, encoding: .utf8) ?? "",
+                stderr: String(data: err, encoding: .utf8) ?? "",
+                exit: process.terminationStatus,
+                timedOut: timedOut.load(ordering: .relaxed)
+            )
+        } onCancel: {
+            // Called when the *outer* Task is cancelled. Process.terminate()
+            // is thread-safe.
+            if process.isRunning { process.terminate() }
+        }
+    }
+}
+```
+
+`scanTCPListening()` inspects `SubprocessResult.timedOut` first; when true it throws `PortScanError.lsofTimeout` regardless of exit status. When false, it applies the empty-result rule (exit 1 + empty stdout/stderr → `[]`) and otherwise the failure rule.
+
+`LsofRunner` lives in `PortScanner.swift` alongside the actor; other features keep using `ShellRunner` for their short outputs. `Bool`-flag implementation detail can use `os_unfair_lock` or actor isolation if `ManagedAtomic` is overkill — the point is "the runner returns whether it timed out, the scanner branches on it."
 
 #### Scanning pipeline
 
@@ -229,7 +287,7 @@ final class PortInventory {
     }
     var searchText: String = ""
 
-    init(scanner: PortScanning = PortScanner()) { ... }
+    init(scanner: any PortScanning = PortScanner()) { ... }
 
     func refresh() async
     func kill(pid: pid_t) async
@@ -256,12 +314,15 @@ struct KillFailure: Equatable, Sendable {
 #### Refresh
 
 - Entry points: popover `.task`, ⌘R, automatic after a kill.
-- Concurrency model: a monotonically incrementing `refreshGeneration: UInt64` token. Each `refresh()` call:
-  1. Increments the generation and captures `let myGen = refreshGeneration`.
-  2. Awaits the scanner. The scanner's subprocess runner is responsible for terminating the lsof child when its enclosing Task is cancelled or hits the timeout (see the runner sketch above) — Swift's `Task.cancel` alone does not kill a running `Process`.
-  3. After awaiting, checks `guard myGen == refreshGeneration else { return }`. A stale completion is discarded; only the latest scan can overwrite `records`.
-- On failure, `lastError` is set and `records` is preserved. (Staleness check still applies — a stale failure does not overwrite a fresh success.)
-- A single in-flight scan is the steady state; overlapping refreshes are tolerated but only the newest result lands. We do **not** try to cancel the old subprocess on a new request — lsof is fast enough that the simple "newest wins" rule is sufficient.
+- Concurrency model: a monotonically incrementing `refreshGeneration: UInt64` token plus an `inflightCount: Int` counter:
+  1. Each `refresh()` call increments `refreshGeneration`, captures `let myGen = refreshGeneration`, increments `inflightCount`, and sets `isRefreshing = true`.
+  2. Awaits the scanner. The scanner's subprocess runner is responsible for terminating the lsof child on cancellation or timeout (see the runner sketch above) — Swift's `Task.cancel` alone does not kill a running `Process`.
+  3. After awaiting: decrement `inflightCount`. Then:
+     - `guard myGen == refreshGeneration else { isRefreshing = (inflightCount > 0); return }` — stale completion is discarded but the spinner remains on if a newer scan is still running.
+     - On the latest generation, write `records` / `lastError` and set `isRefreshing = (inflightCount > 0)`.
+- The rule that matters: **`isRefreshing = false` happens only when no scans are in flight**, regardless of whether the resolved one was the latest. This prevents a stale early completion from clearing the spinner while the newest scan is still running.
+- On failure, `lastError` is set and `records` is preserved. A stale failure does not overwrite a fresh success (same generation-token gate).
+- We do **not** try to cancel the old subprocess on a new request — lsof is fast enough (~tens of ms) that the simple "newest wins" rule is sufficient. The runner's task-cancellation handler exists for the harder case (popover dismissed mid-scan) where the parent Task itself gets cancelled.
 
 #### Kill policy (two-phase)
 
@@ -347,47 +408,64 @@ File: `Sources/AnyDoor/Views/PortManagerPopoverView.swift`
 
 Structure:
 
-```
-VStack(spacing: 0) {
-    PortManagerHeader(inventory: ...)        // globe icon + search + count
-    if let err = inventory.lastError {
-        ScanErrorBanner(error: err, retry: { await inventory.refresh() })
-    }
-    Group {
-        if inventory.isRefreshing && inventory.records.isEmpty {
-            ProgressView("扫描中...")
-        } else if inventory.filteredRecords.isEmpty {
-            Text("无匹配的端口").foregroundStyle(.secondary)
-        } else {
-            switch inventory.viewMode {
-            case .list: PortListView()
-            case .tree: PortTreeView()
+```swift
+struct PortManagerPopoverView: View {
+    @Bindable var inventory: PortInventory   // the singleton
+    var onHoverChange: (Bool) -> Void        // callback to HoverGate.popoverHover
+
+    var body: some View {
+        VStack(spacing: 0) {
+            PortManagerHeader(inventory: inventory)
+            if let err = inventory.lastError {
+                ScanErrorBanner(error: err, retry: { await inventory.refresh() })
             }
+            Group {
+                if inventory.isRefreshing && inventory.records.isEmpty {
+                    ProgressView("扫描中...")
+                } else if inventory.filteredRecords.isEmpty {
+                    Text("无匹配的端口").foregroundStyle(.secondary)
+                } else {
+                    switch inventory.viewMode {
+                    case .list: PortListView(inventory: inventory)
+                    case .tree: PortTreeView(inventory: inventory)
+                    }
+                }
+            }
+            Divider()
+            PortManagerToolbar(inventory: inventory)
         }
+        .frame(width: 340)
+        .frame(minHeight: 280, maxHeight: 560)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .task { await inventory.refresh() }
+        .onHover(perform: onHoverChange)   // critical: keeps popover open while hovered
+        .background(KeyboardMonitor(inventory: inventory))
     }
-    Divider()
-    PortManagerToolbar(inventory: ...)       // Refresh ⌘R / Toggle View ⌘T
 }
-.frame(width: 340)
-.frame(minHeight: 280, maxHeight: 560)
-.task { await inventory.refresh() }
-.background(KeyboardMonitor(inventory: ...)) // local NSEvent monitor
 ```
+
+The `onHoverChange` callback mirrors `AppShortcutsPopoverView.swift:51` and feeds into `HoverGate.popoverHover(_:)`. Without it, the gate only tracks the trigger row's hover state, and the popover closes 300ms after the cursor leaves the menu bar row even though the cursor is inside the popover. `MenuBarView` is responsible for wiring this callback when it constructs the view (just like it does for App Shortcuts today).
 
 #### `PortListView` / `PortRowView`
 
 - One row per `PortRecord`, sorted by port ascending.
 - Layout: `[status dot] [:port monospaced] [process name] [PID xxxxx] [kill icon on hover]`
+- Bind addresses (`record.binds`) are surfaced via tooltip on hover (`help(...)` modifier). The tooltip string format: `"\(processName)\n\(commandLine ?? "")\n\nBinds:\n\(binds.map { "\($0.address) (\($0.family.rawValue))" }.joined(separator: "\n"))"`. The list row stays compact (matches the mockup) — binds are surfaced on demand, not in the primary visual.
 - Status dot: green (default), gray + spinner (killing), red (failed).
-- Process name truncates tail; tooltip shows `commandLine ?? processName`.
+- Process name truncates tail.
 - Kill icon: `xmark.circle.fill`, hidden until row hover; replaced by spinner while `killingPIDs` contains the pid; replaced by `exclamationmark.circle.fill` (red) while `failedKillPIDs` contains the pid.
 - Tap kill → `Task { await inventory.kill(pid: record.pid) }`.
 
-#### `PortTreeView` / `PortProcessGroupView`
+#### `PortTreeView` / process group rendering
 
 - One `DisclosureGroup` per `ProcessGroup`, all collapsed by default.
 - Group header: `[chevron] [status dot] [process name] [PID xxxxx] [collapsed-only: port count capsule] [kill icon on hover]`.
-- Leaf rows: `:port` + bind-address subtitle (`* · :5000` or `127.0.0.1 · :3000`); no kill icon on leaves.
+- Leaf rows: `[:port monospaced] [bind summary]`. The bind summary is computed from `record.binds`:
+  - 1 bind → `"\(bind.address)"` (e.g. `*`, `127.0.0.1`, `[::1]`).
+  - 2 binds, exactly one IPv4 and one IPv6 → `"\(ipv4.address) · \(ipv6.address)"` (typical dual-stack case; matches the mockup's "* · :5000" intent except now driven by real data).
+  - More than 2 → `"\(binds.count) binds"` with tooltip listing them in full.
+- Leaf rows still have **no** kill icon (per earlier decision).
 - Tap group's kill icon → `Task { await inventory.kill(pid: group.pid) }`.
 - Expansion state in `@State` only; not persisted.
 
@@ -396,6 +474,15 @@ VStack(spacing: 0) {
 - Left: SF Symbol `globe` (matches mockups).
 - Middle: search field, auto-focused on appear; `@FocusState` binding.
 - Right: count capsule showing `filteredRecords.count`, accompanied by a small spinner when `isRefreshing` is true.
+
+**Window key-focus contract.** The existing `HoverPopover` (`HoverPopover.swift:14`) hosts content in a borderless, `level = .floating` `NSWindow` that is shown with `orderFrontRegardless()`. A bare `NSWindow` like that returns `false` from `canBecomeKey` and therefore swallows text input and local key events — fine for App Shortcuts (read-only rows with tap gestures), broken for port-manager (search field + ⌘R / ⌘T / ESC). Two changes are required and **must land in the same iteration as this feature**:
+
+1. Subclass `NSWindow` (or set `setIsVisible(false)` and reconfigure) so `canBecomeKey` and `canBecomeMain` return `true`. Add `becomesKeyOnlyIfNeeded = true` and `styleMask` includes `.nonactivatingPanel`-style behavior (use `NSPanel` if simpler) so opening the popover does not steal app activation from the foreground app — this matches the existing "menu bar accessory" feel.
+2. In `HoverPopover.show(...)`, call `window.makeKey()` (or `makeKeyAndOrderFront(nil)` followed by `NSApp.activate(ignoringOtherApps: false)`) so the SwiftUI `@FocusState` binding can claim first responder.
+
+App Shortcuts is unaffected: it has no focusable controls, so gaining key status is harmless. Add a manual QA check that hovering App Shortcuts still doesn't show a typing cursor and doesn't steal focus from other apps.
+
+If subclassing turns out fragile, the fallback is a second, port-manager-specific popover host that owns an `NSPanel` configured for key acceptance, and `HoverPopover` stays read-only. The spec leaves room for either path during implementation; the contract that must hold is "the search field is focused on appear and receives keystrokes without forcing AnyDoor to the foreground."
 
 #### `PortManagerToolbar`
 
@@ -411,13 +498,15 @@ A local `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` mounted while the
 
 ### 6. `HoverPopover` integration
 
-`MenuBarView` already dispatches hover for `.appShortcuts`. Extend the switch:
+`MenuBarView` already dispatches hover for `.appShortcuts`. Extend the dispatch (real API: `entry.source` is the `PanelEntrySource` enum, not `entry.builtin`):
 
 ```swift
-switch entry.builtin {
-case .appShortcuts: present(AppShortcutsPopoverView())
-case .portManager:  present(PortManagerPopoverView())
-default: break
+if case let .builtin(item) = entry.source {
+    switch item {
+    case .appShortcuts: popover.updateContent { AppShortcutsPopoverView(...) }
+    case .portManager:  popover.updateContent { PortManagerPopoverView(...) }
+    default: break
+    }
 }
 ```
 
@@ -516,18 +605,27 @@ Fixtures live under `Tests/AnyDoorTests/Fixtures/`. Tests load them with `Bundle
 - Refresh generation token: consecutive `refresh()` calls where the older one resolves later → records reflect only the newer scan's data (stub controls resolution order via `CheckedContinuation`).
 - `groupedByProcess` returns groups sorted by name with ports sorted ascending.
 - Submenu hotkey filtering remains unchanged: `PanelStore.rebuildHotkeySnapshots()` produces zero snapshots for `.portManager` regardless of whether the preference has a keycode set (regression guard since `.portManager` is the first new submenu item).
+- `isRefreshing` semantics with concurrent refreshes: stub runner exposes two `CheckedContinuation`s. Trigger `refresh()` twice; resolve the older one first; assert `isRefreshing == true` (newer scan still in flight); resolve the newer; assert `isRefreshing == false`. Reverse order also covered.
+- Subprocess runner timeout: stub runner returns `SubprocessResult(timedOut: true, ...)`; scanner throws `.lsofTimeout` regardless of exit code.
+- Subprocess runner cancellation: real `LsofRunner` test (best-effort; skip if CI cannot spawn `/usr/bin/yes`) — spawn `/usr/bin/yes`, wrap in a Task, cancel after 100ms, assert the process is no longer running shortly after.
 
 ### Manual QA checklist
 
 - Hover the App Shortcuts row → port-manager popover does **not** appear.
 - Hover the port-manager row → popover appears after ~400ms.
+- Search field receives focus on appear and accepts typing **without** bringing AnyDoor to the foreground (verify by hovering with another app key — the other app's title bar should not lose key state).
+- Move cursor from the menu bar row into the popover → popover stays open (no flicker, no close after 300ms).
+- Move cursor out of the popover entirely → popover closes after ~300ms.
 - Toggle list/tree → preference persists after app restart.
 - Type in search → count updates instantly; ordering matches priority spec.
+- Tooltip on a list row shows the bind addresses; for a dual-stack listener, both IPv4 and IPv6 entries are listed.
+- Tree view leaf row shows a sensible bind summary (single, dual, or "N binds") matching `record.binds`.
 - Click kill on a user-owned process → row turns gray, process disappears after 0.5–1s, list refreshes.
 - Click kill on a root-owned process (e.g. `ControlCenter`) → red icon + tooltip, auto-dismisses after 3s.
 - ESC clears search when non-empty; ESC closes popover when search is empty.
 - ⌘R triggers refresh; banner appears and disappears on transient failures.
 - ⌘T toggles list/tree view.
+- Open Settings → port-manager row shows no hotkey recorder (column reserved blank, matching App Shortcuts).
 
 ### Out of scope for tests
 
@@ -553,6 +651,8 @@ Fixtures live under `Tests/AnyDoorTests/Fixtures/`. Tests load them with `Bundle
 - `Sources/AnyDoor/Models/BuiltinItem.swift` — add `.portManager` case with `.submenu` kind, title, symbol, default ordering.
 - `Sources/AnyDoor/Services/PanelStore.swift` — no behavioural change required for hotkey path; verify the existing submenu filter still applies (regression test in `PortInventoryTests`).
 - `Sources/AnyDoor/Views/MenuBarView.swift` — generalise the single `triggerFrame` into per-submenu-item frames; extend the hover dispatch to mount `PortManagerPopoverView` for `.portManager`.
+- `Sources/AnyDoor/Views/HoverPopover.swift` — allow the underlying `NSWindow` to accept key focus (subclass override / `NSPanel` swap / opt-in flag) so the SwiftUI `@FocusState` on the search field can become first responder. Existing `AppShortcutsPopoverView` is unaffected because it has no focusable controls.
+- `Sources/AnyDoor/Views/PanelSettingsView.swift` — generalise the hotkey-column filter at `:92` from `case .builtin(.appShortcuts)` to "any `.submenu`-kind builtin" so the new port-manager row does not present a recorder that the system ignores.
 - `Package.swift` — augment the existing `AnyDoorTests` target with `resources: [.process("Fixtures")]`.
 
 **Not modified (despite earlier draft saying otherwise)**
@@ -576,7 +676,18 @@ None. All clarifications captured above.
 
 ## Revisions
 
-**2026-05-21 — post-review revisions**
+**2026-05-21 — second-round revisions**
+
+- Documented that `HoverPopover`'s current `NSWindow` is not key-eligible. The port-manager popover requires text input + local hotkeys, so the popover host must be modified (subclass / `NSPanel` / opt-in flag) to accept key focus without stealing app activation. Bundled in the same iteration.
+- Generalised the hotkey-column filter in `PanelSettingsView` from `case .builtin(.appShortcuts)` to "any submenu-kind builtin" so the port-manager row does not display a recorder the system silently ignores.
+- Added the `onHoverChange` callback wiring on `PortManagerPopoverView` (mirroring `AppShortcutsPopoverView.swift:51`) so the popover keeps the `HoverGate` aware of cursor presence and does not close after 300ms when the cursor moves from the menu row into the popover.
+- Subprocess runner: introduced `SubprocessRunning` protocol + `SubprocessResult.timedOut` flag; the scanner now branches on `timedOut` to throw `.lsofTimeout` deterministically. Added `withTaskCancellationHandler` so the lsof child is terminated when the awaiting Task is cancelled.
+- Made the runner injection-friendly: `PortScanner.init(runner: any SubprocessRunning = LsofRunner())`. Lets the tests cover the "exit 1 + empty" rule and the timeout rule with a stub runner instead of spawning lsof.
+- UI bind display: list row tooltip lists every bind with its family; tree leaf row renders a deterministic bind summary (1 / 2 / >2 cases) drawn from `record.binds` instead of a single string.
+- Refresh concurrency: explicit `inflightCount` companion to the generation token so a stale early completion does not clear `isRefreshing` while a newer scan is still running.
+- Swift 6 / API correctness: `any PortScanning` for the existential; `MenuBarView` switch keys on `entry.source` (the real API) via `if case let .builtin(item) = entry.source`.
+
+**2026-05-21 — post-review revisions (first round)**
 
 - Replaced `ShellRunner` usage in `PortScanner` with a dedicated subprocess runner that drains stdout/stderr concurrently with `process.run()`. `ShellRunner` reads the pipe only after `waitUntilExit`, which deadlocks once lsof's output exceeds the kernel pipe buffer (~16 KiB).
 - Corrected the lsof field characters: `-F pPcntL` (the `t` field carries IPv4/IPv6; `P` is the protocol name, not the family).
