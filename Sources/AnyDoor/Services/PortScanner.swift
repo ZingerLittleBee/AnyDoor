@@ -47,8 +47,47 @@ actor PortScanner: PortScanning {
     }
 
     func scanTCPListening() async throws -> [PortRecord] {
-        // Implemented in Task 7.
-        return []
+        let result = try await runner.run(
+            path: "/usr/sbin/lsof",
+            args: ["-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pPcntL", "+c", "0"],
+            timeout: .seconds(3)
+        )
+
+        if result.timedOut { throw PortScanError.lsofTimeout }
+
+        // lsof returns exit 1 with empty stdout AND empty stderr when there is
+        // no matching open file. Treat that as a successful empty scan.
+        if result.exit == 1 && result.stdout.isEmpty && result.stderr.isEmpty {
+            return []
+        }
+        // Non-zero exit with any output on stderr (or stdout) is a real failure.
+        if result.exit != 0 {
+            throw PortScanError.lsofFailed(exitCode: result.exit, stderr: result.stderr)
+        }
+
+        var records = try parseLsofOutput(result.stdout)
+        records = enrichWithProcArgs(records)
+        return records
+    }
+
+    /// Enriches each record's `executablePath` and `commandLine` via sysctl.
+    /// One sysctl call per unique pid; failures are silent (record keeps lsof's data).
+    private func enrichWithProcArgs(_ records: [PortRecord]) -> [PortRecord] {
+        var cache: [pid_t: (path: String?, command: String?)] = [:]
+        return records.map { r in
+            if cache[r.pid] == nil {
+                cache[r.pid] = parseProcArgs(forPid: r.pid)
+            }
+            let info = cache[r.pid] ?? (nil, nil)
+            return PortRecord(
+                port: r.port,
+                pid: r.pid,
+                processName: r.processName,
+                executablePath: info.path,
+                commandLine: info.command,
+                binds: r.binds
+            )
+        }
     }
 
     nonisolated func kill(pid: pid_t, signal: Int32) -> SignalResult {
@@ -219,4 +258,11 @@ private func hexNibble(_ s: Unicode.Scalar) -> UInt8? {
     case "A"..."F": return UInt8(s.value - Unicode.Scalar("A").value + 10)
     default: return nil
     }
+}
+
+// MARK: - sysctl KERN_PROCARGS2 helper (filled in Task 8)
+
+func parseProcArgs(forPid pid: pid_t) -> (path: String?, command: String?) {
+    // Task 8 replaces this stub with the real sysctl-based implementation.
+    return (nil, nil)
 }

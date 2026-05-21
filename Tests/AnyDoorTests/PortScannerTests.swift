@@ -74,4 +74,59 @@ final class PortScannerTests: XCTestCase {
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records[0].processName, "weird name")
     }
+
+    // Stub runner used to exercise scanner branches without spawning lsof.
+    private struct StubRunner: SubprocessRunning {
+        let result: SubprocessResult
+        func run(path: String, args: [String], timeout: Duration) async throws -> SubprocessResult {
+            result
+        }
+    }
+
+    func testScanEmptyResultExit1BothStreamsEmpty() async throws {
+        let scanner = PortScanner(runner: StubRunner(
+            result: SubprocessResult(stdout: "", stderr: "", exit: 1, timedOut: false)
+        ))
+        let records = try await scanner.scanTCPListening()
+        XCTAssertEqual(records, [])
+    }
+
+    func testScanExit1WithStderrIsFailure() async {
+        let scanner = PortScanner(runner: StubRunner(
+            result: SubprocessResult(stdout: "", stderr: "lsof: permission denied\n", exit: 1, timedOut: false)
+        ))
+        do {
+            _ = try await scanner.scanTCPListening()
+            XCTFail("expected lsofFailed")
+        } catch let PortScanError.lsofFailed(code, stderr) {
+            XCTAssertEqual(code, 1)
+            XCTAssertTrue(stderr.contains("permission denied"))
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testScanTimeoutThrowsRegardlessOfExit() async {
+        let scanner = PortScanner(runner: StubRunner(
+            result: SubprocessResult(stdout: "anything", stderr: "", exit: 0, timedOut: true)
+        ))
+        do {
+            _ = try await scanner.scanTCPListening()
+            XCTFail("expected lsofTimeout")
+        } catch PortScanError.lsofTimeout {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
+    func testScanSuccessfulParse() async throws {
+        let raw = try fixture("lsof-single-ipv4")
+        let scanner = PortScanner(runner: StubRunner(
+            result: SubprocessResult(stdout: raw, stderr: "", exit: 0, timedOut: false)
+        ))
+        let records = try await scanner.scanTCPListening()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].port, 3000)
+    }
 }
