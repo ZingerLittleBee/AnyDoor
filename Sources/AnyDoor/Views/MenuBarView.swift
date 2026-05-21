@@ -32,8 +32,6 @@ struct MenuBarView: View {
             }
             .padding(.horizontal, 4)
 
-            Spacer(minLength: 0)
-
             // Footer
             HStack(spacing: 8) {
                 SettingsLink { Label("设置", systemImage: "gear") }
@@ -50,7 +48,8 @@ struct MenuBarView: View {
             .padding(.horizontal, 8).padding(.bottom, 4)
         }
         .padding(.vertical, 8).padding(.horizontal, 4)
-        .frame(width: 260).frame(minHeight: 400)
+        .frame(width: 260)
+        .fixedSize(horizontal: false, vertical: true)
         .task {
             await panel.refreshAll()
         }
@@ -113,6 +112,11 @@ struct MenuBarView: View {
                                 appPath: binding.appPath
                             )
                         }
+                    },
+                    appPath: { entry in
+                        guard case let .appShortcut(id) = entry.source,
+                              let binding = panel.binding(id: id) else { return nil }
+                        return binding.appPath
                     }
                 )
             }
