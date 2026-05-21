@@ -1,110 +1,140 @@
 import SwiftUI
-import SwiftData
+import AppKit
 
 struct MenuBarView: View {
-    @Query(sort: \KeyBinding.createdAt) private var bindings: [KeyBinding]
-    @Environment(\.modelContext) private var modelContext
+    @State private var panel = PanelStore.shared
+    @State private var popover = HoverPopover {
+        EmptyView()
+    }
+    @State private var gate = HoverGate()
+    @State private var triggerFrame: NSRect = .zero
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             // Header
             HStack {
-                Text("AnyDoor")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+                Text("AnyDoor").font(.headline)
                 Spacer()
-                Text("\(bindings.filter(\.isEnabled).count) 个快捷键")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                let count = panel.topLevelEntries.filter(\.isVisible).count
+                Text("\(count) 个已启用").font(.caption).foregroundStyle(.tertiary)
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 12).padding(.top, 4)
 
-            // Bindings list
-            if bindings.isEmpty {
-                VStack(spacing: 8) {
-                    Image(systemName: "keyboard")
-                        .font(.system(size: 24))
-                        .foregroundStyle(.quaternary)
-                    Text("尚未配置快捷键")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("点击下方「设置」添加")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-            } else {
-                VStack(spacing: 4) {
-                    ForEach(bindings) { binding in
-                        BindingRow(binding: binding)
+            // Rows. GlassEffectContainer is required so the per-row .glassEffect calls
+            // composite as a single Liquid Glass group; without it the last row in the
+            // stack samples its background independently and can render with a stale tint.
+            GlassEffectContainer(spacing: 2) {
+                VStack(spacing: 2) {
+                    ForEach(panel.topLevelEntries.filter(\.isVisible)) { entry in
+                        rowView(for: entry)
                     }
                 }
-                .padding(.horizontal, 4)
             }
+            .padding(.horizontal, 4)
 
             Spacer(minLength: 0)
 
-            // Footer actions
+            // Footer
             HStack(spacing: 8) {
-                SettingsLink {
-                    Label("设置", systemImage: "gear")
-                }
-                .buttonStyle(.glass)
-                .simultaneousGesture(TapGesture().onEnded {
-                    NSApplication.shared.activate()
-                })
-
-                Button {
-                    NSApplication.shared.terminate(nil)
-                } label: {
+                SettingsLink { Label("设置", systemImage: "gear") }
+                    .buttonStyle(.glass)
+                    .simultaneousGesture(TapGesture().onEnded {
+                        NSApplication.shared.activate()
+                    })
+                Button { NSApplication.shared.terminate(nil) } label: {
                     Label("退出", systemImage: "power")
-                }
-                .buttonStyle(.glass)
-
+                }.buttonStyle(.glass)
                 Spacer()
             }
             .focusEffectDisabled()
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 8).padding(.bottom, 4)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
-        .frame(width: 260)
-        .frame(minHeight: 400)
+        .padding(.vertical, 8).padding(.horizontal, 4)
+        .frame(width: 260).frame(minHeight: 400)
+        .task {
+            await panel.refreshAll()
+        }
+        .onAppear { wireGate() }
+        .onDisappear { popover.hide() }
     }
-}
 
-private struct BindingRow: View {
-    let binding: KeyBinding
-    @State private var isHovered = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(binding.displayKey)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-
-            Image(systemName: "arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
-            Text(binding.appName)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-
-            Spacer()
-
-            Circle()
-                .fill(binding.isEnabled ? Color.green : Color.secondary.opacity(0.3))
-                .frame(width: 6, height: 6)
+    @ViewBuilder
+    private func rowView(for entry: PanelEntry) -> some View {
+        if case .builtin(.appShortcuts) = entry.source {
+            PanelRowView(
+                entry: entry,
+                onToggle: {},
+                onAction: {},
+                onSubmenu: { triggerSubmenu() },
+                onPermission: openPermissionsSettings
+            )
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.onAppear {
+                        triggerFrame = proxy.frame(in: .global)
+                    }.onChange(of: proxy.frame(in: .global)) { _, new in
+                        triggerFrame = new
+                    }
+                }
+            )
+            .onHover { hovered in
+                gate.triggerHover(hovered)
+            }
+        } else {
+            PanelRowView(
+                entry: entry,
+                onToggle: {
+                    if case let .builtin(item) = entry.source {
+                        Task { await panel.toggle(item) }
+                    }
+                },
+                onAction: {
+                    if case let .builtin(item) = entry.source {
+                        Task { await panel.run(item) }
+                    }
+                },
+                onSubmenu: {},
+                onPermission: openPermissionsSettings
+            )
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .glassEffect(
-            .regular.interactive(),
-            in: .rect(cornerRadius: 8)
-        )
-        .onHover { hovering in isHovered = hovering }
+    }
+
+    private func wireGate() {
+        gate.onShow = {
+            popover.updateContent {
+                AppShortcutsPopoverView(
+                    entries: panel.appShortcutChildren,
+                    onHoverChange: { gate.popoverHover($0) },
+                    onSelect: { entry in
+                        if case let .appShortcut(id) = entry.source,
+                           let binding = panel.binding(id: id) {
+                            AppSwitcher.toggle(
+                                bundleID: binding.appBundleID,
+                                appPath: binding.appPath
+                            )
+                        }
+                    }
+                )
+            }
+            popover.show(anchoredTo: convertedTriggerFrame())
+        }
+        gate.onHide = { popover.scheduleHide() }
+    }
+
+    /// Convert the panel-local triggerFrame to global screen coordinates by adding
+    /// the menu bar window's frame origin (set by AppKit when the popover opens).
+    private func convertedTriggerFrame() -> NSRect {
+        guard let window = NSApp.windows.first(where: { $0.isVisible }) else {
+            return triggerFrame
+        }
+        return window.convertToScreen(triggerFrame)
+    }
+
+    private func triggerSubmenu() { gate.showImmediately() }
+
+    private func openPermissionsSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
