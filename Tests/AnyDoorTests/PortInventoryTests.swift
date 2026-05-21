@@ -26,4 +26,14 @@ final class PortInventoryTests: XCTestCase {
         XCTAssertEqual(SignalResult.failure(.EPERM), SignalResult.failure(.EPERM))
         XCTAssertNotEqual(SignalResult.success, SignalResult.failure(.EPERM))
     }
+
+    func testSubprocessResultStruct() {
+        let r = SubprocessResult(
+            stdout: "out", stderr: "err", exit: 0, timedOut: false
+        )
+        XCTAssertEqual(r.stdout, "out")
+        XCTAssertEqual(r.stderr, "err")
+        XCTAssertEqual(r.exit, 0)
+        XCTAssertFalse(r.timedOut)
+    }
 }
