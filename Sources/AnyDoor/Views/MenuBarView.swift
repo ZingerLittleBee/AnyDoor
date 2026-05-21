@@ -20,10 +20,14 @@ struct MenuBarView: View {
             }
             .padding(.horizontal, 12).padding(.top, 4)
 
-            // Rows
-            VStack(spacing: 2) {
-                ForEach(panel.topLevelEntries.filter(\.isVisible)) { entry in
-                    rowView(for: entry)
+            // Rows. GlassEffectContainer is required so the per-row .glassEffect calls
+            // composite as a single Liquid Glass group; without it the last row in the
+            // stack samples its background independently and can render with a stale tint.
+            GlassEffectContainer(spacing: 2) {
+                VStack(spacing: 2) {
+                    ForEach(panel.topLevelEntries.filter(\.isVisible)) { entry in
+                        rowView(for: entry)
+                    }
                 }
             }
             .padding(.horizontal, 4)
