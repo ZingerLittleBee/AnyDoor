@@ -36,14 +36,14 @@ struct PortRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             PortStatusDot(state: rowState).frame(width: 10)
-            Text(":\(record.port)")
+            Text(verbatim: ":\(record.port)")
                 .font(.system(.body, design: .monospaced).weight(.semibold))
                 .frame(minWidth: 60, alignment: .leading)
             Text(record.processName)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("PID \(record.pid)")
+            Text(verbatim: "PID \(record.pid)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             trailingControl

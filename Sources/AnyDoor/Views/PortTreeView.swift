@@ -62,11 +62,11 @@ private struct PortProcessGroupRow: View {
                 .fontWeight(.semibold)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            Text("PID \(group.pid)")
+            Text(verbatim: "PID \(group.pid)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if !isExpanded {
-                Text("\(group.ports.count)")
+                Text(verbatim: "\(group.ports.count)")
                     .font(.caption)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Capsule().fill(Color.secondary.opacity(0.15)))
@@ -123,7 +123,7 @@ private struct PortProcessGroupRow: View {
     private func leaf(_ record: PortRecord) -> some View {
         HStack(spacing: 12) {
             Spacer().frame(width: 28)
-            Text(":\(record.port)")
+            Text(verbatim: ":\(record.port)")
                 .font(.system(.body, design: .monospaced))
                 .frame(minWidth: 60, alignment: .leading)
             Text(bindSummary(for: record))
