@@ -36,4 +36,44 @@ final class PortInventoryTests: XCTestCase {
         XCTAssertEqual(r.exit, 0)
         XCTAssertFalse(r.timedOut)
     }
+
+    @MainActor
+    func testViewModeDefaultsToList() {
+        let defaults = isolatedDefaults()
+        let inventory = PortInventory(
+            scanner: StubScanner(records: []),
+            defaults: defaults
+        )
+        XCTAssertEqual(inventory.viewMode, .list)
+    }
+
+    @MainActor
+    func testViewModePersistsToDefaults() {
+        let defaults = isolatedDefaults()
+        let inventory = PortInventory(
+            scanner: StubScanner(records: []),
+            defaults: defaults
+        )
+        inventory.viewMode = .tree
+
+        // New instance reads back the persisted value.
+        let inventory2 = PortInventory(
+            scanner: StubScanner(records: []),
+            defaults: defaults
+        )
+        XCTAssertEqual(inventory2.viewMode, .tree)
+    }
+
+    // Test helpers
+    private struct StubScanner: PortScanning {
+        let records: [PortRecord]
+        var killBehavior: @Sendable (pid_t, Int32) -> SignalResult = { _, _ in .success }
+        func scanTCPListening() async throws -> [PortRecord] { records }
+        func kill(pid: pid_t, signal: Int32) -> SignalResult { killBehavior(pid, signal) }
+    }
+
+    private func isolatedDefaults() -> UserDefaults {
+        let suite = "PortInventoryTests-\(UUID().uuidString)"
+        return UserDefaults(suiteName: suite)!
+    }
 }
