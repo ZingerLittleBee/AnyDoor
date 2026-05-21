@@ -66,3 +66,157 @@ struct LsofRunner: SubprocessRunning {
         return SubprocessResult(stdout: "", stderr: "", exit: 0, timedOut: false)
     }
 }
+
+// MARK: - lsof -F output parser
+
+/// Parses the output of `lsof -nP -iTCP -sTCP:LISTEN -F pPcntL +c 0`.
+///
+/// Field format reference (from `lsof -F?`):
+///   p = process id, c = command name, L = login name (process records)
+///   f = file descriptor (starts a new file record), P = protocol, t = file type
+///   (IPv4/IPv6), n = comment/name ("addr:port")
+///
+/// Each line is `<fieldChar><value>`. `p` starts a new process group; `f` starts
+/// a new file within the current process group.
+func parseLsofOutput(_ raw: String) throws -> [PortRecord] {
+    struct PartialFile {
+        var family: AddressFamily?
+        var name: String?
+        var protocolName: String?
+    }
+    struct PartialProcess {
+        var pid: pid_t?
+        var command: String = ""
+        var files: [PartialFile] = []
+    }
+
+    var partials: [PartialProcess] = []
+    var currentProcess: PartialProcess? = nil
+    var currentFile: PartialFile? = nil
+
+    func flushFile() {
+        if let file = currentFile, currentProcess != nil {
+            currentProcess!.files.append(file)
+        }
+        currentFile = nil
+    }
+    func flushProcess() {
+        flushFile()
+        if let proc = currentProcess { partials.append(proc) }
+        currentProcess = nil
+    }
+
+    for rawLine in raw.split(separator: "\n", omittingEmptySubsequences: true) {
+        guard let first = rawLine.first else { continue }
+        let value = String(rawLine.dropFirst())
+
+        switch first {
+        case "p":
+            flushProcess()
+            currentProcess = PartialProcess(pid: pid_t(value), command: "", files: [])
+        case "c":
+            if currentProcess != nil { currentProcess!.command = decodeLsofEscapes(value) }
+        case "L":
+            break // login name unused
+        case "f":
+            flushFile()
+            currentFile = PartialFile()
+        case "P":
+            if currentFile != nil { currentFile!.protocolName = value }
+        case "t":
+            if currentFile != nil { currentFile!.family = AddressFamily(rawValue: value) }
+        case "n":
+            if currentFile != nil { currentFile!.name = value }
+        default:
+            break // unknown field — ignore for forward-compat
+        }
+    }
+    flushProcess()
+
+    // Group by (pid, port). Within a group, accumulate distinct binds.
+    struct Key: Hashable { let pid: pid_t; let port: UInt16 }
+    var groups: [Key: (processName: String, binds: [PortBind])] = [:]
+    var keyOrder: [Key] = []
+
+    for proc in partials {
+        guard let pid = proc.pid else { continue }
+        for file in proc.files {
+            guard let name = file.name,
+                  let (address, port) = parseAddressPort(name),
+                  let family = file.family else { continue }
+            let key = Key(pid: pid, port: port)
+            let bind = PortBind(address: address, family: family)
+            if var existing = groups[key] {
+                if !existing.binds.contains(bind) { existing.binds.append(bind) }
+                groups[key] = existing
+            } else {
+                groups[key] = (proc.command, [bind])
+                keyOrder.append(key)
+            }
+        }
+    }
+
+    return keyOrder.map { key in
+        let g = groups[key]!
+        let sortedBinds = g.binds.sorted { $0.family.rawValue < $1.family.rawValue }
+        return PortRecord(
+            port: key.port,
+            pid: key.pid,
+            processName: g.processName,
+            executablePath: nil,
+            commandLine: nil,
+            binds: sortedBinds
+        )
+    }
+}
+
+/// Parses the `n` field's `addr:port` value. Handles three forms:
+///   `*:3000`, `127.0.0.1:5000`, `[::1]:8080`, `[fe80::1%en0]:1234`.
+private func parseAddressPort(_ raw: String) -> (address: String, port: UInt16)? {
+    // IPv6 bracketed form
+    if raw.hasPrefix("[") {
+        guard let close = raw.firstIndex(of: "]") else { return nil }
+        let address = String(raw[raw.index(after: raw.startIndex)..<close])
+        let after = raw.index(after: close)
+        guard after < raw.endIndex, raw[after] == ":" else { return nil }
+        let portStr = raw[raw.index(after: after)...]
+        guard let port = UInt16(portStr) else { return nil }
+        return (address, port)
+    }
+    // Plain "address:port"
+    guard let lastColon = raw.lastIndex(of: ":") else { return nil }
+    let address = String(raw[raw.startIndex..<lastColon])
+    let portStr = raw[raw.index(after: lastColon)...]
+    guard let port = UInt16(portStr) else { return nil }
+    return (address, port)
+}
+
+/// lsof escapes non-printable bytes in command names as `\xHH`. Decode them back
+/// to UTF-8 bytes when possible. Spaces and printable ASCII pass through.
+private func decodeLsofEscapes(_ raw: String) -> String {
+    guard raw.contains("\\x") else { return raw }
+    var bytes: [UInt8] = []
+    let scalars = Array(raw.unicodeScalars)
+    var i = 0
+    while i < scalars.count {
+        if scalars[i] == "\\", i + 3 < scalars.count, scalars[i + 1] == "x",
+           let hi = hexNibble(scalars[i + 2]), let lo = hexNibble(scalars[i + 3]) {
+            bytes.append(UInt8(hi << 4 | lo))
+            i += 4
+        } else {
+            // Append the scalar's UTF-8 bytes
+            for byte in String(scalars[i]).utf8 { bytes.append(byte) }
+            i += 1
+        }
+    }
+    return String(decoding: bytes, as: UTF8.self)
+}
+
+private func hexNibble(_ s: Unicode.Scalar) -> UInt8? {
+    switch s {
+    case "0"..."9": return UInt8(s.value - Unicode.Scalar("0").value)
+    case "a"..."f": return UInt8(s.value - Unicode.Scalar("a").value + 10)
+    case "A"..."F": return UInt8(s.value - Unicode.Scalar("A").value + 10)
+    default: return nil
+    }
+}
