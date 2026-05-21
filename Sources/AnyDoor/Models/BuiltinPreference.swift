@@ -3,9 +3,9 @@ import SwiftData
 @Model
 final class BuiltinPreference {
     /// Stable key: `BuiltinItem.rawValue`. Orphans (no matching BuiltinItem) are skipped at read time.
-    @Attribute(.unique) var itemKey: String
-    var isVisible: Bool
-    var displayOrder: Double
+    @Attribute(.unique) var itemKey: String = ""
+    var isVisible: Bool = true
+    var displayOrder: Double = 0
     var keyCode: Int?
     var modifierFlags: Int?
 

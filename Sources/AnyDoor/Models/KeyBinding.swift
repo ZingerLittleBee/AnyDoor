@@ -10,11 +10,17 @@ final class KeyBinding {
     var appName: String
     var appPath: String
     /// Whether the hotkey is armed. `false` disables hotkey dispatch even if the row is visible.
-    var isEnabled: Bool
+    var isEnabled: Bool = true
     /// Whether the row appears in the App Shortcuts submenu and settings list.
-    var isVisible: Bool
+    ///
+    /// Inline default required for SwiftData lightweight migration: existing rows from
+    /// versions before this field existed get backfilled with `true` automatically.
+    var isVisible: Bool = true
     /// Sort weight within the App Shortcuts submenu (lower = earlier). Float so inserts don't renumber.
-    var displayOrder: Double
+    ///
+    /// Inline default required for SwiftData lightweight migration. After migration,
+    /// `KeyBindingOrderBackfill` reassigns proper values based on `createdAt`.
+    var displayOrder: Double = 0
     var createdAt: Date
 
     init(
