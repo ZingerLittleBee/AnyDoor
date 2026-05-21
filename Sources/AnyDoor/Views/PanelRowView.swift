@@ -14,6 +14,7 @@ struct PanelRowView: View {
     var onPermission: () -> Void
 
     @State private var isHovered = false
+    @State private var activationPulse = 0
 
     private var needsPermission: Bool { entry.permission == .denied }
 
@@ -43,11 +44,23 @@ struct PanelRowView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if needsPermission { onPermission(); return }
+            triggerFeedback()
             switch entry.kind {
             case .toggle:  onToggle()
             case .action:  onAction()
             case .submenu: onSubmenu()
             }
+        }
+    }
+
+    /// Visual + auditory feedback fired the instant the user taps the row.
+    ///
+    /// Animation runs for every row (so users get the same affordance everywhere);
+    /// sound only fires for items that opt in via `BuiltinItem.feedbackSound`.
+    private func triggerFeedback() {
+        activationPulse &+= 1
+        if case let .builtin(item) = entry.source {
+            item.feedbackSound?.play()
         }
     }
 
@@ -60,6 +73,7 @@ struct PanelRowView: View {
             Image(systemName: entry.symbol)
                 .font(.system(size: 12))
                 .foregroundStyle(.primary)
+                .symbolEffect(.bounce, value: activationPulse)
         }
         .frame(width: 24, height: 24)
     }

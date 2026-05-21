@@ -73,4 +73,14 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         default: return false
         }
     }
+
+    /// Optional auditory feedback played the moment the user activates this item.
+    /// Lock screen is intentionally silent: macOS transitions to the login window
+    /// immediately and the system already provides its own auditory transition.
+    var feedbackSound: SystemSound? {
+        switch self {
+        case .emptyTrash: return .emptyTrash
+        default: return nil
+        }
+    }
 }
