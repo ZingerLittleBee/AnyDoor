@@ -49,10 +49,11 @@ struct HotkeyRecorder: View {
     @State private var fieldHovered = false
 
     var body: some View {
-        // Outer is .onTapGesture (not Button) so the inner clear Button reliably
-        // wins hit-test in its small area — nested Buttons have flaky tap routing
-        // on macOS and the X would otherwise eat by the outer.
-        ZStack(alignment: .trailing) {
+        // HStack (not ZStack) so the clear Button and the label own disjoint hit
+        // regions. Earlier ZStack overlay had the label's onTapGesture covering
+        // the X area; macOS SwiftUI hit-routing then sometimes sent taps to the
+        // label even when the X was visually on top, so clicks didn't clear.
+        HStack(spacing: 0) {
             label
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.horizontal, 8).padding(.vertical, 4)

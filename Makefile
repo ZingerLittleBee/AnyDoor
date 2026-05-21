@@ -16,8 +16,12 @@ BINARY := .build/release/$(APP_NAME)
 
 install: release
 	@mkdir -p $(APP_DIR)/Contents/MacOS
+	@mkdir -p $(APP_DIR)/Contents/Resources
 	@cp $(BINARY) $(APP_DIR)/Contents/MacOS/
 	@cp Info.plist $(APP_DIR)/Contents/
+	@cp Resources/AppIcon.icns $(APP_DIR)/Contents/Resources/
+	@codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 || true
+	@touch $(APP_DIR)
 	@echo "Installed $(APP_DIR)"
 
 uninstall:

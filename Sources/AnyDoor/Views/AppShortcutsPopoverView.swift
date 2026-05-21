@@ -9,6 +9,9 @@ struct AppShortcutsPopoverView: View {
     let entries: [PanelEntry]
     var onHoverChange: (Bool) -> Void
     var onSelect: (PanelEntry) -> Void
+    /// Resolves the on-disk app path for an entry so the row can render a Finder app icon.
+    /// Returns nil when the entry isn't an app shortcut or its KeyBinding is missing.
+    var appPath: (PanelEntry) -> String?
 
     private var visibleEntries: [PanelEntry] {
         entries.filter(\.isVisible)
@@ -30,7 +33,11 @@ struct AppShortcutsPopoverView: View {
                 GlassEffectContainer(spacing: 2) {
                     VStack(spacing: 2) {
                         ForEach(visibleEntries) { entry in
-                            AppShortcutRow(entry: entry, onSelect: { onSelect(entry) })
+                            AppShortcutRow(
+                                entry: entry,
+                                appPath: appPath(entry),
+                                onSelect: { onSelect(entry) }
+                            )
                         }
                     }
                 }
@@ -47,10 +54,12 @@ struct AppShortcutsPopoverView: View {
 
 private struct AppShortcutRow: View {
     let entry: PanelEntry
+    let appPath: String?
     var onSelect: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
+            appIcon
             Text(entry.title)
                 .font(.body)
                 .lineLimit(1)
@@ -68,6 +77,20 @@ private struct AppShortcutRow: View {
         .help("切换 \(entry.title)")
         .onHover { hovering in
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+    }
+
+    @ViewBuilder
+    private var appIcon: some View {
+        if let path = appPath {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 18, height: 18)
+        } else {
+            Image(systemName: "app.fill")
+                .frame(width: 18, height: 18)
+                .foregroundStyle(.secondary)
         }
     }
 }

@@ -24,11 +24,23 @@ final class HotkeyService {
     /// dispatcher decides what to do with it.
     fileprivate nonisolated(unsafe) var dispatcher: (@MainActor @Sendable (HotkeyAction) -> Void)?
 
+    /// When true, the CGEvent callback drops every key/flag event that doesn't match a
+    /// registered hotkey. Used by the "keyboard lock" feature so the user can wipe the
+    /// keyboard without producing input. Hotkeys still fire so the same shortcut can
+    /// toggle the lock back off.
+    fileprivate nonisolated(unsafe) var keyboardLocked: Bool = false
+
     private init() {}
 
     func setDispatcher(_ dispatcher: @escaping @MainActor @Sendable (HotkeyAction) -> Void) {
         self.dispatcher = dispatcher
     }
+
+    func setKeyboardLocked(_ locked: Bool) {
+        keyboardLocked = locked
+    }
+
+    var isKeyboardLocked: Bool { keyboardLocked }
 
     func updateSnapshots(_ newSnapshots: [HotkeySnapshot]) {
         snapshots = newSnapshots
@@ -142,20 +154,26 @@ private func hotkeyCallback(
         return Unmanaged.passUnretained(event)
     }
 
-    guard type == .keyDown else { return Unmanaged.passUnretained(event) }
+    if type == .keyDown {
+        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        let modifiers = Int(event.flags.rawValue & modifierMask)
 
-    let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-    let modifiers = Int(event.flags.rawValue & modifierMask)
-
-    for snapshot in service.snapshots {
-        if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
-            let action = snapshot.action
-            let dispatcher = service.dispatcher
-            DispatchQueue.main.async {
-                dispatcher?(action)
+        for snapshot in service.snapshots {
+            if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
+                let action = snapshot.action
+                let dispatcher = service.dispatcher
+                DispatchQueue.main.async {
+                    dispatcher?(action)
+                }
+                return nil // consume
             }
-            return nil // consume
         }
+    }
+
+    // Keyboard-lock mode: swallow any keyDown / flagsChanged that didn't match a hotkey.
+    // Registered hotkeys above still fire so the user can toggle the lock back off.
+    if service.keyboardLocked && (type == .keyDown || type == .flagsChanged) {
+        return nil
     }
 
     return Unmanaged.passUnretained(event)

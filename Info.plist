@@ -4,6 +4,8 @@
 <dict>
     <key>CFBundleExecutable</key>
     <string>AnyDoor</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>dev.bybee.AnyDoor</string>
     <key>CFBundleName</key>
@@ -16,5 +18,7 @@
     <string>APPL</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>AnyDoor 通过自动化控制"系统事件"与"访达"，以切换系统外观、清空废纸篓等系统操作。</string>
 </dict>
 </plist>

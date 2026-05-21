@@ -47,6 +47,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DarkModeProvider(),
             LockScreenProvider(),
             EmptyTrashProvider(),
+            ScreenshotProvider(),
+            DisplaySleepProvider(),
+            SystemSleepProvider(),
+            HideDockProvider(),
+            AutoHideMenuBarProvider(),
+            RestartFinderProvider(),
+            RestartDockProvider(),
+            RestartMenuBarProvider(),
+            FlushDNSProvider(),
+            KeyboardLockProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
 
