@@ -3,11 +3,13 @@ import AppKit
 
 struct MenuBarView: View {
     @State private var panel = PanelStore.shared
-    @State private var popover = HoverPopover {
-        EmptyView()
-    }
+    @State private var popover = HoverPopover { EmptyView() }
     @State private var gate = HoverGate()
-    @State private var triggerFrame: NSRect = .zero
+    // One trigger frame per submenu builtin so hover-anchored popovers can be
+    // mounted from any `.submenu`-kind row, not just App Shortcuts.
+    @State private var triggerFrames: [BuiltinItem: NSRect] = [:]
+    // The submenu whose popover should be mounted on the next `gate.onShow`.
+    @State private var activeSubmenu: BuiltinItem? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -54,42 +56,47 @@ struct MenuBarView: View {
             await panel.refreshAll()
         }
         .onAppear { wireGate() }
-        .onDisappear { popover.hide() }
+        .onDisappear {
+            // Don't hide if the popover took key focus deliberately (port-manager
+            // search field). Otherwise hide as before.
+            if !popover.isHoldingFocus { popover.hide() }
+        }
     }
 
     @ViewBuilder
     private func rowView(for entry: PanelEntry) -> some View {
-        if case .builtin(.appShortcuts) = entry.source {
+        if case let .builtin(item) = entry.source, item.kind == .submenu {
             PanelRowView(
                 entry: entry,
                 onToggle: {},
                 onAction: {},
-                onSubmenu: { triggerSubmenu() },
+                onSubmenu: { triggerSubmenu(item) },
                 onPermission: openPermissionsSettings
             )
             .background(
                 GeometryReader { proxy in
                     Color.clear.onAppear {
-                        triggerFrame = proxy.frame(in: .global)
+                        triggerFrames[item] = proxy.frame(in: .global)
                     }.onChange(of: proxy.frame(in: .global)) { _, new in
-                        triggerFrame = new
+                        triggerFrames[item] = new
                     }
                 }
             )
             .onHover { hovered in
+                if hovered { activeSubmenu = item }
                 gate.triggerHover(hovered)
             }
         } else {
             PanelRowView(
                 entry: entry,
                 onToggle: {
-                    if case let .builtin(item) = entry.source {
-                        Task { await panel.toggle(item) }
+                    if case let .builtin(builtin) = entry.source {
+                        Task { await panel.toggle(builtin) }
                     }
                 },
                 onAction: {
-                    if case let .builtin(item) = entry.source {
-                        Task { await panel.run(item) }
+                    if case let .builtin(builtin) = entry.source {
+                        Task { await panel.run(builtin) }
                     }
                 },
                 onSubmenu: {},
@@ -100,6 +107,22 @@ struct MenuBarView: View {
 
     private func wireGate() {
         gate.onShow = {
+            guard let item = activeSubmenu else { return }
+            mountPopoverContent(for: item)
+            popover.show(anchoredTo: convertedTriggerFrame(for: item))
+        }
+        gate.onHide = {
+            popover.scheduleHide()
+            popover.needsKeyFocus = false
+        }
+    }
+
+    /// Mount the SwiftUI content appropriate for `item` and toggle the
+    /// popover's `needsKeyFocus` flag for views that need first-responder.
+    private func mountPopoverContent(for item: BuiltinItem) {
+        switch item {
+        case .appShortcuts:
+            popover.needsKeyFocus = false
             popover.updateContent {
                 AppShortcutsPopoverView(
                     entries: panel.appShortcutChildren,
@@ -120,21 +143,36 @@ struct MenuBarView: View {
                     }
                 )
             }
-            popover.show(anchoredTo: convertedTriggerFrame())
+        case .portManager:
+            popover.needsKeyFocus = true
+            popover.updateContent {
+                PortManagerPopoverView(
+                    inventory: PortInventory.shared,
+                    onHoverChange: { gate.popoverHover($0) },
+                    onClose: {
+                        PortInventory.shared.searchText = ""
+                        gate.reset()
+                        popover.hide()
+                    }
+                )
+            }
+        default:
+            break
         }
-        gate.onHide = { popover.scheduleHide() }
     }
 
-    /// Convert the panel-local triggerFrame to global screen coordinates by adding
-    /// the menu bar window's frame origin (set by AppKit when the popover opens).
-    private func convertedTriggerFrame() -> NSRect {
-        guard let window = NSApp.windows.first(where: { $0.isVisible }) else {
-            return triggerFrame
-        }
-        return window.convertToScreen(triggerFrame)
+    /// Convert the panel-local rect to screen coordinates by adding the menu
+    /// bar window's origin. Same approach as the previous single-trigger impl.
+    private func convertedTriggerFrame(for item: BuiltinItem) -> NSRect {
+        let local = triggerFrames[item] ?? .zero
+        guard let window = NSApp.windows.first(where: { $0.isVisible }) else { return local }
+        return window.convertToScreen(local)
     }
 
-    private func triggerSubmenu() { gate.showImmediately() }
+    private func triggerSubmenu(_ item: BuiltinItem) {
+        activeSubmenu = item
+        gate.showImmediately()
+    }
 
     private func openPermissionsSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
