@@ -161,12 +161,29 @@ struct MenuBarView: View {
         }
     }
 
-    /// Convert the panel-local rect to screen coordinates by adding the menu
-    /// bar window's origin. Same approach as the previous single-trigger impl.
+    /// Convert the panel-local rect (SwiftUI `.global`, top-left origin) to
+    /// screen coordinates. SwiftUI's Y increases downward while NSWindow uses
+    /// bottom-left origin, so we flip Y against the window's content height
+    /// before letting AppKit convert to screen space. The popover panel is
+    /// excluded from the lookup so a second hover doesn't accidentally anchor
+    /// against the already-open popover window.
     private func convertedTriggerFrame(for item: BuiltinItem) -> NSRect {
         let local = triggerFrames[item] ?? .zero
-        guard let window = NSApp.windows.first(where: { $0.isVisible }) else { return local }
-        return window.convertToScreen(local)
+        guard let window = menuBarPanelWindow() else { return local }
+        let panelHeight = window.frame.height
+        let flipped = NSRect(
+            x: local.origin.x,
+            y: panelHeight - local.origin.y - local.size.height,
+            width: local.size.width,
+            height: local.size.height
+        )
+        return window.convertToScreen(flipped)
+    }
+
+    private func menuBarPanelWindow() -> NSWindow? {
+        NSApp.windows.first { window in
+            window.isVisible && !(window is KeyableHoverPanel)
+        }
     }
 
     private func triggerSubmenu(_ item: BuiltinItem) {
