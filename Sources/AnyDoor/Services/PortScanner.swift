@@ -97,12 +97,61 @@ actor PortScanner: PortScanning {
     }
 }
 
-// MARK: - LsofRunner placeholder (real implementation lands in Task 8)
+// MARK: - LsofRunner
 
 struct LsofRunner: SubprocessRunning {
     func run(path: String, args: [String], timeout: Duration) async throws -> SubprocessResult {
-        // Placeholder; replaced in Task 8.
-        return SubprocessResult(stdout: "", stderr: "", exit: 0, timedOut: false)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: path)
+        process.arguments = args
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+
+        do { try process.run() }
+        catch { throw SubprocessError.spawnFailed("\(error)") }
+
+        // OSAllocatedUnfairLock<Bool> — no new dependency, watchdog and
+        // result-builder both read/write through .withLock.
+        let timedOut = OSAllocatedUnfairLock<Bool>(initialState: false)
+
+        return await withTaskCancellationHandler {
+            // Drain pipes concurrently so the kernel buffer never fills.
+            async let outData: Data = readAll(outPipe.fileHandleForReading)
+            async let errData: Data = readAll(errPipe.fileHandleForReading)
+
+            let watchdog = Task {
+                try? await Task.sleep(for: timeout)
+                if process.isRunning {
+                    timedOut.withLock { $0 = true }
+                    process.terminate()
+                }
+            }
+
+            let out = await outData
+            let err = await errData
+            watchdog.cancel()
+            process.waitUntilExit()
+
+            return SubprocessResult(
+                stdout: String(data: out, encoding: .utf8) ?? "",
+                stderr: String(data: err, encoding: .utf8) ?? "",
+                exit: process.terminationStatus,
+                timedOut: timedOut.withLock { $0 }
+            )
+        } onCancel: {
+            if process.isRunning { process.terminate() }
+        }
+    }
+}
+
+private func readAll(_ handle: FileHandle) async -> Data {
+    await withCheckedContinuation { (cont: CheckedContinuation<Data, Never>) in
+        DispatchQueue.global().async {
+            let data = (try? handle.readToEnd()) ?? Data()
+            cont.resume(returning: data)
+        }
     }
 }
 
@@ -260,9 +309,47 @@ private func hexNibble(_ s: Unicode.Scalar) -> UInt8? {
     }
 }
 
-// MARK: - sysctl KERN_PROCARGS2 helper (filled in Task 8)
+// MARK: - sysctl KERN_PROCARGS2 helper
 
+/// Reads `KERN_PROCARGS2` for a pid and extracts the executable path and the
+/// space-joined argv. Returns `(nil, nil)` on any failure (permission, race,
+/// pid no longer alive). Silent by design — caller falls back to lsof's command.
 func parseProcArgs(forPid pid: pid_t) -> (path: String?, command: String?) {
-    // Task 8 replaces this stub with the real sysctl-based implementation.
-    return (nil, nil)
+    var size: Int = 0
+    var name: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+    // First call: ask for size.
+    if sysctl(&name, 3, nil, &size, nil, 0) != 0 || size == 0 {
+        return (nil, nil)
+    }
+    var buffer = [UInt8](repeating: 0, count: size)
+    if sysctl(&name, 3, &buffer, &size, nil, 0) != 0 {
+        return (nil, nil)
+    }
+
+    // Layout: <argc:Int32><executable path NUL>[padding NULs]<argv[0] NUL><argv[1] NUL>...
+    guard size >= MemoryLayout<Int32>.size else { return (nil, nil) }
+    let argc = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
+    if argc < 0 { return (nil, nil) }
+
+    var cursor = MemoryLayout<Int32>.size
+    // Read NUL-terminated executable path.
+    let pathStart = cursor
+    while cursor < buffer.count && buffer[cursor] != 0 { cursor += 1 }
+    let pathBytes = buffer[pathStart..<cursor]
+    let path = String(decoding: pathBytes, as: UTF8.self)
+    // Skip padding NULs.
+    while cursor < buffer.count && buffer[cursor] == 0 { cursor += 1 }
+
+    // Read argc NUL-terminated argv entries.
+    var argv: [String] = []
+    var collected = 0
+    while collected < Int(argc) && cursor < buffer.count {
+        let start = cursor
+        while cursor < buffer.count && buffer[cursor] != 0 { cursor += 1 }
+        argv.append(String(decoding: buffer[start..<cursor], as: UTF8.self))
+        if cursor < buffer.count { cursor += 1 } // skip NUL
+        collected += 1
+    }
+    let command = argv.joined(separator: " ")
+    return (path.isEmpty ? nil : path, command.isEmpty ? nil : command)
 }
