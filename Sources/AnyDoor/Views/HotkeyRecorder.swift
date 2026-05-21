@@ -40,21 +40,20 @@ struct HotkeyRecorder: View {
 
     @State private var instanceID = UUID()
     @State private var isRecording = false
-    @State private var monitor: Any?
+    @State private var keyMonitor: Any?
+    @State private var clickMonitor: Any?
     @State private var fieldHovered = false
 
     var body: some View {
-        // ZStack lets the record button (base) and the clear button (top-trailing)
-        // be true siblings, so SwiftUI's hit-test routes each click to whichever
-        // is visually on top at the click point. With `.overlay { Button }` on a
-        // parent Button, the parent often eats the click before the overlay sees it.
+        // Outer is .onTapGesture (not Button) so the inner clear Button reliably
+        // wins hit-test in its small area — nested Buttons have flaky tap routing
+        // on macOS and the X would otherwise eat by the outer.
         ZStack(alignment: .trailing) {
-            Button(action: { startRecording() }) {
-                label
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
+            label
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .contentShape(Rectangle())
+                .onTapGesture { startRecording() }
 
             if hotkey != nil && !isRecording {
                 Button {
@@ -70,7 +69,6 @@ struct HotkeyRecorder: View {
                 .help("清除快捷键")
             }
         }
-        .padding(.horizontal, 8).padding(.vertical, 4)
         .background(
             RoundedRectangle(cornerRadius: 5)
                 .fill(Color.primary.opacity(isRecording ? 0.04 : 0.06))
@@ -89,15 +87,20 @@ struct HotkeyRecorder: View {
 
     @ViewBuilder
     private var label: some View {
-        if let hk = hotkey {
-            Text(hk.displayString)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.primary)
-        } else if isRecording {
+        // Recording state takes priority so an already-bound field also shows
+        // the prompt when the user clicks it to re-record.
+        //
+        // All three states share `.caption` monospaced font so the field height
+        // stays uniform regardless of binding state — only color/italic differ.
+        if isRecording {
             Text("按下快捷键…")
                 .font(.system(.caption, design: .monospaced))
                 .foregroundStyle(.secondary)
                 .italic()
+        } else if let hk = hotkey {
+            Text(hk.displayString)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.primary)
         } else {
             Text("点击录入")
                 .font(.system(.caption, design: .monospaced))
@@ -116,7 +119,7 @@ struct HotkeyRecorder: View {
         isRecording = true
         HotkeyService.shared.suspend()
 
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
                 | CGEventFlags.maskControl.rawValue
                 | CGEventFlags.maskAlternate.rawValue
@@ -142,13 +145,25 @@ struct HotkeyRecorder: View {
             stopRecording()
             return nil
         }
+
+        // Any mouse click cancels recording. If the click lands on this same
+        // field, the .onTapGesture re-invokes startRecording() right after —
+        // net effect is "click outside cancels, click inside restarts cleanly".
+        clickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { event in
+            stopRecording()
+            return event
+        }
     }
 
     private func stopRecording(notifyCoordinator: Bool = true) {
-        if let m = monitor {
+        if let m = keyMonitor {
             NSEvent.removeMonitor(m)
-            monitor = nil
+            keyMonitor = nil
             HotkeyService.shared.resume()
+        }
+        if let cm = clickMonitor {
+            NSEvent.removeMonitor(cm)
+            clickMonitor = nil
         }
         isRecording = false
         if notifyCoordinator {
