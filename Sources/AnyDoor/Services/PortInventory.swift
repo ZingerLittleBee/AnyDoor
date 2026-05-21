@@ -131,6 +131,41 @@ final class PortInventory {
     func dismissError(for pid: pid_t) {
         failedKillPIDs.removeValue(forKey: pid)
     }
+
+    // MARK: - Derived views
+
+    var filteredRecords: [PortRecord] {
+        guard !searchText.isEmpty else {
+            return records.sorted { $0.port < $1.port }
+        }
+        let q = searchText.lowercased()
+        var seen = Set<PortRecord.ID>()
+        var ordered: [PortRecord] = []
+        func add(_ bucket: [PortRecord]) {
+            for r in bucket where !seen.contains(r.id) {
+                seen.insert(r.id)
+                ordered.append(r)
+            }
+        }
+        add(records.filter { String($0.port).contains(q) })
+        add(records.filter { $0.processName.lowercased().contains(q) })
+        add(records.filter { String($0.pid).contains(q) })
+        return ordered
+    }
+
+    var groupedByProcess: [ProcessGroup] {
+        let grouped = Dictionary(grouping: filteredRecords, by: \.pid)
+        return grouped.map { (pid, recs) in
+            ProcessGroup(
+                pid: pid,
+                processName: recs.first?.processName ?? "",
+                ports: recs.sorted { $0.port < $1.port }
+            )
+        }
+        .sorted {
+            $0.processName.localizedCaseInsensitiveCompare($1.processName) == .orderedAscending
+        }
+    }
 }
 
 enum ViewMode: String, Sendable, Equatable {

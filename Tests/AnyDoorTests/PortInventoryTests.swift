@@ -240,4 +240,69 @@ final class PortInventoryTests: XCTestCase {
         XCTAssertEqual(inv.records.count, 1)
         XCTAssertEqual(inv.records[0].port, 9)
     }
+
+    @MainActor
+    func testFilteredEmptyQueryReturnsPortAscending() async {
+        let recs = [
+            PortRecord(port: 5000, pid: 1, processName: "a", executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+            PortRecord(port: 80, pid: 2, processName: "b", executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+            PortRecord(port: 3000, pid: 3, processName: "c", executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+        ]
+        let inv = PortInventory(scanner: StubScanner(records: recs), defaults: isolatedDefaults())
+        await inv.refresh()
+        XCTAssertEqual(inv.filteredRecords.map(\.port), [80, 3000, 5000])
+    }
+
+    @MainActor
+    func testSearchPriorityPortBeforeNameBeforePid() async {
+        let recs = [
+            PortRecord(port: 3000, pid: 99, processName: "node",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+            PortRecord(port: 8080, pid: 30,  processName: "java",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+        ]
+        let inv = PortInventory(scanner: StubScanner(records: recs), defaults: isolatedDefaults())
+        await inv.refresh()
+        inv.searchText = "30"
+        // Port :3000 matches the "30" substring; pid 30 also matches. Port should come first.
+        XCTAssertEqual(inv.filteredRecords.map(\.port), [3000, 8080])
+    }
+
+    @MainActor
+    func testSearchIsCaseInsensitive() async {
+        let recs = [
+            PortRecord(port: 1, pid: 1, processName: "NodeProcess",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)])
+        ]
+        let inv = PortInventory(scanner: StubScanner(records: recs), defaults: isolatedDefaults())
+        await inv.refresh()
+        inv.searchText = "node"
+        XCTAssertEqual(inv.filteredRecords.count, 1)
+    }
+
+    @MainActor
+    func testGroupedByProcessSortsByNameThenPort() async {
+        let recs = [
+            PortRecord(port: 5000, pid: 10, processName: "bravo",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+            PortRecord(port: 80, pid: 10, processName: "bravo",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+            PortRecord(port: 22, pid: 20, processName: "alpha",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+        ]
+        let inv = PortInventory(scanner: StubScanner(records: recs), defaults: isolatedDefaults())
+        await inv.refresh()
+        let groups = inv.groupedByProcess
+        XCTAssertEqual(groups.map(\.processName), ["alpha", "bravo"])
+        XCTAssertEqual(groups[1].ports.map(\.port), [80, 5000])
+    }
 }
