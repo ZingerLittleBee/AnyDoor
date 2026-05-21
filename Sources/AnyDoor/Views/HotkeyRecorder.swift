@@ -37,6 +37,10 @@ final class HotkeyRecordingCoordinator {
 struct HotkeyRecorder: View {
     @Binding var hotkey: HotkeyDescriptor?
     var onChange: (HotkeyDescriptor?) -> Void
+    /// Whether to show the inline clear (×) button next to the bound hotkey.
+    /// Disable for entries where clearing makes no sense (e.g. an app shortcut
+    /// without a hotkey has nothing to trigger it — delete the row instead).
+    var allowsClear: Bool = true
 
     @State private var instanceID = UUID()
     @State private var isRecording = false
@@ -55,7 +59,7 @@ struct HotkeyRecorder: View {
                 .contentShape(Rectangle())
                 .onTapGesture { startRecording() }
 
-            if hotkey != nil && !isRecording {
+            if allowsClear && hotkey != nil && !isRecording {
                 Button {
                     hotkey = nil
                     onChange(nil)

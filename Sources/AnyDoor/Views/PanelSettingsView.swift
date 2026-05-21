@@ -178,9 +178,11 @@ struct PanelSettingsView: View {
                 appIcon(for: child)
                 Text(child.title).font(.body)
                 Spacer()
-                HotkeyRecorder(hotkey: .constant(child.hotkey)) { newValue in
-                    handleHotkeyChange(entry: child, newValue: newValue)
-                }
+                HotkeyRecorder(
+                    hotkey: .constant(child.hotkey),
+                    onChange: { newValue in handleHotkeyChange(entry: child, newValue: newValue) },
+                    allowsClear: false
+                )
                 .frame(width: 130, alignment: .trailing)
                 deleteButton(for: child)
             }
