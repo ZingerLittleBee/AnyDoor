@@ -1,0 +1,7 @@
+p999
+clinkservice
+LZinger
+f7
+PTCP
+tIPv6
+n[fe80::1%en0]:1234
