@@ -190,7 +190,7 @@ enum SubprocessError: Error, Equatable {
 
 `PortScanner.init(runner:)` accepts any `any SubprocessRunning` (defaulting to the real one). Tests inject a stub that returns canned `SubprocessResult` values.
 
-The real implementation drains pipes concurrently with the running process and honors both timeout and Task cancellation:
+The real implementation drains pipes concurrently with the running process and honors both timeout and Task cancellation. The `timedOut` flag uses `OSAllocatedUnfairLock<Bool>` from `os` — **no new package dependency**; Swift Atomics is intentionally *not* added to `Package.swift` for this feature. A simple `NSLock`-guarded `Bool` or an actor-wrapped value are interchangeable; the only requirement is that the watchdog and the result-builder see consistent state.
 
 ```swift
 struct LsofRunner: SubprocessRunning {
@@ -214,11 +214,11 @@ struct LsofRunner: SubprocessRunning {
             async let errData: Data = readAll(errPipe.fileHandleForReading)
 
             // Timeout watchdog terminates the child on deadline.
-            let timedOut = ManagedAtomic(false)   // or actor-isolated Bool
+            let timedOut = OSAllocatedUnfairLock<Bool>(initialState: false)
             let watchdog = Task {
                 try? await Task.sleep(for: timeout)
                 if process.isRunning {
-                    timedOut.store(true, ordering: .relaxed)
+                    timedOut.withLock { $0 = true }
                     process.terminate()
                 }
             }
@@ -231,7 +231,7 @@ struct LsofRunner: SubprocessRunning {
                 stdout: String(data: out, encoding: .utf8) ?? "",
                 stderr: String(data: err, encoding: .utf8) ?? "",
                 exit: process.terminationStatus,
-                timedOut: timedOut.load(ordering: .relaxed)
+                timedOut: timedOut.withLock { $0 }
             )
         } onCancel: {
             // Called when the *outer* Task is cancelled. Process.terminate()
@@ -242,9 +242,9 @@ struct LsofRunner: SubprocessRunning {
 }
 ```
 
-`scanTCPListening()` inspects `SubprocessResult.timedOut` first; when true it throws `PortScanError.lsofTimeout` regardless of exit status. When false, it applies the empty-result rule (exit 1 + empty stdout/stderr → `[]`) and otherwise the failure rule.
+`scanTCPListening()` inspects `SubprocessResult.timedOut` first; when true it throws `PortScanError.lsofTimeout` regardless of exit status. When false, it applies the empty-result rule (`exit == 1 && stdout.isEmpty && stderr.isEmpty` → `[]`) and otherwise the failure rule. **Both stdout and stderr must be empty** for the empty-result shortcut — exit 1 with diagnostics on stderr is a real failure.
 
-`LsofRunner` lives in `PortScanner.swift` alongside the actor; other features keep using `ShellRunner` for their short outputs. `Bool`-flag implementation detail can use `os_unfair_lock` or actor isolation if `ManagedAtomic` is overkill — the point is "the runner returns whether it timed out, the scanner branches on it."
+`LsofRunner` lives in `PortScanner.swift` alongside the actor; other features keep using `ShellRunner` for their short outputs.
 
 #### Scanning pipeline
 
@@ -252,7 +252,7 @@ struct LsofRunner: SubprocessRunning {
    - `-F pPcntL` requests fielded output: `p` = process id, `P` = protocol name, `c` = command name, `n` = name (`addr:port`), `t` = file type (`IPv4` / `IPv6`), `L` = login user. **`t` is the address family field — `P` is the protocol (`TCP`), not the family.**
    - `-n -P` skips DNS / service-name resolution.
    - `+c 0` disables command-name truncation.
-2. **Handle empty-result exit code.** lsof returns exit code 1 with empty stdout and (typically) empty stderr when no matching open files exist. Treat `(exit == 1 && stdout.isEmpty)` as a successful empty scan, not a failure. Any other non-zero exit with non-empty stderr is a real error → `PortScanError.lsofFailed`.
+2. **Handle empty-result exit code.** lsof returns exit code 1 with empty stdout *and* empty stderr when no matching open files exist. Treat **`(exit == 1 && stdout.isEmpty && stderr.isEmpty)`** as a successful empty scan. **Stderr must also be empty** — exit code 1 with non-empty stderr means lsof actually failed (permissions, syntax, etc.) and stderr carries the diagnostic. That case throws `PortScanError.lsofFailed`. Any other non-zero exit also throws `.lsofFailed`.
 3. Parse the fielded output by process record (`p`-prefixed line starts a new process) → file record (`f`-prefixed line starts a new file within a process). Extract `(pid, command, addr:port, family)`. Address parsing handles three forms: `*:5000`, `127.0.0.1:3000`, `[::1]:8080` (and zone-id variants like `[fe80::1%en0]:1234`).
 4. Group entries by `(pid, port)`. Each group becomes a single `PortRecord` whose `binds` array preserves every distinct `(address, family)` pair. **No information is lost when both IPv4 `127.0.0.1` and IPv6 `[::1]` listen on the same port.**
 5. Enrich with `sysctl(KERN_PROCARGS2)` once per unique pid (deduplicated across multi-port processes) to obtain `executablePath` and `commandLine`. Failures (permission denied, process gone) are silent — the record keeps lsof's short command name.
@@ -412,6 +412,7 @@ Structure:
 struct PortManagerPopoverView: View {
     @Bindable var inventory: PortInventory   // the singleton
     var onHoverChange: (Bool) -> Void        // callback to HoverGate.popoverHover
+    var onClose: () -> Void                  // invoked by ESC (when search is empty)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -440,12 +441,20 @@ struct PortManagerPopoverView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .task { await inventory.refresh() }
         .onHover(perform: onHoverChange)   // critical: keeps popover open while hovered
-        .background(KeyboardMonitor(inventory: inventory))
+        .background(KeyboardMonitor(inventory: inventory, onClose: onClose))
     }
 }
 ```
 
-The `onHoverChange` callback mirrors `AppShortcutsPopoverView.swift:51` and feeds into `HoverGate.popoverHover(_:)`. Without it, the gate only tracks the trigger row's hover state, and the popover closes 300ms after the cursor leaves the menu bar row even though the cursor is inside the popover. `MenuBarView` is responsible for wiring this callback when it constructs the view (just like it does for App Shortcuts today).
+The `onHoverChange` callback mirrors `AppShortcutsPopoverView.swift:51` and feeds into `HoverGate.popoverHover(_:)`. Without it, the gate only tracks the trigger row's hover state, and the popover closes 300ms after the cursor leaves the menu bar row even though the cursor is inside the popover.
+
+The `onClose` callback is the ESC-when-search-is-empty path. `MenuBarView` wires it to a closure that:
+
+1. Calls `inventory.searchText = ""` (no-op if already empty; keeps state tidy).
+2. Calls `gate.reset()` — a new helper on `HoverGate` that clears both `triggerHovered` and `popoverHovered`, cancels any pending show/hide tasks, and sets `isShown = false`. Without this reset the gate can keep believing `popoverHovered == true` (last seen during an `.onHover(false)` that never fired because the popover was force-closed first), which jams the next hover open or closed depending on which task wins.
+3. Calls `popover.hide()`.
+
+`MenuBarView` is responsible for passing all three closures (`inventory`, `onHoverChange`, `onClose`) when it constructs the view — same wiring pattern as App Shortcuts today.
 
 #### `PortListView` / `PortRowView`
 
@@ -475,14 +484,38 @@ The `onHoverChange` callback mirrors `AppShortcutsPopoverView.swift:51` and feed
 - Middle: search field, auto-focused on appear; `@FocusState` binding.
 - Right: count capsule showing `filteredRecords.count`, accompanied by a small spinner when `isRefreshing` is true.
 
-**Window key-focus contract.** The existing `HoverPopover` (`HoverPopover.swift:14`) hosts content in a borderless, `level = .floating` `NSWindow` that is shown with `orderFrontRegardless()`. A bare `NSWindow` like that returns `false` from `canBecomeKey` and therefore swallows text input and local key events — fine for App Shortcuts (read-only rows with tap gestures), broken for port-manager (search field + ⌘R / ⌘T / ESC). Two changes are required and **must land in the same iteration as this feature**:
+**Window key-focus contract.** The existing `HoverPopover` (`HoverPopover.swift:14`) hosts content in a borderless, `level = .floating` `NSWindow` that is shown with `orderFrontRegardless()`. A bare `NSWindow` like that returns `false` from `canBecomeKey` and therefore swallows text input and local key events — fine for App Shortcuts (read-only rows with tap gestures), broken for port-manager (search field + ⌘R / ⌘T / ESC).
 
-1. Subclass `NSWindow` (or set `setIsVisible(false)` and reconfigure) so `canBecomeKey` and `canBecomeMain` return `true`. Add `becomesKeyOnlyIfNeeded = true` and `styleMask` includes `.nonactivatingPanel`-style behavior (use `NSPanel` if simpler) so opening the popover does not steal app activation from the foreground app — this matches the existing "menu bar accessory" feel.
-2. In `HoverPopover.show(...)`, call `window.makeKey()` (or `makeKeyAndOrderFront(nil)` followed by `NSApp.activate(ignoringOtherApps: false)`) so the SwiftUI `@FocusState` binding can claim first responder.
+The complication unique to AnyDoor is the parent: `AnyDoorApp` uses `MenuBarExtra(...).menuBarExtraStyle(.window)` (`AnyDoor.swift:13`), which means the menu bar panel itself is an `NSPanel` that auto-dismisses when key is taken away from it. And `MenuBarView.swift:57` runs `popover.hide()` from `onDisappear`. If the popover naively calls `makeKey()`, the menu bar panel will lose key, collapse, and trigger `onDisappear`, which hides the very popover that just took focus.
 
-App Shortcuts is unaffected: it has no focusable controls, so gaining key status is harmless. Add a manual QA check that hovering App Shortcuts still doesn't show a typing cursor and doesn't steal focus from other apps.
+The design therefore has three layered requirements that **all ship together with this feature**:
 
-If subclassing turns out fragile, the fallback is a second, port-manager-specific popover host that owns an `NSPanel` configured for key acceptance, and `HoverPopover` stays read-only. The spec leaves room for either path during implementation; the contract that must hold is "the search field is focused on appear and receives keystrokes without forcing AnyDoor to the foreground."
+1. **Popover host is an `NSPanel` with `.nonactivatingPanel`** (replace or subclass the current `NSWindow`). Override `canBecomeKey` to return `true` only when the content actually needs first responder (a `needsKeyFocus: Bool` flag on `HoverPopover` set by the caller — `AppShortcutsPopoverView` leaves it `false`, `PortManagerPopoverView` sets it `true`). Non-activating panels do not activate the app, but they still take key when explicitly asked.
+
+2. **`HoverPopover.isHoldingFocus`** — a published flag flipped to `true` while the popover panel has key status (observe via `NSWindow.didBecomeKeyNotification` / `didResignKeyNotification`). When `true`, `HoverGate` and `MenuBarView` treat the popover as "stuck" and do not run dismissal timers.
+
+3. **`MenuBarView.onDisappear` guards on `isHoldingFocus`**:
+   ```swift
+   .onDisappear {
+       if !popover.isHoldingFocus { popover.hide() }
+   }
+   ```
+   The contract: if the popover is the reason the menu bar panel lost key, leave it alive. The popover takes responsibility for hiding itself when its own focus session ends (next finding's `onClose`).
+
+**Fallback if MenuBarExtra still collapses despite a non-activating panel.** The risk that `.menuBarExtraStyle(.window)` collapses on any key transition — even to a non-activating panel — cannot be dismissed without testing on the target macOS. If the primary path fails, the fallback is:
+
+- The popover panel does **not** become key. Instead, the popover installs a local `NSEvent.addLocalMonitorForEvents(matching: [.keyDown])` while it is visible. The monitor intercepts every key event delivered to any of AnyDoor's windows, routes ⌘R / ⌘T / ESC to inventory commands, and appends/removes characters from `inventory.searchText` directly (treating the search field as a presentation-only mirror with `@Bindable` two-way binding back to the inventory string). The TextField is rendered but never becomes first responder.
+- This is less polished (no cursor blinking inside the field) but completely sidesteps the focus-transfer problem.
+
+The implementation order is: try (1)+(2)+(3) first, validate with the QA gate below, and only fall back if it visibly misbehaves. Either way the spec's external contract is unchanged: typing works, ⌘R/⌘T/ESC work, hovering away closes the popover, hovering App Shortcuts is unaffected.
+
+**QA gate** (must all pass before the feature ships):
+
+- Hover port-manager → popover appears, search field shows a cursor (or, in fallback mode, typing visibly updates the field via the bound string).
+- Type a query → menu bar panel is still visible, popover is still visible, list filters.
+- Move cursor away from popover and trigger row → popover closes after 300ms, menu bar panel remains open (or closes naturally on outside click), and a subsequent hover on port-manager re-opens the popover cleanly (no stuck gate state).
+- Switch focus to another app (Cmd-Tab) → menu bar panel and popover both dismiss; reopening the menu bar shows a fresh state.
+- Hover App Shortcuts → still works exactly as before; popover content has no typing cursor; no app activation occurs.
 
 #### `PortManagerToolbar`
 
@@ -490,11 +523,14 @@ If subclassing turns out fragile, the fallback is a second, port-manager-specifi
 
 #### Keyboard handling
 
-A local `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` mounted while the popover is visible:
+`KeyboardMonitor` is an `NSViewRepresentable` that installs a local `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` when its hosting view appears and removes it on disappear. While the popover is visible:
 
-- `⌘R` → `Task { await inventory.refresh() }`
-- `⌘T` → `inventory.viewMode = (inventory.viewMode == .list) ? .tree : .list`
-- `ESC`: if `searchText` is non-empty, clear it; otherwise close the popover via the `HoverPopover` handle.
+- `⌘R` → `Task { await inventory.refresh() }`. Return `nil` to swallow the event.
+- `⌘T` → `inventory.viewMode = (inventory.viewMode == .list) ? .tree : .list`. Return `nil`.
+- `ESC`: if `inventory.searchText.isEmpty`, call `onClose()` (passed in from `PortManagerPopoverView`). Otherwise clear `inventory.searchText` and return `nil`.
+- All other events pass through (return the event unchanged) so the search field receives input normally.
+
+The monitor is local (not global), so it sees only events delivered to AnyDoor's own windows. When the fallback "no-key-focus" mode is in use (see Window key-focus contract above), the same monitor also handles printable keys to update `inventory.searchText` directly.
 
 ### 6. `HoverPopover` integration
 
@@ -524,7 +560,7 @@ User hover on port-manager row
                  └─> PortScanner.scanTCPListening()
                       ├─> private subprocess runner: lsof -nP -iTCP -sTCP:LISTEN -F pPcntL +c 0
                       │     (drains stdout/stderr concurrently with run; 3s timeout)
-                      ├─> handle (exit==1 && stdout.isEmpty) → return []
+                      ├─> handle (exit==1 && stdout.isEmpty && stderr.isEmpty) → return []
                       ├─> parseLsofOutput → [(pid,port,binds[],family)]
                       └─> sysctl(KERN_PROCARGS2) per unique pid
                  └─> PortInventory.records = ...
@@ -607,7 +643,7 @@ Fixtures live under `Tests/AnyDoorTests/Fixtures/`. Tests load them with `Bundle
 - Submenu hotkey filtering remains unchanged: `PanelStore.rebuildHotkeySnapshots()` produces zero snapshots for `.portManager` regardless of whether the preference has a keycode set (regression guard since `.portManager` is the first new submenu item).
 - `isRefreshing` semantics with concurrent refreshes: stub runner exposes two `CheckedContinuation`s. Trigger `refresh()` twice; resolve the older one first; assert `isRefreshing == true` (newer scan still in flight); resolve the newer; assert `isRefreshing == false`. Reverse order also covered.
 - Subprocess runner timeout: stub runner returns `SubprocessResult(timedOut: true, ...)`; scanner throws `.lsofTimeout` regardless of exit code.
-- Subprocess runner cancellation: real `LsofRunner` test (best-effort; skip if CI cannot spawn `/usr/bin/yes`) — spawn `/usr/bin/yes`, wrap in a Task, cancel after 100ms, assert the process is no longer running shortly after.
+- Subprocess runner cancellation (logical): a `FakeSubprocessRunner` whose `run(...)` waits on an internal `CheckedContinuation`; the test wraps the scanner call in a Task, cancels the Task, and asserts the fake recorded a cancellation callback. This exercises the `withTaskCancellationHandler` wiring without spawning real processes — the hazardous `/usr/bin/yes` approach (where the cancellation logic *is* the unit under test, so a regression hangs the test process) is downgraded to a **manual dev-only smoke test** documented in the QA checklist, not a CI unit test.
 
 ### Manual QA checklist
 
@@ -626,6 +662,7 @@ Fixtures live under `Tests/AnyDoorTests/Fixtures/`. Tests load them with `Bundle
 - ⌘R triggers refresh; banner appears and disappears on transient failures.
 - ⌘T toggles list/tree view.
 - Open Settings → port-manager row shows no hotkey recorder (column reserved blank, matching App Shortcuts).
+- (Dev-only smoke check, not in CI) Temporarily point the runner at `/usr/bin/yes`, open the popover, then dismiss within ~200ms; verify with `ps aux | grep yes` that no orphan `yes` process remains. Skip on CI/automation; only run when modifying the subprocess runner.
 
 ### Out of scope for tests
 
@@ -675,6 +712,14 @@ None. All clarifications captured above.
 - Keyboard navigation inside the list.
 
 ## Revisions
+
+**2026-05-21 — third-round revisions**
+
+- Codified the MenuBarExtra interaction policy. `AnyDoorApp` uses `.menuBarExtraStyle(.window)`, so the menu bar panel auto-dismisses on key loss; combined with `MenuBarView.onDisappear { popover.hide() }`, a naive `makeKey()` on the popover would collapse the menu bar panel and immediately re-hide the popover. New requirements: popover host is an `NSPanel` with `.nonactivatingPanel`; `HoverPopover.isHoldingFocus` flips from `NSWindow` key notifications; `MenuBarView.onDisappear` guards the hide on that flag. Documented a fallback (local NSEvent monitor without taking key focus) for the case where `.menuBarExtraStyle(.window)` still collapses on any key transition. Added a QA gate that must pass before the feature ships.
+- Plumbed an `onClose: () -> Void` callback through `PortManagerPopoverView` → `KeyboardMonitor`. ESC-with-empty-search now invokes `onClose`, which `MenuBarView` wires to: clear search → call a new `HoverGate.reset()` (clears trigger/popover-hovered, cancels pending tasks, sets `isShown = false`) → `popover.hide()`. Prevents stuck gate state on the next hover.
+- Unified the empty-result rule to `exit == 1 && stdout.isEmpty && stderr.isEmpty` in all three places (Clarifications, Section 3 pipeline, Data Flow). Exit 1 with diagnostics on stderr is a real failure, not an empty list.
+- Removed all references to `ManagedAtomic`. The runner's `timedOut` flag uses `OSAllocatedUnfairLock<Bool>` from the standard library — no new package dependency.
+- Downgraded the "spawn `/usr/bin/yes` then cancel" cancellation test from a unit test to a dev-only smoke check. Unit tests use a `FakeSubprocessRunner` with `CheckedContinuation` to exercise the `withTaskCancellationHandler` wiring deterministically; the real-process variant lives in the QA checklist for use when modifying the runner.
 
 **2026-05-21 — second-round revisions**
 
