@@ -8,7 +8,10 @@ struct PortListView: View {
             LazyVStack(spacing: 0) {
                 ForEach(inventory.filteredRecords) { record in
                     PortRowView(record: record, inventory: inventory)
-                    Divider()
+                    // Skip the trailing divider after the last row to avoid a dangling line.
+                    if record.id != inventory.filteredRecords.last?.id {
+                        Divider()
+                    }
                 }
             }
         }
@@ -19,6 +22,10 @@ struct PortRowView: View {
     let record: PortRecord
     @Bindable var inventory: PortInventory
     @State private var isHovered = false
+
+    /// Shared width for the trailing slot so kill / error / placeholder all align
+    /// and the row doesn't jitter as the hover state toggles the button in and out.
+    private static let trailingSlotWidth: CGFloat = 22
 
     private var rowState: PortStatusDot.State {
         if inventory.failedKillPIDs[record.pid] != nil { return .failed }
@@ -43,7 +50,10 @@ struct PortRowView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isHovered ? Color.white.opacity(0.04) : Color.clear)
+        // Interactive Liquid Glass styling matches PanelRowView / AppShortcutsPopoverView.
+        // `.interactive()` handles its own hover affordance, replacing the previous
+        // hardcoded white tint that was invisible in Light Mode.
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .help(tooltipText)
@@ -53,15 +63,20 @@ struct PortRowView: View {
     private var trailingControl: some View {
         switch rowState {
         case .killing:
-            ProgressView().controlSize(.small)
+            ProgressView()
+                .controlSize(.small)
+                .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
         case .failed:
             Button {
                 inventory.dismissError(for: record.pid)
             } label: {
                 Image(systemName: "exclamationmark.circle.fill")
                     .foregroundStyle(.red)
+                    .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
             }
             .buttonStyle(.plain)
+            .help("清除错误提示")
+            .accessibilityLabel("清除错误提示")
         case .listening:
             if isHovered {
                 Button {
@@ -69,11 +84,12 @@ struct PortRowView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundStyle(.secondary)
+                        .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
                 }
                 .buttonStyle(.plain)
-                .help("kill PID \(record.pid)")
+                .help("终止 PID \(record.pid)")
             } else {
-                Color.clear.frame(width: 16, height: 16)
+                Color.clear.frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
             }
         }
     }
@@ -85,7 +101,7 @@ struct PortRowView: View {
         }
         if let path = record.executablePath, !path.isEmpty { lines.append(path) }
         lines.append("")
-        lines.append("Binds:")
+        lines.append("绑定地址：")
         for bind in record.binds {
             lines.append("  \(bind.address) (\(bind.family.rawValue))")
         }
@@ -93,11 +109,11 @@ struct PortRowView: View {
             lines.append("")
             switch failure.reason {
             case .permissionDenied:
-                lines.append("kill 失败：权限不足（系统/其他用户进程）")
+                lines.append("终止失败：权限不足（系统/其他用户进程）")
             case .processGone:
-                lines.append("kill 失败：进程已退出")
+                lines.append("终止失败：进程已退出")
             case .other(let code):
-                lines.append("kill 失败 (errno: \(code))")
+                lines.append("终止失败 (errno: \(code))")
             }
         }
         return lines.joined(separator: "\n")
