@@ -25,7 +25,7 @@ struct PortManagerPopoverView: View {
             )
             if let err = inventory.lastError {
                 PortScanErrorBanner(error: err) {
-                    Task { await inventory.refresh() }
+                    Task { await inventory.refresh(force: true) }
                 }
             }
             content
@@ -101,7 +101,7 @@ private struct PortManagerToolbar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             toolbarButton(
-                action: { Task { await inventory.refresh() } },
+                action: { Task { await inventory.refresh(force: true) } },
                 label: "刷新",
                 systemImage: "arrow.clockwise",
                 shortcut: "⌘R"
@@ -236,7 +236,7 @@ private struct KeyboardMonitor: NSViewRepresentable {
                 let consumed: Bool = MainActor.assumeIsolated {
                     guard let self else { return false }
                     if cmd && chars == "r" {
-                        Task { await self.inventory.refresh() }
+                        Task { await self.inventory.refresh(force: true) }
                         return true
                     }
                     if cmd && chars == "t" {
