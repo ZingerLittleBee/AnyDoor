@@ -27,10 +27,6 @@ struct GeneralSettingsView: View {
                     }
             } header: {
                 Text("启动")
-            } footer: {
-                if !LaunchAtLogin.isSupported {
-                    Text("仅在已安装的 AnyDoor.app 中可用")
-                }
             }
 
             Section("权限") {
