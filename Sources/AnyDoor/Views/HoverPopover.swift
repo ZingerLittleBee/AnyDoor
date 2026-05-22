@@ -183,10 +183,9 @@ final class HoverGate {
 
     func showImmediately() {
         showTask?.cancel()
-        if !isShown {
-            isShown = true
-            onShow()
-        }
+        hideTask?.cancel()
+        if !isShown { isShown = true }
+        onShow()
     }
 
     /// Forcibly reset all tracked hover state. Used by the port-manager ESC
@@ -205,8 +204,11 @@ final class HoverGate {
     }
 
     private func scheduleShow() {
-        guard !isShown else { return }
         hideTask?.cancel()
+        if isShown {
+            onShow()
+            return
+        }
         showTask?.cancel()
         showTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)
