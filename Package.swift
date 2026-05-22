@@ -4,9 +4,18 @@ import PackageDescription
 let package = Package(
     name: "AnyDoor",
     platforms: [.macOS(.v26)],
+    dependencies: [
+        .package(
+            url: "https://github.com/riko2chen/AskForPermission.git",
+            revision: "91f4dde33f9f5dd58a89d72f3f05aa4b149a1f0e"
+        ),
+    ],
     targets: [
         .executableTarget(
             name: "AnyDoor",
+            dependencies: [
+                .product(name: "AskForPermission", package: "AskForPermission"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]
