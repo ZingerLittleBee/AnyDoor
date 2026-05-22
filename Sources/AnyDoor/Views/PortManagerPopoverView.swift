@@ -33,8 +33,7 @@ struct PortManagerPopoverView: View {
         .frame(minHeight: 280, maxHeight: 560)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .task {
-            await inventory.refresh()
+        .onAppear {
             searchFocused = true
         }
         .onHover(perform: onHoverChange)

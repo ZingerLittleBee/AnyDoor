@@ -120,6 +120,24 @@ final class PortScannerTests: XCTestCase {
         }
     }
 
+    func testLsofRunnerThrowsCancellationInsteadOfExit15WhenTaskIsCancelled() async {
+        let runner = LsofRunner()
+        let task = Task {
+            try await runner.run(path: "/bin/sleep", args: ["5"], timeout: .seconds(10))
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("expected CancellationError")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
+
     func testScanSuccessfulParse() async throws {
         let raw = try fixture("lsof-single-ipv4")
         let scanner = PortScanner(runner: StubRunner(

@@ -135,6 +135,22 @@ final class PortInventoryTests: XCTestCase {
         XCTAssertFalse(inv.isRefreshing)
     }
 
+    @MainActor
+    func testRefreshCancellationDoesNotSurfaceAsScanError() async {
+        struct CancellingScanner: PortScanning {
+            func scanTCPListening() async throws -> [PortRecord] {
+                throw CancellationError()
+            }
+            func kill(pid: pid_t, signal: Int32) -> SignalResult { .success }
+        }
+        let inv = PortInventory(scanner: CancellingScanner(), defaults: isolatedDefaults())
+
+        await inv.refresh()
+
+        XCTAssertNil(inv.lastError)
+        XCTAssertFalse(inv.isRefreshing)
+    }
+
     /// Records every kill call and lets the test choose what `SignalResult` to return.
     private final class RecordingKillScanner: PortScanning, @unchecked Sendable {
         var records: [PortRecord]

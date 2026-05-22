@@ -178,6 +178,7 @@ struct MenuBarView: View {
                     }
                 )
             }
+            Task { await PortInventory.shared.refresh() }
         default:
             break
         }

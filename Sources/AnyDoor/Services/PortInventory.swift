@@ -65,6 +65,9 @@ final class PortInventory {
                 Self.logger.debug("dropping stale scan result (gen \(myGen), now \(self.refreshGeneration))")
             }
             isRefreshing = inflightCount > 0
+        } catch is CancellationError {
+            inflightCount -= 1
+            isRefreshing = inflightCount > 0
         } catch {
             inflightCount -= 1
             if myGen == refreshGeneration {
