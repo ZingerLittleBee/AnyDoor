@@ -1,41 +1,30 @@
 import SwiftUI
 
-/// The status a toast reports. `Sendable` so it can cross the OCRProvider → ToastPresenter
-/// (actor → MainActor) boundary.
+/// The status a toast reports. `Sendable` so it can cross provider actor →
+/// `ToastPresenter` (`@MainActor`) boundaries. `Color` is `Sendable`, so the
+/// `.color` swatch crosses the boundary unchanged.
 enum ToastStyle: Sendable {
     case success(String)
     case failure(String)
+    case color(message: String, swatch: Color)
 
     var message: String {
         switch self {
-        case .success(let text), .failure(let text): return text
-        }
-    }
-
-    var iconName: String {
-        switch self {
-        case .success: return "checkmark.circle.fill"
-        case .failure: return "xmark.circle.fill"
-        }
-    }
-
-    var iconColor: Color {
-        switch self {
-        case .success: return .green
-        case .failure: return .red
+        case .success(let text), .failure(let text):
+            return text
+        case .color(let message, _):
+            return message
         }
     }
 }
 
-/// A compact status pill: an SF Symbol icon next to a single line of text.
+/// A compact status pill: a leading icon or color swatch next to one line of text.
 struct ToastView: View {
     let style: ToastStyle
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: style.iconName)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(style.iconColor)
+            leading
             Text(verbatim: style.message)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
@@ -44,5 +33,31 @@ struct ToastView: View {
         .padding(.vertical, 10)
         .background(.regularMaterial, in: Capsule())
         .fixedSize()
+    }
+
+    /// SF Symbol for success/failure; a bordered color swatch for `.color`.
+    @ViewBuilder
+    private var leading: some View {
+        switch style {
+        case .success:
+            symbol("checkmark.circle.fill", color: .green)
+        case .failure:
+            symbol("xmark.circle.fill", color: .red)
+        case .color(_, let swatch):
+            RoundedRectangle(cornerRadius: 4)
+                .fill(swatch)
+                .frame(width: 16, height: 16)
+                // Thin border keeps near-white swatches visible on the material.
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                )
+        }
+    }
+
+    private func symbol(_ name: String, color: Color) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(color)
     }
 }
