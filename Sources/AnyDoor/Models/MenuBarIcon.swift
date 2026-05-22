@@ -1,3 +1,5 @@
+import Foundation
+
 /// Storage keys, default value, and the catalog of SF Symbols offered for the
 /// menu bar icon. Consumed by `AnyDoorApp` (keys + default) and
 /// `GeneralSettingsView` (the picker).
@@ -21,4 +23,15 @@ enum MenuBarIcon {
         "door.garage.open",
         "door.french.open",
     ]
+
+    /// Current visibility preference. Returns `true` when the key is unset so
+    /// fresh installs show the icon — mirrors the `@AppStorage` default.
+    static var isVisible: Bool {
+        UserDefaults.standard.object(forKey: visibilityKey) as? Bool ?? true
+    }
+
+    /// Current icon SF Symbol name, falling back to `defaultName` when unset.
+    static var currentName: String {
+        UserDefaults.standard.string(forKey: nameKey) ?? defaultName
+    }
 }

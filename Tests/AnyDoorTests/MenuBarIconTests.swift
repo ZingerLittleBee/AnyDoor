@@ -22,4 +22,22 @@ final class MenuBarIconTests: XCTestCase {
         XCTAssertEqual(MenuBarIcon.visibilityKey, "menuBar.iconVisible")
         XCTAssertEqual(MenuBarIcon.nameKey, "menuBar.iconName")
     }
+
+    func testIsVisibleDefaultsToTrueWhenUnset() {
+        let defaults = UserDefaults.standard
+        let original = defaults.object(forKey: MenuBarIcon.visibilityKey)
+        defaults.removeObject(forKey: MenuBarIcon.visibilityKey)
+        defer { if let original { defaults.set(original, forKey: MenuBarIcon.visibilityKey) } }
+
+        XCTAssertTrue(MenuBarIcon.isVisible, "Unset visibility must read as true")
+    }
+
+    func testCurrentNameFallsBackToDefaultWhenUnset() {
+        let defaults = UserDefaults.standard
+        let original = defaults.object(forKey: MenuBarIcon.nameKey)
+        defaults.removeObject(forKey: MenuBarIcon.nameKey)
+        defer { if let original { defaults.set(original, forKey: MenuBarIcon.nameKey) } }
+
+        XCTAssertEqual(MenuBarIcon.currentName, MenuBarIcon.defaultName)
+    }
 }
