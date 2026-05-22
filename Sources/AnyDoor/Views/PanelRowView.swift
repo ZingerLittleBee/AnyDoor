@@ -82,13 +82,12 @@ struct PanelRowView: View {
                 set: { _ in onToggle() }
             ))
             .toggleStyle(.switch)
+            .controlSize(.small)
             .labelsHidden()
             .disabled(needsPermission)
         case .action:
             if let hk = entry.hotkey {
-                Text(hk.displayString)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                HotkeyLabel(hotkey: hk)
             }
         case .submenu:
             Image(systemName: "chevron.right")

@@ -1,6 +1,7 @@
 import Cocoa
 import SwiftData
 import OSLog
+import AskForPermission
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
 
@@ -32,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
+        AskForPermission.configure(appName: "AnyDoor")
 
         // Run migrations / seeding on the main context
         let context = modelContainer.mainContext
