@@ -14,7 +14,8 @@ struct HotkeyDescriptor: Hashable, Sendable {
     let keyCode: Int
     let modifierFlags: Int
 
-    var displayString: String {
+    /// Ordered key symbols (modifiers first, then the key), one element per keycap.
+    var displayParts: [String] {
         var parts: [String] = []
         let flags = NSEvent.ModifierFlags(rawValue: UInt(modifierFlags))
         if flags.contains(.control) { parts.append("⌃") }
@@ -22,7 +23,11 @@ struct HotkeyDescriptor: Hashable, Sendable {
         if flags.contains(.shift) { parts.append("⇧") }
         if flags.contains(.command) { parts.append("⌘") }
         parts.append(KeyCodeMap.name(for: keyCode))
-        return parts.joined()
+        return parts
+    }
+
+    var displayString: String {
+        displayParts.joined()
     }
 }
 

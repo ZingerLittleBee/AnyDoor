@@ -65,9 +65,7 @@ private struct AppShortcutRow: View {
                 .lineLimit(1)
             Spacer(minLength: 12)
             if let hotkey = entry.hotkey {
-                Text(hotkey.displayString)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                HotkeyLabel(hotkey: hotkey)
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
