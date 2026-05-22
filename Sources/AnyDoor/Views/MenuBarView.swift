@@ -2,6 +2,10 @@ import SwiftUI
 import AppKit
 
 struct MenuBarView: View {
+    /// Invoked by the footer's Settings button so the controller can dismiss
+    /// the panel before the Settings window opens.
+    let onRequestClose: () -> Void
+
     @State private var panel = PanelStore.shared
     @State private var popover = HoverPopover { EmptyView() }
     @State private var gate = HoverGate()
@@ -36,11 +40,14 @@ struct MenuBarView: View {
 
             // Footer
             HStack(spacing: 8) {
-                SettingsLink { Label("设置", systemImage: "gear") }
-                    .buttonStyle(.glass)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        NSApplication.shared.activate()
-                    })
+                Button {
+                    onRequestClose()
+                    NSApp.activate()
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                } label: {
+                    Label("设置", systemImage: "gear")
+                }
+                .buttonStyle(.glass)
                 Button { NSApplication.shared.terminate(nil) } label: {
                     Label("退出", systemImage: "power")
                 }.buttonStyle(.glass)
