@@ -81,6 +81,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotkeyService.shared.stop()
     }
 
+    /// When the icon is hidden the menu bar item disappears and the app keeps
+    /// the `.accessory` policy (no Dock icon). Re-launching AnyDoor from
+    /// Finder/Spotlight lands here; with no visible window, re-open Settings so
+    /// the user can turn the icon back on.
+    @MainActor
+    func applicationShouldHandleReopen(_ sender: NSApplication,
+                                       hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
+        return true
+    }
+
     /// Hot-reload entry point used by views after data changes.
     @MainActor
     func refreshBindings() {
