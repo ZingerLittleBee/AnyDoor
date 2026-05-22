@@ -14,7 +14,7 @@ final class MenuBarController {
 
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
-    private var hostingController: NSHostingController<AnyView>?
+    private var hostingView: NSHostingView<AnyView>?
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
 
@@ -56,23 +56,38 @@ final class MenuBarController {
     private func showPanel() {
         guard let button = statusItem?.button else { return }
 
-        let hosting = NSHostingController(
+        let hostingView = NSHostingView(
             rootView: AnyView(
                 MenuBarView(onRequestClose: { [weak self] in self?.hidePanel() })
                     .modelContainer(modelContainer)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             )
         )
-        hosting.sizingOptions = [.preferredContentSize]
-        hostingController = hosting
+        // Measure the SwiftUI content once, then DETACH the hosting view from
+        // window sizing. With sizing enabled NSHostingView resizes its window
+        // from within layout, which recurses straight back into window layout
+        // — that pegs the CPU and overflows the stack.
+        hostingView.sizingOptions = .intrinsicContentSize
+        hostingView.layoutSubtreeIfNeeded()
+        var size = hostingView.fittingSize
+        if size.width < 1 || size.height < 1 {
+            size = NSSize(width: 260, height: 320)
+        }
+        hostingView.sizingOptions = []
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        hostingView.autoresizingMask = [.width, .height]
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 260, height: 120),
+            contentRect: NSRect(origin: .zero, size: size),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        panel.contentViewController = hosting
+        // A plain NSView container keeps the hosting view out of the window's
+        // constraint-based layout, so nothing can drive a window resize.
+        let container = NSView(frame: NSRect(origin: .zero, size: size))
+        container.addSubview(hostingView)
+        panel.contentView = container
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
@@ -81,13 +96,7 @@ final class MenuBarController {
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
         self.panel = panel
-
-        // Size to the SwiftUI content before showing to avoid a resize flash.
-        hosting.view.layoutSubtreeIfNeeded()
-        let fitting = hosting.view.fittingSize
-        if fitting.width > 0, fitting.height > 0 {
-            panel.setContentSize(fitting)
-        }
+        self.hostingView = hostingView
 
         positionPanel(panel, under: button)
         panel.orderFrontRegardless()
@@ -99,9 +108,9 @@ final class MenuBarController {
         removeClickMonitors()
         statusItem?.button?.highlight(false)
         panel?.orderOut(nil)
-        panel?.contentViewController = nil
+        panel?.contentView = nil
         panel = nil
-        hostingController = nil
+        hostingView = nil
     }
 
     /// Anchor the panel's top-right corner just below the status item.
