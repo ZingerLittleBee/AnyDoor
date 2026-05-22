@@ -24,4 +24,10 @@ final class ColorHexTests: XCTestCase {
         let color = NSColor(srgbRed: 1.4, green: -0.2, blue: 1.0, alpha: 1)
         XCTAssertEqual(color.sRGBHexString, "#FF00FF")
     }
+
+    func testPatternColorReturnsNil() {
+        // Pattern colors have no color-space representation, so conversion fails.
+        let patternColor = NSColor(patternImage: NSImage())
+        XCTAssertNil(patternColor.sRGBHexString)
+    }
 }
