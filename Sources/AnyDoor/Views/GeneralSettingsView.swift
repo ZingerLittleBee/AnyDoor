@@ -10,6 +10,8 @@ struct GeneralSettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var accessibilityGranted = HotkeyService.hasAccessibilityPermission
     @State private var automationGranted = false
+    @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
+    @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
 
     var body: some View {
         Form {
@@ -28,6 +30,19 @@ struct GeneralSettingsView: View {
                     }
             } header: {
                 Text("启动")
+            }
+
+            Section("菜单栏") {
+                Toggle("显示菜单栏图标", isOn: $menuBarIconVisible)
+
+                LabeledContent("菜单栏图标") {
+                    HStack(spacing: 8) {
+                        ForEach(MenuBarIcon.options, id: \.self) { name in
+                            iconSwatch(name)
+                        }
+                    }
+                }
+                .disabled(!menuBarIconVisible)
             }
 
             Section("权限") {
@@ -91,6 +106,32 @@ struct GeneralSettingsView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func iconSwatch(_ name: String) -> some View {
+        let isSelected = menuBarIconName == name
+        Button {
+            menuBarIconName = name
+        } label: {
+            Image(systemName: name)
+                .font(.system(size: 16))
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(
+                            isSelected ? Color.accentColor : Color.secondary.opacity(0.3),
+                            lineWidth: isSelected ? 2 : 1
+                        )
+                )
+                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+        }
+        .buttonStyle(.plain)
+        .help(name)
     }
 
     private func openAccessibilitySettings() {
