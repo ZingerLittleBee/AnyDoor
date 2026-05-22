@@ -51,11 +51,18 @@ enum RegionCapture {
         return image
     }
 
-    private static func decodeImage(at url: URL) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+    /// Decodes the PNG at `url` into a CGImage. Internal (not private) so the
+    /// file-deletion-survival behavior can be unit-tested.
+    ///
+    /// `kCGImageSourceShouldCacheImmediately` forces a full pixel decode at creation
+    /// time, while the file still exists. Without it the returned CGImage decodes
+    /// lazily on first pixel access — but the caller deletes the temp file as soon as
+    /// `captureRegion()` returns, so a lazy image would read back nothing.
+    static func decodeImage(at url: URL) -> CGImage? {
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
             return nil
         }
-        return image
+        let options: [CFString: Any] = [kCGImageSourceShouldCacheImmediately: true]
+        return CGImageSourceCreateImageAtIndex(source, 0, options as CFDictionary)
     }
 }
