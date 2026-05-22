@@ -55,7 +55,7 @@ global hotkey from the panel settings exactly like any other action item
 | Cancellation (Esc) | Detected by **temp-file absence** after the command, not by exit code. Silent no-op — no toast, clipboard untouched |
 | Control modifier during capture | If the user holds Control while selecting, `screencapture` writes the capture to the clipboard instead of the file (native, non-suppressible behavior). No file is produced, so OCR treats it as a cancellation (silent). Accepted edge case |
 | OCR engine | Vision framework, modern Swift API `RecognizeTextRequest` |
-| Recognition languages | Explicit `recognitionLanguages = [Locale.Language("zh-Hans"), Locale.Language("en-US")]`; `automaticallyDetectsLanguage = false`; `recognitionLevel = .accurate` |
+| Recognition languages | Explicit `recognitionLanguages = [Locale.Language(identifier: "zh-Hans"), Locale.Language(identifier: "en-US")]`; `automaticallyDetectsLanguage = false`; `recognitionLevel = .accurate` |
 | Multi-line handling | One string per recognized observation, joined top-to-bottom with `\n` |
 | Empty result | Failure toast "未识别到文字"; clipboard untouched |
 | Concurrency guard | `PanelStore.run(_:)` gains a per-item in-flight guard (mirroring the existing `toggle` guard) so a re-trigger while OCR is mid-flight is dropped |
@@ -69,7 +69,7 @@ global hotkey from the panel settings exactly like any other action item
 
 ## Architecture
 
-Five new units plus small edits to four existing files. Each new unit has a
+Five new units plus small edits to five existing files. Each new unit has a
 single responsibility and a narrow interface.
 
 ```
@@ -119,6 +119,9 @@ Sources/AnyDoor/
 - `AppDelegate.swift` — register `OCRProvider()` in the `providers` array.
 - `Services/ShellRunner.swift` — make the timeout optional so an interactive
   subprocess can run without the watchdog (see ShellRunner change below).
+- `Services/Providers/ScreenshotProvider.swift` — pass `timeout: nil` to its
+  `ShellRunner.run` call; it runs the same interactive `screencapture -i` and
+  carries the identical latent 5-second-kill bug (see ShellRunner change).
 - `Services/PanelStore.swift` — add a per-item in-flight guard to `run(_:)`
   (see Action In-Flight Guard below).
 - `BuiltinPreferenceSeeder` — no code change required; it iterates
@@ -154,14 +157,25 @@ static func run(_ path: String, args: [String] = [],
 ```
 
 When `timeout` is `nil`, the watchdog loop is skipped and the runner simply
-waits for the process to exit. All existing call sites are unaffected (the
-`5` default is unchanged). `RegionCapture` passes `timeout: nil`.
+waits for the process to exit. The `5` default is unchanged, so call sites
+that pass nothing keep compiling and keep their current behavior.
+
+Two interactive callers should run without the watchdog:
+
+- `RegionCapture` (new) passes `timeout: nil`.
+- `ScreenshotProvider` (existing) runs `screencapture -i -c` and today carries
+  the same latent bug — a screenshot selection lasting longer than 5 seconds
+  is killed mid-drag. Since this round already establishes that interactive
+  `screencapture` has no meaningful timeout, fix it in the same pass: change
+  its `ShellRunner.run` call to pass `timeout: nil`. This is a one-line,
+  in-scope fix that removes the inconsistency rather than leaving known debt.
 
 ## Component Details
 
 ### `TextRecognizer`
 
-Pure, UI-free, shell-free. The only unit with an automated test.
+Pure, UI-free, shell-free — the only new OCR *service* with a fixture-backed
+automated test (see Testing for the full automated-test set).
 
 ```
 enum TextRecognizer {
@@ -398,6 +412,9 @@ All cases are handled inside `OCRProvider.run()`; nothing propagates out.
   OCR action and the assigned hotkey, and confirming: clipboard contents,
   toast appearance/position/timing, a >5s selection is not killed, and a
   rapid double-trigger starts only one capture.
+- **`ScreenshotProvider` regression**: manually confirm the existing
+  "截图到剪贴板" action still works and a >5s screenshot selection is no longer
+  killed after the `timeout: nil` change.
 
 ## Open Questions
 
