@@ -52,6 +52,18 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertFalse(BuiltinItem.ocr.requiresAutomation)
         XCTAssertNil(BuiltinItem.ocr.feedbackSound)
     }
+
+    func testPickColorIsAnActionItem() {
+        XCTAssertEqual(BuiltinItem.pickColor.kind, .action)
+    }
+
+    func testPickColorMetadata() {
+        XCTAssertEqual(BuiltinItem.pickColor.title, "屏幕取色")
+        XCTAssertEqual(BuiltinItem.pickColor.symbol, "eyedropper")
+        XCTAssertEqual(BuiltinItem.pickColor.defaultOrder, 975)
+        XCTAssertFalse(BuiltinItem.pickColor.requiresAutomation)
+        XCTAssertNil(BuiltinItem.pickColor.feedbackSound)
+    }
 }
 
 final class KeyBindingOrderBackfillTests: XCTestCase {
