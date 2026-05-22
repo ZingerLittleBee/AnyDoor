@@ -27,12 +27,16 @@ enum ColorSampler {
                     continuation.resume(returning: .cancelled)
                     return
                 }
-                guard let hex = color.sRGBHexString else {
+                // Derive both the hex string and the swatch from the same sRGB
+                // representation, so the previewed swatch matches the value the
+                // user pastes (the raw NSColor may be in a wider gamut).
+                guard let hex = color.sRGBHexString,
+                      let srgb = color.usingColorSpace(.sRGB) else {
                     continuation.resume(returning: .conversionFailed)
                     return
                 }
                 continuation.resume(
-                    returning: .picked(hex: hex, swatch: Color(nsColor: color))
+                    returning: .picked(hex: hex, swatch: Color(nsColor: srgb))
                 )
             }
         }
