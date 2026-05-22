@@ -113,23 +113,34 @@ final class MenuBarController {
         hostingView = nil
     }
 
-    /// Anchor the panel's top-right corner just below the status item.
+    /// Anchor the panel's leading edge directly below the status item.
     private func positionPanel(_ panel: NSPanel, under button: NSStatusBarButton) {
         guard let buttonWindow = button.window else { return }
         let buttonInScreen = buttonWindow.convertToScreen(
             button.convert(button.bounds, to: nil)
         )
-        let size = panel.frame.size
-        var origin = NSPoint(
-            x: buttonInScreen.maxX - size.width,
-            y: buttonInScreen.minY - size.height - 4
+        let origin = Self.panelOrigin(
+            forStatusItemFrame: buttonInScreen,
+            panelSize: panel.frame.size,
+            visibleFrame: buttonWindow.screen?.visibleFrame
         )
-        if let screen = buttonWindow.screen {
-            let visible = screen.visibleFrame
-            origin.x = min(max(origin.x, visible.minX + 4), visible.maxX - size.width - 4)
+        panel.setFrameOrigin(origin)
+    }
+
+    static func panelOrigin(
+        forStatusItemFrame statusItemFrame: NSRect,
+        panelSize: NSSize,
+        visibleFrame: NSRect?
+    ) -> NSPoint {
+        var origin = NSPoint(
+            x: statusItemFrame.minX,
+            y: statusItemFrame.minY - panelSize.height - 4
+        )
+        if let visible = visibleFrame {
+            origin.x = min(max(origin.x, visible.minX + 4), visible.maxX - panelSize.width - 4)
             origin.y = max(origin.y, visible.minY + 4)
         }
-        panel.setFrameOrigin(origin)
+        return origin
     }
 
     // MARK: - Outside-click dismissal
