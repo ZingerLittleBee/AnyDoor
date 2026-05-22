@@ -108,10 +108,9 @@ struct GeneralSettingsView: View {
         }
     }
 
-    @ViewBuilder
     private func iconSwatch(_ name: String) -> some View {
         let isSelected = menuBarIconName == name
-        Button {
+        return Button {
             menuBarIconName = name
         } label: {
             Image(systemName: name)
