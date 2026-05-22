@@ -8,16 +8,25 @@ final class ToastPresenter {
     static let shared = ToastPresenter()
 
     private let panel: ToastPanel
-    private let hostingController: NSHostingController<ToastView>
+    private let containerView: NSView
+    private let hostingView: NSHostingView<ToastView>
     private var dismissTask: Task<Void, Never>?
 
     private init() {
-        let controller = NSHostingController(rootView: ToastView(style: .success("")))
-        controller.sizingOptions = [.preferredContentSize]
-        self.hostingController = controller
+        let initialView = ToastView(style: .success(""))
+        let initialSize = Self.fittingSize(for: initialView, fallback: NSSize(width: 200, height: 44))
+        let hostingView = NSHostingView(rootView: initialView)
+        hostingView.sizingOptions = []
+        hostingView.frame = NSRect(origin: .zero, size: initialSize)
+        hostingView.autoresizingMask = [.width, .height]
+        self.hostingView = hostingView
+
+        let containerView = NSView(frame: NSRect(origin: .zero, size: initialSize))
+        containerView.addSubview(hostingView)
+        self.containerView = containerView
 
         let panel = ToastPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 200, height: 44),
+            contentRect: NSRect(origin: .zero, size: initialSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -29,7 +38,7 @@ final class ToastPresenter {
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.hidesOnDeactivate = false
-        panel.contentViewController = controller
+        panel.contentView = containerView
         self.panel = panel
     }
 
@@ -37,12 +46,9 @@ final class ToastPresenter {
     func show(_ style: ToastStyle) {
         dismissTask?.cancel()
 
-        hostingController.rootView = ToastView(style: style)
-        hostingController.view.layoutSubtreeIfNeeded()
-        let size = hostingController.view.fittingSize
-        if size.width > 0 && size.height > 0 {
-            panel.setContentSize(size)
-        }
+        let toastView = ToastView(style: style)
+        hostingView.rootView = toastView
+        resizePanel(to: Self.fittingSize(for: toastView, fallback: panel.frame.size))
         positionPanel(size: panel.frame.size)
 
         panel.alphaValue = 0
@@ -66,6 +72,22 @@ final class ToastPresenter {
         } completionHandler: { [panel] in
             panel.orderOut(nil)
         }
+    }
+
+    private func resizePanel(to size: NSSize) {
+        guard size.width > 0 && size.height > 0 else { return }
+        panel.setContentSize(size)
+        containerView.frame = NSRect(origin: .zero, size: size)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+    }
+
+    private static func fittingSize(for rootView: ToastView, fallback: NSSize) -> NSSize {
+        let measuringView = NSHostingView(rootView: rootView)
+        measuringView.sizingOptions = .intrinsicContentSize
+        measuringView.layoutSubtreeIfNeeded()
+        let fitting = measuringView.fittingSize
+        if fitting.width > 0 && fitting.height > 0 { return fitting }
+        return fallback
     }
 
     /// Bottom-center of the screen containing the mouse cursor (fallback: main screen),
