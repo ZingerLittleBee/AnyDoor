@@ -12,6 +12,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case lockScreen
     case emptyTrash
     case screenshot
+    case ocr
     case displaySleep
     case systemSleep
     case hideDock
@@ -34,7 +35,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .appShortcuts, .portManager: return .submenu
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
-        case .lockScreen, .emptyTrash, .screenshot, .displaySleep, .systemSleep,
+        case .lockScreen, .emptyTrash, .screenshot, .ocr, .displaySleep, .systemSleep,
              .restartFinder, .restartDock, .restartMenuBar, .flushDNS: return .action
         }
     }
@@ -50,6 +51,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen: return "锁定屏幕"
         case .emptyTrash: return "清空废纸篓"
         case .screenshot: return "截图到剪贴板"
+        case .ocr: return "屏幕取词"
         case .displaySleep: return "显示器睡眠"
         case .systemSleep: return "系统休眠"
         case .hideDock: return "隐藏 Dock"
@@ -74,6 +76,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen: return "lock.fill"
         case .emptyTrash: return "trash.fill"
         case .screenshot: return "camera.viewfinder"
+        case .ocr: return "text.viewfinder"
         case .displaySleep: return "moon.zzz.fill"
         case .systemSleep: return "powersleep"
         case .hideDock: return "dock.rectangle"
@@ -99,6 +102,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen: return 700
         case .emptyTrash: return 800
         case .screenshot: return 900
+        case .ocr: return 950
         case .displaySleep: return 1000
         case .systemSleep: return 1100
         case .hideDock: return 1200

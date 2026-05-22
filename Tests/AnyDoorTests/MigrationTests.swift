@@ -40,6 +40,18 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertTrue(BuiltinItem.emptyTrash.requiresAutomation)
         XCTAssertFalse(BuiltinItem.keepAwake.requiresAutomation)
     }
+
+    func testOCRIsAnActionItem() {
+        XCTAssertEqual(BuiltinItem.ocr.kind, .action)
+    }
+
+    func testOCRMetadata() {
+        XCTAssertEqual(BuiltinItem.ocr.title, "屏幕取词")
+        XCTAssertEqual(BuiltinItem.ocr.symbol, "text.viewfinder")
+        XCTAssertEqual(BuiltinItem.ocr.defaultOrder, 950)
+        XCTAssertFalse(BuiltinItem.ocr.requiresAutomation)
+        XCTAssertNil(BuiltinItem.ocr.feedbackSound)
+    }
 }
 
 final class KeyBindingOrderBackfillTests: XCTestCase {
