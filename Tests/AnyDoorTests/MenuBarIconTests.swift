@@ -17,6 +17,27 @@ final class MenuBarIconTests: XCTestCase {
         )
     }
 
+    func testDropdownChoicesStayAlignedWithOptions() {
+        XCTAssertEqual(MenuBarIcon.choices.map(\.name), MenuBarIcon.options)
+        XCTAssertTrue(MenuBarIcon.choices.allSatisfy { !$0.title.isEmpty })
+    }
+
+    func testOffersExpandedIconCatalog() {
+        XCTAssertGreaterThanOrEqual(MenuBarIcon.options.count, 12)
+    }
+
+    func testOnlyDefaultDoorIconIsOffered() {
+        XCTAssertEqual(
+            MenuBarIcon.options.filter { $0.hasPrefix("door.") },
+            [MenuBarIcon.defaultName]
+        )
+    }
+
+    func testKeyboardAndPowerIconsAreNotOffered() {
+        XCTAssertFalse(MenuBarIcon.options.contains("keyboard"))
+        XCTAssertFalse(MenuBarIcon.options.contains("power"))
+    }
+
     func testStorageKeysAreDistinct() {
         XCTAssertNotEqual(MenuBarIcon.visibilityKey, MenuBarIcon.nameKey)
         XCTAssertEqual(MenuBarIcon.visibilityKey, "menuBar.iconVisible")

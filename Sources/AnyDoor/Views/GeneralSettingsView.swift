@@ -36,11 +36,7 @@ struct GeneralSettingsView: View {
                 Toggle("显示菜单栏图标", isOn: $menuBarIconVisible)
 
                 LabeledContent("菜单栏图标") {
-                    HStack(spacing: 8) {
-                        ForEach(MenuBarIcon.options, id: \.self) { name in
-                            iconSwatch(name)
-                        }
-                    }
+                    menuBarIconPicker
                 }
                 .disabled(!menuBarIconVisible)
             }
@@ -108,29 +104,22 @@ struct GeneralSettingsView: View {
         }
     }
 
-    private func iconSwatch(_ name: String) -> some View {
-        let isSelected = menuBarIconName == name
-        return Button {
-            menuBarIconName = name
-        } label: {
-            Image(systemName: name)
-                .font(.system(size: 16))
-                .frame(width: 32, height: 32)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(
-                            isSelected ? Color.accentColor : Color.secondary.opacity(0.3),
-                            lineWidth: isSelected ? 2 : 1
-                        )
-                )
-                .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+    private var menuBarIconPicker: some View {
+        Picker("菜单栏图标", selection: $menuBarIconName) {
+            ForEach(MenuBarIcon.choices, id: \.name) { choice in
+                Image(systemName: choice.name)
+                    .tag(choice.name)
+                    .accessibilityLabel(choice.title)
+            }
         }
-        .buttonStyle(.plain)
-        .help(name)
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .frame(width: 56)
+        .help(MenuBarIcon.title(for: selectedMenuBarIconName))
+    }
+
+    private var selectedMenuBarIconName: String {
+        MenuBarIcon.options.contains(menuBarIconName) ? menuBarIconName : MenuBarIcon.defaultName
     }
 
     private func openAccessibilitySettings() {
