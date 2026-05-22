@@ -20,9 +20,14 @@ menu bar utility are missing:
 - Add a Launch at Login toggle to the General tab.
 - Add an Accessibility permission row that shows live status and runs a guided
   grant flow.
+- Add an Automation permission row that shows live status and triggers the
+  standard system prompt (AnyDoor scripts System Events for the dark-mode
+  toggle).
 - Keep the General tab visually native (macOS grouped `Form`).
 
-Non-goals: about/version info, other permissions, menu bar icon customization.
+Non-goals: about/version info, Screen Recording (OCR/screenshot use interactive
+`screencapture -i`, which is user-mediated and exempt from the Screen Recording
+TCC gate), menu bar icon customization.
 
 ## Approach
 
@@ -80,6 +85,20 @@ Thin wrapper over `SMAppService.mainApp` (`import ServiceManagement`):
 
 `SMAppService` calls are synchronous and quick; no actor needed.
 
+### `Services/AutomationPermission.swift` (new)
+
+Wraps `AEDeterminePermissionToAutomateTarget` for the System Events target
+(`import CoreServices`):
+
+- `static var isGranted: Bool` — determination with `askUserIfNeeded: false`.
+- `static func request() -> Bool` — determination with `askUserIfNeeded: true`;
+  shows the system prompt when undetermined. Blocks until the user responds, so
+  callers run it off the main actor.
+- `static func activateSystemEvents() async` — launches System Events (faceless,
+  non-activating) when it is not running, because the determination API returns
+  `procNotFound` for a non-running target.
+- `static func openSettings()` — deep-links to the Automation privacy pane.
+
 ### `Views/GeneralSettingsView.swift` (rewritten)
 
 A `Form` with `.formStyle(.grouped)`, two sections:
@@ -88,11 +107,14 @@ A `Form` with `.formStyle(.grouped)`, two sections:
 - Toggle "开机时启动 AnyDoor", reflecting `LaunchAtLogin.isEnabled`.
 - On change, call `LaunchAtLogin.setEnabled(_:)`. If it throws, revert the
   toggle to the actual `SMAppService` status and log the error.
-- When `!LaunchAtLogin.isSupported`: toggle disabled, section footer reads
-  "仅在已安装的 AnyDoor.app 中可用".
+- When `!LaunchAtLogin.isSupported` (running via `swift run`): the toggle is
+  disabled. No explanatory footer — end users always run the installed `.app`.
 
 **权限 (Permissions)**
-- One row: SF Symbol + "辅助功能" + a trailing status badge.
+
+Two rows, each an SF Symbol + name + trailing status badge.
+
+*辅助功能 (Accessibility)*
 - Granted → "✓ 已授权" badge, no action.
 - Not granted + `AskForPermission.isAvailable` → a tappable "去授权" element
   carrying `.requestsPermission(.accessibility)`; tapping runs the guided
@@ -101,9 +123,19 @@ A `Form` with `.formStyle(.grouped)`, two sections:
   button deep-linking to
   `x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility`.
 
-Status is polled every ~1s with a `Timer` while the view is visible (via
-`.onAppear`/`.onDisappear`), reading `AXIsProcessTrusted()` so the badge updates
-live after the user grants the permission. Reuses `HotkeyService.hasAccessibilityPermission`.
+*自动化 (Automation)*
+- Granted → "✓ 已授权" badge, no action.
+- Not granted → a "申请授权" button. Automation has no guided drag flow, so the
+  button calls `AutomationPermission.request()` to show the standard system
+  prompt when undetermined; if the request resolves to a denial (the prompt no
+  longer reappears), it falls back to `AutomationPermission.openSettings()`.
+
+Both badges are polled every ~1s while the tab is visible, via a `.task` loop
+(cancelled on disappear). Accessibility reads
+`HotkeyService.hasAccessibilityPermission`; Automation reads
+`AutomationPermission.isGranted`. The `.task` first calls
+`AutomationPermission.activateSystemEvents()` so the automation check returns a
+real verdict instead of `procNotFound`.
 
 ### `AppDelegate` (modified)
 
@@ -119,6 +151,9 @@ Add `AskForPermission.configure(appName: "AnyDoor")` in
   in System Settings → General → Login Items (no extra UI for this edge case).
 - `AskForPermission.request` returning `.unavailable` is already handled by the
   `isAvailable` branch — the guided element is not shown in that case.
+- `AutomationPermission.request()` resolving to a denial: the row's button opens
+  System Settings → Automation as the fallback, since a denied state no longer
+  re-prompts.
 
 ## Testing
 
@@ -130,8 +165,11 @@ Verification is manual:
 - With the permission revoked (`tccutil reset Accessibility dev.bybee.AnyDoor`),
   open General settings, confirm the row shows "未授权" and the guided flow runs
   and the badge flips to "已授权" after granting.
-- Run via `swift run`, confirm the toggle is disabled with the footer note and
-  the permission row shows the "打开系统设置" fallback.
+- Run via `swift run`, confirm the toggle is disabled and the accessibility row
+  shows the "打开系统设置" fallback.
+- With Automation revoked (`tccutil reset AppleEvents dev.bybee.AnyDoor`), open
+  General settings, confirm the 自动化 row shows "申请授权"; tapping it shows the
+  system prompt, and the badge flips to "已授权" after allowing.
 
 ## UI language
 
