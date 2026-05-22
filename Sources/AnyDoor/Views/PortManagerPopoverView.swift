@@ -9,6 +9,9 @@ import AppKit
 /// helper is mounted as a background view so ⌘R / ⌘T / ESC work while the
 /// popover holds key focus.
 struct PortManagerPopoverView: View {
+    private static let popoverWidth: CGFloat = 340
+    private static let popoverHeight: CGFloat = 560
+
     @Bindable var inventory: PortInventory
     var onHoverChange: (Bool) -> Void
     var onClose: () -> Void
@@ -29,8 +32,7 @@ struct PortManagerPopoverView: View {
             Divider()
             PortManagerToolbar(inventory: inventory)
         }
-        .frame(width: 340)
-        .frame(minHeight: 280, maxHeight: 560)
+        .frame(width: Self.popoverWidth, height: Self.popoverHeight)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear {
