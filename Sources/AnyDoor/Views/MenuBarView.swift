@@ -7,7 +7,7 @@ struct MenuBarView: View {
     let onRequestClose: () -> Void
 
     @State private var panel = PanelStore.shared
-    @State private var popover = HoverPopover { EmptyView() }
+    @State private var popover: HoverPopover?
     @State private var gate = HoverGate()
     // One trigger frame per submenu builtin so hover-anchored popovers can be
     // mounted from any `.submenu`-kind row, not just App Shortcuts.
@@ -62,11 +62,14 @@ struct MenuBarView: View {
         .task {
             await panel.refreshAll()
         }
-        .onAppear { wireGate() }
+        .onAppear {
+            _ = ensurePopover()
+            wireGate()
+        }
         .onDisappear {
             // Don't hide if the popover took key focus deliberately (port-manager
             // search field). Otherwise hide as before.
-            if !popover.isHoldingFocus { popover.hide() }
+            if popover?.isHoldingFocus != true { popover?.hide() }
         }
     }
 
@@ -116,17 +119,18 @@ struct MenuBarView: View {
         gate.onShow = {
             guard let item = activeSubmenu else { return }
             mountPopoverContent(for: item)
-            popover.show(anchoredTo: convertedTriggerFrame(for: item))
+            popover?.show(anchoredTo: convertedTriggerFrame(for: item))
         }
         gate.onHide = {
-            popover.scheduleHide()
-            popover.needsKeyFocus = false
+            popover?.scheduleHide()
+            popover?.needsKeyFocus = false
         }
     }
 
     /// Mount the SwiftUI content appropriate for `item` and toggle the
     /// popover's `needsKeyFocus` flag for views that need first-responder.
     private func mountPopoverContent(for item: BuiltinItem) {
+        let popover = ensurePopover()
         switch item {
         case .appShortcuts:
             popover.needsKeyFocus = false
@@ -166,6 +170,13 @@ struct MenuBarView: View {
         default:
             break
         }
+    }
+
+    private func ensurePopover() -> HoverPopover {
+        if let popover { return popover }
+        let created = HoverPopover { EmptyView() }
+        popover = created
+        return created
     }
 
     /// Convert the panel-local rect (SwiftUI `.global`, top-left origin) to
