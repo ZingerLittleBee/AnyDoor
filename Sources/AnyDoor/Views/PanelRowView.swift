@@ -83,8 +83,19 @@ struct PanelRowView: View {
             ))
             .toggleStyle(.switch)
             .controlSize(.small)
+            .tint(.accentColor)
+            .environment(\.appearsActive, true)
             .labelsHidden()
             .disabled(needsPermission)
+            .opacity(0.01)
+            .overlay {
+                PanelSwitchIndicator(
+                    isOn: entry.toggleState ?? false,
+                    isEnabled: !needsPermission
+                )
+                .allowsHitTesting(false)
+            }
+            .frame(width: 42, height: 24)
         case .action:
             if let hk = entry.hotkey {
                 HotkeyLabel(hotkey: hk)
@@ -94,5 +105,29 @@ struct PanelRowView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
+    }
+}
+
+private struct PanelSwitchIndicator: View {
+    let isOn: Bool
+    let isEnabled: Bool
+
+    var body: some View {
+        ZStack(alignment: isOn ? .trailing : .leading) {
+            Capsule()
+                .fill(trackColor)
+            Circle()
+                .fill(.white)
+                .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
+                .padding(2)
+        }
+        .frame(width: 42, height: 24)
+        .opacity(isEnabled ? 1 : 0.45)
+        .animation(.snappy(duration: 0.16), value: isOn)
+    }
+
+    private var trackColor: Color {
+        if isOn { return .accentColor }
+        return .secondary.opacity(0.28)
     }
 }
