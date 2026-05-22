@@ -29,6 +29,9 @@ final class PanelStore {
     /// Per-item in-flight guard preventing overlapping toggles from desynchronizing state.
     private var togglesInFlight: Set<BuiltinItem> = []
 
+    /// Per-item in-flight guard preventing overlapping action runs from racing.
+    private var actionsInFlight: Set<BuiltinItem> = []
+
     private init() {}
 
     func bootstrap(
@@ -149,8 +152,15 @@ final class PanelStore {
     }
 
     /// Run a one-shot action.
+    ///
+    /// Guarded against overlapping calls: a second invocation for the same item while the
+    /// first is mid-flight is dropped. Actor isolation alone does not serialize runs — an
+    /// `actor` provider yields its executor at every `await`.
     func run(_ item: BuiltinItem) async {
         guard let provider = providers[item] as? any ActionProvider else { return }
+        guard !actionsInFlight.contains(item) else { return }
+        actionsInFlight.insert(item)
+        defer { actionsInFlight.remove(item) }
         do {
             try await provider.run()
         } catch {
