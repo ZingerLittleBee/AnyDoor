@@ -8,7 +8,7 @@ actor ScreenshotProvider: ActionProvider {
 
     func run() async throws {
         do {
-            _ = try await ShellRunner.run("/usr/sbin/screencapture", args: ["-i", "-c"])
+            _ = try await ShellRunner.run("/usr/sbin/screencapture", args: ["-i", "-c"], timeout: nil)
         } catch BuiltinError.shellFailed {
             // screencapture exits non-zero when the user cancels with Esc; treat cancellation as a no-op.
         }

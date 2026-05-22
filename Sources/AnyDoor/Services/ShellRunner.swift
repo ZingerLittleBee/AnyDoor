@@ -6,11 +6,12 @@ import Foundation
 /// linking against the corresponding C API would be more complex than calling out.
 enum ShellRunner {
     /// Launch a binary with args. Returns combined stdout/stderr. Throws on non-zero exit
-    /// or timeout (default 5 seconds).
+    /// or timeout. Pass `timeout: nil` for interactive subprocesses that have no meaningful
+    /// time budget (e.g. `screencapture -i`).
     static func run(
         _ path: String,
         args: [String] = [],
-        timeout: TimeInterval = 5
+        timeout: TimeInterval? = 5
     ) async throws -> String {
         try await Task.detached(priority: .userInitiated) {
             let process = Process()
@@ -23,10 +24,10 @@ enum ShellRunner {
 
             try process.run()
 
-            // Timeout watchdog
-            let deadline = Date().addingTimeInterval(timeout)
+            // Timeout watchdog — only armed when a timeout is supplied.
+            let deadline = timeout.map { Date().addingTimeInterval($0) }
             while process.isRunning {
-                if Date() > deadline {
+                if let deadline, Date() > deadline {
                     process.terminate()
                     let data = try? pipe.fileHandleForReading.readToEnd()
                     let output = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
