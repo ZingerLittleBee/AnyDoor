@@ -5,6 +5,22 @@ import XCTest
 
 final class PortManagerPopoverViewTests: XCTestCase {
     @MainActor
+    func testPortManagerPopoverSeparatesSearchHeaderFromContent() {
+        let inventory = PortInventory(
+            scanner: StubScanner(records: []),
+            defaults: isolatedDefaults()
+        )
+        let view = PortManagerPopoverView(
+            inventory: inventory,
+            onHoverChange: { _ in },
+            onClose: {}
+        )
+        let bodyType = String(reflecting: type(of: view.body))
+
+        XCTAssertGreaterThanOrEqual(bodyType.occurrences(of: "Divider"), 2, bodyType)
+    }
+
+    @MainActor
     func testPortManagerPopoverUsesFixedHeightAcrossContentStates() async {
         let emptyInventory = PortInventory(
             scanner: StubScanner(records: []),
@@ -69,5 +85,11 @@ final class PortManagerPopoverViewTests: XCTestCase {
                 binds: [PortBind(address: "*", family: .ipv4)]
             )
         }
+    }
+}
+
+private extension String {
+    func occurrences(of needle: String) -> Int {
+        components(separatedBy: needle).count - 1
     }
 }

@@ -23,6 +23,7 @@ struct PortManagerPopoverView: View {
                 inventory: inventory,
                 searchFocused: $searchFocused
             )
+            Divider()
             if let err = inventory.lastError {
                 PortScanErrorBanner(error: err) {
                     Task { await inventory.refresh(force: true) }
