@@ -1,5 +1,3 @@
-import Foundation
-
 /// Storage keys, default value, and the catalog of SF Symbols offered for the
 /// menu bar icon. Consumed by `AnyDoorApp` (keys + default) and
 /// `GeneralSettingsView` (the picker).

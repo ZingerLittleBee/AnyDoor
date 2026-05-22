@@ -19,5 +19,7 @@ final class MenuBarIconTests: XCTestCase {
 
     func testStorageKeysAreDistinct() {
         XCTAssertNotEqual(MenuBarIcon.visibilityKey, MenuBarIcon.nameKey)
+        XCTAssertEqual(MenuBarIcon.visibilityKey, "menuBar.iconVisible")
+        XCTAssertEqual(MenuBarIcon.nameKey, "menuBar.iconName")
     }
 }
