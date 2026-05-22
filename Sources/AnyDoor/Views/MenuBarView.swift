@@ -41,6 +41,7 @@ struct MenuBarView: View {
 
             // Footer
             HStack(spacing: 8) {
+                Spacer()
                 footerButton("设置", systemImage: "gear") {
                     NSApp.activate()
                     openSettings()
@@ -49,7 +50,6 @@ struct MenuBarView: View {
                 footerButton("退出", systemImage: "power") {
                     NSApplication.shared.terminate(nil)
                 }
-                Spacer()
             }
             .focusEffectDisabled()
             .padding(.horizontal, 8).padding(.bottom, 4)
