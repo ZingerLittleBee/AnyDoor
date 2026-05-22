@@ -9,6 +9,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "settings"
 struct GeneralSettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var accessibilityGranted = HotkeyService.hasAccessibilityPermission
+    @State private var automationGranted = false
 
     var body: some View {
         Form {
@@ -31,14 +32,17 @@ struct GeneralSettingsView: View {
 
             Section("权限") {
                 accessibilityRow
+                automationRow
             }
         }
         .formStyle(.grouped)
-        // Poll while the tab is visible so the badge updates live after the
-        // user grants the permission in System Settings.
+        // Poll while the tab is visible so the badges update live after the
+        // user grants a permission in System Settings.
         .task {
+            await AutomationPermission.activateSystemEvents()
             while !Task.isCancelled {
                 accessibilityGranted = HotkeyService.hasAccessibilityPermission
+                automationGranted = AutomationPermission.isGranted
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -60,6 +64,31 @@ struct GeneralSettingsView: View {
                     .requestsPermission(.accessibility)
             } else {
                 Button("打开系统设置", action: openAccessibilitySettings)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var automationRow: some View {
+        HStack {
+            Label("自动化", systemImage: "gearshape.2")
+            Spacer()
+            if automationGranted {
+                Label("已授权", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else {
+                // Automation has no guided drag flow. Show the system prompt
+                // when undetermined; fall back to System Settings when the
+                // request resolves to a denial (the prompt no longer appears).
+                Button("申请授权") {
+                    Task {
+                        await AutomationPermission.activateSystemEvents()
+                        let granted = await Task.detached {
+                            AutomationPermission.request()
+                        }.value
+                        if !granted { AutomationPermission.openSettings() }
+                    }
+                }
             }
         }
     }
