@@ -8,10 +8,6 @@ struct PortTreeView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(inventory.groupedByProcess) { group in
                     PortProcessGroupRow(group: group, inventory: inventory)
-                    // Skip the trailing divider after the last row to avoid a dangling line.
-                    if group.id != inventory.groupedByProcess.last?.id {
-                        Divider()
-                    }
                 }
             }
         }
@@ -75,14 +71,13 @@ private struct PortProcessGroupRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        // `contentShape` before `glassEffect` ensures the entire header row remains
-        // hit-testable (chevron button + hover detection) even with the glass overlay.
         .contentShape(Rectangle())
-        // Interactive Liquid Glass styling matches PortListView / PanelRowView /
-        // AppShortcutsPopoverView. `.interactive()` provides its own hover affordance,
-        // replacing the previous hardcoded white tint that was invisible in Light Mode.
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
+        .background(headerBackground, in: .rect(cornerRadius: 6))
         .onHover { isHeaderHovered = $0 }
+    }
+
+    private var headerBackground: Color {
+        isHeaderHovered ? Color.primary.opacity(0.06) : .clear
     }
 
     @ViewBuilder
