@@ -20,11 +20,12 @@ final class HoverPopover {
     private(set) var isHoldingFocus: Bool = false
 
     private let panel: KeyableHoverPanel
-    private let hostingController: NSHostingController<AnyView>
+    private let containerView: NSView
+    private let hostingView: NSHostingView<AnyView>
     private var hideTask: Task<Void, Never>?
-    // nonisolated(unsafe) so deinit can access them without MainActor hop.
-    nonisolated(unsafe) private var keyObserver: NSObjectProtocol?
-    nonisolated(unsafe) private var resignObserver: NSObjectProtocol?
+    // nonisolated(unsafe) so deinit can remove observers without a MainActor hop.
+    @ObservationIgnored nonisolated(unsafe) private var keyObserver: NSObjectProtocol?
+    @ObservationIgnored nonisolated(unsafe) private var resignObserver: NSObjectProtocol?
 
     /// Set to `true` for popovers whose SwiftUI content needs first-responder focus
     /// (e.g. TextField). Leave `false` for read-only popovers — they keep the
@@ -34,12 +35,20 @@ final class HoverPopover {
     }
 
     init<Content: View>(@ViewBuilder content: () -> Content) {
-        let controller = NSHostingController(rootView: AnyView(content()))
-        controller.sizingOptions = [.preferredContentSize]
-        self.hostingController = controller
+        let rootView = AnyView(content())
+        let initialSize = Self.fittingSize(for: rootView, fallback: NSSize(width: 240, height: 200))
+        let hostingView = NSHostingView(rootView: rootView)
+        hostingView.sizingOptions = []
+        hostingView.frame = NSRect(origin: .zero, size: initialSize)
+        hostingView.autoresizingMask = [.width, .height]
+
+        let containerView = NSView(frame: NSRect(origin: .zero, size: initialSize))
+        containerView.addSubview(hostingView)
+        self.containerView = containerView
+        self.hostingView = hostingView
 
         let panel = KeyableHoverPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 240, height: 200),
+            contentRect: NSRect(origin: .zero, size: initialSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -49,7 +58,7 @@ final class HoverPopover {
         panel.hasShadow = true
         panel.level = .floating
         panel.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        panel.contentViewController = controller
+        panel.contentView = containerView
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
         self.panel = panel
@@ -73,12 +82,10 @@ final class HoverPopover {
     }
 
     func updateContent<Content: View>(@ViewBuilder content: () -> Content) {
-        hostingController.rootView = AnyView(content())
-        hostingController.view.layoutSubtreeIfNeeded()
-        let fitting = hostingController.view.fittingSize
-        if fitting.width > 0 && fitting.height > 0 {
-            panel.setContentSize(fitting)
-        }
+        let rootView = AnyView(content())
+        hostingView.rootView = rootView
+        hostingView.layoutSubtreeIfNeeded()
+        resizePanel(to: Self.fittingSize(for: rootView, fallback: panel.frame.size))
     }
 
     /// Show the popover anchored to the right side of `referenceFrame` (screen coordinates).
@@ -123,6 +130,22 @@ final class HoverPopover {
         hideTask = nil
         panel.orderOut(nil)
     }
+
+    private func resizePanel(to size: NSSize) {
+        guard size.width > 0 && size.height > 0 else { return }
+        panel.setContentSize(size)
+        containerView.frame = NSRect(origin: .zero, size: size)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+    }
+
+    private static func fittingSize(for rootView: AnyView, fallback: NSSize) -> NSSize {
+        let measuringView = NSHostingView(rootView: rootView)
+        measuringView.sizingOptions = .intrinsicContentSize
+        measuringView.layoutSubtreeIfNeeded()
+        let fitting = measuringView.fittingSize
+        if fitting.width > 0 && fitting.height > 0 { return fitting }
+        return fallback
+    }
 }
 
 /// NSPanel subclass whose key-eligibility is controlled by an opt-in flag.
@@ -160,10 +183,9 @@ final class HoverGate {
 
     func showImmediately() {
         showTask?.cancel()
-        if !isShown {
-            isShown = true
-            onShow()
-        }
+        hideTask?.cancel()
+        if !isShown { isShown = true }
+        onShow()
     }
 
     /// Forcibly reset all tracked hover state. Used by the port-manager ESC
@@ -182,8 +204,11 @@ final class HoverGate {
     }
 
     private func scheduleShow() {
-        guard !isShown else { return }
         hideTask?.cancel()
+        if isShown {
+            onShow()
+            return
+        }
         showTask?.cancel()
         showTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 400_000_000)

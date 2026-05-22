@@ -109,14 +109,16 @@ struct LsofRunner: SubprocessRunning {
         process.standardOutput = outPipe
         process.standardError = errPipe
 
+        try Task.checkCancellation()
         do { try process.run() }
         catch { throw SubprocessError.spawnFailed("\(error)") }
 
         // OSAllocatedUnfairLock<Bool> — no new dependency, watchdog and
         // result-builder both read/write through .withLock.
         let timedOut = OSAllocatedUnfairLock<Bool>(initialState: false)
+        let cancelledByTask = OSAllocatedUnfairLock<Bool>(initialState: false)
 
-        return await withTaskCancellationHandler {
+        return try await withTaskCancellationHandler {
             // Drain pipes concurrently so the kernel buffer never fills.
             async let outData: Data = readAll(outPipe.fileHandleForReading)
             async let errData: Data = readAll(errPipe.fileHandleForReading)
@@ -134,6 +136,9 @@ struct LsofRunner: SubprocessRunning {
             watchdog.cancel()
             process.waitUntilExit()
 
+            if cancelledByTask.withLock({ $0 }) || Task.isCancelled {
+                throw CancellationError()
+            }
             return SubprocessResult(
                 stdout: String(data: out, encoding: .utf8) ?? "",
                 stderr: String(data: err, encoding: .utf8) ?? "",
@@ -141,6 +146,7 @@ struct LsofRunner: SubprocessRunning {
                 timedOut: timedOut.withLock { $0 }
             )
         } onCancel: {
+            cancelledByTask.withLock { $0 = true }
             if process.isRunning { process.terminate() }
         }
     }

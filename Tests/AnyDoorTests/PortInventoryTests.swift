@@ -135,6 +135,93 @@ final class PortInventoryTests: XCTestCase {
         XCTAssertFalse(inv.isRefreshing)
     }
 
+    @MainActor
+    func testRefreshCancellationDoesNotSurfaceAsScanError() async {
+        struct CancellingScanner: PortScanning {
+            func scanTCPListening() async throws -> [PortRecord] {
+                throw CancellationError()
+            }
+            func kill(pid: pid_t, signal: Int32) -> SignalResult { .success }
+        }
+        let inv = PortInventory(scanner: CancellingScanner(), defaults: isolatedDefaults())
+
+        await inv.refresh()
+
+        XCTAssertNil(inv.lastError)
+        XCTAssertFalse(inv.isRefreshing)
+    }
+
+    @MainActor
+    func testRefreshReusesRecentSuccessfulScan() async {
+        let scanner = CountingScanner(records: [
+            PortRecord(port: 3000, pid: 1, processName: "node",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)])
+        ])
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+
+        await inv.refresh()
+        await inv.refresh()
+
+        XCTAssertEqual(scanner.scanCalls, 1)
+        XCTAssertEqual(inv.records.map(\.port), [3000])
+    }
+
+    @MainActor
+    func testRefreshCachesEmptySuccessfulScan() async {
+        let scanner = CountingScanner(records: [])
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+
+        await inv.refresh()
+        await inv.refresh()
+
+        XCTAssertEqual(scanner.scanCalls, 1)
+        XCTAssertTrue(inv.records.isEmpty)
+    }
+
+    @MainActor
+    func testForcedRefreshBypassesRecentCache() async {
+        let scanner = CountingScanner(records: [
+            PortRecord(port: 3000, pid: 1, processName: "node",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)])
+        ])
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+
+        await inv.refresh()
+        scanner.records = [
+            PortRecord(port: 4000, pid: 2, processName: "ruby",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)])
+        ]
+        await inv.refresh(force: true)
+
+        XCTAssertEqual(scanner.scanCalls, 2)
+        XCTAssertEqual(inv.records.map(\.port), [4000])
+    }
+
+    @MainActor
+    func testRefreshScansAgainAfterCacheExpires() async {
+        var currentDate = Date(timeIntervalSince1970: 1_000)
+        let scanner = CountingScanner(records: [
+            PortRecord(port: 3000, pid: 1, processName: "node",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)])
+        ])
+        let inv = PortInventory(
+            scanner: scanner,
+            defaults: isolatedDefaults(),
+            cacheDuration: 10,
+            now: { currentDate }
+        )
+
+        await inv.refresh()
+        currentDate = currentDate.addingTimeInterval(11)
+        await inv.refresh()
+
+        XCTAssertEqual(scanner.scanCalls, 2)
+    }
+
     /// Records every kill call and lets the test choose what `SignalResult` to return.
     private final class RecordingKillScanner: PortScanning, @unchecked Sendable {
         var records: [PortRecord]
@@ -149,6 +236,22 @@ final class PortInventoryTests: XCTestCase {
             killCalls.append((pid, signal))
             return killHandler(pid, signal)
         }
+    }
+
+    private final class CountingScanner: PortScanning, @unchecked Sendable {
+        var records: [PortRecord]
+        private(set) var scanCalls = 0
+
+        init(records: [PortRecord]) {
+            self.records = records
+        }
+
+        func scanTCPListening() async throws -> [PortRecord] {
+            scanCalls += 1
+            return records
+        }
+
+        func kill(pid: pid_t, signal: Int32) -> SignalResult { .success }
     }
 
     @MainActor

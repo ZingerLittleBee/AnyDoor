@@ -5,16 +5,9 @@ import SwiftData
 struct AnyDoorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
-    @AppStorage(MenuBarIcon.visibilityKey) private var iconVisible = true
-    @AppStorage(MenuBarIcon.nameKey) private var iconName = MenuBarIcon.defaultName
-
     var body: some Scene {
-        MenuBarExtra("AnyDoor", systemImage: iconName, isInserted: $iconVisible) {
-            MenuBarView()
-                .modelContainer(appDelegate.modelContainer)
-        }
-        .menuBarExtraStyle(.window)
-
+        // The menu bar item is owned by `MenuBarController` (see AppDelegate),
+        // not a SwiftUI `MenuBarExtra`. Only the Settings scene lives here.
         Settings {
             SettingsView()
                 .modelContainer(appDelegate.modelContainer)

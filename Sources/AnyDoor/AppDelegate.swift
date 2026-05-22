@@ -7,6 +7,8 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
+    private var menuBarController: MenuBarController?
+    private var defaultsObserver: NSObjectProtocol?
 
     override init() {
         do {
@@ -75,6 +77,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         HotkeyService.shared.start()
         PanelStore.shared.rebuildHotkeySnapshots()
+
+        // Menu bar status item. Replaces SwiftUI `MenuBarExtra`, whose
+        // `isInserted: false` state infinite-loops the scene graph on macOS 26.
+        let menuBar = MenuBarController(modelContainer: modelContainer)
+        menuBar.install()
+        menuBarController = menuBar
+        defaultsObserver = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: UserDefaults.standard,
+            queue: .main
+        ) { [weak menuBar] _ in
+            MainActor.assumeIsolated { menuBar?.syncFromPreferences() }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

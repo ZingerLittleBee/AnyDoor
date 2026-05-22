@@ -2,8 +2,13 @@ import SwiftUI
 import AppKit
 
 struct MenuBarView: View {
+    /// Invoked by the footer's Settings button so the controller can dismiss
+    /// the panel before the Settings window opens.
+    let onRequestClose: () -> Void
+
+    @Environment(\.openSettings) private var openSettings
     @State private var panel = PanelStore.shared
-    @State private var popover = HoverPopover { EmptyView() }
+    @State private var popover: HoverPopover?
     @State private var gate = HoverGate()
     // One trigger frame per submenu builtin so hover-anchored popovers can be
     // mounted from any `.submenu`-kind row, not just App Shortcuts.
@@ -36,15 +41,15 @@ struct MenuBarView: View {
 
             // Footer
             HStack(spacing: 8) {
-                SettingsLink { Label("设置", systemImage: "gear") }
-                    .buttonStyle(.glass)
-                    .simultaneousGesture(TapGesture().onEnded {
-                        NSApplication.shared.activate()
-                    })
-                Button { NSApplication.shared.terminate(nil) } label: {
-                    Label("退出", systemImage: "power")
-                }.buttonStyle(.glass)
                 Spacer()
+                footerButton("设置", systemImage: "gear") {
+                    NSApp.activate()
+                    openSettings()
+                    onRequestClose()
+                }
+                footerButton("退出", systemImage: "power") {
+                    NSApplication.shared.terminate(nil)
+                }
             }
             .focusEffectDisabled()
             .padding(.horizontal, 8).padding(.bottom, 4)
@@ -55,12 +60,32 @@ struct MenuBarView: View {
         .task {
             await panel.refreshAll()
         }
-        .onAppear { wireGate() }
+        .onAppear {
+            _ = ensurePopover()
+            wireGate()
+        }
         .onDisappear {
             // Don't hide if the popover took key focus deliberately (port-manager
             // search field). Otherwise hide as before.
-            if !popover.isHoldingFocus { popover.hide() }
+            if popover?.isHoldingFocus != true { popover?.hide() }
         }
+    }
+
+    private func footerButton(
+        _ title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 10)
+                .frame(height: 24)
+                .contentShape(Rectangle())
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -74,12 +99,8 @@ struct MenuBarView: View {
                 onPermission: openPermissionsSettings
             )
             .background(
-                GeometryReader { proxy in
-                    Color.clear.onAppear {
-                        triggerFrames[item] = proxy.frame(in: .global)
-                    }.onChange(of: proxy.frame(in: .global)) { _, new in
-                        triggerFrames[item] = new
-                    }
+                ScreenFrameReader { frame in
+                    triggerFrames[item] = frame
                 }
             )
             .onHover { hovered in
@@ -109,17 +130,18 @@ struct MenuBarView: View {
         gate.onShow = {
             guard let item = activeSubmenu else { return }
             mountPopoverContent(for: item)
-            popover.show(anchoredTo: convertedTriggerFrame(for: item))
+            popover?.show(anchoredTo: convertedTriggerFrame(for: item))
         }
         gate.onHide = {
-            popover.scheduleHide()
-            popover.needsKeyFocus = false
+            popover?.scheduleHide()
+            popover?.needsKeyFocus = false
         }
     }
 
     /// Mount the SwiftUI content appropriate for `item` and toggle the
     /// popover's `needsKeyFocus` flag for views that need first-responder.
     private func mountPopoverContent(for item: BuiltinItem) {
+        let popover = ensurePopover()
         switch item {
         case .appShortcuts:
             popover.needsKeyFocus = false
@@ -156,28 +178,22 @@ struct MenuBarView: View {
                     }
                 )
             }
+            Task { await PortInventory.shared.refresh() }
         default:
             break
         }
     }
 
-    /// Convert the panel-local rect (SwiftUI `.global`, top-left origin) to
-    /// screen coordinates. SwiftUI's Y increases downward while NSWindow uses
-    /// bottom-left origin, so we flip Y against the window's content height
-    /// before letting AppKit convert to screen space. The popover panel is
-    /// excluded from the lookup so a second hover doesn't accidentally anchor
-    /// against the already-open popover window.
+    private func ensurePopover() -> HoverPopover {
+        if let popover { return popover }
+        let created = HoverPopover { EmptyView() }
+        popover = created
+        return created
+    }
+
+    /// Returns the submenu row frame in AppKit screen coordinates.
     private func convertedTriggerFrame(for item: BuiltinItem) -> NSRect {
-        let local = triggerFrames[item] ?? .zero
-        guard let window = menuBarPanelWindow() else { return local }
-        let panelHeight = window.frame.height
-        let flipped = NSRect(
-            x: local.origin.x,
-            y: panelHeight - local.origin.y - local.size.height,
-            width: local.size.width,
-            height: local.size.height
-        )
-        return window.convertToScreen(flipped)
+        triggerFrames[item] ?? menuBarPanelWindow()?.frame ?? .zero
     }
 
     private func menuBarPanelWindow() -> NSWindow? {
@@ -194,6 +210,55 @@ struct MenuBarView: View {
     private func openPermissionsSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
             NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+private struct ScreenFrameReader: NSViewRepresentable {
+    var onChange: (NSRect) -> Void
+
+    func makeNSView(context: Context) -> FrameReportingView {
+        let view = FrameReportingView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateNSView(_ nsView: FrameReportingView, context: Context) {
+        nsView.onChange = onChange
+    }
+
+    final class FrameReportingView: NSView {
+        var onChange: ((NSRect) -> Void)?
+        private var lastFrame: NSRect = .zero
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            reportFrame()
+        }
+
+        override func setFrameSize(_ newSize: NSSize) {
+            super.setFrameSize(newSize)
+            reportFrame()
+        }
+
+        override func setFrameOrigin(_ newOrigin: NSPoint) {
+            super.setFrameOrigin(newOrigin)
+            reportFrame()
+        }
+
+        override func layout() {
+            super.layout()
+            reportFrame()
+        }
+
+        private func reportFrame() {
+            guard let window else { return }
+            let frame = window.convertToScreen(convert(bounds, to: nil))
+            guard frame != lastFrame else { return }
+            lastFrame = frame
+            RunLoop.main.perform { [weak self] in
+                self?.onChange?(frame)
+            }
         }
     }
 }

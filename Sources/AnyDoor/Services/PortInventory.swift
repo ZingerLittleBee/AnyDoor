@@ -25,6 +25,8 @@ final class PortInventory {
 
     private let scanner: any PortScanning
     private let defaults: UserDefaults
+    private let cacheDuration: TimeInterval
+    private let now: () -> Date
     private static let viewModeKey = "PortInventory.viewMode"
     private static let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "PortInventory")
 
@@ -32,6 +34,7 @@ final class PortInventory {
 
     private var refreshGeneration: UInt64 = 0
     private var inflightCount: Int = 0
+    private var lastSuccessfulRefreshAt: Date?
 
     // MARK: - Lifecycle
 
@@ -39,17 +42,25 @@ final class PortInventory {
 
     init(
         scanner: any PortScanning = PortScanner(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        cacheDuration: TimeInterval = 10,
+        now: @escaping () -> Date = Date.init
     ) {
         self.scanner = scanner
         self.defaults = defaults
+        self.cacheDuration = cacheDuration
+        self.now = now
         let raw = defaults.string(forKey: Self.viewModeKey)
         self.viewMode = raw.flatMap(ViewMode.init(rawValue:)) ?? .list
     }
 
     // Placeholder methods — real implementations land in Task 10 and Task 11.
 
-    func refresh() async {
+    func refresh(force: Bool = false) async {
+        if !force, isCacheFresh {
+            return
+        }
+
         refreshGeneration &+= 1
         let myGen = refreshGeneration
         inflightCount += 1
@@ -61,9 +72,13 @@ final class PortInventory {
             if myGen == refreshGeneration {
                 records = scanned
                 lastError = nil
+                lastSuccessfulRefreshAt = now()
             } else {
                 Self.logger.debug("dropping stale scan result (gen \(myGen), now \(self.refreshGeneration))")
             }
+            isRefreshing = inflightCount > 0
+        } catch is CancellationError {
+            inflightCount -= 1
             isRefreshing = inflightCount > 0
         } catch {
             inflightCount -= 1
@@ -75,6 +90,12 @@ final class PortInventory {
         }
     }
 
+    private var isCacheFresh: Bool {
+        guard lastError == nil,
+              let lastSuccessfulRefreshAt else { return false }
+        return now().timeIntervalSince(lastSuccessfulRefreshAt) < cacheDuration
+    }
+
     func kill(pid: pid_t) async {
         killingPIDs.insert(pid)
 
@@ -82,7 +103,7 @@ final class PortInventory {
         switch scanner.kill(pid: pid, signal: SIGTERM) {
         case .failure(.ESRCH):
             // Process already gone — treat as success.
-            await refresh()
+            await refresh(force: true)
             killingPIDs.remove(pid)
             return
         case .failure(let code):
@@ -98,16 +119,16 @@ final class PortInventory {
 
         // Step 2: give the process time to handle SIGTERM, then re-scan.
         try? await Task.sleep(for: .milliseconds(500))
-        await refresh()
+        await refresh(force: true)
 
         // Step 3: if still alive, escalate.
         if records.contains(where: { $0.pid == pid }) {
             switch scanner.kill(pid: pid, signal: SIGKILL) {
             case .success:
                 try? await Task.sleep(for: .milliseconds(200))
-                await refresh()
+                await refresh(force: true)
             case .failure(.ESRCH):
-                await refresh()
+                await refresh(force: true)
             case .failure(let code):
                 let reason: KillFailure.Reason =
                     (code == .EPERM) ? .permissionDenied : .other(code.rawValue)

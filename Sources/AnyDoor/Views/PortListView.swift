@@ -8,10 +8,6 @@ struct PortListView: View {
             LazyVStack(spacing: 0) {
                 ForEach(inventory.filteredRecords) { record in
                     PortRowView(record: record, inventory: inventory)
-                    // Skip the trailing divider after the last row to avoid a dangling line.
-                    if record.id != inventory.filteredRecords.last?.id {
-                        Divider()
-                    }
                 }
             }
         }
@@ -50,13 +46,14 @@ struct PortRowView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        // Interactive Liquid Glass styling matches PanelRowView / AppShortcutsPopoverView.
-        // `.interactive()` handles its own hover affordance, replacing the previous
-        // hardcoded white tint that was invisible in Light Mode.
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
         .contentShape(Rectangle())
+        .background(rowBackground, in: .rect(cornerRadius: 6))
         .onHover { isHovered = $0 }
         .help(tooltipText)
+    }
+
+    private var rowBackground: Color {
+        isHovered ? Color.primary.opacity(0.06) : .clear
     }
 
     @ViewBuilder

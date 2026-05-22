@@ -9,6 +9,9 @@ import AppKit
 /// helper is mounted as a background view so ⌘R / ⌘T / ESC work while the
 /// popover holds key focus.
 struct PortManagerPopoverView: View {
+    private static let popoverWidth: CGFloat = 340
+    private static let popoverHeight: CGFloat = 560
+
     @Bindable var inventory: PortInventory
     var onHoverChange: (Bool) -> Void
     var onClose: () -> Void
@@ -20,21 +23,20 @@ struct PortManagerPopoverView: View {
                 inventory: inventory,
                 searchFocused: $searchFocused
             )
+            Divider()
             if let err = inventory.lastError {
                 PortScanErrorBanner(error: err) {
-                    Task { await inventory.refresh() }
+                    Task { await inventory.refresh(force: true) }
                 }
             }
             content
             Divider()
             PortManagerToolbar(inventory: inventory)
         }
-        .frame(width: 340)
-        .frame(minHeight: 280, maxHeight: 560)
+        .frame(width: Self.popoverWidth, height: Self.popoverHeight)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .task {
-            await inventory.refresh()
+        .onAppear {
             searchFocused = true
         }
         .onHover(perform: onHoverChange)
@@ -100,7 +102,7 @@ private struct PortManagerToolbar: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             toolbarButton(
-                action: { Task { await inventory.refresh() } },
+                action: { Task { await inventory.refresh(force: true) } },
                 label: "刷新",
                 systemImage: "arrow.clockwise",
                 shortcut: "⌘R"
@@ -235,7 +237,7 @@ private struct KeyboardMonitor: NSViewRepresentable {
                 let consumed: Bool = MainActor.assumeIsolated {
                     guard let self else { return false }
                     if cmd && chars == "r" {
-                        Task { await self.inventory.refresh() }
+                        Task { await self.inventory.refresh(force: true) }
                         return true
                     }
                     if cmd && chars == "t" {
