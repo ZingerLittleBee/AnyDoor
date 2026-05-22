@@ -23,7 +23,8 @@ global hotkey from the panel settings exactly like any other action item
 - Trigger via the panel row or an assignable global hotkey.
 - Capture an arbitrary screen region using the native macOS selection UI.
 - Recognize text with the macOS Vision framework (no third-party engine).
-- Recognize mixed Chinese + English automatically.
+- Recognize mixed Chinese + English text (explicit `zh-Hans` + `en-US`
+  recognition language list).
 - Write the recognized text to `NSPasteboard.general`.
 - Show a non-interactive toast at the bottom-center of the screen reporting
   success or failure, auto-dismissing after ~1 second.
@@ -48,23 +49,27 @@ global hotkey from the panel settings exactly like any other action item
 
 | Topic | Decision |
 |-------|----------|
-| Input source | Interactive region selection via `screencapture -i` |
-| Capture mechanism | `screencapture -i <tempfile>` to a temp PNG, decoded to `CGImage`, temp file deleted afterward |
-| Cancellation (Esc) | Silent no-op — no toast, clipboard untouched |
+| Input source | Interactive region selection via `screencapture -i -s` (selection-only; `-s` disables the spacebar window-capture mode) |
+| Capture mechanism | `screencapture -i -s <tempfile>` to a temp PNG, decoded to `CGImage`, temp file deleted afterward |
+| Capture timeout | None — the interactive selection runs with no watchdog; `ShellRunner` is extended to accept an optional/`nil` timeout (see ShellRunner change) |
+| Cancellation (Esc) | Detected by **temp-file absence** after the command, not by exit code. Silent no-op — no toast, clipboard untouched |
+| Control modifier during capture | If the user holds Control while selecting, `screencapture` writes the capture to the clipboard instead of the file (native, non-suppressible behavior). No file is produced, so OCR treats it as a cancellation (silent). Accepted edge case |
 | OCR engine | Vision framework, modern Swift API `RecognizeTextRequest` |
-| Recognition languages | Automatic, `["zh-Hans", "en-US"]`; `.accurate` recognition level |
+| Recognition languages | Explicit `recognitionLanguages = [Locale.Language("zh-Hans"), Locale.Language("en-US")]`; `automaticallyDetectsLanguage = false`; `recognitionLevel = .accurate` |
 | Multi-line handling | One string per recognized observation, joined top-to-bottom with `\n` |
 | Empty result | Failure toast "未识别到文字"; clipboard untouched |
+| Concurrency guard | `PanelStore.run(_:)` gains a per-item in-flight guard (mirroring the existing `toggle` guard) so a re-trigger while OCR is mid-flight is dropped |
 | Toast content | Status only (icon + text); no recognized-text preview |
 | Toast position | Bottom-center of the screen containing the mouse cursor |
 | Toast lifetime | Fade-in 0.15s → hold 1.0s → fade-out 0.2s |
 | Re-trigger | New toast replaces the current one (cancel pending dismiss, reset timer) |
 | Permission | `OCRProvider.permission = .notRequired` |
 | Menu integration | New `BuiltinItem.ocr` with `kind = .action` |
+| Panel ordering | `defaultOrder = 950` positions OCR after "截图到剪贴板" on fresh installs only. Existing installs receive the row appended at the end of the panel (the seeder's standing contract); the user can reorder it in panel settings. No migration |
 
 ## Architecture
 
-Five new units plus small edits to three existing files. Each new unit has a
+Five new units plus small edits to four existing files. Each new unit has a
 single responsibility and a narrow interface.
 
 ```
@@ -107,12 +112,50 @@ Sources/AnyDoor/
   - `kind = .action`
   - `title = "屏幕取词"`
   - `symbol = "text.viewfinder"`
-  - `defaultOrder = 950` (just after `.screenshot` at 900)
+  - `defaultOrder = 950` (positions OCR after `.screenshot` at 900 — see the
+    Panel Ordering note below)
   - `requiresAutomation = false`
   - `feedbackSound = nil`
 - `AppDelegate.swift` — register `OCRProvider()` in the `providers` array.
+- `Services/ShellRunner.swift` — make the timeout optional so an interactive
+  subprocess can run without the watchdog (see ShellRunner change below).
+- `Services/PanelStore.swift` — add a per-item in-flight guard to `run(_:)`
+  (see Action In-Flight Guard below).
 - `BuiltinPreferenceSeeder` — no code change required; it iterates
   `BuiltinItem.allCases`, so the new case is seeded automatically.
+
+### Panel Ordering (existing vs fresh installs)
+
+`BuiltinPreferenceSeeder` only applies `defaultOrder` on a **fresh install**
+(`existing.isEmpty`). For an install that already has `BuiltinPreference`
+rows, the seeder appends every new `BuiltinItem` at the end of the panel
+(`maxOrder + 100`, incrementing). Therefore:
+
+- **Fresh install** — OCR appears right after "截图到剪贴板".
+- **Existing install** — OCR appears at the bottom of the panel; the user can
+  drag it anywhere in panel settings.
+
+This matches how every previously-added built-in behaved and keeps the
+seeder's documented contract intact. No migration is written. `defaultOrder`
+is still defined because it governs the fresh-install seeding order (every
+`BuiltinItem` case must supply one). `MigrationTests` continues to assert the
+append-at-end behavior for existing installs.
+
+### ShellRunner change
+
+`ShellRunner.run` currently defaults to a 5-second timeout and `terminate()`s
+the subprocess when it elapses. An interactive `screencapture` selection
+routinely takes longer than 5 seconds, which would kill the user's selection
+mid-drag. The fix: make the parameter optional —
+
+```
+static func run(_ path: String, args: [String] = [],
+                timeout: TimeInterval? = 5) async throws -> String
+```
+
+When `timeout` is `nil`, the watchdog loop is skipped and the runner simply
+waits for the process to exit. All existing call sites are unaffected (the
+`5` default is unchanged). `RegionCapture` passes `timeout: nil`.
 
 ## Component Details
 
@@ -126,18 +169,20 @@ enum TextRecognizer {
 }
 ```
 
-- Uses Vision's modern Swift API `RecognizeTextRequest`.
-- `recognitionLevel = .accurate`.
-- Recognition languages fixed to `["zh-Hans", "en-US"]`.
-- Returns the top candidate string of each observation, ordered
-  top-to-bottom (sorted by observation bounding-box origin Y, descending in
-  Vision's normalized coordinate space).
+- Uses Vision's modern Swift API `RecognizeTextRequest` (verified against the
+  macOS 26 SDK `Vision.swiftinterface`):
+  - `recognitionLevel = .accurate`
+  - `recognitionLanguages = [Locale.Language(identifier: "zh-Hans"), Locale.Language(identifier: "en-US")]`
+    — the property is `[Foundation.Locale.Language]`, **not** `[String]`.
+  - `automaticallyDetectsLanguage = false` — keep the explicit language list
+    authoritative (the SDK default is `false`, default language `en-US`;
+    setting the list explicitly is what enables Chinese recognition).
+- Runs `try await request.perform(on: cgImage)` → `[RecognizedTextObservation]`.
+- For each observation, takes `observation.transcript` (the recognized text
+  string; available macOS 26+).
+- Orders results top-to-bottom by observation bounding-box origin Y
+  (descending — Vision's normalized coordinate space has Y increasing upward).
 - Throws on a Vision engine error. An empty result is `[]`, not an error.
-
-> Note: the exact `RecognizeTextRequest` API surface (property names,
-> `perform(on:)` signature, observation accessor) is verified against the
-> current macOS 26 SDK during implementation; the contract above is the
-> stable part.
 
 ### `RegionCapture`
 
@@ -150,14 +195,32 @@ enum RegionCapture {
 }
 ```
 
-- Builds a unique temp path under `FileManager.default.temporaryDirectory`.
-- Runs `/usr/sbin/screencapture` with `["-i", <tempPath>]` via `ShellRunner`.
-- Cancellation detection: if `ShellRunner` throws `BuiltinError.shellFailed`,
-  **or** the temp file does not exist after the command returns, treat it as
-  cancellation and return `nil`.
-- If the temp file exists but cannot be decoded to a `CGImage`, throw an
-  error (surfaces as a failure toast).
+- Builds a unique temp path with a `.png` extension under
+  `FileManager.default.temporaryDirectory`.
+- Runs `/usr/sbin/screencapture` with `["-i", "-s", <tempPath>]` via
+  `ShellRunner`, passing `timeout: nil` (no watchdog — the user controls how
+  long the selection takes).
+  - `-s` restricts the interaction to mouse selection, disabling the
+    spacebar window-capture mode.
+- Outcome classification after the command:
+
+  | Signal | Meaning | Result |
+  |--------|---------|--------|
+  | `ShellRunner` throws a process-launch error (not `BuiltinError.shellFailed`) | screencapture could not run | rethrow → failure toast |
+  | `BuiltinError.shellFailed` (non-zero exit) **and** temp file absent | user cancelled (screencapture's cancel exit code is undocumented and unreliable) | return `nil` |
+  | No throw / `shellFailed`, temp file **absent** | user cancelled, or held Control to copy to clipboard | return `nil` |
+  | Temp file **present** but undecodable to `CGImage` | corrupt/empty capture | throw `OCRError.imageDecodeFailed` → failure toast |
+  | Temp file **present** and decodable | success | return the `CGImage` |
+
+  Rationale: `screencapture`'s exit code on cancellation is not documented and
+  varies; the only reliable success signal is a decodable file. A genuine
+  *launch* failure surfaces as a non-`shellFailed` error and is escalated to a
+  failure toast. A non-zero exit with no file is indistinguishable from a
+  cancel and is therefore treated as one.
 - Always deletes the temp file before returning (`defer`).
+
+`OCRError` is a small `enum OCRError: Error { case imageDecodeFailed }`
+defined alongside `RegionCapture`.
 
 ### `OCRProvider`
 
@@ -194,6 +257,40 @@ hop to `@MainActor` via `await`.
 > `ActionProvider.run()` is currently `func run() async throws`. `OCRProvider`
 > implements it without ever throwing (a non-throwing body satisfies a
 > `throws` requirement). No protocol change needed.
+
+`OCRProvider` does **not** rely on actor isolation to prevent overlapping
+runs. An `actor` releases its executor at every `await`, so a second
+`run()` could interleave at the `RegionCapture` await and spawn a second
+`screencapture` selection, racing two OCR pipelines and clobbering the
+clipboard out of order. Overlap is prevented one level up, in
+`PanelStore.run` — see Action In-Flight Guard.
+
+### Action In-Flight Guard
+
+`PanelStore.toggle(_:)` already drops overlapping calls via a
+`togglesInFlight: Set<BuiltinItem>` guard. `PanelStore.run(_:)` has no
+equivalent, so every hotkey press / row tap spawns a fresh
+`Task { await run(item) }` with nothing to serialize them.
+
+Add a symmetric guard:
+
+```
+private var actionsInFlight: Set<BuiltinItem> = []
+
+func run(_ item: BuiltinItem) async {
+    guard let provider = providers[item] as? any ActionProvider else { return }
+    guard !actionsInFlight.contains(item) else { return }
+    actionsInFlight.insert(item)
+    defer { actionsInFlight.remove(item) }
+    do { try await provider.run() }
+    catch { logger.error("Run \(item.rawValue) failed: \(error)") }
+}
+```
+
+`run` is `@MainActor`; the `contains` check and `insert` execute
+synchronously before the first `await`, so a second `Task` entering `run`
+for the same item observes the guard and returns. This protects OCR and,
+as a side effect, hardens every other action against double-triggering.
 
 ### `ToastPresenter`
 
@@ -259,11 +356,14 @@ All cases are handled inside `OCRProvider.run()`; nothing propagates out.
 
 | Situation | Behavior |
 |-----------|----------|
-| Esc cancels selection (shell non-zero **or** temp file absent) | Silent — no toast |
-| Capture succeeded but image decode failed | Failure toast "识别失败" |
+| Esc cancels selection (no temp file produced) | Silent — no toast |
+| Control held during selection (capture goes to clipboard, no file) | Silent — no toast (treated as cancellation) |
+| `screencapture` fails to launch (non-`shellFailed` error) | Failure toast "识别失败" |
+| Temp file produced but undecodable (`OCRError.imageDecodeFailed`) | Failure toast "识别失败" |
 | Vision engine throws | Failure toast "识别失败" |
 | Recognition result empty | Failure toast "未识别到文字", clipboard untouched |
 | Recognition succeeded | Write clipboard + success toast "已复制到剪贴板" |
+| Re-trigger while OCR mid-flight | Dropped by `PanelStore.run` in-flight guard |
 
 ## Concurrency
 
@@ -273,6 +373,9 @@ All cases are handled inside `OCRProvider.run()`; nothing propagates out.
 - `ToastPresenter` is `@MainActor`; calls from `OCRProvider` cross the
   boundary with `await`. `ToastStyle` is `Sendable`.
 - The `NSPasteboard` write is performed on `@MainActor`.
+- Actor isolation does **not** serialize OCR runs (an `actor` yields at every
+  `await`). Overlap is prevented by the `PanelStore.run` in-flight guard —
+  see Action In-Flight Guard.
 - No CGEvent-tap interaction; the hotkey dispatch path (callback →
   `DispatchQueue.main.async` → `PanelStore.dispatch`) is unchanged. The OCR
   work happens well after the tap callback returns, so the ~1s tap budget is
@@ -286,10 +389,15 @@ All cases are handled inside `OCRProvider.run()`; nothing propagates out.
   expected substrings, in top-to-bottom order.
 - **`BuiltinItem` coverage**: extend existing/colocated tests so the new
   `.ocr` case's `kind`, `title`, and `symbol` are asserted.
+- **`PanelStore.run` in-flight guard** (automated, `PanelStoreTests`): a test
+  provider whose `run()` suspends on a continuation; assert a second
+  `run(.ocr)` issued while the first is suspended is dropped (the provider's
+  `run()` body executes once).
 - **`RegionCapture`, `ToastPresenter`, `OCRProvider`**: interactive /
   windowing units — verified manually via `swift run AnyDoor`, triggering the
-  OCR action and the assigned hotkey, and confirming clipboard contents and
-  toast appearance/position/timing.
+  OCR action and the assigned hotkey, and confirming: clipboard contents,
+  toast appearance/position/timing, a >5s selection is not killed, and a
+  rapid double-trigger starts only one capture.
 
 ## Open Questions
 
