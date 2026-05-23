@@ -80,9 +80,9 @@ region, and more.
 
 ## Requirements
 
-- macOS 15+
-- Liquid Glass effects on macOS 26+ only; older supported versions use a
-  standard material fallback.
+- macOS 15 (Sequoia) or later
+- Liquid Glass effects light up on macOS 26 (Tahoe); macOS 15–25 fall back
+  to a standard material surface.
 - Swift 6.2
 - Accessibility permission (System Settings → Privacy & Security → Accessibility)
 
