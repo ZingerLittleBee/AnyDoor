@@ -3,6 +3,30 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.1.0</title>
+            <pubDate>Sun, 24 May 2026 02:11:02 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.1.0</sparkle:version>
+            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[
+### Added
+
+- QR code recognition: drag-select a screen region to decode any QR codes
+  inside it. Payload is copied to the clipboard verbatim; multiple codes
+  are newline-joined top-to-bottom. The toast reports status only and
+  never includes the decoded content. New "识别二维码" panel row with an
+  assignable global hotkey.
+
+### Changed
+
+- Removed the user-tunable update-check frequency setting; Sparkle now
+  uses its default schedule.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.1.0/AnyDoor-1.1.0.zip" length="4004294" type="application/octet-stream" sparkle:edSignature="XXKLeZ6hjoNI/F143qwALK1z4S/gFi9MXPwdNFKSQqyb2zgMsjUcPh4AYLdniiaNlhfnPJCLkYx4nsnWHZ1/DQ=="/>
+        </item>
+        <item>
             <title>1.0.1</title>
             <pubDate>Sat, 23 May 2026 21:15:37 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -10,15 +34,7 @@
             <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[
-### Fixed
-
-- App failed to launch from `/Applications` because the bundled
-  `Sparkle.framework` was not on dyld's search path. The release script now
-  injects `@executable_path/../Frameworks` into the main executable's rpath
-  before codesigning.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.0.1/AnyDoor-1.0.1.zip" length="4002276" type="application/octet-stream" sparkle:edSignature="r9Z3b50AmAIM1cesw5hn+w+oH5JHFlSQxtvgc9USXaHpzDEh0eYXslKItmiKKOP98JfmkFjO5d7AQqQ77zLjAw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.0.1/AnyDoor-1.0.1.zip" length="4002276" type="application/octet-stream" sparkle:edSignature="r9Z3b50AmAIM1cesw5hn+w+oH5JHFlSQxtvgc9USXaHpzDEh0eYXslKItmiKKOP98JfmkFjO5d7AQqQ77zLjAw=="/>
         </item>
         <item>
             <title>1.0.0</title>

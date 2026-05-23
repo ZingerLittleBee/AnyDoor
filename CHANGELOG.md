@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-24
+
 ### Added
 
 - QR code recognition: drag-select a screen region to decode any QR codes
