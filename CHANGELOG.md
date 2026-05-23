@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-23
+
 ### Fixed
 
 - App failed to launch from `/Applications` because the bundled
