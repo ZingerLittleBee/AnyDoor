@@ -15,15 +15,24 @@ final class UpdateServiceTests: XCTestCase {
         XCTAssertTrue(fake.automaticallyChecksForUpdates)
     }
 
-    func testCheckIntervalDaysMapsToSeconds() {
+    func testInitAppliesDefaultCheckIntervalToAdapter() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        fake.updateCheckInterval = 7 * 86_400  // any stale value
 
-        service.checkIntervalDays = 7
-        XCTAssertEqual(fake.updateCheckInterval, 7 * 86_400, accuracy: 0.5)
+        _ = UpdateService(adapter: fake, skippedVersionProvider: { nil })
 
-        service.checkIntervalDays = 1
-        XCTAssertEqual(fake.updateCheckInterval, 86_400, accuracy: 0.5)
+        XCTAssertEqual(fake.updateCheckInterval, UpdateService.defaultCheckInterval, accuracy: 0.5)
+    }
+
+    func testRebindResetsAdapterToDefaultCheckInterval() {
+        let initial = FakeUpdater()
+        let service = UpdateService(adapter: initial, skippedVersionProvider: { nil })
+
+        let replacement = FakeUpdater()
+        replacement.updateCheckInterval = 30 * 86_400
+        service.rebind(to: replacement)
+
+        XCTAssertEqual(replacement.updateCheckInterval, UpdateService.defaultCheckInterval, accuracy: 0.5)
     }
 
     func testCheckForUpdatesForwardsToAdapter() {

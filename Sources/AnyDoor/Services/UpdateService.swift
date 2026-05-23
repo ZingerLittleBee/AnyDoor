@@ -10,6 +10,9 @@ import Observation
 @Observable
 final class UpdateService {
 
+    /// Fixed cadence for scheduled background update checks. Not user-tunable.
+    static let defaultCheckInterval: TimeInterval = 86_400
+
     // MARK: - Public state
 
     private(set) var availableVersion: String? = nil
@@ -20,21 +23,6 @@ final class UpdateService {
             // Avoid the echo when we set this from rebind/init.
             guard suppressAdapterEcho == false else { return }
             adapter.automaticallyChecksForUpdates = automaticChecksEnabled
-        }
-    }
-
-    var checkIntervalDays: Int {
-        didSet {
-            let clamped = max(1, checkIntervalDays)
-            if clamped != checkIntervalDays {
-                // didSet runs again; the guard below stops the loop.
-                suppressAdapterEcho = true
-                checkIntervalDays = clamped
-                suppressAdapterEcho = false
-                return
-            }
-            guard suppressAdapterEcho == false else { return }
-            adapter.updateCheckInterval = TimeInterval(checkIntervalDays) * 86_400
         }
     }
 
@@ -60,8 +48,8 @@ final class UpdateService {
         self.skippedVersionProvider = skippedVersionProvider
         self.suppressAdapterEcho = true
         self.automaticChecksEnabled = adapter.automaticallyChecksForUpdates
-        self.checkIntervalDays = max(1, Int(adapter.updateCheckInterval / 86_400))
         self.suppressAdapterEcho = false
+        adapter.updateCheckInterval = Self.defaultCheckInterval
     }
 
     /// Swap in the real Sparkle adapter once `AppDelegate` has constructed the controller.
@@ -69,8 +57,8 @@ final class UpdateService {
         self.adapter = adapter
         suppressAdapterEcho = true
         automaticChecksEnabled = adapter.automaticallyChecksForUpdates
-        checkIntervalDays = max(1, Int(adapter.updateCheckInterval / 86_400))
         suppressAdapterEcho = false
+        adapter.updateCheckInterval = Self.defaultCheckInterval
     }
 
     // MARK: - User-facing actions
