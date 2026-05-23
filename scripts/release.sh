@@ -165,8 +165,11 @@ while IFS= read -r -d '' xpc; do
   codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$xpc"
 done < <(find "$FW_ROOT/XPCServices" -type d -name '*.xpc' -print0 2>/dev/null || true)
 
-for helper in "$FW_ROOT/Autoupdate.app" "$FW_ROOT/Updater.app"; do
-  [[ -d "$helper" ]] && codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$helper"
+# Sparkle 2.x ships Autoupdate as a bare Mach-O alongside Updater.app; older
+# versions wrapped it in Autoupdate.app. Sign whichever form is present so the
+# notary sees the helper signed with our Developer ID + secure timestamp.
+for helper in "$FW_ROOT/Autoupdate" "$FW_ROOT/Autoupdate.app" "$FW_ROOT/Updater.app"; do
+  [[ -e "$helper" ]] && codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$helper"
 done
 
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
