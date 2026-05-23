@@ -1076,7 +1076,7 @@ for bin in sign_update generate_appcast; do
   [[ -x "$SPARKLE_BIN/$bin" ]] || die "missing $SPARKLE_BIN/$bin — run 'make sparkle-tools'"
 done
 
-xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" --limit 1 >/dev/null 2>&1 \
+xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
   || die "notarytool keychain profile '$NOTARY_PROFILE' not configured"
 
 gh auth status -h github.com >/dev/null 2>&1 || die "gh CLI is not authenticated"
@@ -1392,7 +1392,7 @@ xcrun notarytool store-credentials "AnyDoor-Notary" \
     --password "<app-specific password>"
 ```
 
-Verify: `xcrun notarytool history --keychain-profile AnyDoor-Notary --limit 1`
+Verify: `xcrun notarytool history --keychain-profile AnyDoor-Notary`
 Expected: succeeds (may show no entries on a fresh setup, but must not error).
 
 - [ ] **Step 3: Confirm signing identity**
