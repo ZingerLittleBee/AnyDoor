@@ -93,12 +93,12 @@ struct PanelSettingsView: View {
         // the submenu is opened by hovering). Reserve the column width so the
         // grid stays aligned.
         if case let .builtin(item) = entry.source, item.kind == .submenu {
-            Color.clear.frame(width: 130)
+            Color.clear.frame(width: 150)
         } else {
             HotkeyRecorder(hotkey: .constant(entry.hotkey)) { newValue in
                 handleHotkeyChange(entry: entry, newValue: newValue)
             }
-            .frame(width: 130, alignment: .trailing)
+            .frame(width: 150, alignment: .trailing)
         }
     }
 
@@ -184,7 +184,7 @@ struct PanelSettingsView: View {
                     onChange: { newValue in handleHotkeyChange(entry: child, newValue: newValue) },
                     allowsClear: false
                 )
-                .frame(width: 130, alignment: .trailing)
+                .frame(width: 150, alignment: .trailing)
                 deleteButton(for: child)
             }
             .padding(.vertical, 3)
