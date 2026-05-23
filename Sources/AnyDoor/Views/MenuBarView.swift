@@ -268,7 +268,7 @@ private struct ScreenFrameReader: NSViewRepresentable {
             let frame = window.convertToScreen(convert(bounds, to: nil))
             guard frame != lastFrame else { return }
             lastFrame = frame
-            RunLoop.main.perform { [weak self] in
+            Task { @MainActor [weak self] in
                 self?.onChange?(frame)
             }
         }

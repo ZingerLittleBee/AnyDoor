@@ -70,7 +70,9 @@ final class ToastPresenter {
             context.duration = 0.2
             panel.animator().alphaValue = 0
         } completionHandler: { [panel] in
-            panel.orderOut(nil)
+            Task { @MainActor in
+                panel.orderOut(nil)
+            }
         }
     }
 
