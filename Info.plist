@@ -19,7 +19,7 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>LSMinimumSystemVersion</key>
-	<string>15.0</string>
+	<string>14.0</string>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>AnyDoor 通过自动化控制"系统事件"与"访达"，以切换系统外观、清空废纸篓等系统操作。</string>
 	<key>SUEnableSystemProfiling</key>

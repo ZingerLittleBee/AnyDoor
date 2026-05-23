@@ -14,8 +14,10 @@ versioning.
 
 ### Changed
 
-- Lowered the minimum supported macOS version to 15.0 while keeping Liquid
-  Glass effects on macOS 26+ only.
+- Lowered the minimum supported macOS version to 14.0 (Sonoma) while keeping
+  Liquid Glass effects on macOS 26+ only. OCR now uses the legacy
+  VNRecognizeTextRequest path, and Settings falls back to the classic
+  TabView/tabItem API.
 
 ## [1.0.0] - 2026-05-23
 

@@ -71,8 +71,8 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 
 ## 环境要求
 
-- macOS 15 (Sequoia) 或更高版本
-- Liquid Glass 效果只在 macOS 26 (Tahoe) 启用；macOS 15–25 会回退到普通材质背景。
+- macOS 14 (Sonoma) 或更高版本
+- Liquid Glass 效果只在 macOS 26 (Tahoe) 启用；macOS 14–25 会回退到普通材质背景。
 - Swift 6.2
 - 辅助功能权限：系统设置 > 隐私与安全性 > 辅助功能
 
