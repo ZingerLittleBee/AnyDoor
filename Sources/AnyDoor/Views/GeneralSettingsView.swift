@@ -13,7 +13,6 @@ struct GeneralSettingsView: View {
     @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
     @State private var updateService = UpdateService.shared
-    @State private var checkInterval: CheckInterval = .daily
 
     var body: some View {
         Form {
@@ -49,30 +48,25 @@ struct GeneralSettingsView: View {
             }
 
             Section("关于与更新") {
+                @Bindable var updateService = updateService
+
                 LabeledContent("当前版本") {
                     Text(Bundle.main.shortVersionString ?? "—")
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
                 }
 
-                Toggle("自动检查更新", isOn: Binding(
-                    get: { updateService.automaticChecksEnabled },
-                    set: { updateService.automaticChecksEnabled = $0 }
-                ))
+                Toggle("自动检查更新", isOn: $updateService.automaticChecksEnabled)
 
-                Picker("检查频率", selection: $checkInterval) {
+                Picker("检查频率", selection: Binding(
+                    get: { CheckInterval.from(days: updateService.checkIntervalDays) },
+                    set: { updateService.checkIntervalDays = $0.days }
+                )) {
                     ForEach(CheckInterval.allCases) { interval in
                         Text(interval.label).tag(interval)
                     }
                 }
                 .disabled(!updateService.automaticChecksEnabled)
-                .onChange(of: checkInterval) { _, new in
-                    switch new {
-                    case .daily: updateService.checkIntervalDays = 1
-                    case .weekly: updateService.checkIntervalDays = 7
-                    case .manualOnly: updateService.automaticChecksEnabled = false
-                    }
-                }
 
                 LabeledContent("上次检查") {
                     Text(updateService.lastCheckDate?.formatted(date: .abbreviated, time: .shortened) ?? "—")
@@ -172,15 +166,20 @@ extension GeneralSettingsView {
     enum CheckInterval: Int, CaseIterable, Identifiable {
         case daily = 1
         case weekly = 7
-        case manualOnly = 0
 
         var id: Int { rawValue }
+        var days: Int { rawValue }
         var label: String {
             switch self {
             case .daily: "每日"
             case .weekly: "每周"
-            case .manualOnly: "仅手动"
             }
+        }
+
+        /// Map the service's raw day count back to the closest picker option.
+        /// Anything below daily threshold clamps to `.daily`; weekly or greater clamps to `.weekly`.
+        static func from(days: Int) -> CheckInterval {
+            days >= CheckInterval.weekly.days ? .weekly : .daily
         }
     }
 }
