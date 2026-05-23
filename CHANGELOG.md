@@ -6,6 +6,19 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- QR code recognition: drag-select a screen region to decode any QR codes
+  inside it. Payload is copied to the clipboard verbatim; multiple codes
+  are newline-joined top-to-bottom. The toast reports status only and
+  never includes the decoded content. New "识别二维码" panel row with an
+  assignable global hotkey.
+
+### Changed
+
+- Removed the user-tunable update-check frequency setting; Sparkle now
+  uses its default schedule.
+
 ## [1.0.1] - 2026-05-23
 
 ### Fixed
