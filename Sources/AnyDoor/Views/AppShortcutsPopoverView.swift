@@ -28,9 +28,7 @@ struct AppShortcutsPopoverView: View {
             if !visibleEntries.isEmpty {
                 Divider().padding(.horizontal, 8)
 
-                // GlassEffectContainer keeps per-row interactive glass effects in sync
-                // (same reason as the menu bar list — without it, edge rows tint inconsistently).
-                GlassEffectContainer(spacing: 2) {
+                AdaptiveGlassEffectContainer(spacing: 2) {
                     VStack(spacing: 2) {
                         ForEach(visibleEntries) { entry in
                             AppShortcutRow(
@@ -69,7 +67,7 @@ private struct AppShortcutRow: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 6))
+        .adaptiveInteractiveSurface(cornerRadius: 6)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .help("切换 \(entry.title)")

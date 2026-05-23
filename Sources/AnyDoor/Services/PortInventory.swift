@@ -144,7 +144,7 @@ final class PortInventory {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(3))
             await MainActor.run {
-                self?.failedKillPIDs.removeValue(forKey: pid)
+                _ = self?.failedKillPIDs.removeValue(forKey: pid)
             }
         }
     }

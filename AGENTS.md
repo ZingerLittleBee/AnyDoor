@@ -5,7 +5,8 @@ macOS 菜单栏应用，通过全局快捷键一键切换（打开/隐藏）指�
 ## 技术栈
 
 - Swift 6.2，严格并发模式 (`.swiftLanguageMode(.v6)`)
-- macOS 26+ (Tahoe)
+- macOS 14+
+- macOS 26+ 上启用 Liquid Glass；更早的受支持系统使用普通材质背景。
 - SwiftUI (`MenuBarExtra` + `Settings`)
 - SwiftData 持久化
 - CGEvent tap 全局热键监听

@@ -1,4 +1,5 @@
 .DEFAULT_GOAL := dev
+.PHONY: dev build swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun
 
 dev:
 	watchexec -r -e swift -- swift run AnyDoor
@@ -6,7 +7,7 @@ dev:
 build:
 	swift build
 
-release:
+swift-release:
 	swift build -c release
 
 APP_NAME := AnyDoor
@@ -14,7 +15,7 @@ APP_BUNDLE := $(APP_NAME).app
 APP_DIR := /Applications/$(APP_BUNDLE)
 BINARY := .build/release/$(APP_NAME)
 
-install: release
+install: swift-release
 	@mkdir -p $(APP_DIR)/Contents/MacOS
 	@mkdir -p $(APP_DIR)/Contents/Resources
 	@cp $(BINARY) $(APP_DIR)/Contents/MacOS/
@@ -27,3 +28,33 @@ install: release
 uninstall:
 	@rm -rf $(APP_DIR)
 	@echo "Removed $(APP_DIR)"
+
+# ----- Release pipeline --------------------------------------------------
+
+# Pin SPM dependency and downloaded CLI tools to the same Sparkle release.
+SPARKLE_VERSION := 2.9.2
+LOAD_ENV := set -a; [[ ! -f .env ]] || source .env; set +a
+RELEASE_GOAL := $(filter release release-dryrun,$(firstword $(MAKECMDGOALS)))
+RELEASE_VERSION := $(or $(VERSION),$(if $(RELEASE_GOAL),$(word 2,$(MAKECMDGOALS))))
+
+ifneq ($(RELEASE_GOAL),)
+ifneq ($(word 2,$(MAKECMDGOALS)),)
+$(eval .PHONY: $(word 2,$(MAKECMDGOALS)))
+$(eval $(word 2,$(MAKECMDGOALS)):; @:)
+endif
+endif
+
+sparkle-tools:
+	@./scripts/install-sparkle-tools.sh $(SPARKLE_VERSION)
+
+notary-profile:
+	@bash -lc '$(LOAD_ENV); xcrun notarytool store-credentials "$${NOTARY_PROFILE:?NOTARY_PROFILE is required}" --apple-id "$${APPLE_ID:?APPLE_ID is required}" --team-id "$${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"'
+
+notary-check:
+	@bash -lc '$(LOAD_ENV); xcrun notarytool history --keychain-profile "$${NOTARY_PROFILE:?NOTARY_PROFILE is required}"'
+
+release: sparkle-tools
+	@bash -lc '$(LOAD_ENV); ./scripts/release.sh "$(RELEASE_VERSION)"'
+
+release-dryrun: sparkle-tools
+	@bash -lc '$(LOAD_ENV); DRYRUN=1 ./scripts/release.sh "$(RELEASE_VERSION)"'

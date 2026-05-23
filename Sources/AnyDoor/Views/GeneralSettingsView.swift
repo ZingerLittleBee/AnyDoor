@@ -12,6 +12,7 @@ struct GeneralSettingsView: View {
     @State private var automationGranted = false
     @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
+    @State private var updateService = UpdateService.shared
 
     var body: some View {
         Form {
@@ -44,6 +45,37 @@ struct GeneralSettingsView: View {
             Section("权限") {
                 accessibilityRow
                 automationRow
+            }
+
+            Section("关于与更新") {
+                @Bindable var updateService = updateService
+
+                LabeledContent("当前版本") {
+                    Text(Bundle.main.shortVersionString ?? "—")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+
+                Toggle("自动检查更新", isOn: $updateService.automaticChecksEnabled)
+
+                Picker("检查频率", selection: Binding(
+                    get: { CheckInterval.from(days: updateService.checkIntervalDays) },
+                    set: { updateService.checkIntervalDays = $0.days }
+                )) {
+                    ForEach(CheckInterval.allCases) { interval in
+                        Text(interval.label).tag(interval)
+                    }
+                }
+                .disabled(!updateService.automaticChecksEnabled)
+
+                LabeledContent("上次检查") {
+                    Text(updateService.lastCheckDate?.formatted(date: .abbreviated, time: .shortened) ?? "—")
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("立即检查更新…") {
+                    updateService.checkForUpdates()
+                }
             }
         }
         .formStyle(.grouped)
@@ -127,5 +159,27 @@ struct GeneralSettingsView: View {
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility")
         else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+extension GeneralSettingsView {
+    enum CheckInterval: Int, CaseIterable, Identifiable {
+        case daily = 1
+        case weekly = 7
+
+        var id: Int { rawValue }
+        var days: Int { rawValue }
+        var label: String {
+            switch self {
+            case .daily: "每日"
+            case .weekly: "每周"
+            }
+        }
+
+        /// Map the service's raw day count back to the closest picker option.
+        /// Anything below daily threshold clamps to `.daily`; weekly or greater clamps to `.weekly`.
+        static func from(days: Int) -> CheckInterval {
+            days >= CheckInterval.weekly.days ? .weekly : .daily
+        }
     }
 }

@@ -6,4 +6,12 @@ DerivedData/
 .swiftpm/configuration/registries.json
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
+.env
+.env.local
+.env.*.local
 .superpowers/
+
+# Auto-update release artifacts
+/dist/
+/scripts/sparkle-bin/
+/scripts/release-archive/

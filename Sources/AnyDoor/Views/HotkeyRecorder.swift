@@ -99,16 +99,17 @@ struct HotkeyRecorder: View {
         // stays uniform regardless of binding state — only color/italic differ.
         if isRecording {
             Text("按下快捷键…")
-                .font(.system(.caption, design: .monospaced))
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .italic()
         } else if let hk = hotkey {
             Text(hk.displayString)
-                .font(.system(.caption, design: .monospaced))
+                .font(.callout.weight(.medium))
+                .tracking(1.5)
                 .foregroundStyle(.primary)
         } else {
             Text("点击录入")
-                .font(.system(.caption, design: .monospaced))
+                .font(.callout)
                 .foregroundStyle(.tertiary)
         }
     }
