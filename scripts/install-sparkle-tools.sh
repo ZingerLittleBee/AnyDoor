@@ -14,7 +14,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN_DIR="$REPO_ROOT/scripts/sparkle-bin"
 STAMP_FILE="$BIN_DIR/.version"
 
-if [[ -f "$STAMP_FILE" ]] && [[ "$(cat "$STAMP_FILE")" == "$VERSION" ]]; then
+if [[ -f "$STAMP_FILE" ]] \
+    && [[ "$(cat "$STAMP_FILE")" == "$VERSION" ]] \
+    && [[ -x "$BIN_DIR/sign_update" ]] \
+    && [[ -x "$BIN_DIR/generate_appcast" ]]; then
   echo "sparkle tools already installed at $VERSION"
   exit 0
 fi
