@@ -1,0 +1,17 @@
+# Changelog
+
+All notable changes to AnyDoor are documented here. This project follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and uses semantic
+versioning.
+
+## [Unreleased]
+
+### Added
+
+- Auto-update via Sparkle 2 with assets published to GitHub Releases.
+- "关于与更新" section in General settings.
+- Menu bar panel banner when a new version is available.
+
+## [1.0.0] - 2026-05-23
+
+- Initial release.
