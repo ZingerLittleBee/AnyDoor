@@ -155,6 +155,13 @@ done
 log "Sparkle.framework → $SPARKLE_FW"
 ditto "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
 
+# SwiftPM doesn't know about app-bundle layout, so the built executable only
+# has @loader_path on its rpath list. Add @executable_path/../Frameworks so
+# dyld can resolve Sparkle from Contents/Frameworks at launch.
+if ! otool -l "$APP/Contents/MacOS/AnyDoor" | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/AnyDoor"
+fi
+
 # --- 6. Codesign (depth-first) -------------------------------------------
 LAST_STEP=6
 RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
