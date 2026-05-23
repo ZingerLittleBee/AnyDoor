@@ -21,6 +21,6 @@ enum TextRecognizer {
         // top-most text block has the largest topLeft.y.
         return observations
             .sorted { $0.topLeft.y > $1.topLeft.y }
-            .map(\.transcript)
+            .compactMap { $0.topCandidates(1).first?.string }
     }
 }

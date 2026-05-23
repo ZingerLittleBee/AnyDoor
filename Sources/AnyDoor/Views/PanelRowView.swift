@@ -36,7 +36,7 @@ struct PanelRowView: View {
             trailing
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
+        .adaptiveInteractiveSurface(cornerRadius: 8)
         .contentShape(Rectangle())
         .onTapGesture {
             if needsPermission { onPermission(); return }

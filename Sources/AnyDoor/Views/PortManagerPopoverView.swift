@@ -136,7 +136,7 @@ private struct PortManagerToolbar: View {
             // not just the text/icon. Matches the pattern used in PortListView /
             // PortTreeView / AppShortcutsPopoverView for consistent affordance.
             .contentShape(Rectangle())
-            .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
+            .adaptiveInteractiveSurface(cornerRadius: 8)
         }
         .buttonStyle(.plain)
     }

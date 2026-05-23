@@ -12,6 +12,11 @@ versioning.
 - "关于与更新" section in General settings.
 - Menu bar panel banner when a new version is available.
 
+### Changed
+
+- Lowered the minimum supported macOS version to 15.0 while keeping Liquid
+  Glass effects on macOS 26+ only.
+
 ## [1.0.0] - 2026-05-23
 
 - Initial release.

@@ -80,7 +80,9 @@ region, and more.
 
 ## Requirements
 
-- macOS 26+ (Tahoe)
+- macOS 15+
+- Liquid Glass effects on macOS 26+ only; older supported versions use a
+  standard material fallback.
 - Swift 6.2
 - Accessibility permission (System Settings → Privacy & Security → Accessibility)
 

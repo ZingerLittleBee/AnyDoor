@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AnyDoor",
-    platforms: [.macOS(.v26)],
+    platforms: [.macOS(.v15)],
     dependencies: [
         .package(
             url: "https://github.com/riko2chen/AskForPermission.git",

@@ -40,10 +40,9 @@ struct MenuBarView: View {
                 )
             }
 
-            // Rows. GlassEffectContainer is required so the per-row .glassEffect calls
-            // composite as a single Liquid Glass group; without it the last row in the
-            // stack samples its background independently and can render with a stale tint.
-            GlassEffectContainer(spacing: 2) {
+            // On macOS 26, rows composite as one Liquid Glass group; earlier systems
+            // render the same rows with a plain material fallback.
+            AdaptiveGlassEffectContainer(spacing: 2) {
                 VStack(spacing: 2) {
                     ForEach(panel.topLevelEntries.filter(\.isVisible)) { entry in
                         rowView(for: entry)
@@ -96,7 +95,7 @@ struct MenuBarView: View {
                 .padding(.horizontal, 10)
                 .frame(height: 24)
                 .contentShape(Rectangle())
-                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 8))
+                .adaptiveInteractiveSurface(cornerRadius: 8)
         }
         .buttonStyle(.plain)
     }
