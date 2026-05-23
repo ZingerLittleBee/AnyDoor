@@ -1,0 +1,30 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>AnyDoor</title>
+        <item>
+            <title>1.0.0</title>
+            <pubDate>Sat, 23 May 2026 20:53:18 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.0.0</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[
+### Added
+
+- Auto-update via Sparkle 2 with assets published to GitHub Releases.
+- "关于与更新" section in General settings.
+- Menu bar panel banner when a new version is available.
+
+### Changed
+
+- Lowered the minimum supported macOS version to 14.0 (Sonoma) while keeping
+  Liquid Glass effects on macOS 26+ only. OCR now uses the legacy
+  VNRecognizeTextRequest path, and Settings falls back to the classic
+  TabView/tabItem API.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.0.0/AnyDoor-1.0.0.zip" length="4002273" type="application/octet-stream" sparkle:edSignature="6akHR/qFs/zAs0ryoK+CfRRDNrZ6bRGR76HLjbAOeLluPTmW/LY1R6IF51cd5OWKTWPJskQDsh6BSITV9o44AA=="/>
+        </item>
+    </channel>
+</rss>

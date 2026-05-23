@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-23
+
 ### Added
 
 - Auto-update via Sparkle 2 with assets published to GitHub Releases.
