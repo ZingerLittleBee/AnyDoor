@@ -8,6 +8,7 @@ struct MenuBarView: View {
 
     @Environment(\.openSettings) private var openSettings
     @State private var panel = PanelStore.shared
+    @State private var updateService = UpdateService.shared
     @State private var popover: HoverPopover?
     @State private var gate = HoverGate()
     // One trigger frame per submenu builtin so hover-anchored popovers can be
@@ -26,6 +27,18 @@ struct MenuBarView: View {
                 Text("\(count) 个已启用").font(.caption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12).padding(.top, 4)
+
+            if let version = updateService.availableVersion {
+                UpdateBannerView(
+                    version: version,
+                    onActivate: {
+                        updateService.checkForUpdates()
+                    },
+                    onDismiss: {
+                        updateService.dismissBannerForThisSession()
+                    }
+                )
+            }
 
             // Rows. GlassEffectContainer is required so the per-row .glassEffect calls
             // composite as a single Liquid Glass group; without it the last row in the
