@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- App failed to launch from `/Applications` because the bundled
+  `Sparkle.framework` was not on dyld's search path. The release script now
+  injects `@executable_path/../Frameworks` into the main executable's rpath
+  before codesigning.
+
 ## [1.0.0] - 2026-05-23
 
 ### Added
