@@ -82,21 +82,21 @@ final class UpdateServiceTests: XCTestCase {
         XCTAssertNil(service.availableVersion)
     }
 
-    func testCheckingStartedSetsIsCheckingForUpdate() {
+    func testDidFailCheckUpdatesLastCheckDateWithoutClearingBanner() {
         let fake = FakeUpdater()
         let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
 
-        service.checkingStarted()
-        XCTAssertTrue(service.isCheckingForUpdate)
-    }
+        service.didFindUpdate(version: "1.2.0")
+        let originalDate = service.lastCheckDate
+        XCTAssertEqual(service.availableVersion, "1.2.0")
 
-    func testCheckingFinishedClearsIsCheckingForUpdate() {
-        let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        // Sleep briefly so the second date is observably distinct.
+        Thread.sleep(forTimeInterval: 0.01)
+        service.didFailCheck()
 
-        service.checkingStarted()
-        service.checkingFinished()
-        XCTAssertFalse(service.isCheckingForUpdate)
+        XCTAssertEqual(service.availableVersion, "1.2.0", "failure must not clear an existing banner")
+        XCTAssertNotNil(service.lastCheckDate)
+        XCTAssertNotEqual(service.lastCheckDate, originalDate, "failure must update lastCheckDate")
     }
 }
 
@@ -104,7 +104,6 @@ final class UpdateServiceTests: XCTestCase {
 private final class FakeUpdater: UpdaterAdapter {
     var automaticallyChecksForUpdates: Bool = true
     var updateCheckInterval: TimeInterval = 86_400
-    var lastUpdateCheckDate: Date? = nil
     var checkForUpdatesCallCount: Int = 0
     var checkForUpdatesInBackgroundCallCount: Int = 0
 

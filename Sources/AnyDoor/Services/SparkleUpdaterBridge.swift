@@ -20,8 +20,6 @@ final class SparkleUpdaterAdapter: UpdaterAdapter {
         set { updater.updateCheckInterval = newValue }
     }
 
-    var lastUpdateCheckDate: Date? { updater.lastUpdateCheckDate }
-
     func checkForUpdates() { updater.checkForUpdates() }
     func checkForUpdatesInBackground() { updater.checkForUpdatesInBackground() }
 }
@@ -43,5 +41,9 @@ final class SparkleUpdaterBridge: NSObject, SPUUpdaterDelegate {
 
     nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
         Task { @MainActor in service.didNotFindUpdate() }
+    }
+
+    nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        Task { @MainActor in service.didFailCheck() }
     }
 }
