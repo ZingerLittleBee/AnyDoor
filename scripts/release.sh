@@ -26,7 +26,26 @@ SPARKLE_BIN="$REPO_ROOT/scripts/sparkle-bin"
 log() { printf '\033[1;34m▸\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Track progress for the EXIT trap so we print actionable recovery
+# instructions tailored to where the script failed.
+LAST_STEP=0
+RECOVERY_HINT=""
+
+on_exit() {
+    local code=$?
+    if [[ $code -eq 0 ]]; then
+        return
+    fi
+    printf '\033[1;31m✗\033[0m release.sh failed at step %s (exit %s)\n' "$LAST_STEP" "$code" >&2
+    if [[ -n "$RECOVERY_HINT" ]]; then
+        printf '\033[1;33m→\033[0m Recovery: %s\n' "$RECOVERY_HINT" >&2
+    fi
+}
+trap on_exit EXIT
+
 # --- 1. Preflight ---------------------------------------------------------
+LAST_STEP=1
+RECOVERY_HINT="nothing to undo; preflight aborted before any mutation"
 log "Preflight checks"
 
 [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; commit or stash first"
@@ -59,7 +78,12 @@ xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" --limit 1 >/dev/nu
 
 gh auth status -h github.com >/dev/null 2>&1 || die "gh CLI is not authenticated"
 
+command -v create-dmg >/dev/null 2>&1 \
+  || die "create-dmg not found in PATH — run: brew install create-dmg"
+
 # --- 2. Resolve version --------------------------------------------------
+LAST_STEP=2
+RECOVERY_HINT="nothing to undo; version not yet written"
 log "Resolve version"
 VER="$(scripts/bump-version.sh "$REQUESTED_VERSION")"
 log "VERSION → $VER"
@@ -71,6 +95,8 @@ git ls-remote --tags origin "v$VER" | grep -q . && die "tag v$VER already exists
 # don't commit yet; the commit happens after all artifacts are produced.
 
 # --- 3. Mutate CHANGELOG and emit release notes --------------------------
+LAST_STEP=3
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md"
 log "Update CHANGELOG"
 TODAY="$(date +%Y-%m-%d)"
 python3 - "$VER" "$TODAY" <<'PY'
@@ -97,10 +123,14 @@ PY
 [[ -s "$DIST/release-notes.md" ]] || die "failed to extract release notes for $VER"
 
 # --- 4. Build ------------------------------------------------------------
+LAST_STEP=4
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 log "swift build -c release"
 swift build -c release
 
 # --- 5. Assemble .app ----------------------------------------------------
+LAST_STEP=5
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 log "Assemble dist/AnyDoor.app"
 APP="$DIST/AnyDoor.app"
 rm -rf "$APP"
@@ -126,6 +156,8 @@ log "Sparkle.framework → $SPARKLE_FW"
 ditto "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
 
 # --- 6. Codesign (depth-first) -------------------------------------------
+LAST_STEP=6
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 log "Codesign Sparkle helpers (depth-first)"
 FW_ROOT="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"
 # XPC services first, then helper apps, then framework, then main binary, then bundle.
@@ -145,6 +177,8 @@ log "Verify codesign"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
 # --- 7. Notarize .app ----------------------------------------------------
+LAST_STEP=7
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 log "Notarize .app"
 ditto -c -k --keepParent "$APP" "$DIST/_notary.zip"
 xcrun notarytool submit "$DIST/_notary.zip" --keychain-profile "$NOTARY_PROFILE" --wait
@@ -153,6 +187,8 @@ xcrun stapler staple "$APP"
 spctl -a -t exec -vv "$APP"
 
 # --- 8. Package final assets --------------------------------------------
+LAST_STEP=8
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 ZIP="$DIST/AnyDoor-$VER.zip"
 DMG="$DIST/AnyDoor-$VER.dmg"
 log "Package $ZIP"
@@ -161,9 +197,6 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 
 log "Package $DMG"
 rm -f "$DMG"
-if ! command -v create-dmg >/dev/null 2>&1; then
-  die "create-dmg not found in PATH (brew install create-dmg)"
-fi
 create-dmg \
   --volname "AnyDoor $VER" \
   --window-size 540 320 \
@@ -176,11 +209,15 @@ xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 
 # --- 9. Sparkle EdDSA sign ----------------------------------------------
+LAST_STEP=9
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 log "Sparkle EdDSA sign"
 ED_SIGNATURE_OUTPUT="$("$SPARKLE_BIN/sign_update" "$ZIP")"
 log "→ $ED_SIGNATURE_OUTPUT"
 
 # --- 10. Generate appcast -----------------------------------------------
+LAST_STEP=10
+RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 log "Generate appcast.xml"
 mkdir -p "$ARCHIVE"
 cp "$ZIP" "$ARCHIVE/"
@@ -250,21 +287,28 @@ cp "$APPCAST" "$REPO_ROOT/appcast.xml"
 
 if [[ "$DRYRUN" == "1" ]]; then
   log "Dry run: stopping before git commit / push / release."
+  log "To reset working tree: git checkout -- Info.plist CHANGELOG.md && rm -f appcast.xml"
   exit 0
 fi
 
 # --- 11. Git commit + tag ------------------------------------------------
+LAST_STEP=11
+RECOVERY_HINT="git tag -d v\$VER (if the tag was created) && rm -rf dist/  # the commit is on main locally — keep it if you intend to retry from step 12"
 log "git commit + tag"
 git add Info.plist CHANGELOG.md appcast.xml
 git commit -m "release: v$VER"
 git tag "v$VER"
 
 # --- 12. Push --------------------------------------------------------
+LAST_STEP=12
+RECOVERY_HINT="resolve git push failure (auth/conflict), then retry from step 12 (no local cleanup needed)"
 log "git push (commit + tag)"
 git push origin main
 git push origin "v$VER"
 
 # --- 13. Create draft release, upload assets, publish ------------------
+LAST_STEP=13
+RECOVERY_HINT="gh release delete v\$VER --yes  # the release was a draft, so no clients ever saw it"
 log "gh release create v$VER (draft)"
 gh release create "v$VER" \
   --draft \
