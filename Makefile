@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := dev
-.PHONY: dev build swift-release install uninstall sparkle-tools release release-dryrun
+.PHONY: dev build swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun
 
 dev:
 	watchexec -r -e swift -- swift run AnyDoor
@@ -33,9 +33,16 @@ uninstall:
 
 # Pin SPM dependency and downloaded CLI tools to the same Sparkle release.
 SPARKLE_VERSION := 2.9.2
+LOAD_ENV := set -a; [[ ! -f .env ]] || source .env; set +a
 
 sparkle-tools:
 	@./scripts/install-sparkle-tools.sh $(SPARKLE_VERSION)
+
+notary-profile:
+	@bash -lc '$(LOAD_ENV); xcrun notarytool store-credentials "$${NOTARY_PROFILE:?NOTARY_PROFILE is required}" --apple-id "$${APPLE_ID:?APPLE_ID is required}" --team-id "$${APPLE_TEAM_ID:?APPLE_TEAM_ID is required}"'
+
+notary-check:
+	@bash -lc '$(LOAD_ENV); xcrun notarytool history --keychain-profile "$${NOTARY_PROFILE:?NOTARY_PROFILE is required}"'
 
 release: sparkle-tools
 	@./scripts/release.sh $(VERSION)

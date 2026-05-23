@@ -137,11 +137,14 @@ make uninstall
 # 下载固定版本的 Sparkle 命令行工具。
 make sparkle-tools
 
+# 从 .env 创建或更新 notarytool keychain profile。
+make notary-profile
+
 # 检查登录钥匙串里的 Developer ID 签名身份。
 security find-identity -v -p codesigning
 
-# 检查 notarytool keychain profile 是否可用。
-xcrun notarytool history --keychain-profile "$NOTARY_PROFILE"
+# 从 .env 检查 notarytool keychain profile 是否可用。
+make notary-check
 
 # 验证完整发布流水线，但不提交、不打 tag、不 push、不创建 GitHub Release。
 make release-dryrun VERSION=1.0.1
@@ -171,13 +174,7 @@ make release VERSION=1.1.0
 3. 如果还没有 notarytool keychain profile，先创建它：
 
    ```bash
-   set -a
-   source .env
-   set +a
-
-   xcrun notarytool store-credentials "$NOTARY_PROFILE" \
-     --apple-id "$APPLE_ID" \
-     --team-id "$APPLE_TEAM_ID"
+   make notary-profile
    ```
 
    在安全提示里输入 Apple app-specific password。成功后，凭据会存入
@@ -187,7 +184,7 @@ make release VERSION=1.1.0
 4. 验证 notary profile：
 
    ```bash
-   xcrun notarytool history --keychain-profile "$NOTARY_PROFILE"
+   make notary-check
    ```
 
 5. 安装本地发布工具：

@@ -142,11 +142,14 @@ make uninstall
 # Download the pinned Sparkle command line tools.
 make sparkle-tools
 
+# Create or update the notarytool keychain profile from .env.
+make notary-profile
+
 # Verify the Developer ID signing identity in the login keychain.
 security find-identity -v -p codesigning
 
-# Verify the notarytool keychain profile.
-xcrun notarytool history --keychain-profile "$NOTARY_PROFILE"
+# Verify the notarytool keychain profile from .env.
+make notary-check
 
 # Validate the full release pipeline without committing, tagging, pushing,
 # or creating a GitHub release.
@@ -177,13 +180,7 @@ make release VERSION=1.1.0
 3. Create the notarytool keychain profile if it does not already exist:
 
    ```bash
-   set -a
-   source .env
-   set +a
-
-   xcrun notarytool store-credentials "$NOTARY_PROFILE" \
-     --apple-id "$APPLE_ID" \
-     --team-id "$APPLE_TEAM_ID"
+   make notary-profile
    ```
 
    Enter the Apple app-specific password at the secure prompt. After this
@@ -193,7 +190,7 @@ make release VERSION=1.1.0
 4. Verify the notary profile:
 
    ```bash
-   xcrun notarytool history --keychain-profile "$NOTARY_PROFILE"
+   make notary-check
    ```
 
 5. Install the local release tools:
