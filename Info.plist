@@ -23,7 +23,7 @@
     <key>SUFeedURL</key>
     <string>https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>PLACEHOLDER_REPLACE_WITH_GENERATE_KEYS_OUTPUT</string>
+    <string>hbLSRwztl+EyMPefu7uNJHn7FjWQEREtC5Nx0MzM+Xk=</string>
     <key>SUEnableSystemProfiling</key>
     <false/>
 </dict>
