@@ -34,6 +34,15 @@ uninstall:
 # Pin SPM dependency and downloaded CLI tools to the same Sparkle release.
 SPARKLE_VERSION := 2.9.2
 LOAD_ENV := set -a; [[ ! -f .env ]] || source .env; set +a
+RELEASE_GOAL := $(filter release release-dryrun,$(firstword $(MAKECMDGOALS)))
+RELEASE_VERSION := $(or $(VERSION),$(if $(RELEASE_GOAL),$(word 2,$(MAKECMDGOALS))))
+
+ifneq ($(RELEASE_GOAL),)
+ifneq ($(word 2,$(MAKECMDGOALS)),)
+$(eval .PHONY: $(word 2,$(MAKECMDGOALS)))
+$(eval $(word 2,$(MAKECMDGOALS)):; @:)
+endif
+endif
 
 sparkle-tools:
 	@./scripts/install-sparkle-tools.sh $(SPARKLE_VERSION)
@@ -45,7 +54,7 @@ notary-check:
 	@bash -lc '$(LOAD_ENV); xcrun notarytool history --keychain-profile "$${NOTARY_PROFILE:?NOTARY_PROFILE is required}"'
 
 release: sparkle-tools
-	@./scripts/release.sh $(VERSION)
+	@bash -lc '$(LOAD_ENV); ./scripts/release.sh "$(RELEASE_VERSION)"'
 
 release-dryrun: sparkle-tools
-	@DRYRUN=1 ./scripts/release.sh $(VERSION)
+	@bash -lc '$(LOAD_ENV); DRYRUN=1 ./scripts/release.sh "$(RELEASE_VERSION)"'

@@ -89,7 +89,16 @@ region, and more.
 ```bash
 git clone https://github.com/ZingerLittleBee/AnyDoor.git
 cd AnyDoor
-swift build -c release
+make install
+```
+
+This builds the release binary and installs `/Applications/AnyDoor.app` with
+the app bundle metadata and icon.
+
+For a binary-only build, use:
+
+```bash
+make swift-release
 ```
 
 The binary will be at `.build/release/AnyDoor`.
@@ -121,15 +130,12 @@ make swift-release
 
 Releases are signed with Developer ID, notarized with Apple, packaged as a DMG
 and Sparkle zip, then published to GitHub Releases with an updated appcast.
+The release Make targets automatically load `.env` through `bash`, so the same
+commands work from fish, zsh, bash, or sh.
 
 ### Packaging commands
 
 ```bash
-# Load local release variables for the current shell.
-set -a
-source .env
-set +a
-
 # Build the release binary only.
 make swift-release
 
@@ -153,10 +159,13 @@ make notary-check
 
 # Validate the full release pipeline without committing, tagging, pushing,
 # or creating a GitHub release.
-make release-dryrun VERSION=1.0.1
+make release-dryrun 1.0.1
+
+# Omit the version to auto-increment the patch version from Info.plist.
+make release-dryrun
 
 # Publish a real signed and notarized release.
-make release VERSION=1.1.0
+make release 1.1.0
 ```
 
 ### One-time machine setup
@@ -164,6 +173,10 @@ make release VERSION=1.1.0
 1. Copy `.env.example` to `.env` and fill the local release values.
 
    Keep `.env` local only. It is ignored by git.
+   Fill `APPLE_ID`, `APPLE_TEAM_ID`, `NOTARY_PROFILE`,
+   `SIGNING_IDENTITY`, and `REPO_URL`. Leave
+   `APPLE_APP_SPECIFIC_PASSWORD` empty after the notary profile has been
+   saved to Keychain.
 
 2. Confirm the Developer ID signing identity exists in the login keychain:
 
@@ -212,13 +225,16 @@ Run this before every real release. It signs, notarizes, packages, signs the
 Sparkle update, and generates `appcast.xml`, but stops before committing,
 tagging, pushing, or creating a GitHub release.
 
-```bash
-set -a
-source .env
-set +a
+This uses the same preflight checks as a real release: run it from a clean
+`main` branch that is in sync with `origin/main`.
 
-make release-dryrun VERSION=1.0.1
+```bash
+make release-dryrun 1.0.1
 ```
+
+If no version is passed, the script increments the patch version from the
+current `CFBundleShortVersionString`. The current value must already be strict
+`MAJOR.MINOR.PATCH`.
 
 Expected outputs include:
 
@@ -236,12 +252,10 @@ Real releases must run from a clean `main` branch that is in sync with
 git checkout main
 git pull --ff-only origin main
 
-set -a
-source .env
-set +a
-
-make release VERSION=1.1.0
+make release 1.1.0
 ```
+
+Pass the version explicitly for real releases.
 
 The release script bumps `Info.plist`, moves the changelog entry, builds,
 codesigns, notarizes, packages the DMG and zip, regenerates the Sparkle appcast,

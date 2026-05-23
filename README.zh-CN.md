@@ -80,7 +80,16 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 ```bash
 git clone https://github.com/ZingerLittleBee/AnyDoor.git
 cd AnyDoor
-swift build -c release
+make install
+```
+
+这会构建 release 二进制，并安装带有 bundle metadata 和图标的
+`/Applications/AnyDoor.app`。
+
+如果只想构建二进制：
+
+```bash
+make swift-release
 ```
 
 构建产物在：
@@ -116,15 +125,12 @@ make swift-release
 
 发布流程会使用 Developer ID 签名，提交 Apple 公证，打包 DMG 和 Sparkle
 更新 zip，然后创建 GitHub Release 并更新 appcast。
+发布相关的 Make target 会通过 `bash` 自动加载 `.env`，所以同一组命令可以在
+fish、zsh、bash 或 sh 里直接使用。
 
 ### 打包相关命令
 
 ```bash
-# 将本地发布变量加载到当前 shell。
-set -a
-source .env
-set +a
-
 # 只构建 release 二进制。
 make swift-release
 
@@ -147,10 +153,13 @@ security find-identity -v -p codesigning
 make notary-check
 
 # 验证完整发布流水线，但不提交、不打 tag、不 push、不创建 GitHub Release。
-make release-dryrun VERSION=1.0.1
+make release-dryrun 1.0.1
+
+# 不传版本时，会基于 Info.plist 当前版本自动递增 patch。
+make release-dryrun
 
 # 发布经过签名和公证的正式版本。
-make release VERSION=1.1.0
+make release 1.1.0
 ```
 
 ### 一次性机器配置
@@ -158,6 +167,9 @@ make release VERSION=1.1.0
 1. 复制 `.env.example` 为 `.env`，并填写本机发布变量。
 
    `.env` 只保留在本地，已经被 git 忽略，不要提交。
+   需要填写 `APPLE_ID`、`APPLE_TEAM_ID`、`NOTARY_PROFILE`、
+   `SIGNING_IDENTITY` 和 `REPO_URL`。notary profile 存入 Keychain 后，
+   `APPLE_APP_SPECIFIC_PASSWORD` 应该保持为空。
 
 2. 确认登录钥匙串里有 Developer ID 签名身份：
 
@@ -206,13 +218,15 @@ make release VERSION=1.1.0
 zip 签名和 `appcast.xml` 生成，但会在提交 commit、打 tag、push、创建
 GitHub Release 之前停止。
 
-```bash
-set -a
-source .env
-set +a
+dry run 使用和正式发布相同的 preflight：需要在干净的 `main` 分支上执行，
+并且本地 `main` 要与 `origin/main` 保持同步。
 
-make release-dryrun VERSION=1.0.1
+```bash
+make release-dryrun 1.0.1
 ```
+
+如果不传版本，脚本会基于当前 `CFBundleShortVersionString` 自动递增 patch。
+当前版本必须已经是严格的 `MAJOR.MINOR.PATCH`。
 
 预期输出包括：
 
@@ -230,12 +244,10 @@ make release-dryrun VERSION=1.0.1
 git checkout main
 git pull --ff-only origin main
 
-set -a
-source .env
-set +a
-
-make release VERSION=1.1.0
+make release 1.1.0
 ```
+
+正式发布建议显式传入版本号。
 
 发布脚本会更新 `Info.plist` 版本，移动 changelog 条目，执行构建和
 codesign，提交 Apple 公证，打包 DMG 和 zip，重新生成 Sparkle appcast，

@@ -4,7 +4,7 @@
 
 **Goal:** Ship in-app auto-updates for AnyDoor using Sparkle 2 with assets distributed via GitHub Releases, plus a local `make release` pipeline that signs and notarizes every artifact.
 
-**Architecture:** Add Sparkle 2 as an SPM dependency and host a single `SPUStandardUpdaterController` on `AppDelegate`. Wrap it in a `@MainActor @Observable UpdateService` (with an `UpdaterAdapter` protocol for testability) so SwiftUI never imports Sparkle directly. Surface updates via Sparkle's standard dialogs, an in-panel banner in `MenuBarView`, and a new section in `GeneralSettingsView`. Distribute updates as version-pinned zips inside GitHub Releases alongside a cumulative `appcast.xml`; first-time downloads use a DMG. Releases are produced by a local `scripts/release.sh` driven from `make release [VERSION=x.y.z]`.
+**Architecture:** Add Sparkle 2 as an SPM dependency and host a single `SPUStandardUpdaterController` on `AppDelegate`. Wrap it in a `@MainActor @Observable UpdateService` (with an `UpdaterAdapter` protocol for testability) so SwiftUI never imports Sparkle directly. Surface updates via Sparkle's standard dialogs, an in-panel banner in `MenuBarView`, and a new section in `GeneralSettingsView`. Distribute updates as version-pinned zips inside GitHub Releases alongside a cumulative `appcast.xml`; first-time downloads use a DMG. Releases are produced by a local `scripts/release.sh` driven from `make release [x.y.z]`.
 
 **Tech Stack:**
 - Swift 6.2 strict concurrency, macOS 26
@@ -1410,7 +1410,7 @@ This validates the entire release pipeline without touching git or `gh`.
 
 - [ ] **Step 1: Run dry-run**
 
-Run: `make release-dryrun VERSION=1.0.1`
+Run: `make release-dryrun 1.0.1`
 Expected: completes through appcast generation; prints "Dry run: stopping before git commit / push / release."; produces `dist/AnyDoor.app`, `dist/AnyDoor-1.0.1.zip`, `dist/AnyDoor-1.0.1.dmg`, and `appcast.xml` at the repo root.
 
 - [ ] **Step 2: Verify the zip with sign_update**
@@ -1457,7 +1457,7 @@ The Phase 4 task already populated it with bullets. Adjust if needed.
 
 - [ ] **Step 3: Run the release**
 
-Run: `make release VERSION=1.1.0`
+Run: `make release 1.1.0`
 Expected: completes through step 13; prints "Done. v1.1.0 published at https://github.com/.../releases/tag/v1.1.0".
 
 - [ ] **Step 4: Run the §9.1 manual e2e checklist**
