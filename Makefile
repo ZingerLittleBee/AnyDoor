@@ -6,7 +6,7 @@ dev:
 build:
 	swift build
 
-release:
+swift-release:
 	swift build -c release
 
 APP_NAME := AnyDoor
@@ -14,7 +14,7 @@ APP_BUNDLE := $(APP_NAME).app
 APP_DIR := /Applications/$(APP_BUNDLE)
 BINARY := .build/release/$(APP_NAME)
 
-install: release
+install: swift-release
 	@mkdir -p $(APP_DIR)/Contents/MacOS
 	@mkdir -p $(APP_DIR)/Contents/Resources
 	@cp $(BINARY) $(APP_DIR)/Contents/MacOS/
@@ -27,3 +27,17 @@ install: release
 uninstall:
 	@rm -rf $(APP_DIR)
 	@echo "Removed $(APP_DIR)"
+
+# ----- Release pipeline --------------------------------------------------
+
+# Pin SPM dependency and downloaded CLI tools to the same Sparkle release.
+SPARKLE_VERSION := 2.9.2
+
+sparkle-tools:
+	@./scripts/install-sparkle-tools.sh $(SPARKLE_VERSION)
+
+release: sparkle-tools
+	@./scripts/release.sh $(VERSION)
+
+release-dryrun: sparkle-tools
+	@DRYRUN=1 ./scripts/release.sh $(VERSION)
