@@ -1,4 +1,5 @@
 .DEFAULT_GOAL := dev
+.PHONY: dev build swift-release install uninstall sparkle-tools release release-dryrun
 
 dev:
 	watchexec -r -e swift -- swift run AnyDoor
