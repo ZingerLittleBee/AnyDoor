@@ -2,9 +2,81 @@
 
 [中文](README.zh-CN.md)
 
-macOS menu bar app for toggling apps with global hotkeys.
+A macOS menu bar control center driven by global hotkeys. Bind any key
+combination to launch and toggle apps, flip system settings, or run one-off
+actions — all without leaving the keyboard.
 
-Press a shortcut to open an app. Press it again to hide it. That's it.
+Press a shortcut to open an app. Press it again to hide it. Use the same
+muscle memory to mute audio, lock the screen, sample a color, OCR a screen
+region, and more.
+
+## Features
+
+### App shortcuts
+
+- Global hotkey per app — opens it when not running, activates it when
+  backgrounded, hides it when frontmost.
+- Inline hotkey recorder with live modifier detection and conflict prompts.
+- Drag to reorder shortcuts; toggle visibility per item.
+
+### Built-in system toggles
+
+| Toggle | What it does |
+| --- | --- |
+| Keep Awake | Holds an `IOPMAssertion` to prevent display/system sleep |
+| Mute Audio | Mutes/unmutes the default Core Audio output device |
+| Dark Mode | Flips system appearance via AppleScript |
+| Hide Desktop Icons | Toggles Finder's desktop icon visibility |
+| Show Hidden Files | Toggles `AppleShowAllFiles` in Finder |
+| Hide Dock | Toggles Dock auto-hide |
+| Auto-hide Menu Bar | Toggles `_HIHideMenuBar` |
+| Keyboard Lock | Drops all key events except registered hotkeys (cleaning mode) |
+
+### Built-in actions
+
+- Lock Screen, Display Sleep, System Sleep
+- Empty Trash, Flush DNS cache
+- Restart Finder / Dock / SystemUIServer + ControlCenter
+- Screenshot to clipboard (interactive region capture)
+- OCR a screen region — Vision framework recognizes text and copies it
+- Pick Color — system color sampler captures HEX into the clipboard
+
+### Port Manager
+
+- Submenu listing every listening port on the system.
+- Search by port number or process name.
+- Flat list and process-grouped tree views.
+- Live refresh with retry on scan failure.
+
+### Menu bar panel
+
+- Click the menu bar icon to open a Liquid Glass panel listing every
+  enabled item with its current state and hotkey.
+- Hover the App Shortcuts or Port Manager rows to open side popovers.
+- Toast feedback for OCR / color picker results.
+- In-panel update banner when a new release is available.
+
+### Settings
+
+- **Panel** tab: drag-to-reorder, per-item visibility, inline hotkey
+  recorder, type badges (toggle / action / submenu).
+- **General** tab: launch at login, menu bar icon style, accessibility
+  and automation permission status with one-click request, auto-update
+  controls.
+
+### Auto-update
+
+- Sparkle integration with EdDSA-signed appcast.
+- Configurable check frequency (daily / weekly / off) and manual check.
+- Update banner surfaces new versions inside the menu bar panel.
+
+### Security & permissions
+
+- Runs as an `.accessory` app (no Dock icon).
+- Accessibility and Automation permission flows built into Settings with
+  live status indicators.
+- CGEvent tap at HID level with a watchdog that restarts itself if macOS
+  disables it for exceeding the callback budget.
 
 ## Requirements
 
