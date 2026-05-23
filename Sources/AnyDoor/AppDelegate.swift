@@ -2,6 +2,7 @@ import Cocoa
 import SwiftData
 import OSLog
 import AskForPermission
+import Sparkle
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
 
@@ -9,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
+    private var updaterController: SPUStandardUpdaterController?
+    private var updaterBridge: SparkleUpdaterBridge?
 
     override init() {
         do {
@@ -90,6 +93,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ) { [weak menuBar] _ in
             MainActor.assumeIsolated { menuBar?.syncFromPreferences() }
         }
+        bootstrapUpdater()
+    }
+
+    @MainActor
+    private func bootstrapUpdater() {
+        guard shouldStartUpdater() else {
+            // `swift run` and unit tests reach here: no SUFeedURL/SUPublicEDKey, no
+            // installed bundle id. Sparkle would log noisy errors and could crash.
+            return
+        }
+
+        let bridge = SparkleUpdaterBridge(service: UpdateService.shared)
+        let controller = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: bridge,
+            userDriverDelegate: nil
+        )
+        UpdateService.shared.rebind(to: SparkleUpdaterAdapter(updater: controller.updater))
+        updaterController = controller
+        updaterBridge = bridge
+    }
+
+    private func shouldStartUpdater() -> Bool {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let hasFeed = !((info["SUFeedURL"] as? String) ?? "").isEmpty
+        let hasKey = !((info["SUPublicEDKey"] as? String) ?? "").isEmpty
+        let isInstalled = Bundle.main.bundleIdentifier == "dev.bybee.AnyDoor"
+        let placeholderKey = (info["SUPublicEDKey"] as? String) == "PLACEHOLDER_REPLACE_WITH_GENERATE_KEYS_OUTPUT"
+        return hasFeed && hasKey && isInstalled && !placeholderKey
     }
 
     func applicationWillTerminate(_ notification: Notification) {
