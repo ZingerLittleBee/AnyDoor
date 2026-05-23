@@ -24,6 +24,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case flushDNS
     case keyboardLock
     case portManager
+    case qrcode
 
     enum Kind: Sendable {
         case toggle
@@ -36,7 +37,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .appShortcuts, .portManager: return .submenu
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
-        case .lockScreen, .emptyTrash, .screenshot, .ocr, .pickColor, .displaySleep, .systemSleep,
+        case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
              .restartFinder, .restartDock, .restartMenuBar, .flushDNS: return .action
         }
     }
@@ -64,6 +65,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .flushDNS: return "刷新 DNS"
         case .keyboardLock: return "禁用键盘"
         case .portManager: return "端口管理"
+        case .qrcode: return "识别二维码"
         }
     }
 
@@ -90,6 +92,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .flushDNS: return "network"
         case .keyboardLock: return "keyboard.fill"
         case .portManager: return "network"
+        case .qrcode: return "qrcode.viewfinder"
         }
     }
 
@@ -117,6 +120,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .flushDNS: return 1700
         case .keyboardLock: return 1800
         case .portManager: return 1900
+        case .qrcode: return 960
         }
     }
 

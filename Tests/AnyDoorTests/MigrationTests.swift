@@ -64,6 +64,15 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertFalse(BuiltinItem.pickColor.requiresAutomation)
         XCTAssertNil(BuiltinItem.pickColor.feedbackSound)
     }
+
+    func testQRCodeItem() {
+        XCTAssertEqual(BuiltinItem.qrcode.kind, .action)
+        XCTAssertEqual(BuiltinItem.qrcode.title, "识别二维码")
+        XCTAssertEqual(BuiltinItem.qrcode.symbol, "qrcode.viewfinder")
+        XCTAssertEqual(BuiltinItem.qrcode.defaultOrder, 960)
+        XCTAssertFalse(BuiltinItem.qrcode.requiresAutomation)
+        XCTAssertNil(BuiltinItem.qrcode.feedbackSound)
+    }
 }
 
 final class KeyBindingOrderBackfillTests: XCTestCase {

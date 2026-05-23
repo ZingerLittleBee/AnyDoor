@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             FlushDNSProvider(),
             KeyboardLockProvider(),
             OCRProvider(),
+            QRCodeProvider(),
             PickColorProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
