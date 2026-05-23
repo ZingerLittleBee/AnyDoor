@@ -20,5 +20,11 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>AnyDoor 通过自动化控制"系统事件"与"访达"，以切换系统外观、清空废纸篓等系统操作。</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>PLACEHOLDER_REPLACE_WITH_GENERATE_KEYS_OUTPUT</string>
+    <key>SUEnableSystemProfiling</key>
+    <false/>
 </dict>
 </plist>
