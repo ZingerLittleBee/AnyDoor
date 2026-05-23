@@ -7,3 +7,8 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
 .netrc
 .superpowers/
+
+# Auto-update release artifacts
+/dist/
+/scripts/sparkle-bin/
+/scripts/release-archive/
