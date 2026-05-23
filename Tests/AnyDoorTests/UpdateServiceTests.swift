@@ -81,6 +81,23 @@ final class UpdateServiceTests: XCTestCase {
         service.didNotFindUpdate()
         XCTAssertNil(service.availableVersion)
     }
+
+    func testCheckingStartedSetsIsCheckingForUpdate() {
+        let fake = FakeUpdater()
+        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+
+        service.checkingStarted()
+        XCTAssertTrue(service.isCheckingForUpdate)
+    }
+
+    func testCheckingFinishedClearsIsCheckingForUpdate() {
+        let fake = FakeUpdater()
+        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+
+        service.checkingStarted()
+        service.checkingFinished()
+        XCTAssertFalse(service.isCheckingForUpdate)
+    }
 }
 
 @MainActor
