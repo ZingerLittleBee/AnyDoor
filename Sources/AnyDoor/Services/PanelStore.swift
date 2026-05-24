@@ -111,9 +111,9 @@ final class PanelStore {
         switch item {
         case .appShortcuts:
             let visible = appShortcutChildren.filter(\.isVisible).count
-            return "\(visible) 个绑定"
+            return L(.portBindCount, visible)
         case .keepAwake:
-            return (toggleStates[.keepAwake] ?? false) ? "无限期保持唤醒" : nil
+            return (toggleStates[.keepAwake] ?? false) ? L(.panelSubtitleKeepAwakeIndefinite) : nil
         default:
             return nil
         }
