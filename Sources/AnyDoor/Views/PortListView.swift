@@ -72,8 +72,8 @@ struct PortRowView: View {
                     .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
             }
             .buttonStyle(.plain)
-            .help("清除错误提示")
-            .accessibilityLabel("清除错误提示")
+            .help(L(.portActionClearError))
+            .accessibilityLabel(L(.portActionClearError))
         case .listening:
             if isHovered {
                 Button {
@@ -84,7 +84,7 @@ struct PortRowView: View {
                         .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
                 }
                 .buttonStyle(.plain)
-                .help("终止 PID \(record.pid)")
+                .help(L(.portActionKillPID, record.pid))
             } else {
                 Color.clear.frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
             }
@@ -98,7 +98,7 @@ struct PortRowView: View {
         }
         if let path = record.executablePath, !path.isEmpty { lines.append(path) }
         lines.append("")
-        lines.append("绑定地址：")
+        lines.append(L(.portTooltipBindAddress))
         for bind in record.binds {
             lines.append("  \(bind.address) (\(bind.family.rawValue))")
         }
@@ -106,11 +106,11 @@ struct PortRowView: View {
             lines.append("")
             switch failure.reason {
             case .permissionDenied:
-                lines.append("终止失败：权限不足（系统/其他用户进程）")
+                lines.append(L(.portTooltipKillFailedPermission))
             case .processGone:
-                lines.append("终止失败：进程已退出")
+                lines.append(L(.portTooltipKillFailedGone))
             case .other(let code):
-                lines.append("终止失败 (errno: \(code))")
+                lines.append(L(.portTooltipKillFailedOther, Int64(code)))
             }
         }
         return lines.joined(separator: "\n")
