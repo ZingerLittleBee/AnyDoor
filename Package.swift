@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AnyDoor",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(
@@ -20,6 +21,9 @@ let package = Package(
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
+            ],
+            resources: [
+                .process("Resources"),
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
