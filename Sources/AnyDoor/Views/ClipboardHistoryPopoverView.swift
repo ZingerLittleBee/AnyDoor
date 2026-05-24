@@ -67,9 +67,37 @@ struct ClipboardHistoryPopoverView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
+            if !items.isEmpty {
+                keyboardHint
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    private var keyboardHint: some View {
+        HStack(spacing: 6) {
+            hintChip("↑↓", label: "选择")
+            hintChip("Space", label: "预览")
+            hintChip("⏎", label: "复制")
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+    }
+
+    private func hintChip(_ key: String, label: String) -> some View {
+        HStack(spacing: 3) {
+            Text(key)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                )
+            Text(label)
+        }
     }
 
     // MARK: Content
