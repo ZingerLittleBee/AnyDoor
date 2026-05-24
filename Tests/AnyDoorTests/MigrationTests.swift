@@ -73,6 +73,22 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertFalse(BuiltinItem.qrcode.requiresAutomation)
         XCTAssertNil(BuiltinItem.qrcode.feedbackSound)
     }
+
+    func testHistoryKinds() {
+        XCTAssertEqual(BuiltinItem.ocr.historyKind, .ocr)
+        XCTAssertEqual(BuiltinItem.pickColor.historyKind, .color)
+        XCTAssertEqual(BuiltinItem.qrcode.historyKind, .qrcode)
+        XCTAssertEqual(BuiltinItem.screenshot.historyKind, .screenshot)
+        XCTAssertNil(BuiltinItem.keepAwake.historyKind)
+        XCTAssertNil(BuiltinItem.portManager.historyKind)
+    }
+
+    func testHistoryCapableItemsRemainActions() {
+        XCTAssertEqual(BuiltinItem.ocr.kind, .action)
+        XCTAssertEqual(BuiltinItem.pickColor.kind, .action)
+        XCTAssertEqual(BuiltinItem.qrcode.kind, .action)
+        XCTAssertEqual(BuiltinItem.screenshot.kind, .action)
+    }
 }
 
 final class KeyBindingOrderBackfillTests: XCTestCase {
