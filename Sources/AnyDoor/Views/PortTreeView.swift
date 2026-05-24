@@ -96,8 +96,8 @@ private struct PortProcessGroupRow: View {
                     .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
             }
             .buttonStyle(.plain)
-            .help("清除错误提示")
-            .accessibilityLabel("清除错误提示")
+            .help(L(.portActionClearError))
+            .accessibilityLabel(L(.portActionClearError))
         case .listening:
             if isHeaderHovered {
                 Button {
@@ -108,7 +108,7 @@ private struct PortProcessGroupRow: View {
                         .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
                 }
                 .buttonStyle(.plain)
-                .help("终止 PID \(group.pid)")
+                .help(L(.portActionKillPID, Int64(group.pid)))
             } else {
                 Color.clear.frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
             }
@@ -147,7 +147,7 @@ private struct PortProcessGroupRow: View {
             }
             return binds.map(\.address).joined(separator: " · ")
         default:
-            return "\(binds.count) 个绑定"
+            return L(.portBindCount, binds.count)
         }
     }
 }
