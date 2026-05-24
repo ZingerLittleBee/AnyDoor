@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-24
+
 ### Added
 
 - Status item right-click menu with Settings and Quit entries, bridged

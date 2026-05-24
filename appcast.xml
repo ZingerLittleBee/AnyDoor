@@ -3,6 +3,36 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.3.0</title>
+            <pubDate>Sun, 24 May 2026 23:53:25 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.3.0</sparkle:version>
+            <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- Status item right-click menu with Settings and Quit entries, bridged
+  to SwiftUI's `\.openSettings` so the Settings window opens through
+  the same path as the in-panel button.
+
+### Changed
+
+- Menu bar panel footer redesigned: a divider separates it from the
+  content, and Settings / Quit are now compact icon-only buttons with
+  tooltips, reducing the visual weight of bottom chrome.
+
+### Fixed
+
+- Brightness +/− hotkey recorder labels in Settings now use the
+  existing `builtin.brightnessUp/Down` localizations instead of
+  hard-coded Chinese strings.
+- Clipboard history hint chips ("Space", "Preview") no longer wrap to
+  two lines in English locales.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.3.0/AnyDoor-1.3.0.zip" length="5449728" type="application/octet-stream" sparkle:edSignature="Pi9CXUWVhJVD0i24XmTWBMcqhRBFlXpAu5PBcjEADtKiP4dMb5+EA/GSUQRY3M436qZwoYMsoXUWxU9XOuwLCw=="/>
+        </item>
+        <item>
             <title>1.2.0</title>
             <pubDate>Sun, 24 May 2026 15:28:34 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -10,38 +40,7 @@
             <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[
-### Added
-
-- Generated clipboard history: outputs produced by built-in actions
-  (QR code recognition, screenshots, and similar generators) are now
-  recorded into a dedicated SwiftData-backed history store. Screenshot
-  payloads are persisted to disk; text payloads are kept inline.
-- History popover: hovering an action row reveals a side popover
-  listing recent generated outputs, with a selection model, keyboard
-  navigation routed through a first-responder NSView, and a header
-  hint surfacing the active shortcuts.
-- Screenshot preview: selecting a screenshot entry opens it in a
-  dedicated floating panel sized to 60% of the screen, with a top-right
-  close button. The panel is configured to appear correctly under the
-  `.accessory` activation policy.
-- Settings: a "清空历史" action to wipe all generated history at once.
-
-### Changed
-
-- Action rows in the hover popover now display a chevron affordance to
-  indicate that further content is available on hover.
-
-### Fixed
-
-- Hover gate no longer collapses when the cursor crosses between rows
-  or moves from a row into the popover itself, keeping the popover
-  stable during normal mouse movement.
-- `clearAll` now consistently resets the in-memory cache and
-  `lastPrunedAt` watermark so subsequent reads reflect the cleared
-  state.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.2.0/AnyDoor-1.2.0.zip" length="4131941" type="application/octet-stream" sparkle:edSignature="fzzmTyb2ArrlRrcw5Akx+gbk2xsIypqU9OKa+Cu8JSQKEF7F8beIpRnad204eAYuvpFPHbdoCcrEmEHjMof5DQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.2.0/AnyDoor-1.2.0.zip" length="4131941" type="application/octet-stream" sparkle:edSignature="fzzmTyb2ArrlRrcw5Akx+gbk2xsIypqU9OKa+Cu8JSQKEF7F8beIpRnad204eAYuvpFPHbdoCcrEmEHjMof5DQ=="/>
         </item>
         <item>
             <title>1.1.0</title>
