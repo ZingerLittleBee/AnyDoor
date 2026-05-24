@@ -197,10 +197,10 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
 
 final class ClipboardHistoryItemModelTests: XCTestCase {
     func testClipboardHistoryKindMetadata() {
-        XCTAssertEqual(ClipboardHistoryKind.ocr.title, "屏幕取词")
-        XCTAssertEqual(ClipboardHistoryKind.color.title, "屏幕取色")
-        XCTAssertEqual(ClipboardHistoryKind.qrcode.title, "识别二维码")
-        XCTAssertEqual(ClipboardHistoryKind.screenshot.title, "截图")
+        XCTAssertEqual(ClipboardHistoryKind.ocr.titleKey, .clipboardKindOcr)
+        XCTAssertEqual(ClipboardHistoryKind.color.titleKey, .clipboardKindColor)
+        XCTAssertEqual(ClipboardHistoryKind.qrcode.titleKey, .clipboardKindQrcode)
+        XCTAssertEqual(ClipboardHistoryKind.screenshot.titleKey, .clipboardKindScreenshot)
     }
 
     func testClipboardHistoryItemCanBePersisted() throws {

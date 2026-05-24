@@ -346,6 +346,223 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Wand" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "魔杖" } }
       }
+    },
+    "clipboard.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无历史" } }
+      }
+    },
+    "clipboard.header.countSuffix" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "· %lld" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "· %lld 条" } }
+      }
+    },
+    "clipboard.hint.copy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制" } }
+      }
+    },
+    "clipboard.hint.preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "预览" } }
+      }
+    },
+    "clipboard.hint.select" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择" } }
+      }
+    },
+    "clipboard.kind.color" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "屏幕取色" } }
+      }
+    },
+    "clipboard.kind.ocr" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Screen Text" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "屏幕取词" } }
+      }
+    },
+    "clipboard.kind.qrcode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "QR Code" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "识别二维码" } }
+      }
+    },
+    "clipboard.kind.screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Screenshot" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "截图" } }
+      }
+    },
+    "clipboard.preview.cannotRender" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cannot preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法预览" } }
+      }
+    },
+    "clipboard.preview.close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭预览" } }
+      }
+    },
+    "clipboard.preview.missingFile" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Screenshot not found" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "截图不存在" } }
+      }
+    },
+    "clipboard.preview.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "预览" } }
+      }
+    },
+    "clipboard.toast.copyFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制失败" } }
+      }
+    },
+    "port.action.clearError" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear error" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除错误提示" } }
+      }
+    },
+    "port.action.killPID" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kill PID %lld" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "终止 PID %lld" } }
+      }
+    },
+    "port.bindCount" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld bindings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个绑定" } }
+      }
+    },
+    "port.error.refreshFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh failed: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新失败：%@" } }
+      }
+    },
+    "port.noMatch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching ports" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无匹配的端口" } }
+      }
+    },
+    "port.scanning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Scanning…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "扫描中..." } }
+      }
+    },
+    "port.search.placeholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search ports or processes…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索端口或进程..." } }
+      }
+    },
+    "port.toolbar.listView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "List view" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "列表视图" } }
+      }
+    },
+    "port.toolbar.refresh" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新" } }
+      }
+    },
+    "port.toolbar.treeView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tree view" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "树状视图" } }
+      }
+    },
+    "port.tooltip.bindAddress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Bind address:" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "绑定地址：" } }
+      }
+    },
+    "port.tooltip.killFailedGone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kill failed: process exited" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "终止失败：进程已退出" } }
+      }
+    },
+    "port.tooltip.killFailedOther" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kill failed (errno: %lld)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "终止失败 (errno: %lld)" } }
+      }
+    },
+    "port.tooltip.killFailedPermission" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Kill failed: permission denied (system/other user process)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "终止失败：权限不足（系统/其他用户进程）" } }
+      }
+    },
+    "update.banner.available" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AnyDoor %@ available" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "AnyDoor %@ 可更新" } }
+      }
+    },
+    "update.banner.dismissForSession" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dismiss for this session" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本次启动不再提醒" } }
+      }
+    },
+    "update.banner.viewAndInstall" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "View and install update" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看并安装更新" } }
+      }
     }
   },
   "version" : "1.0"
