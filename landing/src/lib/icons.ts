@@ -1,0 +1,42 @@
+// SVG icons used in the menu panel and elsewhere.
+// Returned as raw strings so .astro components can `set:html` them.
+
+const wrap = (paths: string, stroke = 1.6) =>
+  `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+
+export const icons = {
+  keyboard:   () => wrap(`<rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M6 14h.01M18 14h.01M9 14h6"/>`),
+  globe:      () => wrap(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>`),
+  coffee:     () => wrap(`<path d="M17 8h1a3 3 0 0 1 0 6h-1"/><path d="M3 8h14v7a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5z"/><path d="M6 2v3M10 2v3M14 2v3"/>`),
+  mute:       () => wrap(`<path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/>`),
+  hideDesk:   () => wrap(`<path d="M3 3l18 18"/><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>`),
+  eye:        () => wrap(`<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>`),
+  moon:       () => wrap(`<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>`),
+  lock:       () => wrap(`<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>`),
+  trash:      () => wrap(`<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/><path d="M9 7V4h6v3"/>`),
+  camera:     () => wrap(`<path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/>`),
+  sleepZ:     () => wrap(`<circle cx="12" cy="12" r="9"/><path d="M9 9h6l-6 6h6"/>`),
+  dock:       () => wrap(`<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 14h18"/>`),
+  menubar:    () => wrap(`<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18"/>`),
+  finder:     () => wrap(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 8v3M16 8v3M8 16c1 1 2.5 2 4 2s3-1 4-2"/>`),
+  restart:    () => wrap(`<path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M21 4v5h-5"/>`),
+  upload:     () => wrap(`<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 16V8m-3 3l3-3 3 3"/>`),
+  refreshDNS: () => wrap(`<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3v18"/>`),
+  keyOff:     () => wrap(`<rect x="2" y="6" width="20" height="13" rx="2.5"/><path d="M3 4l18 18"/>`),
+  ocr:        () => wrap(`<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M8 11h.01M12 11h.01M16 11h.01M8 14h8"/>`),
+  eyedropper: () => wrap(`<path d="M11 4l2-2 5 5-2 2"/><path d="M14 7l-9 9v4h4l9-9"/>`),
+  qr:         () => wrap(`<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM20 14h1M14 20h3M20 17v4"/>`),
+  settings:   () => wrap(`<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.4.6 1 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>`),
+  power:      () => wrap(`<path d="M18.4 6.6a9 9 0 1 1-12.8 0M12 2v10"/>`),
+  chev:       () => wrap(`<path d="M9 6l6 6-6 6"/>`, 1.8),
+  search:     () => wrap(`<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>`),
+  refresh:    () => wrap(`<path d="M21 12a9 9 0 1 1-3.2-6.9"/><path d="M21 4v5h-5"/>`),
+  tree:       () => wrap(`<path d="M5 4h6M5 4v16h6M5 12h6M17 4h2v3h-2zM17 11h2v3h-2zM17 18h2v3h-2z"/>`),
+  check:      () => wrap(`<path d="M5 12l5 5L20 7"/>`, 2.4),
+  plus:       () => wrap(`<path d="M12 5v14M5 12h14"/>`),
+  grip:       () => wrap(`<circle cx="8" cy="8" r=".8" fill="currentColor"/><circle cx="16" cy="8" r=".8" fill="currentColor"/><circle cx="8" cy="12" r=".8" fill="currentColor"/><circle cx="16" cy="12" r=".8" fill="currentColor"/><circle cx="8" cy="16" r=".8" fill="currentColor"/><circle cx="16" cy="16" r=".8" fill="currentColor"/>`),
+  github:     () => wrap(`<path d="M9 19c-4.5 1.5-4.5-2.5-6-3M16 22v-3.8c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1-.3-3.6 1.3a12.4 12.4 0 0 0-6 0C7.5 3.7 6.5 4 6.5 4a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 5 10.4c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V22"/>`),
+  bolt:       () => wrap(`<path d="M13 2L3 14h7l-1 8 10-12h-7z"/>`),
+  clipboard:  () => wrap(`<rect x="6" y="4" width="12" height="18" rx="2"/><path d="M9 4V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1"/>`),
+  door:       () => wrap(`<path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M4 21h16"/><circle cx="14.5" cy="13" r="0.9" fill="currentColor"/>`, 1.8),
+};
