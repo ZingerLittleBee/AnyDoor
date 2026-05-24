@@ -25,7 +25,7 @@ enum BuiltinPreferenceSeeder {
                 let order = existing.isEmpty ? item.defaultOrder : addedAt
                 let pref = BuiltinPreference(
                     itemKey: item.rawValue,
-                    isVisible: true,
+                    isVisible: item.defaultVisibility,
                     displayOrder: order,
                     keyCode: nil,
                     modifierFlags: nil
