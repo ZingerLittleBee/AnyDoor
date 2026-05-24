@@ -1,0 +1,36 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+---
+
+<section class="section container-x" id="faq" data-screen-label="08 FAQ">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-text-dim); box-shadow: none" />
+    <span data-i18n-zh>{copy.faq.eyebrow.zh}</span><span data-i18n-en>{copy.faq.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><span data-i18n-zh>{copy.faq.h2.zh}</span><span data-i18n-en>{copy.faq.h2.en}</span></span>
+  </h2>
+
+  <div class="faq">
+    {copy.faq.items.map((item, i) => (
+      <div class={`faq-item ${i === 0 ? 'is-open' : ''}`} data-faq>
+        <div class="faq-q">
+          <span><span data-i18n-zh>{item.q.zh}</span><span data-i18n-en>{item.q.en}</span></span>
+          <span class="ic" set:html={icons.plus()} style="width:20px;height:20px" />
+        </div>
+        <div class="faq-a">
+          <span data-i18n-zh>{item.a.zh}</span><span data-i18n-en>{item.a.en}</span>
+        </div>
+      </div>
+    ))}
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-faq]').forEach((item) => {
+    item.addEventListener('click', () => {
+      item.classList.toggle('is-open');
+    });
+  });
+</script>
