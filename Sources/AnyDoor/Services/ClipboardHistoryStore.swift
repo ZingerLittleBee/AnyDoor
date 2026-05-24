@@ -29,7 +29,10 @@ final class ClipboardHistoryStore {
     @ObservationIgnored private let historyDirectoryProvider: () -> URL
     @ObservationIgnored private var lastPrunedAt: Date?
 
-    private var cachedItems: [ClipboardHistoryKind: [ClipboardHistoryItem]] = [:]
+    /// Publicly readable so SwiftUI views can let `@Observable` track reads in
+    /// their `body` (method calls like `items(for:)` may not register a
+    /// dependency on this stored property). Mutated only inside the store.
+    private(set) var cachedItems: [ClipboardHistoryKind: [ClipboardHistoryItem]] = [:]
 
     /// Designated initializer used by both production (`shared`) and tests.
     /// `historyDirectoryProvider` is wired here in Task 2 so Task 3 only adds
@@ -141,6 +144,14 @@ final class ClipboardHistoryStore {
 
     func items(for kind: ClipboardHistoryKind) -> [ClipboardHistoryItem] {
         cachedItems[kind] ?? []
+    }
+
+    /// Resolves the on-disk PNG location for a screenshot history item, so the
+    /// preview view can render it via `NSImage(contentsOf:)`. Returns `nil` for
+    /// non-screenshot items or rows that lack a stored file name.
+    func screenshotURL(for item: ClipboardHistoryItem) -> URL? {
+        guard item.historyKind == .screenshot, let fileName = item.fileName else { return nil }
+        return historyDirectoryProvider().appendingPathComponent(fileName)
     }
 
     func pruneExpiredAndOverflow(force: Bool) async {
