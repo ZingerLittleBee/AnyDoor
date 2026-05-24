@@ -50,4 +50,42 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
         let second = try ctx.fetch(FetchDescriptor<BuiltinPreference>()).count
         XCTAssertEqual(first, second)
     }
+
+    @MainActor
+    func testSeedsAllItemsOnEmptyStore() throws {
+        let ctx = try makeInMemoryContext()
+        BuiltinPreferenceSeeder.seedIfNeeded(in: ctx)
+
+        let rows = try ctx.fetch(FetchDescriptor<BuiltinPreference>())
+        XCTAssertEqual(rows.count, BuiltinItem.allCases.count)
+
+        let keys = Set(rows.map(\.itemKey))
+        for item in BuiltinItem.allCases {
+            XCTAssertTrue(keys.contains(item.rawValue), "missing \(item.rawValue)")
+        }
+    }
+
+    @MainActor
+    func testSeedingAppendsNewItemsAtEnd() throws {
+        let ctx = try makeInMemoryContext()
+
+        // Pre-populate with one item to simulate prior state.
+        ctx.insert(BuiltinPreference(itemKey: BuiltinItem.keepAwake.rawValue,
+                                     isVisible: true,
+                                     displayOrder: 50))
+        try ctx.save()
+
+        BuiltinPreferenceSeeder.seedIfNeeded(in: ctx)
+
+        let rows = try ctx.fetch(FetchDescriptor<BuiltinPreference>())
+            .sorted { $0.displayOrder < $1.displayOrder }
+
+        // Pre-existing row should still be at order 50.
+        XCTAssertEqual(rows.first?.itemKey, BuiltinItem.keepAwake.rawValue)
+        XCTAssertEqual(rows.first?.displayOrder, 50)
+        // New rows should all have order > 50.
+        for row in rows.dropFirst() {
+            XCTAssertGreaterThan(row.displayOrder, 50)
+        }
+    }
 }
