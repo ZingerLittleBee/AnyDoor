@@ -114,7 +114,7 @@ private struct ScreenshotPreviewContent: View {
                     .font(.system(size: 22, weight: .regular))
             }
             .buttonStyle(.plain)
-            .help("关闭预览")
+            .help(L(.clipboardPreviewClose))
             .keyboardShortcut(.cancelAction)
             .padding(12)
         }
