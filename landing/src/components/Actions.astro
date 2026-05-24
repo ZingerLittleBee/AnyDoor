@@ -1,0 +1,136 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+---
+
+<section class="section container-x" data-screen-label="05 Actions">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-mac-orange); box-shadow: 0 0 12px var(--color-mac-orange)" />
+    <span data-i18n-zh>{copy.actions.eyebrow.zh}</span><span data-i18n-en>{copy.actions.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><span data-i18n-zh>{copy.actions.h2a.zh}</span><span data-i18n-en>{copy.actions.h2a.en}</span></span><br />
+    <span class="gradient-text"><span data-i18n-zh>{copy.actions.h2b.zh}</span><span data-i18n-en>{copy.actions.h2b.en}</span></span>
+  </h2>
+  <p class="lede">
+    <span data-i18n-zh>{copy.actions.lede.zh}</span><span data-i18n-en>{copy.actions.lede.en}</span>
+  </p>
+
+  <div class="actions-grid">
+    {/* OCR */}
+    <div class="acard">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div class="head-ico" style="background:rgba(94,155,255,.15);color:#5e9bff" set:html={icons.ocr()} />
+        <h3><span data-i18n-zh>{copy.actions.ocrName.zh}</span><span data-i18n-en>{copy.actions.ocrName.en}</span></h3>
+      </div>
+      <p><span data-i18n-zh>{copy.actions.ocrDesc.zh}</span><span data-i18n-en>{copy.actions.ocrDesc.en}</span></p>
+      <div class="acard-stage ocr-stage">
+        <div class="ocr-doc">
+          <div class="ocr-h">README.md</div>
+          <div class="line" style="width:92%" />
+          <div class="line" style="width:88%" />
+          <div class="line" style="width:74%" />
+          <div class="line" style="width:95%" />
+          <div class="line" style="width:68%" />
+          <div class="line" style="width:82%" />
+          <div class="line" style="width:90%" />
+          <div class="line" style="width:62%" />
+          <div class="ocr-scan" />
+        </div>
+        <div class="ocr-toast">
+          <span set:html={icons.clipboard()} style="width:12px;height:12px" />
+          <span data-i18n-zh>{copy.actions.ocrToast.zh}</span><span data-i18n-en>{copy.actions.ocrToast.en}</span>
+        </div>
+      </div>
+    </div>
+
+    {/* Color picker */}
+    <div class="acard">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div class="head-ico" style="background:rgba(191,90,242,.15);color:#bf5af2" set:html={icons.eyedropper()} />
+        <h3><span data-i18n-zh>{copy.actions.colorName.zh}</span><span data-i18n-en>{copy.actions.colorName.en}</span></h3>
+      </div>
+      <p><span data-i18n-zh>{copy.actions.colorDesc.zh}</span><span data-i18n-en>{copy.actions.colorDesc.en}</span></p>
+      <div class="acard-stage cp-stage" id="cp-stage">
+        <div class="cp-loupe" id="cp-loupe" />
+        <div class="cp-readout">
+          <span class="swatch" id="cp-swatch" style="background: #5E9BFF" />
+          <span id="cp-hex">#5E9BFF</span>
+        </div>
+      </div>
+    </div>
+
+    {/* Screenshot */}
+    <div class="acard">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <div class="head-ico" style="background:rgba(48,209,88,.15);color:#30d158" set:html={icons.camera()} />
+        <h3><span data-i18n-zh>{copy.actions.shotName.zh}</span><span data-i18n-en>{copy.actions.shotName.en}</span></h3>
+      </div>
+      <p><span data-i18n-zh>{copy.actions.shotDesc.zh}</span><span data-i18n-en>{copy.actions.shotDesc.en}</span></p>
+      <div class="acard-stage ss-stage">
+        <div style="position:absolute; inset:10%; border-radius:8px; background:linear-gradient(135deg, #2c2c30, #1a1a1d); border:.5px solid rgba(255,255,255,.06); padding:16px; display:flex; flex-direction:column; gap:6px">
+          <div style="height:8px; width:40%; background:rgba(255,255,255,.1); border-radius:3px" />
+          <div style="height:6px; width:85%; background:rgba(255,255,255,.07); border-radius:3px" />
+          <div style="height:6px; width:72%; background:rgba(255,255,255,.07); border-radius:3px" />
+          <div style="height:6px; width:90%; background:rgba(255,255,255,.07); border-radius:3px" />
+        </div>
+        <div class="ss-marquee" />
+        <div class="ss-shutter" />
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Color picker — sample real pixels under the cursor via canvas.
+  const stage = document.getElementById('cp-stage');
+  const loupe = document.getElementById('cp-loupe');
+  const swatch = document.getElementById('cp-swatch');
+  const hexEl = document.getElementById('cp-hex');
+  if (!stage || !loupe || !swatch || !hexEl) throw new Error('missing color picker els');
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d')!;
+
+  const paint = () => {
+    const r = stage.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.floor(r.width));
+    canvas.height = Math.max(1, Math.floor(r.height));
+    const g = ctx.createLinearGradient(0, 0, r.width, r.height);
+    g.addColorStop(0,    '#ff453a');
+    g.addColorStop(0.18, '#ff9f0a');
+    g.addColorStop(0.40, '#30d158');
+    g.addColorStop(0.65, '#5e9bff');
+    g.addColorStop(0.88, '#bf5af2');
+    g.addColorStop(1.00, '#ff375f');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, r.width, r.height);
+  };
+
+  paint();
+  new ResizeObserver(paint).observe(stage);
+
+  stage.addEventListener('mousemove', (ev) => {
+    const e = ev as MouseEvent;
+    const r = stage.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    if (x < 0 || y < 0 || x > r.width || y > r.height) return;
+    const px = ctx.getImageData(
+      Math.max(0, Math.min(canvas.width - 1, Math.floor(x))),
+      Math.max(0, Math.min(canvas.height - 1, Math.floor(y))),
+      1, 1,
+    ).data;
+    const hex = '#' + [px[0], px[1], px[2]].map((v) => v.toString(16).padStart(2, '0').toUpperCase()).join('');
+    hexEl.textContent = hex;
+    (swatch as HTMLElement).style.background = hex;
+    const l = loupe as HTMLElement;
+    l.style.display = 'block';
+    l.style.left = (x - 40) + 'px';
+    l.style.top = (y - 40) + 'px';
+    l.style.background = hex;
+  });
+  stage.addEventListener('mouseleave', () => {
+    (loupe as HTMLElement).style.display = 'none';
+  });
+</script>
