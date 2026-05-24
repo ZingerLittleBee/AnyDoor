@@ -6,8 +6,6 @@ versioning.
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-05-24
-
 ### Added
 
 - Generated clipboard history: outputs produced by built-in actions

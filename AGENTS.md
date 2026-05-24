@@ -123,3 +123,15 @@ Sources/AnyDoor/
 - **All commit messages must be written in English.**
 - **All PR titles and descriptions must be written in English.**
 - UI-facing strings (labels, messages shown to the user) remain in Chinese.
+
+## 发版流程（`make release <version>`）
+
+发行说明**必须写在 `CHANGELOG.md` 的 `## [Unreleased]` 段下**，不要手动新建 `## [x.y.z]` 标题。`scripts/release.sh` 会在执行时自动把 `## [Unreleased]` 重写为 `## [Unreleased]\n\n## [<version>] - <today>`（见 `scripts/release.sh:107`），并在 preflight 阶段断言 `[Unreleased]` 非空（`scripts/release.sh:57-59`）。
+
+运行 `make release <version>` 前需确认这些 preflight 检查全部就绪，否则脚本会在第 1 步退出：
+
+- `Info.plist` 的 `SUPublicEDKey` 不能是占位符（先跑 `scripts/sparkle-bin/generate_keys` 并把公钥写回）
+- 登录钥匙串里有匹配 `SIGNING_IDENTITY` 的 codesigning 证书
+- `sign_update` / `generate_appcast` 已安装（`make sparkle-tools`）
+- `notarytool` 的 keychain profile 已配置
+- `gh` CLI 已登录
