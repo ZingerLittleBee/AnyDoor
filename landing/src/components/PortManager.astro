@@ -1,0 +1,139 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+import { samplePorts } from '../lib/data';
+---
+
+<section class="section container-x" data-screen-label="04 Ports">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-mac-green); box-shadow: 0 0 12px var(--color-mac-green)" />
+    <span data-i18n-zh>{copy.ports.eyebrow.zh}</span><span data-i18n-en>{copy.ports.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><span data-i18n-zh>{copy.ports.h2a.zh}</span><span data-i18n-en>{copy.ports.h2a.en}</span></span><br />
+    <span class="accent-text"><span data-i18n-zh>{copy.ports.h2b.zh}</span><span data-i18n-en>{copy.ports.h2b.en}</span></span>
+  </h2>
+  <p class="lede">
+    <span data-i18n-zh>{copy.ports.lede.zh}</span><span data-i18n-en>{copy.ports.lede.en}</span>
+  </p>
+
+  <div class="pm-wrap">
+    <div class="pm-side">
+      <div class="mbpanel-head">
+        <div class="title">AnyDoor</div>
+        <div class="meta">
+          <span data-i18n-zh>{copy.ports.enabled.zh}</span><span data-i18n-en>{copy.ports.enabled.en}</span>
+        </div>
+      </div>
+      <div class="mbrow" style="background: rgba(255,255,255,.08)">
+        <div class="ico" set:html={icons.globe()} />
+        <div class="label">
+          <span data-i18n-zh>{copy.ports.panelTitle.zh}</span><span data-i18n-en>{copy.ports.panelTitle.en}</span>
+        </div>
+        <div class="chev" set:html={icons.chev()} />
+      </div>
+      <div class="mbrow" style="opacity:.55">
+        <div class="ico" set:html={icons.keyboard()} />
+        <div class="label">
+          <span data-i18n-zh>{copy.ports.appShortcuts.zh}</span><span data-i18n-en>{copy.ports.appShortcuts.en}</span>
+        </div>
+        <div class="chev" set:html={icons.chev()} />
+      </div>
+      <div class="mbrow" style="opacity:.55">
+        <div class="ico" set:html={icons.coffee()} />
+        <div class="label">Keep Awake</div>
+        <button class="toggle" aria-label="Keep Awake"></button>
+      </div>
+    </div>
+
+    <div class="pm-main">
+      <div class="pm-search">
+        <span set:html={icons.search()} style="width:16px; height:16px; color: var(--color-text-soft)" />
+        <input id="pm-input" placeholder={copy.ports.placeholder.zh} data-ph-zh={copy.ports.placeholder.zh} data-ph-en={copy.ports.placeholder.en} />
+        <span class="count" id="pm-count">{samplePorts.length}</span>
+      </div>
+      <div class="pm-list" id="pm-list">
+        {samplePorts.map((p) => (
+          <div class="port-row" data-pm-row data-port={p.port} data-name={p.name} data-pid={p.pid}>
+            <span class="dot-running" />
+            <span class="port">:{p.port}</span>
+            <span class="pname">{p.name}</span>
+            <span class="pid">PID {p.pid}</span>
+          </div>
+        ))}
+        <div class="pm-empty" style="padding:30px; text-align:center; color:var(--color-text-soft); font-size:13px; display:none">
+          <span data-i18n-zh>{copy.ports.noMatch.zh}</span><span data-i18n-en>{copy.ports.noMatch.en}</span>
+        </div>
+      </div>
+      <div class="pm-foot">
+        <div class="pf-btn">
+          <span style="display:flex; align-items:center; gap:8px">
+            <span set:html={icons.refresh()} style="width:15px; height:15px" />
+            <span data-i18n-zh>{copy.ports.refresh.zh}</span><span data-i18n-en>{copy.ports.refresh.en}</span>
+          </span>
+          <span style="font-family: var(--font-mono)">⌘R</span>
+        </div>
+        <div class="pf-btn">
+          <span style="display:flex; align-items:center; gap:8px">
+            <span set:html={icons.tree()} style="width:15px; height:15px" />
+            <span data-i18n-zh>{copy.ports.tree.zh}</span><span data-i18n-en>{copy.ports.tree.en}</span>
+          </span>
+          <span style="font-family: var(--font-mono)">⌘T</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  const input = document.getElementById('pm-input') as HTMLInputElement;
+  const countEl = document.getElementById('pm-count')!;
+  const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-pm-row]'));
+  const empty = document.querySelector<HTMLElement>('.pm-empty')!;
+
+  const highlight = (text: string, q: string) => {
+    if (!q) return text;
+    const i = text.toLowerCase().indexOf(q.toLowerCase());
+    if (i < 0) return text;
+    return `${text.slice(0, i)}<mark>${text.slice(i, i + q.length)}</mark>${text.slice(i + q.length)}`;
+  };
+
+  const filter = (q: string) => {
+    let visible = 0;
+    for (const row of rows) {
+      const name = row.dataset.name!;
+      const port = row.dataset.port!;
+      const match = !q || name.toLowerCase().includes(q.toLowerCase()) || port.includes(q);
+      row.style.display = match ? '' : 'none';
+      if (match) {
+        visible++;
+        row.querySelector('.pname')!.innerHTML = highlight(name, q);
+      }
+    }
+    countEl.textContent = String(visible);
+    empty.style.display = visible === 0 ? '' : 'none';
+  };
+
+  // Sync placeholder with current language
+  const syncPh = () => {
+    const lang = document.documentElement.getAttribute('data-lang') || 'zh';
+    input.placeholder = lang === 'en' ? (input.dataset.phEn || '') : (input.dataset.phZh || '');
+  };
+  syncPh();
+  new MutationObserver(syncPh).observe(document.documentElement, { attributes: true, attributeFilter: ['data-lang'] });
+
+  let userTyping = false;
+  input.addEventListener('input', () => { userTyping = true; filter(input.value); });
+  input.addEventListener('focus', () => { userTyping = true; });
+
+  // Auto-type "node" demo until user touches the input
+  const stages = ['', 'n', 'no', 'nod', 'node'];
+  let i = 0;
+  const auto = setInterval(() => {
+    if (userTyping) { clearInterval(auto); return; }
+    input.value = stages[i % stages.length];
+    filter(input.value);
+    i++;
+    if (i > stages.length + 3) i = 0;
+  }, 700);
+</script>
