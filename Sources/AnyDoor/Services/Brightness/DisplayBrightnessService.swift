@@ -218,11 +218,3 @@ extension DisplayBrightnessService {
         bumpInternal(delta, displayID: displayID, showOSD: false)
     }
 }
-
-// MARK: - Temporary stub until OSDBridge lands (Task 12)
-// DELETE THIS BLOCK in Task 12 when the real OSDBridge is added.
-enum OSDBridge {
-    static func showBrightness(_ value: Float, on displayID: CGDirectDisplayID) {
-        _ = (value, displayID)
-    }
-}
