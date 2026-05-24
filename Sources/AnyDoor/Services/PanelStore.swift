@@ -57,6 +57,7 @@ final class PanelStore {
         ) {
             for pref in prefs {
                 guard let item = BuiltinItem(rawValue: pref.itemKey) else { continue }
+                if item.kind == .hiddenHotkey { continue }
                 let hotkey = pref.keyCode.flatMap { code in
                     pref.modifierFlags.map { mods in
                         HotkeyDescriptor(keyCode: code, modifierFlags: mods)
@@ -182,9 +183,9 @@ final class PanelStore {
             guard let item = BuiltinItem(rawValue: key) else { return }
             Task { await self.run(item) }
         case .brightnessUp:
-            break  // TODO(Task 6): forward to DisplayBrightnessService.bump(.up)
+            DisplayBrightnessService.shared.bump(+1.0 / 16.0, target: .displayUnderMouse)
         case .brightnessDown:
-            break  // TODO(Task 6): forward to DisplayBrightnessService.bump(.down)
+            DisplayBrightnessService.shared.bump(-1.0 / 16.0, target: .displayUnderMouse)
         }
     }
 
@@ -212,11 +213,22 @@ final class PanelStore {
             for pref in prefs {
                 guard let item = BuiltinItem(rawValue: pref.itemKey),
                       let code = pref.keyCode,
-                      let mods = pref.modifierFlags,
-                      item.kind != .submenu else { continue }
-                let action: HotkeyAction = item.kind == .toggle
-                    ? .toggleBuiltin(itemKey: item.rawValue)
-                    : .runBuiltin(itemKey: item.rawValue)
+                      let mods = pref.modifierFlags else { continue }
+                let action: HotkeyAction
+                switch item.kind {
+                case .toggle:
+                    action = .toggleBuiltin(itemKey: item.rawValue)
+                case .action:
+                    action = .runBuiltin(itemKey: item.rawValue)
+                case .submenu, .brightnessControl:
+                    continue   // hover-opened items don't bind a top-level hotkey
+                case .hiddenHotkey:
+                    switch item {
+                    case .brightnessUp:   action = .brightnessUp
+                    case .brightnessDown: action = .brightnessDown
+                    default: continue
+                    }
+                }
                 out.append(HotkeySnapshot(
                     keyCode: code,
                     modifierFlags: mods,
@@ -321,8 +333,40 @@ final class PanelStore {
     }
 
     /// Find which entry currently owns a given hotkey (used for conflict detection).
+    ///
+    /// Scans visible top-level rows + visible app shortcut children + hidden-hotkey
+    /// built-ins (e.g., brightness ±) so all hotkey bindings participate in conflict
+    /// detection regardless of whether they render as a panel row.
     func entryUsingHotkey(_ hotkey: HotkeyDescriptor, excluding: PanelEntry.Source? = nil) -> PanelEntry? {
-        for entry in topLevelEntries + appShortcutChildren {
+        var pool = topLevelEntries + appShortcutChildren
+
+        if let container = modelContainer {
+            let context = container.mainContext
+            if let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) {
+                for pref in prefs {
+                    guard let item = BuiltinItem(rawValue: pref.itemKey),
+                          item.kind == .hiddenHotkey,
+                          let code = pref.keyCode,
+                          let mods = pref.modifierFlags else { continue }
+                    let entry = PanelEntry(
+                        id: PanelEntry.id(for: .builtin(item)),
+                        source: .builtin(item),
+                        displayOrder: pref.displayOrder,
+                        isVisible: false,
+                        hotkey: HotkeyDescriptor(keyCode: code, modifierFlags: mods),
+                        title: item.title,
+                        subtitle: nil,
+                        symbol: item.symbol,
+                        kind: .hiddenHotkey,
+                        toggleState: nil,
+                        permission: .notRequired
+                    )
+                    pool.append(entry)
+                }
+            }
+        }
+
+        for entry in pool {
             if entry.source == excluding { continue }
             if entry.hotkey == hotkey { return entry }
         }
@@ -362,4 +406,14 @@ final class PanelStore {
         rebuild()
         rebuildHotkeySnapshots()
     }
+}
+
+// MARK: - Temporary stub until DisplayBrightnessService lands (Task 11)
+// This stub keeps the build green during incremental implementation.
+// DELETE THIS BLOCK in Task 11 when the real service is added.
+@MainActor
+enum DisplayBrightnessService {
+    static let shared = Self.self
+    enum BumpTarget { case displayUnderMouse }
+    static func bump(_ delta: Float, target: BumpTarget) { _ = (delta, target) }
 }
