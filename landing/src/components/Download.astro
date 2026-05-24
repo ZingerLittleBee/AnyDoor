@@ -1,0 +1,63 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+---
+
+<section class="section container-x" id="download" data-screen-label="07 Download">
+  <div class="eyebrow">
+    <span class="dot" />
+    <span data-i18n-zh>{copy.download.eyebrow.zh}</span><span data-i18n-en>{copy.download.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><span data-i18n-zh>{copy.download.h2a.zh}</span><span data-i18n-en>{copy.download.h2a.en}</span></span>
+    <span class="accent-text"><span data-i18n-zh>{copy.download.h2b.zh}</span><span data-i18n-en>{copy.download.h2b.en}</span></span>
+  </h2>
+  <p class="lede">
+    <span data-i18n-zh>{copy.download.lede.zh}</span><span data-i18n-en>{copy.download.lede.en}</span>
+  </p>
+
+  <div class="dl-wrap">
+    <div class="dl-card primary">
+      <h3><span data-i18n-zh>{copy.download.dmgTitle.zh}</span><span data-i18n-en>{copy.download.dmgTitle.en}</span></h3>
+      <p><span data-i18n-zh>{copy.download.dmgDesc.zh}</span><span data-i18n-en>{copy.download.dmgDesc.en}</span></p>
+      <a class="btn-primary" href="https://github.com/ZingerLittleBee/AnyDoor/releases" target="_blank" rel="noreferrer">
+        <span set:html={icons.bolt()} style="width:16px;height:16px" />
+        <span data-i18n-zh>{copy.download.dmgBtn.zh}</span><span data-i18n-en>{copy.download.dmgBtn.en}</span>
+      </a>
+      <div class="dl-meta">
+        <span>~4.8 MB</span>
+        <span>macOS 14+</span>
+        <span>Universal Binary</span>
+      </div>
+    </div>
+
+    <div class="dl-card">
+      <h3><span data-i18n-zh>{copy.download.brewTitle.zh}</span><span data-i18n-en>{copy.download.brewTitle.en}</span></h3>
+      <p><span data-i18n-zh>{copy.download.brewDesc.zh}</span><span data-i18n-en>{copy.download.brewDesc.en}</span></p>
+      <div class="dl-cmd">
+        <span class="prompt">$</span>
+        <span>git clone https://github.com/ZingerLittleBee/AnyDoor.git</span>
+        <span class="copy" data-copy="git clone https://github.com/ZingerLittleBee/AnyDoor.git">
+          <span data-i18n-zh>{copy.download.copy.zh}</span><span data-i18n-en>{copy.download.copy.en}</span>
+        </span>
+      </div>
+      <div class="dl-cmd">
+        <span class="prompt">$</span>
+        <span>cd AnyDoor && make install</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  document.querySelectorAll<HTMLElement>('[data-copy]').forEach((el) => {
+    el.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(el.dataset.copy!);
+        const original = el.innerHTML;
+        el.innerHTML = `<span data-i18n-zh>已复制</span><span data-i18n-en>Copied</span>`;
+        setTimeout(() => { el.innerHTML = original; }, 1500);
+      } catch {}
+    });
+  });
+</script>
