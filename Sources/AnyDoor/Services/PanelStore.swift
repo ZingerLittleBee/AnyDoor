@@ -407,13 +407,3 @@ final class PanelStore {
         rebuildHotkeySnapshots()
     }
 }
-
-// MARK: - Temporary stub until DisplayBrightnessService lands (Task 11)
-// This stub keeps the build green during incremental implementation.
-// DELETE THIS BLOCK in Task 11 when the real service is added.
-@MainActor
-enum DisplayBrightnessService {
-    static let shared = Self.self
-    enum BumpTarget { case displayUnderMouse }
-    static func bump(_ delta: Float, target: BumpTarget) { _ = (delta, target) }
-}
