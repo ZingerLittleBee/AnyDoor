@@ -131,37 +131,70 @@ private final class AVServiceCache: @unchecked Sendable {
         }
     }
 
-    /// Walks IORegistry for IOAVService entries; matches by the IOAVService's
-    /// "VendorID" / "ProductID" / "AlphanumericSerialNumber" against
-    /// `CGDisplayVendorNumber` / `CGDisplayModelNumber` / `CGDisplaySerialNumber`.
+    /// Pairs each external `CGDirectDisplayID` with a `DCPAVServiceProxy`
+    /// IORegistry entry by position.
+    ///
+    /// Background: on macOS 26 Apple Silicon the `IOAVService` class is no
+    /// longer populated (`ioreg`'s class counter shows zero instances).
+    /// Active entries are `DCPAVServiceProxy` (provider `AFKEndpointInterface`,
+    /// `Location = External` for external monitors). These entries have no
+    /// `VendorID` / `ProductID` / `AlphanumericSerialNumber` properties to
+    /// match against `CGDisplay*Number`, so we fall back to position-based
+    /// matching: enumerate proxies in IORegistry order, then the Nth external
+    /// online display gets the Nth proxy. For typical setups (1-3 external
+    /// monitors) the pairing is stable across reboots.
+    ///
+    /// Worst case (mismatched pairing): brightness slider for monitor A
+    /// drives monitor B. Spec § "Out-of-scope failure modes" explicitly
+    /// accepts position-based fallback as the v1 strategy.
     private func locateService(for displayID: CGDirectDisplayID) -> AnyObject? {
-        let vendor = CGDisplayVendorNumber(displayID)
-        let model = CGDisplayModelNumber(displayID)
-        let serial = CGDisplaySerialNumber(displayID)
-        guard vendor != 0 || model != 0 else { return nil }
+        let proxies = enumerateExternalProxies()
+        guard !proxies.isEmpty else { return nil }
+        let externalDisplays = onlineExternalDisplays()
+        guard let index = externalDisplays.firstIndex(of: displayID),
+              index < proxies.count else { return nil }
+        defer {
+            for (i, service) in proxies.enumerated() where i != index {
+                IOObjectRelease(service)
+            }
+        }
+        let service = proxies[index]
+        let av = IOAVServiceCreateWithService(kCFAllocatorDefault, service)?
+            .takeRetainedValue()
+        IOObjectRelease(service)
+        return av
+    }
 
+    /// Online external displays in `CGGetOnlineDisplayList` order.
+    private func onlineExternalDisplays() -> [CGDirectDisplayID] {
+        var count: UInt32 = 0
+        CGGetOnlineDisplayList(0, nil, &count)
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetOnlineDisplayList(count, &ids, &count)
+        return ids.filter { CGDisplayIsBuiltin($0) == 0 }
+    }
+
+    /// `DCPAVServiceProxy` IORegistry entries with `Location == "External"`.
+    /// Caller owns the returned `io_service_t` references (must `IOObjectRelease`).
+    private func enumerateExternalProxies() -> [io_service_t] {
         var iter: io_iterator_t = 0
-        let matching = IOServiceMatching("IOAVService")
+        guard let matching = IOServiceMatching("DCPAVServiceProxy") else { return [] }
         guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS else {
-            return nil
+            return []
         }
         defer { IOObjectRelease(iter) }
 
-        var match: AnyObject?
+        var out: [io_service_t] = []
         while case let service = IOIteratorNext(iter), service != 0 {
-            defer { IOObjectRelease(service) }
-            guard let props = serviceProperties(service) else { continue }
-            let v = (props["VendorID"] as? UInt32) ?? 0
-            let m = (props["ProductID"] as? UInt32) ?? 0
-            let s = (props["AlphanumericSerialNumber"] as? String).flatMap(UInt32.init) ?? 0
-            if v == vendor && m == model && (serial == 0 || s == serial) {
-                if let av = IOAVServiceCreateWithService(kCFAllocatorDefault, service)?.takeRetainedValue() {
-                    match = av
-                    break
-                }
+            if let props = serviceProperties(service),
+               let location = props["Location"] as? String,
+               location == "External" {
+                out.append(service)   // ownership transferred to caller
+            } else {
+                IOObjectRelease(service)
             }
         }
-        return match
+        return out
     }
 
     private func serviceProperties(_ service: io_service_t) -> [String: Any]? {
