@@ -4,23 +4,18 @@ import SwiftUI
 /// Standalone borderless floating panel used for previewing a screenshot
 /// history item at 60% of the active screen's visible frame, centered.
 ///
-/// Becomes the key window so `cancelOperation` (Esc) reaches it. Closes when
-/// the user clicks anywhere outside the panel, via `didResignKeyNotification`
-/// — any other window taking key (the menu bar panel, another app, the
-/// desktop) collapses the preview.
+/// Uses `.nonactivatingPanel` so AnyDoor's `.accessory` activation policy and
+/// the surrounding hover popover key state are left untouched. Closes on Esc
+/// and on any mouse-down outside the panel frame, via local + global event
+/// monitors.
 @MainActor
 final class ScreenshotPreviewWindow {
     static let shared = ScreenshotPreviewWindow()
 
-    private final class Panel: NSPanel {
-        var onCancel: (() -> Void)?
-        override var canBecomeKey: Bool { true }
-        override var canBecomeMain: Bool { false }
-        override func cancelOperation(_ sender: Any?) { onCancel?() }
-    }
-
-    private var panel: Panel?
-    @ObservationIgnored nonisolated(unsafe) private var resignObserver: NSObjectProtocol?
+    private var panel: NSPanel?
+    @ObservationIgnored nonisolated(unsafe) private var localMouseMonitor: Any?
+    @ObservationIgnored nonisolated(unsafe) private var globalMouseMonitor: Any?
+    @ObservationIgnored nonisolated(unsafe) private var keyMonitor: Any?
 
     private init() {}
 
@@ -39,9 +34,9 @@ final class ScreenshotPreviewWindow {
             height: height
         )
 
-        let p = Panel(
+        let p = NSPanel(
             contentRect: rect,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -50,8 +45,8 @@ final class ScreenshotPreviewWindow {
         p.level = .floating
         p.hasShadow = true
         p.isMovableByWindowBackground = true
+        p.hidesOnDeactivate = false
         p.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
-        p.onCancel = { [weak self] in self?.close() }
 
         let hosting = NSHostingView(rootView: ScreenshotPreviewContent(image: image))
         hosting.frame = NSRect(origin: .zero, size: rect.size)
@@ -59,22 +54,39 @@ final class ScreenshotPreviewWindow {
         p.contentView = hosting
         panel = p
 
-        resignObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification,
-            object: p,
-            queue: .main
+        p.orderFrontRegardless()
+
+        // Esc anywhere in this app closes the preview.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 /* Esc */ else { return event }
+            MainActor.assumeIsolated { self?.close() }
+            return nil
+        }
+
+        // Click anywhere inside this app outside the panel closes the preview
+        // (events for our own app never reach the global monitor).
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            guard let self else { return event }
+            let inside = MainActor.assumeIsolated { event.window === self.panel }
+            if inside { return event }
+            MainActor.assumeIsolated { self.close() }
+            return event
+        }
+
+        // Click in another app or on the desktop also closes.
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.close() }
         }
-
-        p.makeKeyAndOrderFront(nil)
     }
 
     func close() {
-        if let observer = resignObserver {
-            NotificationCenter.default.removeObserver(observer)
-            resignObserver = nil
-        }
+        if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+        if let m = localMouseMonitor { NSEvent.removeMonitor(m); localMouseMonitor = nil }
+        if let m = globalMouseMonitor { NSEvent.removeMonitor(m); globalMouseMonitor = nil }
         panel?.orderOut(nil)
         panel = nil
     }
