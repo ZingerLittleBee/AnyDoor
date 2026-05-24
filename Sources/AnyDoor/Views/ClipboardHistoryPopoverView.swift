@@ -283,6 +283,18 @@ private struct KeyboardMonitor: NSViewRepresentable {
                 selection.moveDown()
                 return true
             case kVK_Space:
+                // Screenshot items open a dedicated 60%-screen preview panel
+                // and dismiss the popover; other kinds use the inline overlay.
+                if let id = selection.selectedID,
+                   let item = items.first(where: { $0.id == id }),
+                   item.historyKind == .screenshot {
+                    if let url = store.screenshotURL(for: item),
+                       let image = NSImage(contentsOf: url) {
+                        ScreenshotPreviewWindow.shared.show(image: image)
+                    }
+                    onDismissPopover()
+                    return true
+                }
                 selection.togglePreview()
                 return true
             case kVK_Return:
