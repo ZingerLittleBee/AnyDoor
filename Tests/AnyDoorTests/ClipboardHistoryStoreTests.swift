@@ -105,7 +105,7 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         let item = try XCTUnwrap(store.items(for: .screenshot).first)
         let fileName = try XCTUnwrap(item.fileName)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(fileName).path))
-        XCTAssertEqual(item.previewTitle, "截图")
+        XCTAssertEqual(item.previewTitle, L(.clipboardKindScreenshot))
 
         try? FileManager.default.removeItem(at: directory)
     }
