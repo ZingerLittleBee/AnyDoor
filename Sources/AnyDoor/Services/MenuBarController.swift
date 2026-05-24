@@ -60,6 +60,8 @@ final class MenuBarController {
             rootView: AnyView(
                 MenuBarView(onRequestClose: { [weak self] in self?.hidePanel() })
                     .modelContainer(modelContainer)
+                    .environment(LocalizationManager.shared)
+                    .environment(\.locale, LocalizationManager.shared.effectiveLocale)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             )
         )

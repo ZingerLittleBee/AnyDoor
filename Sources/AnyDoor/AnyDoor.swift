@@ -11,6 +11,8 @@ struct AnyDoorApp: App {
         Settings {
             SettingsView()
                 .modelContainer(appDelegate.modelContainer)
+                .environment(appDelegate.localizationManager)
+                .environment(\.locale, appDelegate.localizationManager.effectiveLocale)
         }
     }
 }
