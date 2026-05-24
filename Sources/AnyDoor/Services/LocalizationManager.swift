@@ -18,11 +18,12 @@ final class LocalizationManager {
     static let shared = LocalizationManager()
 
     static let defaultsKey = "dev.bybee.AnyDoor.language"
-    static let supportedLocaleIdentifiers: [String] = ["zh-Hans", "en"]
 
     private let preferredLanguagesProvider: @Sendable () -> [String]
     private let defaults: UserDefaults
 
+    // Manual UserDefaults injection (rather than @AppStorage) so tests can
+    // supply an isolated suite and exercise the persistence round-trip.
     init(
         defaults: UserDefaults = .standard,
         preferredLanguagesProvider: @escaping @Sendable () -> [String] = { Locale.preferredLanguages }
@@ -79,7 +80,7 @@ final class LocalizationManager {
         }
     }
 
-    static func matchSupportedLocale(for languageCode: String) -> String? {
+    private static func matchSupportedLocale(for languageCode: String) -> String? {
         let normalized = languageCode.lowercased()
         if normalized.hasPrefix("zh") { return "zh-Hans" }
         if normalized.hasPrefix("en") { return "en" }
