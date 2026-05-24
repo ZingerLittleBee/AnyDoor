@@ -33,7 +33,7 @@ struct PanelRowView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(entry.localizedTitle()).font(.body)
                 if needsPermission {
-                    Text("⚠ 需要权限")
+                    LocalizedText(.panelRowNeedsPermission)
                         .font(.caption2)
                         .foregroundStyle(Color.orange)
                 } else if let subtitle = entry.subtitle {
