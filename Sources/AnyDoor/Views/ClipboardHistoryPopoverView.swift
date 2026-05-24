@@ -62,8 +62,8 @@ struct ClipboardHistoryPopoverView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            Text(kind.title).font(.headline)
-            Text("· \(items.count) 条")
+            LocalizedText(kind.titleKey).font(.headline)
+            Text(L(.clipboardHeaderCountSuffix, items.count))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
@@ -77,15 +77,15 @@ struct ClipboardHistoryPopoverView: View {
 
     private var keyboardHint: some View {
         HStack(spacing: 6) {
-            hintChip("↑↓", label: "选择")
-            hintChip("Space", label: "预览")
-            hintChip("⏎", label: "复制")
+            hintChip("↑↓", labelKey: .clipboardHintSelect)
+            hintChip("Space", labelKey: .clipboardHintPreview)
+            hintChip("⏎", labelKey: .clipboardHintCopy)
         }
         .font(.caption2)
         .foregroundStyle(.tertiary)
     }
 
-    private func hintChip(_ key: String, label: String) -> some View {
+    private func hintChip(_ key: String, labelKey: L10n.Key) -> some View {
         HStack(spacing: 3) {
             Text(key)
                 .font(.system(size: 10, weight: .medium, design: .rounded))
@@ -96,7 +96,7 @@ struct ClipboardHistoryPopoverView: View {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(Color.primary.opacity(0.08))
                 )
-            Text(label)
+            LocalizedText(labelKey)
         }
     }
 
@@ -107,7 +107,7 @@ struct ClipboardHistoryPopoverView: View {
         if items.isEmpty {
             VStack {
                 Spacer()
-                Text("暂无历史").foregroundStyle(.secondary)
+                LocalizedText(.clipboardEmpty).foregroundStyle(.secondary)
                 Spacer()
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -140,7 +140,7 @@ struct ClipboardHistoryPopoverView: View {
     private func previewOverlay(for item: ClipboardHistoryItem) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Text("预览").font(.headline)
+                LocalizedText(.clipboardPreviewTitle).font(.headline)
                 Spacer()
                 Button {
                     selection.closePreview()
@@ -149,7 +149,7 @@ struct ClipboardHistoryPopoverView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("关闭预览")
+                .help(L(.clipboardPreviewClose))
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -198,10 +198,10 @@ struct ClipboardHistoryPopoverView: View {
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Text("截图不存在").foregroundStyle(.secondary)
+                LocalizedText(.clipboardPreviewMissingFile).foregroundStyle(.secondary)
             }
         case .none:
-            Text("无法预览").foregroundStyle(.secondary)
+            LocalizedText(.clipboardPreviewCannotRender).foregroundStyle(.secondary)
         }
     }
 
@@ -213,7 +213,7 @@ struct ClipboardHistoryPopoverView: View {
                 try await store.copyToPasteboard(item)
                 onCopyAndClosePanel()
             } catch {
-                ToastPresenter.shared.show(.failure("复制失败"))
+                ToastPresenter.shared.show(.failure(L(.clipboardToastCopyFailed)))
             }
         }
     }
@@ -325,7 +325,7 @@ private struct KeyboardMonitor: NSViewRepresentable {
                         try await self.store.copyToPasteboard(item)
                         self.onCopyAndClosePanel()
                     } catch {
-                        ToastPresenter.shared.show(.failure("复制失败"))
+                        ToastPresenter.shared.show(.failure(L(.clipboardToastCopyFailed)))
                     }
                 }
                 return true
