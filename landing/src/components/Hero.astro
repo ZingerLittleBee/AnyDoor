@@ -1,0 +1,58 @@
+---
+import MenuPanel from './MenuPanel.astro';
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+---
+
+<section class="hero container-x" data-screen-label="01 Hero">
+  <div>
+    <div class="eyebrow">
+      <span class="dot" />
+      <span data-i18n-zh>{copy.hero.eyebrow.zh}</span><span data-i18n-en>{copy.hero.eyebrow.en}</span>
+    </div>
+    <h1 class="hero-h">
+      <span class="gradient-text"><span data-i18n-zh>{copy.hero.h1a.zh}</span><span data-i18n-en>{copy.hero.h1a.en}</span></span><br />
+      <span class="accent-text"><span data-i18n-zh>{copy.hero.h1b.zh}</span><span data-i18n-en>{copy.hero.h1b.en}</span></span>
+    </h1>
+    <p class="lede">
+      <span data-i18n-zh>{copy.hero.lede.zh}</span><span data-i18n-en>{copy.hero.lede.en}</span>
+    </p>
+
+    <div class="hero-cta">
+      <a class="btn-primary" href="https://github.com/ZingerLittleBee/AnyDoor/releases" target="_blank" rel="noreferrer">
+        <span set:html={icons.bolt()} style="width:16px;height:16px" />
+        <span data-i18n-zh>{copy.hero.ctaPrimary.zh}</span><span data-i18n-en>{copy.hero.ctaPrimary.en}</span>
+      </a>
+      <a class="btn-secondary" href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer">
+        <span set:html={icons.github()} style="width:16px;height:16px" />
+        <span data-i18n-zh>{copy.hero.ctaSecondary.zh}</span><span data-i18n-en>{copy.hero.ctaSecondary.en}</span>
+      </a>
+    </div>
+
+    <div class="hero-meta">
+      <span><span class="check">✓</span><span data-i18n-zh>{copy.hero.meta1.zh}</span><span data-i18n-en>{copy.hero.meta1.en}</span></span>
+      <span><span class="check">✓</span><span data-i18n-zh>{copy.hero.meta2.zh}</span><span data-i18n-en>{copy.hero.meta2.en}</span></span>
+      <span><span class="check">✓</span><span data-i18n-zh>{copy.hero.meta3.zh}</span><span data-i18n-en>{copy.hero.meta3.en}</span></span>
+    </div>
+
+    <div class="feature-pills">
+      {copy.hero.pills.zh.map((p, i) => (
+        <span>
+          <span data-i18n-zh>{p}</span><span data-i18n-en>{copy.hero.pills.en[i]}</span>
+        </span>
+      ))}
+    </div>
+  </div>
+
+  <div class="hero-stage">
+    <div class="menubar-strip">
+      <span class="mb-apple" />
+      <span class="mb-right">
+        <span class="mb-door" set:html={icons.door()} style="width:15px;height:15px" />
+        <span>9:41</span>
+      </span>
+    </div>
+
+    <MenuPanel panelClass="" />
+  </div>
+</section>
