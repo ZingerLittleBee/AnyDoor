@@ -29,6 +29,8 @@ final class MenuBarController {
             button.image = Self.iconImage(named: MenuBarIcon.currentName)
             button.target = self
             button.action = #selector(statusItemClicked)
+            // Receive both left- and right-clicks; we dispatch in the handler.
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
         item.isVisible = MenuBarIcon.isVisible
         statusItem = item
@@ -46,11 +48,60 @@ final class MenuBarController {
     // MARK: - Panel
 
     @objc private func statusItemClicked() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            // Dismiss the panel first so the menu doesn't sit on top of it.
+            if panel?.isVisible == true { hidePanel() }
+            showContextMenu()
+            return
+        }
         if panel?.isVisible == true {
             hidePanel()
         } else {
             showPanel()
         }
+    }
+
+    private func showContextMenu() {
+        guard let statusItem else { return }
+        let menu = NSMenu()
+
+        let settingsItem = NSMenuItem(
+            title: L(.panelFooterSettings),
+            action: #selector(openSettingsFromMenu),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: L(.panelFooterQuit),
+            action: #selector(quitFromMenu),
+            keyEquivalent: "q"
+        )
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        // Assigning .menu makes the status item display it for the current
+        // click; nil it back out afterwards so the next left-click still
+        // routes to our action handler.
+        statusItem.menu = menu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
+    }
+
+    @objc private func openSettingsFromMenu() {
+        // Defer to the next runloop tick: the NSMenu tracking loop is still
+        // unwinding here, and activating the app inside it can race with the
+        // menu dismissal animation.
+        DispatchQueue.main.async {
+            SettingsOpener.shared.tryOpen()
+        }
+    }
+
+    @objc private func quitFromMenu() {
+        NSApplication.shared.terminate(nil)
     }
 
     private func showPanel() {

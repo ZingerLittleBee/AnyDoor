@@ -65,19 +65,24 @@ struct MenuBarView: View {
             .padding(.horizontal, 4)
 
             // Footer
-            HStack(spacing: 8) {
-                Spacer()
-                footerButton(.panelFooterSettings, systemImage: "gear") {
-                    NSApp.activate()
-                    openSettings()
-                    onRequestClose()
+            VStack(spacing: 0) {
+                Divider()
+                    .padding(.horizontal, 8)
+                HStack(spacing: 2) {
+                    Spacer()
+                    footerIconButton(.panelFooterSettings, systemImage: "gearshape") {
+                        NSApp.activate()
+                        openSettings()
+                        onRequestClose()
+                    }
+                    footerIconButton(.panelFooterQuit, systemImage: "power") {
+                        NSApplication.shared.terminate(nil)
+                    }
                 }
-                footerButton(.panelFooterQuit, systemImage: "power") {
-                    NSApplication.shared.terminate(nil)
-                }
+                .focusEffectDisabled()
+                .padding(.horizontal, 6)
+                .padding(.top, 4)
             }
-            .focusEffectDisabled()
-            .padding(.horizontal, 8).padding(.bottom, 4)
         }
         .padding(.vertical, 8).padding(.horizontal, 4)
         .frame(width: 260)
@@ -96,25 +101,21 @@ struct MenuBarView: View {
         }
     }
 
-    private func footerButton(
+    private func footerIconButton(
         _ titleKey: L10n.Key,
         systemImage: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label {
-                LocalizedText(titleKey)
-            } icon: {
-                Image(systemName: systemImage)
-            }
-            .font(.body)
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 10)
-            .frame(height: 24)
-            .contentShape(Rectangle())
-            .adaptiveInteractiveSurface(cornerRadius: 8)
+            Image(systemName: systemImage)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 22)
+                .contentShape(Rectangle())
+                .adaptiveInteractiveSurface(cornerRadius: 6)
         }
         .buttonStyle(.plain)
+        .help(L(titleKey))
     }
 
     @ViewBuilder

@@ -1,5 +1,6 @@
 import Cocoa
 import SwiftData
+import SwiftUI
 import OSLog
 import AskForPermission
 import Sparkle
@@ -13,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var defaultsObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
+    private var settingsCaptureWindow: NSWindow?
 
     override init() {
         do {
@@ -114,6 +116,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { menuBar?.syncFromPreferences() }
         }
         bootstrapUpdater()
+        installSettingsOpenerCapture()
+    }
+
+    /// Mount an off-screen SwiftUI view that resolves `\.openSettings` and
+    /// stores the action closure into `SettingsOpener.shared`, so AppKit code
+    /// (status item right-click menu) can open the Settings window through the
+    /// same path SwiftUI uses internally.
+    @MainActor
+    private func installSettingsOpenerCapture() {
+        let window = NSWindow(
+            contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.alphaValue = 0
+        window.ignoresMouseEvents = true
+        window.isExcludedFromWindowsMenu = true
+        window.collectionBehavior = [.stationary, .ignoresCycle, .fullScreenAuxiliary]
+        window.contentView = NSHostingView(rootView: SettingsOpenerCaptureView())
+        window.orderFrontRegardless()
+        settingsCaptureWindow = window
     }
 
     @MainActor

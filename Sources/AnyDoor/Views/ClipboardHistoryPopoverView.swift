@@ -90,6 +90,8 @@ struct ClipboardHistoryPopoverView: View {
             Text(key)
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(
@@ -97,7 +99,10 @@ struct ClipboardHistoryPopoverView: View {
                         .fill(Color.primary.opacity(0.08))
                 )
             LocalizedText(labelKey)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     // MARK: Content

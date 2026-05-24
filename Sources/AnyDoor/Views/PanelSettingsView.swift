@@ -61,17 +61,17 @@ struct PanelSettingsView: View {
     @ViewBuilder
     private func brightnessHotkeyRecorders() -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            brightnessHotkeyRow(item: .brightnessUp, label: "亮度 +")
-            brightnessHotkeyRow(item: .brightnessDown, label: "亮度 −")
+            brightnessHotkeyRow(item: .brightnessUp, labelKey: .builtinBrightnessUp)
+            brightnessHotkeyRow(item: .brightnessDown, labelKey: .builtinBrightnessDown)
         }
         .padding(.leading, 36)
         .padding(.vertical, 4)
     }
 
     @ViewBuilder
-    private func brightnessHotkeyRow(item: BuiltinItem, label: String) -> some View {
+    private func brightnessHotkeyRow(item: BuiltinItem, labelKey: L10n.Key) -> some View {
         HStack {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            LocalizedText(labelKey).font(.caption).foregroundStyle(.secondary)
             Spacer()
             HotkeyRecorder(hotkey: .constant(PanelStore.shared.hotkeyForBuiltin(item))) { newValue in
                 handleBrightnessHotkeyChange(item: item, newValue: newValue)
