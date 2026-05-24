@@ -18,7 +18,7 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("开机时启动 AnyDoor", isOn: $launchAtLogin)
+                Toggle(isOn: $launchAtLogin) { LocalizedText(.settingsGeneralLaunchAtLogin) }
                     .disabled(!LaunchAtLogin.isSupported)
                     .onChange(of: launchAtLogin) { _, newValue in
                         // Skip the echo from our own revert assignment below.
@@ -31,65 +31,69 @@ struct GeneralSettingsView: View {
                         }
                     }
             } header: {
-                Text("启动")
+                LocalizedText(.settingsGeneralLaunchSection)
             }
 
-            Section("语言") {
+            Section {
                 @Bindable var localization = localization
                 Picker(selection: Binding(
                     get: { localization.preference },
                     set: { localization.preference = $0 }
                 )) {
-                    Text("跟随系统").tag(LanguagePreference.system)
-                    Text("中文").tag(LanguagePreference.zh)
-                    Text("English").tag(LanguagePreference.en)
+                    LocalizedText(.settingsGeneralLanguageOptionSystem).tag(LanguagePreference.system)
+                    LocalizedText(.settingsGeneralLanguageOptionZh).tag(LanguagePreference.zh)
+                    LocalizedText(.settingsGeneralLanguageOptionEn).tag(LanguagePreference.en)
                 } label: {
-                    Text("界面语言")
+                    LocalizedText(.settingsGeneralLanguage)
                 }
                 .pickerStyle(.menu)
+            } header: {
+                LocalizedText(.settingsGeneralLanguageSection)
             }
 
-            Section("菜单栏") {
-                Toggle("显示菜单栏图标", isOn: $menuBarIconVisible)
+            Section {
+                Toggle(isOn: $menuBarIconVisible) { LocalizedText(.settingsGeneralMenubarIconVisible) }
 
-                LabeledContent("菜单栏图标") {
-                    menuBarIconPicker
-                }
-                .disabled(!menuBarIconVisible)
+                LabeledContent { menuBarIconPicker } label: { LocalizedText(.settingsGeneralMenubarIcon) }
+                    .disabled(!menuBarIconVisible)
+            } header: {
+                LocalizedText(.settingsGeneralMenubarSection)
             }
 
-            Section("权限") {
+            Section {
                 accessibilityRow
                 automationRow
+            } header: {
+                LocalizedText(.settingsGeneralPermissionsSection)
             }
 
-            Section("历史记录") {
+            Section {
                 Button(role: .destructive) {
                     Task { await ClipboardHistoryStore.shared.clearAll() }
                 } label: {
-                    Label("清空剪贴历史", systemImage: "trash")
+                    Label { LocalizedText(.settingsGeneralHistoryClear) } icon: { Image(systemName: "trash") }
                 }
+            } header: {
+                LocalizedText(.settingsGeneralHistory)
             }
 
-            Section("关于与更新") {
+            Section {
                 @Bindable var updateService = updateService
 
-                LabeledContent("当前版本") {
-                    Text(Bundle.main.shortVersionString ?? "—")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                }
+                LabeledContent { Text(Bundle.main.shortVersionString ?? "—")
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                } label: { LocalizedText(.settingsAboutCurrentVersion) }
 
-                Toggle("自动检查更新", isOn: $updateService.automaticChecksEnabled)
+                Toggle(isOn: $updateService.automaticChecksEnabled) { LocalizedText(.settingsAboutAutoCheck) }
 
-                LabeledContent("上次检查") {
-                    Text(updateService.lastCheckDate?.formatted(date: .abbreviated, time: .shortened) ?? "—")
-                        .foregroundStyle(.secondary)
-                }
+                LabeledContent { Text(updateService.lastCheckDate?.formatted(date: .abbreviated, time: .shortened) ?? "—")
+                    .foregroundStyle(.secondary)
+                } label: { LocalizedText(.settingsAboutLastCheck) }
 
-                Button("立即检查更新…") {
-                    updateService.checkForUpdates()
-                }
+                Button { updateService.checkForUpdates() } label: { LocalizedText(.settingsAboutCheckNow) }
+            } header: {
+                LocalizedText(.settingsGeneralAbout)
             }
         }
         .formStyle(.grouped)
@@ -108,19 +112,19 @@ struct GeneralSettingsView: View {
     @ViewBuilder
     private var accessibilityRow: some View {
         HStack {
-            Label("辅助功能", systemImage: "accessibility")
+            Label { LocalizedText(.settingsGeneralPermissionAccessibility) } icon: { Image(systemName: "accessibility") }
             Spacer()
             if accessibilityGranted {
-                Label("已授权", systemImage: "checkmark.circle.fill")
+                Label { LocalizedText(.settingsGeneralPermissionGranted) } icon: { Image(systemName: "checkmark.circle.fill") }
                     .foregroundStyle(.green)
             } else if AskForPermission.isAvailable {
                 // Plain Text (not a Button) per AskForPermission guidance —
                 // the modifier owns the tap and runs the guided flight flow.
-                Text("去授权")
+                LocalizedText(.settingsGeneralPermissionRequestEntry)
                     .foregroundStyle(Color.accentColor)
                     .requestsPermission(.accessibility)
             } else {
-                Button("打开系统设置", action: openAccessibilitySettings)
+                Button(action: openAccessibilitySettings) { LocalizedText(.settingsGeneralPermissionOpenSettings) }
             }
         }
     }
@@ -128,16 +132,16 @@ struct GeneralSettingsView: View {
     @ViewBuilder
     private var automationRow: some View {
         HStack {
-            Label("自动化", systemImage: "gearshape.2")
+            Label { LocalizedText(.settingsGeneralPermissionAutomation) } icon: { Image(systemName: "gearshape.2") }
             Spacer()
             if automationGranted {
-                Label("已授权", systemImage: "checkmark.circle.fill")
+                Label { LocalizedText(.settingsGeneralPermissionGranted) } icon: { Image(systemName: "checkmark.circle.fill") }
                     .foregroundStyle(.green)
             } else {
                 // Automation has no guided drag flow. Show the system prompt
                 // when undetermined; fall back to System Settings when the
                 // request resolves to a denial (the prompt no longer appears).
-                Button("申请授权") {
+                Button {
                     Task {
                         await AutomationPermission.activateSystemEvents()
                         let granted = await Task.detached {
@@ -145,19 +149,19 @@ struct GeneralSettingsView: View {
                         }.value
                         if !granted { AutomationPermission.openSettings() }
                     }
-                }
+                } label: { LocalizedText(.settingsGeneralPermissionRequest) }
             }
         }
     }
 
     private var menuBarIconPicker: some View {
-        Picker("菜单栏图标", selection: $menuBarIconName) {
+        Picker(selection: $menuBarIconName) {
             ForEach(MenuBarIcon.choices, id: \.name) { choice in
                 Image(systemName: choice.name)
                     .tag(choice.name)
                     .accessibilityLabel(L(choice.titleKey))
             }
-        }
+        } label: { LocalizedText(.settingsGeneralMenubarIcon) }
         .labelsHidden()
         .pickerStyle(.menu)
         .frame(width: 56)
@@ -175,4 +179,3 @@ struct GeneralSettingsView: View {
         NSWorkspace.shared.open(url)
     }
 }
-
