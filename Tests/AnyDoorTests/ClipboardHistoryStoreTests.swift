@@ -127,6 +127,31 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    func testClearAllResetsCacheEvenWhenNoRows() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        // Populate the cache via the public API, then wipe rows out-of-band so
+        // clearAll() runs against an empty store with a stale cache present.
+        await store.recordText(kind: .ocr, text: "stale")
+        XCTAssertFalse(store.items(for: .ocr).isEmpty)
+
+        let context = container.mainContext
+        for item in try context.fetch(FetchDescriptor<ClipboardHistoryItem>()) {
+            context.delete(item)
+        }
+        try context.save()
+
+        await store.clearAll()
+
+        for kind in ClipboardHistoryKind.allCases {
+            XCTAssertTrue(store.items(for: kind).isEmpty)
+        }
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     func testClearAllDeletesRowsAndScreenshotFiles() async throws {
         let container = try makeContainer()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)

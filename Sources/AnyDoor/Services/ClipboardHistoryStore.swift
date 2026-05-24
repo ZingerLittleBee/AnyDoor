@@ -239,6 +239,16 @@ final class ClipboardHistoryStore {
     }
 
     func clearAll() async {
+        // Ensure the in-memory cache and prune throttle are reset even when
+        // SwiftData operations throw, so the UI does not show stale rows
+        // after the user explicitly cleared history.
+        defer {
+            for kind in ClipboardHistoryKind.allCases {
+                cachedItems[kind] = []
+            }
+            lastPrunedAt = nil
+        }
+
         guard let container = modelContainer else { return }
         do {
             let context = container.mainContext
@@ -254,10 +264,6 @@ final class ClipboardHistoryStore {
                 for url in contents {
                     try? fm.removeItem(at: url)
                 }
-            }
-
-            for kind in ClipboardHistoryKind.allCases {
-                cachedItems[kind] = []
             }
         } catch {
             historyLogger.error("Failed to clear clipboard history: \(error)")
