@@ -19,11 +19,18 @@ on **both Intel and Apple Silicon** Macs. The MacBook built-in display is
 excluded (system F1/F2 already covers it). Per-display volume/contrast and
 internal-display control are deferred.
 
-DDC I/O is delegated to [`reitermarkus/DDC.swift`](https://github.com/reitermarkus/DDC.swift)
-(MIT, vendored via SPM), which already abstracts the Intel `IOAVService` and
-Apple Silicon `Arm64DDC` code paths. AnyDoor wraps it in a small actor that
-exposes `read`/`write` against a `DDCBackend` protocol so tests can inject a
-mock.
+DDC I/O is split by architecture: on **Intel**, the
+[`reitermarkus/DDC.swift`](https://github.com/reitermarkus/DDC.swift) library
+(MIT, SPM) handles the IOKit `i2c` / `IOFramebuffer` path. On **Apple
+Silicon**, that library does not work (it uses `IOFBGetI2CInterfaceCount`,
+which is not the path arm64 displays use), so AnyDoor includes a
+**clean-room `Arm64DDCBackend`** that calls the private
+`IOAVServiceCreate` / `IOAVServiceReadI2C` / `IOAVServiceWriteI2C` symbols
+directly. The MonitorControl project (GPLv3) is referenced for the *approach*
+but no GPL code is copied — function signatures and IORegistry matching
+strategy for IOAVService are not copyrightable. Both backends conform to a
+single `DDCBackend` protocol; runtime picks one based on
+`#if arch(arm64)` (with a runtime guard for fat builds).
 
 ## Goals
 
@@ -85,7 +92,8 @@ mock.
 ├─────────────────────────────────────────────────────────┤
 │  BrightnessController (actor)                           │
 │  └─ probe / read / write via DDCBackend protocol        │
-│      ├─ DDCSwiftBackend  (production, wraps DDC.swift)  │
+│      ├─ Arm64DDCBackend  (Apple Silicon, IOAVService)   │
+│      ├─ IntelDDCBackend  (Intel, wraps DDC.swift)       │
 │      └─ MockDDCBackend   (tests)                        │
 ├─────────────────────────────────────────────────────────┤
 │  HotkeyService (existing) + HotkeyAction (extended)     │
@@ -118,14 +126,16 @@ mock.
 
 ### Code-defined enum extension
 
-`BuiltinItem` is an enum-of-cases (one case per built-in panel item). Add a
-new case and route it to a new `Kind`:
+`BuiltinItem` is an enum-of-cases (one case per built-in item). Three new
+cases and two new `Kind` values are added:
 
 ```swift
 // Models/BuiltinItem.swift
 enum BuiltinItem: String, CaseIterable {
     // ... existing cases (keepAwake, muteAudio, ..., qrcode) ...
-    case brightness                       // new
+    case brightness                       // new: the visible panel row
+    case brightnessUp                     // new: hidden, hotkey-only
+    case brightnessDown                   // new: hidden, hotkey-only
 }
 
 extension BuiltinItem {
@@ -134,51 +144,76 @@ extension BuiltinItem {
         case action
         case submenu                      // existing: click locks popover
         case brightnessControl            // new: hover-only, click is no-op
+        case hiddenHotkey                 // new: no panel row, hotkey only
     }
 
     var kind: Kind {
         switch self {
         // ... existing routing ...
-        case .brightness: return .brightnessControl
+        case .brightness:                 return .brightnessControl
+        case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
     }
 }
 ```
 
-Position of the `.brightness` case in `defaultOrder`: placed adjacent to
-display-related entries (after `.darkMode` is a reasonable default). Final
-position is decided at implementation time and can be re-ordered by the user
-via Panel Settings.
+Position of `.brightness` in `defaultOrder`: placed after `.darkMode`. Users
+can re-order via Panel Settings. `.brightnessUp` / `.brightnessDown` get
+sentinel order values and are filtered out of the panel render.
 
-A new `.brightnessControl` Kind (rather than reusing `.submenu`) is
-deliberate: `.submenu`'s click handler locks the popover (`onSubmenu()`,
-see `PanelRowView.swift`), whereas the brightness row's click must be a
-no-op per the chosen UX. The new Kind keeps that branch local to one
-switch case in `PanelRowView`.
+**Why a new `.brightnessControl` Kind** (not reuse `.submenu`): `.submenu`'s
+click handler locks the popover (`onSubmenu()` in `PanelRowView.swift`),
+whereas the brightness row's click must be a no-op per the chosen UX. New
+Kind keeps the branch local.
 
-`PanelRowView.body`'s `.onTapGesture` switch gains:
+**Why a new `.hiddenHotkey` Kind** (not "hidden `BuiltinPreference` rows"):
+the previous draft stored the ± hotkeys as `isVisible: false` preference
+rows, but `PanelStore.entryUsingHotkey()`
+(`Sources/AnyDoor/Services/PanelStore.swift:320`) only scans
+`topLevelEntries + appShortcutChildren`, which excludes invisible entries.
+That would let the brightness hotkeys silently collide with existing app /
+built-in hotkeys. Modelling them as real `BuiltinItem` cases that flow
+through normal `BuiltinPreference` storage and snapshot rebuild keeps
+conflict detection honest.
+
+### Changes to `PanelStore`
 
 ```swift
-case .brightnessControl: break   // click is intentionally a no-op
+// PanelRowView click switch gains:
+case .brightnessControl: break              // intentional no-op
+// (.hiddenHotkey never reaches PanelRowView — it's filtered out of
+//  topLevelEntries during rebuild.)
+
+// rebuild(): when assembling topLevelEntries, skip items whose kind is
+// .hiddenHotkey. (They still own a BuiltinPreference row for hotkey storage.)
+
+// entryUsingHotkey(_:excluding:): scan extended to include hidden-hotkey
+// entries:
+let hiddenHotkeyEntries = BuiltinItem.allCases
+    .filter { $0.kind == .hiddenHotkey }
+    .compactMap { makeEntry(for: $0) }
+for entry in topLevelEntries + appShortcutChildren + hiddenHotkeyEntries {
+    if entry.source == excluding { continue }
+    if entry.hotkey == hotkey { return entry }
+}
+
+// rebuildHotkeySnapshots(): also emit snapshots for hidden-hotkey
+// BuiltinPreferences, with HotkeyAction.brightnessUp / .brightnessDown.
 ```
 
-Hotkey binding for the main row is not applicable — there is no single
-"toggle brightness" action. The two ± hotkeys live on separate hidden
-`BuiltinPreference` rows (see below).
+Single source of truth: brightness hotkeys live in the same `BuiltinPreference`
+table everything else uses; no special-case storage.
 
 ### SwiftData (`BuiltinPreference`) — no schema change
 
-Reuse the existing `BuiltinPreference` model. Add two hidden preference
-entries to store the bump hotkeys (they have no visible row of their own):
+`BuiltinPreference` already stores one hotkey per `BuiltinItem` raw value. The
+new cases `.brightnessUp` and `.brightnessDown` get their own
+`BuiltinPreference` rows, seeded by `BuiltinPreferenceSeeder`. They use
+`isVisible: false` (no panel row), but unlike the previous draft they are
+proper `BuiltinItem` cases, so `PanelStore` discovers them through
+`BuiltinItem.allCases`-based scans (see "Changes to `PanelStore`" above).
 
-| `id`                    | `isVisible` | Purpose                       |
-| ----------------------- | ----------- | ----------------------------- |
-| `brightness.hotkey.up`  | false       | Stores hotkey for brightness+ |
-| `brightness.hotkey.down`| false       | Stores hotkey for brightness− |
-
-Seeded by `BuiltinPreferenceSeeder` on first run if absent.
-
-The Panel Settings UI surfaces these two hidden preferences inline under the
+The Panel Settings UI surfaces these two preferences inline under the
 "屏幕亮度" row using the existing `HotkeyRecorder` component.
 
 ### Runtime state (in-memory only)
@@ -207,13 +242,33 @@ persisted.
 
 ```swift
 protocol DDCBackend: Sendable {
+    /// Fast, side-effect-free check: is the I2C/IOAVService transport
+    /// reachable for this display? Does NOT issue a VCP read. Used by
+    /// `BrightnessController.probe`.
+    func transportReady(displayID: CGDirectDisplayID) -> Bool
+
+    /// Issue a VCP read. May time out independently of `transportReady`.
     func read(displayID: CGDirectDisplayID, vcp: UInt8) async -> UInt16?
+
+    /// Issue a VCP write. Throws on failure.
     func write(displayID: CGDirectDisplayID, vcp: UInt8, value: UInt16) async throws
 }
 
-struct DDCSwiftBackend: DDCBackend { /* wraps reitermarkus/DDC.swift */ }
+#if arch(arm64)
+struct Arm64DDCBackend: DDCBackend  { /* clean-room, dlsym IOAVService */ }
+typealias ProductionDDCBackend = Arm64DDCBackend
+#else
+struct IntelDDCBackend: DDCBackend  { /* wraps reitermarkus/DDC.swift */ }
+typealias ProductionDDCBackend = IntelDDCBackend
+#endif
+
 struct MockDDCBackend: DDCBackend  { /* test fixture */ }
 ```
+
+Both production backends look up the display's IOAVService /
+IOI2CInterface object once and cache it per `CGDirectDisplayID` (refreshed
+on screen-change notifications). Cache invalidation on hot-unplug is
+handled by the higher-level service via `refresh()`.
 
 ### `BrightnessController`
 
@@ -223,7 +278,10 @@ actor BrightnessController {
 
     init(backend: DDCBackend)
 
-    /// One-shot probe: tries a read; success → supports DDC.
+    /// Transport probe — fast, no VCP query. Returns true iff the display
+    /// is reachable via IOAVService / IOI2CInterface. Used to decide whether
+    /// to render the card as supported or greyed out. A read or write may
+    /// still time out for transient reasons even when this returns true.
     func probe(displayID: CGDirectDisplayID) async -> Bool
 
     /// 0...1 normalised, or nil if unreadable / unsupported.
@@ -244,14 +302,22 @@ Invariants:
 
 ### `DisplayBrightnessService`
 
+Service follows the codebase pattern (mirror of
+`PanelStore.shared` + `bootstrap(...)`, `ClipboardHistoryStore.shared` +
+`bootstrap(...)`):
+
 ```swift
 @MainActor @Observable
 final class DisplayBrightnessService {
-    static let shared: DisplayBrightnessService
+    static let shared = DisplayBrightnessService()
 
     private(set) var displays: [DisplayInfo]
     private(set) var levels:   [CGDirectDisplayID: Float]
     private(set) var isLoading: Set<CGDirectDisplayID>
+
+    /// Called once from AppDelegate. Tests can call this with a
+    /// MockDDCBackend-backed controller to override the production wiring.
+    func bootstrap(controller: BrightnessController)
 
     /// Re-enumerates NSScreen.screens, probes/reads DDC per display.
     func refresh() async
@@ -287,11 +353,20 @@ enum OSDBridge {
 }
 ```
 
-- Uses `dlopen` on
-  `/System/Library/PrivateFrameworks/OSDUIHelper.framework/OSDUIHelper`
-  and `dlsym` to resolve the relevant Obj-C selector.
-- Renders the brightness chiclet count (16 chiclets, filled = `round(value*16)`).
-- Never throws; never blocks the caller.
+- Loads `/System/Library/PrivateFrameworks/OSDUIHub.framework/OSDUIHub` (the
+  current daemon process owning the OSD UI) and resolves the chiclet
+  display selector
+  `showImage:onDisplayID:priority:msecUntilFade:filledChiclets:totalChiclets:locked:`
+  on `OSDManager`.
+- Brightness uses OSD image ID `OSDGraphic.brightness` (raw value `1` in
+  the private enum); chiclet count = 16, `filled = round(value * 16)`.
+- Selector and image-id values are based on MonitorControl's published
+  bridging-header constants (`showImage:` for chiclets;
+  `showImageAtPath:withText:...` is a *different* selector used for
+  text-bearing OSDs and is **not** used here).
+- Never throws; never blocks the caller. If `dlopen`, the class lookup, or
+  `responds(to:)` fails, the call returns silently and brightness still
+  takes effect at the display.
 
 ### `HotkeyAction` extension
 
@@ -316,11 +391,22 @@ preferences and emits `HotkeySnapshot`s carrying `.brightnessUp` /
 
 ### Flow A — User hovers the "屏幕亮度" row
 
+Hover-popover plumbing in AnyDoor lives in `MenuBarView`, not
+`PanelRowView` (see `Sources/AnyDoor/Views/MenuBarView.swift:117-118` for
+the existing `.submenu` registration). The brightness row plugs into the
+same machinery:
+
 ```
-1. PanelRowView detects hover (existing HoverGate timing)
-2. HoverPopover.show(content: BrightnessPopoverView())
-3. BrightnessPopoverView.onAppear → Task { await service.refresh() }
-4. service.refresh():
+1. MenuBarView's hover-trigger logic registers a trigger frame for any
+   built-in row whose kind is .submenu OR .brightnessControl.
+2. When the cursor enters that frame and the HoverGate delay elapses,
+   MenuBarView sets activeHoverTarget = .brightnessControl(.brightness)
+   (new HoverPopoverTarget case).
+3. mountPopoverContent gains a new branch:
+       case .brightnessControl(.brightness):
+           HoverPopover.show(content: BrightnessPopoverView())
+4. BrightnessPopoverView.onAppear → Task { await service.refresh() }
+5. service.refresh():
    a. Enumerate NSScreen.screens, filter out CGDisplayIsBuiltin
    b. Resolve each name via CoreDisplay (localizedDeviceName)
    c. Dedupe identical names with suffix " (1)", " (2)", ...
@@ -371,12 +457,17 @@ notification has fired since, skip step 4.
 
 ### Flow E — Application launch
 
+Mirrors the existing `PanelStore.shared.bootstrap(...)` /
+`ClipboardHistoryStore.shared.bootstrap(...)` pattern:
+
 ```
 AppDelegate.applicationDidFinishLaunching:
-1. Build BrightnessController(backend: DDCSwiftBackend())
-2. Build DisplayBrightnessService(controller:)  → register as shared
-3. Register NSScreen observer inside the service
-4. Wire PanelStore dispatcher cases to service.bump
+1. let backend = ProductionDDCBackend()              // arch-selected at compile time
+2. let controller = BrightnessController(backend: backend)
+3. DisplayBrightnessService.shared.bootstrap(controller: controller)
+   // bootstrap() also installs the NSScreen observer
+4. PanelStore dispatcher already wired in existing flow; the new
+   HotkeyAction cases route to DisplayBrightnessService.shared.bump(...)
 5. Task.detached { await DisplayBrightnessService.shared.refresh() }
    → first hover finds data already cached
 ```
@@ -440,8 +531,8 @@ Under the existing "屏幕亮度" row, a chevron-expandable inline section:
 
 | Scenario                                  | Behaviour                                                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Display does not support DDC              | `supportsDDC = false`; card visible but greyed out; slider disabled; no further read/write attempts.   |
-| DDC read timeout (>500 ms)                | `levels[id]` stays `nil`; slider shows at midpoint but is interactive (drag triggers write normally).  |
+| Display has no DDC transport (`transportReady == false`) | `supportsDDC = false`; card visible but greyed out; slider disabled; no further read/write attempts. This is the only path that sets `supportsDDC = false`. |
+| DDC value read timeout (>500 ms) on a transport-ready display | `supportsDDC` stays `true`; `levels[id]` stays `nil`; slider shows at midpoint but remains interactive (drag triggers write normally — many monitors accept writes but refuse VCP reads). |
 | DDC write failure                         | Actor retries once; on second failure, log; thumb greys for ~250 ms; no alert.                         |
 | `bump` with mouse on built-in / unsupported| Fallback to `NSScreen.main`. If that is also unsupported, bump becomes a no-op (no OSD, no write).     |
 | Hot-unplug during in-flight write         | Actor's next write throws (invalid IOAVService); caught silently; UI removes the card on next refresh. |
@@ -499,14 +590,25 @@ Captured separately when the implementation lands; covers:
 ### New SPM dependency
 
 - `https://github.com/reitermarkus/DDC.swift` (MIT) — added to
-  `Package.swift`. Copyright/notice surfaced in the project README's
-  acknowledgements list and (eventually) in an in-app "About" view.
+  `Package.swift`, **conditionally compiled in only for Intel builds**
+  (`#if !arch(arm64)`). Copyright/notice surfaced in README's
+  acknowledgements list and in the eventual in-app "About" view.
+
+### New in-repo code (no third-party dependency)
+
+- `Arm64DDCBackend` — ~150-200 lines of Swift, clean-room implementation of
+  IOAVService-based DDC over I2C for Apple Silicon. Uses public IOKit calls
+  plus `dlsym`-loaded `IOAVServiceCreate`, `IOAVServiceReadI2C`,
+  `IOAVServiceWriteI2C` private symbols. The MonitorControl project's
+  Arm64DDC.swift is GPLv3 and is **not** copied; we reference only its
+  approach, which is non-copyrightable.
 
 ### System frameworks (already linked or trivially available)
 
 - `IOKit` / `CoreDisplay` / `AppKit` — already used by AnyDoor.
-- `OSDUIHelper` (private) — loaded dynamically via `dlopen`; not linked at
-  build time.
+- `OSDUIHub` (private) — loaded dynamically via `dlopen`; not linked at
+  build time. Selector resolution wrapped in defensive guards
+  (`responds(to:)`) so framework path changes degrade gracefully.
 
 ## Open follow-ups (post-v1)
 
