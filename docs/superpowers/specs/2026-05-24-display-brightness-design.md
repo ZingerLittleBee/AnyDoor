@@ -12,7 +12,7 @@ popover containing one card per detected external display, each with a
 horizontal slider bound to that display's brightness (VCP 0x10). Two global
 hotkeys ("亮度 +" / "亮度 −") adjust the brightness of the display under the
 mouse cursor by ±1/16 (≈6.25%, matching the macOS system step) and trigger the
-native macOS OSD via a private `OSDUIHelper` bridge.
+native macOS OSD via a private-framework bridge (`OSD.framework`).
 
 v1 is intentionally scoped to **external DDC/CI displays, brightness only**,
 on **both Intel and Apple Silicon** Macs. The MacBook built-in display is
@@ -29,8 +29,12 @@ which is not the path arm64 displays use), so AnyDoor includes a
 directly. The MonitorControl project (GPLv3) is referenced for the *approach*
 but no GPL code is copied — function signatures and IORegistry matching
 strategy for IOAVService are not copyrightable. Both backends conform to a
-single `DDCBackend` protocol; runtime picks one based on
-`#if arch(arm64)` (with a runtime guard for fat builds).
+single `DDCBackend` protocol; the production typealias is selected per
+slice by `#if arch(arm64)` in source code (each slice of a universal
+binary compiles independently, so per-slice selection works correctly).
+The SPM dependency on DDC.swift is declared unconditionally — see
+"Dependencies" for why arch-conditioning the manifest breaks
+universal builds.
 
 ## Goals
 
@@ -61,7 +65,7 @@ single `DDCBackend` protocol; runtime picks one based on
 - **No error dialogs/toasts.** DDC failures are logged; the slider thumb
   briefly greys to signal a transient write failure.
 - **No App Store submission compatibility.** The native OSD path uses
-  `OSDUIHelper` (private framework); this is acceptable given AnyDoor's
+  the private `OSD.framework`; this is acceptable given AnyDoor's
   distribution model.
 - **No exposure of the DDC backend from view code.** Views never touch
   `DDC.swift` directly.
@@ -100,7 +104,8 @@ single `DDCBackend` protocol; runtime picks one based on
 │  └─ .brightnessUp / .brightnessDown                     │
 ├─────────────────────────────────────────────────────────┤
 │  OSDBridge (enum, stateless)                            │
-│  └─ dlopen OSDUIHelper → native brightness OSD          │
+│  └─ dlopen OSD.framework → OSDManager.sharedManager()   │
+│      → native brightness OSD                            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -114,8 +119,9 @@ single `DDCBackend` protocol; runtime picks one based on
   truth for the brightness UI: tracks detected external displays, their
   current brightness, and orchestrates refresh / debounced writes /
   bump-by-delta. Owns the NSScreen observer.
-- **`OSDBridge` (enum)** — wraps the private `OSDUIHelper`
-  `showImageAtPath:onDisplayID:priority:msecUntilFade:filledChiclets:totalChiclets:locked:` call.
+- **`OSDBridge` (enum)** — `dlopen`s `/System/Library/PrivateFrameworks/OSD.framework/OSD`,
+  resolves the `OSDManager` class via `NSClassFromString`, calls
+  `+sharedManager` then `-showImage:onDisplayID:priority:msecUntilFade:filledChiclets:totalChiclets:locked:`.
   Stateless; failures silent.
 - **`PanelStore`** — adds two cases to `dispatch(_:)`, routes brightness
   hotkeys to the service. Does not own brightness state.
@@ -339,9 +345,20 @@ Behavioural rules:
 - `bump` resolves displayID via mouse cursor → falls back to
   `NSScreen.main` if cursor is over the built-in / unsupported display; if
   fallback is also unsupported, the bump is a no-op.
-- `bump` always fires `OSDBridge.showBrightness(newValue, on: displayID)`
-  after a successful write.
-- `bump` is rate-naturally-limited by user keyboard repeat; no extra
+- **Baseline when `levels[id] == nil`** (read previously timed out on a
+  transport-ready display): `bump` treats the current level as `0.5` for
+  the purpose of `clamp(current + delta, 0...1)`. After the write is
+  scheduled, the service issues a fresh `controller.read` (best-effort) so
+  later nudges have a real baseline. Rationale: keeps hotkey UX snappy,
+  avoids ignoring user input; 6.25% nudge from a wrong baseline self-corrects
+  within ~4 keypresses.
+- **OSD timing**: `bump` fires `OSDBridge.showBrightness(newValue, on: id)`
+  *optimistically*, immediately after spawning the write Task — not after
+  the write resolves. Rationale: DDC writes can take 50-200 ms; deferring
+  the OSD until after `write` returns makes the chiclet feel laggy relative
+  to the keystroke. If the write later fails, we do NOT undo the OSD
+  (acceptable: nudges are tiny and the OSD is transient).
+- `bump` is rate-naturally-limited by keyboard repeat; no extra
   debouncing.
 
 ### `OSDBridge`
@@ -353,20 +370,27 @@ enum OSDBridge {
 }
 ```
 
-- Loads `/System/Library/PrivateFrameworks/OSDUIHub.framework/OSDUIHub` (the
-  current daemon process owning the OSD UI) and resolves the chiclet
-  display selector
-  `showImage:onDisplayID:priority:msecUntilFade:filledChiclets:totalChiclets:locked:`
-  on `OSDManager`.
-- Brightness uses OSD image ID `OSDGraphic.brightness` (raw value `1` in
-  the private enum); chiclet count = 16, `filled = round(value * 16)`.
-- Selector and image-id values are based on MonitorControl's published
-  bridging-header constants (`showImage:` for chiclets;
+- Loads `/System/Library/PrivateFrameworks/OSD.framework/OSD` via `dlopen`.
+  Verified path on macOS 26.5 (`OSDUIHelper.framework` /
+  `OSDUIHub.framework` from older macOS docs do **not** exist on current
+  systems). The on-disk binary is a stub symlink resolved from the dyld
+  shared cache; `dlopen` succeeds because dyld services symbols from the
+  cache rather than the on-disk file.
+- Resolves `OSDManager` via `NSClassFromString("OSDManager")`, calls
+  `+sharedManager` (returns an `NSObject` that internally manages the XPC
+  connection to `OSDUIHelper.app` in `/System/Library/CoreServices`),
+  then invokes the chiclet display selector
+  `showImage:onDisplayID:priority:msecUntilFade:filledChiclets:totalChiclets:locked:`.
+- Brightness uses OSD image id `OSDGraphic.brightness` (raw value `1` in
+  the published private enum). Chiclet count = 16,
+  `filled = round(value * 16)`.
+- Selector name confirmed against MonitorControl's bridging header.
   `showImageAtPath:withText:...` is a *different* selector used for
-  text-bearing OSDs and is **not** used here).
-- Never throws; never blocks the caller. If `dlopen`, the class lookup, or
-  `responds(to:)` fails, the call returns silently and brightness still
-  takes effect at the display.
+  text-bearing OSDs and is **not** used here.
+- Never throws; never blocks the caller. If `dlopen`, `NSClassFromString`,
+  `+sharedManager`, or `responds(to:)` fails (e.g., the framework path or
+  selector changes in a future macOS), the call returns silently and the
+  DDC write still takes effect at the display.
 
 ### `HotkeyAction` extension
 
@@ -440,10 +464,14 @@ notification has fired since, skip step 4.
 4. service:
    a. Resolve displayID via NSEvent.mouseLocation + NSScreen.screens;
       fallback NSScreen.main; bail if still unsupported.
-   b. newValue = clamp(levels[id] + delta, 0...1)
-   c. levels[id] = newValue          (popover, if open, updates live)
-   d. Task { try await controller.write(id, newValue) }
-   e. OSDBridge.showBrightness(newValue, on: id)
+   b. baseline = levels[id] ?? 0.5     (see "Baseline when nil" above)
+   c. newValue = clamp(baseline + delta, 0...1)
+   d. levels[id] = newValue            (popover, if open, updates live)
+   e. Task { try await controller.write(id, newValue) }
+   f. OSDBridge.showBrightness(newValue, on: id)   (optimistic; pre-await)
+   g. If baseline came from the 0.5 fallback: Task {
+         if let real = await controller.read(id) { levels[id] = real }
+      }                                  (best-effort backfill for next bump)
 ```
 
 ### Flow D — Display hot-plug
@@ -532,7 +560,7 @@ Under the existing "屏幕亮度" row, a chevron-expandable inline section:
 | Scenario                                  | Behaviour                                                                                              |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | Display has no DDC transport (`transportReady == false`) | `supportsDDC = false`; card visible but greyed out; slider disabled; no further read/write attempts. This is the only path that sets `supportsDDC = false`. |
-| DDC value read timeout (>500 ms) on a transport-ready display | `supportsDDC` stays `true`; `levels[id]` stays `nil`; slider shows at midpoint but remains interactive (drag triggers write normally — many monitors accept writes but refuse VCP reads). |
+| DDC value read timeout (>500 ms) on a transport-ready display | `supportsDDC` stays `true`; `levels[id]` stays `nil`; slider shows at midpoint but remains interactive (drag triggers write normally — many monitors accept writes but refuse VCP reads). Hotkey bump uses 0.5 as baseline (see service rules) and schedules a backfill read after the write. |
 | DDC write failure                         | Actor retries once; on second failure, log; thumb greys for ~250 ms; no alert.                         |
 | `bump` with mouse on built-in / unsupported| Fallback to `NSScreen.main`. If that is also unsupported, bump becomes a no-op (no OSD, no write).     |
 | Hot-unplug during in-flight write         | Actor's next write throws (invalid IOAVService); caught silently; UI removes the card on next refresh. |
@@ -590,9 +618,19 @@ Captured separately when the implementation lands; covers:
 ### New SPM dependency
 
 - `https://github.com/reitermarkus/DDC.swift` (MIT) — added to
-  `Package.swift`, **conditionally compiled in only for Intel builds**
-  (`#if !arch(arm64)`). Copyright/notice surfaced in README's
-  acknowledgements list and in the eventual in-app "About" view.
+  `Package.swift` **unconditionally**. SwiftPM's `Package.Dependency`
+  conditions only support `.platforms(...)`, not `arch`, and `#if arch(...)`
+  in a `Package.swift` manifest is evaluated against the **host
+  architecture**, not per slice. `scripts/release.sh:132` does a universal
+  build (`swift build -c release --arch arm64 --arch x86_64`), so any
+  host-conditioned manifest would silently drop the dependency from one
+  slice and break the universal release. The dependency is therefore
+  unconditional; the *usage* lives behind `#if !arch(arm64)` in the source
+  files that wrap it (`IntelDDCBackend`). On an arm64-only build the
+  resulting binary contains no DDC.swift symbols (dead-code stripped),
+  with only a small manifest-resolution overhead at build time.
+  Copyright/notice surfaced in README's acknowledgements list and in the
+  eventual in-app "About" view.
 
 ### New in-repo code (no third-party dependency)
 
@@ -606,9 +644,12 @@ Captured separately when the implementation lands; covers:
 ### System frameworks (already linked or trivially available)
 
 - `IOKit` / `CoreDisplay` / `AppKit` — already used by AnyDoor.
-- `OSDUIHub` (private) — loaded dynamically via `dlopen`; not linked at
-  build time. Selector resolution wrapped in defensive guards
-  (`responds(to:)`) so framework path changes degrade gracefully.
+- `OSD.framework` (private) — loaded dynamically via `dlopen` at
+  `/System/Library/PrivateFrameworks/OSD.framework/OSD`; not linked at
+  build time. Class lookup (`NSClassFromString("OSDManager")`), shared
+  instance, and selector resolution are each guarded so framework path,
+  class, or selector changes in a future macOS degrade gracefully (silent
+  no-op; DDC write still lands).
 
 ## Open follow-ups (post-v1)
 
