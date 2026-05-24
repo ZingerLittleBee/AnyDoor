@@ -17,7 +17,8 @@ actor OCRProvider: ActionProvider {
             }
             let lines = try await TextRecognizer.recognize(image)
             guard !lines.isEmpty else {
-                await ToastPresenter.shared.show(.failure("未识别到文字"))
+                let msg = await MainActor.run { L(.toastOcrNoText) }
+                await ToastPresenter.shared.show(.failure(msg))
                 return
             }
             let text = lines.joined(separator: "\n")
@@ -27,9 +28,11 @@ actor OCRProvider: ActionProvider {
                 pasteboard.setString(text, forType: .string)
             }
             await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text)
-            await ToastPresenter.shared.show(.success("已复制到剪贴板"))
+            let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
+            await ToastPresenter.shared.show(.success(successMsg))
         } catch {
-            await ToastPresenter.shared.show(.failure("识别失败"))
+            let errMsg = await MainActor.run { L(.toastRecognitionFailed) }
+            await ToastPresenter.shared.show(.failure(errMsg))
         }
     }
 }
