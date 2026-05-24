@@ -1,6 +1,17 @@
 import SwiftUI
 import AppKit
 
+/// Identifies which kind of hover-anchored popover should be mounted next.
+///
+/// Built-in `.submenu` rows (e.g. App Shortcuts, Port Manager) hover-show
+/// their dedicated popover content. Built-in `.action` rows that produce
+/// clipboard history (OCR / pick color / QR code / screenshot) hover-show
+/// the unified `ClipboardHistoryPopoverView` for the matching kind.
+private enum HoverPopoverTarget: Hashable {
+    case submenu(BuiltinItem)
+    case history(ClipboardHistoryKind)
+}
+
 struct MenuBarView: View {
     /// Invoked by the footer's Settings button so the controller can dismiss
     /// the panel before the Settings window opens.
@@ -11,11 +22,12 @@ struct MenuBarView: View {
     @State private var updateService = UpdateService.shared
     @State private var popover: HoverPopover?
     @State private var gate = HoverGate()
-    // One trigger frame per submenu builtin so hover-anchored popovers can be
-    // mounted from any `.submenu`-kind row, not just App Shortcuts.
-    @State private var triggerFrames: [BuiltinItem: NSRect] = [:]
-    // The submenu whose popover should be mounted on the next `gate.onShow`.
-    @State private var activeSubmenu: BuiltinItem? = nil
+    // One trigger frame per hover target so hover-anchored popovers can be
+    // mounted from any `.submenu`-kind row or any `.action`-kind row that
+    // owns a clipboard history bucket.
+    @State private var triggerFrames: [HoverPopoverTarget: NSRect] = [:]
+    // The target whose popover should be mounted on the next `gate.onShow`.
+    @State private var activeHoverTarget: HoverPopoverTarget? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -103,6 +115,7 @@ struct MenuBarView: View {
     @ViewBuilder
     private func rowView(for entry: PanelEntry) -> some View {
         if case let .builtin(item) = entry.source, item.kind == .submenu {
+            let target = HoverPopoverTarget.submenu(item)
             PanelRowView(
                 entry: entry,
                 onToggle: {},
@@ -112,12 +125,32 @@ struct MenuBarView: View {
             )
             .background(
                 ScreenFrameReader { frame in
-                    triggerFrames[item] = frame
+                    triggerFrames[target] = frame
                 }
             )
             .onHover { hovered in
-                if hovered { activeSubmenu = item }
-                gate.triggerHover(hovered)
+                triggerHover(hovered, target: target)
+            }
+        } else if case let .builtin(item) = entry.source,
+                  item.kind == .action,
+                  let historyKind = item.historyKind {
+            let target = HoverPopoverTarget.history(historyKind)
+            PanelRowView(
+                entry: entry,
+                onToggle: {},
+                onAction: {
+                    Task { await panel.run(item) }
+                },
+                onSubmenu: {},
+                onPermission: openPermissionsSettings
+            )
+            .background(
+                ScreenFrameReader { frame in
+                    triggerFrames[target] = frame
+                }
+            )
+            .onHover { hovered in
+                triggerHover(hovered, target: target)
             }
         } else {
             PanelRowView(
@@ -140,9 +173,10 @@ struct MenuBarView: View {
 
     private func wireGate() {
         gate.onShow = {
-            guard let item = activeSubmenu else { return }
-            mountPopoverContent(for: item)
-            popover?.show(anchoredTo: convertedTriggerFrame(for: item))
+            guard let target = activeHoverTarget else { return }
+            // `mountPopoverContent` owns the `popover.show` call so submenu (sync)
+            // and history (async after store reload) paths stay symmetric.
+            mountPopoverContent(for: target)
         }
         gate.onHide = {
             popover?.scheduleHide()
@@ -150,12 +184,38 @@ struct MenuBarView: View {
         }
     }
 
-    /// Mount the SwiftUI content appropriate for `item` and toggle the
+    /// Drive `HoverGate` from a row's `onHover` while keeping `activeHoverTarget`
+    /// in sync. `activeHoverTarget` MUST be updated before calling
+    /// `gate.triggerHover(true)`: when the gate is already shown,
+    /// `HoverGate.scheduleShow` re-invokes `onShow` synchronously, which reads
+    /// `activeHoverTarget` to decide what to mount. That re-fire is also what
+    /// re-mounts the correct content when the user crosses from one hover row
+    /// to another (it additionally cancels the pending hide queued by the
+    /// previous row's leave event).
+    private func triggerHover(_ hovered: Bool, target: HoverPopoverTarget) {
+        if hovered {
+            activeHoverTarget = target
+            gate.triggerHover(true)
+        } else {
+            guard activeHoverTarget == target else { return }
+            gate.triggerHover(false)
+        }
+    }
+
+    /// Mount the SwiftUI content appropriate for `target` and toggle the
     /// popover's `needsKeyFocus` flag for views that need first-responder.
-    private func mountPopoverContent(for item: BuiltinItem) {
+    ///
+    /// Sole owner of `popover.show(anchoredTo:)` for hover-anchored content:
+    /// submenu cases call it synchronously at the end of their branch;
+    /// `.history` defers it inside a `Task` so the popover only appears after
+    /// the store cache has been pruned + reloaded. Invoked both from
+    /// `wireGate`'s `onShow` (first show) and again synchronously from
+    /// `HoverGate.scheduleShow` when the gate is already shown and the user
+    /// crosses to a new hover target.
+    private func mountPopoverContent(for target: HoverPopoverTarget) {
         let popover = ensurePopover()
-        switch item {
-        case .appShortcuts:
+        switch target {
+        case .submenu(.appShortcuts):
             popover.needsKeyFocus = false
             popover.updateContent {
                 AppShortcutsPopoverView(
@@ -177,7 +237,8 @@ struct MenuBarView: View {
                     }
                 )
             }
-        case .portManager:
+            popover.show(anchoredTo: convertedTriggerFrame(for: target))
+        case .submenu(.portManager):
             popover.needsKeyFocus = true
             popover.updateContent {
                 PortManagerPopoverView(
@@ -191,8 +252,39 @@ struct MenuBarView: View {
                 )
             }
             Task { await PortInventory.shared.refresh() }
-        default:
+            popover.show(anchoredTo: convertedTriggerFrame(for: target))
+        case .submenu:
+            // Other builtin submenu items (none today) — nothing to mount.
             break
+        case .history(let kind):
+            let store = ClipboardHistoryStore.shared
+            Task { @MainActor in
+                await store.pruneExpiredAndOverflow(force: false)
+                await store.reload(kind: kind)
+
+                // Guard against the user moving off the row before reload finished.
+                // Setting `needsKeyFocus` is deferred until after this guard so we
+                // never briefly flip the flag for a popover we will not show.
+                guard activeHoverTarget == .history(kind) else { return }
+                popover.needsKeyFocus = true
+
+                popover.updateContent {
+                    ClipboardHistoryPopoverView(
+                        store: store,
+                        kind: kind,
+                        onDismissPopover: {
+                            gate.reset()
+                            popover.hide()
+                        },
+                        onCopyAndClosePanel: {
+                            gate.reset()
+                            popover.hide()
+                            onRequestClose()
+                        }
+                    )
+                }
+                popover.show(anchoredTo: convertedTriggerFrame(for: .history(kind)))
+            }
         }
     }
 
@@ -203,9 +295,9 @@ struct MenuBarView: View {
         return created
     }
 
-    /// Returns the submenu row frame in AppKit screen coordinates.
-    private func convertedTriggerFrame(for item: BuiltinItem) -> NSRect {
-        triggerFrames[item] ?? menuBarPanelWindow()?.frame ?? .zero
+    /// Returns the hover target's row frame in AppKit screen coordinates.
+    private func convertedTriggerFrame(for target: HoverPopoverTarget) -> NSRect {
+        triggerFrames[target] ?? menuBarPanelWindow()?.frame ?? .zero
     }
 
     private func menuBarPanelWindow() -> NSWindow? {
@@ -215,7 +307,7 @@ struct MenuBarView: View {
     }
 
     private func triggerSubmenu(_ item: BuiltinItem) {
-        activeSubmenu = item
+        activeHoverTarget = .submenu(item)
         gate.showImmediately()
     }
 

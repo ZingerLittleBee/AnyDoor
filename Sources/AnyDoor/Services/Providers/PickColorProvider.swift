@@ -23,6 +23,7 @@ actor PickColorProvider: ActionProvider {
                 pasteboard.clearContents()
                 pasteboard.setString(hex, forType: .string)
             }
+            await ClipboardHistoryStore.shared.recordColor(hex: hex)
             await ToastPresenter.shared.show(
                 .color(message: "已复制 \(hex)", swatch: swatch)
             )

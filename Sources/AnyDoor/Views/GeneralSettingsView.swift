@@ -47,6 +47,14 @@ struct GeneralSettingsView: View {
                 automationRow
             }
 
+            Section("历史记录") {
+                Button(role: .destructive) {
+                    Task { await ClipboardHistoryStore.shared.clearAll() }
+                } label: {
+                    Label("清空剪贴历史", systemImage: "trash")
+                }
+            }
+
             Section("关于与更新") {
                 @Bindable var updateService = updateService
 

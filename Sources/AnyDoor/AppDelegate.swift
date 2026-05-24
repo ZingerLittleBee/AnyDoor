@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
             let config = ModelConfiguration(url: storeURL)
             modelContainer = try ModelContainer(
-                for: KeyBinding.self, BuiltinPreference.self,
+                for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
                 configurations: config
             )
 
@@ -44,6 +44,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let context = modelContainer.mainContext
         KeyBindingOrderBackfill.runIfNeeded(in: context)
         BuiltinPreferenceSeeder.seedIfNeeded(in: context)
+
+        // Bootstrap clipboard history store so providers can record entries.
+        ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
+        Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true) }
 
         // Register providers
         let providers: [any BuiltinProvider] = [

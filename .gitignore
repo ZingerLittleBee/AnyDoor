@@ -10,6 +10,7 @@ DerivedData/
 .env.local
 .env.*.local
 .superpowers/
+.worktrees/
 
 # Auto-update release artifacts
 /dist/

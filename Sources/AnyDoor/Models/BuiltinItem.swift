@@ -124,6 +124,18 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         }
     }
 
+    /// The clipboard history bucket this built-in writes into, if any.
+    /// Non-history items (toggles, submenus, system actions) return nil.
+    var historyKind: ClipboardHistoryKind? {
+        switch self {
+        case .ocr: return .ocr
+        case .pickColor: return .color
+        case .qrcode: return .qrcode
+        case .screenshot: return .screenshot
+        default: return nil
+        }
+    }
+
     /// True if the item requires macOS Automation permission (NSAppleEventsUsage).
     var requiresAutomation: Bool {
         switch self {

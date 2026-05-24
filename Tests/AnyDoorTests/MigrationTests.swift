@@ -73,6 +73,22 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertFalse(BuiltinItem.qrcode.requiresAutomation)
         XCTAssertNil(BuiltinItem.qrcode.feedbackSound)
     }
+
+    func testHistoryKinds() {
+        XCTAssertEqual(BuiltinItem.ocr.historyKind, .ocr)
+        XCTAssertEqual(BuiltinItem.pickColor.historyKind, .color)
+        XCTAssertEqual(BuiltinItem.qrcode.historyKind, .qrcode)
+        XCTAssertEqual(BuiltinItem.screenshot.historyKind, .screenshot)
+        XCTAssertNil(BuiltinItem.keepAwake.historyKind)
+        XCTAssertNil(BuiltinItem.portManager.historyKind)
+    }
+
+    func testHistoryCapableItemsRemainActions() {
+        XCTAssertEqual(BuiltinItem.ocr.kind, .action)
+        XCTAssertEqual(BuiltinItem.pickColor.kind, .action)
+        XCTAssertEqual(BuiltinItem.qrcode.kind, .action)
+        XCTAssertEqual(BuiltinItem.screenshot.kind, .action)
+    }
 }
 
 final class KeyBindingOrderBackfillTests: XCTestCase {
@@ -176,5 +192,38 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
         for row in rows.dropFirst() {
             XCTAssertGreaterThan(row.displayOrder, 50)
         }
+    }
+}
+
+final class ClipboardHistoryItemModelTests: XCTestCase {
+    func testClipboardHistoryKindMetadata() {
+        XCTAssertEqual(ClipboardHistoryKind.ocr.title, "屏幕取词")
+        XCTAssertEqual(ClipboardHistoryKind.color.title, "屏幕取色")
+        XCTAssertEqual(ClipboardHistoryKind.qrcode.title, "识别二维码")
+        XCTAssertEqual(ClipboardHistoryKind.screenshot.title, "截图")
+    }
+
+    func testClipboardHistoryItemCanBePersisted() throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(for: ClipboardHistoryItem.self, configurations: config)
+        let context = ModelContext(container)
+
+        let item = ClipboardHistoryItem(
+            kind: .ocr,
+            text: "hello",
+            fileName: nil,
+            colorHex: nil,
+            previewTitle: "hello",
+            previewSubtitle: "5 字符",
+            createdAt: Date(timeIntervalSinceReferenceDate: 10)
+        )
+        context.insert(item)
+        try context.save()
+
+        let rows = try context.fetch(FetchDescriptor<ClipboardHistoryItem>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].kind, ClipboardHistoryKind.ocr.rawValue)
+        XCTAssertEqual(rows[0].text, "hello")
+        XCTAssertNil(rows[0].colorHex)
     }
 }

@@ -30,6 +30,7 @@ actor QRCodeProvider: ActionProvider {
                 pasteboard.clearContents()
                 pasteboard.setString(text, forType: .string)
             }
+            await ClipboardHistoryStore.shared.recordText(kind: .qrcode, text: text)
             await ToastPresenter.shared.show(.success("已复制到剪贴板"))
         } catch {
             await ToastPresenter.shared.show(.failure("识别失败"))
