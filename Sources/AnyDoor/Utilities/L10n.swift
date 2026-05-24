@@ -152,7 +152,6 @@ func L(_ key: L10n.Key, _ args: CVarArg...) -> String {
 /// Replaces raw `Text("中文")` everywhere in the view tree.
 @MainActor
 struct LocalizedText: View {
-    @Environment(LocalizationManager.self) private var manager
     let key: L10n.Key
 
     init(_ key: L10n.Key) {
@@ -160,9 +159,12 @@ struct LocalizedText: View {
     }
 
     var body: some View {
-        // Reading manager.preference establishes a dependency so SwiftUI
-        // re-renders this view when the user changes language.
-        _ = manager.preference
+        // Reading the shared manager's preference establishes an observation
+        // dependency under @Observable so SwiftUI re-renders this view when
+        // the user changes language. Reading the singleton directly (rather
+        // than via @Environment) keeps the view usable in test fixtures
+        // that introspect `view.body` without an injected environment.
+        _ = LocalizationManager.shared.preference
         return Text(L(key))
     }
 }
