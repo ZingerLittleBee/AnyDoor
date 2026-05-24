@@ -12,7 +12,7 @@ struct ClipboardHistoryPopoverView: View {
     private static let popoverWidth: CGFloat = 320
     private static let popoverHeight: CGFloat = 420
 
-    @Bindable var store: ClipboardHistoryStore
+    let store: ClipboardHistoryStore
     let kind: ClipboardHistoryKind
     let onDismissPopover: () -> Void
     let onCopyAndClosePanel: () -> Void
@@ -150,7 +150,7 @@ struct ClipboardHistoryPopoverView: View {
         case .color:
             VStack(spacing: 12) {
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(Self.swatchColor(hex: item.colorHex) ?? Color.gray)
+                    .fill(ClipboardHistoryRow.swatchColor(forHex: item.colorHex) ?? Color.gray)
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
@@ -187,101 +187,6 @@ struct ClipboardHistoryPopoverView: View {
             }
         }
     }
-
-    /// Parse `"#RRGGBB"` (or `"RRGGBB"`) into a SwiftUI `Color`. Returns nil on
-    /// malformed input so the preview can fall back to a neutral swatch.
-    fileprivate static func swatchColor(hex: String?) -> Color? {
-        guard var raw = hex?.uppercased() else { return nil }
-        if raw.hasPrefix("#") { raw.removeFirst() }
-        guard raw.count == 6, let value = UInt32(raw, radix: 16) else { return nil }
-        let r = Double((value >> 16) & 0xFF) / 255.0
-        let g = Double((value >> 8) & 0xFF) / 255.0
-        let b = Double(value & 0xFF) / 255.0
-        return Color(.sRGB, red: r, green: g, blue: b, opacity: 1)
-    }
-}
-
-// MARK: - Row
-
-private struct ClipboardHistoryRow: View {
-    let item: ClipboardHistoryItem
-    let isSelected: Bool
-    let store: ClipboardHistoryStore
-
-    var body: some View {
-        HStack(spacing: 10) {
-            leading
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.previewTitle)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                if let subtitle = item.previewSubtitle {
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer(minLength: 8)
-            Text(relativeTimestamp)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .background(rowBackground, in: .rect(cornerRadius: 6))
-    }
-
-    private var rowBackground: Color {
-        isSelected ? Color.accentColor.opacity(0.18) : .clear
-    }
-
-    @ViewBuilder
-    private var leading: some View {
-        switch item.historyKind {
-        case .color:
-            RoundedRectangle(cornerRadius: 4)
-                .fill(ClipboardHistoryPopoverView.swatchColor(hex: item.colorHex) ?? Color.gray)
-                .frame(width: 18, height: 18)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-                )
-        case .screenshot:
-            if let url = store.screenshotURL(for: item),
-               let image = NSImage(contentsOf: url) {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.medium)
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: 24, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-            } else {
-                Image(systemName: "photo")
-                    .frame(width: 24, height: 18)
-                    .foregroundStyle(.secondary)
-            }
-        case .qrcode:
-            Image(systemName: "qrcode")
-                .frame(width: 18, height: 18)
-                .foregroundStyle(.secondary)
-        case .ocr, .none:
-            Image(systemName: "text.viewfinder")
-                .frame(width: 18, height: 18)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var relativeTimestamp: String {
-        Self.formatter.localizedString(for: item.createdAt, relativeTo: Date())
-    }
-
-    private static let formatter: RelativeDateTimeFormatter = {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        f.locale = Locale(identifier: "zh_CN")
-        return f
-    }()
 }
 
 // MARK: - Keyboard monitor
@@ -290,7 +195,7 @@ private struct ClipboardHistoryRow: View {
 /// primitive key info from `NSEvent` (which is not `Sendable`) before
 /// `MainActor.assumeIsolated` calls into the selection/store closures.
 private struct KeyboardMonitor: NSViewRepresentable {
-    @Bindable var selection: ClipboardHistorySelectionModel
+    let selection: ClipboardHistorySelectionModel
     let items: [ClipboardHistoryItem]
     let store: ClipboardHistoryStore
     let onCopyAndClosePanel: () -> Void
