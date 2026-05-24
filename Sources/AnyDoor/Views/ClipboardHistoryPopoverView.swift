@@ -14,6 +14,7 @@ struct ClipboardHistoryPopoverView: View {
 
     let store: ClipboardHistoryStore
     let kind: ClipboardHistoryKind
+    let onHoverChange: (Bool) -> Void
     let onDismissPopover: () -> Void
     let onCopyAndClosePanel: () -> Void
 
@@ -39,6 +40,7 @@ struct ClipboardHistoryPopoverView: View {
         .frame(width: Self.popoverWidth, height: Self.popoverHeight)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .onHover(perform: onHoverChange)
         .onAppear {
             selection.replaceItems(items.map(\.id))
         }
@@ -65,9 +67,37 @@ struct ClipboardHistoryPopoverView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
+            if !items.isEmpty {
+                keyboardHint
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
+    }
+
+    private var keyboardHint: some View {
+        HStack(spacing: 6) {
+            hintChip("↑↓", label: "选择")
+            hintChip("Space", label: "预览")
+            hintChip("⏎", label: "复制")
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+    }
+
+    private func hintChip(_ key: String, label: String) -> some View {
+        HStack(spacing: 3) {
+            Text(key)
+                .font(.system(size: 10, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+                .background(
+                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                        .fill(Color.primary.opacity(0.08))
+                )
+            Text(label)
+        }
     }
 
     // MARK: Content
@@ -191,9 +221,15 @@ struct ClipboardHistoryPopoverView: View {
 
 // MARK: - Keyboard monitor
 
-/// Mirrors the pattern in `PortManagerPopoverView.KeyboardMonitor`: extracts
-/// primitive key info from `NSEvent` (which is not `Sendable`) before
-/// `MainActor.assumeIsolated` calls into the selection/store closures.
+/// Routes Up/Down/Space/Return/Esc into selection + copy logic.
+///
+/// Implementation note: previous version used `NSEvent.addLocalMonitorForEvents`,
+/// but in the menu-bar + non-activating popover combo, arrow / Return keys
+/// were intercepted by upstream handlers before reaching the local monitor
+/// (Space happened to slip through, which made the bug confusing). Now we
+/// install a first-responder NSView inside the popover panel that overrides
+/// `keyDown(with:)` directly, which gets the events first via the panel's
+/// own responder chain.
 private struct KeyboardMonitor: NSViewRepresentable {
     let selection: ClipboardHistorySelectionModel
     let items: [ClipboardHistoryItem]
@@ -211,21 +247,29 @@ private struct KeyboardMonitor: NSViewRepresentable {
         )
     }
 
-    func makeNSView(context: Context) -> NSView {
-        context.coordinator.install()
-        return NSView(frame: .zero)
+    func makeNSView(context: Context) -> KeyHandlerView {
+        let view = KeyHandlerView()
+        view.onKeyDown = { [weak coordinator = context.coordinator] keyCode in
+            guard let coordinator else { return false }
+            return coordinator.handle(keyCode: keyCode)
+        }
+        // Defer first-responder grab until the view is in a window.
+        DispatchQueue.main.async { [weak view] in
+            guard let view, let window = view.window else { return }
+            window.makeFirstResponder(view)
+        }
+        return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        // Keep the coordinator's references current so the key handler always
-        // sees the latest items / closures without reinstalling the monitor.
+    func updateNSView(_ nsView: KeyHandlerView, context: Context) {
         context.coordinator.items = items
         context.coordinator.onCopyAndClosePanel = onCopyAndClosePanel
         context.coordinator.onDismissPopover = onDismissPopover
-    }
-
-    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
-        coordinator.uninstall()
+        // Re-assert first-responder in case the panel re-mounted us without
+        // hooking up focus (e.g., updateContent swap inside HoverPopover).
+        if let window = nsView.window, window.firstResponder !== nsView {
+            window.makeFirstResponder(nsView)
+        }
     }
 
     @MainActor
@@ -235,7 +279,6 @@ private struct KeyboardMonitor: NSViewRepresentable {
         let store: ClipboardHistoryStore
         var onCopyAndClosePanel: () -> Void
         var onDismissPopover: () -> Void
-        nonisolated(unsafe) private var monitor: Any?
 
         init(
             selection: ClipboardHistorySelectionModel,
@@ -251,28 +294,7 @@ private struct KeyboardMonitor: NSViewRepresentable {
             self.onDismissPopover = onDismissPopover
         }
 
-        deinit {
-            if let monitor { NSEvent.removeMonitor(monitor) }
-        }
-
-        func install() {
-            uninstall()
-            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                let keyCode = Int(event.keyCode)
-                let consumed: Bool = MainActor.assumeIsolated {
-                    guard let self else { return false }
-                    return self.handle(keyCode: keyCode)
-                }
-                return consumed ? nil : event
-            }
-        }
-
-        func uninstall() {
-            if let m = monitor { NSEvent.removeMonitor(m) }
-            monitor = nil
-        }
-
-        private func handle(keyCode: Int) -> Bool {
+        func handle(keyCode: Int) -> Bool {
             switch keyCode {
             case kVK_UpArrow:
                 selection.moveUp()
@@ -281,6 +303,18 @@ private struct KeyboardMonitor: NSViewRepresentable {
                 selection.moveDown()
                 return true
             case kVK_Space:
+                // Screenshot items open a dedicated 60%-screen preview panel
+                // and dismiss the popover; other kinds use the inline overlay.
+                if let id = selection.selectedID,
+                   let item = items.first(where: { $0.id == id }),
+                   item.historyKind == .screenshot {
+                    if let url = store.screenshotURL(for: item),
+                       let image = NSImage(contentsOf: url) {
+                        ScreenshotPreviewWindow.shared.show(image: image)
+                    }
+                    onDismissPopover()
+                    return true
+                }
                 selection.togglePreview()
                 return true
             case kVK_Return:
@@ -306,5 +340,22 @@ private struct KeyboardMonitor: NSViewRepresentable {
                 return false
             }
         }
+    }
+}
+
+/// First-responder NSView whose only job is to forward `keyDown` to a
+/// SwiftUI-owned handler. Returning `false` calls `super.keyDown` so we
+/// don't accidentally swallow keys we don't recognize (e.g., ⌘+letter).
+final class KeyHandlerView: NSView {
+    var onKeyDown: ((Int) -> Bool)?
+
+    override var acceptsFirstResponder: Bool { true }
+    override var canBecomeKeyView: Bool { true }
+
+    override func keyDown(with event: NSEvent) {
+        if let handler = onKeyDown, handler(Int(event.keyCode)) {
+            return
+        }
+        super.keyDown(with: event)
     }
 }
