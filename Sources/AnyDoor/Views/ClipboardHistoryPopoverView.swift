@@ -14,6 +14,7 @@ struct ClipboardHistoryPopoverView: View {
 
     let store: ClipboardHistoryStore
     let kind: ClipboardHistoryKind
+    let onHoverChange: (Bool) -> Void
     let onDismissPopover: () -> Void
     let onCopyAndClosePanel: () -> Void
 
@@ -39,6 +40,7 @@ struct ClipboardHistoryPopoverView: View {
         .frame(width: Self.popoverWidth, height: Self.popoverHeight)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .onHover(perform: onHoverChange)
         .onAppear {
             selection.replaceItems(items.map(\.id))
         }

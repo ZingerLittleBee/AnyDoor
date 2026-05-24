@@ -272,6 +272,7 @@ struct MenuBarView: View {
                     ClipboardHistoryPopoverView(
                         store: store,
                         kind: kind,
+                        onHoverChange: { gate.popoverHover($0) },
                         onDismissPopover: {
                             gate.reset()
                             popover.hide()
