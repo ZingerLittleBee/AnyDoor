@@ -6,6 +6,26 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Status item right-click menu with Settings and Quit entries, bridged
+  to SwiftUI's `\.openSettings` so the Settings window opens through
+  the same path as the in-panel button.
+
+### Changed
+
+- Menu bar panel footer redesigned: a divider separates it from the
+  content, and Settings / Quit are now compact icon-only buttons with
+  tooltips, reducing the visual weight of bottom chrome.
+
+### Fixed
+
+- Brightness +/− hotkey recorder labels in Settings now use the
+  existing `builtin.brightnessUp/Down` localizations instead of
+  hard-coded Chinese strings.
+- Clipboard history hint chips ("Space", "Preview") no longer wrap to
+  two lines in English locales.
+
 ## [1.2.0] - 2026-05-24
 
 ### Added
