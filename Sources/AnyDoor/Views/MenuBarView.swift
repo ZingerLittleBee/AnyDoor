@@ -10,6 +10,7 @@ import AppKit
 private enum HoverPopoverTarget: Hashable {
     case submenu(BuiltinItem)
     case history(ClipboardHistoryKind)
+    case brightnessControl(BuiltinItem)
 }
 
 struct MenuBarView: View {
@@ -121,6 +122,23 @@ struct MenuBarView: View {
                 onToggle: {},
                 onAction: {},
                 onSubmenu: { triggerSubmenu(item) },
+                onPermission: openPermissionsSettings
+            )
+            .background(
+                ScreenFrameReader { frame in
+                    triggerFrames[target] = frame
+                }
+            )
+            .onHover { hovered in
+                triggerHover(hovered, target: target)
+            }
+        } else if case let .builtin(item) = entry.source, item.kind == .brightnessControl {
+            let target = HoverPopoverTarget.brightnessControl(item)
+            PanelRowView(
+                entry: entry,
+                onToggle: {},
+                onAction: {},
+                onSubmenu: {},
                 onPermission: openPermissionsSettings
             )
             .background(
@@ -252,6 +270,12 @@ struct MenuBarView: View {
                 )
             }
             Task { await PortInventory.shared.refresh() }
+            popover.show(anchoredTo: convertedTriggerFrame(for: target))
+        case .brightnessControl:
+            popover.needsKeyFocus = false
+            popover.updateContent {
+                BrightnessPopoverView(onHoverChange: { gate.popoverHover($0) })
+            }
             popover.show(anchoredTo: convertedTriggerFrame(for: target))
         case .submenu:
             // Other builtin submenu items (none today) — nothing to mount.
