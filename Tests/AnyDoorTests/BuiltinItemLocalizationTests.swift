@@ -17,11 +17,7 @@ final class BuiltinItemLocalizationTests: XCTestCase {
         for item in BuiltinItem.allCases {
             let s = L(item.titleKey)
             XCTAssertFalse(s.isEmpty, "empty translation for \(item)")
-            // When the xcstrings catalog is compiled into lproj bundles (production /
-            // Xcode build), `s` differs from the raw key. In SPM debug builds the
-            // bundle contains only the raw xcstrings file and NSLocalizedString falls
-            // back to returning the key itself, so we allow equality here.
-            // The catalog coverage test in Task 12 will enforce full resolution.
+            XCTAssertNotEqual(s, item.titleKey.rawValue, "unresolved key for \(item)")
         }
     }
 }

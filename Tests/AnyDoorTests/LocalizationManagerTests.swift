@@ -49,8 +49,7 @@ final class LocalizationManagerTests: XCTestCase {
         XCTAssertEqual(manager.effectiveLocale.identifier, "zh-Hans")
     }
 
-    func test_bundleChangesWhenPreferenceChanges() throws {
-        try XCTSkipIf(true, "re-enable after Task 12 populates lproj resources")
+    func test_bundleChangesWhenPreferenceChanges() {
         let manager = LocalizationManager()
         manager.preference = .en
         let enBundle = manager.bundle

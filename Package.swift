@@ -16,6 +16,11 @@ let package = Package(
         ),
     ],
     targets: [
+        .plugin(
+            name: "XCStringsCompilerPlugin",
+            capability: .buildTool(),
+            path: "Plugins/XCStringsCompiler"
+        ),
         .executableTarget(
             name: "AnyDoor",
             dependencies: [
@@ -27,6 +32,9 @@ let package = Package(
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
+            ],
+            plugins: [
+                .plugin(name: "XCStringsCompilerPlugin")
             ]
         ),
         .testTarget(
