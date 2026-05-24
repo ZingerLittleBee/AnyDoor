@@ -43,6 +43,7 @@ final class PanelStore {
             self.providers[provider.itemKey] = provider
         }
         rebuild()
+        observeLanguageChanges()
     }
 
     /// Recompute `topLevelEntries` and `appShortcutChildren` from SwiftData + cached states.
@@ -181,6 +182,27 @@ final class PanelStore {
         case .runBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
             Task { await self.run(item) }
+        }
+    }
+
+    /// Watches `LocalizationManager.preference` so cached, localized fields
+    /// (e.g. `PanelEntry.subtitle`) refresh the moment the user switches
+    /// language. `withObservationTracking` fires once per change; the loop
+    /// re-registers after each rebuild so subsequent changes are also caught.
+    private func observeLanguageChanges() {
+        Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                    withObservationTracking {
+                        _ = LocalizationManager.shared.preference
+                    } onChange: {
+                        cont.resume()
+                    }
+                }
+                guard let self else { return }
+                self.rebuild()
+                self.rebuildHotkeySnapshots()
+            }
         }
     }
 
