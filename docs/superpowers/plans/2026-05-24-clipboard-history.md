@@ -339,20 +339,51 @@ final class ClipboardHistoryStore {
     @ObservationIgnored private let maxAge: TimeInterval
     @ObservationIgnored private let maxItemsPerKind: Int
     @ObservationIgnored private let pruneThrottle: TimeInterval
+    @ObservationIgnored private let historyDirectoryProvider: () -> URL
     @ObservationIgnored private var lastPrunedAt: Date?
 
     private var cachedItems: [ClipboardHistoryKind: [ClipboardHistoryItem]] = [:]
 
+    /// Designated initializer used by both production (`shared`) and tests.
+    /// `historyDirectoryProvider` is wired here in Task 2 so Task 3 only adds
+    /// the screenshot methods that consume it — no second init in Task 3.
     init(
         now: @escaping () -> Date = Date.init,
         maxAge: TimeInterval = 7 * 86_400,
         maxItemsPerKind: Int = 100,
-        pruneThrottle: TimeInterval = 60
+        pruneThrottle: TimeInterval = 60,
+        historyDirectoryProvider: @escaping () -> URL = ClipboardHistoryStore.defaultHistoryDirectory
     ) {
         self.now = now
         self.maxAge = maxAge
         self.maxItemsPerKind = maxItemsPerKind
         self.pruneThrottle = pruneThrottle
+        self.historyDirectoryProvider = historyDirectoryProvider
+    }
+
+    /// Convenience used by tests that want to pin the directory to a `tmp` URL
+    /// without passing a closure.
+    convenience init(
+        now: @escaping () -> Date = Date.init,
+        maxAge: TimeInterval = 7 * 86_400,
+        maxItemsPerKind: Int = 100,
+        pruneThrottle: TimeInterval = 60,
+        historyDirectory: URL
+    ) {
+        self.init(
+            now: now,
+            maxAge: maxAge,
+            maxItemsPerKind: maxItemsPerKind,
+            pruneThrottle: pruneThrottle,
+            historyDirectoryProvider: { historyDirectory }
+        )
+    }
+
+    static func defaultHistoryDirectory() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        return appSupport
+            .appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
+            .appendingPathComponent("ClipboardHistory", isDirectory: true)
     }
 
     func bootstrap(modelContainer: ModelContainer) {
@@ -584,50 +615,7 @@ Expected: compile or assertion failures for missing screenshot/file/copy APIs.
 
 - [ ] **Step 3: Implement screenshot/file APIs**
 
-Extend `ClipboardHistoryStore` with:
-
-```swift
-@ObservationIgnored private let historyDirectoryProvider: () -> URL
-
-convenience init(
-    now: @escaping () -> Date = Date.init,
-    maxAge: TimeInterval = 7 * 86_400,
-    maxItemsPerKind: Int = 100,
-    pruneThrottle: TimeInterval = 60,
-    historyDirectory: URL
-) {
-    self.init(
-        now: now,
-        maxAge: maxAge,
-        maxItemsPerKind: maxItemsPerKind,
-        pruneThrottle: pruneThrottle,
-        historyDirectoryProvider: { historyDirectory }
-    )
-}
-
-init(
-    now: @escaping () -> Date = Date.init,
-    maxAge: TimeInterval = 7 * 86_400,
-    maxItemsPerKind: Int = 100,
-    pruneThrottle: TimeInterval = 60,
-    historyDirectoryProvider: @escaping () -> URL = ClipboardHistoryStore.defaultHistoryDirectory
-) {
-    self.now = now
-    self.maxAge = maxAge
-    self.maxItemsPerKind = maxItemsPerKind
-    self.pruneThrottle = pruneThrottle
-    self.historyDirectoryProvider = historyDirectoryProvider
-}
-
-static func defaultHistoryDirectory() -> URL {
-    let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-    return appSupport
-        .appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
-        .appendingPathComponent("ClipboardHistory", isDirectory: true)
-}
-```
-
-Add:
+Task 2 already wired `historyDirectoryProvider`, `historyDirectory:` convenience init, and `defaultHistoryDirectory()`. Do not redeclare them here. Add only the screenshot/copy/clear methods that consume the directory:
 
 ```swift
 func recordScreenshotFromPasteboard() async {
@@ -715,23 +703,27 @@ git commit -m "feat(history): store screenshot history files"
 
 - [ ] **Step 1: Write failing built-in metadata tests**
 
-Append to `BuiltinItemTests`:
+There is no `BuiltinItemTests` class today (built-in coverage lives in `MigrationTests.swift`). Add a **new** class in the same file so `swift test --filter BuiltinItemTests` can target it:
 
 ```swift
-func testHistoryKinds() {
-    XCTAssertEqual(BuiltinItem.ocr.historyKind, .ocr)
-    XCTAssertEqual(BuiltinItem.pickColor.historyKind, .color)
-    XCTAssertEqual(BuiltinItem.qrcode.historyKind, .qrcode)
-    XCTAssertEqual(BuiltinItem.screenshot.historyKind, .screenshot)
-    XCTAssertNil(BuiltinItem.keepAwake.historyKind)
-    XCTAssertNil(BuiltinItem.portManager.historyKind)
-}
+// Tests/AnyDoorTests/MigrationTests.swift
 
-func testHistoryCapableItemsRemainActions() {
-    XCTAssertEqual(BuiltinItem.ocr.kind, .action)
-    XCTAssertEqual(BuiltinItem.pickColor.kind, .action)
-    XCTAssertEqual(BuiltinItem.qrcode.kind, .action)
-    XCTAssertEqual(BuiltinItem.screenshot.kind, .action)
+final class BuiltinItemTests: XCTestCase {
+    func testHistoryKinds() {
+        XCTAssertEqual(BuiltinItem.ocr.historyKind, .ocr)
+        XCTAssertEqual(BuiltinItem.pickColor.historyKind, .color)
+        XCTAssertEqual(BuiltinItem.qrcode.historyKind, .qrcode)
+        XCTAssertEqual(BuiltinItem.screenshot.historyKind, .screenshot)
+        XCTAssertNil(BuiltinItem.keepAwake.historyKind)
+        XCTAssertNil(BuiltinItem.portManager.historyKind)
+    }
+
+    func testHistoryCapableItemsRemainActions() {
+        XCTAssertEqual(BuiltinItem.ocr.kind, .action)
+        XCTAssertEqual(BuiltinItem.pickColor.kind, .action)
+        XCTAssertEqual(BuiltinItem.qrcode.kind, .action)
+        XCTAssertEqual(BuiltinItem.screenshot.kind, .action)
+    }
 }
 ```
 
@@ -743,7 +735,7 @@ Run:
 swift test --filter BuiltinItemTests
 ```
 
-Expected: compile fails because `historyKind` does not exist.
+Expected: compile fails because `historyKind` does not exist. The `--filter` matches the XCTestCase class name, not the file name, so a new class inside `MigrationTests.swift` is enough.
 
 - [ ] **Step 3: Implement `historyKind`**
 
@@ -1152,8 +1144,11 @@ private func triggerHover(_ hovered: Bool, target: HoverPopoverTarget) {
         let changed = activeHoverTarget != target
         activeHoverTarget = target
         if changed, gate.isShown {
+            // Switching directly between two history rows (or submenu → history,
+            // etc.) while the popover is already visible. Remount only; do NOT
+            // call popover.show here — mountPopoverContent owns the show call so
+            // history's async reload path doesn't race a stale sync show.
             mountPopoverContent(for: target)
-            popover?.show(anchoredTo: convertedTriggerFrame(for: target))
             return
         }
         gate.triggerHover(true)
@@ -1165,7 +1160,12 @@ private func triggerHover(_ hovered: Bool, target: HoverPopoverTarget) {
 }
 ```
 
-If the popover is already visible and target changes, remount and re-anchor immediately. If `HoverGate` does not expose visibility enough to implement that cleanly, add a small method to `HoverGate` such as `remountShown()` or call `gate.showImmediately()` after setting the target. Keep the API small.
+`mountPopoverContent` is the single owner of `popover.show(anchoredTo:)` so the submenu and history paths stay symmetric:
+
+- Submenu cases call `popover.show(anchoredTo: convertedTriggerFrame(for: target))` synchronously at the end of their case.
+- The history case calls it inside the `Task` after `reload` completes (see Step 4).
+
+`gate.onShow` should therefore call `mountPopoverContent(for: target)` and **not** also call `popover.show`.
 
 - [ ] **Step 4: Update `wireGate` and mount content**
 
@@ -1185,21 +1185,41 @@ Cases:
 
 - `.submenu(.appShortcuts)`: existing App Shortcuts content, `needsKeyFocus = false`.
 - `.submenu(.portManager)`: existing Port Manager content, `needsKeyFocus = true`.
-- `.history(let kind)`: set `needsKeyFocus = true`, prune throttled, reload kind, mount `ClipboardHistoryPopoverView`.
+- `.history(let kind)`: set `needsKeyFocus = true`, then run the prune+reload+mount sequence inside a `Task` so the popover only mounts after the store cache is populated.
 
-History close callbacks:
+`gate.onShow` is a synchronous `() -> Void`, and `mountPopoverContent` itself is sync. For the history case, wrap the async store work in a `Task` and only call `popover.show(...)` after `reload` returns; otherwise the first hover renders an empty popover while the fetch is still in flight:
 
 ```swift
-onDismissPopover: {
-    gate.reset()
-    popover.hide()
-},
-onCopyAndClosePanel: {
-    gate.reset()
-    popover.hide()
-    onRequestClose()
-}
+case .history(let kind):
+    let store = ClipboardHistoryStore.shared
+    popover.needsKeyFocus = true
+    Task { @MainActor in
+        await store.pruneExpiredAndOverflow(force: false)
+        await store.reload(kind: kind)
+
+        // Guard against the user moving off the row before reload finished.
+        guard activeHoverTarget == .history(kind) else { return }
+
+        popover.updateContent {
+            ClipboardHistoryPopoverView(
+                store: store,
+                kind: kind,
+                onDismissPopover: {
+                    gate.reset()
+                    popover.hide()
+                },
+                onCopyAndClosePanel: {
+                    gate.reset()
+                    popover.hide()
+                    onRequestClose()
+                }
+            )
+        }
+        popover.show(anchoredTo: convertedTriggerFrame(for: .history(kind)))
+    }
 ```
+
+The same `onDismissPopover` / `onCopyAndClosePanel` closures are also reused when the target changes mid-show inside `triggerHover(_:target:)`.
 
 - [ ] **Step 5: Run build**
 
