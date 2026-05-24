@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "settings"
 @MainActor
 struct GeneralSettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    @Environment(LocalizationManager.self) private var localization
     @State private var accessibilityGranted = HotkeyService.hasAccessibilityPermission
     @State private var automationGranted = false
     @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
@@ -31,6 +32,21 @@ struct GeneralSettingsView: View {
                     }
             } header: {
                 Text("启动")
+            }
+
+            Section("语言") {
+                @Bindable var localization = localization
+                Picker(selection: Binding(
+                    get: { localization.preference },
+                    set: { localization.preference = $0 }
+                )) {
+                    Text("跟随系统").tag(LanguagePreference.system)
+                    Text("中文").tag(LanguagePreference.zh)
+                    Text("English").tag(LanguagePreference.en)
+                } label: {
+                    Text("界面语言")
+                }
+                .pickerStyle(.menu)
             }
 
             Section("菜单栏") {
