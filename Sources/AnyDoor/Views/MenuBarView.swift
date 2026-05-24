@@ -185,25 +185,21 @@ struct MenuBarView: View {
     }
 
     /// Drive `HoverGate` from a row's `onHover` while keeping `activeHoverTarget`
-    /// in sync. When the popover is already visible and the user crosses from
-    /// one hover-eligible row to another, remount the popover content for the
-    /// new target without re-triggering the gate's show-delay. We intentionally
-    /// do NOT call `popover.show` here — `mountPopoverContent` owns that call
-    /// so the history case's async `reload` cannot race a stale sync show.
+    /// in sync. `activeHoverTarget` MUST be updated before calling
+    /// `gate.triggerHover(true)`: when the gate is already shown,
+    /// `HoverGate.scheduleShow` re-invokes `onShow` synchronously, which reads
+    /// `activeHoverTarget` to decide what to mount. That re-fire is also what
+    /// re-mounts the correct content when the user crosses from one hover row
+    /// to another (it additionally cancels the pending hide queued by the
+    /// previous row's leave event).
     private func triggerHover(_ hovered: Bool, target: HoverPopoverTarget) {
         if hovered {
-            let changed = activeHoverTarget != target
             activeHoverTarget = target
-            if changed, gate.isShown {
-                mountPopoverContent(for: target)
-                return
-            }
             gate.triggerHover(true)
-            return
+        } else {
+            guard activeHoverTarget == target else { return }
+            gate.triggerHover(false)
         }
-
-        guard activeHoverTarget == target else { return }
-        gate.triggerHover(false)
     }
 
     /// Mount the SwiftUI content appropriate for `target` and toggle the
@@ -212,7 +208,10 @@ struct MenuBarView: View {
     /// Sole owner of `popover.show(anchoredTo:)` for hover-anchored content:
     /// submenu cases call it synchronously at the end of their branch;
     /// `.history` defers it inside a `Task` so the popover only appears after
-    /// the store cache has been pruned + reloaded.
+    /// the store cache has been pruned + reloaded. Invoked both from
+    /// `wireGate`'s `onShow` (first show) and again synchronously from
+    /// `HoverGate.scheduleShow` when the gate is already shown and the user
+    /// crosses to a new hover target.
     private func mountPopoverContent(for target: HoverPopoverTarget) {
         let popover = ensurePopover()
         switch target {
@@ -259,13 +258,15 @@ struct MenuBarView: View {
             break
         case .history(let kind):
             let store = ClipboardHistoryStore.shared
-            popover.needsKeyFocus = true
             Task { @MainActor in
                 await store.pruneExpiredAndOverflow(force: false)
                 await store.reload(kind: kind)
 
                 // Guard against the user moving off the row before reload finished.
+                // Setting `needsKeyFocus` is deferred until after this guard so we
+                // never briefly flip the flag for a popover we will not show.
                 guard activeHoverTarget == .history(kind) else { return }
+                popover.needsKeyFocus = true
 
                 popover.updateContent {
                     ClipboardHistoryPopoverView(
