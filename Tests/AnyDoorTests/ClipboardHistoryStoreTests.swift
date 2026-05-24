@@ -79,4 +79,72 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         let rows = try context.fetch(FetchDescriptor<ClipboardHistoryItem>())
         XCTAssertTrue(rows.contains { $0.text == "expired2" })
     }
+
+    func testRecordScreenshotStoresPngFileAndMetadata() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(
+            now: { Date(timeIntervalSinceReferenceDate: 100) },
+            historyDirectory: directory
+        )
+        store.bootstrap(modelContainer: container)
+
+        let image = NSImage(size: NSSize(width: 4, height: 4))
+        image.lockFocus()
+        NSColor.red.setFill()
+        NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+        image.unlockFocus()
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.writeObjects([image]))
+
+        await store.recordScreenshotFromPasteboard()
+        await store.reload(kind: .screenshot)
+
+        let item = try XCTUnwrap(store.items(for: .screenshot).first)
+        let fileName = try XCTUnwrap(item.fileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(fileName).path))
+        XCTAssertEqual(item.previewTitle, "截图")
+
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testCopyTextAndColorBackToPasteboard() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        let textItem = ClipboardHistoryItem(kind: .ocr, text: "hello", previewTitle: "hello")
+        try await store.copyToPasteboard(textItem)
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "hello")
+
+        let colorItem = ClipboardHistoryItem(kind: .color, colorHex: "#FFCC00", previewTitle: "#FFCC00")
+        try await store.copyToPasteboard(colorItem)
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "#FFCC00")
+
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testClearAllDeletesRowsAndScreenshotFiles() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let fileURL = directory.appendingPathComponent("shot.png")
+        try Data([0x89, 0x50, 0x4E, 0x47]).write(to: fileURL)
+
+        let context = container.mainContext
+        context.insert(ClipboardHistoryItem(kind: .screenshot, fileName: "shot.png", previewTitle: "截图"))
+        try context.save()
+
+        await store.clearAll()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        XCTAssertTrue(try context.fetch(FetchDescriptor<ClipboardHistoryItem>()).isEmpty)
+        try? FileManager.default.removeItem(at: directory)
+    }
 }

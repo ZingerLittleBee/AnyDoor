@@ -171,12 +171,131 @@ final class ClipboardHistoryStore {
             }
 
             for item in all where idsToDelete.contains(item.id) {
+                deleteScreenshotFileIfNeeded(for: item)
                 context.delete(item)
             }
             if !idsToDelete.isEmpty { try context.save() }
+
+            // Sweep orphan PNG files no longer referenced by surviving screenshot rows.
+            let survivingFiles = Set(
+                all.compactMap { item -> String? in
+                    guard !idsToDelete.contains(item.id),
+                          item.kind == ClipboardHistoryKind.screenshot.rawValue
+                    else { return nil }
+                    return item.fileName
+                }
+            )
+            removeOrphanScreenshotFiles(keeping: survivingFiles)
         } catch {
             historyLogger.error("Failed to prune clipboard history: \(error)")
         }
+    }
+
+    func recordScreenshotFromPasteboard() async {
+        guard let container = modelContainer else { return }
+        do {
+            let png = try Self.pngDataFromPasteboard(NSPasteboard.general)
+            let id = UUID()
+            let directory = historyDirectoryProvider()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileName = "\(id.uuidString).png"
+            try png.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+
+            let item = ClipboardHistoryItem(
+                id: id,
+                kind: .screenshot,
+                fileName: fileName,
+                previewTitle: "截图",
+                previewSubtitle: nil,
+                createdAt: now()
+            )
+            container.mainContext.insert(item)
+            try container.mainContext.save()
+            await pruneExpiredAndOverflow(force: true)
+            await reload(kind: .screenshot)
+        } catch {
+            historyLogger.error("Failed to record screenshot history: \(error)")
+        }
+    }
+
+    func copyToPasteboard(_ item: ClipboardHistoryItem) async throws {
+        guard let kind = item.historyKind else { throw ClipboardHistoryError.missingText }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+
+        switch kind {
+        case .ocr, .qrcode:
+            guard let text = item.text else { throw ClipboardHistoryError.missingText }
+            pasteboard.setString(text, forType: .string)
+        case .color:
+            guard let hex = item.colorHex else { throw ClipboardHistoryError.missingColor }
+            pasteboard.setString(hex, forType: .string)
+        case .screenshot:
+            guard let fileName = item.fileName else { throw ClipboardHistoryError.missingScreenshotFile }
+            let url = historyDirectoryProvider().appendingPathComponent(fileName)
+            guard let image = NSImage(contentsOf: url) else { throw ClipboardHistoryError.missingScreenshotFile }
+            pasteboard.writeObjects([image])
+        }
+    }
+
+    func clearAll() async {
+        guard let container = modelContainer else { return }
+        do {
+            let context = container.mainContext
+            let all = try context.fetch(FetchDescriptor<ClipboardHistoryItem>())
+            for item in all {
+                context.delete(item)
+            }
+            try context.save()
+
+            let directory = historyDirectoryProvider()
+            let fm = FileManager.default
+            if let contents = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) {
+                for url in contents {
+                    try? fm.removeItem(at: url)
+                }
+            }
+
+            for kind in ClipboardHistoryKind.allCases {
+                cachedItems[kind] = []
+            }
+        } catch {
+            historyLogger.error("Failed to clear clipboard history: \(error)")
+        }
+    }
+
+    private func deleteScreenshotFileIfNeeded(for item: ClipboardHistoryItem) {
+        guard item.kind == ClipboardHistoryKind.screenshot.rawValue,
+              let fileName = item.fileName
+        else { return }
+        let url = historyDirectoryProvider().appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    private func removeOrphanScreenshotFiles(keeping survivingFiles: Set<String>) {
+        let directory = historyDirectoryProvider()
+        let fm = FileManager.default
+        guard let contents = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
+            return
+        }
+        for url in contents where url.pathExtension.lowercased() == "png" {
+            if !survivingFiles.contains(url.lastPathComponent) {
+                try? fm.removeItem(at: url)
+            }
+        }
+    }
+
+    private static func pngDataFromPasteboard(_ pasteboard: NSPasteboard) throws -> Data {
+        guard let image = NSImage(pasteboard: pasteboard) else {
+            throw ClipboardHistoryError.pasteboardImageUnavailable
+        }
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:])
+        else {
+            throw ClipboardHistoryError.pngEncodingFailed
+        }
+        return png
     }
 
     private static func previewTitle(for text: String) -> String {
