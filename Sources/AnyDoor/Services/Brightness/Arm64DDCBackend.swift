@@ -1,0 +1,174 @@
+#if arch(arm64)
+import Foundation
+import IOKit
+import CoreGraphics
+import OSLog
+
+private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "ddc.arm64")
+
+// MARK: - Private IOAVService symbol declarations
+//
+// These three symbols live in CoreDisplay/IOKit's private surface. Function
+// signatures are not copyrightable; the calling convention is documented in
+// public Apple sample code (AVCustomEdit, AVScreenShack) and in Apple's
+// open-source IOAVService headers shipped historically with xnu.
+
+@_silgen_name("IOAVServiceCreate")
+private func IOAVServiceCreate(_ allocator: CFAllocator?) -> Unmanaged<AnyObject>?
+
+@_silgen_name("IOAVServiceCreateWithService")
+private func IOAVServiceCreateWithService(
+    _ allocator: CFAllocator?,
+    _ service: io_service_t
+) -> Unmanaged<AnyObject>?
+
+@_silgen_name("IOAVServiceReadI2C")
+private func IOAVServiceReadI2C(
+    _ service: AnyObject,
+    _ chipAddress: UInt32,
+    _ offset: UInt32,
+    _ buffer: UnsafeMutableRawPointer,
+    _ length: UInt32
+) -> IOReturn
+
+@_silgen_name("IOAVServiceWriteI2C")
+private func IOAVServiceWriteI2C(
+    _ service: AnyObject,
+    _ chipAddress: UInt32,
+    _ offset: UInt32,
+    _ buffer: UnsafeRawPointer,
+    _ length: UInt32
+) -> IOReturn
+
+// MARK: - Backend
+
+struct Arm64DDCBackend: DDCBackend {
+    /// Per-process cache: displayID -> IOAVService object. Invalidated by
+    /// the caller (DisplayBrightnessService) on screen-change notifications.
+    private static let cache = AVServiceCache()
+
+    func transportReady(displayID: CGDirectDisplayID) -> Bool {
+        return Self.cache.service(for: displayID) != nil
+    }
+
+    func read(displayID: CGDirectDisplayID, vcp: UInt8) async -> UInt16? {
+        guard let service = Self.cache.service(for: displayID) else { return nil }
+        return await Task.detached(priority: .userInitiated) { () -> UInt16? in
+            // DDC read request packet: [src=0x51, len=0x82, op=0x01, vcp, chksum]
+            // followed by a separate read of the 11-byte reply.
+            var request: [UInt8] = [0x51, 0x82, 0x01, vcp]
+            request.append(checksum(destination: 0x6E, bytes: request))
+
+            let writeResult = request.withUnsafeBufferPointer { buf -> IOReturn in
+                IOAVServiceWriteI2C(service, 0x37, 0x51, buf.baseAddress!, UInt32(buf.count))
+            }
+            guard writeResult == KERN_SUCCESS else { return nil }
+
+            // Per DDC/CI: the source must wait at least 40 ms before reading the reply.
+            try? await Task.sleep(nanoseconds: 50_000_000)
+
+            var reply = [UInt8](repeating: 0, count: 11)
+            let readResult = reply.withUnsafeMutableBufferPointer { buf -> IOReturn in
+                IOAVServiceReadI2C(service, 0x37, 0x51, buf.baseAddress!, UInt32(buf.count))
+            }
+            guard readResult == KERN_SUCCESS, reply[0] == 0x6E, reply[1] == 0x88,
+                  reply[2] == 0x02, reply[3] == 0x00, reply[4] == vcp else {
+                return nil
+            }
+            let current = (UInt16(reply[8]) << 8) | UInt16(reply[9])
+            return current
+        }.value
+    }
+
+    func write(displayID: CGDirectDisplayID, vcp: UInt8, value: UInt16) async throws {
+        guard let service = Self.cache.service(for: displayID) else {
+            throw NSError(domain: "Arm64DDC", code: -1,
+                          userInfo: [NSLocalizedDescriptionKey: "transport not ready"])
+        }
+        try await Task.detached(priority: .userInitiated) {
+            // DDC write packet: [src=0x51, len=0x84, op=0x03, vcp, valHi, valLo, chksum]
+            var packet: [UInt8] = [0x51, 0x84, 0x03, vcp,
+                                   UInt8((value >> 8) & 0xFF),
+                                   UInt8(value & 0xFF)]
+            packet.append(checksum(destination: 0x6E, bytes: packet))
+
+            let result = packet.withUnsafeBufferPointer { buf -> IOReturn in
+                IOAVServiceWriteI2C(service, 0x37, 0x51, buf.baseAddress!, UInt32(buf.count))
+            }
+            guard result == KERN_SUCCESS else {
+                throw NSError(domain: "Arm64DDC", code: Int(result),
+                              userInfo: [NSLocalizedDescriptionKey: "I2C write failed"])
+            }
+        }.value
+    }
+}
+
+private func checksum(destination: UInt8, bytes: [UInt8]) -> UInt8 {
+    var sum = destination
+    for byte in bytes { sum ^= byte }
+    return sum
+}
+
+/// Per-displayID IOAVService lookup, cached for the process lifetime.
+/// Higher layers must drop entries on screen-change notifications.
+private final class AVServiceCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var map: [CGDirectDisplayID: AnyObject] = [:]
+
+    func service(for displayID: CGDirectDisplayID) -> AnyObject? {
+        lock.withLock {
+            if let s = map[displayID] { return s }
+            guard let s = locateService(for: displayID) else { return nil }
+            map[displayID] = s
+            return s
+        }
+    }
+
+    func invalidate() {
+        lock.withLock {
+            map.removeAll()
+        }
+    }
+
+    /// Walks IORegistry for IOAVService entries; matches by the IOAVService's
+    /// "VendorID" / "ProductID" / "AlphanumericSerialNumber" against
+    /// `CGDisplayVendorNumber` / `CGDisplayModelNumber` / `CGDisplaySerialNumber`.
+    private func locateService(for displayID: CGDirectDisplayID) -> AnyObject? {
+        let vendor = CGDisplayVendorNumber(displayID)
+        let model = CGDisplayModelNumber(displayID)
+        let serial = CGDisplaySerialNumber(displayID)
+        guard vendor != 0 || model != 0 else { return nil }
+
+        var iter: io_iterator_t = 0
+        let matching = IOServiceMatching("IOAVService")
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, matching, &iter) == KERN_SUCCESS else {
+            return nil
+        }
+        defer { IOObjectRelease(iter) }
+
+        var match: AnyObject?
+        while case let service = IOIteratorNext(iter), service != 0 {
+            defer { IOObjectRelease(service) }
+            guard let props = serviceProperties(service) else { continue }
+            let v = (props["VendorID"] as? UInt32) ?? 0
+            let m = (props["ProductID"] as? UInt32) ?? 0
+            let s = (props["AlphanumericSerialNumber"] as? String).flatMap(UInt32.init) ?? 0
+            if v == vendor && m == model && (serial == 0 || s == serial) {
+                if let av = IOAVServiceCreateWithService(kCFAllocatorDefault, service)?.takeRetainedValue() {
+                    match = av
+                    break
+                }
+            }
+        }
+        return match
+    }
+
+    private func serviceProperties(_ service: io_service_t) -> [String: Any]? {
+        var unmanaged: Unmanaged<CFMutableDictionary>?
+        let result = IORegistryEntryCreateCFProperties(service, &unmanaged, kCFAllocatorDefault, 0)
+        guard result == KERN_SUCCESS, let dict = unmanaged?.takeRetainedValue() else { return nil }
+        return dict as? [String: Any]
+    }
+}
+
+#endif
