@@ -48,7 +48,9 @@ final class ScreenshotPreviewWindow {
         p.hidesOnDeactivate = false
         p.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
 
-        let hosting = NSHostingView(rootView: ScreenshotPreviewContent(image: image))
+        let hosting = NSHostingView(rootView: ScreenshotPreviewContent(image: image) { [weak self] in
+            MainActor.assumeIsolated { self?.close() }
+        })
         hosting.frame = NSRect(origin: .zero, size: rect.size)
         hosting.autoresizingMask = [.width, .height]
         p.contentView = hosting
@@ -94,15 +96,29 @@ final class ScreenshotPreviewWindow {
 
 private struct ScreenshotPreviewContent: View {
     let image: NSImage
+    let onClose: () -> Void
 
     var body: some View {
-        Image(nsImage: image)
-            .resizable()
-            .interpolation(.high)
-            .aspectRatio(contentMode: .fit)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(16)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+        ZStack(alignment: .topTrailing) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(16)
+
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, .black.opacity(0.55))
+                    .font(.system(size: 22, weight: .regular))
+            }
+            .buttonStyle(.plain)
+            .help("关闭预览")
+            .keyboardShortcut(.cancelAction)
+            .padding(12)
+        }
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
