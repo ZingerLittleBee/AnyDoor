@@ -125,8 +125,13 @@ PY
 # --- 4. Build ------------------------------------------------------------
 LAST_STEP=4
 RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
-log "swift build -c release"
-swift build -c release
+# Build a Universal Binary so a single artifact runs on both Apple Silicon
+# and Intel Macs. SwiftPM merges the per-arch outputs into
+# .build/apple/Products/Release/ and Sparkle.framework is taken from the
+# matching macos-arm64_x86_64 slice of Sparkle.xcframework.
+BUILD_ARCHS=(--arch arm64 --arch x86_64)
+log "swift build -c release (universal: arm64 + x86_64)"
+swift build -c release "${BUILD_ARCHS[@]}"
 
 # --- 5. Assemble .app ----------------------------------------------------
 LAST_STEP=5
@@ -136,11 +141,10 @@ APP="$DIST/AnyDoor.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 
-cp ".build/release/AnyDoor" "$APP/Contents/MacOS/AnyDoor"
+BIN_PATH="$(swift build --show-bin-path -c release "${BUILD_ARCHS[@]}")"
+cp "$BIN_PATH/AnyDoor" "$APP/Contents/MacOS/AnyDoor"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Info.plist "$APP/Contents/Info.plist"
-
-BIN_PATH="$(swift build --show-bin-path -c release)"
 SPARKLE_FW=""
 for candidate in \
   "$BIN_PATH/Sparkle.framework" \
