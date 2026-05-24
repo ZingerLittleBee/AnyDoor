@@ -36,11 +36,11 @@ final class PanelStoreTests: XCTestCase {
 
         // hiddenHotkey items (brightnessUp/brightnessDown) are seeded but
         // filtered out of topLevelEntries — they own a hotkey, not a row.
-        let expectedVisibleKinds = BuiltinItem.allCases.filter { $0.kind != .hiddenHotkey }
-        XCTAssertEqual(store.topLevelEntries.count, expectedVisibleKinds.count)
-        // Order should follow defaultOrder
-        let titles = store.topLevelEntries.map(\.title)
-        XCTAssertEqual(titles.first, BuiltinItem.keepAwake.title) // defaultOrder 100 is smallest
+        let expectedVisible = BuiltinItem.allCases.filter { $0.kind != .hiddenHotkey }
+        XCTAssertEqual(store.topLevelEntries.count, expectedVisible.count)
+        // Order should follow defaultOrder — first entry should be keepAwake (defaultOrder 100)
+        let firstSource = store.topLevelEntries.first?.source
+        XCTAssertEqual(firstSource, .builtin(.keepAwake))
     }
 
     @MainActor

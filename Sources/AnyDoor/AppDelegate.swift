@@ -8,6 +8,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
+    @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?

@@ -6,7 +6,7 @@ import Foundation
 enum MenuBarIcon {
     struct Choice: Equatable, Sendable {
         let name: String
-        let title: String
+        let titleKey: L10n.Key
     }
 
     /// UserDefaults key for whether the menu bar item is shown.
@@ -20,20 +20,20 @@ enum MenuBarIcon {
 
     /// Ordered SF Symbol choices offered in the picker.
     static let choices: [Choice] = [
-        Choice(name: "door.left.hand.open", title: "左开门"),
-        Choice(name: "sparkles", title: "闪光"),
-        Choice(name: "wand.and.sparkles", title: "魔杖"),
-        Choice(name: "bolt.fill", title: "闪电"),
-        Choice(name: "command", title: "Command"),
-        Choice(name: "switch.2", title: "切换"),
-        Choice(name: "square.grid.2x2", title: "网格"),
-        Choice(name: "circle.grid.3x3.fill", title: "九宫格"),
-        Choice(name: "point.3.connected.trianglepath.dotted", title: "连接点"),
-        Choice(name: "app.connected.to.app.below.fill", title: "应用连接"),
-        Choice(name: "arrow.trianglehead.2.clockwise", title: "循环"),
-        Choice(name: "link", title: "链接"),
-        Choice(name: "network", title: "网络"),
-        Choice(name: "globe", title: "地球"),
+        Choice(name: "door.left.hand.open", titleKey: .menubarIconDoorLeft),
+        Choice(name: "sparkles", titleKey: .menubarIconSparkles),
+        Choice(name: "wand.and.sparkles", titleKey: .menubarIconWand),
+        Choice(name: "bolt.fill", titleKey: .menubarIconBolt),
+        Choice(name: "command", titleKey: .menubarIconCommand),
+        Choice(name: "switch.2", titleKey: .menubarIconSwitch),
+        Choice(name: "square.grid.2x2", titleKey: .menubarIconGrid2x2),
+        Choice(name: "circle.grid.3x3.fill", titleKey: .menubarIconGrid3x3),
+        Choice(name: "point.3.connected.trianglepath.dotted", titleKey: .menubarIconConnectedPoints),
+        Choice(name: "app.connected.to.app.below.fill", titleKey: .menubarIconAppConnected),
+        Choice(name: "arrow.trianglehead.2.clockwise", titleKey: .menubarIconCycle),
+        Choice(name: "link", titleKey: .menubarIconLink),
+        Choice(name: "network", titleKey: .menubarIconNetwork),
+        Choice(name: "globe", titleKey: .menubarIconGlobe),
     ]
 
     /// Ordered SF Symbol names offered in the picker. Kept for storage and tests
@@ -51,7 +51,11 @@ enum MenuBarIcon {
         UserDefaults.standard.string(forKey: nameKey) ?? defaultName
     }
 
-    static func title(for name: String) -> String {
-        choices.first { $0.name == name }?.title ?? name
+    @MainActor
+    static func localizedTitle(for name: String) -> String {
+        if let choice = choices.first(where: { $0.name == name }) {
+            return L(choice.titleKey)
+        }
+        return name
     }
 }

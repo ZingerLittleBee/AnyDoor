@@ -37,7 +37,7 @@ struct MenuBarView: View {
                 Text("AnyDoor").font(.headline)
                 Spacer()
                 let count = panel.topLevelEntries.filter(\.isVisible).count
-                Text("\(count) 个已启用").font(.caption).foregroundStyle(.tertiary)
+                Text(L(.panelHeaderEnabledCount, count)).font(.caption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12).padding(.top, 4)
 
@@ -67,12 +67,12 @@ struct MenuBarView: View {
             // Footer
             HStack(spacing: 8) {
                 Spacer()
-                footerButton("设置", systemImage: "gear") {
+                footerButton(.panelFooterSettings, systemImage: "gear") {
                     NSApp.activate()
                     openSettings()
                     onRequestClose()
                 }
-                footerButton("退出", systemImage: "power") {
+                footerButton(.panelFooterQuit, systemImage: "power") {
                     NSApplication.shared.terminate(nil)
                 }
             }
@@ -97,18 +97,22 @@ struct MenuBarView: View {
     }
 
     private func footerButton(
-        _ title: String,
+        _ titleKey: L10n.Key,
         systemImage: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Label(title, systemImage: systemImage)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 10)
-                .frame(height: 24)
-                .contentShape(Rectangle())
-                .adaptiveInteractiveSurface(cornerRadius: 8)
+            Label {
+                LocalizedText(titleKey)
+            } icon: {
+                Image(systemName: systemImage)
+            }
+            .font(.body)
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 10)
+            .frame(height: 24)
+            .contentShape(Rectangle())
+            .adaptiveInteractiveSurface(cornerRadius: 8)
         }
         .buttonStyle(.plain)
     }

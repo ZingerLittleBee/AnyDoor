@@ -30,7 +30,7 @@ final class BuiltinItemBrightnessTests: XCTestCase {
     }
 
     func testBrightnessTitleAndSymbol() {
-        XCTAssertEqual(BuiltinItem.brightness.title, "屏幕亮度")
+        XCTAssertEqual(BuiltinItem.brightness.titleKey, .builtinBrightness)
         XCTAssertEqual(BuiltinItem.brightness.symbol, "sun.max")
     }
 

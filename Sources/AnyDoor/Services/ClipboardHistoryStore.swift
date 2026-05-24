@@ -216,7 +216,10 @@ final class ClipboardHistoryStore {
                 id: id,
                 kind: .screenshot,
                 fileName: fileName,
-                previewTitle: "截图",
+                // Stored empty so ClipboardHistoryRow can resolve the title via
+                // L(...) at render time. Persisting a localized string here
+                // would freeze it in the language active at capture time.
+                previewTitle: "",
                 previewSubtitle: nil,
                 createdAt: now()
             )
@@ -319,9 +322,10 @@ final class ClipboardHistoryStore {
         text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
     }
 
+    @MainActor
     private static func textSubtitle(for text: String) -> String? {
         let lineCount = text.split(whereSeparator: \.isNewline).count
-        return lineCount > 1 ? "\(lineCount) 行" : "\(text.count) 字符"
+        return lineCount > 1 ? L(.clipboardTextLines, lineCount) : L(.clipboardTextChars, text.count)
     }
 
 }

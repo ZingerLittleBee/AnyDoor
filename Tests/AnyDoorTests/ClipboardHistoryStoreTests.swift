@@ -105,7 +105,11 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         let item = try XCTUnwrap(store.items(for: .screenshot).first)
         let fileName = try XCTUnwrap(item.fileName)
         XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(fileName).path))
-        XCTAssertEqual(item.previewTitle, "截图")
+        // Screenshots persist an empty previewTitle; the displayed label is
+        // resolved via L(item.historyKind.titleKey) at render time so a
+        // language switch updates the row without rewriting the store.
+        XCTAssertEqual(item.previewTitle, "")
+        XCTAssertEqual(item.historyKind, .screenshot)
 
         try? FileManager.default.removeItem(at: directory)
     }

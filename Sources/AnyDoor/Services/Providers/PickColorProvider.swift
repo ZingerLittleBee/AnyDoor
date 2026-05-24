@@ -16,7 +16,8 @@ actor PickColorProvider: ActionProvider {
         case .cancelled:
             return // user cancelled — silent, no toast
         case .conversionFailed:
-            await ToastPresenter.shared.show(.failure("取色失败"))
+            let msg = await MainActor.run { L(.toastPickColorFailed) }
+            await ToastPresenter.shared.show(.failure(msg))
         case .picked(let hex, let swatch):
             await MainActor.run {
                 let pasteboard = NSPasteboard.general
@@ -24,8 +25,9 @@ actor PickColorProvider: ActionProvider {
                 pasteboard.setString(hex, forType: .string)
             }
             await ClipboardHistoryStore.shared.recordColor(hex: hex)
+            let colorMsg = await MainActor.run { L(.toastColorCopied, hex) }
             await ToastPresenter.shared.show(
-                .color(message: "已复制 \(hex)", swatch: swatch)
+                .color(message: colorMsg, swatch: swatch)
             )
         }
     }

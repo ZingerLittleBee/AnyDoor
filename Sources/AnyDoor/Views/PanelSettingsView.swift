@@ -17,28 +17,28 @@ struct PanelSettingsView: View {
             }
             .listStyle(.inset)
 
-            Text("系统条目无法删除，只能隐藏；应用快捷键可自由增删。")
+            LocalizedText(.settingsPanelTip)
                 .font(.caption2).foregroundStyle(.tertiary)
                 .padding(8)
         }
         .alert(item: $conflictAlert) { alert in
             Alert(
-                title: Text("快捷键冲突"),
-                message: Text("\(alert.hotkey.displayString) 已被「\(alert.existingTitle)」占用"),
-                primaryButton: .default(Text("替换")) {
+                title: Text(L(.settingsPanelHotkeyConflictTitle)),
+                message: Text(L(.settingsPanelHotkeyConflictMessage, alert.hotkey.displayString, alert.existingTitle)),
+                primaryButton: .default(Text(L(.settingsPanelHotkeyConflictReplace))) {
                     alert.onReplace()
                 },
-                secondaryButton: .cancel(Text("取消"))
+                secondaryButton: .cancel(Text(L(.settingsPanelCancel)))
             )
         }
         .alert(item: $pendingDelete) { item in
             Alert(
-                title: Text("删除「\(item.appName)」?"),
-                message: Text("将一并清除快捷键绑定，无法撤销。"),
-                primaryButton: .destructive(Text("删除")) {
+                title: Text(L(.settingsPanelDeleteTitle, item.appName)),
+                message: Text(L(.settingsPanelDeleteMessage)),
+                primaryButton: .destructive(Text(L(.settingsPanelDeleteConfirm))) {
                     PanelStore.shared.deleteAppShortcut(id: item.bindingID)
                 },
-                secondaryButton: .cancel(Text("取消"))
+                secondaryButton: .cancel(Text(L(.settingsPanelCancel)))
             )
         }
     }
@@ -115,8 +115,8 @@ struct PanelSettingsView: View {
             .toggleStyle(.checkbox).labelsHidden()
             .disabled(false)
             Image(systemName: entry.symbol).frame(width: 16)
-            Text(entry.title).font(.body)
-            Text(typeBadge(for: entry)).font(.caption2).foregroundStyle(.tertiary)
+            Text(entry.localizedTitle()).font(.body)
+            LocalizedText(typeBadge(for: entry)).font(.caption2).foregroundStyle(.tertiary)
             Spacer()
             hotkeyField(for: entry)
             deleteButton(for: entry)
@@ -124,13 +124,13 @@ struct PanelSettingsView: View {
         .padding(.vertical, 4)
     }
 
-    private func typeBadge(for entry: PanelEntry) -> String {
+    private func typeBadge(for entry: PanelEntry) -> L10n.Key {
         switch entry.kind {
-        case .toggle:  return "系统"
-        case .action:  return "系统 · 动作"
-        case .submenu: return "系统 · 子菜单"
-        case .brightnessControl: return "系统 · 亮度"
-        case .hiddenHotkey:      return "系统 · 全局动作"
+        case .toggle:            return .settingsPanelTypeBadgeToggle
+        case .action:            return .settingsPanelTypeBadgeAction
+        case .submenu:           return .settingsPanelTypeBadgeSubmenu
+        case .brightnessControl: return .settingsPanelTypeBadgeBrightness
+        case .hiddenHotkey:      return .settingsPanelTypeBadgeHiddenHotkey
         }
     }
 
@@ -155,13 +155,13 @@ struct PanelSettingsView: View {
     private func deleteButton(for entry: PanelEntry) -> some View {
         if case let .appShortcut(id) = entry.source {
             Button {
-                pendingDelete = PendingDelete(bindingID: id, appName: entry.title)
+                pendingDelete = PendingDelete(bindingID: id, appName: entry.localizedTitle())
             } label: {
                 Image(systemName: "xmark").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .frame(width: 20)
-            .help("删除 \(entry.title)")
+            .help(L(.settingsPanelDeleteItemHelp, entry.localizedTitle()))
         } else {
             // Reserve the same width so other columns stay aligned across rows.
             Color.clear.frame(width: 20)
@@ -173,7 +173,7 @@ struct PanelSettingsView: View {
            let existing = panel.entryUsingHotkey(new, excluding: entry.source) {
             conflictAlert = ConflictAlert(
                 hotkey: new,
-                existingTitle: existing.title,
+                existingTitle: existing.localizedTitle(),
                 onReplace: {
                     clearHotkey(for: existing.source)
                     apply(hotkey: new, to: entry)
@@ -226,7 +226,7 @@ struct PanelSettingsView: View {
                 ))
                 .toggleStyle(.checkbox).labelsHidden()
                 appIcon(for: child)
-                Text(child.title).font(.body)
+                Text(child.localizedTitle()).font(.body)
                 Spacer()
                 HotkeyRecorder(
                     hotkey: .constant(child.hotkey),
@@ -271,7 +271,7 @@ struct PanelSettingsView: View {
             Button {
                 addApp()
             } label: {
-                Label("添加应用", systemImage: "plus")
+                Label { LocalizedText(.settingsPanelAddApp) } icon: { Image(systemName: "plus") }
                     .font(.caption)
             }
             .buttonStyle(.bordered)
@@ -282,7 +282,7 @@ struct PanelSettingsView: View {
 
     private func addApp() {
         let panel = NSOpenPanel()
-        panel.title = "选择应用程序"
+        panel.title = L(.settingsAppPickerTitle)
         panel.allowedContentTypes = [.application]
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowsMultipleSelection = false

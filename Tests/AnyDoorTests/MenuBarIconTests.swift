@@ -19,7 +19,7 @@ final class MenuBarIconTests: XCTestCase {
 
     func testDropdownChoicesStayAlignedWithOptions() {
         XCTAssertEqual(MenuBarIcon.choices.map(\.name), MenuBarIcon.options)
-        XCTAssertTrue(MenuBarIcon.choices.allSatisfy { !$0.title.isEmpty })
+        XCTAssertTrue(MenuBarIcon.choices.allSatisfy { !$0.titleKey.rawValue.isEmpty })
     }
 
     func testOffersExpandedIconCatalog() {

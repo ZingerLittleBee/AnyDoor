@@ -49,33 +49,33 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         }
     }
 
-    var title: String {
+    var titleKey: L10n.Key {
         switch self {
-        case .appShortcuts: return "应用快捷键"
-        case .keepAwake: return "Keep Awake"
-        case .muteAudio: return "静音"
-        case .hideDesktopIcons: return "隐藏桌面图标"
-        case .showHiddenFiles: return "显示隐藏文件"
-        case .darkMode: return "深色模式"
-        case .lockScreen: return "锁定屏幕"
-        case .emptyTrash: return "清空废纸篓"
-        case .screenshot: return "截图到剪贴板"
-        case .ocr: return "屏幕取词"
-        case .pickColor: return "屏幕取色"
-        case .displaySleep: return "显示器睡眠"
-        case .systemSleep: return "系统休眠"
-        case .hideDock: return "隐藏 Dock"
-        case .autoHideMenuBar: return "自动隐藏菜单栏"
-        case .restartFinder: return "重启访达"
-        case .restartDock: return "重启 Dock"
-        case .restartMenuBar: return "重启菜单栏"
-        case .flushDNS: return "刷新 DNS"
-        case .keyboardLock: return "禁用键盘"
-        case .portManager: return "端口管理"
-        case .qrcode: return "识别二维码"
-        case .brightness: return "屏幕亮度"
-        case .brightnessUp: return "亮度 +"
-        case .brightnessDown: return "亮度 −"
+        case .appShortcuts:      return .builtinAppShortcuts
+        case .keepAwake:         return .builtinKeepAwake
+        case .muteAudio:         return .builtinMuteAudio
+        case .hideDesktopIcons:  return .builtinHideDesktopIcons
+        case .showHiddenFiles:   return .builtinShowHiddenFiles
+        case .darkMode:          return .builtinDarkMode
+        case .lockScreen:        return .builtinLockScreen
+        case .emptyTrash:        return .builtinEmptyTrash
+        case .screenshot:        return .builtinScreenshot
+        case .ocr:               return .builtinOCR
+        case .pickColor:         return .builtinPickColor
+        case .displaySleep:      return .builtinDisplaySleep
+        case .systemSleep:       return .builtinSystemSleep
+        case .hideDock:          return .builtinHideDock
+        case .autoHideMenuBar:   return .builtinAutoHideMenuBar
+        case .restartFinder:     return .builtinRestartFinder
+        case .restartDock:       return .builtinRestartDock
+        case .restartMenuBar:    return .builtinRestartMenuBar
+        case .flushDNS:          return .builtinFlushDNS
+        case .keyboardLock:      return .builtinKeyboardLock
+        case .portManager:       return .builtinPortManager
+        case .qrcode:            return .builtinQRCode
+        case .brightness:        return .builtinBrightness
+        case .brightnessUp:      return .builtinBrightnessUp
+        case .brightnessDown:    return .builtinBrightnessDown
         }
     }
 
