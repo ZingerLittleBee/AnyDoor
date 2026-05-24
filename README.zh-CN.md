@@ -268,6 +268,12 @@ codesign，提交 Apple 公证，打包 DMG 和 zip，重新生成 Sparkle appca
 - CGEvent tap
 - Swift Package Manager
 
+## 致谢
+
+- [DDC.swift](https://github.com/reitermarkus/DDC.swift) (MIT) — Intel Mac 上外置显示器的 DDC/CI 亮度控制。
+- [AskForPermission](https://github.com/riko2chen/AskForPermission) — macOS 辅助功能权限助手。
+- [Sparkle](https://sparkle-project.org/) — 应用自动更新。
+
 ## 许可证
 
 MIT
