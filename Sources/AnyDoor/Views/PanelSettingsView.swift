@@ -51,8 +51,53 @@ struct PanelSettingsView: View {
                 appShortcutChildren()
                 addAppButton()
             }
+            if case .builtin(.brightness) = entry.source {
+                brightnessHotkeyRecorders()
+            }
         }
         .opacity(entry.isVisible ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private func brightnessHotkeyRecorders() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            brightnessHotkeyRow(item: .brightnessUp, label: "亮度 +")
+            brightnessHotkeyRow(item: .brightnessDown, label: "亮度 −")
+        }
+        .padding(.leading, 36)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func brightnessHotkeyRow(item: BuiltinItem, label: String) -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            HotkeyRecorder(hotkey: .constant(PanelStore.shared.hotkeyForBuiltin(item))) { newValue in
+                handleBrightnessHotkeyChange(item: item, newValue: newValue)
+            }
+            .frame(width: 150, alignment: .trailing)
+        }
+    }
+
+    private func handleBrightnessHotkeyChange(item: BuiltinItem, newValue: HotkeyDescriptor?) {
+        if let new = newValue,
+           let existing = PanelStore.shared.entryUsingHotkey(new, excluding: .builtin(item)) {
+            conflictAlert = ConflictAlert(
+                hotkey: new,
+                existingTitle: existing.title,
+                onReplace: {
+                    if case let .builtin(other) = existing.source {
+                        PanelStore.shared.setBuiltinHotkey(other, hotkey: nil)
+                    } else if case let .appShortcut(id) = existing.source {
+                        PanelStore.shared.updateAppShortcut(id: id, hotkey: nil)
+                    }
+                    PanelStore.shared.setBuiltinHotkey(item, hotkey: new)
+                }
+            )
+        } else {
+            PanelStore.shared.setBuiltinHotkey(item, hotkey: newValue)
+        }
     }
 
     private func mainRow(_ entry: PanelEntry) -> some View {

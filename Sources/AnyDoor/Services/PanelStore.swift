@@ -248,6 +248,19 @@ final class PanelStore {
         return try? context.fetch(descriptor).first
     }
 
+    /// Look up the current hotkey assigned to a built-in item, if any.
+    /// Reads from SwiftData rather than `topLevelEntries` so it works for
+    /// hidden-hotkey items (e.g., brightness ±).
+    func hotkeyForBuiltin(_ item: BuiltinItem) -> HotkeyDescriptor? {
+        guard let container = modelContainer else { return nil }
+        let key = item.rawValue
+        guard let pref = try? container.mainContext.fetch(
+            FetchDescriptor<BuiltinPreference>(predicate: #Predicate { $0.itemKey == key })
+        ).first,
+        let code = pref.keyCode, let mods = pref.modifierFlags else { return nil }
+        return HotkeyDescriptor(keyCode: code, modifierFlags: mods)
+    }
+
     // MARK: - Mutations
 
     /// Update visibility for a built-in.
