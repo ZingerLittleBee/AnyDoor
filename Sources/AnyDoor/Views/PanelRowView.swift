@@ -4,7 +4,7 @@ import SwiftUI
 ///
 /// Three visual variants driven by `entry.kind`:
 /// - `.toggle`  — icon + title + (subtitle) + right-side switch
-/// - `.action`  — icon + title + optional right-side hotkey label (HIG menu-item style)
+/// - `.action`  — icon + title + optional hotkey + chevron when the action has a hover popover
 /// - `.submenu` — icon + title + (subtitle) + right-side chevron
 ///
 /// All rows are tappable on the whole row, matching Apple-menu / NSMenuItem behavior.
@@ -18,6 +18,14 @@ struct PanelRowView: View {
     @State private var activationPulse = 0
 
     private var needsPermission: Bool { entry.permission == .denied }
+
+    /// True when the row is a built-in action that exposes a hover-only history popover
+    /// (OCR / pick color / QR / screenshot). Used to render an affordance chevron so
+    /// users discover hover-to-reveal even when no hotkey is bound.
+    private var hasHoverPopover: Bool {
+        if case let .builtin(item) = entry.source { return item.historyKind != nil }
+        return false
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -97,8 +105,15 @@ struct PanelRowView: View {
             }
             .frame(width: 42, height: 24)
         case .action:
-            if let hk = entry.hotkey {
-                HotkeyLabel(hotkey: hk)
+            HStack(spacing: 6) {
+                if let hk = entry.hotkey {
+                    HotkeyLabel(hotkey: hk)
+                }
+                if hasHoverPopover {
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
             }
         case .submenu:
             Image(systemName: "chevron.right")
