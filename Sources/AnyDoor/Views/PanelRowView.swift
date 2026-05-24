@@ -53,6 +53,8 @@ struct PanelRowView: View {
             case .toggle:  onToggle()
             case .submenu: onSubmenu()
             case .action:  onAction()
+            case .brightnessControl: break          // click is intentionally a no-op (hover-only UI)
+            case .hiddenHotkey: break                // never reaches PanelRowView; defensive only
             }
         }
     }
@@ -119,6 +121,13 @@ struct PanelRowView: View {
             Image(systemName: "chevron.right")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+        case .brightnessControl:
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12)
+        case .hiddenHotkey:
+            EmptyView()
         }
     }
 }

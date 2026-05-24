@@ -2,7 +2,6 @@ import XCTest
 import SwiftData
 @testable import AnyDoor
 
-@MainActor
 final class BuiltinPreferenceSeederTests: XCTestCase {
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
@@ -15,9 +14,10 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
             allowsSave: true
         )
         let container = try ModelContainer(for: schema, configurations: [config])
-        return container.mainContext
+        return ModelContext(container)
     }
 
+    @MainActor
     func testHiddenHotkeyItemsAreSeededInvisible() throws {
         let ctx = try makeInMemoryContext()
         BuiltinPreferenceSeeder.seedIfNeeded(in: ctx)
@@ -29,6 +29,7 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
         XCTAssertFalse(down.isVisible)
     }
 
+    @MainActor
     func testRegularItemsAreSeededVisible() throws {
         let ctx = try makeInMemoryContext()
         BuiltinPreferenceSeeder.seedIfNeeded(in: ctx)
@@ -40,6 +41,7 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
         XCTAssertTrue(keepAwake.isVisible)
     }
 
+    @MainActor
     func testSeederIsIdempotent() throws {
         let ctx = try makeInMemoryContext()
         BuiltinPreferenceSeeder.seedIfNeeded(in: ctx)

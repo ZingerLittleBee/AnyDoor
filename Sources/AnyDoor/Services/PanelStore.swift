@@ -181,6 +181,10 @@ final class PanelStore {
         case .runBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
             Task { await self.run(item) }
+        case .brightnessUp:
+            break  // TODO(Task 6): forward to DisplayBrightnessService.bump(.up)
+        case .brightnessDown:
+            break  // TODO(Task 6): forward to DisplayBrightnessService.bump(.down)
         }
     }
 

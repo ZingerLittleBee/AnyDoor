@@ -84,15 +84,19 @@ struct PanelSettingsView: View {
         case .toggle:  return "系统"
         case .action:  return "系统 · 动作"
         case .submenu: return "系统 · 子菜单"
+        case .brightnessControl: return "系统 · 亮度"
+        case .hiddenHotkey:      return "系统 · 全局动作"
         }
     }
 
     @ViewBuilder
     private func hotkeyField(for entry: PanelEntry) -> some View {
-        // Any submenu-kind builtin has no hotkey (children carry their own, or
-        // the submenu is opened by hovering). Reserve the column width so the
-        // grid stays aligned.
-        if case let .builtin(item) = entry.source, item.kind == .submenu {
+        // Items that do not get a row-level hotkey recorder:
+        //   - .submenu: opened by hover (children carry their own hotkeys)
+        //   - .brightnessControl: bumps are bound inline below the row
+        //   - .hiddenHotkey: never rendered in the settings grid
+        if case let .builtin(item) = entry.source,
+           item.kind == .submenu || item.kind == .brightnessControl || item.kind == .hiddenHotkey {
             Color.clear.frame(width: 150)
         } else {
             HotkeyRecorder(hotkey: .constant(entry.hotkey)) { newValue in
