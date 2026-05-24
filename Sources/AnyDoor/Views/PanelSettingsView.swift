@@ -70,7 +70,7 @@ struct PanelSettingsView: View {
             .toggleStyle(.checkbox).labelsHidden()
             .disabled(false)
             Image(systemName: entry.symbol).frame(width: 16)
-            Text(entry.title).font(.body)
+            Text(entry.localizedTitle()).font(.body)
             Text(typeBadge(for: entry)).font(.caption2).foregroundStyle(.tertiary)
             Spacer()
             hotkeyField(for: entry)
@@ -106,13 +106,13 @@ struct PanelSettingsView: View {
     private func deleteButton(for entry: PanelEntry) -> some View {
         if case let .appShortcut(id) = entry.source {
             Button {
-                pendingDelete = PendingDelete(bindingID: id, appName: entry.title)
+                pendingDelete = PendingDelete(bindingID: id, appName: entry.localizedTitle())
             } label: {
                 Image(systemName: "xmark").foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
             .frame(width: 20)
-            .help("删除 \(entry.title)")
+            .help("删除 \(entry.localizedTitle())")
         } else {
             // Reserve the same width so other columns stay aligned across rows.
             Color.clear.frame(width: 20)
@@ -177,7 +177,7 @@ struct PanelSettingsView: View {
                 ))
                 .toggleStyle(.checkbox).labelsHidden()
                 appIcon(for: child)
-                Text(child.title).font(.body)
+                Text(child.localizedTitle()).font(.body)
                 Spacer()
                 HotkeyRecorder(
                     hotkey: .constant(child.hotkey),

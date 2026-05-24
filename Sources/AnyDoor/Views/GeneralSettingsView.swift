@@ -155,13 +155,13 @@ struct GeneralSettingsView: View {
             ForEach(MenuBarIcon.choices, id: \.name) { choice in
                 Image(systemName: choice.name)
                     .tag(choice.name)
-                    .accessibilityLabel(choice.title)
+                    .accessibilityLabel(L(choice.titleKey))
             }
         }
         .labelsHidden()
         .pickerStyle(.menu)
         .frame(width: 56)
-        .help(MenuBarIcon.title(for: selectedMenuBarIconName))
+        .help(MenuBarIcon.localizedTitle(for: selectedMenuBarIconName))
     }
 
     private var selectedMenuBarIconName: String {

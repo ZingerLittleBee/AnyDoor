@@ -58,7 +58,7 @@ private struct AppShortcutRow: View {
     var body: some View {
         HStack(spacing: 8) {
             appIcon
-            Text(entry.title)
+            Text(entry.localizedTitle())
                 .font(.body)
                 .lineLimit(1)
             Spacer(minLength: 12)
@@ -70,7 +70,7 @@ private struct AppShortcutRow: View {
         .adaptiveInteractiveSurface(cornerRadius: 6)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
-        .help("切换 \(entry.title)")
+        .help("切换 \(entry.localizedTitle())")
         .onHover { hovering in
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }

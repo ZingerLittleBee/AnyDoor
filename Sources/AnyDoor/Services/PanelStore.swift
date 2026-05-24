@@ -68,7 +68,7 @@ final class PanelStore {
                     displayOrder: pref.displayOrder,
                     isVisible: pref.isVisible,
                     hotkey: hotkey,
-                    title: item.title,
+                    title: "",
                     subtitle: subtitle(for: item),
                     symbol: item.symbol,
                     kind: item.kind,

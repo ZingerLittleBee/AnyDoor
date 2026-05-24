@@ -35,9 +35,9 @@ final class PanelStoreTests: XCTestCase {
         store.bootstrap(modelContainer: container, providers: [])
 
         XCTAssertEqual(store.topLevelEntries.count, BuiltinItem.allCases.count)
-        // Order should follow defaultOrder
-        let titles = store.topLevelEntries.map(\.title)
-        XCTAssertEqual(titles.first, BuiltinItem.keepAwake.title) // defaultOrder 100 is smallest
+        // Order should follow defaultOrder — first entry should be keepAwake (defaultOrder 100)
+        let firstSource = store.topLevelEntries.first?.source
+        XCTAssertEqual(firstSource, .builtin(.keepAwake)) // defaultOrder 100 is smallest
     }
 
     @MainActor

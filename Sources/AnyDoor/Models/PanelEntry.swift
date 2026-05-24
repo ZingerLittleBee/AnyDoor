@@ -56,4 +56,15 @@ struct PanelEntry: Identifiable, Hashable {
         case .builtin(let item):   return "builtin:\(item.rawValue)"
         }
     }
+
+    /// Returns the display title resolved against the active locale.
+    /// App shortcut entries return the stored app name; built-in entries
+    /// defer to the L10n catalog so the title updates on language change.
+    @MainActor
+    func localizedTitle() -> String {
+        switch source {
+        case .appShortcut: return title
+        case .builtin(let item): return L(item.titleKey)
+        }
+    }
 }

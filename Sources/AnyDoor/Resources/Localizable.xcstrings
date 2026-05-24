@@ -1,6 +1,160 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "builtin.appShortcuts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "App Shortcuts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用快捷键" } }
+      }
+    },
+    "builtin.autoHideMenuBar" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Auto-Hide Menu Bar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动隐藏菜单栏" } }
+      }
+    },
+    "builtin.darkMode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dark Mode" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "深色模式" } }
+      }
+    },
+    "builtin.displaySleep" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display Sleep" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示器睡眠" } }
+      }
+    },
+    "builtin.emptyTrash" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Empty Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清空废纸篓" } }
+      }
+    },
+    "builtin.flushDNS" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Flush DNS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新 DNS" } }
+      }
+    },
+    "builtin.hideDesktopIcons" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide Desktop Icons" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐藏桌面图标" } }
+      }
+    },
+    "builtin.hideDock" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide Dock" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐藏 Dock" } }
+      }
+    },
+    "builtin.keepAwake" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Keep Awake" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Keep Awake" } }
+      }
+    },
+    "builtin.keyboardLock" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disable Keyboard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "禁用键盘" } }
+      }
+    },
+    "builtin.lockScreen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Lock Screen" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "锁定屏幕" } }
+      }
+    },
+    "builtin.muteAudio" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Mute" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "静音" } }
+      }
+    },
+    "builtin.ocr" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Screen Text Recognition" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "屏幕取词" } }
+      }
+    },
+    "builtin.pickColor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pick Color" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "屏幕取色" } }
+      }
+    },
+    "builtin.portManager" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Port Manager" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "端口管理" } }
+      }
+    },
+    "builtin.qrcode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Recognize QR Code" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "识别二维码" } }
+      }
+    },
+    "builtin.restartDock" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restart Dock" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重启 Dock" } }
+      }
+    },
+    "builtin.restartFinder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restart Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重启访达" } }
+      }
+    },
+    "builtin.restartMenuBar" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restart Menu Bar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重启菜单栏" } }
+      }
+    },
+    "builtin.screenshot" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Screenshot to Clipboard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "截图到剪贴板" } }
+      }
+    },
+    "builtin.showHiddenFiles" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show Hidden Files" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示隐藏文件" } }
+      }
+    },
+    "builtin.systemSleep" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "System Sleep" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统休眠" } }
+      }
+    },
     "demo.hello" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16,6 +170,104 @@
             "value" : "你好"
           }
         }
+      }
+    },
+    "menubarIcon.appConnected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "App connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用连接" } }
+      }
+    },
+    "menubarIcon.bolt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Bolt" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "闪电" } }
+      }
+    },
+    "menubarIcon.command" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Command" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Command" } }
+      }
+    },
+    "menubarIcon.connectedPoints" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connected dots" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接点" } }
+      }
+    },
+    "menubarIcon.cycle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cycle" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "循环" } }
+      }
+    },
+    "menubarIcon.doorLeft" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Left door" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "左开门" } }
+      }
+    },
+    "menubarIcon.globe" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Globe" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "地球" } }
+      }
+    },
+    "menubarIcon.grid2x2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "2×2 grid" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "网格" } }
+      }
+    },
+    "menubarIcon.grid3x3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "3×3 grid" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "九宫格" } }
+      }
+    },
+    "menubarIcon.link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Link" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "链接" } }
+      }
+    },
+    "menubarIcon.network" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Network" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "网络" } }
+      }
+    },
+    "menubarIcon.sparkles" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sparkles" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "闪光" } }
+      }
+    },
+    "menubarIcon.switch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Switch" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换" } }
+      }
+    },
+    "menubarIcon.wand" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Wand" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "魔杖" } }
       }
     }
   },
