@@ -64,11 +64,14 @@ Application Support directory.
 | Scope | Only AnyDoor-generated outputs |
 | History entry points | Hover on the existing OCR, color, QR, and screenshot action rows |
 | Row click behavior | Unchanged; runs the original action |
-| Copy from history | Click or `Enter`; copies to pasteboard and closes history + main panel |
+| Copy from history | Click or `Enter`; copies to pasteboard, hides the history popover, and calls the existing main-panel close path |
 | Preview | `Space` previews the selected item; no copy, no close |
 | Selection | Mouse hover and `↑` / `↓` both update selected item |
 | Search | Not in first version |
 | Screenshots | Store full PNG files for 7 days; show thumbnails in history |
+| Screenshot record timing | Read the pasteboard in the same `ScreenshotProvider.run()` await chain immediately after `screencapture` returns |
+| History popover focus | Hovering a history-capable row makes the side popover key-capable and key, matching Port Manager |
+| Prune on hover | Throttled; opening history prunes only when the last prune is older than 60 seconds |
 | Clipboard manager behavior | Explicitly out of scope |
 
 ## UX
@@ -81,8 +84,43 @@ items, so their existing hotkey and click paths continue to work through
 
 On hover, `MenuBarView` mounts a history popover to the right of the hovered
 row. This uses the same `HoverPopover` / `HoverGate` infrastructure currently
-used by App Shortcuts and Port Manager, generalized so a row can have a hover
-popover even when its `BuiltinItem.Kind` is `.action`.
+used by App Shortcuts and Port Manager, but the state model must be generalized
+from "active submenu" to "active hover target" so action rows can own popovers
+without becoming submenus.
+
+### MenuBarView State Model
+
+`MenuBarView` currently has one `HoverPopover`, one `HoverGate`, and an
+`activeSubmenu: BuiltinItem?`. This feature replaces that with a target enum:
+
+```swift
+enum HoverPopoverTarget: Hashable {
+    case submenu(BuiltinItem)
+    case history(ClipboardHistoryKind)
+}
+```
+
+The view tracks:
+
+- `activeHoverTarget: HoverPopoverTarget?`
+- `triggerFrames: [HoverPopoverTarget: NSRect]`
+
+Every `.submenu` row and every `.action` row with `item.historyKind != nil`
+installs a `ScreenFrameReader` and hover handler. Switching directly from one
+history action to another must not leave the old content mounted. When a new
+target is hovered:
+
+1. If the new target differs from `activeHoverTarget`, update
+   `activeHoverTarget` first.
+2. Cancel any pending hide.
+3. Mount the new target's content and re-anchor the popover immediately if the
+   popover is already shown.
+4. Ignore stale `hover(false)` events from a target that is no longer active.
+
+This target-aware handling is required because a single boolean
+`triggerHovered` cannot distinguish "the old row stopped hovering" from "the
+new row is now hovering." Without that distinction, moving from OCR history to
+color history can race the hide path against the remount path.
 
 ### History popover
 
@@ -110,7 +148,25 @@ No search field appears in this version.
   history popover.
 
 The popover must be key-capable (`HoverPopover.needsKeyFocus = true`) while
-mounted, because the keyboard interaction is part of the primary workflow.
+mounted, because the keyboard interaction is part of the primary workflow. This
+means hovering a history-capable row gives the side popover key focus, the same
+tradeoff already accepted for Port Manager. The user does not need to click the
+history popover before `↑`, `↓`, `Space`, `Enter`, or `Esc` work.
+
+### Closing After Copy
+
+`ClipboardHistoryPopoverView` needs two closure paths, not a single generic
+`onClose`:
+
+- `onDismissPopover`: hide only the side popover, used by `Esc` when no preview
+  is open.
+- `onCopyAndClosePanel`: reset the hover gate, hide the side popover, and call
+  `MenuBarView.onRequestClose()` so `MenuBarController` closes the main panel.
+
+On successful click / `Enter` copy, the popover calls `onCopyAndClosePanel`.
+This reuses the existing `MenuBarView` close injection already used by the
+Settings button; the history view does not reach into `MenuBarController`
+directly.
 
 ### Preview
 
@@ -160,9 +216,10 @@ The raw string is persisted so SwiftData stores a stable primitive value.
 
 ### Field Semantics
 
-- `text` stores OCR text, QR payload text, and the HEX value for color records.
-- `colorHex` stores color records redundantly for clear rendering and
-  validation without parsing arbitrary text.
+- `text` stores OCR text and QR payload text.
+- Color records store their value in `colorHex`; `text` is nil for color rows.
+  `copyToPasteboard` reads `colorHex` for colors and `text` for OCR / QR. This
+  avoids two persisted fields drifting apart later.
 - `fileName` stores only the PNG filename for screenshot records.
 - `previewTitle` is the list row title:
   - OCR: first non-empty line, truncated for display by the view.
@@ -179,8 +236,19 @@ The raw string is persisted so SwiftData stores a stable primitive value.
 
 ## Storage
 
-The model is added to the existing `ModelContainer` in `AppDelegate`. It must
-reuse the current fixed store path:
+The model is added to the existing `ModelContainer` in `AppDelegate`. The full
+model list must be:
+
+```swift
+ModelContainer(
+    for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
+    configurations: config
+)
+```
+
+This preserves the existing `BuiltinPreference` and `KeyBinding` schemas while
+adding the new history table. The container must reuse the current fixed store
+path:
 
 `~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store`
 
@@ -208,9 +276,10 @@ final class ClipboardHistoryStore {
     func recordText(kind: ClipboardHistoryKind, text: String) async
     func recordColor(hex: String) async
     func recordScreenshotFromPasteboard() async
-    func recentItems(kind: ClipboardHistoryKind) -> [ClipboardHistoryItem]
+    func reload(kind: ClipboardHistoryKind) async
+    func items(for kind: ClipboardHistoryKind) -> [ClipboardHistoryItem]
     func copyToPasteboard(_ item: ClipboardHistoryItem) async throws
-    func pruneExpiredAndOverflow() async
+    func pruneExpiredAndOverflow(force: Bool) async
     func clearAll() async
 }
 ```
@@ -222,9 +291,16 @@ The store owns all history-specific behavior:
 - Pruning expired and overflow records.
 - Orphan PNG cleanup.
 - Pasteboard writes from stored history.
+- A small in-memory cache of recent visible rows, keyed by
+  `ClipboardHistoryKind`.
 
 It does **not** own panel rows or hotkeys. `PanelStore` remains responsible for
 built-in panel state, provider dispatch, and hotkey snapshots.
+
+`items(for:)` returns cached rows only. SwiftUI body rendering must not trigger
+SwiftData fetches. `reload(kind:)` performs the fetch once when a popover opens
+or after a record write changes the relevant kind. This keeps `↑` / `↓`
+selection changes from re-fetching the database on every render.
 
 ### `BuiltinItem.historyKind`
 
@@ -253,23 +329,31 @@ New SwiftUI view mounted inside `HoverPopover`:
 struct ClipboardHistoryPopoverView: View {
     @Bindable var store: ClipboardHistoryStore
     let kind: ClipboardHistoryKind
-    let onClose: () -> Void
+    let onDismissPopover: () -> Void
+    let onCopyAndClosePanel: () -> Void
 }
 ```
 
 Responsibilities:
 
-- Fetch and render `store.recentItems(kind:)`.
+- Render `store.items(for:)` from the store cache. `MenuBarView` reloads the
+  relevant kind before mounting the popover.
 - Track selected item.
 - Update selection on hover and arrow keys.
 - Handle `Space`, `Enter`, and `Esc`.
 - Show previews.
 - Call `store.copyToPasteboard` for click / `Enter`.
-- Call `onClose` after successful copy.
+- Call `onCopyAndClosePanel` after successful copy.
+- Call `onDismissPopover` for non-copy dismissal.
 
 Keyboard monitoring can follow the `PortManagerPopoverView.KeyboardMonitor`
 pattern. The monitor should extract Sendable primitives from `NSEvent` before
 using `MainActor.assumeIsolated`, matching the existing Swift 6 safety pattern.
+
+Keyboard selection state should live in a small
+`ClipboardHistorySelectionModel`. The SwiftUI view and keyboard monitor mutate
+that model; unit tests cover selection, preview toggling, and copy intent there
+instead of trying to synthesize AppKit key events in CI.
 
 ## Data Flow
 
@@ -281,7 +365,7 @@ using `MainActor.assumeIsolated`, matching the existing Swift 6 safety pattern.
    - `ClipboardHistoryItem`
 2. `AppDelegate.applicationDidFinishLaunching` calls:
    - `ClipboardHistoryStore.shared.bootstrap(modelContainer:)`
-   - `Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow() }`
+   - `Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true) }`
 
 ### OCR success
 
@@ -310,7 +394,9 @@ History write failure is logged and does not alter the success toast.
 
 1. `ScreenshotProvider.run()` still calls:
    - `/usr/sbin/screencapture -i -c`
-2. If the command succeeds, it calls `recordScreenshotFromPasteboard()`.
+2. If the command succeeds, it immediately awaits
+   `ClipboardHistoryStore.shared.recordScreenshotFromPasteboard()` before
+   returning from `run()`.
 3. `recordScreenshotFromPasteboard()` reads the current pasteboard image data,
    normalizes it to PNG, writes it to the history directory, and creates the
    SwiftData metadata row.
@@ -319,6 +405,11 @@ History write failure is logged and does not alter the success toast.
 decodable image data after a successful command, history recording logs and
 returns without user-visible failure.
 
+This must not be implemented as a fire-and-forget `Task`. The pasteboard read
+has to happen in the same await chain immediately after `screencapture`
+returns, because the user can overwrite the pasteboard at any time after the
+action completes.
+
 ### Hover history
 
 1. `MenuBarView` renders each action row normally.
@@ -326,7 +417,9 @@ returns without user-visible failure.
    `ScreenFrameReader` and `onHover`.
 3. On hover, `MenuBarView`:
    - sets an active popover target for that history kind,
-   - calls `ClipboardHistoryStore.shared.pruneExpiredAndOverflow()`,
+   - calls `ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false)`,
+     which skips work if the last prune was less than 60 seconds ago,
+   - calls `ClipboardHistoryStore.shared.reload(kind:)`,
    - mounts `ClipboardHistoryPopoverView`,
    - sets `popover.needsKeyFocus = true`,
    - shows the popover anchored to that row.
@@ -336,9 +429,10 @@ returns without user-visible failure.
 
 Pruning runs:
 
-- once after `ClipboardHistoryStore.bootstrap`,
-- every time a history popover is opened,
-- after each successful record insert.
+- once after `ClipboardHistoryStore.bootstrap` with `force: true`,
+- when a history popover is opened with `force: false`, which only runs when
+  `lastPrunedAt` is nil or older than 60 seconds,
+- after each successful record insert with `force: true`.
 
 Rules:
 
@@ -350,6 +444,10 @@ Rules:
    any remaining screenshot row.
 
 If file deletion fails, log and continue. The next prune can retry.
+
+The 60-second hover throttle only applies to popover-open pruning. Insert-time
+pruning remains forced so the 100-item cap is restored immediately after a new
+record is added.
 
 ## Error Handling
 
@@ -363,6 +461,11 @@ If file deletion fails, log and continue. The next prune can retry.
 - Prune fails partly: log and continue.
 - QR payload is sensitive: do not show it in toast; do show it in the history
   UI because the user explicitly opened that UI.
+- On macOS 15+ / Sequoia and later, reading `NSPasteboard.general` during
+  screenshot history recording may trigger the system pasteboard-access prompt.
+  That is expected. Do not attempt to bypass the prompt; this feature only reads
+  immediately after AnyDoor asks `screencapture` to write an image there, but
+  macOS does not expose that intent distinction to the app.
 
 ## Testing
 
@@ -371,13 +474,15 @@ If file deletion fails, log and continue. The next prune can retry.
 - Insert `ClipboardHistoryItem` rows and fetch newest-first per kind.
 - `recordText(.ocr)` builds correct metadata and preserves full text.
 - `recordText(.qrcode)` builds correct metadata and preserves full payload text.
-- `recordColor` uppercases or preserves uppercase HEX and stores `colorHex`.
+- `recordColor` uppercases or preserves uppercase HEX, stores `colorHex`, and
+  leaves `text` nil.
 - 7-day prune deletes expired rows.
 - 100-item cap deletes oldest overflow per kind.
 - Screenshot record writes a PNG file and creates matching metadata.
 - Deleting screenshot rows during prune deletes their PNG files.
 - Orphan PNG cleanup removes unreferenced files.
 - `copyToPasteboard` writes text-like records as `.string`.
+- `copyToPasteboard` writes color records from `colorHex` as `.string`.
 - `copyToPasteboard` writes screenshot records back as image pasteboard data.
 - Missing screenshot file copy throws a store error.
 - `clearAll` deletes all rows and screenshot files.
@@ -393,18 +498,19 @@ If file deletion fails, log and continue. The next prune can retry.
 - `PanelStore.rebuildHotkeySnapshots()` still includes action hotkeys for OCR,
   color, QR, and screenshot when assigned.
 
-### UI Tests / View Tests
+### View / Selection Model Tests
 
 - `ClipboardHistoryPopoverView` empty state renders for no records.
 - List state renders newest-first records.
-- Hover updates selected item in the row view model.
-- Arrow navigation clamps at the first and last item.
-- `Space` toggles preview for selected item.
-- `Enter` invokes copy and close.
+- `ClipboardHistorySelectionModel` hover selection updates selected item.
+- `ClipboardHistorySelectionModel` arrow navigation clamps at the first and
+  last item.
+- `ClipboardHistorySelectionModel` `Space` toggles preview for selected item.
+- `ClipboardHistorySelectionModel` `Enter` produces a copy-and-close intent.
 
-If direct SwiftUI event-monitor testing is brittle, keep key behavior in a small
-view model and test that instead. Do not turn the test suite into a ritual
-bonfire for the sake of pretending AppKit keyboard events are fun.
+Do not unit-test AppKit local event monitors directly. They are integration
+glue. The testable behavior belongs in `ClipboardHistorySelectionModel`; the
+monitor only maps key events into that model.
 
 ## Files Expected To Change
 
@@ -412,6 +518,7 @@ New files:
 
 - `Sources/AnyDoor/Models/ClipboardHistoryItem.swift`
 - `Sources/AnyDoor/Services/ClipboardHistoryStore.swift`
+- `Sources/AnyDoor/Views/ClipboardHistorySelectionModel.swift`
 - `Sources/AnyDoor/Views/ClipboardHistoryPopoverView.swift`
 - `Tests/AnyDoorTests/ClipboardHistoryStoreTests.swift`
 - `Tests/AnyDoorTests/ClipboardHistoryPopoverViewTests.swift`
