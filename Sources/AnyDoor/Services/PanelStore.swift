@@ -32,6 +32,10 @@ final class PanelStore {
     /// Per-item in-flight guard preventing overlapping action runs from racing.
     private var actionsInFlight: Set<BuiltinItem> = []
 
+    /// Handle for the language-change observation loop. Stored so re-bootstrap
+    /// (used by tests) cancels the previous loop instead of stacking another.
+    private var languageObservationTask: Task<Void, Never>?
+
     private init() {}
 
     func bootstrap(
@@ -189,8 +193,12 @@ final class PanelStore {
     /// (e.g. `PanelEntry.subtitle`) refresh the moment the user switches
     /// language. `withObservationTracking` fires once per change; the loop
     /// re-registers after each rebuild so subsequent changes are also caught.
+    ///
+    /// Cancels any prior observation task so repeated `bootstrap()` calls
+    /// (test harnesses) don't stack concurrent loops.
     private func observeLanguageChanges() {
-        Task { @MainActor [weak self] in
+        languageObservationTask?.cancel()
+        languageObservationTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                     withObservationTracking {
@@ -199,7 +207,7 @@ final class PanelStore {
                         cont.resume()
                     }
                 }
-                guard let self else { return }
+                guard !Task.isCancelled, let self else { return }
                 self.rebuild()
                 self.rebuildHotkeySnapshots()
             }

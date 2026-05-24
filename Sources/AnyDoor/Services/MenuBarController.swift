@@ -56,6 +56,14 @@ final class MenuBarController {
     private func showPanel() {
         guard let button = statusItem?.button else { return }
 
+        // `\.locale` is captured at show time, not reactively rebound. That's
+        // OK in practice because the panel auto-dismisses when the Settings
+        // window receives focus, so any language change initiated from
+        // Settings closes this panel first; the next showPanel() rebuilds the
+        // host view with the fresh locale. `LocalizedText` further bypasses
+        // `\.locale` (reads `LocalizationManager.shared` directly), so even
+        // if a language change ever races with an open panel, visible labels
+        // re-render correctly.
         let hostingView = NSHostingView(
             rootView: AnyView(
                 MenuBarView(onRequestClose: { [weak self] in self?.hidePanel() })

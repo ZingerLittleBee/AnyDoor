@@ -124,7 +124,7 @@ struct PanelSettingsView: View {
            let existing = panel.entryUsingHotkey(new, excluding: entry.source) {
             conflictAlert = ConflictAlert(
                 hotkey: new,
-                existingTitle: existing.title,
+                existingTitle: existing.localizedTitle(),
                 onReplace: {
                     clearHotkey(for: existing.source)
                     apply(hotkey: new, to: entry)

@@ -16,7 +16,7 @@ struct ClipboardHistoryRow: View {
         HStack(spacing: 10) {
             leading
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.previewTitle)
+                Text(displayTitle)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if let subtitle = subtitleText {
@@ -34,6 +34,17 @@ struct ClipboardHistoryRow: View {
         .padding(.vertical, 6)
         .contentShape(Rectangle())
         .background(rowBackground, in: .rect(cornerRadius: 6))
+    }
+
+    /// Screenshots persist an empty `previewTitle` because the human-readable
+    /// label is purely decorative and must follow the current UI language.
+    /// Other kinds carry user data (OCR text, color hex) and pass through.
+    private var displayTitle: String {
+        _ = LocalizationManager.shared.preference
+        if item.previewTitle.isEmpty, let kind = item.historyKind {
+            return L(kind.titleKey)
+        }
+        return item.previewTitle
     }
 
     private var rowBackground: Color {
@@ -92,13 +103,26 @@ struct ClipboardHistoryRow: View {
     }
 
     private var relativeTimestamp: String {
-        // A fresh formatter per render is fine here: rows are sparse, and the
-        // cached static instance can't be rebound to a new locale safely after
-        // first read.
+        Self.formatter(for: LocalizationManager.shared.effectiveLocale)
+            .localizedString(for: item.createdAt, relativeTo: Date())
+    }
+
+    /// Per-locale `RelativeDateTimeFormatter` cache. ICU locale loading is
+    /// non-trivial, so re-allocating per row per render measurably slowed
+    /// scrolling on populated history lists.
+    @MainActor
+    private static var formatterCache: [String: RelativeDateTimeFormatter] = [:]
+
+    @MainActor
+    private static func formatter(for locale: Locale) -> RelativeDateTimeFormatter {
+        if let cached = formatterCache[locale.identifier] {
+            return cached
+        }
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .abbreviated
-        f.locale = LocalizationManager.shared.effectiveLocale
-        return f.localizedString(for: item.createdAt, relativeTo: Date())
+        f.locale = locale
+        formatterCache[locale.identifier] = f
+        return f
     }
 
     /// Parse `"#RRGGBB"` (or `"RRGGBB"`) into a SwiftUI `Color`. Returns nil on

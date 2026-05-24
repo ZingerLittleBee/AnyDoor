@@ -216,7 +216,10 @@ final class ClipboardHistoryStore {
                 id: id,
                 kind: .screenshot,
                 fileName: fileName,
-                previewTitle: L(.clipboardKindScreenshot),
+                // Stored empty so ClipboardHistoryRow can resolve the title via
+                // L(...) at render time. Persisting a localized string here
+                // would freeze it in the language active at capture time.
+                previewTitle: "",
                 previewSubtitle: nil,
                 createdAt: now()
             )
