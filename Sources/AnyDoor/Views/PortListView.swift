@@ -84,7 +84,7 @@ struct PortRowView: View {
                         .frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
                 }
                 .buttonStyle(.plain)
-                .help(L(.portActionKillPID, record.pid))
+                .help(L(.portActionKillPID, Int64(record.pid)))
             } else {
                 Color.clear.frame(width: Self.trailingSlotWidth, height: Self.trailingSlotWidth)
             }
