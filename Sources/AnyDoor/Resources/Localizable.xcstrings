@@ -1,6 +1,83 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "hotkey.recorder.clear" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear shortcut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除快捷键" } }
+      }
+    },
+    "hotkey.recorder.placeholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to record" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击录入" } }
+      }
+    },
+    "hotkey.recorder.prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Press shortcut…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按下快捷键…" } }
+      }
+    },
+    "hotkey.recorder.tipBound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to re-record · ⌫ to clear · ESC to cancel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击重录 · ⌫ 清除 · ESC 取消" } }
+      }
+    },
+    "hotkey.recorder.tipUnbound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to record shortcut" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击录入快捷键" } }
+      }
+    },
+    "panel.appShortcut.countSuffix" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "· %lld" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "· %lld 个" } }
+      }
+    },
+    "panel.appShortcut.toggleHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Toggle %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换 %@" } }
+      }
+    },
+    "panel.footer.quit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出" } }
+      }
+    },
+    "panel.footer.settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置" } }
+      }
+    },
+    "panel.header.enabledCount" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld enabled" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个已启用" } }
+      }
+    },
+    "panel.row.needsPermission" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "⚠ Needs permission" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "⚠ 需要权限" } }
+      }
+    },
     "builtin.appShortcuts" : {
       "extractionState" : "manual",
       "localizations" : {

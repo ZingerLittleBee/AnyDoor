@@ -42,6 +42,17 @@ enum L10n {
         case menubarIconSparkles = "menubarIcon.sparkles"
         case menubarIconSwitch = "menubarIcon.switch"
         case menubarIconWand = "menubarIcon.wand"
+        case hotkeyRecorderClear = "hotkey.recorder.clear"
+        case hotkeyRecorderPlaceholder = "hotkey.recorder.placeholder"
+        case hotkeyRecorderPrompt = "hotkey.recorder.prompt"
+        case hotkeyRecorderTipBound = "hotkey.recorder.tipBound"
+        case hotkeyRecorderTipUnbound = "hotkey.recorder.tipUnbound"
+        case panelAppShortcutCountSuffix = "panel.appShortcut.countSuffix"
+        case panelAppShortcutToggleHelp = "panel.appShortcut.toggleHelp"
+        case panelFooterQuit = "panel.footer.quit"
+        case panelFooterSettings = "panel.footer.settings"
+        case panelHeaderEnabledCount = "panel.header.enabledCount"
+        case panelRowNeedsPermission = "panel.row.needsPermission"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
