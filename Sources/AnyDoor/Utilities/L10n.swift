@@ -124,6 +124,15 @@ enum L10n {
         case settingsPanelTypeBadgeToggle = "settings.panel.typeBadge.toggle"
         case settingsTabGeneral = "settings.tab.general"
         case settingsTabPanel = "settings.tab.panel"
+        case clipboardTextChars = "clipboard.text.chars"
+        case clipboardTextLines = "clipboard.text.lines"
+        case panelSubtitleKeepAwakeIndefinite = "panel.subtitle.keepAwakeIndefinite"
+        case toastColorCopied = "toast.color.copied"
+        case toastCopiedToClipboard = "toast.copiedToClipboard"
+        case toastOcrNoText = "toast.ocr.noText"
+        case toastPickColorFailed = "toast.pickColor.failed"
+        case toastQrcodeNoCode = "toast.qrcode.noCode"
+        case toastRecognitionFailed = "toast.recognitionFailed"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

@@ -843,6 +843,69 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Panel" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "面板" } }
       }
+    },
+    "clipboard.text.chars" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld characters" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 字符" } }
+      }
+    },
+    "clipboard.text.lines" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld lines" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 行" } }
+      }
+    },
+    "panel.subtitle.keepAwakeIndefinite" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Awake indefinitely" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无限期保持唤醒" } }
+      }
+    },
+    "toast.color.copied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copied %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制 %@" } }
+      }
+    },
+    "toast.copiedToClipboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copied to clipboard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制到剪贴板" } }
+      }
+    },
+    "toast.ocr.noText" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No text detected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未识别到文字" } }
+      }
+    },
+    "toast.pickColor.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Color pick failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取色失败" } }
+      }
+    },
+    "toast.qrcode.noCode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No QR code detected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未识别到二维码" } }
+      }
+    },
+    "toast.recognitionFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Recognition failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "识别失败" } }
+      }
     }
   },
   "version" : "1.0"
