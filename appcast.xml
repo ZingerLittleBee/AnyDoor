@@ -3,6 +3,47 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.2.0</title>
+            <pubDate>Sun, 24 May 2026 15:28:34 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.2.0</sparkle:version>
+            <sparkle:shortVersionString>1.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[
+### Added
+
+- Generated clipboard history: outputs produced by built-in actions
+  (QR code recognition, screenshots, and similar generators) are now
+  recorded into a dedicated SwiftData-backed history store. Screenshot
+  payloads are persisted to disk; text payloads are kept inline.
+- History popover: hovering an action row reveals a side popover
+  listing recent generated outputs, with a selection model, keyboard
+  navigation routed through a first-responder NSView, and a header
+  hint surfacing the active shortcuts.
+- Screenshot preview: selecting a screenshot entry opens it in a
+  dedicated floating panel sized to 60% of the screen, with a top-right
+  close button. The panel is configured to appear correctly under the
+  `.accessory` activation policy.
+- Settings: a "清空历史" action to wipe all generated history at once.
+
+### Changed
+
+- Action rows in the hover popover now display a chevron affordance to
+  indicate that further content is available on hover.
+
+### Fixed
+
+- Hover gate no longer collapses when the cursor crosses between rows
+  or moves from a row into the popover itself, keeping the popover
+  stable during normal mouse movement.
+- `clearAll` now consistently resets the in-memory cache and
+  `lastPrunedAt` watermark so subsequent reads reflect the cleared
+  state.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.2.0/AnyDoor-1.2.0.zip" length="4131941" type="application/octet-stream" sparkle:edSignature="fzzmTyb2ArrlRrcw5Akx+gbk2xsIypqU9OKa+Cu8JSQKEF7F8beIpRnad204eAYuvpFPHbdoCcrEmEHjMof5DQ=="/>
+        </item>
+        <item>
             <title>1.1.0</title>
             <pubDate>Sun, 24 May 2026 02:11:02 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -10,21 +51,7 @@
             <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[
-### Added
-
-- QR code recognition: drag-select a screen region to decode any QR codes
-  inside it. Payload is copied to the clipboard verbatim; multiple codes
-  are newline-joined top-to-bottom. The toast reports status only and
-  never includes the decoded content. New "识别二维码" panel row with an
-  assignable global hotkey.
-
-### Changed
-
-- Removed the user-tunable update-check frequency setting; Sparkle now
-  uses its default schedule.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.1.0/AnyDoor-1.1.0.zip" length="4004294" type="application/octet-stream" sparkle:edSignature="XXKLeZ6hjoNI/F143qwALK1z4S/gFi9MXPwdNFKSQqyb2zgMsjUcPh4AYLdniiaNlhfnPJCLkYx4nsnWHZ1/DQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.1.0/AnyDoor-1.1.0.zip" length="4004294" type="application/octet-stream" sparkle:edSignature="XXKLeZ6hjoNI/F143qwALK1z4S/gFi9MXPwdNFKSQqyb2zgMsjUcPh4AYLdniiaNlhfnPJCLkYx4nsnWHZ1/DQ=="/>
         </item>
         <item>
             <title>1.0.1</title>
@@ -35,16 +62,6 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.0.1/AnyDoor-1.0.1.zip" length="4002276" type="application/octet-stream" sparkle:edSignature="r9Z3b50AmAIM1cesw5hn+w+oH5JHFlSQxtvgc9USXaHpzDEh0eYXslKItmiKKOP98JfmkFjO5d7AQqQ77zLjAw=="/>
-        </item>
-        <item>
-            <title>1.0.0</title>
-            <pubDate>Sat, 23 May 2026 20:53:18 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.0.0</sparkle:version>
-            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.0.0/AnyDoor-1.0.0.zip" length="4002273" type="application/octet-stream" sparkle:edSignature="6akHR/qFs/zAs0ryoK+CfRRDNrZ6bRGR76HLjbAOeLluPTmW/LY1R6IF51cd5OWKTWPJskQDsh6BSITV9o44AA=="/>
         </item>
     </channel>
 </rss>
