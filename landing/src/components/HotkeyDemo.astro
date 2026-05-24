@@ -1,0 +1,195 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+import { hotkeyApps } from '../lib/data';
+
+const fnRow = ['Esc','F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12'];
+const row1  = ['`','1','2','3','4','5','6','7','8','9','0','-','=','⌫'];
+const row2  = ['⇥','Q','W','E','R','T','Y','U','I','O','P','[',']','\\'];
+const row3  = ['⇪','A','S','D','F','G','H','J','K','L',';',"'",'↩'];
+const row4  = ['⇧','Z','X','C','V','B','N','M',',','.','/','⇧'];
+
+const keyWidth = (k: string, ri = 0) => {
+  if (k === '⌫') return 60;
+  if (k === '⇥') return 50;
+  if (k === '⇪') return 56;
+  if (k === '↩') return 60;
+  if (k === '⇧') return ri === 4 ? 70 : 50;
+  return 38;
+};
+---
+
+<section class="section container-x" id="demo" data-screen-label="02 Hotkey demo">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-mac-purple); box-shadow: 0 0 12px var(--color-mac-purple)" />
+    <span data-i18n-zh>{copy.demo.eyebrow.zh}</span><span data-i18n-en>{copy.demo.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><span data-i18n-zh>{copy.demo.h2a.zh}</span><span data-i18n-en>{copy.demo.h2a.en}</span></span><br />
+    <span class="gradient-text"><span data-i18n-zh>{copy.demo.h2b.zh}</span><span data-i18n-en>{copy.demo.h2b.en}</span></span>
+  </h2>
+  <p class="lede">
+    <span data-i18n-zh>{copy.demo.lede.zh}</span><span data-i18n-en>{copy.demo.lede.en}</span>
+  </p>
+
+  <div class="hkstage">
+    <div class="hkscreen" id="hkscreen">
+      <div class="hkscreen-menu">
+        <span class="apple-mini" />
+        <span class="app-name" id="hkscreen-appname"><span data-i18n-zh>访达</span><span data-i18n-en>Finder</span></span>
+        <span class="menu-item"><span data-i18n-zh>{copy.demo.menuFile.zh}</span><span data-i18n-en>{copy.demo.menuFile.en}</span></span>
+        <span class="menu-item"><span data-i18n-zh>{copy.demo.menuEdit.zh}</span><span data-i18n-en>{copy.demo.menuEdit.en}</span></span>
+        <span class="menu-item"><span data-i18n-zh>{copy.demo.menuView.zh}</span><span data-i18n-en>{copy.demo.menuView.en}</span></span>
+        <span class="right">
+          <span class="door" set:html={icons.door()} />
+          <span>9:41</span>
+        </span>
+      </div>
+
+      <div class="hkscreen-hint">
+        <span data-i18n-zh>{copy.demo.hintScreen.zh}</span><span data-i18n-en>{copy.demo.hintScreen.en}</span>
+      </div>
+
+      <div class="winwrap" id="hkscreen-winwrap" />
+
+      <div class="hkscreen-dock">
+        {hotkeyApps.map((app) => (
+          <div class="dock-item" data-dock-app={app.name} style={`background:${app.grad}`} title={app.name} />
+        ))}
+        <div class="dock-divider" />
+        <div class="dock-item" style="background:linear-gradient(135deg, #2a2a2e, #0a0a0d)" title="Terminal" />
+      </div>
+    </div>
+
+    <div style="width:100%; display:flex; flex-direction:column; align-items:center">
+      <div class="keyboard">
+        <div class="kbrow">
+          {fnRow.map((k) => {
+            const isHot = hotkeyApps.some((a) => a.key === k);
+            return (
+              <div
+                class={`key ${k === 'Esc' ? '' : 'label'} ${isHot ? 'is-hint' : ''}`}
+                data-key={k}
+                style={`min-width: ${k === 'Esc' ? 50 : 36}px; height: 30px; font-size: 11px`}
+              >{k}</div>
+            );
+          })}
+        </div>
+        {[row1, row2, row3, row4].map((r, ri) => (
+          <div class="kbrow">
+            {r.map((k) => (
+              <div class="key" data-key={k} style={`min-width: ${keyWidth(k, ri + 1)}px`}>{k}</div>
+            ))}
+          </div>
+        ))}
+        <div class="kbrow">
+          <div class="key" style="min-width:48px">⌃</div>
+          <div class="key" style="min-width:48px">⌥</div>
+          <div class="key" style="min-width:54px">⌘</div>
+          <div class="key wide" style="min-width:320px">&nbsp;</div>
+          <div class="key" style="min-width:54px">⌘</div>
+          <div class="key" style="min-width:48px">⌥</div>
+          <div class="key" style="min-width:48px">←</div>
+        </div>
+      </div>
+      <div class="hint-line">
+        <b><span data-i18n-zh>{copy.demo.hint.zh}</span><span data-i18n-en>{copy.demo.hint.en}</span></b>
+        <span data-i18n-zh>{copy.demo.hintAfter.zh}</span><span data-i18n-en>{copy.demo.hintAfter.en}</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  import { hotkeyApps } from '../lib/data';
+
+  const screen = document.getElementById('hkscreen')!;
+  const winwrap = document.getElementById('hkscreen-winwrap')!;
+  const appNameEl = document.getElementById('hkscreen-appname')!;
+
+  let openApp: typeof hotkeyApps[number] | null = null;
+  let pressTimer: number | undefined;
+  let autoTimer: number | undefined;
+
+  const appsByKey = new Map(hotkeyApps.map((a) => [a.key, a]));
+
+  const renderApp = (app: typeof hotkeyApps[number] | null) => {
+    openApp = app;
+    if (!app) {
+      winwrap.innerHTML = '';
+      screen.removeAttribute('data-app-open');
+      appNameEl.innerHTML = `<span data-i18n-zh>访达</span><span data-i18n-en>Finder</span>`;
+    } else {
+      screen.setAttribute('data-app-open', '');
+      appNameEl.textContent = app.name;
+      winwrap.innerHTML = `
+        <div class="appwin show">
+          <div class="titlebar">
+            <div class="traffic"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+            <div class="title">${app.name}</div>
+            <div style="width:48px"></div>
+          </div>
+          <div class="body">
+            <div class="applogo" style="background:${app.grad}">${app.letter}</div>
+            <div class="appname">${app.name}</div>
+            <div class="apptag">${app.tag}</div>
+          </div>
+        </div>`;
+    }
+    // Dock state
+    document.querySelectorAll<HTMLElement>('[data-dock-app]').forEach((d) => {
+      d.classList.toggle('running', d.dataset.dockApp === app?.name);
+    });
+  };
+
+  const pressKey = (k: string, opts: { fromUser?: boolean } = {}) => {
+    if (opts.fromUser) {
+      clearInterval(autoTimer);
+      autoTimer = undefined;
+    }
+    document.querySelectorAll<HTMLElement>(`[data-key="${k}"]`).forEach((el) => el.classList.add('is-pressed'));
+    clearTimeout(pressTimer);
+    pressTimer = window.setTimeout(() => {
+      document.querySelectorAll<HTMLElement>(`[data-key="${k}"]`).forEach((el) => el.classList.remove('is-pressed'));
+    }, 180);
+
+    const app = appsByKey.get(k);
+    if (app) {
+      // Trigger dock bounce
+      const di = document.querySelector<HTMLElement>(`[data-dock-app="${app.name}"]`);
+      if (di) {
+        di.classList.remove('is-launching');
+        // Force reflow to restart animation
+        void di.offsetWidth;
+        di.classList.add('is-launching');
+      }
+      renderApp(openApp?.name === app.name ? null : app);
+    } else if (k === 'Esc') {
+      renderApp(null);
+    }
+  };
+
+  // Keyboard
+  window.addEventListener('keydown', (e) => {
+    if (appsByKey.has(e.key)) { pressKey(e.key, { fromUser: true }); e.preventDefault(); }
+    else if (e.key === 'Escape') { pressKey('Esc', { fromUser: true }); e.preventDefault(); }
+  });
+
+  // Click on rendered keys
+  document.querySelectorAll<HTMLElement>('[data-key]').forEach((el) => {
+    el.addEventListener('click', () => pressKey(el.dataset.key!, { fromUser: true }));
+  });
+
+  // Auto-cycle demo until user interacts
+  const cycle = ['F1', 'F2', 'F3', 'F4'];
+  let idx = 0;
+  const tick = async () => {
+    const k = cycle[idx % cycle.length];
+    pressKey(k);
+    await new Promise((r) => setTimeout(r, 2400));
+    pressKey(k); // hide
+    idx++;
+  };
+  autoTimer = window.setInterval(tick, 4600);
+  setTimeout(tick, 1500);
+</script>

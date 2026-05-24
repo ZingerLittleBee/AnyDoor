@@ -1,0 +1,167 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+import { settingsRows } from '../lib/data';
+
+const meta = (type: string) =>
+  type === 'submenu' ? copy.settings.metaSubmenu
+  : type === 'action' ? copy.settings.metaAction
+  : copy.settings.metaSystem;
+const badge = (type: string) =>
+  type === 'submenu' ? copy.settings.badgeSubmenu
+  : type === 'action' ? copy.settings.badgeAction
+  : copy.settings.badgeToggle;
+---
+
+<section class="section container-x" data-screen-label="06 Settings">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-mac-pink); box-shadow: 0 0 12px var(--color-mac-pink)" />
+    <span data-i18n-zh>{copy.settings.eyebrow.zh}</span><span data-i18n-en>{copy.settings.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><span data-i18n-zh>{copy.settings.h2a.zh}</span><span data-i18n-en>{copy.settings.h2a.en}</span></span><br />
+    <span class="gradient-text"><span data-i18n-zh>{copy.settings.h2b.zh}</span><span data-i18n-en>{copy.settings.h2b.en}</span></span>
+  </h2>
+  <p class="lede">
+    <span data-i18n-zh>{copy.settings.lede.zh}</span><span data-i18n-en>{copy.settings.lede.en}</span>
+  </p>
+
+  <div class="settings-mock">
+    <div class="sm-titlebar">
+      <div class="traffic"><span class="r" /><span class="y" /><span class="g" /></div>
+      <div class="ttl">
+        <span data-i18n-zh>{copy.settings.tabPanel.zh}</span><span data-i18n-en>{copy.settings.tabPanel.en}</span>
+      </div>
+      <div style="width:60px" />
+    </div>
+
+    <div class="sm-tabs">
+      <div class="sm-tab active">
+        <span set:html={icons.clipboard()} />
+        <span><span data-i18n-zh>{copy.settings.tabPanel.zh}</span><span data-i18n-en>{copy.settings.tabPanel.en}</span></span>
+      </div>
+      <div class="sm-tab">
+        <span set:html={icons.settings()} />
+        <span><span data-i18n-zh>{copy.settings.tabGeneral.zh}</span><span data-i18n-en>{copy.settings.tabGeneral.en}</span></span>
+      </div>
+    </div>
+
+    <div class="sm-body" id="sm-body">
+      {settingsRows.map((r) => {
+        const m = meta(r.type);
+        const b = badge(r.type);
+        return (
+          <div class="sm-row" draggable="true" data-sm-row={r.key}>
+            <div class="grip" set:html={icons.grip()} />
+            <div class="checkbox" set:html={icons.check()} />
+            <div class="ico-cell" set:html={icons[r.icon as keyof typeof icons]?.()} />
+            <div class="text-cell">
+              <span class="name"><span data-i18n-zh>{r.label.zh}</span><span data-i18n-en>{r.label.en}</span></span>
+              <span class="meta"><span data-i18n-zh>{m.zh}</span><span data-i18n-en>{m.en}</span></span>
+            </div>
+            <div class="badge"><span data-i18n-zh>{b.zh}</span><span data-i18n-en>{b.en}</span></div>
+            {r.type === 'submenu' ? (
+              <div class="rec" style="min-width:100px; color:var(--color-text-soft); cursor:default">
+                {r.key === 'shortcuts' ? (
+                  <><span data-i18n-zh>{copy.settings.twoBindings.zh}</span><span data-i18n-en>{copy.settings.twoBindings.en}</span></>
+                ) : (
+                  <><span data-i18n-zh>{copy.settings.portsCount.zh}</span><span data-i18n-en>{copy.settings.portsCount.en}</span></>
+                )}
+              </div>
+            ) : (
+              <button class="rec" data-sm-record={r.key}>
+                <span class="rec-default"><span data-i18n-zh>{copy.settings.record.zh}</span><span data-i18n-en>{copy.settings.record.en}</span></span>
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+
+    <div style="padding:12px 24px 18px; color:var(--color-text-soft); font-size:12px; text-align:center">
+      <span data-i18n-zh>{copy.settings.hint.zh}</span><span data-i18n-en>{copy.settings.hint.en}</span>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Drag-to-reorder
+  const body = document.getElementById('sm-body')!;
+  let dragKey: string | null = null;
+
+  body.addEventListener('dragstart', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
+    if (!row) return;
+    dragKey = row.dataset.smRow!;
+    e.dataTransfer!.effectAllowed = 'move';
+    try { e.dataTransfer!.setData('text/plain', dragKey); } catch {}
+    row.classList.add('is-dragging');
+  });
+  body.addEventListener('dragend', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
+    row?.classList.remove('is-dragging');
+    document.querySelectorAll('.sm-row.drag-hover').forEach((el) => el.classList.remove('drag-hover'));
+    dragKey = null;
+  });
+  body.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
+    if (!target || target.dataset.smRow === dragKey) return;
+    document.querySelectorAll('.sm-row.drag-hover').forEach((el) => el.classList.remove('drag-hover'));
+    target.classList.add('drag-hover');
+  });
+  body.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-sm-row]');
+    if (!target || !dragKey) return;
+    const dragged = body.querySelector<HTMLElement>(`[data-sm-row="${dragKey}"]`);
+    if (!dragged || dragged === target) return;
+    body.insertBefore(dragged, target);
+    target.classList.remove('drag-hover');
+  });
+
+  // Hotkey recorder
+  let recording: HTMLButtonElement | null = null;
+  const stopRec = () => {
+    if (recording) {
+      recording.classList.remove('is-recording');
+      const def = recording.querySelector<HTMLElement>('.rec-default');
+      if (def) def.style.display = '';
+      const lbl = recording.querySelector<HTMLElement>('.rec-recording');
+      lbl?.remove();
+    }
+    recording = null;
+  };
+
+  document.querySelectorAll<HTMLButtonElement>('[data-sm-record]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      stopRec();
+      recording = btn;
+      btn.classList.add('is-recording');
+      const def = btn.querySelector<HTMLElement>('.rec-default');
+      if (def) def.style.display = 'none';
+      const lbl = document.createElement('span');
+      lbl.className = 'rec-recording';
+      lbl.innerHTML = `<span data-i18n-zh>请按下…</span><span data-i18n-en>Press keys…</span>`;
+      btn.appendChild(lbl);
+    });
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (!recording) return;
+    e.preventDefault();
+    if (e.key === 'Escape') { stopRec(); return; }
+    if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return; // wait for non-modifier
+    const parts: string[] = [];
+    if (e.shiftKey) parts.push('⇧');
+    if (e.ctrlKey) parts.push('⌃');
+    if (e.altKey) parts.push('⌥');
+    if (e.metaKey) parts.push('⌘');
+    parts.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
+    const btn = recording;
+    stopRec();
+    btn.classList.add('has-key');
+    btn.innerHTML = `<span>${parts.join(' ')}</span>`;
+  });
+</script>

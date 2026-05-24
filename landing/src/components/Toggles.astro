@@ -1,0 +1,63 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+import { toggleCards, defaultOnToggles } from '../lib/data';
+---
+
+<section class="section container-x" id="features" data-screen-label="03 Toggles">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-accent-2); box-shadow: 0 0 12px var(--color-accent-2)" />
+    <span data-i18n-zh>{copy.toggles.eyebrow.zh}</span><span data-i18n-en>{copy.toggles.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><span data-i18n-zh>{copy.toggles.h2a.zh}</span><span data-i18n-en>{copy.toggles.h2a.en}</span></span><br />
+    <span class="gradient-text"><span data-i18n-zh>{copy.toggles.h2b.zh}</span><span data-i18n-en>{copy.toggles.h2b.en}</span></span>
+  </h2>
+  <p class="lede">
+    <span data-i18n-zh>{copy.toggles.lede.zh}</span><span data-i18n-en>{copy.toggles.lede.en}</span>
+  </p>
+
+  <div class="toggles-grid">
+    {toggleCards.map((card) => {
+      const isOn = !!defaultOnToggles[card.key];
+      return (
+        <div
+          class={`tcard ${card.cardClass || ''} ${isOn ? 'is-on' : ''}`}
+          data-tcard={card.key}
+          style={`--ico-on-bg: ${card.iconOnBg}; --ico-on-color: ${card.iconOnColor}`}
+        >
+          <div class="head">
+            <div class="ico" set:html={icons[card.icon as keyof typeof icons]?.()} />
+            <button class={`toggle ${isOn ? 'on' : ''}`} data-tcard-toggle={card.key} aria-label={card.name.en} />
+          </div>
+          <h4>
+            <span data-i18n-zh>{card.name.zh}</span><span data-i18n-en>{card.name.en}</span>
+          </h4>
+          <p>
+            <span data-i18n-zh>{card.desc.zh}</span><span data-i18n-en>{card.desc.en}</span>
+          </p>
+          <div class="state">
+            <span data-i18n-zh class="state-on" style={isOn ? '' : 'display:none'}>{card.stateOn.zh}</span>
+            <span data-i18n-en class="state-on" style={isOn ? '' : 'display:none'}>{card.stateOn.en}</span>
+            <span data-i18n-zh class="state-off" style={isOn ? 'display:none' : ''}>{card.stateOff.zh}</span>
+            <span data-i18n-en class="state-off" style={isOn ? 'display:none' : ''}>{card.stateOff.en}</span>
+          </div>
+        </div>
+      );
+    })}
+  </div>
+</section>
+
+<script>
+  // Click anywhere on a card to flip; mirror state to icon + state text.
+  const onClick = (e: Event) => {
+    const card = (e.target as HTMLElement).closest<HTMLElement>('[data-tcard]');
+    if (!card) return;
+    const isOn = card.classList.toggle('is-on');
+    const toggle = card.querySelector<HTMLButtonElement>('[data-tcard-toggle]');
+    toggle?.classList.toggle('on', isOn);
+    card.querySelectorAll<HTMLElement>('.state-on').forEach((el) => { el.style.display = isOn ? '' : 'none'; });
+    card.querySelectorAll<HTMLElement>('.state-off').forEach((el) => { el.style.display = isOn ? 'none' : ''; });
+  };
+  document.querySelectorAll<HTMLElement>('[data-tcard]').forEach((el) => el.addEventListener('click', onClick));
+</script>

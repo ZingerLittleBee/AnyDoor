@@ -1,0 +1,47 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+---
+
+<nav class="nav">
+  <div class="nav-brand">
+    <span class="logo" />
+    <span>AnyDoor</span>
+  </div>
+  <div class="nav-links">
+    <a href="#features"><span data-i18n-zh>{copy.nav.features.zh}</span><span data-i18n-en>{copy.nav.features.en}</span></a>
+    <a href="#demo"><span data-i18n-zh>{copy.nav.demo.zh}</span><span data-i18n-en>{copy.nav.demo.en}</span></a>
+    <a href="#faq"><span data-i18n-zh>{copy.nav.faq.zh}</span><span data-i18n-en>{copy.nav.faq.en}</span></a>
+    <a href="#download"><span data-i18n-zh>{copy.nav.download.zh}</span><span data-i18n-en>{copy.nav.download.en}</span></a>
+  </div>
+  <div class="nav-cta">
+    <div class="lang-toggle" role="tablist">
+      <button data-lang-btn="zh">中</button>
+      <button data-lang-btn="en">EN</button>
+    </div>
+    <a class="gh" href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer">
+      <span set:html={icons.github()} style="width:14px;height:14px" />
+      <span>1.4k</span>
+    </a>
+  </div>
+</nav>
+
+<script>
+  // Language toggle — persists to localStorage, swaps data-lang on <html>.
+  const KEY = 'anydoor.lang';
+  const setLang = (lang: 'zh' | 'en') => {
+    document.documentElement.setAttribute('data-lang', lang);
+    document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+    document.querySelectorAll<HTMLButtonElement>('[data-lang-btn]').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.langBtn === lang);
+    });
+    try { localStorage.setItem(KEY, lang); } catch {}
+  };
+
+  const initial = (localStorage.getItem(KEY) || document.documentElement.getAttribute('data-lang') || 'zh') as 'zh' | 'en';
+  setLang(initial);
+
+  document.querySelectorAll<HTMLButtonElement>('[data-lang-btn]').forEach((b) => {
+    b.addEventListener('click', () => setLang(b.dataset.langBtn as 'zh' | 'en'));
+  });
+</script>

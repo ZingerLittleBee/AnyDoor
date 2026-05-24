@@ -1,0 +1,27 @@
+---
+import { copy } from '../lib/copy';
+---
+
+<footer class="container-x footer">
+  <div class="row">
+    <div class="left">
+      <div class="nav-brand">
+        <span class="logo" />
+        <span>AnyDoor</span>
+      </div>
+      <span style="color:var(--color-text-soft); font-weight:400; font-size:13px; margin-left:8px">
+        · <span data-i18n-zh>{copy.footer.tagline.zh}</span><span data-i18n-en>{copy.footer.tagline.en}</span>
+      </span>
+    </div>
+    <div class="links">
+      <a href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer">{copy.footer.links.zh[0]}</a>
+      <a href="https://github.com/ZingerLittleBee/AnyDoor/releases" target="_blank" rel="noreferrer">{copy.footer.links.zh[1]}</a>
+      <a href="https://github.com/ZingerLittleBee/AnyDoor/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer">{copy.footer.links.zh[2]}</a>
+      <a href="https://github.com/ZingerLittleBee/AnyDoor/blob/main/LICENSE" target="_blank" rel="noreferrer">{copy.footer.links.zh[3]}</a>
+    </div>
+  </div>
+  <div class="bot">
+    <div>© 2026 ZingerLittleBee · <span data-i18n-zh>{copy.footer.built.zh}</span><span data-i18n-en>{copy.footer.built.en}</span></div>
+    <div>v1.1.0 · 9VM4RM39R3</div>
+  </div>
+</footer>

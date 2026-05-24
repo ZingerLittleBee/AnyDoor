@@ -1,0 +1,77 @@
+---
+import { icons } from '../lib/icons';
+import { panelItems, defaultOnToggles, type PanelItem } from '../lib/data';
+import { copy } from '../lib/copy';
+
+interface Props {
+  items?: PanelItem[];
+  /** Wrapper class — e.g. for the hero panel fade mask. */
+  panelClass?: string;
+}
+
+const { items = panelItems, panelClass = '' } = Astro.props;
+---
+
+<div class={`mbpanel ${panelClass}`}>
+  <div class="mbpanel-head">
+    <div class="title">AnyDoor</div>
+    <div class="meta">
+      <span data-i18n-zh>{copy.ports.enabled.zh}</span><span data-i18n-en>{copy.ports.enabled.en}</span>
+    </div>
+  </div>
+
+  {items.map((item) => (
+    <div class="mbrow" data-key={item.key}>
+      <div class={`ico ${defaultOnToggles[item.key] && item.type === 'toggle' ? 'on' : ''}`} set:html={icons[item.icon as keyof typeof icons]?.()} />
+      <div style="flex:1; min-width:0">
+        <div class="label">
+          <span data-i18n-zh>{item.label.zh}</span><span data-i18n-en>{item.label.en}</span>
+        </div>
+        {item.sub && (
+          <div class="sub">
+            <span data-i18n-zh>{item.sub.zh}</span><span data-i18n-en>{item.sub.en}</span>
+          </div>
+        )}
+      </div>
+
+      {item.type === 'submenu' && <div class="chev" set:html={icons.chev()} />}
+      {item.type === 'toggle' && (
+        <button
+          class={`toggle ${defaultOnToggles[item.key] ? 'on' : ''}`}
+          data-toggle-key={item.key}
+          aria-label={item.label.en}
+        />
+      )}
+      {item.hotkey && (
+        <div class="keys">
+          {item.hotkey.map((k) => <span class="kbd">{k}</span>)}
+        </div>
+      )}
+    </div>
+  ))}
+
+  <div class="mbpanel-foot">
+    <div class="btn-foot">
+      <span set:html={icons.settings()} style="width:13px; height:13px" />
+      <span data-i18n-zh>设置</span><span data-i18n-en>Settings</span>
+    </div>
+    <div class="btn-foot">
+      <span set:html={icons.power()} style="width:13px; height:13px" />
+      <span data-i18n-zh>退出</span><span data-i18n-en>Quit</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Wire any .toggle inside .mbpanel to flip its `.on` class on click.
+  // Multiple panels stay independent — each click is scoped to its own button.
+  const flip = (e: Event) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.mbpanel .toggle');
+    if (!btn) return;
+    btn.classList.toggle('on');
+    // Mirror to the row's icon
+    const row = btn.closest('.mbrow');
+    row?.querySelector('.ico')?.classList.toggle('on', btn.classList.contains('on'));
+  };
+  document.addEventListener('click', flip);
+</script>
