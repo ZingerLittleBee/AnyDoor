@@ -232,23 +232,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统休眠" } }
       }
     },
-    "demo.hello" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hello"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "你好"
-          }
-        }
-      }
-    },
     "menubarIcon.appConnected" : {
       "extractionState" : "manual",
       "localizations" : {

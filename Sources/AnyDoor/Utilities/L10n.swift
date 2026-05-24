@@ -27,7 +27,6 @@ enum L10n {
         case builtinScreenshot = "builtin.screenshot"
         case builtinShowHiddenFiles = "builtin.showHiddenFiles"
         case builtinSystemSleep = "builtin.systemSleep"
-        case demoHello = "demo.hello"
         case menubarIconAppConnected = "menubarIcon.appConnected"
         case menubarIconBolt = "menubarIcon.bolt"
         case menubarIconCommand = "menubarIcon.command"
