@@ -13,9 +13,6 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "ddc.arm64
 // public Apple sample code (AVCustomEdit, AVScreenShack) and in Apple's
 // open-source IOAVService headers shipped historically with xnu.
 
-@_silgen_name("IOAVServiceCreate")
-private func IOAVServiceCreate(_ allocator: CFAllocator?) -> Unmanaged<AnyObject>?
-
 @_silgen_name("IOAVServiceCreateWithService")
 private func IOAVServiceCreateWithService(
     _ allocator: CFAllocator?,
@@ -49,6 +46,10 @@ struct Arm64DDCBackend: DDCBackend {
 
     func transportReady(displayID: CGDirectDisplayID) -> Bool {
         return Self.cache.service(for: displayID) != nil
+    }
+
+    func invalidateCaches() {
+        Self.cache.invalidate()
     }
 
     func read(displayID: CGDirectDisplayID, vcp: UInt8) async -> UInt16? {

@@ -28,6 +28,14 @@ actor BrightnessController {
         return backend.transportReady(displayID: displayID)
     }
 
+    /// Forward cache invalidation to the backend. Called by
+    /// `DisplayBrightnessService.refresh()` on every screen-change so stale
+    /// IOAVService handles from unplugged displays are dropped before we
+    /// probe / read the new topology.
+    func invalidateCaches() async {
+        backend.invalidateCaches()
+    }
+
     /// Reads current brightness, normalised 0.0...1.0; nil on backend nil.
     func read(displayID: CGDirectDisplayID) async -> Float? {
         guard let raw = await backend.read(displayID: displayID, vcp: Self.vcpBrightness) else {

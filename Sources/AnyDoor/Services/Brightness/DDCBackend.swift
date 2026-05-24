@@ -14,6 +14,18 @@ protocol DDCBackend: Sendable {
 
     /// Issue a VCP write. Throws on I/O failure.
     func write(displayID: CGDirectDisplayID, vcp: UInt8, value: UInt16) async throws
+
+    /// Drop any per-displayID transport caches. Called by
+    /// `DisplayBrightnessService.refresh()` on every screen-change notification
+    /// so that hot-unplug + replug with a recycled `CGDirectDisplayID` does not
+    /// route subsequent I/O to a defunct transport object.
+    func invalidateCaches()
+}
+
+extension DDCBackend {
+    /// Default no-op for backends that don't cache (Intel via DDC.swift
+    /// re-resolves per call; mocks have no transport).
+    func invalidateCaches() {}
 }
 
 /// In-memory mock for unit tests. Scripted return values + recording of calls.

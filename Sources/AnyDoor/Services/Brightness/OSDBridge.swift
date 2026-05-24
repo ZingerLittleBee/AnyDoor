@@ -58,8 +58,12 @@ enum OSDBridge {
             return
         }
         // +sharedManager is a class method, so look it up on the metaclass.
+        // Guard with class_respondsToSelector: class_getMethodImplementation
+        // returns _objc_msgForward (a forwarding trampoline) — NOT nil — when
+        // the method is absent. Calling that via unsafeBitCast would crash.
         let sharedSel = NSSelectorFromString("sharedManager")
         guard let metaclass = object_getClass(managerClass),
+              class_respondsToSelector(metaclass, sharedSel),
               let sharedIMP = class_getMethodImplementation(metaclass, sharedSel) else {
             logger.debug("OSDManager +sharedManager IMP not found; skipping OSD")
             return
@@ -73,7 +77,9 @@ enum OSDBridge {
         let showSel = NSSelectorFromString(
             "showImage:onDisplayID:priority:msecUntilFade:filledChiclets:totalChiclets:locked:"
         )
-        guard let showIMP = class_getMethodImplementation(managerClass, showSel) else {
+        // Same guard for the instance method: forwarding trampoline avoidance.
+        guard class_respondsToSelector(managerClass, showSel),
+              let showIMP = class_getMethodImplementation(managerClass, showSel) else {
             logger.debug("OSDManager chiclet IMP not found; skipping OSD")
             return
         }

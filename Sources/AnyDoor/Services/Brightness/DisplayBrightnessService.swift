@@ -57,6 +57,12 @@ final class DisplayBrightnessService {
     func refresh() async {
         guard let controller else { return }
 
+        // Drop any transport caches keyed by the *previous* display topology
+        // before we enumerate the new one. Hot-unplug + replug can recycle
+        // CGDirectDisplayIDs; without this, a stale IOAVService handle would
+        // silently route writes to a defunct transport.
+        await controller.invalidateCaches()
+
         let externalIDs = Self.externalDisplayIDs()
         var newDisplays: [DisplayInfo] = []
         var rawNames: [(CGDirectDisplayID, String)] = []
