@@ -19,7 +19,7 @@ struct ClipboardHistoryRow: View {
                 Text(item.previewTitle)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let subtitle = item.previewSubtitle {
+                if let subtitle = subtitleText {
                     Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -76,16 +76,30 @@ struct ClipboardHistoryRow: View {
         }
     }
 
-    private var relativeTimestamp: String {
-        Self.formatter.localizedString(for: item.createdAt, relativeTo: Date())
+    /// Text rows persist `text` in SwiftData but the subtitle ("N characters" /
+    /// "N lines") must reflect the current UI language. Computing it from
+    /// `item.text` here ignores any stale `previewSubtitle` frozen at insert
+    /// time and re-resolves through `L(...)` on every render.
+    private var subtitleText: String? {
+        _ = LocalizationManager.shared.preference
+        if let text = item.text {
+            let lineCount = text.split(whereSeparator: \.isNewline).count
+            return lineCount > 1
+                ? L(.clipboardTextLines, lineCount)
+                : L(.clipboardTextChars, text.count)
+        }
+        return item.previewSubtitle
     }
 
-    private static let formatter: RelativeDateTimeFormatter = {
+    private var relativeTimestamp: String {
+        // A fresh formatter per render is fine here: rows are sparse, and the
+        // cached static instance can't be rebound to a new locale safely after
+        // first read.
         let f = RelativeDateTimeFormatter()
         f.unitsStyle = .abbreviated
-        f.locale = Locale(identifier: "zh_CN")
-        return f
-    }()
+        f.locale = LocalizationManager.shared.effectiveLocale
+        return f.localizedString(for: item.createdAt, relativeTo: Date())
+    }
 
     /// Parse `"#RRGGBB"` (or `"RRGGBB"`) into a SwiftUI `Color`. Returns nil on
     /// malformed input so callers can fall back to a neutral swatch. Shared
