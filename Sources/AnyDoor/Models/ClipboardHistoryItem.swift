@@ -7,12 +7,12 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
     case qrcode
     case screenshot
 
-    var title: String {
+    var titleKey: L10n.Key {
         switch self {
-        case .ocr: return "屏幕取词"
-        case .color: return "屏幕取色"
-        case .qrcode: return "识别二维码"
-        case .screenshot: return "截图"
+        case .ocr:        return .clipboardKindOcr
+        case .color:      return .clipboardKindColor
+        case .qrcode:     return .clipboardKindQrcode
+        case .screenshot: return .clipboardKindScreenshot
         }
     }
 }

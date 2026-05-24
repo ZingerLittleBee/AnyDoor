@@ -71,7 +71,7 @@ struct HotkeyRecorder: View {
                 }
                 .buttonStyle(.plain)
                 .padding(.trailing, 6)
-                .help("清除快捷键")
+                .help(L(.hotkeyRecorderClear))
             }
         }
         .background(
@@ -85,7 +85,7 @@ struct HotkeyRecorder: View {
                     lineWidth: isRecording ? 1.5 : 0.5
                 )
         )
-        .help(hotkey == nil ? "点击录入快捷键" : "点击重录 · ⌫ 清除 · ESC 取消")
+        .help(L(hotkey == nil ? .hotkeyRecorderTipUnbound : .hotkeyRecorderTipBound))
         .onHover { fieldHovered = $0 }
         .onDisappear { stopRecording() }
     }
@@ -98,7 +98,7 @@ struct HotkeyRecorder: View {
         // All three states share `.caption` monospaced font so the field height
         // stays uniform regardless of binding state — only color/italic differ.
         if isRecording {
-            Text("按下快捷键…")
+            LocalizedText(.hotkeyRecorderPrompt)
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .italic()
@@ -108,7 +108,7 @@ struct HotkeyRecorder: View {
                 .tracking(1.5)
                 .foregroundStyle(.primary)
         } else {
-            Text("点击录入")
+            LocalizedText(.hotkeyRecorderPlaceholder)
                 .font(.callout)
                 .foregroundStyle(.tertiary)
         }

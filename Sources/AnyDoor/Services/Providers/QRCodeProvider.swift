@@ -21,7 +21,8 @@ actor QRCodeProvider: ActionProvider {
             }
             let payloads = try await BarcodeRecognizer.scan(image)
             guard !payloads.isEmpty else {
-                await ToastPresenter.shared.show(.failure("未识别到二维码"))
+                let msg = await MainActor.run { L(.toastQrcodeNoCode) }
+                await ToastPresenter.shared.show(.failure(msg))
                 return
             }
             let text = payloads.joined(separator: "\n")
@@ -31,9 +32,11 @@ actor QRCodeProvider: ActionProvider {
                 pasteboard.setString(text, forType: .string)
             }
             await ClipboardHistoryStore.shared.recordText(kind: .qrcode, text: text)
-            await ToastPresenter.shared.show(.success("已复制到剪贴板"))
+            let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
+            await ToastPresenter.shared.show(.success(successMsg))
         } catch {
-            await ToastPresenter.shared.show(.failure("识别失败"))
+            let errMsg = await MainActor.run { L(.toastRecognitionFailed) }
+            await ToastPresenter.shared.show(.failure(errMsg))
         }
     }
 }

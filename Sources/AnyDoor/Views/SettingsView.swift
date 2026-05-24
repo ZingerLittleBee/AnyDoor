@@ -5,12 +5,12 @@ struct SettingsView: View {
         TabView {
             PanelSettingsView()
                 .tabItem {
-                    Label("面板", systemImage: "rectangle.stack")
+                    Label { LocalizedText(.settingsTabPanel) } icon: { Image(systemName: "rectangle.stack") }
                 }
 
             GeneralSettingsView()
                 .tabItem {
-                    Label("通用", systemImage: "gear")
+                    Label { LocalizedText(.settingsTabGeneral) } icon: { Image(systemName: "gear") }
                 }
         }
         .frame(width: 560, height: 480)

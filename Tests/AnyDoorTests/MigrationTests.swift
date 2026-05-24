@@ -46,7 +46,7 @@ final class BuiltinItemTests: XCTestCase {
     }
 
     func testOCRMetadata() {
-        XCTAssertEqual(BuiltinItem.ocr.title, "屏幕取词")
+        XCTAssertEqual(BuiltinItem.ocr.titleKey, .builtinOCR)
         XCTAssertEqual(BuiltinItem.ocr.symbol, "text.viewfinder")
         XCTAssertEqual(BuiltinItem.ocr.defaultOrder, 950)
         XCTAssertFalse(BuiltinItem.ocr.requiresAutomation)
@@ -58,7 +58,7 @@ final class BuiltinItemTests: XCTestCase {
     }
 
     func testPickColorMetadata() {
-        XCTAssertEqual(BuiltinItem.pickColor.title, "屏幕取色")
+        XCTAssertEqual(BuiltinItem.pickColor.titleKey, .builtinPickColor)
         XCTAssertEqual(BuiltinItem.pickColor.symbol, "eyedropper")
         XCTAssertEqual(BuiltinItem.pickColor.defaultOrder, 975)
         XCTAssertFalse(BuiltinItem.pickColor.requiresAutomation)
@@ -67,7 +67,7 @@ final class BuiltinItemTests: XCTestCase {
 
     func testQRCodeItem() {
         XCTAssertEqual(BuiltinItem.qrcode.kind, .action)
-        XCTAssertEqual(BuiltinItem.qrcode.title, "识别二维码")
+        XCTAssertEqual(BuiltinItem.qrcode.titleKey, .builtinQRCode)
         XCTAssertEqual(BuiltinItem.qrcode.symbol, "qrcode.viewfinder")
         XCTAssertEqual(BuiltinItem.qrcode.defaultOrder, 960)
         XCTAssertFalse(BuiltinItem.qrcode.requiresAutomation)
@@ -197,10 +197,10 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
 
 final class ClipboardHistoryItemModelTests: XCTestCase {
     func testClipboardHistoryKindMetadata() {
-        XCTAssertEqual(ClipboardHistoryKind.ocr.title, "屏幕取词")
-        XCTAssertEqual(ClipboardHistoryKind.color.title, "屏幕取色")
-        XCTAssertEqual(ClipboardHistoryKind.qrcode.title, "识别二维码")
-        XCTAssertEqual(ClipboardHistoryKind.screenshot.title, "截图")
+        XCTAssertEqual(ClipboardHistoryKind.ocr.titleKey, .clipboardKindOcr)
+        XCTAssertEqual(ClipboardHistoryKind.color.titleKey, .clipboardKindColor)
+        XCTAssertEqual(ClipboardHistoryKind.qrcode.titleKey, .clipboardKindQrcode)
+        XCTAssertEqual(ClipboardHistoryKind.screenshot.titleKey, .clipboardKindScreenshot)
     }
 
     func testClipboardHistoryItemCanBePersisted() throws {

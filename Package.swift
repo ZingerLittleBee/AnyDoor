@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "AnyDoor",
+    defaultLocalization: "en",
     platforms: [.macOS(.v14)],
     dependencies: [
         .package(
@@ -15,14 +16,25 @@ let package = Package(
         ),
     ],
     targets: [
+        .plugin(
+            name: "XCStringsCompilerPlugin",
+            capability: .buildTool(),
+            path: "Plugins/XCStringsCompiler"
+        ),
         .executableTarget(
             name: "AnyDoor",
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
+            resources: [
+                .process("Resources"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
+            ],
+            plugins: [
+                .plugin(name: "XCStringsCompilerPlugin")
             ]
         ),
         .testTarget(

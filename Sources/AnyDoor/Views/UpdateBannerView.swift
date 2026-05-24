@@ -12,7 +12,7 @@ struct UpdateBannerView: View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.up.circle.fill")
                 .foregroundStyle(Color.accentColor)
-            Text("AnyDoor \(version) 可更新")
+            Text(L(.updateBannerAvailable, version))
                 .font(.subheadline)
                 .lineLimit(1)
             Spacer()
@@ -21,14 +21,14 @@ struct UpdateBannerView: View {
                     .font(.caption)
             }
             .buttonStyle(.plain)
-            .help("查看并安装更新")
+            .help(L(.updateBannerViewAndInstall))
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
                     .font(.caption)
             }
             .buttonStyle(.plain)
-            .help("本次启动不再提醒")
+            .help(L(.updateBannerDismissForSession))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

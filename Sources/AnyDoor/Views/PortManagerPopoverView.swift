@@ -48,13 +48,13 @@ struct PortManagerPopoverView: View {
         if inventory.isRefreshing && inventory.records.isEmpty {
             VStack {
                 Spacer()
-                ProgressView("扫描中...")
+                ProgressView(L(.portScanning))
                 Spacer()
             }
         } else if inventory.filteredRecords.isEmpty {
             VStack {
                 Spacer()
-                Text("无匹配的端口").foregroundStyle(.secondary)
+                LocalizedText(.portNoMatch).foregroundStyle(.secondary)
                 Spacer()
             }
         } else {
@@ -75,7 +75,7 @@ private struct PortManagerHeader: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "globe").foregroundStyle(.secondary)
-            TextField("搜索端口或进程...", text: $inventory.searchText)
+            TextField(L(.portSearchPlaceholder), text: $inventory.searchText)
                 .textFieldStyle(.plain)
                 .focused(searchFocused)
             ZStack {
@@ -103,7 +103,7 @@ private struct PortManagerToolbar: View {
         VStack(alignment: .leading, spacing: 2) {
             toolbarButton(
                 action: { Task { await inventory.refresh(force: true) } },
-                label: "刷新",
+                label: L(.portToolbarRefresh),
                 systemImage: "arrow.clockwise",
                 shortcut: "⌘R"
             )
@@ -111,7 +111,7 @@ private struct PortManagerToolbar: View {
                 action: {
                     inventory.viewMode = (inventory.viewMode == .list) ? .tree : .list
                 },
-                label: inventory.viewMode == .list ? "树状视图" : "列表视图",
+                label: inventory.viewMode == .list ? L(.portToolbarTreeView) : L(.portToolbarListView),
                 systemImage: "list.bullet.indent",
                 shortcut: "⌘T"
             )
@@ -158,7 +158,7 @@ private struct PortScanErrorBanner: View {
                 Image(systemName: "arrow.clockwise")
             }
             .buttonStyle(.plain)
-            .help("刷新")
+            .help(L(.portToolbarRefresh))
         }
         .padding(.horizontal, 12).padding(.vertical, 6)
         // Flat yellow tint keeps the banner visually distinct from the
@@ -171,7 +171,7 @@ private struct PortScanErrorBanner: View {
     private var message: String {
         switch error {
         case .scanFailed(let detail):
-            return "刷新失败：\(detail)"
+            return L(.portErrorRefreshFailed, detail)
         }
     }
 }

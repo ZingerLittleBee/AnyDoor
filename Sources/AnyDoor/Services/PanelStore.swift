@@ -32,6 +32,10 @@ final class PanelStore {
     /// Per-item in-flight guard preventing overlapping action runs from racing.
     private var actionsInFlight: Set<BuiltinItem> = []
 
+    /// Handle for the language-change observation loop. Stored so re-bootstrap
+    /// (used by tests) cancels the previous loop instead of stacking another.
+    private var languageObservationTask: Task<Void, Never>?
+
     private init() {}
 
     func bootstrap(
@@ -43,6 +47,7 @@ final class PanelStore {
             self.providers[provider.itemKey] = provider
         }
         rebuild()
+        observeLanguageChanges()
     }
 
     /// Recompute `topLevelEntries` and `appShortcutChildren` from SwiftData + cached states.
@@ -68,7 +73,7 @@ final class PanelStore {
                     displayOrder: pref.displayOrder,
                     isVisible: pref.isVisible,
                     hotkey: hotkey,
-                    title: item.title,
+                    title: "",
                     subtitle: subtitle(for: item),
                     symbol: item.symbol,
                     kind: item.kind,
@@ -111,9 +116,9 @@ final class PanelStore {
         switch item {
         case .appShortcuts:
             let visible = appShortcutChildren.filter(\.isVisible).count
-            return "\(visible) 个绑定"
+            return L(.portBindCount, visible)
         case .keepAwake:
-            return (toggleStates[.keepAwake] ?? false) ? "无限期保持唤醒" : nil
+            return (toggleStates[.keepAwake] ?? false) ? L(.panelSubtitleKeepAwakeIndefinite) : nil
         default:
             return nil
         }
@@ -181,6 +186,31 @@ final class PanelStore {
         case .runBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
             Task { await self.run(item) }
+        }
+    }
+
+    /// Watches `LocalizationManager.preference` so cached, localized fields
+    /// (e.g. `PanelEntry.subtitle`) refresh the moment the user switches
+    /// language. `withObservationTracking` fires once per change; the loop
+    /// re-registers after each rebuild so subsequent changes are also caught.
+    ///
+    /// Cancels any prior observation task so repeated `bootstrap()` calls
+    /// (test harnesses) don't stack concurrent loops.
+    private func observeLanguageChanges() {
+        languageObservationTask?.cancel()
+        languageObservationTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                    withObservationTracking {
+                        _ = LocalizationManager.shared.preference
+                    } onChange: {
+                        cont.resume()
+                    }
+                }
+                guard !Task.isCancelled, let self else { return }
+                self.rebuild()
+                self.rebuildHotkeySnapshots()
+            }
         }
     }
 

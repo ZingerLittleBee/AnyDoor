@@ -20,8 +20,8 @@ struct AppShortcutsPopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Text("应用快捷键").font(.headline)
-                Text("· \(visibleEntries.count) 个").font(.caption).foregroundStyle(.tertiary)
+                LocalizedText(.builtinAppShortcuts).font(.headline)
+                Text(L(.panelAppShortcutCountSuffix, visibleEntries.count)).font(.caption).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 6)
 
@@ -58,7 +58,7 @@ private struct AppShortcutRow: View {
     var body: some View {
         HStack(spacing: 8) {
             appIcon
-            Text(entry.title)
+            Text(entry.localizedTitle())
                 .font(.body)
                 .lineLimit(1)
             Spacer(minLength: 12)
@@ -70,7 +70,7 @@ private struct AppShortcutRow: View {
         .adaptiveInteractiveSurface(cornerRadius: 6)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
-        .help("切换 \(entry.title)")
+        .help(L(.panelAppShortcutToggleHelp, entry.localizedTitle()))
         .onHover { hovering in
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
