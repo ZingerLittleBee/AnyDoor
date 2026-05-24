@@ -75,6 +75,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
 
+        // Brightness control (external DDC/CI displays). Arch-selected backend.
+        #if arch(arm64)
+        let ddcBackend: any DDCBackend = Arm64DDCBackend()
+        #else
+        let ddcBackend: any DDCBackend = IntelDDCBackend()
+        #endif
+        let brightnessController = BrightnessController(backend: ddcBackend)
+        DisplayBrightnessService.shared.bootstrap(controller: brightnessController)
+
+        // Pre-warm the brightness service so the first hover finds data cached.
+        Task.detached(priority: .utility) {
+            await DisplayBrightnessService.shared.refresh()
+        }
+
         // Wire HotkeyService dispatcher
         HotkeyService.shared.setDispatcher { action in
             PanelStore.shared.dispatch(action)

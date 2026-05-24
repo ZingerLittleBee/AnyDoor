@@ -62,6 +62,7 @@ final class PanelStore {
         ) {
             for pref in prefs {
                 guard let item = BuiltinItem(rawValue: pref.itemKey) else { continue }
+                if item.kind == .hiddenHotkey { continue }
                 let hotkey = pref.keyCode.flatMap { code in
                     pref.modifierFlags.map { mods in
                         HotkeyDescriptor(keyCode: code, modifierFlags: mods)
@@ -186,6 +187,10 @@ final class PanelStore {
         case .runBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
             Task { await self.run(item) }
+        case .brightnessUp:
+            DisplayBrightnessService.shared.bump(+1.0 / 16.0, target: .displayUnderMouse)
+        case .brightnessDown:
+            DisplayBrightnessService.shared.bump(-1.0 / 16.0, target: .displayUnderMouse)
         }
     }
 
@@ -238,11 +243,22 @@ final class PanelStore {
             for pref in prefs {
                 guard let item = BuiltinItem(rawValue: pref.itemKey),
                       let code = pref.keyCode,
-                      let mods = pref.modifierFlags,
-                      item.kind != .submenu else { continue }
-                let action: HotkeyAction = item.kind == .toggle
-                    ? .toggleBuiltin(itemKey: item.rawValue)
-                    : .runBuiltin(itemKey: item.rawValue)
+                      let mods = pref.modifierFlags else { continue }
+                let action: HotkeyAction
+                switch item.kind {
+                case .toggle:
+                    action = .toggleBuiltin(itemKey: item.rawValue)
+                case .action:
+                    action = .runBuiltin(itemKey: item.rawValue)
+                case .submenu, .brightnessControl:
+                    continue   // hover-opened items don't bind a top-level hotkey
+                case .hiddenHotkey:
+                    switch item {
+                    case .brightnessUp:   action = .brightnessUp
+                    case .brightnessDown: action = .brightnessDown
+                    default: continue
+                    }
+                }
                 out.append(HotkeySnapshot(
                     keyCode: code,
                     modifierFlags: mods,
@@ -260,6 +276,19 @@ final class PanelStore {
         let context = container.mainContext
         let descriptor = FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.id == id })
         return try? context.fetch(descriptor).first
+    }
+
+    /// Look up the current hotkey assigned to a built-in item, if any.
+    /// Reads from SwiftData rather than `topLevelEntries` so it works for
+    /// hidden-hotkey items (e.g., brightness ±).
+    func hotkeyForBuiltin(_ item: BuiltinItem) -> HotkeyDescriptor? {
+        guard let container = modelContainer else { return nil }
+        let key = item.rawValue
+        guard let pref = try? container.mainContext.fetch(
+            FetchDescriptor<BuiltinPreference>(predicate: #Predicate { $0.itemKey == key })
+        ).first,
+        let code = pref.keyCode, let mods = pref.modifierFlags else { return nil }
+        return HotkeyDescriptor(keyCode: code, modifierFlags: mods)
     }
 
     // MARK: - Mutations
@@ -347,8 +376,40 @@ final class PanelStore {
     }
 
     /// Find which entry currently owns a given hotkey (used for conflict detection).
+    ///
+    /// Scans visible top-level rows + visible app shortcut children + hidden-hotkey
+    /// built-ins (e.g., brightness ±) so all hotkey bindings participate in conflict
+    /// detection regardless of whether they render as a panel row.
     func entryUsingHotkey(_ hotkey: HotkeyDescriptor, excluding: PanelEntry.Source? = nil) -> PanelEntry? {
-        for entry in topLevelEntries + appShortcutChildren {
+        var pool = topLevelEntries + appShortcutChildren
+
+        if let container = modelContainer {
+            let context = container.mainContext
+            if let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) {
+                for pref in prefs {
+                    guard let item = BuiltinItem(rawValue: pref.itemKey),
+                          item.kind == .hiddenHotkey,
+                          let code = pref.keyCode,
+                          let mods = pref.modifierFlags else { continue }
+                    let entry = PanelEntry(
+                        id: PanelEntry.id(for: .builtin(item)),
+                        source: .builtin(item),
+                        displayOrder: pref.displayOrder,
+                        isVisible: false,
+                        hotkey: HotkeyDescriptor(keyCode: code, modifierFlags: mods),
+                        title: L(item.titleKey),
+                        subtitle: nil,
+                        symbol: item.symbol,
+                        kind: .hiddenHotkey,
+                        toggleState: nil,
+                        permission: .notRequired
+                    )
+                    pool.append(entry)
+                }
+            }
+        }
+
+        for entry in pool {
             if entry.source == excluding { continue }
             if entry.hotkey == hotkey { return entry }
         }

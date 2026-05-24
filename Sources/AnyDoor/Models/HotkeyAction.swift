@@ -8,6 +8,8 @@ enum HotkeyAction: Sendable, Hashable {
     case launchApp(bundleID: String, path: String)
     case toggleBuiltin(itemKey: String)
     case runBuiltin(itemKey: String)
+    case brightnessUp
+    case brightnessDown
 }
 
 /// Sendable snapshot passed across the CGEvent tap boundary.

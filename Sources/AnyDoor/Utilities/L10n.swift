@@ -7,6 +7,9 @@ enum L10n {
     enum Key: String, CaseIterable, Sendable {
         case builtinAppShortcuts = "builtin.appShortcuts"
         case builtinAutoHideMenuBar = "builtin.autoHideMenuBar"
+        case builtinBrightness = "builtin.brightness"
+        case builtinBrightnessDown = "builtin.brightnessDown"
+        case builtinBrightnessUp = "builtin.brightnessUp"
         case builtinDarkMode = "builtin.darkMode"
         case builtinDisplaySleep = "builtin.displaySleep"
         case builtinEmptyTrash = "builtin.emptyTrash"
@@ -119,6 +122,8 @@ enum L10n {
         case settingsPanelHotkeyConflictTitle = "settings.panel.hotkeyConflict.title"
         case settingsPanelTip = "settings.panel.tip"
         case settingsPanelTypeBadgeAction = "settings.panel.typeBadge.action"
+        case settingsPanelTypeBadgeBrightness = "settings.panel.typeBadge.brightness"
+        case settingsPanelTypeBadgeHiddenHotkey = "settings.panel.typeBadge.hiddenHotkey"
         case settingsPanelTypeBadgeSubmenu = "settings.panel.typeBadge.submenu"
         case settingsPanelTypeBadgeToggle = "settings.panel.typeBadge.toggle"
         case settingsTabGeneral = "settings.tab.general"

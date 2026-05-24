@@ -278,6 +278,12 @@ publishes it.
 - CGEvent tap
 - Swift Package Manager
 
+## Acknowledgements
+
+- [DDC.swift](https://github.com/reitermarkus/DDC.swift) (MIT) — DDC/CI brightness control for external displays on Intel Macs.
+- [AskForPermission](https://github.com/riko2chen/AskForPermission) — macOS accessibility permission helper.
+- [Sparkle](https://sparkle-project.org/) — application auto-update.
+
 ## License
 
 MIT

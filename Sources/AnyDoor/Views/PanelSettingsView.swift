@@ -51,8 +51,53 @@ struct PanelSettingsView: View {
                 appShortcutChildren()
                 addAppButton()
             }
+            if case .builtin(.brightness) = entry.source {
+                brightnessHotkeyRecorders()
+            }
         }
         .opacity(entry.isVisible ? 1.0 : 0.5)
+    }
+
+    @ViewBuilder
+    private func brightnessHotkeyRecorders() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            brightnessHotkeyRow(item: .brightnessUp, label: "亮度 +")
+            brightnessHotkeyRow(item: .brightnessDown, label: "亮度 −")
+        }
+        .padding(.leading, 36)
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func brightnessHotkeyRow(item: BuiltinItem, label: String) -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            HotkeyRecorder(hotkey: .constant(PanelStore.shared.hotkeyForBuiltin(item))) { newValue in
+                handleBrightnessHotkeyChange(item: item, newValue: newValue)
+            }
+            .frame(width: 150, alignment: .trailing)
+        }
+    }
+
+    private func handleBrightnessHotkeyChange(item: BuiltinItem, newValue: HotkeyDescriptor?) {
+        if let new = newValue,
+           let existing = PanelStore.shared.entryUsingHotkey(new, excluding: .builtin(item)) {
+            conflictAlert = ConflictAlert(
+                hotkey: new,
+                existingTitle: existing.title,
+                onReplace: {
+                    if case let .builtin(other) = existing.source {
+                        PanelStore.shared.setBuiltinHotkey(other, hotkey: nil)
+                    } else if case let .appShortcut(id) = existing.source {
+                        PanelStore.shared.updateAppShortcut(id: id, hotkey: nil)
+                    }
+                    PanelStore.shared.setBuiltinHotkey(item, hotkey: new)
+                }
+            )
+        } else {
+            PanelStore.shared.setBuiltinHotkey(item, hotkey: newValue)
+        }
     }
 
     private func mainRow(_ entry: PanelEntry) -> some View {
@@ -81,18 +126,22 @@ struct PanelSettingsView: View {
 
     private func typeBadge(for entry: PanelEntry) -> L10n.Key {
         switch entry.kind {
-        case .toggle:  return .settingsPanelTypeBadgeToggle
-        case .action:  return .settingsPanelTypeBadgeAction
-        case .submenu: return .settingsPanelTypeBadgeSubmenu
+        case .toggle:            return .settingsPanelTypeBadgeToggle
+        case .action:            return .settingsPanelTypeBadgeAction
+        case .submenu:           return .settingsPanelTypeBadgeSubmenu
+        case .brightnessControl: return .settingsPanelTypeBadgeBrightness
+        case .hiddenHotkey:      return .settingsPanelTypeBadgeHiddenHotkey
         }
     }
 
     @ViewBuilder
     private func hotkeyField(for entry: PanelEntry) -> some View {
-        // Any submenu-kind builtin has no hotkey (children carry their own, or
-        // the submenu is opened by hovering). Reserve the column width so the
-        // grid stays aligned.
-        if case let .builtin(item) = entry.source, item.kind == .submenu {
+        // Items that do not get a row-level hotkey recorder:
+        //   - .submenu: opened by hover (children carry their own hotkeys)
+        //   - .brightnessControl: bumps are bound inline below the row
+        //   - .hiddenHotkey: never rendered in the settings grid
+        if case let .builtin(item) = entry.source,
+           item.kind == .submenu || item.kind == .brightnessControl || item.kind == .hiddenHotkey {
             Color.clear.frame(width: 150)
         } else {
             HotkeyRecorder(hotkey: .constant(entry.hotkey)) { newValue in

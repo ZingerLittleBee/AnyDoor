@@ -25,11 +25,16 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case keyboardLock
     case portManager
     case qrcode
+    case brightness
+    case brightnessUp
+    case brightnessDown
 
     enum Kind: Sendable {
         case toggle
         case action
         case submenu
+        case brightnessControl
+        case hiddenHotkey
     }
 
     var kind: Kind {
@@ -39,6 +44,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
              .restartFinder, .restartDock, .restartMenuBar, .flushDNS: return .action
+        case .brightness: return .brightnessControl
+        case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
     }
 
@@ -66,6 +73,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .keyboardLock:      return .builtinKeyboardLock
         case .portManager:       return .builtinPortManager
         case .qrcode:            return .builtinQRCode
+        case .brightness:        return .builtinBrightness
+        case .brightnessUp:      return .builtinBrightnessUp
+        case .brightnessDown:    return .builtinBrightnessDown
         }
     }
 
@@ -93,6 +103,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .keyboardLock: return "keyboard.fill"
         case .portManager: return "network"
         case .qrcode: return "qrcode.viewfinder"
+        case .brightness: return "sun.max"
+        case .brightnessUp: return "sun.max"
+        case .brightnessDown: return "sun.min"
         }
     }
 
@@ -121,6 +134,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .keyboardLock: return 1800
         case .portManager: return 1900
         case .qrcode: return 960
+        case .brightness: return 650
+        case .brightnessUp: return 999_998
+        case .brightnessDown: return 999_999
         }
     }
 
@@ -151,6 +167,15 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         switch self {
         case .emptyTrash: return .emptyTrash
         default: return nil
+        }
+    }
+
+    /// Whether this item should default to being shown in the menu bar panel when first seeded.
+    /// False only for hidden-hotkey items (brightness ± live on the brightness row only).
+    var defaultVisibility: Bool {
+        switch self.kind {
+        case .toggle, .action, .submenu, .brightnessControl: return true
+        case .hiddenHotkey:                                   return false
         }
     }
 }

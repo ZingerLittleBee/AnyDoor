@@ -92,6 +92,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动隐藏菜单栏" } }
       }
     },
+    "builtin.brightness" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display Brightness" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "屏幕亮度" } }
+      }
+    },
+    "builtin.brightnessDown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Brightness −" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度 −" } }
+      }
+    },
+    "builtin.brightnessUp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Brightness +" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度 +" } }
+      }
+    },
     "builtin.darkMode" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -797,6 +818,20 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "System · Action" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统 · 动作" } }
+      }
+    },
+    "settings.panel.typeBadge.brightness" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "System · Brightness" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统 · 亮度" } }
+      }
+    },
+    "settings.panel.typeBadge.hiddenHotkey" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "System · Global Action" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统 · 全局动作" } }
       }
     },
     "settings.panel.typeBadge.submenu" : {
