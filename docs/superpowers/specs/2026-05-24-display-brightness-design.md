@@ -182,19 +182,32 @@ built-in hotkeys. Modelling them as real `BuiltinItem` cases that flow
 through normal `BuiltinPreference` storage and snapshot rebuild keeps
 conflict detection honest.
 
+### Updates to existing exhaustive-switch consumers
+
+Adding new `Kind` cases breaks compile at every exhaustive switch on
+`BuiltinItem.Kind`. The full list of consumers (as of `seattle-v1` HEAD)
+and the required arm per site:
+
+| Site | Existing arms | Add for `.brightnessControl` | Add for `.hiddenHotkey` |
+|---|---|---|---|
+| `PanelRowView.swift:52` — `.onTapGesture` switch | `.toggle / .submenu / .action` | `case .brightnessControl: break` (intentional no-op) | `case .hiddenHotkey: break` (defensive; entry never reaches the row) |
+| `PanelRowView.swift:86` — `trailing` view switch | toggle shows switch; submenu shows chevron; action shows hotkey | `case .brightnessControl:` — show a small `chevron.right` chevron to advertise hover-popover affordance (same idiom as `.submenu`) | `case .hiddenHotkey: EmptyView()` (never rendered) |
+| `PanelSettingsView.swift:83` — `typeBadge` | `.toggle → "系统"`, `.action → "系统 · 动作"`, `.submenu → "系统 · 子菜单"` | `case .brightnessControl: return "系统 · 亮度"` | `case .hiddenHotkey: return "系统 · 全局动作"` (only shown if the row ever surfaces, which it doesn't in v1) |
+| `PanelSettingsView.swift:95` — `hotkeyField` row-level recorder gate | matches only `.submenu` → renders empty `Color.clear` | extend the guard: `if item.kind == .submenu || item.kind == .brightnessControl { Color.clear.frame(width: 150) }` — the brightness row gets its hotkey UI inline below (see "Settings (Panel tab)" section), NOT in the row's trailing column | extend the same guard to include `.hiddenHotkey` for symmetry, even though hidden rows aren't rendered |
+
+If any future switch on `Kind` is added, the same pattern applies; the
+compiler enforces it.
+
 ### Changes to `PanelStore`
 
 ```swift
-// PanelRowView click switch gains:
-case .brightnessControl: break              // intentional no-op
-// (.hiddenHotkey never reaches PanelRowView — it's filtered out of
-//  topLevelEntries during rebuild.)
-
 // rebuild(): when assembling topLevelEntries, skip items whose kind is
-// .hiddenHotkey. (They still own a BuiltinPreference row for hotkey storage.)
+// .hiddenHotkey. (They still own a BuiltinPreference row for hotkey storage,
+// but never appear in the menu bar list nor in PanelSettingsView's grid.)
 
 // entryUsingHotkey(_:excluding:): scan extended to include hidden-hotkey
-// entries:
+// entries so brightness ± conflicts with existing app / built-in hotkeys
+// are detected:
 let hiddenHotkeyEntries = BuiltinItem.allCases
     .filter { $0.kind == .hiddenHotkey }
     .compactMap { makeEntry(for: $0) }
@@ -214,13 +227,43 @@ table everything else uses; no special-case storage.
 
 `BuiltinPreference` already stores one hotkey per `BuiltinItem` raw value. The
 new cases `.brightnessUp` and `.brightnessDown` get their own
-`BuiltinPreference` rows, seeded by `BuiltinPreferenceSeeder`. They use
-`isVisible: false` (no panel row), but unlike the previous draft they are
-proper `BuiltinItem` cases, so `PanelStore` discovers them through
-`BuiltinItem.allCases`-based scans (see "Changes to `PanelStore`" above).
+`BuiltinPreference` rows, seeded by `BuiltinPreferenceSeeder`. They should
+have `isVisible: false` (they own only a hotkey, not a panel row), but
+unlike the previous draft they are proper `BuiltinItem` cases, so
+`PanelStore` discovers them through `BuiltinItem.allCases`-based scans
+(see "Changes to `PanelStore`" above).
+
+**Seeder change required**: `BuiltinPreferenceSeeder.swift:28` currently
+hardcodes `isVisible: true`. That has been correct so far because every
+existing BuiltinItem is meant to be visible by default. The new
+`.hiddenHotkey` kind breaks that assumption — if the seeder runs with the
+hardcoded value, the brightness ± rows are persisted with `isVisible: true`,
+which is data-semantics-incorrect even though `PanelStore.rebuild()` filters
+them out by kind.
+
+Fix: add a computed property on `BuiltinItem`:
+
+```swift
+extension BuiltinItem {
+    /// Whether this item should default to being shown in the menu bar
+    /// panel when first seeded. False only for hidden-hotkey items.
+    var defaultVisibility: Bool {
+        switch self.kind {
+        case .toggle, .action, .submenu, .brightnessControl: return true
+        case .hiddenHotkey:                                   return false
+        }
+    }
+}
+```
+
+`BuiltinPreferenceSeeder` then uses `item.defaultVisibility` instead of the
+literal `true`. This keeps the seeder a single code path and lets future
+hidden-hotkey-style items inherit the right default for free.
 
 The Panel Settings UI surfaces these two preferences inline under the
-"屏幕亮度" row using the existing `HotkeyRecorder` component.
+"屏幕亮度" row using the existing `HotkeyRecorder` component (writes go
+through a new `PanelStore.setBrightnessHotkey(direction:keyCode:modifierFlags:)`
+method that saves to SwiftData and calls `rebuildHotkeySnapshots()`).
 
 ### Runtime state (in-memory only)
 
@@ -236,6 +279,11 @@ final class DisplayBrightnessService {
     private(set) var displays: [DisplayInfo] = []
     private(set) var levels:   [CGDirectDisplayID: Float] = [:]   // 0...1
     private(set) var isLoading: Set<CGDirectDisplayID> = []
+
+    /// Monotonic counter per display, incremented on every level mutation
+    /// (setBrightness / bump). Used by deferred backfill reads to drop
+    /// themselves when a newer user action has superseded them.
+    private var levelGeneration: [CGDirectDisplayID: UInt64] = [:]
 }
 ```
 
@@ -339,19 +387,33 @@ final class DisplayBrightnessService {
 ```
 
 Behavioural rules:
-- `setBrightness` updates `levels[id]` synchronously; cancels any in-flight
-  write Task for that displayID; schedules a new Task that sleeps 30 ms and
-  then calls `controller.write`.
+- `setBrightness` increments `levelGeneration[id]`, updates `levels[id]`
+  synchronously, cancels any in-flight write Task for that displayID, and
+  schedules a new Task that sleeps 30 ms then calls `controller.write`.
+  (The generation bump also invalidates any pending backfill read from a
+  prior `bump` — see "Backfill read" below.)
 - `bump` resolves displayID via mouse cursor → falls back to
   `NSScreen.main` if cursor is over the built-in / unsupported display; if
   fallback is also unsupported, the bump is a no-op.
 - **Baseline when `levels[id] == nil`** (read previously timed out on a
   transport-ready display): `bump` treats the current level as `0.5` for
-  the purpose of `clamp(current + delta, 0...1)`. After the write is
-  scheduled, the service issues a fresh `controller.read` (best-effort) so
-  later nudges have a real baseline. Rationale: keeps hotkey UX snappy,
-  avoids ignoring user input; 6.25% nudge from a wrong baseline self-corrects
-  within ~4 keypresses.
+  the purpose of `clamp(current + delta, 0...1)`. Rationale: keeps hotkey
+  UX snappy, avoids ignoring user input; 6.25% nudge from a wrong baseline
+  self-corrects within ~4 keypresses.
+- **Backfill read after fallback bump** (replacing the naive Flow C step):
+  Only triggered when the bump used the `0.5` fallback. The backfill must
+  not race with the write nor clobber a fresher optimistic value. Rules:
+  1. Maintain `var levelGeneration: [CGDirectDisplayID: UInt64]` on the
+     service, incremented on every `setBrightness` / `bump` for a given id.
+  2. Capture `gen = levelGeneration[id]` at the moment of the bump.
+  3. Schedule the backfill as a continuation of the write Task, not in
+     parallel: `Task { try? await controller.write(id, newValue); if
+     levelGeneration[id] == gen, let real = await controller.read(id),
+     levelGeneration[id] == gen { levels[id] = real } }`. The double
+     generation check brackets the read so an intervening bump always
+     wins.
+  4. If `controller.write` throws, do not attempt the backfill (the
+     display is in an unknown state; next user action will set it).
 - **OSD timing**: `bump` fires `OSDBridge.showBrightness(newValue, on: id)`
   *optimistically*, immediately after spawning the write Task — not after
   the write resolves. Rationale: DDC writes can take 50-200 ms; deferring
@@ -464,14 +526,21 @@ notification has fired since, skip step 4.
 4. service:
    a. Resolve displayID via NSEvent.mouseLocation + NSScreen.screens;
       fallback NSScreen.main; bail if still unsupported.
-   b. baseline = levels[id] ?? 0.5     (see "Baseline when nil" above)
-   c. newValue = clamp(baseline + delta, 0...1)
-   d. levels[id] = newValue            (popover, if open, updates live)
-   e. Task { try await controller.write(id, newValue) }
-   f. OSDBridge.showBrightness(newValue, on: id)   (optimistic; pre-await)
-   g. If baseline came from the 0.5 fallback: Task {
-         if let real = await controller.read(id) { levels[id] = real }
-      }                                  (best-effort backfill for next bump)
+   b. usedFallback = (levels[id] == nil)
+   c. baseline = levels[id] ?? 0.5
+   d. newValue = clamp(baseline + delta, 0...1)
+   e. levelGeneration[id] &+= 1; let gen = levelGeneration[id]
+   f. levels[id] = newValue          (popover updates live if open)
+   g. OSDBridge.showBrightness(newValue, on: id)   (optimistic; pre-await)
+   h. Task {
+         do {
+            try await controller.write(id, newValue)
+         } catch { return }                       // no backfill on failure
+         guard usedFallback, levelGeneration[id] == gen else { return }
+         guard let real = await controller.read(id) else { return }
+         guard levelGeneration[id] == gen else { return }   // newer bump wins
+         levels[id] = real
+      }
 ```
 
 ### Flow D — Display hot-plug
@@ -587,7 +656,8 @@ Under the existing "屏幕亮度" row, a chevron-expandable inline section:
 | Module                          | Test focus                                                                                                              |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `BrightnessController`          | Inject `MockDDCBackend`; verify probe behaviour, read normalisation (0...100 → 0...1), write retry on failure, timeout. |
-| `DisplayBrightnessService`      | Inject mock controller; verify ① debounce only emits the final write per displayID; ② `bump` clamps to 0...1; ③ NSScreen notification rebuilds `displays`; ④ `displayUnderMouse` falls back to main screen when cursor is over an unsupported display. |
+| `DisplayBrightnessService`      | Inject mock controller; verify ① debounce only emits the final write per displayID; ② `bump` clamps to 0...1; ③ NSScreen notification rebuilds `displays`; ④ `displayUnderMouse` falls back to main screen when cursor is over an unsupported display; ⑤ nil-baseline bump uses 0.5 and only backfills when subsequent generation matches (test with: a) successful backfill, b) interleaved bump invalidates backfill, c) interleaved setBrightness invalidates backfill, d) write failure suppresses backfill). |
+| `BuiltinPreferenceSeeder`       | After adding `.brightnessUp` / `.brightnessDown`, verify their seeded `BuiltinPreference` rows have `isVisible == false` (via the new `defaultVisibility` property), and existing items still seed `isVisible == true`. |
 | `PanelStore.dispatch`           | Feed `.brightnessUp` / `.brightnessDown`; assert `bump` called with correct delta and target.                           |
 | `DisplayInfo` name deduplication| Three displays named "DELL U2720QM" yield "DELL U2720QM", "DELL U2720QM (1)", "DELL U2720QM (2)", stable across calls.  |
 
