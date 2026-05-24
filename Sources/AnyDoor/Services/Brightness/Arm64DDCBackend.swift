@@ -55,10 +55,13 @@ struct Arm64DDCBackend: DDCBackend {
     func read(displayID: CGDirectDisplayID, vcp: UInt8) async -> UInt16? {
         guard let service = Self.cache.service(for: displayID) else { return nil }
         return await Task.detached(priority: .userInitiated) { () -> UInt16? in
-            // DDC read request packet: [src=0x51, len=0x82, op=0x01, vcp, chksum]
-            // followed by a separate read of the 11-byte reply.
-            var request: [UInt8] = [0x51, 0x82, 0x01, vcp]
-            request.append(checksum(destination: 0x6E, bytes: request))
+            // DDC VCP read request, 2 data bytes [op=0x01, vcp]:
+            //   [length=0x80|2, op=0x01, vcp, chksum]
+            // The source byte (0x51) is supplied via IOAVServiceWriteI2C's
+            // dataAddress parameter and is NOT placed in the packet buffer,
+            // but it still counts toward the checksum domain.
+            var request: [UInt8] = [0x82, 0x01, vcp, 0x00]
+            request[request.count - 1] = ddcChecksum(packet: request)
 
             let writeResult = request.withUnsafeBufferPointer { buf -> IOReturn in
                 IOAVServiceWriteI2C(service, 0x37, 0x51, buf.baseAddress!, UInt32(buf.count))
@@ -68,6 +71,9 @@ struct Arm64DDCBackend: DDCBackend {
             // Per DDC/CI: the source must wait at least 40 ms before reading the reply.
             try? await Task.sleep(nanoseconds: 50_000_000)
 
+            // 11-byte VCP response:
+            //   [src=0x6E, len=0x88, op=0x02, result=0x00, vcp, type,
+            //    maxHi, maxLo, curHi, curLo, chksum]
             var reply = [UInt8](repeating: 0, count: 11)
             let readResult = reply.withUnsafeMutableBufferPointer { buf -> IOReturn in
                 IOAVServiceReadI2C(service, 0x37, 0x51, buf.baseAddress!, UInt32(buf.count))
@@ -87,11 +93,17 @@ struct Arm64DDCBackend: DDCBackend {
                           userInfo: [NSLocalizedDescriptionKey: "transport not ready"])
         }
         try await Task.detached(priority: .userInitiated) {
-            // DDC write packet: [src=0x51, len=0x84, op=0x03, vcp, valHi, valLo, chksum]
-            var packet: [UInt8] = [0x51, 0x84, 0x03, vcp,
-                                   UInt8((value >> 8) & 0xFF),
-                                   UInt8(value & 0xFF)]
-            packet.append(checksum(destination: 0x6E, bytes: packet))
+            // DDC VCP write, 4 data bytes [op=0x03, vcp, valHi, valLo]:
+            //   [length=0x80|4, op=0x03, vcp, valHi, valLo, chksum]
+            // The source byte (0x51) is supplied via IOAVServiceWriteI2C's
+            // dataAddress parameter and is NOT in the packet buffer.
+            var packet: [UInt8] = [
+                0x84, 0x03, vcp,
+                UInt8((value >> 8) & 0xFF),
+                UInt8(value & 0xFF),
+                0x00
+            ]
+            packet[packet.count - 1] = ddcChecksum(packet: packet)
 
             let result = packet.withUnsafeBufferPointer { buf -> IOReturn in
                 IOAVServiceWriteI2C(service, 0x37, 0x51, buf.baseAddress!, UInt32(buf.count))
@@ -104,10 +116,14 @@ struct Arm64DDCBackend: DDCBackend {
     }
 }
 
-private func checksum(destination: UInt8, bytes: [UInt8]) -> UInt8 {
-    var sum = destination
-    for byte in bytes { sum ^= byte }
-    return sum
+/// XOR-checksum over the packet, excluding the trailing checksum slot.
+/// Seed is `dest(0x6E) ^ src(0x51) = 0x3F`: those two bytes belong to the
+/// DDC framing but are sent out-of-band by IOAVService (as I2C chip and
+/// data addresses) rather than appearing in the buffer.
+private func ddcChecksum(packet: [UInt8]) -> UInt8 {
+    var chk: UInt8 = 0x6E ^ 0x51
+    for i in 0..<(packet.count - 1) { chk ^= packet[i] }
+    return chk
 }
 
 /// Per-displayID IOAVService lookup, cached for the process lifetime.
