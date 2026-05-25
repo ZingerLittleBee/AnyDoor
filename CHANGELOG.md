@@ -6,6 +6,44 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Window layout actions: four new built-in actions (left half, right half,
+  maximize, center) that tile the frontmost window via Accessibility.
+  `WindowLayoutService` resolves the focused window through AX, picks the
+  screen with the largest overlap, and writes `kAXPosition`/`kAXSize`
+  after converting Cocoa `visibleFrame` to AX coordinates. Failures
+  (missing AX permission, no active window, full-screen window) surface
+  as localized toasts instead of silent no-ops. Pure geometry is unit
+  tested for clamping, odd widths, fractional frames, and exact-size
+  edge cases.
+- Window layout submenu: the four layout actions are grouped under a
+  single `windowLayout` row, exposed as a hover popover from the menu
+  bar and inline-expanded in Settings with drag-reorder + per-child
+  hotkey binding. Children are hotkey-conflict-checked against the rest
+  of the panel and snapshots refresh after reorder so global hotkeys
+  follow the new order without a relaunch. A one-shot
+  `windowLayoutDefaultsApplied_v1` backfill seeds the four children's
+  `displayOrder` (2010/2020/2030/2040) so existing installs adopt the
+  submenu without losing customizations.
+- Keep Awake duration presets: the Keep Awake row gains a clock
+  accessory with 15m / 30m / 1h / 2h / indefinite options backed by
+  `IOPMAssertion`. Whole-row tap and the global hotkey still toggle
+  indefinite to preserve muscle memory. The provider owns a single
+  expiration `Task` so timers never stack or leak across re-applies;
+  the hotkey path reads `await provider.currentState` instead of the
+  MainActor cache so a press at the exact moment of expiration cannot
+  invert the user's intent. Acquire failures resync the panel cache
+  from the provider, and the "Awake until HH:mm" subtitle is
+  re-formatted against `LocalizationManager.effectiveLocale` so a
+  runtime language switch refreshes the rendered time.
+
+### Changed
+
+- `PanelRowView` reserves a fixed 18pt trailing accessory slot on every
+  toggle row, so Keep Awake's new clock control aligns with the other
+  switches instead of widening its trailing region.
+
 ## [1.3.1] - 2026-05-25
 
 ### Fixed
