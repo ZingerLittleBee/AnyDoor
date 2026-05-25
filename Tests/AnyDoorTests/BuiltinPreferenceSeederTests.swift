@@ -3,6 +3,18 @@ import SwiftData
 @testable import AnyDoor
 
 final class BuiltinPreferenceSeederTests: XCTestCase {
+    private let backfillFlagKey = "windowLayoutDefaultsApplied_v1"
+
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.removeObject(forKey: backfillFlagKey)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: backfillFlagKey)
+        super.tearDown()
+    }
+
     private func makeInMemoryContext() throws -> ModelContext {
         let schema = Schema([
             KeyBinding.self,

@@ -7,15 +7,23 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "panel")
 /// Single source of truth for the merged panel data.
 ///
 /// Owns the provider registry, reads BuiltinPreference / KeyBinding from SwiftData,
-/// and exposes two collections to the views:
+/// and exposes three collections to the views:
 /// - `topLevelEntries` — built-in items, sorted by BuiltinPreference.displayOrder
 /// - `appShortcutChildren` — KeyBinding rows, sorted by KeyBinding.displayOrder
+/// - `windowLayoutChildren` — the four window-layout action children, sorted by displayOrder
 @Observable @MainActor
 final class PanelStore {
     static let shared = PanelStore()
 
     private(set) var topLevelEntries: [PanelEntry] = []
     private(set) var appShortcutChildren: [PanelEntry] = []
+    private(set) var windowLayoutChildren: [PanelEntry] = []
+
+    /// The four window-layout child items that are partitioned out of topLevelEntries
+    /// and exposed separately via `windowLayoutChildren`.
+    private static let windowLayoutChildKeys: Set<BuiltinItem> = [
+        .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
+    ]
 
     private var providers: [BuiltinItem: any BuiltinProvider] = [:]
     private var modelContainer: ModelContainer?
@@ -56,13 +64,15 @@ final class PanelStore {
         observeLanguageChanges()
     }
 
-    /// Recompute `topLevelEntries` and `appShortcutChildren` from SwiftData + cached states.
+    /// Recompute `topLevelEntries`, `appShortcutChildren`, and `windowLayoutChildren`
+    /// from SwiftData + cached states.
     func rebuild() {
         guard let container = modelContainer else { return }
         let context = container.mainContext
 
-        // Built-in preferences → topLevelEntries
+        // Built-in preferences → topLevelEntries (and windowLayoutChildren)
         var topLevel: [PanelEntry] = []
+        var windowChildren: [PanelEntry] = []
         if let prefs = try? context.fetch(
             FetchDescriptor<BuiltinPreference>(sortBy: [SortDescriptor(\.displayOrder)])
         ) {
@@ -74,11 +84,12 @@ final class PanelStore {
                         HotkeyDescriptor(keyCode: code, modifierFlags: mods)
                     }
                 }
+                let isWindowChild = Self.windowLayoutChildKeys.contains(item)
                 let entry = PanelEntry(
                     id: PanelEntry.id(for: .builtin(item)),
                     source: .builtin(item),
                     displayOrder: pref.displayOrder,
-                    isVisible: pref.isVisible,
+                    isVisible: isWindowChild ? true : pref.isVisible,
                     hotkey: hotkey,
                     title: "",
                     subtitle: subtitle(for: item),
@@ -87,7 +98,11 @@ final class PanelStore {
                     toggleState: item.kind == .toggle ? toggleStates[item] : nil,
                     permission: permissionStates[item] ?? (item.requiresAutomation ? .undetermined : .notRequired)
                 )
-                topLevel.append(entry)
+                if isWindowChild {
+                    windowChildren.append(entry)
+                } else {
+                    topLevel.append(entry)
+                }
             }
         }
 
@@ -117,6 +132,7 @@ final class PanelStore {
 
         self.topLevelEntries = topLevel
         self.appShortcutChildren = children
+        self.windowLayoutChildren = windowChildren.sorted { $0.displayOrder < $1.displayOrder }
     }
 
     private func subtitle(for item: BuiltinItem) -> String? {
@@ -454,13 +470,36 @@ final class PanelStore {
         rebuild()
     }
 
+    /// Reorder the four window-layout children by new keys array (ordered).
+    ///
+    /// Rewrites `BuiltinPreference.displayOrder` for each window child in
+    /// 100-step increments so the popover reflects the user's drag order
+    /// from the Settings panel. Non-window keys in `newOrder` are ignored.
+    func reorderWindowChildren(by newOrder: [BuiltinItem]) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        guard let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) else { return }
+        let prefsByKey = Dictionary(uniqueKeysWithValues: prefs.map { ($0.itemKey, $0) })
+        var order: Double = 100
+        for item in newOrder {
+            guard Self.windowLayoutChildKeys.contains(item) else { continue }
+            if let pref = prefsByKey[item.rawValue] {
+                pref.displayOrder = order
+                order += 100
+            }
+        }
+        try? context.save()
+        rebuild()
+        rebuildHotkeySnapshots()
+    }
+
     /// Find which entry currently owns a given hotkey (used for conflict detection).
     ///
     /// Scans visible top-level rows + visible app shortcut children + hidden-hotkey
     /// built-ins (e.g., brightness ±) so all hotkey bindings participate in conflict
     /// detection regardless of whether they render as a panel row.
     func entryUsingHotkey(_ hotkey: HotkeyDescriptor, excluding: PanelEntry.Source? = nil) -> PanelEntry? {
-        var pool = topLevelEntries + appShortcutChildren
+        var pool = topLevelEntries + appShortcutChildren + windowLayoutChildren
 
         if let container = modelContainer {
             let context = container.mainContext

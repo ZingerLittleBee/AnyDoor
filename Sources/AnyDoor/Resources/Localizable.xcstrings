@@ -988,6 +988,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口居中" } }
       }
     },
+    "builtin.windowLayout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Window Layout" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口布局" } }
+      }
+    },
     "builtin.windowLeftHalf" : {
       "extractionState" : "manual",
       "localizations" : {

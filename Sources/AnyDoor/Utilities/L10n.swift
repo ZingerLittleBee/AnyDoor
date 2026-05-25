@@ -31,6 +31,7 @@ enum L10n {
         case builtinShowHiddenFiles = "builtin.showHiddenFiles"
         case builtinSystemSleep = "builtin.systemSleep"
         case builtinWindowCenter = "builtin.windowCenter"
+        case builtinWindowLayout = "builtin.windowLayout"
         case builtinWindowLeftHalf = "builtin.windowLeftHalf"
         case builtinWindowMaximize = "builtin.windowMaximize"
         case builtinWindowRightHalf = "builtin.windowRightHalf"
