@@ -132,6 +132,7 @@ final class PanelStore {
 
         self.topLevelEntries = topLevel
         self.appShortcutChildren = children
+        self.windowLayoutChildren = windowChildren.sorted { $0.displayOrder < $1.displayOrder }
     }
 
     private func subtitle(for item: BuiltinItem) -> String? {
@@ -462,6 +463,28 @@ final class PanelStore {
         for id in newOrder {
             if let binding = binding(id: id) {
                 binding.displayOrder = order
+                order += 100
+            }
+        }
+        try? context.save()
+        rebuild()
+    }
+
+    /// Reorder the four window-layout children by new keys array (ordered).
+    ///
+    /// Rewrites `BuiltinPreference.displayOrder` for each window child in
+    /// 100-step increments so the popover reflects the user's drag order
+    /// from the Settings panel. Non-window keys in `newOrder` are ignored.
+    func reorderWindowChildren(by newOrder: [BuiltinItem]) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        guard let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) else { return }
+        let prefsByKey = Dictionary(uniqueKeysWithValues: prefs.map { ($0.itemKey, $0) })
+        var order: Double = 100
+        for item in newOrder {
+            guard Self.windowLayoutChildKeys.contains(item) else { continue }
+            if let pref = prefsByKey[item.rawValue] {
+                pref.displayOrder = order
                 order += 100
             }
         }
