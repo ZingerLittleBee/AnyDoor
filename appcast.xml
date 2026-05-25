@@ -3,34 +3,35 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.3.1</title>
+            <pubDate>Mon, 25 May 2026 12:33:29 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.3.1</sparkle:version>
+            <sparkle:shortVersionString>1.3.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Fixed
+
+- Released `.app` crashed at launch with `unable to find bundle named
+  AnyDoor_AnyDoor` because the SPM-generated resource bundle (produced by
+  `.process("Resources")` for the String Catalog) was never copied into
+  `Contents/Resources/`. `scripts/release.sh` now ditto-copies and
+  separately codesigns `AnyDoor_AnyDoor.bundle` before signing the main
+  binary. Same fix mirrored into `make install`, which additionally now
+  copies `Sparkle.framework` and injects the `@executable_path/../Frameworks`
+  rpath so a fresh `/Applications/AnyDoor.app` launches without relying on
+  leftovers from a previous release build.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.3.1/AnyDoor-1.3.1.zip" length="5465882" type="application/octet-stream" sparkle:edSignature="FBRLOe68Az44DAo1iF4Ei4VRPZnDm9cxEfnSR0jdZyBbRtIH3SY7gCYIEsC7KD0UDtDfpCRBh2OyGfeYuENmBA=="/>
+        </item>
+        <item>
             <title>1.3.0</title>
             <pubDate>Sun, 24 May 2026 23:53:25 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.3.0</sparkle:version>
             <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Added
-
-- Status item right-click menu with Settings and Quit entries, bridged
-  to SwiftUI's `\.openSettings` so the Settings window opens through
-  the same path as the in-panel button.
-
-### Changed
-
-- Menu bar panel footer redesigned: a divider separates it from the
-  content, and Settings / Quit are now compact icon-only buttons with
-  tooltips, reducing the visual weight of bottom chrome.
-
-### Fixed
-
-- Brightness +/− hotkey recorder labels in Settings now use the
-  existing `builtin.brightnessUp/Down` localizations instead of
-  hard-coded Chinese strings.
-- Clipboard history hint chips ("Space", "Preview") no longer wrap to
-  two lines in English locales.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.3.0/AnyDoor-1.3.0.zip" length="5449728" type="application/octet-stream" sparkle:edSignature="Pi9CXUWVhJVD0i24XmTWBMcqhRBFlXpAu5PBcjEADtKiP4dMb5+EA/GSUQRY3M436qZwoYMsoXUWxU9XOuwLCw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.3.0/AnyDoor-1.3.0.zip" length="5449728" type="application/octet-stream" sparkle:edSignature="Pi9CXUWVhJVD0i24XmTWBMcqhRBFlXpAu5PBcjEADtKiP4dMb5+EA/GSUQRY3M436qZwoYMsoXUWxU9XOuwLCw=="/>
         </item>
         <item>
             <title>1.2.0</title>

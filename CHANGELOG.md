@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-05-25
+
 ### Fixed
 
 - Released `.app` crashed at launch with `unable to find bundle named
