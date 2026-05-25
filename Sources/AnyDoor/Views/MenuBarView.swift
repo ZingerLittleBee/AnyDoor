@@ -350,6 +350,21 @@ struct MenuBarView: View {
                 BrightnessPopoverView(onHoverChange: { gate.popoverHover($0) })
             }
             popover.show(anchoredTo: convertedTriggerFrame(for: target))
+        case .submenu(.windowLayout):
+            popover.needsKeyFocus = false
+            popover.updateContent {
+                WindowLayoutPopoverView(
+                    entries: panel.windowLayoutChildren,
+                    onHoverChange: { gate.popoverHover($0) },
+                    onSelect: { item in
+                        Task { await panel.run(item) }
+                        gate.reset()
+                        popover.hide()
+                        onRequestClose()
+                    }
+                )
+            }
+            popover.show(anchoredTo: convertedTriggerFrame(for: target))
         case .submenu:
             // Other builtin submenu items (none today) — nothing to mount.
             break
