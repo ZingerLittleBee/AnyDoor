@@ -148,6 +148,14 @@ BIN_PATH="$(swift build --show-bin-path -c release "${BUILD_FLAGS[@]}")"
 cp "$BIN_PATH/AnyDoor" "$APP/Contents/MacOS/AnyDoor"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Info.plist "$APP/Contents/Info.plist"
+
+# SPM emits a per-target resource bundle for `.process("Resources")` (string
+# catalogs etc.). Bundle.module's generated accessor looks for it next to the
+# executable in Contents/Resources; without it the app fatalErrors at launch.
+RESOURCE_BUNDLE="$BIN_PATH/AnyDoor_AnyDoor.bundle"
+[[ -d "$RESOURCE_BUNDLE" ]] || die "missing resource bundle at $RESOURCE_BUNDLE"
+ditto "$RESOURCE_BUNDLE" "$APP/Contents/Resources/AnyDoor_AnyDoor.bundle"
+
 SPARKLE_FW=""
 for candidate in \
   "$BIN_PATH/Sparkle.framework" \
@@ -187,6 +195,7 @@ for helper in "$FW_ROOT/Autoupdate" "$FW_ROOT/Autoupdate.app" "$FW_ROOT/Updater.
 done
 
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
+codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Resources/AnyDoor_AnyDoor.bundle"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoor"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP"
 

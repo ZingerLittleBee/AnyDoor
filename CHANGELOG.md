@@ -6,6 +6,18 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Released `.app` crashed at launch with `unable to find bundle named
+  AnyDoor_AnyDoor` because the SPM-generated resource bundle (produced by
+  `.process("Resources")` for the String Catalog) was never copied into
+  `Contents/Resources/`. `scripts/release.sh` now ditto-copies and
+  separately codesigns `AnyDoor_AnyDoor.bundle` before signing the main
+  binary. Same fix mirrored into `make install`, which additionally now
+  copies `Sparkle.framework` and injects the `@executable_path/../Frameworks`
+  rpath so a fresh `/Applications/AnyDoor.app` launches without relying on
+  leftovers from a previous release build.
+
 ## [1.3.0] - 2026-05-24
 
 ### Added

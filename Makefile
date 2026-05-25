@@ -14,13 +14,29 @@ APP_NAME := AnyDoor
 APP_BUNDLE := $(APP_NAME).app
 APP_DIR := /Applications/$(APP_BUNDLE)
 BINARY := .build/release/$(APP_NAME)
+RESOURCE_BUNDLE := .build/release/$(APP_NAME)_$(APP_NAME).bundle
 
 install: swift-release
 	@mkdir -p $(APP_DIR)/Contents/MacOS
 	@mkdir -p $(APP_DIR)/Contents/Resources
+	@mkdir -p $(APP_DIR)/Contents/Frameworks
 	@cp $(BINARY) $(APP_DIR)/Contents/MacOS/
 	@cp Info.plist $(APP_DIR)/Contents/
 	@cp Resources/AppIcon.icns $(APP_DIR)/Contents/Resources/
+	@rm -rf $(APP_DIR)/Contents/Resources/$(APP_NAME)_$(APP_NAME).bundle
+	@cp -R $(RESOURCE_BUNDLE) $(APP_DIR)/Contents/Resources/
+	@SPARKLE_FW=""; for cand in \
+	  .build/release/Sparkle.framework \
+	  .build/release/PackageFrameworks/Sparkle.framework; do \
+	  if [ -d "$$cand" ]; then SPARKLE_FW="$$cand"; break; fi; \
+	done; \
+	if [ -n "$$SPARKLE_FW" ]; then \
+	  rm -rf $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
+	  ditto "$$SPARKLE_FW" $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
+	fi
+	@if ! otool -l $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then \
+	  install_name_tool -add_rpath "@executable_path/../Frameworks" $(APP_DIR)/Contents/MacOS/$(APP_NAME); \
+	fi
 	@codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 || true
 	@touch $(APP_DIR)
 	@echo "Installed $(APP_DIR)"
