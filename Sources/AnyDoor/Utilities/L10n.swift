@@ -30,6 +30,10 @@ enum L10n {
         case builtinScreenshot = "builtin.screenshot"
         case builtinShowHiddenFiles = "builtin.showHiddenFiles"
         case builtinSystemSleep = "builtin.systemSleep"
+        case builtinWindowCenter = "builtin.windowCenter"
+        case builtinWindowLeftHalf = "builtin.windowLeftHalf"
+        case builtinWindowMaximize = "builtin.windowMaximize"
+        case builtinWindowRightHalf = "builtin.windowRightHalf"
         case menubarIconAppConnected = "menubarIcon.appConnected"
         case menubarIconBolt = "menubarIcon.bolt"
         case menubarIconCommand = "menubarIcon.command"
@@ -137,6 +141,10 @@ enum L10n {
         case toastPickColorFailed = "toast.pickColor.failed"
         case toastQrcodeNoCode = "toast.qrcode.noCode"
         case toastRecognitionFailed = "toast.recognitionFailed"
+        case toastWindowLayoutFailed = "toast.windowLayout.failed"
+        case toastWindowLayoutFullScreen = "toast.windowLayout.fullScreen"
+        case toastWindowLayoutNeedsAccessibility = "toast.windowLayout.needsAccessibility"
+        case toastWindowLayoutNoWindow = "toast.windowLayout.noWindow"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

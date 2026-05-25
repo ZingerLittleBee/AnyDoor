@@ -924,6 +924,62 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Recognition failed" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "识别失败" } }
       }
+    },
+    "builtin.windowCenter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Center Window" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口居中" } }
+      }
+    },
+    "builtin.windowLeftHalf" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Window Left Half" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口左半屏" } }
+      }
+    },
+    "builtin.windowMaximize" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Maximize Window" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口最大化" } }
+      }
+    },
+    "builtin.windowRightHalf" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Window Right Half" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口右半屏" } }
+      }
+    },
+    "toast.windowLayout.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Window layout failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口布局失败" } }
+      }
+    },
+    "toast.windowLayout.fullScreen" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Full-screen windows can't be repositioned" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全屏窗口无法调整" } }
+      }
+    },
+    "toast.windowLayout.needsAccessibility" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable Accessibility to manage windows" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请开启辅助功能权限以管理窗口" } }
+      }
+    },
+    "toast.windowLayout.noWindow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No active window to arrange" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有可调整的当前窗口" } }
+      }
     }
   },
   "version" : "1.0"
