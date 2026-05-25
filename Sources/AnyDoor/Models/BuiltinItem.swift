@@ -32,6 +32,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case windowRightHalf
     case windowMaximize
     case windowCenter
+    case windowLayout
 
     enum Kind: Sendable {
         case toggle
@@ -43,7 +44,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
 
     var kind: Kind {
         switch self {
-        case .appShortcuts, .portManager: return .submenu
+        case .appShortcuts, .portManager, .windowLayout: return .submenu
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
@@ -85,6 +86,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowRightHalf:   return .builtinWindowRightHalf
         case .windowMaximize:    return .builtinWindowMaximize
         case .windowCenter:      return .builtinWindowCenter
+        case .windowLayout:      return .builtinWindowLayout
         }
     }
 
@@ -119,6 +121,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowRightHalf: return "rectangle.righthalf.filled"
         case .windowMaximize: return "arrow.up.left.and.arrow.down.right"
         case .windowCenter: return "rectangle.center.inset.filled"
+        case .windowLayout: return "macwindow"
         }
     }
 
@@ -150,10 +153,11 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .brightness: return 650
         case .brightnessUp: return 999_998
         case .brightnessDown: return 999_999
-        case .windowLeftHalf:  return 2000
-        case .windowRightHalf: return 2010
-        case .windowMaximize:  return 2020
-        case .windowCenter:    return 2030
+        case .windowLayout:    return 2000
+        case .windowLeftHalf:  return 100
+        case .windowRightHalf: return 200
+        case .windowMaximize:  return 300
+        case .windowCenter:    return 400
         }
     }
 
