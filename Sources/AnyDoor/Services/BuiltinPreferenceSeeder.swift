@@ -1,5 +1,6 @@
 import SwiftData
 import OSLog
+import Foundation
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "seeder")
 
@@ -11,6 +12,8 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "seeder")
 /// - Orphan rows (itemKey not in current `BuiltinItem`) are left in place; readers skip them
 ///   via `BuiltinItem(rawValue:)`.
 enum BuiltinPreferenceSeeder {
+    private static let windowLayoutBackfillFlag = "windowLayoutDefaultsApplied_v1"
+
     @MainActor
     static func seedIfNeeded(in context: ModelContext) {
         do {
@@ -38,8 +41,42 @@ enum BuiltinPreferenceSeeder {
                 try context.save()
                 logger.info("Seeded \(added) BuiltinPreference row(s)")
             }
+
+            applyWindowLayoutBackfillIfNeeded(in: context)
         } catch {
             logger.error("BuiltinPreference seeding failed: \(error)")
+        }
+    }
+
+    /// One-shot reset of the four window-children displayOrders to their new
+    /// in-popover defaults (2010/2020/2030/2040). Pre-existing users had these
+    /// items as top-level rows ordered 2000/2010/2020/2030; without this
+    /// rewrite the popover would inherit the old spread (windowLayout parent
+    /// shares the 2000 slot) which produces an awkward tie on first launch.
+    @MainActor
+    private static func applyWindowLayoutBackfillIfNeeded(in context: ModelContext) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: windowLayoutBackfillFlag) else { return }
+
+        let targets: [(BuiltinItem, Double)] = [
+            (.windowLeftHalf,  2010),
+            (.windowRightHalf, 2020),
+            (.windowMaximize,  2030),
+            (.windowCenter,    2040),
+        ]
+        do {
+            let rows = try context.fetch(FetchDescriptor<BuiltinPreference>())
+            let byKey = Dictionary(uniqueKeysWithValues: rows.map { ($0.itemKey, $0) })
+            for (item, order) in targets {
+                if let row = byKey[item.rawValue] {
+                    row.displayOrder = order
+                }
+            }
+            try context.save()
+            defaults.set(true, forKey: windowLayoutBackfillFlag)
+            logger.info("Applied windowLayout displayOrder backfill")
+        } catch {
+            logger.error("windowLayout backfill failed: \(error)")
         }
     }
 }
