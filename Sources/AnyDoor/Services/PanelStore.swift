@@ -26,6 +26,12 @@ final class PanelStore {
     /// Cached permission states by item key.
     private var permissionStates: [BuiltinItem: PermissionStatus] = [:]
 
+    /// Current Keep Awake state. Owns the `.timed(endDate:)` value used by the
+    /// subtitle so views don't have to poll the provider on every rebuild.
+    /// Pushed in via `onKeepAwakeStateChange` from the provider's expiration
+    /// callback and from explicit mutations through `setKeepAwakeDuration`.
+    private(set) var keepAwakeState: KeepAwakeState = .off
+
     /// Per-item in-flight guard preventing overlapping toggles from desynchronizing state.
     private var togglesInFlight: Set<BuiltinItem> = []
 
@@ -119,10 +125,30 @@ final class PanelStore {
             let visible = appShortcutChildren.filter(\.isVisible).count
             return L(.portBindCount, visible)
         case .keepAwake:
-            return (toggleStates[.keepAwake] ?? false) ? L(.panelSubtitleKeepAwakeIndefinite) : nil
+            switch keepAwakeState {
+            case .off:
+                return nil
+            case .indefinite:
+                return L(.panelSubtitleKeepAwakeIndefinite)
+            case .timed(let endDate):
+                return L(.panelSubtitleKeepAwakeUntil, keepAwakeEndTimeString(endDate))
+            }
         default:
             return nil
         }
+    }
+
+    /// Renders an end-time using the app's currently selected language.
+    /// Built per call rather than cached statically because a `DateFormatter`'s
+    /// locale is frozen at construction — switching language at runtime would
+    /// otherwise leave the time stuck in the boot-time locale even though the
+    /// surrounding strings update via `observeLanguageChanges`.
+    private func keepAwakeEndTimeString(_ endDate: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        formatter.locale = LocalizationManager.shared.effectiveLocale
+        return formatter.string(from: endDate)
     }
 
     /// Refresh every toggle provider's state. Called from MenuBarView.onAppear.
@@ -135,6 +161,12 @@ final class PanelStore {
             }
             permissionStates[item] = await provider.permission
         }
+        // Pull the full Keep Awake state (incl. the timed end-date) so the
+        // subtitle reflects what the provider actually holds — `readState`
+        // above only restores the boolean.
+        if let provider = providers[.keepAwake] as? KeepAwakeProvider {
+            keepAwakeState = await provider.currentState
+        }
         rebuild()
     }
 
@@ -143,6 +175,22 @@ final class PanelStore {
     /// Guarded against overlapping calls: a second invocation while the first is mid-flight
     /// is dropped, preventing two reads from observing the same stale state and double-flipping.
     func toggle(_ item: BuiltinItem) async {
+        // Keep Awake routes through its duration-aware path so the cached
+        // `keepAwakeState` (incl. the timed end-date) stays in sync without
+        // waiting for the provider's async onChange hop. The on/off decision
+        // is taken from the provider directly rather than from the MainActor
+        // cache so a hotkey press at the moment of timer expiration cannot
+        // read a stale `.timed` value and invert the user's intent.
+        if item == .keepAwake {
+            guard let provider = providers[.keepAwake] as? KeepAwakeProvider else { return }
+            guard !togglesInFlight.contains(item) else { return }
+            togglesInFlight.insert(item)
+            defer { togglesInFlight.remove(item) }
+            let current = await provider.currentState
+            await setKeepAwakeDuration(current.isOn ? nil : .indefinite)
+            return
+        }
+
         guard let provider = providers[item] as? any ToggleProvider else { return }
         guard !togglesInFlight.contains(item) else { return }
         togglesInFlight.insert(item)
@@ -155,6 +203,37 @@ final class PanelStore {
         } catch {
             logger.error("Toggle \(item.rawValue) failed: \(error)")
         }
+    }
+
+    /// Apply a Keep Awake duration (or `nil` to turn it off). The provider's
+    /// expiration callback will subsequently push the `.off` transition back
+    /// through `onKeepAwakeStateChange`, but we also cache eagerly here so
+    /// the panel doesn't render a stale frame between this call and the hop
+    /// back to MainActor.
+    func setKeepAwakeDuration(_ duration: KeepAwakeDuration?) async {
+        guard let provider = providers[.keepAwake] as? KeepAwakeProvider else { return }
+        do {
+            try await provider.apply(duration)
+        } catch {
+            logger.error("Keep Awake apply failed: \(error)")
+            // Fall through — the same resync block runs on success and
+            // failure, so the cached row state always reflects whatever the
+            // provider actually holds rather than what we optimistically
+            // hoped to set.
+        }
+        let state = await provider.currentState
+        keepAwakeState = state
+        toggleStates[.keepAwake] = state.isOn
+        rebuild()
+    }
+
+    /// Callback target wired into `KeepAwakeProvider.onChange`. Invoked on the
+    /// MainActor when the provider's state transitions for any reason —
+    /// explicit mutation, hotkey, or timed expiration.
+    func onKeepAwakeStateChange(_ state: KeepAwakeState) {
+        keepAwakeState = state
+        toggleStates[.keepAwake] = state.isOn
+        rebuild()
     }
 
     /// Run a one-shot action.

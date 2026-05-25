@@ -876,11 +876,67 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 行" } }
       }
     },
+    "keepAwake.duration.15min" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "15 minutes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "15 分钟" } }
+      }
+    },
+    "keepAwake.duration.1hour" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "1 hour" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "1 小时" } }
+      }
+    },
+    "keepAwake.duration.2hour" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "2 hours" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "2 小时" } }
+      }
+    },
+    "keepAwake.duration.30min" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "30 minutes" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "30 分钟" } }
+      }
+    },
+    "keepAwake.duration.indefinite" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Until I turn it off" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "直到手动关闭" } }
+      }
+    },
+    "keepAwake.duration.menuHelp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose how long to keep awake" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择保持唤醒时长" } }
+      }
+    },
+    "keepAwake.duration.turnOff" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn off" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
     "panel.subtitle.keepAwakeIndefinite" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Awake indefinitely" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无限期保持唤醒" } }
+      }
+    },
+    "panel.subtitle.keepAwakeUntil" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Awake until %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保持至 %@" } }
       }
     },
     "toast.color.copied" : {
