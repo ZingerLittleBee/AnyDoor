@@ -54,6 +54,9 @@ struct PanelSettingsView: View {
             if case .builtin(.brightness) = entry.source {
                 brightnessHotkeyRecorders()
             }
+            if case .builtin(.windowLayout) = entry.source {
+                windowLayoutChildrenList()
+            }
         }
         .opacity(entry.isVisible ? 1.0 : 0.5)
     }
@@ -263,6 +266,34 @@ struct PanelSettingsView: View {
         }
         ids.move(fromOffsets: source, toOffset: destination)
         panel.reorderAppShortcuts(by: ids)
+    }
+
+    @ViewBuilder
+    private func windowLayoutChildrenList() -> some View {
+        ForEach(panel.windowLayoutChildren) { child in
+            HStack(spacing: 8) {
+                Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
+                Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+                Image(systemName: child.symbol).frame(width: 18)
+                Text(child.localizedTitle()).font(.body)
+                Spacer()
+                HotkeyRecorder(hotkey: .constant(child.hotkey)) { newValue in
+                    handleHotkeyChange(entry: child, newValue: newValue)
+                }
+                .frame(width: 150, alignment: .trailing)
+                Color.clear.frame(width: 20)
+            }
+            .padding(.vertical, 3)
+        }
+        .onMove(perform: moveWindowChildren)
+    }
+
+    private func moveWindowChildren(from source: IndexSet, to destination: Int) {
+        var items = panel.windowLayoutChildren.compactMap { entry -> BuiltinItem? in
+            if case let .builtin(item) = entry.source { return item } else { return nil }
+        }
+        items.move(fromOffsets: source, toOffset: destination)
+        panel.reorderWindowChildren(by: items)
     }
 
     private func addAppButton() -> some View {
