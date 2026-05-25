@@ -153,11 +153,11 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .brightness: return 650
         case .brightnessUp: return 999_998
         case .brightnessDown: return 999_999
+        case .windowLeftHalf:  return 2010
+        case .windowRightHalf: return 2020
+        case .windowMaximize:  return 2030
+        case .windowCenter:    return 2040
         case .windowLayout:    return 2000
-        case .windowLeftHalf:  return 100
-        case .windowRightHalf: return 200
-        case .windowMaximize:  return 300
-        case .windowCenter:    return 400
         }
     }
 
