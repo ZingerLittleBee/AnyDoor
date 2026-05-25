@@ -28,6 +28,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case brightness
     case brightnessUp
     case brightnessDown
+    case windowLeftHalf
+    case windowRightHalf
+    case windowMaximize
+    case windowCenter
 
     enum Kind: Sendable {
         case toggle
@@ -43,7 +47,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
-             .restartFinder, .restartDock, .restartMenuBar, .flushDNS: return .action
+             .restartFinder, .restartDock, .restartMenuBar, .flushDNS,
+             .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter: return .action
         case .brightness: return .brightnessControl
         case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
@@ -76,6 +81,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .brightness:        return .builtinBrightness
         case .brightnessUp:      return .builtinBrightnessUp
         case .brightnessDown:    return .builtinBrightnessDown
+        case .windowLeftHalf:    return .builtinWindowLeftHalf
+        case .windowRightHalf:   return .builtinWindowRightHalf
+        case .windowMaximize:    return .builtinWindowMaximize
+        case .windowCenter:      return .builtinWindowCenter
         }
     }
 
@@ -106,6 +115,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .brightness: return "sun.max"
         case .brightnessUp: return "sun.max"
         case .brightnessDown: return "sun.min"
+        case .windowLeftHalf: return "rectangle.lefthalf.filled"
+        case .windowRightHalf: return "rectangle.righthalf.filled"
+        case .windowMaximize: return "arrow.up.left.and.arrow.down.right"
+        case .windowCenter: return "rectangle.center.inset.filled"
         }
     }
 
@@ -137,6 +150,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .brightness: return 650
         case .brightnessUp: return 999_998
         case .brightnessDown: return 999_999
+        case .windowLeftHalf:  return 2000
+        case .windowRightHalf: return 2010
+        case .windowMaximize:  return 2020
+        case .windowCenter:    return 2030
         }
     }
 
