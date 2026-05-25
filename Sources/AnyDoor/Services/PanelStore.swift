@@ -490,6 +490,7 @@ final class PanelStore {
         }
         try? context.save()
         rebuild()
+        rebuildHotkeySnapshots()
     }
 
     /// Find which entry currently owns a given hotkey (used for conflict detection).
@@ -498,7 +499,7 @@ final class PanelStore {
     /// built-ins (e.g., brightness ±) so all hotkey bindings participate in conflict
     /// detection regardless of whether they render as a panel row.
     func entryUsingHotkey(_ hotkey: HotkeyDescriptor, excluding: PanelEntry.Source? = nil) -> PanelEntry? {
-        var pool = topLevelEntries + appShortcutChildren
+        var pool = topLevelEntries + appShortcutChildren + windowLayoutChildren
 
         if let container = modelContainer {
             let context = container.mainContext
