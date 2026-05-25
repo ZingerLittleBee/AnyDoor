@@ -74,6 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             OCRProvider(),
             QRCodeProvider(),
             PickColorProvider(),
+            WindowLayoutProvider(item: .windowLeftHalf, action: .leftHalf),
+            WindowLayoutProvider(item: .windowRightHalf, action: .rightHalf),
+            WindowLayoutProvider(item: .windowMaximize, action: .maximize),
+            WindowLayoutProvider(item: .windowCenter, action: .center),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
 
