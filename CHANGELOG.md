@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-05-25
+
 ### Added
 
 - Window layout actions: four new built-in actions (left half, right half,
