@@ -1,5 +1,6 @@
 ---
 import { copy } from '../lib/copy';
+import { latestVersion } from '../lib/version';
 ---
 
 <footer class="container-x footer">
@@ -22,6 +23,6 @@ import { copy } from '../lib/copy';
   </div>
   <div class="bot">
     <div>© 2026 ZingerLittleBee · <span data-i18n-zh>{copy.footer.built.zh}</span><span data-i18n-en>{copy.footer.built.en}</span></div>
-    <div>v1.1.0 · 9VM4RM39R3</div>
+    <div>v{latestVersion} · 9VM4RM39R3</div>
   </div>
 </footer>

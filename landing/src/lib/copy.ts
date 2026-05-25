@@ -15,7 +15,7 @@ export const copy = {
       zh: 'AnyDoor 是一个由全局热键驱动的 macOS 菜单栏控制中心。绑定任意按键来唤起 App、翻转系统开关、运行一次性动作——双手永远不必离开键盘。',
       en: 'AnyDoor is a macOS menu bar control center driven by global hotkeys. Bind any key combination to launch and toggle apps, flip system settings, or run one-off actions — all without leaving the keyboard.',
     },
-    ctaPrimary: { zh: '下载 v1.1.0', en: 'Download v1.1.0' },
+    ctaPrimary: { zh: '下载 v', en: 'Download v' },
     ctaSecondary: { zh: '在 GitHub 上查看', en: 'View on GitHub' },
     meta1: { zh: '免费 & 开源', en: 'Free & open source' },
     meta2: { zh: 'macOS 14+', en: 'macOS 14+' },

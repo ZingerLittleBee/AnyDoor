@@ -2,6 +2,7 @@
 import MenuPanel from './MenuPanel.astro';
 import { icons } from '../lib/icons';
 import { copy } from '../lib/copy';
+import { latestVersion } from '../lib/version';
 ---
 
 <section class="hero container-x" data-screen-label="01 Hero">
@@ -21,7 +22,7 @@ import { copy } from '../lib/copy';
     <div class="hero-cta">
       <a class="btn-primary" href="https://github.com/ZingerLittleBee/AnyDoor/releases" target="_blank" rel="noreferrer">
         <span set:html={icons.bolt()} style="width:16px;height:16px" />
-        <span data-i18n-zh>{copy.hero.ctaPrimary.zh}</span><span data-i18n-en>{copy.hero.ctaPrimary.en}</span>
+        <span data-i18n-zh>{copy.hero.ctaPrimary.zh}{latestVersion}</span><span data-i18n-en>{copy.hero.ctaPrimary.en}{latestVersion}</span>
       </a>
       <a class="btn-secondary" href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer">
         <span set:html={icons.github()} style="width:16px;height:16px" />
