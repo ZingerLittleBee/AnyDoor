@@ -54,7 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Register providers
         let providers: [any BuiltinProvider] = [
-            KeepAwakeProvider(),
+            KeepAwakeProvider(onChange: { state in
+                PanelStore.shared.onKeepAwakeStateChange(state)
+            }),
             HideDesktopIconsProvider(),
             ShowHiddenFilesProvider(),
             MuteAudioProvider(),

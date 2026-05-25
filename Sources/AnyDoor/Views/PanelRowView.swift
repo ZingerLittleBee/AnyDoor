@@ -14,6 +14,10 @@ struct PanelRowView: View {
     var onAction: () -> Void
     var onSubmenu: () -> Void
     var onPermission: () -> Void
+    /// Optional accessory inserted left of the trailing switch on `.toggle`
+    /// rows. Used today only by the Keep Awake row for its duration menu —
+    /// keep usage rare; most rows should not need a secondary control.
+    var trailingAccessory: AnyView? = nil
 
     @State private var activationPulse = 0
 
@@ -87,25 +91,36 @@ struct PanelRowView: View {
     @ViewBuilder private var trailing: some View {
         switch entry.kind {
         case .toggle:
-            Toggle("", isOn: Binding(
-                get: { entry.toggleState ?? false },
-                set: { _ in onToggle() }
-            ))
-            .toggleStyle(.switch)
-            .controlSize(.small)
-            .tint(.accentColor)
-            .environment(\.appearsActive, true)
-            .labelsHidden()
-            .disabled(needsPermission)
-            .opacity(0.01)
-            .overlay {
-                PanelSwitchIndicator(
-                    isOn: entry.toggleState ?? false,
-                    isEnabled: !needsPermission
-                )
-                .allowsHitTesting(false)
+            HStack(spacing: 6) {
+                // Reserve a fixed accessory slot on every toggle row so the
+                // trailing region keeps a uniform width regardless of whether
+                // an accessory is present. Without this, only the Keep Awake
+                // row would gain ~24pt on the right and its title column
+                // would shrink, breaking visual alignment across rows.
+                Group {
+                    if let trailingAccessory { trailingAccessory } else { Color.clear }
+                }
+                .frame(width: 18, height: 18)
+                Toggle("", isOn: Binding(
+                    get: { entry.toggleState ?? false },
+                    set: { _ in onToggle() }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .tint(.accentColor)
+                .environment(\.appearsActive, true)
+                .labelsHidden()
+                .disabled(needsPermission)
+                .opacity(0.01)
+                .overlay {
+                    PanelSwitchIndicator(
+                        isOn: entry.toggleState ?? false,
+                        isEnabled: !needsPermission
+                    )
+                    .allowsHitTesting(false)
+                }
+                .frame(width: 42, height: 24)
             }
-            .frame(width: 42, height: 24)
         case .action:
             HStack(spacing: 6) {
                 if let hk = entry.hotkey {

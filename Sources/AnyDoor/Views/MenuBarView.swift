@@ -120,7 +120,18 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private func rowView(for entry: PanelEntry) -> some View {
-        if case let .builtin(item) = entry.source, item.kind == .submenu {
+        if case .builtin(.keepAwake) = entry.source {
+            PanelRowView(
+                entry: entry,
+                onToggle: {
+                    Task { await panel.toggle(.keepAwake) }
+                },
+                onAction: {},
+                onSubmenu: {},
+                onPermission: openPermissionsSettings,
+                trailingAccessory: AnyView(keepAwakeDurationMenu)
+            )
+        } else if case let .builtin(item) = entry.source, item.kind == .submenu {
             let target = HoverPopoverTarget.submenu(item)
             PanelRowView(
                 entry: entry,
@@ -192,6 +203,63 @@ struct MenuBarView: View {
                 onPermission: openPermissionsSettings
             )
         }
+    }
+
+    /// SwiftUI Menu rendered inside the Keep Awake row's trailing accessory.
+    /// Exposes the duration presets without expanding the popover system —
+    /// scoped to this single row by design (see `mountPopoverContent` warning).
+    @ViewBuilder
+    private var keepAwakeDurationMenu: some View {
+        let state = panel.keepAwakeState
+        Menu {
+            Button {
+                Task { await panel.setKeepAwakeDuration(.indefinite) }
+            } label: {
+                // Prefix marker is simpler than wrestling SwiftUI Menu into
+                // showing a real check glyph; the chosen item still reads
+                // clearly in both languages.
+                Text(durationMenuLabel(.keepAwakeDurationIndefinite, checked: state == .indefinite))
+            }
+            Divider()
+            keepAwakeDurationButton(.minutes(15), titleKey: .keepAwakeDuration15Min)
+            keepAwakeDurationButton(.minutes(30), titleKey: .keepAwakeDuration30Min)
+            keepAwakeDurationButton(.minutes(60), titleKey: .keepAwakeDuration1Hour)
+            keepAwakeDurationButton(.minutes(120), titleKey: .keepAwakeDuration2Hour)
+            if state.isOn {
+                Divider()
+                Button(role: .destructive) {
+                    Task { await panel.setKeepAwakeDuration(nil) }
+                } label: {
+                    LocalizedText(.keepAwakeDurationTurnOff)
+                }
+            }
+        } label: {
+            Image(systemName: "clock")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L(.keepAwakeDurationMenuHelp))
+    }
+
+    @ViewBuilder
+    private func keepAwakeDurationButton(_ duration: KeepAwakeDuration, titleKey: L10n.Key) -> some View {
+        Button {
+            Task { await panel.setKeepAwakeDuration(duration) }
+        } label: {
+            // Timed durations never get a check mark — the row's subtitle
+            // already shows the active end-time which is the more useful cue.
+            Text(L(titleKey))
+        }
+    }
+
+    private func durationMenuLabel(_ key: L10n.Key, checked: Bool) -> String {
+        let title = L(key)
+        return checked ? "✓ " + title : title
     }
 
     private func wireGate() {
