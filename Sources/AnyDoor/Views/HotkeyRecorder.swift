@@ -45,8 +45,13 @@ struct HotkeyRecorder: View {
     @State private var instanceID = UUID()
     @State private var isRecording = false
     @State private var keyMonitor: Any?
+    @State private var keyUpMonitor: Any?
+    @State private var flagsMonitor: Any?
     @State private var clickMonitor: Any?
+    @State private var hyperHeld = false
+    @State private var liveModifiers: Int = 0
     @State private var fieldHovered = false
+    @State private var hyperKey = HyperKeyService.shared
 
     var body: some View {
         // HStack (not ZStack) so the clear Button and the label own disjoint hit
@@ -98,12 +103,20 @@ struct HotkeyRecorder: View {
         // All three states share `.caption` monospaced font so the field height
         // stays uniform regardless of binding state — only color/italic differ.
         if isRecording {
-            LocalizedText(.hotkeyRecorderPrompt)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .italic()
+            let liveGlyphs = liveModifierGlyphs()
+            if liveGlyphs.isEmpty {
+                LocalizedText(.hotkeyRecorderPrompt)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .italic()
+            } else {
+                Text(liveGlyphs)
+                    .font(.callout.weight(.medium))
+                    .tracking(1.5)
+                    .foregroundStyle(.primary)
+            }
         } else if let hk = hotkey {
-            Text(hk.displayString)
+            Text(hk.displayString(hyperFlags: hyperKey.hyperModifierFlags))
                 .font(.callout.weight(.medium))
                 .tracking(1.5)
                 .foregroundStyle(.primary)
@@ -112,6 +125,26 @@ struct HotkeyRecorder: View {
                 .font(.callout)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    /// Renders the live modifier glyphs while recording. Returns "" when no
+    /// modifiers are currently held — the caller then shows the static prompt.
+    /// Hyper collapses to "✦" when either (a) the trigger key's keyDown reached
+    /// us directly (hyperHeld) or (b) the synthesized hyper modifier mask is
+    /// already present in the real flags stream.
+    private func liveModifierGlyphs() -> String {
+        let hyperFlags = hyperKey.hyperModifierFlags
+        let effective = hyperHeld ? (liveModifiers | hyperFlags) : liveModifiers
+        if hyperFlags != 0 && effective == hyperFlags {
+            return "✦"
+        }
+        var parts: [String] = []
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(effective))
+        if flags.contains(.control) { parts.append("⌃") }
+        if flags.contains(.option) { parts.append("⌥") }
+        if flags.contains(.shift) { parts.append("⇧") }
+        if flags.contains(.command) { parts.append("⌘") }
+        return parts.joined()
     }
 
     private func startRecording() {
@@ -123,16 +156,37 @@ struct HotkeyRecorder: View {
 
         stopRecording(notifyCoordinator: false)
         isRecording = true
-        HotkeyService.shared.suspend()
+        // Route Hyper trigger detection through HotkeyService's tap — it's
+        // the only path that reliably sees Caps-Lock-sourced F19. The tap
+        // suppresses bound-hotkey dispatch while the observer is set, so
+        // recording can't accidentally fire an existing binding.
+        HotkeyService.shared.beginRecording { held in
+            // Already on main; observer is dispatched via DispatchQueue.main.async.
+            hyperHeld = held
+        }
+
+        let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
+            | CGEventFlags.maskControl.rawValue
+            | CGEventFlags.maskAlternate.rawValue
+            | CGEventFlags.maskShift.rawValue
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
-                | CGEventFlags.maskControl.rawValue
-                | CGEventFlags.maskAlternate.rawValue
-                | CGEventFlags.maskShift.rawValue
+            // Read hyper state dynamically — isActive may flip during a long
+            // recording session if the user toggles Hyper from a sibling
+            // settings sheet (rare, but cheap to defend against).
+            let virtualKey = hyperKey.virtualKeyCode
+            let hyperFlags = hyperKey.hyperModifierFlags
             let cgFlags = event.cgEvent?.flags ?? []
-            let mods = Int(cgFlags.rawValue & modMask)
+            var mods = Int(cgFlags.rawValue & modMask)
             let code = Int(event.keyCode)
+
+            // Trigger keyDown — treat as a modifier press, never commit.
+            // Tap normally swallows this so the branch is a fallback for
+            // setups where the tap is down.
+            if virtualKey >= 0 && code == virtualKey {
+                hyperHeld = true
+                return nil
+            }
 
             if code == 53 { // ESC
                 stopRecording()
@@ -145,11 +199,41 @@ struct HotkeyRecorder: View {
                 return nil
             }
 
+            // Hyper acts like a modifier — fold its flags in if (a) the tap
+            // currently reports the trigger held (authoritative, race-free),
+            // (b) the local @State has it (covers tap-down fallback), or
+            // (c) the synthesized hyper mask already rode the event flags.
+            let tapHyperHeld = HotkeyService.shared.isHyperHeld
+            if tapHyperHeld || hyperHeld
+               || (hyperFlags != 0 && (mods & hyperFlags) == hyperFlags) {
+                mods |= hyperFlags
+            }
+
             let new = HotkeyDescriptor(keyCode: code, modifierFlags: mods)
             hotkey = new
             onChange(new)
             stopRecording()
             return nil
+        }
+
+        // Live preview of the currently-held modifiers so the field reflects
+        // the combo as the user builds it, rather than only at commit time.
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+            let cgFlags = event.cgEvent?.flags ?? []
+            liveModifiers = Int(cgFlags.rawValue & modMask)
+            return event
+        }
+
+        // Track virtual F-key release to reset hyperHeld; pass non-virtual keys through.
+        // Same as keyDown: this is a fallback — tap normally drives hyperHeld
+        // through the recording observer.
+        keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
+            let virtualKey = hyperKey.virtualKeyCode
+            if virtualKey >= 0 && Int(event.keyCode) == virtualKey {
+                hyperHeld = false
+                return nil
+            }
+            return event
         }
 
         // Any mouse click cancels recording. If the click lands on this same
@@ -165,12 +249,22 @@ struct HotkeyRecorder: View {
         if let m = keyMonitor {
             NSEvent.removeMonitor(m)
             keyMonitor = nil
-            HotkeyService.shared.resume()
+            HotkeyService.shared.endRecording()
+        }
+        if let m = keyUpMonitor {
+            NSEvent.removeMonitor(m)
+            keyUpMonitor = nil
+        }
+        if let fm = flagsMonitor {
+            NSEvent.removeMonitor(fm)
+            flagsMonitor = nil
         }
         if let cm = clickMonitor {
             NSEvent.removeMonitor(cm)
             clickMonitor = nil
         }
+        hyperHeld = false
+        liveModifiers = 0
         isRecording = false
         if notifyCoordinator {
             HotkeyRecordingCoordinator.shared.end(id: instanceID)

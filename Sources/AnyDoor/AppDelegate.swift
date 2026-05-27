@@ -102,12 +102,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             PanelStore.shared.dispatch(action)
         }
 
+        HotkeyService.shared.setQuickPressDispatcher { @MainActor action in
+            QuickPressEmitter.emit(action, trigger: HyperKeyService.shared.trigger)
+        }
+
         if !HotkeyService.hasAccessibilityPermission {
             HotkeyService.requestAccessibilityPermission()
         }
 
         HotkeyService.shared.start()
         PanelStore.shared.rebuildHotkeySnapshots()
+
+        // Hyper Key Phase 1: unconditional reconcile of last-known mapping.
+        // Phase 2: tap-gated apply, handled inside HyperKeyService.bootstrapAfterTap.
+        Task {
+            try? await HyperKeyController.shared.reconcile()
+            await HyperKeyService.shared.bootstrapAfterTap()
+        }
+
+        // Hyper Key cleanup on system shutdown.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willPowerOffNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task { try? await HyperKeyController.shared.clear() }
+        }
 
         // Menu bar status item. Replaces SwiftUI `MenuBarExtra`, whose
         // `isInserted: false` state infinite-loops the scene graph on macOS 26.
@@ -176,6 +196,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyService.shared.stop()
+    }
+
+    @MainActor
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard HyperKeyController.shared.hasPersistedSignatures else {
+            return .terminateNow
+        }
+        Task {
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    try? await HyperKeyController.shared.clear()
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+                await group.next()
+                group.cancelAll()
+            }
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     /// When the icon is hidden the menu bar item disappears and the app keeps

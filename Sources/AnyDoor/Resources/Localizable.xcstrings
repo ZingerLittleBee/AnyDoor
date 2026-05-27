@@ -694,6 +694,90 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "菜单栏" } }
       }
     },
+    "settingsGeneral.hyperKey.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hyper Key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Hyper Key" } }
+      }
+    },
+    "settingsGeneral.hyperKey.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hyper Key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Hyper Key" } }
+      }
+    },
+    "settingsGeneral.hyperKey.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pressing %1$@ will trigger the %2$@ modifier keys. Hyper Key shortcuts will be shown with ✦." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按下 %1$@ 触发 %2$@ 修饰键组合。使用 Hyper Key 的快捷键会显示为 ✦。" } }
+      }
+    },
+    "settingsGeneral.hyperKey.trigger.none" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "None" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无" } }
+      }
+    },
+    "settingsGeneral.hyperKey.quickPress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quick Press" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Quick Press" } }
+      }
+    },
+    "settingsGeneral.hyperKey.quickPress.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select an action to perform when %@ is pressed without any other keys." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择当 %@ 被单独按下时执行的动作。" } }
+      }
+    },
+    "settingsGeneral.hyperKey.quickPress.doesNothing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Does Nothing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不执行" } }
+      }
+    },
+    "settingsGeneral.hyperKey.quickPress.escape" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Escape" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Escape" } }
+      }
+    },
+    "settingsGeneral.hyperKey.quickPress.original" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Original Behavior" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留原始功能" } }
+      }
+    },
+    "settingsGeneral.hyperKey.includeShift" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Include Shift (⇧)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "包含 Shift (⇧)" } }
+      }
+    },
+    "settingsGeneral.hyperKey.error.tap" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Failed to enable: Accessibility permission not granted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用失败：辅助功能权限未授予。" } }
+      }
+    },
+    "settingsGeneral.hyperKey.error.hidutil" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Failed to enable: hidutil call failed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用失败：hidutil 调用失败。" } }
+      }
+    },
     "settings.general.permission.accessibility" : {
       "extractionState" : "manual",
       "localizations" : {

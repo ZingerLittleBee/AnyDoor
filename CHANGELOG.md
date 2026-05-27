@@ -6,6 +6,54 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Hyper Key: pick a single physical key (Caps Lock, left/right modifier, or
+  F1–F12) and have it generate the `⌃⌥⌘` (or `⌃⌥⇧⌘`) combination, providing
+  a conflict-free shortcut layer in the spirit of Raycast's Hyper Key.
+  Configured in Settings → General with a green dot indicating the mapping
+  is live. Shortcuts bound to the Hyper combo render as `✦Key` in the
+  recorder, panel, and conflict alerts. `hidutil` remaps the trigger to a
+  reserved F19 (keyCode 80); the existing CGEvent tap maintains a
+  `hyperHeld` state machine, augments companion `keyDown` events with the
+  hyper modifier mask, suppresses the corresponding `keyUp`, and skips
+  Quick Press on a held release. A Quick Press picker chooses what a solo
+  tap does: nothing, Escape, or the trigger's original key (Caps Lock toggle
+  is emitted via `IOHIDPostEvent` to bypass our own sentinel-tagged tap).
+  Launch is split into an unconditional `reconcile` (only removes our own
+  hidutil residue, requires no permission) and a tap-gated `apply`, so a
+  crash + revoked Accessibility combo can never leave the user's keyboard
+  bricked. A 2-second watchdog observes tap health; emergency-clear paths
+  are token-guarded against concurrent `setTrigger` so a stale revert
+  cannot overwrite a fresh apply.
+- Hotkey recorder: pressed modifiers now render live while recording
+  instead of only appearing at commit time, and the Hyper trigger (when
+  configured) acts as a modifier in the recorder — pressing it shows ✦,
+  pressing it + a letter commits the combo as `✦Key`. Trigger detection
+  routes through the existing HotkeyService tap rather than suspending it,
+  because Caps-Lock-sourced F19 doesn't always survive a disabled tap on
+  every macOS build. The tap stays active in a "recording" mode that
+  suppresses bound-hotkey dispatch and Quick Press while still reporting
+  `hyperHeld` to the recorder; the recorder reads the authoritative
+  `isHyperHeld` synchronously at commit time so an async observer dispatch
+  cannot drop ✦ folding.
+
+### Fixed
+
+- App activation: switching to another app via a hotkey now routes through
+  `NSWorkspace.openApplication` (Launch Services) instead of
+  `NSRunningApplication.activate()`. On macOS 14+ the latter is silently
+  ignored when called from an `.accessory` app while a regular app holds
+  keyboard focus, so a hotkey pressed inside e.g. Warp would toggle the
+  current app via `hide()` (no activation right required) yet do nothing
+  when targeting a different app. The Launch Services path inherits user
+  activation rights and matches the route Raycast/Alfred use.
+- Settings: newly added app rows render an empty hotkey recorder showing
+  the placeholder text instead of literal `Key(-1)`. The sentinel `-1`
+  keyCode used to flag "not yet bound" now projects to a `nil`
+  `HotkeyDescriptor` in the panel, so the recorder picks its unbound
+  branch.
+
 ## [1.4.0] - 2026-05-25
 
 ### Added

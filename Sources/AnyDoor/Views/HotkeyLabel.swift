@@ -4,10 +4,11 @@ import SwiftUI
 /// matching the keycap style used across modern macOS panels and command palettes.
 struct HotkeyLabel: View {
     let hotkey: HotkeyDescriptor
+    @State private var hyperKey = HyperKeyService.shared
 
     var body: some View {
         HStack(spacing: 3) {
-            ForEach(Array(hotkey.displayParts.enumerated()), id: \.offset) { _, part in
+            ForEach(Array(hotkey.displayParts(hyperFlags: hyperKey.hyperModifierFlags).enumerated()), id: \.offset) { _, part in
                 Text(part)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)

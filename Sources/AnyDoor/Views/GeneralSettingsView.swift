@@ -14,6 +14,7 @@ struct GeneralSettingsView: View {
     @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
     @State private var updateService = UpdateService.shared
+    @State private var hyperKey = HyperKeyService.shared
 
     var body: some View {
         Form {
@@ -58,6 +59,62 @@ struct GeneralSettingsView: View {
                     .disabled(!menuBarIconVisible)
             } header: {
                 LocalizedText(.settingsGeneralMenubarSection)
+            }
+
+            Section {
+                LabeledContent {
+                    Picker(selection: triggerBinding) {
+                        ForEach(HyperKeyTrigger.allCases, id: \.self) { t in
+                            Text(t == .none ? L(.settingsGeneralHyperKeyTriggerNone) : t.displayLabel).tag(t)
+                        }
+                    } label: { EmptyView() }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .disabled(hyperKey.isApplying)
+                } label: {
+                    HStack(spacing: 6) {
+                        LocalizedText(.settingsGeneralHyperKeyLabel)
+                        if hyperKey.isActive {
+                            Circle().fill(.green).frame(width: 6, height: 6)
+                        }
+                    }
+                }
+
+                Text(String(format: L(.settingsGeneralHyperKeyDescription),
+                            triggerNameForDescription, hyperModifierGlyphs))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                LabeledContent {
+                    Picker(selection: quickPressBinding) {
+                        ForEach(HyperKeyQuickPress.allCases, id: \.self) { qp in
+                            Text(quickPressLabel(for: qp)).tag(qp)
+                        }
+                    } label: { EmptyView() }
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
+                } label: { LocalizedText(.settingsGeneralHyperKeyQuickPress) }
+
+                Text(String(format: L(.settingsGeneralHyperKeyQuickPressDescription),
+                            triggerNameForDescription))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Toggle(isOn: includeShiftBinding) { LocalizedText(.settingsGeneralHyperKeyIncludeShift) }
+                    .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
+
+                if let err = hyperKey.lastError {
+                    Label {
+                        Text(errorMessage(for: err))
+                    } icon: {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    }
+                    .font(.caption)
+                }
+            } header: {
+                LocalizedText(.settingsGeneralHyperKeySection)
             }
 
             Section {
@@ -106,6 +163,53 @@ struct GeneralSettingsView: View {
                 automationGranted = AutomationPermission.isGranted
                 try? await Task.sleep(for: .seconds(1))
             }
+        }
+    }
+
+    private var triggerBinding: Binding<HyperKeyTrigger> {
+        Binding(
+            get: { hyperKey.trigger },
+            set: { new in Task { await hyperKey.setTrigger(new) } }
+        )
+    }
+
+    private var quickPressBinding: Binding<HyperKeyQuickPress> {
+        Binding(
+            get: { hyperKey.quickPress },
+            set: { new in Task { await hyperKey.setQuickPress(new) } }
+        )
+    }
+
+    private var includeShiftBinding: Binding<Bool> {
+        Binding(
+            get: { hyperKey.includeShift },
+            set: { new in Task { await hyperKey.setIncludeShift(new) } }
+        )
+    }
+
+    private var hyperModifierGlyphs: String {
+        hyperKey.includeShift ? "⌃⌥⇧⌘" : "⌃⌥⌘"
+    }
+
+    private var triggerNameForDescription: String {
+        hyperKey.trigger == .none
+            ? L(.settingsGeneralHyperKeyLabel)
+            : hyperKey.trigger.displayLabel
+    }
+
+    private func quickPressLabel(for qp: HyperKeyQuickPress) -> String {
+        switch qp {
+        case .doesNothing: return L(.settingsGeneralHyperKeyQuickPressDoesNothing)
+        case .escape:      return L(.settingsGeneralHyperKeyQuickPressEscape)
+        case .original:    return L(.settingsGeneralHyperKeyQuickPressOriginal)
+        }
+    }
+
+    private func errorMessage(for err: HyperKeyError) -> String {
+        switch err {
+        case .tapNotRunning:  return L(.settingsGeneralHyperKeyErrorTap)
+        case .hidutilFailed:  return L(.settingsGeneralHyperKeyErrorHidutil)
+        case .timeout:        return L(.settingsGeneralHyperKeyErrorHidutil)
         }
     }
 
