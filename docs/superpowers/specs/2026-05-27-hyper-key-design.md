@@ -17,7 +17,7 @@ Add a Raycast-style **Hyper Key** feature to AnyDoor. Users pick one physical ke
 
 ## Approach
 
-`hidutil` remap is the load-bearing primitive (the same approach Raycast uses). At launch and whenever the user picks a trigger, AnyDoor invokes `hidutil property --set` to map the physical trigger key to a virtual F-key (F19 by default; F20 when the trigger itself is F19). The existing `HotkeyService` CGEvent tap watches that virtual F-key's `keyDown` / `keyUp`, maintains a "Hyper held" state, and OR-augments incoming `keyDown` events with the Hyper modifier flags before matching them against the existing `HotkeySnapshot` list.
+`hidutil` remap is the load-bearing primitive (the same approach Raycast uses). At launch and whenever the user picks a trigger, AnyDoor invokes `hidutil property --set` to map the physical trigger key to a fixed virtual F-key (F19 / keyCode 80). F19 is not exposed as a selectable trigger and is unused on real keyboards, so no collision is possible. The existing `HotkeyService` CGEvent tap watches that virtual F-key's `keyDown` / `keyUp`, maintains a "Hyper held" state, and OR-augments incoming `keyDown` events with the Hyper modifier flags before matching them against the existing `HotkeySnapshot` list.
 
 `HotkeySnapshot` storage stays `(keyCode, modifierFlags)`; recording a "Hyper+M" shortcut produces `(M, ⌃⌥⌘⇧)` — bit-identical to recording the same combo with real modifier keys, so the two input methods are equivalent.
 
@@ -44,12 +44,10 @@ enum HyperKeyTrigger: String, CaseIterable, Sendable, Hashable {
     case f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12
 
     /// HID usage code (page<<32 | usage) for `hidutil property --set`.
-    /// `nil` for `.none`.
+    /// `nil` for `.none`. This is the only keycode representation needed —
+    /// once hidutil remap is active, the trigger is observed exclusively as
+    /// the virtual F-key, never as its original physical keyCode.
     var hidUsage: UInt64? { ... }
-
-    /// CGEventTap-side keyCode for the physical key (used by HotkeyRecorder when
-    /// detecting trigger press during recording).
-    var physicalKeyCode: Int? { ... }
 
     /// Display label shown in the Settings picker, e.g. "Caps Lock (⇪)".
     /// Language-neutral key glyphs; not part of the L10n catalog.
@@ -71,29 +69,64 @@ enum HyperKeyQuickPress: String, CaseIterable, Sendable, Hashable {
 final class HyperKeyService {
     static let shared = HyperKeyService()
 
-    var trigger: HyperKeyTrigger       // persisted UserDefaults "hyperKey.trigger"
-    var quickPress: HyperKeyQuickPress // persisted "hyperKey.quickPress"
-    var includeShift: Bool             // persisted "hyperKey.includeShift", default true
+    // --- Read-only state. Persisted in UserDefaults ("hyperKey.*"). ---
+    private(set) var trigger: HyperKeyTrigger        // default .none
+    private(set) var quickPress: HyperKeyQuickPress  // default .doesNothing
+    private(set) var includeShift: Bool              // default true
 
-    /// True iff trigger != .none AND hidutil mapping was applied successfully.
-    var isActive: Bool { ... }
+    /// True iff trigger != .none AND the hidutil mapping is currently applied
+    /// AND the HotkeyService tap is running. Drives the green status dot.
+    private(set) var isActive: Bool
+
+    /// Set while an apply/clear is in flight. UI dims the picker during this.
+    private(set) var isApplying: Bool
+
+    /// Last apply error surface for the UI. Cleared on the next successful op.
+    private(set) var lastError: HyperKeyError?
 
     /// CGEventFlags bitmask Hyper synthesizes: ⌃⌥⌘ or ⌃⌥⇧⌘. Zero when inactive.
-    /// HotkeyDescriptor.displayString reads this to decide ✦ rendering.
     var hyperModifierFlags: Int { ... }
 
-    /// Virtual keyCode that the trigger is mapped to. -1 when inactive.
-    /// Fixed at F19 (keyCode 80) — F19 is not in `HyperKeyTrigger`'s allowed
-    /// trigger set and is unused on real keyboards, so no allocation collision
-    /// is possible.
+    /// Virtual keyCode (F19 = 80) when active, else -1.
     var virtualKeyCode: Int { ... }
 
-    func apply() async   // (re)apply hidutil mapping + push config to HotkeyService
-    func restore() async // clear hidutil mapping; safe to call repeatedly
+    // --- Mutations. Async + latest-wins. ---
+
+    /// Bumped on every setter call; the apply task captures it and bails if a
+    /// newer mutation has already arrived. Prevents stale apply/clear ordering
+    /// when the user spams the picker.
+    func setTrigger(_ new: HyperKeyTrigger) async
+    func setQuickPress(_ new: HyperKeyQuickPress) async
+    func setIncludeShift(_ new: Bool) async
 }
 ```
 
-Side-effects (calling `apply()` / `restore()` + `HotkeyService.updateHyperConfig(...)`) live in the property setters, not in views.
+**Mutation contract**:
+
+- All three setters are `async` and run serialized on the `@MainActor`. Each setter:
+  1. Bumps an internal monotonic `mutationToken: UInt64`
+  2. Persists the new value to UserDefaults immediately
+  3. Sets `isApplying = true`
+  4. Captures `myToken = mutationToken`
+  5. Drives `HyperKeyController` (`apply` / `clear`) as needed
+  6. If `mutationToken != myToken` when the await returns, discards the result — a newer setter has superseded this one
+  7. On success: updates `isActive`, `hyperModifierFlags`, `virtualKeyCode`, calls `HotkeyService.updateHyperConfig(...)`, clears `lastError`
+  8. On failure: forces `trigger = .none`, persists, calls `HotkeyService.updateHyperConfig(virtualKey: -1, ...)`, populates `lastError`
+  9. Sets `isApplying = false`
+
+- Setters are `async` precisely because Swift's normal property setters cannot await, which makes the original "side-effects in setter" sketch a race factory. Views call them via `Button { Task { await service.setTrigger(...) } }`-style closures bound to `Picker`'s selection through a computed `Binding` that wraps each set in a `Task`.
+
+- `includeShift` change does **not** call `HyperKeyController` (the virtual key doesn't change); it only recomputes flags and pushes `HotkeyService.updateHyperConfig`.
+
+- `quickPress` change also skips the controller.
+
+```swift
+enum HyperKeyError: Error, Sendable {
+    case hidutilFailed(stderr: String)
+    case tapNotRunning   // CGEvent tap is down (AX denied / failed); refuse to apply.
+    case timeout
+}
+```
 
 ### Persistence summary
 
@@ -113,46 +146,114 @@ No SwiftData migration — existing `KeyBinding` / `BuiltinPreference` schema un
 actor HyperKeyController {
     static let shared = HyperKeyController()
 
-    func apply(trigger: HyperKeyTrigger, virtualKey: HyperKeyVirtualKey) async throws
-    func clear() async throws        // resets UserKeyMapping to []
-    func isStale() async -> Bool     // current hidutil property vs. our last-applied state
+    /// Apply our single-entry mapping, replacing the previous mapping the
+    /// controller wrote. Returns the signature that was written.
+    func apply(trigger: HyperKeyTrigger, virtualKey: HyperKeyVirtualKey) async throws -> MappingSignature
+
+    /// Remove **only** the mapping entry whose (src, dst) matches our last
+    /// applied signature. Other UserKeyMapping entries (e.g. written by
+    /// Karabiner or the user via Terminal) are preserved.
+    ///
+    /// If the controller has no last-applied signature (clean start),
+    /// `reconcile(persistedSignature:)` should be used instead — `clear()`
+    /// alone has no idea what's "ours".
+    func clear() async throws
+
+    /// Used at launch. The caller passes the signature it last persisted to
+    /// UserDefaults; the controller reads the *current* hidutil mapping,
+    /// removes that exact entry if present, and ignores anything else.
+    /// Safe when AnyDoor has never run, when no mapping exists, or when an
+    /// unrelated user has written their own mappings.
+    func reconcile(persistedSignature: MappingSignature?) async throws
 }
 
-enum HyperKeyVirtualKey { case f19 }   // keyCode 80; reserved enum to allow future expansion
+enum HyperKeyVirtualKey { case f19 }   // keyCode 80; reserved enum for future expansion
+
+/// Stable identifier of "the entry we own" in UserKeyMapping. Persisted in
+/// UserDefaults across launches so we can recognize our own residue after a
+/// crash without nuking anyone else's mappings.
+struct MappingSignature: Codable, Sendable, Hashable {
+    let src: UInt64   // HIDKeyboardModifierMappingSrc
+    let dst: UInt64   // HIDKeyboardModifierMappingDst
+}
 ```
 
-Underlying call form:
+`hidutil` invocation reuses the existing `ShellRunner`. Output is parsed with `JSONSerialization`. **Read-modify-write** semantics:
 
-```bash
-hidutil property --set '{"UserKeyMapping":[
-  {"HIDKeyboardModifierMappingSrc": <hidUsage(trigger)>,
-   "HIDKeyboardModifierMappingDst": <hidUsage(virtualKey)>}
-]}'
-```
+1. `hidutil property --get UserKeyMapping` to fetch the current array
+2. Filter out any entry whose `(src, dst)` matches the signature we're about to remove (clear) or replace (apply)
+3. Append the new entry (apply) or skip (clear)
+4. `hidutil property --set '{"UserKeyMapping": <new array>}'`
 
-`hidutil` invocation reuses the existing `ShellRunner`. Output is parsed with `JSONSerialization` for `isStale()` (compare returned `UserKeyMapping` array to our intended mapping).
+This preserves third-party mappings — the file-replace semantics of `hidutil --set` is now scoped at our process boundary by reading first.
+
+The last-written `MappingSignature` is persisted under `hyperKey.appliedSignature` so the next launch can identify our own residue.
 
 ### Lifecycle
 
 **Launch (`AppDelegate.applicationDidFinishLaunching`):**
-1. Unconditional `HyperKeyController.shared.clear()` — recovers from crashes that left a stale mapping.
-2. Read persisted `HyperKeyService` settings.
-3. If `trigger != .none`: `controller.apply(trigger:, virtualKey:)`.
-4. Push virtual keyCode + modifier flags + quick-press to `HotkeyService.updateHyperConfig(...)`.
+
+Order matters — Hyper must never be applied while the CGEvent tap is *not* successfully running, otherwise the user loses their trigger key with no interception in place.
+
+1. Start `HotkeyService` and wait for `eventTap != nil`. If `AXIsProcessTrusted()` is false or `tapCreate` fails, **skip the entire Hyper bootstrap** — leave any persisted signature in UserDefaults untouched so the next successful launch can clean it.
+2. Read persisted `MappingSignature?` from `hyperKey.appliedSignature`.
+3. Call `HyperKeyController.shared.reconcile(persistedSignature:)` — scoped removal of *our* residue only; preserves third-party UserKeyMapping entries.
+4. Read persisted `HyperKeyService` settings.
+5. If `trigger != .none`: call `service.setTrigger(trigger)` to re-apply (this writes a fresh signature).
+6. Push `HotkeyService.updateHyperConfig(...)` after success.
+
+**Tap state monitoring:**
+
+- `HotkeyService` exposes `isTapRunning: Bool` (computed from `eventTap != nil && CGEvent.tapIsEnabled(tap:)`).
+- The watchdog already reports tap loss; on transition `running → not running` while Hyper is active, `HyperKeyService` triggers an emergency `controller.clear()` and sets `lastError = .tapNotRunning`. UI flips to inactive state.
+- AX permission revocation is detected via periodic poll in `GeneralSettingsView` (already exists); when revoked, same emergency clear path.
 
 **Runtime change (user edits settings):**
-- `trigger` change → `controller.apply()` or `controller.clear()`.
-- `includeShift` change → no hidutil call (virtual key unchanged); just `HotkeyService.updateHyperConfig` + recompute `hyperModifierFlags`.
-- `quickPress` change → no hidutil call; just `HotkeyService.updateHyperConfig`.
 
-**Exit (`applicationWillTerminate` + `NSWorkspace.willPowerOffNotification`):**
-- `Task { try await controller.clear() }` with a 200 ms timeout cap.
+Routed through async setters per the mutation contract above. Specifically:
+- `setTrigger(.none)` → controller `clear()`; persisted signature removed.
+- `setTrigger(.x)` → controller `apply(trigger: .x, virtualKey: .f19)`; persisted signature updated.
+- Before applying, check `HotkeyService.isTapRunning`; if false, populate `lastError = .tapNotRunning` and refuse.
+- `setIncludeShift` / `setQuickPress` → no controller call.
 
-**Signal handler (SIGTERM / SIGINT):**
-- Registered `signal()` handler that `posix_spawn`s `hidutil property --set '{"UserKeyMapping":[]}'`. No Swift async on the signal path.
+**Exit (`applicationShouldTerminate`):**
+
+The Task-and-pray pattern under `applicationWillTerminate` doesn't actually wait for the cleanup. Use the proper hand-off instead:
+
+```swift
+func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard HyperKeyService.shared.isActive else { return .terminateNow }
+
+    Task {
+        // controller.clear() uses Process which we wait on synchronously inside
+        // the actor; the await here is on actor reentry, not on a fire-and-forget.
+        try? await withTimeout(milliseconds: 500) {
+            try await HyperKeyController.shared.clear()
+        }
+        NSApp.reply(toApplicationShouldTerminate: true)
+    }
+    return .terminateLater
+}
+```
+
+500 ms is enough for `hidutil` to round-trip in normal conditions. If it doesn't, we still terminate — the worst case is a residue that the next launch's `reconcile()` removes.
+
+Also call `controller.clear()` on `NSWorkspace.willPowerOffNotification` via the same `terminateLater` path.
+
+**Signal handlers:**
+
+Removed from the design. Reasons:
+- `posix_spawn` is **not** in the macOS async-signal-safe list (sigaction(2) explicitly enumerates the safe set; `posix_spawn` isn't in it).
+- A SIGTERM handler that returns simply lets the process keep running; you'd need `_exit(0)` to actually stop, which loses the clean termination path entirely.
+- Launch-time `reconcile()` already recovers from any abrupt exit (SIGKILL, panic, force quit).
 
 **Apply failure:**
-- `HyperKeyService.trigger` is forced back to `.none`; UI picker rebinds to "None"; error logged via `Logger(subsystem: "dev.bybee.AnyDoor", category: "hyperKey")`.
+
+- Logged via `Logger(subsystem: "dev.bybee.AnyDoor", category: "hyperKey")`.
+- `HyperKeyService.trigger` forced to `.none`, persisted; UI picker rebinds to "None" via `@Observable`.
+- `lastError` populated; Settings UI shows an inline warning row beneath the Hyper Key picker:
+  > ⚠️ 启用失败：辅助功能权限未授予 / hidutil 调用失败。
+- `HotkeyService.updateHyperConfig(virtualKey: -1, flags: 0, ...)` ensures the matching path no longer expects a Hyper key.
 
 ### Known constraints (documented, not engineered around)
 
@@ -228,22 +329,44 @@ if virtKey >= 0 && type == .keyUp
     return nil
 }
 
-// 3. Normal keyDown matching — OR Hyper flags onto incoming event flags while held.
+// 3. Normal keyDown — augment modifiers with Hyper flags while held.
+//    Swallow ALL keyDown while held, matched or not (exclusive Hyper layer).
 if type == .keyDown {
     let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
     var modifiers = Int(event.flags.rawValue & modifierMask)
+
     if service.hyperHeld {
         modifiers |= service.hyperModifierFlags
         service.hyperConsumedByOther = true
+
+        for snapshot in service.snapshots {
+            if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
+                let action = snapshot.action
+                let dispatcher = service.dispatcher
+                DispatchQueue.main.async { dispatcher?(action) }
+                return nil  // matched: consume
+            }
+        }
+        return nil  // unmatched but Hyper-held: still consume (exclusive layer)
     }
-    // existing snapshot match loop, unchanged
+
+    // Not Hyper-held — fall through to the existing snapshot-match loop,
+    // and pass through to the foreground app if no match.
+    ...
 }
+
+// 4. Companion keyUp during Hyper held — swallow as well, so the foreground
+//    app never sees a paired up event for a down it never received.
+if type == .keyUp && service.hyperHeld { return nil }
 ```
 
 **Design points:**
 - Storage unchanged. Hyper hits and direct ⌃⌥⌘⇧ hits are bit-equivalent.
-- Augmentation is matching-side only — un-matched events pass through with their original flags. Foreground apps never see synthesized Hyper modifiers.
-- Auto-repeat `keyDown` of the trigger reaches branch 1 repeatedly. Idempotent — `hyperDownAt` is preserved.
+- **Exclusive Hyper layer**: while held, every non-trigger `keyDown`/`keyUp` is swallowed. Reasons:
+  1. Matches the "conflict-free shortcut layer" promise — pressing Hyper+J when J isn't bound shouldn't leak a `j` keystroke into the foreground app.
+  2. Avoids torn down/up pairs (we'd otherwise swallow a `keyDown` on match but let its `keyUp` through, or vice versa).
+- Foreground apps still never observe the synthesized Hyper modifier bits — the OR happens only inside our local `modifiers` variable, never on the CGEvent itself.
+- Auto-repeat `keyDown` of the trigger lands in branch 1 repeatedly. Idempotent — `hyperDownAt` is preserved.
 - Quick Press has **no timeout**: any release without an intervening companion `keyDown` triggers it, matching Raycast.
 
 ### Suspend cleanup
@@ -305,18 +428,31 @@ New section in `Views/GeneralSettingsView.swift`, between **Menubar** and **Perm
 - **Quick Press row**: `LabeledContent` + `Picker(.menu)` over `HyperKeyQuickPress.allCases`. `.disabled(true)` when `trigger == .none`. `.original`'s label is contextual: `"切换大写锁定"` for Caps Lock, `"发送 F1"` for F1, etc.
 - **Include Shift row**: `Toggle`. `.disabled(true)` when `trigger == .none`.
 
-**Binding pattern** (matches existing `LocalizationManager` usage in `GeneralSettingsView`):
+**Binding pattern**:
+
+Setters are `async` (per the mutation contract), so direct `$hyperKey.trigger` binding doesn't work. Wrap each in a `Binding` that fires a `Task`:
 
 ```swift
 @State private var hyperKey = HyperKeyService.shared
+
+private var triggerBinding: Binding<HyperKeyTrigger> {
+    Binding(
+        get: { hyperKey.trigger },
+        set: { new in Task { await hyperKey.setTrigger(new) } }
+    )
+}
+
 // in body:
-@Bindable var hyperKey = hyperKey
-Picker(selection: $hyperKey.trigger) { ... }
-Picker(selection: $hyperKey.quickPress) { ... }
-Toggle(isOn: $hyperKey.includeShift) { ... }
+Picker(selection: triggerBinding) { ... }
+    .disabled(hyperKey.isApplying)
+
+if let err = hyperKey.lastError {
+    Label { Text(err.userFacingMessage) } icon: { Image(systemName: "exclamationmark.triangle.fill") }
+        .foregroundStyle(.orange)
+}
 ```
 
-`apply()` / `restore()` calls live in `HyperKeyService` setters, not in `.onChange` modifiers.
+Same pattern for `quickPressBinding` and `includeShiftBinding`. `isApplying` dims controls during the in-flight controller call to make the latest-wins behavior visible.
 
 ### New L10n keys
 
@@ -337,11 +473,17 @@ Toggle(isOn: $hyperKey.includeShift) { ... }
 
 ## Display: `HotkeyDescriptor`
 
-Only `displayParts` is touched. Structure and storage are unchanged:
+`HotkeyDescriptor` is a pure value type and stays so. It must not reach into `@MainActor` global state to compute its display form — that breaks Swift 6 strict concurrency (the type is `Sendable` and used off main) and couples a pure model to a UI singleton.
+
+**Refactor**:
+
+- The existing `var displayParts: [String]` is renamed to `func displayParts(hyperFlags: Int = 0) -> [String]`. `hyperFlags == 0` (default) falls back to the existing modifier-glyph path; non-zero with `modifierFlags == hyperFlags` returns `["✦", key]`.
+- `displayString` becomes `func displayString(hyperFlags: Int = 0) -> String`.
+- Call sites that already render in a `@MainActor` view context (`PanelRowView`, `HotkeyRecorder.label`, `AppShortcutsPopoverView`, etc.) read `HyperKeyService.shared.hyperModifierFlags` at the SwiftUI layer and pass it in. Because the views observe `HyperKeyService.shared` (`@Observable`), they re-render when `trigger` or `includeShift` change — but the model itself stays pure.
 
 ```swift
-var displayParts: [String] {
-    let hyperFlags = HyperKeyService.shared.hyperModifierFlags
+// HotkeyDescriptor.swift
+func displayParts(hyperFlags: Int = 0) -> [String] {
     if hyperFlags != 0 && modifierFlags == hyperFlags {
         return ["✦", KeyCodeMap.name(for: keyCode)]
     }
@@ -354,40 +496,66 @@ var displayParts: [String] {
     parts.append(KeyCodeMap.name(for: keyCode))
     return parts
 }
+
+func displayString(hyperFlags: Int = 0) -> String {
+    displayParts(hyperFlags: hyperFlags).joined()
+}
 ```
 
-Since `HyperKeyService` is `@Observable`, views rendering hotkey badges re-invalidate when `trigger` / `includeShift` change. If a specific surface fails to refresh, add `.id(hyperKey.trigger)` / `.id(hyperKey.includeShift)` as a targeted fix — **not** prophylactically.
+```swift
+// In a view:
+@State private var hyperKey = HyperKeyService.shared
+
+Text(hotkey.displayString(hyperFlags: hyperKey.hyperModifierFlags))
+```
+
+The `hyperFlags: Int = 0` default keeps any non-view callers (logging, debug prints, tests) source-compatible — they get the old plain-modifier rendering.
 
 ## Recording: `HotkeyRecorder`
 
 `HotkeyService.suspend()` disables the CGEvent tap during recording but does not affect AppKit event routing. The virtual F-key produced by `hidutil` therefore still arrives at the recorder's `NSEvent.addLocalMonitorForEvents`.
 
-```swift
-let virtualKey = HyperKeyService.shared.virtualKeyCode
-var hyperArmed = false
+The state machine needs **both** `keyDown` and `keyUp` of the virtual F-key, otherwise a sequence "tap Caps Lock, release, then press M" would still set `hyperArmed = true` and erroneously record `Hyper+M`.
 
-keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+```swift
+let virtualKey = HyperKeyService.shared.virtualKeyCode  // -1 when disabled
+var hyperHeld = false   // true between virtual keyDown and keyUp
+
+keyDownMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
     let code = Int(event.keyCode)
 
     if virtualKey >= 0 && code == virtualKey {
-        hyperArmed = true
-        return nil  // swallow; trigger alone is not a hotkey
+        hyperHeld = true
+        return nil  // trigger alone is not a hotkey
     }
 
     let cgFlags = event.cgEvent?.flags ?? []
     var mods = Int(cgFlags.rawValue & modMask)
-    if hyperArmed {
+    if hyperHeld {
         mods |= HyperKeyService.shared.hyperModifierFlags
     }
 
     // existing ESC / Delete-clear / capture path with `mods` instead of raw
     ...
 }
+
+keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
+    if virtualKey >= 0 && Int(event.keyCode) == virtualKey {
+        hyperHeld = false
+        return nil  // swallow; never let the foreground responder see it
+    }
+    return event
+}
 ```
 
-**Equivalence guarantee**: recording with Hyper produces the same `(keyCode, modifierFlags)` tuple as pressing the literal modifiers `⌃⌥⌘(⇧)`. Both paths display as `✦Key`.
+Both monitors are torn down in `stopRecording()`. The Caps-Lock-tap-then-M case becomes:
+1. `keyDown(F19)` → `hyperHeld = true`
+2. `keyUp(F19)` → `hyperHeld = false`
+3. `keyDown(M)` → captured with raw modifiers only → stored as plain `M`. ✓
 
-ESC and Delete (no modifiers) keep their current cancel / clear semantics. They are never composed with `hyperArmed`.
+**Equivalence guarantee**: recording with Hyper actually held produces the same `(keyCode, modifierFlags)` tuple as pressing the literal modifiers `⌃⌥⌘(⇧)`. Both paths display as `✦Key`.
+
+ESC and Delete (no modifiers) keep their current cancel / clear semantics. They are never composed with `hyperHeld`.
 
 ## Acceptance criteria
 
@@ -396,10 +564,12 @@ ESC and Delete (no modifiers) keep their current cancel / clear semantics. They 
 - [ ] Record a "Hyper+M" binding to an app — displays as `✦M`.
 - [ ] Press Caps Lock + M → binding fires.
 - [ ] Press ⌃⌥⌘⇧+M (without Caps Lock) → same binding fires.
+- [ ] Press Caps Lock + J (unbound) → no `j` reaches the foreground app; no audible beep; no torn keyUp.
 - [ ] Tap Caps Lock alone → Quick Press action fires (Escape / caps toggle / nothing per setting).
+- [ ] Tap Caps Lock, release, then press M — recorded as plain `M`, not Hyper+M.
 - [ ] Toggle Include Shift OFF: existing `✦M` (stored as `⌃⌥⌘⇧+M`) reverts to `⌃⌥⌘⇧M` rendering; new Hyper+M records as `⌃⌥⌘+M` and renders as `✦M`.
 - [ ] Switch trigger to None — Caps Lock restored to system default immediately.
-- [ ] `kill -9` the process while Hyper is active → relaunch → launch-time `clear()` restores Caps Lock before re-applying.
+- [ ] `kill -9` the process while Hyper is active → relaunch → only AnyDoor's mapping is reconciled; any pre-existing third-party `UserKeyMapping` entry survives.
 
 ### Regression
 - [ ] All non-Hyper app shortcuts continue to fire.
@@ -407,17 +577,30 @@ ESC and Delete (no modifiers) keep their current cancel / clear semantics. They 
 - [ ] Recorder ESC cancel and Delete clear behaviors unchanged.
 - [ ] Pressing physical Caps Lock during recording does not leak caps-lock state changes.
 
+### Permission / failure
+- [ ] Launch with AX permission denied: Hyper is **not** applied; Caps Lock works normally; Settings shows the warning row.
+- [ ] AX permission revoked while Hyper is active: emergency clear runs; Settings flips to inactive within ~1 s of the next watchdog tick.
+- [ ] hidutil call fails (mock by chmod-ing the binary unreadable in dev): `lastError = .hidutilFailed`, trigger forced back to None.
+
+### Race
+- [ ] Rapidly toggle the picker A → B → A → None in under 100 ms. Final hidutil state matches the *last* selection; no orphan mapping; `isApplying` returns to false.
+
 ### Edge cases
-- [ ] Running concurrently with Karabiner-Elements — last writer wins on `UserKeyMapping`; README mentions this.
+- [ ] Running concurrently with Karabiner-Elements: a Karabiner-written entry remains after AnyDoor applies its own; turning AnyDoor's trigger to None leaves the Karabiner entry intact.
 - [ ] Trigger = Left Command → left ⌘ stops working (intentional).
-- [ ] App crashes during Hyper-held → next launch starts clean.
+- [ ] App crashes during Hyper-held → next launch starts clean and reconciles only the persisted signature.
 
 ## Open questions
 
-None at design time.
+Resolved before implementation:
+
+1. **Permission gating** — apply must only happen when the CGEvent tap is verified running. Persisted signature is kept across denied-permission launches so a future grant can clean up properly. **Resolved**: enforce in `HyperKeyService.setTrigger` and at launch.
+2. **Unmatched companion key while Hyper held** — swallow at the tap (exclusive Hyper layer). **Resolved**: explicit branch in `hotkeyCallback`, listed in acceptance.
+3. **Cleanup ownership** — `HyperKeyController` owns scoped removal via persisted `MappingSignature`; `HyperKeyService` owns the user-facing state machine; `AppDelegate` only wires lifecycle hooks. **Resolved**: each layer has one job.
 
 ## Known limitations (carried into implementation)
 
 1. `.original` Quick Press for left/right modifier triggers may be ignored by some applications because the synthesized `.flagsChanged` pulse is brief and lacks accompanying keyboard hardware context.
-2. Karabiner-Elements / other `hidutil` consumers cannot coexist cleanly with AnyDoor's Hyper Key.
+2. Karabiner-Elements / other `hidutil` consumers **can** coexist (scoped read-modify-write preserves their entries), but if they overwrite the entire `UserKeyMapping` array between AnyDoor's read and AnyDoor's write, the last writer wins for that race window. Not engineered around — `hidutil` doesn't expose a CAS primitive.
 3. If AnyDoor is force-quit and uninstalled while Hyper is active, the `hidutil` mapping persists until reboot. Recovery command documented in README.
+4. The exclusive Hyper layer (swallow-while-held) means that holding the Hyper trigger then pressing arbitrary keys is *silent* — no key reaches the foreground app. This is intentional and matches Raycast; documented in the in-app description text.
