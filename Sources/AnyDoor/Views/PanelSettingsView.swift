@@ -79,6 +79,9 @@ struct PanelSettingsView: View {
                 handleBrightnessHotkeyChange(item: item, newValue: newValue)
             }
             .frame(width: 150, alignment: .trailing)
+            // Trailing inset matches the Window Layout sub-row so both columns
+            // of recorders align flush along the panel's right edge.
+            Color.clear.frame(width: 20)
         }
     }
 
