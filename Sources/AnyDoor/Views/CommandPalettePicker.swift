@@ -1,45 +1,63 @@
 import SwiftUI
 import AppKit
 
+/// One labelled group of rows in the command palette.
+struct CommandPaletteSection: Identifiable {
+    let titleKey: L10n.Key
+    let entries: [PanelEntry]
+    var id: String { titleKey.rawValue }
+}
+
 /// Mutable state shared between the SwiftUI command palette view and the
-/// AppKit window controller. Mirrors `SpotlightPickerState`.
+/// AppKit window controller. Mirrors `SpotlightPickerState`, with the
+/// addition of sectioned grouping (Raycast-style).
 @MainActor
 @Observable
 final class CommandPaletteState {
     var query: String = ""
     var selectedIndex: Int = 0
 
-    let allEntries: [PanelEntry]
+    let allSections: [CommandPaletteSection]
     let hyperFlags: Int
 
-    init(entries: [PanelEntry], hyperFlags: Int) {
-        self.allEntries = entries
+    init(sections: [CommandPaletteSection], hyperFlags: Int) {
+        self.allSections = sections
         self.hyperFlags = hyperFlags
     }
 
-    var filteredEntries: [PanelEntry] {
+    /// Sections after applying the query filter, with empty sections dropped.
+    var filteredSections: [CommandPaletteSection] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return allEntries }
-        return allEntries.filter { entry in
-            entry.localizedTitle().localizedCaseInsensitiveContains(trimmed)
-                || entry.title.localizedCaseInsensitiveContains(trimmed)
+        guard !trimmed.isEmpty else { return allSections }
+        return allSections.compactMap { section in
+            let matched = section.entries.filter { entry in
+                entry.localizedTitle().localizedCaseInsensitiveContains(trimmed)
+                    || entry.title.localizedCaseInsensitiveContains(trimmed)
+            }
+            return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
         }
     }
 
+    /// Flat list driving keyboard navigation. Sections are conceptual; the
+    /// selection index is global across all visible entries.
+    var flatEntries: [PanelEntry] {
+        filteredSections.flatMap(\.entries)
+    }
+
     func moveDown() {
-        let count = filteredEntries.count
+        let count = flatEntries.count
         guard count > 0 else { return }
         selectedIndex = min(selectedIndex + 1, count - 1)
     }
 
     func moveUp() {
-        let count = filteredEntries.count
+        let count = flatEntries.count
         guard count > 0 else { return }
         selectedIndex = max(selectedIndex - 1, 0)
     }
 
     func commitSelection() -> PanelEntry? {
-        let list = filteredEntries
+        let list = flatEntries
         guard list.indices.contains(selectedIndex) else { return list.first }
         return list[selectedIndex]
     }
@@ -58,7 +76,7 @@ struct CommandPalettePicker: View {
 
             Divider().opacity(0.4)
 
-            if state.filteredEntries.isEmpty {
+            if state.flatEntries.isEmpty {
                 emptyState
             } else {
                 entryList
@@ -124,29 +142,72 @@ struct CommandPalettePicker: View {
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
     }
 
+    /// Pre-flattens sections into one stream of rows so a single ForEach can
+    /// render headers + rows in order while assigning a globally unique flat
+    /// index to each row (matched against `state.selectedIndex`).
+    private struct RowItem: Identifiable {
+        let globalIndex: Int
+        let entry: PanelEntry
+        let headerTitleKey: L10n.Key?
+        let isFirstSection: Bool
+        var id: String { entry.id }
+    }
+
+    private var rowItems: [RowItem] {
+        var items: [RowItem] = []
+        var globalIndex = 0
+        for (sectionIdx, section) in state.filteredSections.enumerated() {
+            for (entryIdx, entry) in section.entries.enumerated() {
+                items.append(RowItem(
+                    globalIndex: globalIndex,
+                    entry: entry,
+                    headerTitleKey: entryIdx == 0 ? section.titleKey : nil,
+                    isFirstSection: sectionIdx == 0
+                ))
+                globalIndex += 1
+            }
+        }
+        return items
+    }
+
     private var entryList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(Array(state.filteredEntries.enumerated()), id: \.element.id) { index, entry in
+                    ForEach(rowItems) { item in
+                        if let key = item.headerTitleKey {
+                            sectionHeader(titleKey: key, isFirst: item.isFirstSection)
+                        }
                         CommandPaletteRow(
-                            entry: entry,
+                            entry: item.entry,
                             hyperFlags: state.hyperFlags,
-                            isSelected: index == state.selectedIndex,
-                            onSelect: { onSelect(entry) }
+                            isSelected: item.globalIndex == state.selectedIndex,
+                            onSelect: { onSelect(item.entry) }
                         )
-                        .id(entry.id)
+                        .id(item.entry.id)
                     }
                 }
                 .padding(.vertical, 12)
             }
             .frame(minHeight: 320, maxHeight: .infinity)
             .onChange(of: state.selectedIndex) { _, newIndex in
-                let entries = state.filteredEntries
+                let entries = state.flatEntries
                 guard entries.indices.contains(newIndex) else { return }
                 proxy.scrollTo(entries[newIndex].id, anchor: UnitPoint(x: 0.5, y: 0.97))
             }
         }
+    }
+
+    private func sectionHeader(titleKey: L10n.Key, isFirst: Bool) -> some View {
+        LocalizedText(titleKey)
+            .font(.system(size: 11, weight: .semibold))
+            .textCase(.uppercase)
+            .foregroundStyle(.tertiary)
+            .tracking(0.4)
+            .padding(.horizontal, 22)
+            .padding(.top, isFirst ? 0 : 12)
+            .padding(.bottom, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -161,30 +222,10 @@ private struct CommandPaletteRow: View {
     var body: some View {
         HStack(spacing: 12) {
             icon
-                .frame(width: 28, height: 28)
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 6) {
-                    Text(entry.localizedTitle())
-                        .font(.system(size: 14, weight: .medium))
-                        .lineLimit(1)
-                    if case .builtin = entry.source {
-                        LocalizedText(.commandPaletteBuiltinTag)
-                            .font(.caption2)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Color.secondary.opacity(0.15))
-                            .clipShape(Capsule())
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if let subtitle = entry.subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-            }
+                .frame(width: 22, height: 22)
+            Text(entry.localizedTitle())
+                .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
             Spacer()
             if let hotkey = entry.hotkey {
                 Text(hotkey.displayString(hyperFlags: hyperFlags))

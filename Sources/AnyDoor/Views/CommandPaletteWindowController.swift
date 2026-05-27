@@ -50,9 +50,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func show() {
-        let entries = collectEntries()
+        let sections = collectSections()
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
-        let pickerState = CommandPaletteState(entries: entries, hyperFlags: hyperFlags)
+        let pickerState = CommandPaletteState(sections: sections, hyperFlags: hyperFlags)
         self.state = pickerState
 
         let view = CommandPalettePicker(
@@ -76,31 +76,43 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    /// Build the set of PanelEntry rows shown in the palette: every directly
-    /// invocable item from the menu bar — built-in toggles/actions plus visible
-    /// app shortcuts. Submenu containers, brightness-control hover items, and
-    /// hidden-hotkey-only entries are dropped because they have no direct
-    /// "run me" semantics from a command palette context.
-    private func collectEntries() -> [PanelEntry] {
+    /// Build the section groups shown in the palette. Sections with no
+    /// matching entries are dropped before they reach the view.
+    private func collectSections() -> [CommandPaletteSection] {
         let store = PanelStore.shared
-        var entries: [PanelEntry] = []
+        var sections: [CommandPaletteSection] = []
 
-        for entry in store.topLevelEntries where entry.isVisible {
-            if case .builtin(let item) = entry.source,
-               item.kind == .toggle || item.kind == .action {
-                entries.append(entry)
+        let commands = store.topLevelEntries.filter { entry in
+            guard entry.isVisible else { return false }
+            if case .builtin(let item) = entry.source {
+                return item.kind == .toggle || item.kind == .action
             }
+            return false
+        }
+        if !commands.isEmpty {
+            sections.append(CommandPaletteSection(
+                titleKey: .commandPaletteSectionCommands,
+                entries: commands
+            ))
         }
 
-        for entry in store.windowLayoutChildren where entry.isVisible {
-            entries.append(entry)
+        let windowLayout = store.windowLayoutChildren.filter(\.isVisible)
+        if !windowLayout.isEmpty {
+            sections.append(CommandPaletteSection(
+                titleKey: .commandPaletteSectionWindowLayout,
+                entries: windowLayout
+            ))
         }
 
-        for entry in store.appShortcutChildren where entry.isVisible {
-            entries.append(entry)
+        let appShortcuts = store.appShortcutChildren.filter(\.isVisible)
+        if !appShortcuts.isEmpty {
+            sections.append(CommandPaletteSection(
+                titleKey: .commandPaletteSectionApplications,
+                entries: appShortcuts
+            ))
         }
 
-        return entries
+        return sections
     }
 
     private func positionAtTopCenter() {

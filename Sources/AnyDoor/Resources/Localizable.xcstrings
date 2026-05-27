@@ -645,6 +645,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置" } }
       }
     },
+    "commandPalette.section.commands" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Commands" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "命令" } }
+      }
+    },
+    "commandPalette.section.windowLayout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Window Layout" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口布局" } }
+      }
+    },
+    "commandPalette.section.applications" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Applications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用" } }
+      }
+    },
     "settings.general.commandPalette.section" : {
       "extractionState" : "manual",
       "localizations" : {
