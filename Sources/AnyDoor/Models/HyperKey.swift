@@ -82,7 +82,7 @@ enum HyperKeyVirtualKey: Sendable {
 
     var hidUsage: UInt64 {
         switch self {
-        case .f19: return 0x07_0000_0068
+        case .f19: return 0x07_0000_006E
         }
     }
 
