@@ -180,15 +180,22 @@ struct CommandPalettePicker: View {
                 // visible bottom.
                 VStack(spacing: 0) {
                     ForEach(rowItems) { item in
-                        if let key = item.headerTitleKey {
-                            sectionHeader(titleKey: key, isFirst: item.isFirstSection)
+                        // Wrap the optional header + row in one VStack so the
+                        // `.id` covers both. ScrollViewReader then treats the
+                        // header as part of the row's bounds — scrolling to
+                        // the first row of a section also brings its header
+                        // into view, instead of clipping it above the edge.
+                        VStack(spacing: 0) {
+                            if let key = item.headerTitleKey {
+                                sectionHeader(titleKey: key, isFirst: item.isFirstSection)
+                            }
+                            CommandPaletteRow(
+                                entry: item.entry,
+                                hyperFlags: state.hyperFlags,
+                                isSelected: item.globalIndex == state.selectedIndex,
+                                onSelect: { onSelect(item.entry) }
+                            )
                         }
-                        CommandPaletteRow(
-                            entry: item.entry,
-                            hyperFlags: state.hyperFlags,
-                            isSelected: item.globalIndex == state.selectedIndex,
-                            onSelect: { onSelect(item.entry) }
-                        )
                         .id(item.entry.id)
                     }
                 }
