@@ -6,6 +6,43 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- System apps in App Shortcuts: Finder, System Settings, Calculator, and other
+  built-ins from `/System/Applications` or `/System/Library/CoreServices/Finder.app`
+  can now be bound to global hotkeys. A new `InstalledAppsScanner` enumerates
+  `/Applications`, `/System/Applications`, both `Utilities` subdirs, and
+  `~/Applications`, plus an explicit probe for Finder. The previous
+  `NSOpenPanel` (locked to `/Applications`) is replaced by a Spotlight-style
+  floating picker — borderless rounded `NSPanel` positioned near the top of
+  the active screen with a thick-material background, a large search field,
+  single-click selection, click-outside / Esc dismissal, and already-bound
+  apps automatically filtered out. Arrow keys move the highlighted row,
+  Enter selects, and a panel-level `NSEvent` key monitor intercepts arrow /
+  Return / Escape before the focused `TextField` can consume them so the
+  search input stays the keyboard target throughout.
+- Command Palette: a Raycast-style global panel that surfaces every directly
+  invocable menu bar item — built-in toggles/actions, window-layout children,
+  and visible app shortcuts — grouped into labelled sections (Commands /
+  Window Layout / Applications) with uppercase muted headers. Configurable
+  trigger hotkey lives in Settings → General → Command Palette and is stored
+  via `CommandPaletteService` (UserDefaults); the snapshot is threaded into
+  `PanelStore.rebuildHotkeySnapshots` so the CGEvent tap picks it up without
+  a relaunch. Re-pressing the trigger while the palette is open dismisses it,
+  matching macOS Spotlight. Selection routes through `PanelStore.dispatch`,
+  so app rows toggle their target app and built-ins fire their normal
+  toggle / run path. Section headers are wrapped into each row's `id` bounds
+  so `ScrollViewReader` brings the label and row into view together when
+  navigating across groups, and `safeAreaInset` keeps an 8pt visual gap at
+  the top and bottom edges so the highlighted row never touches the panel
+  border.
+
+### Fixed
+
+- Settings → 面板: the Display Brightness sub-row hotkey recorder now lines
+  up with the Window Layout sub-row recorders along the panel's right edge
+  (was missing the 20pt trailing inset that the layout rows used).
+
 ## [1.5.0] - 2026-05-27
 
 ### Added
