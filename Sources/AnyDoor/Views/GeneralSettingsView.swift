@@ -80,12 +80,10 @@ struct GeneralSettingsView: View {
                     }
                 }
 
-                if hyperKey.trigger != .none {
-                    Text(String(format: L(.settingsGeneralHyperKeyDescription),
-                                hyperKey.trigger.displayLabel, hyperModifierGlyphs))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(String(format: L(.settingsGeneralHyperKeyDescription),
+                            triggerNameForDescription, hyperModifierGlyphs))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 LabeledContent {
                     Picker(selection: quickPressBinding) {
@@ -98,12 +96,10 @@ struct GeneralSettingsView: View {
                     .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
                 } label: { LocalizedText(.settingsGeneralHyperKeyQuickPress) }
 
-                if hyperKey.trigger != .none {
-                    Text(String(format: L(.settingsGeneralHyperKeyQuickPressDescription),
-                                hyperKey.trigger.displayLabel))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(String(format: L(.settingsGeneralHyperKeyQuickPressDescription),
+                            triggerNameForDescription))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Toggle(isOn: includeShiftBinding) { LocalizedText(.settingsGeneralHyperKeyIncludeShift) }
                     .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
@@ -193,6 +189,12 @@ struct GeneralSettingsView: View {
 
     private var hyperModifierGlyphs: String {
         hyperKey.includeShift ? "⌃⌥⇧⌘" : "⌃⌥⌘"
+    }
+
+    private var triggerNameForDescription: String {
+        hyperKey.trigger == .none
+            ? L(.settingsGeneralHyperKeyLabel)
+            : hyperKey.trigger.displayLabel
     }
 
     private func quickPressLabel(for qp: HyperKeyQuickPress) -> String {
