@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-05-27
+
 ### Added
 
 - System apps in App Shortcuts: Finder, System Settings, Calculator, and other

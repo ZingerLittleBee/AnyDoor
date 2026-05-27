@@ -3,62 +3,60 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.6.0</title>
+            <pubDate>Wed, 27 May 2026 19:58:22 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.6.0</sparkle:version>
+            <sparkle:shortVersionString>1.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- System apps in App Shortcuts: Finder, System Settings, Calculator, and other
+  built-ins from `/System/Applications` or `/System/Library/CoreServices/Finder.app`
+  can now be bound to global hotkeys. A new `InstalledAppsScanner` enumerates
+  `/Applications`, `/System/Applications`, both `Utilities` subdirs, and
+  `~/Applications`, plus an explicit probe for Finder. The previous
+  `NSOpenPanel` (locked to `/Applications`) is replaced by a Spotlight-style
+  floating picker — borderless rounded `NSPanel` positioned near the top of
+  the active screen with a thick-material background, a large search field,
+  single-click selection, click-outside / Esc dismissal, and already-bound
+  apps automatically filtered out. Arrow keys move the highlighted row,
+  Enter selects, and a panel-level `NSEvent` key monitor intercepts arrow /
+  Return / Escape before the focused `TextField` can consume them so the
+  search input stays the keyboard target throughout.
+- Command Palette: a global launcher-style panel that surfaces every directly
+  invocable menu bar item — built-in toggles/actions, window-layout children,
+  and visible app shortcuts — grouped into labelled sections (Commands /
+  Window Layout / Applications) with uppercase muted headers. Configurable
+  trigger hotkey lives in Settings → General → Command Palette and is stored
+  via `CommandPaletteService` (UserDefaults); the snapshot is threaded into
+  `PanelStore.rebuildHotkeySnapshots` so the CGEvent tap picks it up without
+  a relaunch. Re-pressing the trigger while the palette is open dismisses it,
+  matching macOS Spotlight. Selection routes through `PanelStore.dispatch`,
+  so app rows toggle their target app and built-ins fire their normal
+  toggle / run path. Section headers are wrapped into each row's `id` bounds
+  so `ScrollViewReader` brings the label and row into view together when
+  navigating across groups, and `safeAreaInset` keeps an 8pt visual gap at
+  the top and bottom edges so the highlighted row never touches the panel
+  border.
+
+### Fixed
+
+- Settings → 面板: the Display Brightness sub-row hotkey recorder now lines
+  up with the Window Layout sub-row recorders along the panel's right edge
+  (was missing the 20pt trailing inset that the layout rows used).
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.6.0/AnyDoor-1.6.0.zip" length="5939862" type="application/octet-stream" sparkle:edSignature="rUBwweyOv4hG3kHCLRHexYQa0bAP8CtrYcJuSYM3V5Lv++OC2Xq/njmA4p3oRuK/MSONDCmzDqQbbeCDNKcMBg=="/>
+        </item>
+        <item>
             <title>1.5.0</title>
             <pubDate>Wed, 27 May 2026 15:35:13 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.5.0</sparkle:version>
             <sparkle:shortVersionString>1.5.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Added
-
-- Hyper Key: pick a single physical key (Caps Lock, left/right modifier, or
-  F1–F12) and have it generate the `⌃⌥⌘` (or `⌃⌥⇧⌘`) combination, providing
-  a conflict-free shortcut layer in the spirit of Raycast's Hyper Key.
-  Configured in Settings → General with a green dot indicating the mapping
-  is live. Shortcuts bound to the Hyper combo render as `✦Key` in the
-  recorder, panel, and conflict alerts. `hidutil` remaps the trigger to a
-  reserved F19 (keyCode 80); the existing CGEvent tap maintains a
-  `hyperHeld` state machine, augments companion `keyDown` events with the
-  hyper modifier mask, suppresses the corresponding `keyUp`, and skips
-  Quick Press on a held release. A Quick Press picker chooses what a solo
-  tap does: nothing, Escape, or the trigger's original key (Caps Lock toggle
-  is emitted via `IOHIDPostEvent` to bypass our own sentinel-tagged tap).
-  Launch is split into an unconditional `reconcile` (only removes our own
-  hidutil residue, requires no permission) and a tap-gated `apply`, so a
-  crash + revoked Accessibility combo can never leave the user's keyboard
-  bricked. A 2-second watchdog observes tap health; emergency-clear paths
-  are token-guarded against concurrent `setTrigger` so a stale revert
-  cannot overwrite a fresh apply.
-- Hotkey recorder: pressed modifiers now render live while recording
-  instead of only appearing at commit time, and the Hyper trigger (when
-  configured) acts as a modifier in the recorder — pressing it shows ✦,
-  pressing it + a letter commits the combo as `✦Key`. Trigger detection
-  routes through the existing HotkeyService tap rather than suspending it,
-  because Caps-Lock-sourced F19 doesn't always survive a disabled tap on
-  every macOS build. The tap stays active in a "recording" mode that
-  suppresses bound-hotkey dispatch and Quick Press while still reporting
-  `hyperHeld` to the recorder; the recorder reads the authoritative
-  `isHyperHeld` synchronously at commit time so an async observer dispatch
-  cannot drop ✦ folding.
-
-### Fixed
-
-- App activation: switching to another app via a hotkey now routes through
-  `NSWorkspace.openApplication` (Launch Services) instead of
-  `NSRunningApplication.activate()`. On macOS 14+ the latter is silently
-  ignored when called from an `.accessory` app while a regular app holds
-  keyboard focus, so a hotkey pressed inside e.g. Warp would toggle the
-  current app via `hide()` (no activation right required) yet do nothing
-  when targeting a different app. The Launch Services path inherits user
-  activation rights and matches the route Raycast/Alfred use.
-- Settings: newly added app rows render an empty hotkey recorder showing
-  the placeholder text instead of literal `Key(-1)`. The sentinel `-1`
-  keyCode used to flag "not yet bound" now projects to a `nil`
-  `HotkeyDescriptor` in the panel, so the recorder picks its unbound
-  branch.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.5.0/AnyDoor-1.5.0.zip" length="5729418" type="application/octet-stream" sparkle:edSignature="pT/Am7RhKXBezIFPaas4yS+7obhcM1F6BGKHHxPXG1vyDNMtU8UpAKufSu7lrpbEQY8TmXqmouLNPQ1JyCreCA=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.5.0/AnyDoor-1.5.0.zip" length="5729418" type="application/octet-stream" sparkle:edSignature="pT/Am7RhKXBezIFPaas4yS+7obhcM1F6BGKHHxPXG1vyDNMtU8UpAKufSu7lrpbEQY8TmXqmouLNPQ1JyCreCA=="/>
         </item>
         <item>
             <title>1.4.0</title>
@@ -68,15 +66,6 @@
             <sparkle:shortVersionString>1.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.4.0/AnyDoor-1.4.0.zip" length="5586443" type="application/octet-stream" sparkle:edSignature="dSlJZOjuWMhwlha/gDCqdwNtm4TiJ1+qfHttORJOEqXGr8lBr734c0W6woEpROozIoj8sSVCTdWLPJartnAsBw=="/>
-        </item>
-        <item>
-            <title>1.3.1</title>
-            <pubDate>Mon, 25 May 2026 12:33:29 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.3.1</sparkle:version>
-            <sparkle:shortVersionString>1.3.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.3.1/AnyDoor-1.3.1.zip" length="5465882" type="application/octet-stream" sparkle:edSignature="FBRLOe68Az44DAo1iF4Ei4VRPZnDm9cxEfnSR0jdZyBbRtIH3SY7gCYIEsC7KD0UDtDfpCRBh2OyGfeYuENmBA=="/>
         </item>
         <item>
             <title>1.2.0</title>
