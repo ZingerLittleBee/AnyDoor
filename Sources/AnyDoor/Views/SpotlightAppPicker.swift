@@ -24,11 +24,15 @@ struct SpotlightAppPicker: View {
         VStack(spacing: 0) {
             searchField
 
-            if !filteredApps.isEmpty {
-                Divider().opacity(0.4)
+            Divider().opacity(0.4)
+
+            if filteredApps.isEmpty {
+                emptyState
+            } else {
                 appList
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(.thickMaterial)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -37,6 +41,17 @@ struct SpotlightAppPicker: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear { searchFocused = true }
         .onExitCommand(perform: onCancel)
+    }
+
+    private var emptyState: some View {
+        VStack {
+            Spacer()
+            LocalizedText(.settingsAppPickerEmpty)
+                .font(.system(size: 14))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
     }
 
     private var searchField: some View {
@@ -81,7 +96,7 @@ struct SpotlightAppPicker: View {
             }
             .padding(.vertical, 4)
         }
-        .frame(maxHeight: 360)
+        .frame(minHeight: 320, maxHeight: .infinity)
     }
 }
 
