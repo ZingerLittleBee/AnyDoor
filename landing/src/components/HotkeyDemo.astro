@@ -32,7 +32,17 @@ const keyWidth = (k: string, ri = 0) => {
     <span data-i18n-zh>{copy.demo.lede.zh}</span><span data-i18n-en>{copy.demo.lede.en}</span>
   </p>
 
-  <div class="hkstage">
+  <div class="hkstage" data-mode="fkeys">
+    <div class="mode-tabs" role="tablist">
+      <button class="mode-tab is-active" data-tab="fkeys" type="button" aria-selected="true">
+        <span data-i18n-zh>{copy.demo.modeFkeys.zh}</span><span data-i18n-en>{copy.demo.modeFkeys.en}</span>
+      </button>
+      <button class="mode-tab" data-tab="hyper" type="button" aria-selected="false">
+        <span class="hyper-glyph">✦</span>
+        <span data-i18n-zh>{copy.demo.modeHyper.zh}</span><span data-i18n-en>{copy.demo.modeHyper.en}</span>
+      </button>
+    </div>
+
     <div class="hkscreen" id="hkscreen">
       <div class="hkscreen-menu">
         <span class="apple-mini" />
@@ -106,6 +116,7 @@ const keyWidth = (k: string, ri = 0) => {
   const screen = document.getElementById('hkscreen')!;
   const winwrap = document.getElementById('hkscreen-winwrap')!;
   const appNameEl = document.getElementById('hkscreen-appname')!;
+  const stage = document.querySelector<HTMLElement>('.hkstage')!;
 
   let openApp: typeof hotkeyApps[number] | null = null;
   let pressTimer: number | undefined;
@@ -192,4 +203,19 @@ const keyWidth = (k: string, ri = 0) => {
   };
   autoTimer = window.setInterval(tick, 4600);
   setTimeout(tick, 1500);
+
+  // Mode tabs (basic swap — autoplay rewiring lives in Task 7).
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.mode-tab');
+  tabs.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.tab as 'fkeys' | 'hyper';
+      if (stage.dataset.mode === next) return;
+      tabs.forEach((t) => {
+        const active = t.dataset.tab === next;
+        t.classList.toggle('is-active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      stage.dataset.mode = next;
+    });
+  });
 </script>
