@@ -87,9 +87,17 @@ const keyWidth = (k: string, ri = 0) => {
         </div>
         {[row1, row2, row3, row4].map((r, ri) => (
           <div class="kbrow">
-            {r.map((k) => (
-              <div class="key" data-key={k} style={`min-width: ${keyWidth(k, ri + 1)}px`}>{k}</div>
-            ))}
+            {r.map((k) => {
+              const isHyper = ['S', 'F', 'L', 'M'].includes(k);
+              return (
+                <div
+                  class="key"
+                  data-key={k}
+                  data-hyper-key={isHyper ? '' : undefined}
+                  style={`min-width: ${keyWidth(k, ri + 1)}px`}
+                >{k}</div>
+              );
+            })}
           </div>
         ))}
         <div class="kbrow">

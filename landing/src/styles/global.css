@@ -452,6 +452,36 @@ h2.sec-h{
   font-weight: 700;
 }
 
+/* Hyper mode keyboard visuals */
+@keyframes hyperPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .65; }
+}
+.hkstage[data-mode="hyper"] .key[data-key="⇪"]{
+  background: linear-gradient(180deg, #6a3acc, #3a1f80);
+  border-color: rgba(157,90,255,.6);
+  box-shadow: 0 0 0 .5px rgba(157,90,255,.5), 0 0 22px rgba(157,90,255,.45);
+  color: #fff;
+  animation: hyperPulse 1.8s ease-in-out infinite;
+}
+.hkstage[data-mode="hyper"] .key.is-hint{
+  box-shadow: none;
+  border-color: var(--color-line-strong);
+}
+.hkstage[data-mode="hyper"] .key[data-hyper-key]{
+  box-shadow: 0 0 0 .5px rgba(157,90,255,.5), 0 0 22px rgba(157,90,255,.4);
+  border-color: rgba(157,90,255,.5);
+}
+.hkstage[data-mode="hyper"] .key[data-key="⇪"].is-pressed,
+.hkstage[data-mode="hyper"] .key[data-hyper-key].is-pressed{
+  background: linear-gradient(135deg, #9d5aff, #5e9bff);
+  border-color: #b07eff;
+  box-shadow: 0 0 28px rgba(157,90,255,.7);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hkstage[data-mode="hyper"] .key[data-key="⇪"]{ animation: none; }
+}
+
 /* ─────────────────────────── Toggle cards ─────────────────────────── */
 .toggles-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px}
 .tcard{
