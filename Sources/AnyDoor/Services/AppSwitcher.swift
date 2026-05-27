@@ -7,14 +7,23 @@ enum AppSwitcher {
             if app.isActive {
                 app.hide()
             } else {
-                app.activate()
+                // Route activation through Launch Services rather than
+                // NSRunningApplication.activate(). The latter is silently
+                // ignored on macOS 14+ when called from an .accessory app
+                // while another regular app holds keyboard focus (observed
+                // with Warp, also reported for Ghostty / iTerm). openApplication
+                // is itself a privileged Launch Services call and is allowed
+                // to steal focus on behalf of the user.
+                activate(at: URL(fileURLWithPath: appPath))
             }
         } else {
-            let url = URL(fileURLWithPath: appPath)
-            NSWorkspace.shared.openApplication(
-                at: url,
-                configuration: NSWorkspace.OpenConfiguration()
-            ) { _, _ in }
+            activate(at: URL(fileURLWithPath: appPath))
         }
+    }
+
+    private static func activate(at url: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: config) { _, _ in }
     }
 }
