@@ -45,7 +45,9 @@ struct HotkeyRecorder: View {
     @State private var instanceID = UUID()
     @State private var isRecording = false
     @State private var keyMonitor: Any?
+    @State private var keyUpMonitor: Any?
     @State private var clickMonitor: Any?
+    @State private var hyperHeld = false
     @State private var fieldHovered = false
 
     var body: some View {
@@ -125,14 +127,22 @@ struct HotkeyRecorder: View {
         isRecording = true
         HotkeyService.shared.suspend()
 
+        let virtualKey = HyperKeyService.shared.virtualKeyCode
+        let hyperFlags = HyperKeyService.shared.hyperModifierFlags
+
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
                 | CGEventFlags.maskControl.rawValue
                 | CGEventFlags.maskAlternate.rawValue
                 | CGEventFlags.maskShift.rawValue
             let cgFlags = event.cgEvent?.flags ?? []
-            let mods = Int(cgFlags.rawValue & modMask)
+            var mods = Int(cgFlags.rawValue & modMask)
             let code = Int(event.keyCode)
+
+            if virtualKey >= 0 && code == virtualKey {
+                hyperHeld = true
+                return nil
+            }
 
             if code == 53 { // ESC
                 stopRecording()
@@ -145,11 +155,22 @@ struct HotkeyRecorder: View {
                 return nil
             }
 
+            if hyperHeld { mods |= hyperFlags }
+
             let new = HotkeyDescriptor(keyCode: code, modifierFlags: mods)
             hotkey = new
             onChange(new)
             stopRecording()
             return nil
+        }
+
+        // Track virtual F-key release to reset hyperHeld; pass non-virtual keys through.
+        keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
+            if virtualKey >= 0 && Int(event.keyCode) == virtualKey {
+                hyperHeld = false
+                return nil
+            }
+            return event
         }
 
         // Any mouse click cancels recording. If the click lands on this same
@@ -167,10 +188,15 @@ struct HotkeyRecorder: View {
             keyMonitor = nil
             HotkeyService.shared.resume()
         }
+        if let m = keyUpMonitor {
+            NSEvent.removeMonitor(m)
+            keyUpMonitor = nil
+        }
         if let cm = clickMonitor {
             NSEvent.removeMonitor(cm)
             clickMonitor = nil
         }
+        hyperHeld = false
         isRecording = false
         if notifyCoordinator {
             HotkeyRecordingCoordinator.shared.end(id: instanceID)
