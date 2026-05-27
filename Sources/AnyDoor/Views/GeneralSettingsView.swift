@@ -69,7 +69,7 @@ struct GeneralSettingsView: View {
                         }
                     } label: { EmptyView() }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 200)
+                    .fixedSize()
                     .disabled(hyperKey.isApplying)
                 } label: {
                     HStack(spacing: 6) {
@@ -94,7 +94,7 @@ struct GeneralSettingsView: View {
                         }
                     } label: { EmptyView() }
                     .pickerStyle(.menu)
-                    .frame(maxWidth: 200)
+                    .fixedSize()
                     .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
                 } label: { LocalizedText(.settingsGeneralHyperKeyQuickPress) }
 
