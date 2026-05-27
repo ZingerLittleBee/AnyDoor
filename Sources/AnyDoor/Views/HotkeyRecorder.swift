@@ -49,6 +49,7 @@ struct HotkeyRecorder: View {
     @State private var clickMonitor: Any?
     @State private var hyperHeld = false
     @State private var fieldHovered = false
+    @State private var hyperKey = HyperKeyService.shared
 
     var body: some View {
         // HStack (not ZStack) so the clear Button and the label own disjoint hit
@@ -105,7 +106,7 @@ struct HotkeyRecorder: View {
                 .foregroundStyle(.secondary)
                 .italic()
         } else if let hk = hotkey {
-            Text(hk.displayString)
+            Text(hk.displayString(hyperFlags: hyperKey.hyperModifierFlags))
                 .font(.callout.weight(.medium))
                 .tracking(1.5)
                 .foregroundStyle(.primary)

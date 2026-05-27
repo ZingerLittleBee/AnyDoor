@@ -24,7 +24,7 @@ struct PanelSettingsView: View {
         .alert(item: $conflictAlert) { alert in
             Alert(
                 title: Text(L(.settingsPanelHotkeyConflictTitle)),
-                message: Text(L(.settingsPanelHotkeyConflictMessage, alert.hotkey.displayString, alert.existingTitle)),
+                message: Text(L(.settingsPanelHotkeyConflictMessage, alert.hotkey.displayString(hyperFlags: HyperKeyService.shared.hyperModifierFlags), alert.existingTitle)),
                 primaryButton: .default(Text(L(.settingsPanelHotkeyConflictReplace))) {
                     alert.onReplace()
                 },
