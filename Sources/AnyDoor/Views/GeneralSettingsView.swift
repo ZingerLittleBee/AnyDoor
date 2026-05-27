@@ -119,7 +119,12 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                LabeledContent {
+                // Use HStack (not LabeledContent) so the row's hit-target
+                // doesn't swallow taps before HotkeyRecorder's onTapGesture
+                // gets a chance to start recording.
+                HStack {
+                    LocalizedText(.settingsGeneralCommandPaletteHotkey)
+                    Spacer()
                     HotkeyRecorder(hotkey: Binding(
                         get: { commandPalette.hotkey },
                         set: { commandPalette.setHotkey($0) }
@@ -127,7 +132,7 @@ struct GeneralSettingsView: View {
                         commandPalette.setHotkey(newValue)
                     }
                     .frame(width: 150, alignment: .trailing)
-                } label: { LocalizedText(.settingsGeneralCommandPaletteHotkey) }
+                }
 
                 LocalizedText(.settingsGeneralCommandPaletteDescription)
                     .font(.caption)
