@@ -21,7 +21,7 @@ versioning.
   Enter selects, and a panel-level `NSEvent` key monitor intercepts arrow /
   Return / Escape before the focused `TextField` can consume them so the
   search input stays the keyboard target throughout.
-- Command Palette: a Raycast-style global panel that surfaces every directly
+- Command Palette: a global launcher-style panel that surfaces every directly
   invocable menu bar item — built-in toggles/actions, window-layout children,
   and visible app shortcuts — grouped into labelled sections (Commands /
   Window Layout / Applications) with uppercase muted headers. Configurable
@@ -49,7 +49,7 @@ versioning.
 
 - Hyper Key: pick a single physical key (Caps Lock, left/right modifier, or
   F1–F12) and have it generate the `⌃⌥⌘` (or `⌃⌥⇧⌘`) combination, providing
-  a conflict-free shortcut layer in the spirit of Raycast's Hyper Key.
+  a conflict-free shortcut layer.
   Configured in Settings → General with a green dot indicating the mapping
   is live. Shortcuts bound to the Hyper combo render as `✦Key` in the
   recorder, panel, and conflict alerts. `hidutil` remaps the trigger to a
@@ -86,7 +86,7 @@ versioning.
   keyboard focus, so a hotkey pressed inside e.g. Warp would toggle the
   current app via `hide()` (no activation right required) yet do nothing
   when targeting a different app. The Launch Services path inherits user
-  activation rights and matches the route Raycast/Alfred use.
+  activation rights and matches the route other launcher apps use.
 - Settings: newly added app rows render an empty hotkey recorder showing
   the placeholder text instead of literal `Key(-1)`. The sentinel `-1`
   keyCode used to flag "not yet bound" now projects to a `nil`
