@@ -1,17 +1,26 @@
 import SwiftUI
 import AppKit
 
-struct SpotlightAppPicker: View {
-    let apps: [InstalledApp]
+/// Mutable state shared between the SwiftUI picker view and the AppKit window
+/// controller that hosts it. The controller installs an NSEvent key monitor
+/// (so arrow keys never reach the focused `TextField`) and writes into this
+/// model; the view observes it via `@Observable`.
+@MainActor
+@Observable
+final class SpotlightPickerState {
+    var query: String = ""
+    var selectedIndex: Int = 0
+
+    let allApps: [InstalledApp]
     let excludedBundleIDs: Set<String>
-    let onSelect: (InstalledApp) -> Void
-    let onCancel: () -> Void
 
-    @State private var query: String = ""
-    @FocusState private var searchFocused: Bool
+    init(apps: [InstalledApp], excluded: Set<String>) {
+        self.allApps = apps
+        self.excludedBundleIDs = excluded
+    }
 
-    private var filteredApps: [InstalledApp] {
-        let pool = apps.filter { !excludedBundleIDs.contains($0.bundleID) }
+    var filteredApps: [InstalledApp] {
+        let pool = allApps.filter { !excludedBundleIDs.contains($0.bundleID) }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return pool }
         return pool.filter { app in
@@ -20,13 +29,39 @@ struct SpotlightAppPicker: View {
         }
     }
 
+    func moveDown() {
+        let count = filteredApps.count
+        guard count > 0 else { return }
+        selectedIndex = min(selectedIndex + 1, count - 1)
+    }
+
+    func moveUp() {
+        let count = filteredApps.count
+        guard count > 0 else { return }
+        selectedIndex = max(selectedIndex - 1, 0)
+    }
+
+    func commitSelection() -> InstalledApp? {
+        let list = filteredApps
+        guard list.indices.contains(selectedIndex) else { return list.first }
+        return list[selectedIndex]
+    }
+}
+
+struct SpotlightAppPicker: View {
+    @Bindable var state: SpotlightPickerState
+    let onSelect: (InstalledApp) -> Void
+    let onCancel: () -> Void
+
+    @FocusState private var searchFocused: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             searchField
 
             Divider().opacity(0.4)
 
-            if filteredApps.isEmpty {
+            if state.filteredApps.isEmpty {
                 emptyState
             } else {
                 appList
@@ -40,7 +75,43 @@ struct SpotlightAppPicker: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear { searchFocused = true }
-        .onExitCommand(perform: onCancel)
+        .onChange(of: searchFocused) { _, focused in
+            // Search field must always be the keyboard target — re-focus if
+            // something (e.g. a stray hit-test in the panel chrome) steals it.
+            if !focused { searchFocused = true }
+        }
+        .onChange(of: state.query) { _, _ in
+            state.selectedIndex = 0
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(.secondary)
+            TextField(L(.settingsAppPickerSearchPlaceholder), text: $state.query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 22, weight: .regular))
+                .focused($searchFocused)
+                .onSubmit {
+                    if let app = state.commitSelection() {
+                        onSelect(app)
+                    }
+                }
+            if !state.query.isEmpty {
+                Button {
+                    state.query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
 
     private var emptyState: some View {
@@ -54,55 +125,36 @@ struct SpotlightAppPicker: View {
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
     }
 
-    private var searchField: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(.secondary)
-            TextField(L(.settingsAppPickerSearchPlaceholder), text: $query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 22, weight: .regular))
-                .focused($searchFocused)
-                .onSubmit {
-                    if let app = filteredApps.first {
-                        onSelect(app)
+    private var appList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(state.filteredApps.enumerated()), id: \.element.bundleID) { index, app in
+                        SpotlightRow(
+                            app: app,
+                            isSelected: index == state.selectedIndex,
+                            onSelect: { onSelect(app) }
+                        )
+                        .id(app.bundleID)
                     }
                 }
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
+                .padding(.vertical, 4)
             }
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
-    }
-
-    private var appList: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(filteredApps.enumerated()), id: \.element.bundleID) { index, app in
-                    SpotlightRow(
-                        app: app,
-                        isPrimary: index == 0,
-                        onSelect: { onSelect(app) }
-                    )
+            .frame(minHeight: 320, maxHeight: .infinity)
+            .onChange(of: state.selectedIndex) { _, newIndex in
+                let apps = state.filteredApps
+                guard apps.indices.contains(newIndex) else { return }
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo(apps[newIndex].bundleID, anchor: .center)
                 }
             }
-            .padding(.vertical, 4)
         }
-        .frame(minHeight: 320, maxHeight: .infinity)
     }
 }
 
 private struct SpotlightRow: View {
     let app: InstalledApp
-    let isPrimary: Bool
+    let isSelected: Bool
     let onSelect: () -> Void
 
     @State private var isHovering = false
@@ -149,11 +201,11 @@ private struct SpotlightRow: View {
     }
 
     private var rowBackground: Color {
-        if isHovering {
-            return Color.accentColor.opacity(0.22)
+        if isSelected {
+            return Color.accentColor.opacity(0.25)
         }
-        if isPrimary {
-            return Color.primary.opacity(0.06)
+        if isHovering {
+            return Color.primary.opacity(0.08)
         }
         return Color.clear
     }

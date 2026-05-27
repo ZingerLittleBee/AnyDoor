@@ -6,6 +6,8 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
     static let shared = SpotlightAppPickerWindowController()
 
     private var onSelect: ((InstalledApp) -> Void)?
+    private var state: SpotlightPickerState?
+    private var keyMonitor: Any?
 
     private init() {
         let panel = NSPanel(
@@ -45,19 +47,16 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
         onSelect: @escaping (InstalledApp) -> Void
     ) {
         self.onSelect = onSelect
+        let pickerState = SpotlightPickerState(apps: apps, excluded: excluded)
+        self.state = pickerState
 
         let view = SpotlightAppPicker(
-            apps: apps,
-            excludedBundleIDs: excluded,
+            state: pickerState,
             onSelect: { [weak self] app in
-                guard let self else { return }
-                self.onSelect?(app)
-                self.onSelect = nil
-                self.close()
+                self?.commit(app)
             },
             onCancel: { [weak self] in
-                self?.onSelect = nil
-                self?.close()
+                self?.cancel()
             }
         )
 
@@ -65,6 +64,8 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
         host.frame = window?.contentLayoutRect ?? .zero
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
+
+        installKeyMonitor()
 
         positionAtTopCenter()
         window?.makeKeyAndOrderFront(nil)
@@ -82,7 +83,69 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
         window.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        // Local monitor: intercepts key events for THIS app before they reach
+        // the focused responder. Returning nil swallows the event; returning
+        // the event lets it propagate (so typing into the search field works).
+        // We only pass the Sendable `keyCode` across the MainActor boundary —
+        // NSEvent itself isn't Sendable under Swift 6 strict concurrency.
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let keyCode = event.keyCode
+            let consumed = MainActor.assumeIsolated {
+                self?.handle(keyCode: keyCode) ?? false
+            }
+            return consumed ? nil : event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let monitor = keyMonitor {
+            NSEvent.removeMonitor(monitor)
+            keyMonitor = nil
+        }
+    }
+
+    /// Returns true if the key was consumed.
+    private func handle(keyCode: UInt16) -> Bool {
+        guard let window, window.isVisible, window.isKeyWindow else { return false }
+        guard let state else { return false }
+
+        switch keyCode {
+        case 125: // arrow down
+            state.moveDown()
+            return true
+        case 126: // arrow up
+            state.moveUp()
+            return true
+        case 36, 76: // return, numeric enter
+            if let app = state.commitSelection() {
+                commit(app)
+            }
+            return true
+        case 53: // escape
+            cancel()
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func commit(_ app: InstalledApp) {
+        let callback = onSelect
+        onSelect = nil
+        close()
+        callback?(app)
+    }
+
+    private func cancel() {
+        onSelect = nil
+        close()
+    }
+
     func windowWillClose(_ notification: Notification) {
+        removeKeyMonitor()
+        state = nil
         onSelect = nil
     }
 
