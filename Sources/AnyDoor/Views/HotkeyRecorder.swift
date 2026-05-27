@@ -129,14 +129,17 @@ struct HotkeyRecorder: View {
 
     /// Renders the live modifier glyphs while recording. Returns "" when no
     /// modifiers are currently held — the caller then shows the static prompt.
-    /// Hyper key collapses to "✦"; otherwise standard ⌃⌥⇧⌘ ordering.
+    /// Hyper collapses to "✦" when either (a) the trigger key's keyDown reached
+    /// us directly (hyperHeld) or (b) the synthesized hyper modifier mask is
+    /// already present in the real flags stream.
     private func liveModifierGlyphs() -> String {
         let hyperFlags = hyperKey.hyperModifierFlags
-        if hyperHeld && hyperFlags != 0 {
+        let effective = hyperHeld ? (liveModifiers | hyperFlags) : liveModifiers
+        if hyperFlags != 0 && effective == hyperFlags {
             return "✦"
         }
         var parts: [String] = []
-        let flags = NSEvent.ModifierFlags(rawValue: UInt(liveModifiers))
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(effective))
         if flags.contains(.control) { parts.append("⌃") }
         if flags.contains(.option) { parts.append("⌥") }
         if flags.contains(.shift) { parts.append("⇧") }
@@ -155,18 +158,22 @@ struct HotkeyRecorder: View {
         isRecording = true
         HotkeyService.shared.suspend()
 
-        let virtualKey = HyperKeyService.shared.virtualKeyCode
-        let hyperFlags = HyperKeyService.shared.hyperModifierFlags
+        let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
+            | CGEventFlags.maskControl.rawValue
+            | CGEventFlags.maskAlternate.rawValue
+            | CGEventFlags.maskShift.rawValue
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
-                | CGEventFlags.maskControl.rawValue
-                | CGEventFlags.maskAlternate.rawValue
-                | CGEventFlags.maskShift.rawValue
+            // Read hyper state dynamically — isActive may flip during a long
+            // recording session if the user toggles Hyper from a sibling
+            // settings sheet (rare, but cheap to defend against).
+            let virtualKey = hyperKey.virtualKeyCode
+            let hyperFlags = hyperKey.hyperModifierFlags
             let cgFlags = event.cgEvent?.flags ?? []
             var mods = Int(cgFlags.rawValue & modMask)
             let code = Int(event.keyCode)
 
+            // Trigger keyDown — treat as a modifier press, never commit.
             if virtualKey >= 0 && code == virtualKey {
                 hyperHeld = true
                 return nil
@@ -183,7 +190,11 @@ struct HotkeyRecorder: View {
                 return nil
             }
 
-            if hyperHeld { mods |= hyperFlags }
+            // Hyper acts like a modifier — if held (or its synthesized mask is
+            // already present in the flag stream), fold it in before commit.
+            if hyperHeld || (hyperFlags != 0 && (mods & hyperFlags) == hyperFlags) {
+                mods |= hyperFlags
+            }
 
             let new = HotkeyDescriptor(keyCode: code, modifierFlags: mods)
             hotkey = new
@@ -194,10 +205,6 @@ struct HotkeyRecorder: View {
 
         // Live preview of the currently-held modifiers so the field reflects
         // the combo as the user builds it, rather than only at commit time.
-        let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
-            | CGEventFlags.maskControl.rawValue
-            | CGEventFlags.maskAlternate.rawValue
-            | CGEventFlags.maskShift.rawValue
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
             let cgFlags = event.cgEvent?.flags ?? []
             liveModifiers = Int(cgFlags.rawValue & modMask)
@@ -206,6 +213,7 @@ struct HotkeyRecorder: View {
 
         // Track virtual F-key release to reset hyperHeld; pass non-virtual keys through.
         keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
+            let virtualKey = hyperKey.virtualKeyCode
             if virtualKey >= 0 && Int(event.keyCode) == virtualKey {
                 hyperHeld = false
                 return nil
