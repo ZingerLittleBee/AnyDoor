@@ -152,10 +152,10 @@ struct SpotlightAppPicker: View {
             .onChange(of: state.selectedIndex) { _, newIndex in
                 let apps = state.filteredApps
                 guard apps.indices.contains(newIndex) else { return }
-                // Anchor to .bottom so the highlighted row stays pinned to the
-                // bottom edge of the visible area while arrow-down navigation
-                // advances — avoids the center-anchored "jump-to-middle" jitter.
-                proxy.scrollTo(apps[newIndex].bundleID, anchor: .bottom)
+                // Anchor at 92% of vertical instead of exactly .bottom so the
+                // highlighted row keeps a small breathing gap above the panel
+                // edge while arrow-down navigation advances.
+                proxy.scrollTo(apps[newIndex].bundleID, anchor: UnitPoint(x: 0.5, y: 0.92))
             }
         }
     }
