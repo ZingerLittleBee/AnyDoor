@@ -32,7 +32,17 @@ const keyWidth = (k: string, ri = 0) => {
     <span data-i18n-zh>{copy.demo.lede.zh}</span><span data-i18n-en>{copy.demo.lede.en}</span>
   </p>
 
-  <div class="hkstage">
+  <div class="hkstage" data-mode="fkeys">
+    <div class="mode-tabs" role="tablist">
+      <button class="mode-tab is-active" data-tab="fkeys" type="button" aria-selected="true">
+        <span data-i18n-zh>{copy.demo.modeFkeys.zh}</span><span data-i18n-en>{copy.demo.modeFkeys.en}</span>
+      </button>
+      <button class="mode-tab" data-tab="hyper" type="button" aria-selected="false">
+        <span class="hyper-glyph">✦</span>
+        <span data-i18n-zh>{copy.demo.modeHyper.zh}</span><span data-i18n-en>{copy.demo.modeHyper.en}</span>
+      </button>
+    </div>
+
     <div class="hkscreen" id="hkscreen">
       <div class="hkscreen-menu">
         <span class="apple-mini" />
@@ -46,11 +56,16 @@ const keyWidth = (k: string, ri = 0) => {
         </span>
       </div>
 
-      <div class="hkscreen-hint">
+      <div class="hkscreen-hint hint-fkeys">
         <span data-i18n-zh>{copy.demo.hintScreen.zh}</span><span data-i18n-en>{copy.demo.hintScreen.en}</span>
+      </div>
+      <div class="hkscreen-hint hint-hyper">
+        <span data-i18n-zh>{copy.demo.hyperHintScreen.zh}</span><span data-i18n-en>{copy.demo.hyperHintScreen.en}</span>
       </div>
 
       <div class="winwrap" id="hkscreen-winwrap" />
+      <div class="hyper-badge" id="hyper-badge" aria-hidden="true"></div>
+      <div class="hyper-toast" id="hyper-toast" aria-hidden="true"></div>
 
       <div class="hkscreen-dock">
         {hotkeyApps.map((app) => (
@@ -77,9 +92,17 @@ const keyWidth = (k: string, ri = 0) => {
         </div>
         {[row1, row2, row3, row4].map((r, ri) => (
           <div class="kbrow">
-            {r.map((k) => (
-              <div class="key" data-key={k} style={`min-width: ${keyWidth(k, ri + 1)}px`}>{k}</div>
-            ))}
+            {r.map((k) => {
+              const isHyper = ['S', 'F', 'L', 'M'].includes(k);
+              return (
+                <div
+                  class="key"
+                  data-key={k}
+                  data-hyper-key={isHyper ? '' : undefined}
+                  style={`min-width: ${keyWidth(k, ri + 1)}px`}
+                >{k}</div>
+              );
+            })}
           </div>
         ))}
         <div class="kbrow">
@@ -92,20 +115,27 @@ const keyWidth = (k: string, ri = 0) => {
           <div class="key" style="min-width:48px">←</div>
         </div>
       </div>
-      <div class="hint-line">
+      <div class="hint-line hint-fkeys">
         <b><span data-i18n-zh>{copy.demo.hint.zh}</span><span data-i18n-en>{copy.demo.hint.en}</span></b>
         <span data-i18n-zh>{copy.demo.hintAfter.zh}</span><span data-i18n-en>{copy.demo.hintAfter.en}</span>
+      </div>
+      <div class="hint-line hint-hyper">
+        <span data-i18n-zh>{copy.demo.hyperHint.zh}</span><span data-i18n-en>{copy.demo.hyperHint.en}</span>
       </div>
     </div>
   </div>
 </section>
 
 <script>
-  import { hotkeyApps } from '../lib/data';
+  import { hotkeyApps, hyperBindings, type HyperBinding } from '../lib/data';
+  import { icons } from '../lib/icons';
 
   const screen = document.getElementById('hkscreen')!;
   const winwrap = document.getElementById('hkscreen-winwrap')!;
   const appNameEl = document.getElementById('hkscreen-appname')!;
+  const stage = document.querySelector<HTMLElement>('.hkstage')!;
+  const badge = document.getElementById('hyper-badge')!;
+  const toast = document.getElementById('hyper-toast')!;
 
   let openApp: typeof hotkeyApps[number] | null = null;
   let pressTimer: number | undefined;
@@ -192,4 +222,125 @@ const keyWidth = (k: string, ri = 0) => {
   };
   autoTimer = window.setInterval(tick, 4600);
   setTimeout(tick, 1500);
+
+  // ─── Hyper tab autoplay ──────────────────────────────────────────
+  let hyperTimer: number | undefined;
+  let hyperIdx = 0;
+  let hyperPhase: number[] = [];
+
+  const clearHyperPhase = () => {
+    hyperPhase.forEach((id) => window.clearTimeout(id));
+    hyperPhase = [];
+  };
+
+  const releaseHyperKeys = () => {
+    document.querySelectorAll<HTMLElement>('.hkstage[data-mode="hyper"] .key.is-pressed')
+      .forEach((el) => el.classList.remove('is-pressed'));
+    badge.classList.remove('show');
+    badge.textContent = '';
+    toast.classList.remove('show');
+    toast.innerHTML = '';
+    renderApp(null);
+  };
+
+  const renderHyperPayload = (b: HyperBinding) => {
+    if (b.kind === 'app') {
+      renderApp({
+        key: '',
+        name: b.name,
+        grad: b.grad,
+        letter: b.letter,
+        tag: b.tag,
+      });
+    } else {
+      const iconSvg = (icons as Record<string, () => string>)[b.icon]?.() ?? '';
+      toast.innerHTML = `
+        <div class="ico">${iconSvg}</div>
+        <div class="name">
+          <span data-i18n-zh>${b.name.zh}</span><span data-i18n-en>${b.name.en}</span>
+        </div>
+        <div class="state">
+          <span data-i18n-zh>${b.stateOn.zh}</span><span data-i18n-en>${b.stateOn.en}</span>
+        </div>`;
+      toast.classList.add('show');
+    }
+  };
+
+  const hyperTick = () => {
+    clearHyperPhase();
+    releaseHyperKeys();
+    const b = hyperBindings[hyperIdx % hyperBindings.length];
+    hyperIdx++;
+
+    const caps = document.querySelector<HTMLElement>('.key[data-key="⇪"]')!;
+    const letter = document.querySelector<HTMLElement>(`.key[data-key="${b.letter}"]`)!;
+
+    // Phase 1: trigger press (⇪ goes down)
+    hyperPhase.push(window.setTimeout(() => {
+      caps.classList.add('is-pressed');
+    }, 0));
+
+    // Phase 2: companion press + badge in
+    hyperPhase.push(window.setTimeout(() => {
+      letter.classList.add('is-pressed');
+      badge.textContent = `✦${b.letter}`;
+      badge.classList.add('show');
+    }, 280));
+
+    // Phase 3: payload
+    hyperPhase.push(window.setTimeout(() => {
+      renderHyperPayload(b);
+    }, 560));
+
+    // Phase 4: release keys (badge fades; payload lingers a beat)
+    hyperPhase.push(window.setTimeout(() => {
+      caps.classList.remove('is-pressed');
+      letter.classList.remove('is-pressed');
+      badge.classList.remove('show');
+    }, 1100));
+
+    // Phase 5: clear payload before next tick
+    hyperPhase.push(window.setTimeout(() => {
+      toast.classList.remove('show');
+      renderApp(null);
+    }, 3000));
+  };
+
+  // ─── Mode tabs (start/stop autoplay per tab) ─────────────────────
+  const stopFkeys = () => {
+    if (autoTimer) { window.clearInterval(autoTimer); autoTimer = undefined; }
+    clearTimeout(pressTimer);
+    document.querySelectorAll<HTMLElement>('.key.is-pressed').forEach((el) => el.classList.remove('is-pressed'));
+    renderApp(null);
+  };
+  const stopHyper = () => {
+    if (hyperTimer) { window.clearInterval(hyperTimer); hyperTimer = undefined; }
+    clearHyperPhase();
+    releaseHyperKeys();
+  };
+  const startFkeys = () => {
+    autoTimer = window.setInterval(tick, 4600);
+    window.setTimeout(tick, 800);
+  };
+  const startHyper = () => {
+    hyperIdx = 0;
+    hyperTimer = window.setInterval(hyperTick, 3400);
+    window.setTimeout(hyperTick, 800);
+  };
+
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.mode-tab');
+  tabs.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.tab as 'fkeys' | 'hyper';
+      if (stage.dataset.mode === next) return;
+      tabs.forEach((t) => {
+        const active = t.dataset.tab === next;
+        t.classList.toggle('is-active', active);
+        t.setAttribute('aria-selected', String(active));
+      });
+      stage.dataset.mode = next;
+      if (next === 'hyper') { stopFkeys(); startHyper(); }
+      else                  { stopHyper();  startFkeys(); }
+    });
+  });
 </script>

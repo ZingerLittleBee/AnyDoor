@@ -21,8 +21,8 @@ export const copy = {
     meta2: { zh: 'macOS 14+', en: 'macOS 14+' },
     meta3: { zh: 'MIT 协议', en: 'MIT License' },
     pills: {
-      zh: ['全局热键', '端口管理', '深色模式', '屏幕 OCR', '取色器', '识别二维码', 'Liquid Glass'],
-      en: ['Global hotkeys', 'Port manager', 'Dark mode', 'Screen OCR', 'Color picker', 'QR scan', 'Liquid Glass'],
+      zh: ['全局热键', '端口管理', '深色模式', '屏幕 OCR', '取色器', '识别二维码', 'Liquid Glass', 'Hyper Key'],
+      en: ['Global hotkeys', 'Port manager', 'Dark mode', 'Screen OCR', 'Color picker', 'QR scan', 'Liquid Glass', 'Hyper Key'],
     },
   },
 
@@ -40,6 +40,16 @@ export const copy = {
     menuFile: { zh: '文件', en: 'File' },
     menuEdit: { zh: '编辑', en: 'Edit' },
     menuView: { zh: '显示', en: 'View' },
+    modeFkeys: { zh: 'F 键模式', en: 'F-keys' },
+    modeHyper: { zh: 'Hyper Key', en: 'Hyper Key' },
+    hyperHint: {
+      zh: '按住 ⇪ 再按字母键 — Hyper 把单键变成一整层快捷键',
+      en: 'Hold ⇪ then a letter — Hyper turns one key into a whole shortcut layer',
+    },
+    hyperHintScreen: {
+      zh: '↓ ⇪ + S F L M 触发 Hyper',
+      en: '↓ ⇪ + S F L M for Hyper bindings',
+    },
   },
 
   toggles: {
