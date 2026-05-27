@@ -27,8 +27,8 @@ final class HyperKeyControllerTests: XCTestCase {
         ]
         let controller = HyperKeyController(runner: runner)
         let sig = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
-        XCTAssertEqual(sig.src, 0x07_0000_0039)
-        XCTAssertEqual(sig.dst, 0x07_0000_0068)
+        XCTAssertEqual(sig.src, HyperKeyTrigger.capsLock.hidUsage!)
+        XCTAssertEqual(sig.dst, HyperKeyVirtualKey.f19.hidUsage)
         XCTAssertTrue(controller.hasPersistedSignatures)
     }
 
@@ -46,7 +46,7 @@ final class HyperKeyControllerTests: XCTestCase {
         }
     }
 
-    func testApplyPersistsOldAndNewBeforeRMW() async throws {
+    func testApplyRevertsPersistedSetOnSetFailure() async throws {
         let runner = FakeCommandRunner()
         runner.responses = [
             // first apply: GET (empty) + SET (ok)
