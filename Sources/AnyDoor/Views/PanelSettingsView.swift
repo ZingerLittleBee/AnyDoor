@@ -319,18 +319,12 @@ struct PanelSettingsView: View {
             }
             return nil
         })
-        let onPick: (InstalledApp) -> Void = { app in
+        SpotlightAppPickerWindowController.shared.show(apps: apps, excluded: excluded) { app in
             PanelStore.shared.addAppShortcut(
                 appBundleID: app.bundleID,
                 appName: app.displayName,
                 appPath: app.path
             )
-        }
-        // Hold Option while clicking "+" to use the Spotlight-style picker.
-        if NSEvent.modifierFlags.contains(.option) {
-            SpotlightAppPickerWindowController.shared.show(apps: apps, excluded: excluded, onSelect: onPick)
-        } else {
-            AppPickerWindowController.shared.show(apps: apps, excluded: excluded, onSelect: onPick)
         }
     }
 
