@@ -173,7 +173,12 @@ struct CommandPalettePicker: View {
     private var entryList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                // Eager VStack (not Lazy) so ScrollViewReader.scrollTo always
+                // resolves to a fully-laid-out row, even when section headers
+                // appear above. With section grouping in play, Lazy layout
+                // caused selectedIndex changes to land the row past the
+                // visible bottom.
+                VStack(spacing: 0) {
                     ForEach(rowItems) { item in
                         if let key = item.headerTitleKey {
                             sectionHeader(titleKey: key, isFirst: item.isFirstSection)
@@ -193,7 +198,9 @@ struct CommandPalettePicker: View {
             .onChange(of: state.selectedIndex) { _, newIndex in
                 let entries = state.flatEntries
                 guard entries.indices.contains(newIndex) else { return }
-                proxy.scrollTo(entries[newIndex].id, anchor: UnitPoint(x: 0.5, y: 0.97))
+                // Center anchor: keeps the selected row in the middle of the
+                // visible area regardless of section headers above/below.
+                proxy.scrollTo(entries[newIndex].id, anchor: .center)
             }
         }
     }
