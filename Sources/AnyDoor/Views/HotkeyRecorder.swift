@@ -46,8 +46,10 @@ struct HotkeyRecorder: View {
     @State private var isRecording = false
     @State private var keyMonitor: Any?
     @State private var keyUpMonitor: Any?
+    @State private var flagsMonitor: Any?
     @State private var clickMonitor: Any?
     @State private var hyperHeld = false
+    @State private var liveModifiers: Int = 0
     @State private var fieldHovered = false
     @State private var hyperKey = HyperKeyService.shared
 
@@ -101,10 +103,18 @@ struct HotkeyRecorder: View {
         // All three states share `.caption` monospaced font so the field height
         // stays uniform regardless of binding state — only color/italic differ.
         if isRecording {
-            LocalizedText(.hotkeyRecorderPrompt)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .italic()
+            let liveGlyphs = liveModifierGlyphs()
+            if liveGlyphs.isEmpty {
+                LocalizedText(.hotkeyRecorderPrompt)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .italic()
+            } else {
+                Text(liveGlyphs)
+                    .font(.callout.weight(.medium))
+                    .tracking(1.5)
+                    .foregroundStyle(.primary)
+            }
         } else if let hk = hotkey {
             Text(hk.displayString(hyperFlags: hyperKey.hyperModifierFlags))
                 .font(.callout.weight(.medium))
@@ -115,6 +125,23 @@ struct HotkeyRecorder: View {
                 .font(.callout)
                 .foregroundStyle(.tertiary)
         }
+    }
+
+    /// Renders the live modifier glyphs while recording. Returns "" when no
+    /// modifiers are currently held — the caller then shows the static prompt.
+    /// Hyper key collapses to "✦"; otherwise standard ⌃⌥⇧⌘ ordering.
+    private func liveModifierGlyphs() -> String {
+        let hyperFlags = hyperKey.hyperModifierFlags
+        if hyperHeld && hyperFlags != 0 {
+            return "✦"
+        }
+        var parts: [String] = []
+        let flags = NSEvent.ModifierFlags(rawValue: UInt(liveModifiers))
+        if flags.contains(.control) { parts.append("⌃") }
+        if flags.contains(.option) { parts.append("⌥") }
+        if flags.contains(.shift) { parts.append("⇧") }
+        if flags.contains(.command) { parts.append("⌘") }
+        return parts.joined()
     }
 
     private func startRecording() {
@@ -165,6 +192,18 @@ struct HotkeyRecorder: View {
             return nil
         }
 
+        // Live preview of the currently-held modifiers so the field reflects
+        // the combo as the user builds it, rather than only at commit time.
+        let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
+            | CGEventFlags.maskControl.rawValue
+            | CGEventFlags.maskAlternate.rawValue
+            | CGEventFlags.maskShift.rawValue
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+            let cgFlags = event.cgEvent?.flags ?? []
+            liveModifiers = Int(cgFlags.rawValue & modMask)
+            return event
+        }
+
         // Track virtual F-key release to reset hyperHeld; pass non-virtual keys through.
         keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
             if virtualKey >= 0 && Int(event.keyCode) == virtualKey {
@@ -193,11 +232,16 @@ struct HotkeyRecorder: View {
             NSEvent.removeMonitor(m)
             keyUpMonitor = nil
         }
+        if let fm = flagsMonitor {
+            NSEvent.removeMonitor(fm)
+            flagsMonitor = nil
+        }
         if let cm = clickMonitor {
             NSEvent.removeMonitor(cm)
             clickMonitor = nil
         }
         hyperHeld = false
+        liveModifiers = 0
         isRecording = false
         if notifyCoordinator {
             HotkeyRecordingCoordinator.shared.end(id: instanceID)
