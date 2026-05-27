@@ -210,25 +210,85 @@ private func hotkeyCallback(
         return Unmanaged.passUnretained(event)
     }
 
-    if type == .keyDown {
-        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-        let modifiers = Int(event.flags.rawValue & modifierMask)
+    // BYPASS: events we synthesized for Quick Press carry this sentinel and
+    // must never be matched against our own snapshots.
+    if event.getIntegerValueField(.eventSourceUserData) == kAnyDoorSynthesizedEventTag {
+        return Unmanaged.passUnretained(event)
+    }
 
+    let virtKey = service.hyperVirtualKeyCode
+
+    // 1. Hyper trigger keyDown — set held, swallow.
+    if virtKey >= 0 && type == .keyDown
+       && Int(event.getIntegerValueField(.keyboardEventKeycode)) == virtKey {
+        if !service.hyperHeld {
+            service.hyperHeld = true
+            service.hyperDownAt = CACurrentMediaTime()
+            service.hyperConsumedByOther = false
+        }
+        return nil
+    }
+
+    // 2. Hyper trigger keyUp — possibly fire Quick Press.
+    if virtKey >= 0 && type == .keyUp
+       && Int(event.getIntegerValueField(.keyboardEventKeycode)) == virtKey {
+        let wasHeld = service.hyperHeld
+        let consumedOther = service.hyperConsumedByOther
+        service.hyperHeld = false
+        service.hyperConsumedByOther = false
+        if wasHeld && !consumedOther {
+            let qp = service.hyperQuickPress
+            let dispatcher = service.quickPressDispatcher
+            DispatchQueue.main.async { dispatcher?(qp) }
+        }
+        return nil
+    }
+
+    // 3. Companion keyDown while Hyper-held — augment, match, suppress.
+    if type == .keyDown && service.hyperHeld {
+        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        var modifiers = Int(event.flags.rawValue & modifierMask)
+        modifiers |= service.hyperModifierFlags
+        service.hyperConsumedByOther = true
+        service.suppressedKeyCodes.insert(keyCode)
         for snapshot in service.snapshots {
             if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
                 let action = snapshot.action
                 let dispatcher = service.dispatcher
-                DispatchQueue.main.async {
-                    dispatcher?(action)
-                }
-                return nil // consume
+                DispatchQueue.main.async { dispatcher?(action) }
+                break
+            }
+        }
+        return nil
+    }
+
+    // 4. Companion keyUp whose keyDown we previously suppressed — consume.
+    //    Works regardless of current hyperHeld state (user may release Hyper first).
+    if type == .keyUp {
+        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        if service.suppressedKeyCodes.remove(keyCode) != nil {
+            return nil
+        }
+    }
+
+    // 5. Normal (Hyper not held) keyDown matching.
+    if type == .keyDown {
+        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        let modifiers = Int(event.flags.rawValue & modifierMask)
+        for snapshot in service.snapshots {
+            if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
+                let action = snapshot.action
+                let dispatcher = service.dispatcher
+                DispatchQueue.main.async { dispatcher?(action) }
+                return nil
             }
         }
     }
 
-    // Keyboard-lock mode: swallow any keyDown / flagsChanged that didn't match a hotkey.
-    // Registered hotkeys above still fire so the user can toggle the lock back off.
-    if service.keyboardLocked && (type == .keyDown || type == .flagsChanged) {
+    // Keyboard-lock mode: swallow any keyDown / keyUp / flagsChanged that
+    // didn't match. Registered hotkeys above still fire so the user can
+    // toggle the lock back off.
+    if service.keyboardLocked && (type == .keyDown || type == .flagsChanged || type == .keyUp) {
         return nil
     }
 
