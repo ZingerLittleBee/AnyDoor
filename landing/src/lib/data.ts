@@ -130,3 +130,51 @@ export const settingsRows: SettingsRow[] = [
   { key: 'lock',      icon: 'lock',     type: 'action',  label: { zh: '锁定屏幕', en: 'Lock Screen' } },
   { key: 'trash',     icon: 'trash',    type: 'action',  label: { zh: '清空废纸篓', en: 'Empty Trash' } },
 ];
+
+// Hyper Key tab — letter triggers mixing apps and system actions.
+export type HyperBinding =
+  | {
+      kind: 'app';
+      letter: string;
+      name: string;
+      grad: string;
+      tag: string;
+    }
+  | {
+      kind: 'action';
+      letter: string;
+      name: Bi;
+      stateOn: Bi;
+      icon: string;
+    };
+
+export const hyperBindings: HyperBinding[] = [
+  {
+    kind: 'app',
+    letter: 'S',
+    name: 'Safari',
+    grad: 'linear-gradient(135deg, #36d4ff, #1873e8)',
+    tag: 'macOS Web Browser',
+  },
+  {
+    kind: 'app',
+    letter: 'F',
+    name: 'Finder',
+    grad: 'linear-gradient(135deg, #6dd4ff, #1f8fff)',
+    tag: 'macOS File Browser',
+  },
+  {
+    kind: 'action',
+    letter: 'L',
+    name: { zh: '锁定屏幕', en: 'Lock Screen' },
+    stateOn: { zh: '已锁定', en: 'Locked' },
+    icon: 'lock',
+  },
+  {
+    kind: 'action',
+    letter: 'M',
+    name: { zh: '静音', en: 'Mute' },
+    stateOn: { zh: '已静音', en: 'Muted' },
+    icon: 'mute',
+  },
+];
