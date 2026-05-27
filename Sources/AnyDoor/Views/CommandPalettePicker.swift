@@ -195,22 +195,14 @@ struct CommandPalettePicker: View {
                 .padding(.vertical, 12)
             }
             .frame(minHeight: 320, maxHeight: .infinity)
-            .onChange(of: state.selectedIndex) { oldIndex, newIndex in
+            .onChange(of: state.selectedIndex) { _, newIndex in
                 let entries = state.flatEntries
                 guard entries.indices.contains(newIndex) else { return }
-                // Direction-aware sticky scroll (Raycast-style):
-                // moving the selection down pins the highlighted row near the
-                // bottom of the visible area; moving up pins it near the top.
-                // Symmetric 3% padding keeps the row off the edges.
-                let anchor: UnitPoint
-                if newIndex > oldIndex {
-                    anchor = UnitPoint(x: 0.5, y: 0.97)
-                } else if newIndex < oldIndex {
-                    anchor = UnitPoint(x: 0.5, y: 0.03)
-                } else {
-                    return
-                }
-                proxy.scrollTo(entries[newIndex].id, anchor: anchor)
+                // No anchor → SwiftUI picks the minimum scroll required to
+                // bring the target into view. Matches Raycast: in-view rows
+                // don't trigger any scroll, and rows just off-screen scroll
+                // just enough to reveal them at the closest edge.
+                proxy.scrollTo(entries[newIndex].id)
             }
         }
     }
