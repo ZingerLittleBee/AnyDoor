@@ -12,7 +12,7 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
     private init() {
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 460),
-            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
+            styleMask: [.titled, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )

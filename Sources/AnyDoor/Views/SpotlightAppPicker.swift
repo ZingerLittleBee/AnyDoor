@@ -74,11 +74,19 @@ struct SpotlightAppPicker: View {
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onAppear { searchFocused = true }
+        .onAppear {
+            // Defer one runloop tick: at this exact moment the SwiftUI view is
+            // attached but the hosting NSPanel may not yet be the key window,
+            // so @FocusState assignments get dropped. A trailing async hop
+            // gives AppKit time to finish makeKeyAndOrderFront.
+            DispatchQueue.main.async { searchFocused = true }
+        }
         .onChange(of: searchFocused) { _, focused in
             // Search field must always be the keyboard target — re-focus if
             // something (e.g. a stray hit-test in the panel chrome) steals it.
-            if !focused { searchFocused = true }
+            if !focused {
+                DispatchQueue.main.async { searchFocused = true }
+            }
         }
         .onChange(of: state.query) { _, _ in
             state.selectedIndex = 0
