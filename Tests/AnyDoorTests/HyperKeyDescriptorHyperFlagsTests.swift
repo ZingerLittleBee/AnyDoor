@@ -32,8 +32,10 @@ final class HyperKeyDescriptorHyperFlagsTests: XCTestCase {
         XCTAssertEqual(d.displayString(hyperFlags: hyper3), "⌃⌥⇧⌘M")
     }
 
-    func testIncludeShiftOffNoHyperOnFourModifierShortcut() {
-        let d = HotkeyDescriptor(keyCode: kVK_ANSI_M, modifierFlags: hyper4)
-        XCTAssertEqual(d.displayString(hyperFlags: hyper3), "⌃⌥⇧⌘M")
+    func testIncludeShiftOffNewHyperShortcutRendersStar() {
+        // When Include Shift = OFF, newly recorded Hyper+M is stored as
+        // ⌃⌥⌘+M (3 modifiers); rendering with 3-mod hyperFlags should produce ✦M.
+        let d = HotkeyDescriptor(keyCode: kVK_ANSI_M, modifierFlags: hyper3)
+        XCTAssertEqual(d.displayString(hyperFlags: hyper3), "✦M")
     }
 }
