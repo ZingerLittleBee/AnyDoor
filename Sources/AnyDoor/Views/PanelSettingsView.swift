@@ -5,7 +5,6 @@ struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
     @State private var conflictAlert: ConflictAlert?
     @State private var pendingDelete: PendingDelete?
-    @State private var pickerApps: [InstalledApp] = []
     @State private var showingAppPicker = false
 
     var body: some View {
@@ -43,6 +42,7 @@ struct PanelSettingsView: View {
             )
         }
         .sheet(isPresented: $showingAppPicker) {
+            let apps = InstalledAppsScanner.scan()
             let excluded = Set(panel.appShortcutChildren.compactMap { entry -> String? in
                 if case let .appShortcut(id) = entry.source,
                    let binding = PanelStore.shared.binding(id: id) {
@@ -51,7 +51,7 @@ struct PanelSettingsView: View {
                 return nil
             })
             AppPickerSheet(
-                apps: pickerApps,
+                apps: apps,
                 excludedBundleIDs: excluded,
                 onSelect: { app in
                     showingAppPicker = false
@@ -335,7 +335,6 @@ struct PanelSettingsView: View {
     }
 
     private func addApp() {
-        pickerApps = InstalledAppsScanner.scan()
         showingAppPicker = true
     }
 

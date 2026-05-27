@@ -36,7 +36,12 @@ struct AppPickerSheet: View {
 
             footer
         }
-        .frame(width: 480, height: 480)
+        .frame(width: 540, height: 560)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var header: some View {
