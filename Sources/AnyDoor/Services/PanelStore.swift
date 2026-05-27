@@ -112,13 +112,19 @@ final class PanelStore {
             FetchDescriptor<KeyBinding>(sortBy: [SortDescriptor(\.displayOrder)])
         ) {
             for binding in bindings {
+                // keyCode == -1 is the "unbound" sentinel used for newly-added
+                // app shortcuts. Project it as a nil hotkey so the recorder
+                // renders its placeholder instead of "Key(-1)".
+                let descriptor: HotkeyDescriptor? = binding.keyCode >= 0
+                    ? HotkeyDescriptor(keyCode: binding.keyCode,
+                                       modifierFlags: binding.modifierFlags)
+                    : nil
                 let entry = PanelEntry(
                     id: PanelEntry.id(for: .appShortcut(binding.id)),
                     source: .appShortcut(binding.id),
                     displayOrder: binding.displayOrder,
                     isVisible: binding.isVisible,
-                    hotkey: HotkeyDescriptor(keyCode: binding.keyCode,
-                                              modifierFlags: binding.modifierFlags),
+                    hotkey: descriptor,
                     title: binding.appName,
                     subtitle: nil,
                     symbol: "app.fill",
