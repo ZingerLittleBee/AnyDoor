@@ -88,10 +88,12 @@ final class HyperKeyService {
                 lastError = nil
                 pushConfig()
             } catch let err as HyperKeyError {
+                guard token == mutationToken else { return }
                 lastError = err
                 isActive = false
                 pushConfig()
             } catch {
+                guard token == mutationToken else { return }
                 lastError = .hidutilFailed(stderr: String(describing: error))
                 isActive = false
                 pushConfig()
@@ -157,7 +159,7 @@ final class HyperKeyService {
         case .failed:
             if trigger != .none && isActive {
                 logger.error("Tap health failed, emergency clearing hyper mapping")
-                Task {
+                Task { @MainActor in
                     try? await HyperKeyController.shared.clear()
                     isActive = false
                     lastError = .tapNotRunning
