@@ -9,7 +9,6 @@ struct SpotlightAppPicker: View {
 
     @State private var query: String = ""
     @FocusState private var searchFocused: Bool
-    @State private var hoveredID: String?
 
     private var filteredApps: [InstalledApp] {
         let pool = apps.filter { !excludedBundleIDs.contains($0.bundleID) }
@@ -19,11 +18,6 @@ struct SpotlightAppPicker: View {
             app.displayName.localizedCaseInsensitiveContains(trimmed)
                 || app.bundleID.localizedCaseInsensitiveContains(trimmed)
         }
-    }
-
-    /// Row that pressing Return selects. Mirrors hover; falls back to the first row.
-    private var primaryID: String? {
-        hoveredID ?? filteredApps.first?.bundleID
     }
 
     var body: some View {
@@ -55,7 +49,7 @@ struct SpotlightAppPicker: View {
                 .font(.system(size: 22, weight: .regular))
                 .focused($searchFocused)
                 .onSubmit {
-                    if let id = primaryID, let app = filteredApps.first(where: { $0.bundleID == id }) {
+                    if let app = filteredApps.first {
                         onSelect(app)
                     }
                 }
@@ -77,14 +71,11 @@ struct SpotlightAppPicker: View {
     private var appList: some View {
         ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(filteredApps) { app in
+                ForEach(Array(filteredApps.enumerated()), id: \.element.bundleID) { index, app in
                     SpotlightRow(
                         app: app,
-                        isSelected: primaryID == app.bundleID,
-                        onSelect: { onSelect(app) },
-                        onHover: { hovering in
-                            if hovering { hoveredID = app.bundleID }
-                        }
+                        isPrimary: index == 0,
+                        onSelect: { onSelect(app) }
                     )
                 }
             }
@@ -96,9 +87,10 @@ struct SpotlightAppPicker: View {
 
 private struct SpotlightRow: View {
     let app: InstalledApp
-    let isSelected: Bool
+    let isPrimary: Bool
     let onSelect: () -> Void
-    let onHover: (Bool) -> Void
+
+    @State private var isHovering = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -133,11 +125,21 @@ private struct SpotlightRow: View {
         .padding(.vertical, 7)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isSelected ? Color.accentColor.opacity(0.22) : Color.clear)
+                .fill(rowBackground)
         )
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
-        .onHover(perform: onHover)
+        .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
+    }
+
+    private var rowBackground: Color {
+        if isHovering {
+            return Color.accentColor.opacity(0.22)
+        }
+        if isPrimary {
+            return Color.primary.opacity(0.06)
+        }
+        return Color.clear
     }
 }
