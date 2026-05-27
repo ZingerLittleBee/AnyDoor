@@ -38,8 +38,11 @@ actor HyperKeyController {
     }
 
     /// Read-modify-write: remove all `removeAll` entries, optionally add `add`.
-    /// Throws on `--get` or `--set` failure; never silently writes on failed get.
-    private func readModifyWrite(removeAll: OwnedSignatures, add: MappingSignature?) async throws {
+    /// Throws on `--get` or `--set` failure; never silently writes on a failed GET.
+    /// The `didReachSet` flag is set to `true` immediately before the SET call so
+    /// callers can detect whether hidutil was mutated (SET was attempted) even
+    /// when the method throws.
+    private func readModifyWrite(removeAll: OwnedSignatures, add: MappingSignature?, didReachSet: inout Bool) async throws {
         let getRes = try await runner.run(hidutilPath, args: ["property", "--get", "UserKeyMapping"], timeout: 2.0)
         guard getRes.isSuccess else {
             throw HyperKeyError.hidutilFailed(stderr: getRes.stderr)
@@ -50,10 +53,17 @@ actor HyperKeyController {
         if let add { current.append(.init(src: add.src, dst: add.dst)) }
 
         let setArg = encodeUserKeyMapping(current)
+        didReachSet = true // GET succeeded; SET is about to be invoked
         let setRes = try await runner.run(hidutilPath, args: ["property", "--set", setArg], timeout: 2.0)
         guard setRes.isSuccess else {
             throw HyperKeyError.hidutilFailed(stderr: setRes.stderr)
         }
+    }
+
+    /// Convenience overload for call sites that don't need to inspect the phase.
+    private func readModifyWrite(removeAll: OwnedSignatures, add: MappingSignature?) async throws {
+        var dummy = false
+        try await readModifyWrite(removeAll: removeAll, add: add, didReachSet: &dummy)
     }
 
     struct ParsedEntry: Sendable { let src: UInt64; let dst: UInt64 }
@@ -91,11 +101,16 @@ actor HyperKeyController {
 
         persistOwned(oldOwned.union([newSig]))
 
+        var setReached = false
         do {
-            try await readModifyWrite(removeAll: oldOwned, add: newSig)
+            try await readModifyWrite(removeAll: oldOwned, add: newSig, didReachSet: &setReached)
         } catch {
-            if (try? await readModifyWrite(removeAll: [newSig], add: nil)) != nil {
-                persistOwned(oldOwned)
+            // Only attempt revert when the SET phase was reached (GET succeeded).
+            // If the GET itself failed, hidutil is unchanged — no revert needed.
+            if setReached {
+                if (try? await readModifyWrite(removeAll: [newSig], add: nil)) != nil {
+                    persistOwned(oldOwned)
+                }
             }
             throw error
         }
