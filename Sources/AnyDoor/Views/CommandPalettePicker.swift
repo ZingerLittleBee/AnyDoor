@@ -202,11 +202,14 @@ struct CommandPalettePicker: View {
         LocalizedText(titleKey)
             .font(.system(size: 11, weight: .semibold))
             .textCase(.uppercase)
-            .foregroundStyle(.tertiary)
-            .tracking(0.4)
+            .foregroundStyle(.secondary)
+            .tracking(0.6)
             .padding(.horizontal, 22)
-            .padding(.top, isFirst ? 0 : 12)
-            .padding(.bottom, 4)
+            // Uniform top spacing across sections so the first label has the
+            // same visual rhythm as later ones. The LazyVStack's outer 12pt
+            // padding still keeps the very top from clipping the first header.
+            .padding(.top, isFirst ? 4 : 14)
+            .padding(.bottom, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
