@@ -596,6 +596,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上次检查" } }
       }
     },
+    "settings.appPicker.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching apps" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配的应用" } }
+      }
+    },
+    "settings.appPicker.searchPlaceholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search apps" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索应用" } }
+      }
+    },
+    "settings.appPicker.systemTag" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "System" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统" } }
+      }
+    },
     "settings.appPicker.title" : {
       "extractionState" : "manual",
       "localizations" : {
