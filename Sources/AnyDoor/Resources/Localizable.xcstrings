@@ -596,11 +596,95 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上次检查" } }
       }
     },
+    "settings.appPicker.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching apps" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配的应用" } }
+      }
+    },
+    "settings.appPicker.searchPlaceholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search apps" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索应用" } }
+      }
+    },
+    "settings.appPicker.systemTag" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "System" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统" } }
+      }
+    },
     "settings.appPicker.title" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose Application" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择应用程序" } }
+      }
+    },
+    "commandPalette.searchPlaceholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search commands" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索命令" } }
+      }
+    },
+    "commandPalette.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching commands" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配的命令" } }
+      }
+    },
+    "commandPalette.builtinTag" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置" } }
+      }
+    },
+    "commandPalette.section.commands" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Commands" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "命令" } }
+      }
+    },
+    "commandPalette.section.windowLayout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Window Layout" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口布局" } }
+      }
+    },
+    "commandPalette.section.applications" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Applications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用" } }
+      }
+    },
+    "settings.general.commandPalette.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Command Palette" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "命令面板" } }
+      }
+    },
+    "settings.general.commandPalette.hotkey" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show command palette" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示命令面板" } }
+      }
+    },
+    "settings.general.commandPalette.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Press this shortcut anywhere to open the command palette and run any menu bar action." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在任意位置按下此快捷键即可打开命令面板，运行任意菜单栏命令。" } }
       }
     },
     "settings.general.about" : {

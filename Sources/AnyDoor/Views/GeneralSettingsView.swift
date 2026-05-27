@@ -15,6 +15,7 @@ struct GeneralSettingsView: View {
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
     @State private var updateService = UpdateService.shared
     @State private var hyperKey = HyperKeyService.shared
+    @State private var commandPalette = CommandPaletteService.shared
 
     var body: some View {
         Form {
@@ -115,6 +116,29 @@ struct GeneralSettingsView: View {
                 }
             } header: {
                 LocalizedText(.settingsGeneralHyperKeySection)
+            }
+
+            Section {
+                // Use HStack (not LabeledContent) so the row's hit-target
+                // doesn't swallow taps before HotkeyRecorder's onTapGesture
+                // gets a chance to start recording.
+                HStack {
+                    LocalizedText(.settingsGeneralCommandPaletteHotkey)
+                    Spacer()
+                    HotkeyRecorder(hotkey: Binding(
+                        get: { commandPalette.hotkey },
+                        set: { commandPalette.setHotkey($0) }
+                    )) { newValue in
+                        commandPalette.setHotkey(newValue)
+                    }
+                    .frame(width: 150, alignment: .trailing)
+                }
+
+                LocalizedText(.settingsGeneralCommandPaletteDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                LocalizedText(.settingsGeneralCommandPaletteSection)
             }
 
             Section {

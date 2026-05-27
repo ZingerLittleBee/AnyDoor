@@ -1,6 +1,5 @@
 import SwiftUI
 import AppKit
-import UniformTypeIdentifiers
 
 struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
@@ -80,6 +79,9 @@ struct PanelSettingsView: View {
                 handleBrightnessHotkeyChange(item: item, newValue: newValue)
             }
             .frame(width: 150, alignment: .trailing)
+            // Trailing inset matches the Window Layout sub-row so both columns
+            // of recorders align flush along the panel's right edge.
+            Color.clear.frame(width: 20)
         }
     }
 
@@ -312,22 +314,21 @@ struct PanelSettingsView: View {
     }
 
     private func addApp() {
-        let panel = NSOpenPanel()
-        panel.title = L(.settingsAppPickerTitle)
-        panel.allowedContentTypes = [.application]
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        let bundle = Bundle(url: url)
-        let appBundleID = bundle?.bundleIdentifier ?? ""
-        let appName = (bundle?.infoDictionary?["CFBundleName"] as? String)
-            ?? (bundle?.infoDictionary?["CFBundleDisplayName"] as? String)
-            ?? url.deletingPathExtension().lastPathComponent
-
-        PanelStore.shared.addAppShortcut(appBundleID: appBundleID, appName: appName, appPath: url.path)
+        let apps = InstalledAppsScanner.scan()
+        let excluded = Set(panel.appShortcutChildren.compactMap { entry -> String? in
+            if case let .appShortcut(id) = entry.source,
+               let binding = PanelStore.shared.binding(id: id) {
+                return binding.appBundleID
+            }
+            return nil
+        })
+        SpotlightAppPickerWindowController.shared.show(apps: apps, excluded: excluded) { app in
+            PanelStore.shared.addAppShortcut(
+                appBundleID: app.bundleID,
+                appName: app.displayName,
+                appPath: app.path
+            )
+        }
     }
 
 }
