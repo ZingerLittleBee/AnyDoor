@@ -5,7 +5,6 @@ struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
     @State private var conflictAlert: ConflictAlert?
     @State private var pendingDelete: PendingDelete?
-    @State private var showingAppPicker = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -39,29 +38,6 @@ struct PanelSettingsView: View {
                     PanelStore.shared.deleteAppShortcut(id: item.bindingID)
                 },
                 secondaryButton: .cancel(Text(L(.settingsPanelCancel)))
-            )
-        }
-        .sheet(isPresented: $showingAppPicker) {
-            let apps = InstalledAppsScanner.scan()
-            let excluded = Set(panel.appShortcutChildren.compactMap { entry -> String? in
-                if case let .appShortcut(id) = entry.source,
-                   let binding = PanelStore.shared.binding(id: id) {
-                    return binding.appBundleID
-                }
-                return nil
-            })
-            AppPickerSheet(
-                apps: apps,
-                excludedBundleIDs: excluded,
-                onSelect: { app in
-                    showingAppPicker = false
-                    PanelStore.shared.addAppShortcut(
-                        appBundleID: app.bundleID,
-                        appName: app.displayName,
-                        appPath: app.path
-                    )
-                },
-                onCancel: { showingAppPicker = false }
             )
         }
     }
@@ -335,7 +311,21 @@ struct PanelSettingsView: View {
     }
 
     private func addApp() {
-        showingAppPicker = true
+        let apps = InstalledAppsScanner.scan()
+        let excluded = Set(panel.appShortcutChildren.compactMap { entry -> String? in
+            if case let .appShortcut(id) = entry.source,
+               let binding = PanelStore.shared.binding(id: id) {
+                return binding.appBundleID
+            }
+            return nil
+        })
+        AppPickerWindowController.shared.show(apps: apps, excluded: excluded) { app in
+            PanelStore.shared.addAppShortcut(
+                appBundleID: app.bundleID,
+                appName: app.displayName,
+                appPath: app.path
+            )
+        }
     }
 
 }

@@ -22,7 +22,7 @@ struct AppPickerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            searchBar
 
             Divider()
 
@@ -39,32 +39,27 @@ struct AppPickerSheet: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LocalizedText(.settingsAppPickerTitle)
-                .font(.headline)
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField(L(.settingsAppPickerSearchPlaceholder), text: $query)
-                    .textFieldStyle(.plain)
-                    .focused($searchFocused)
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.tertiary)
-                    }
-                    .buttonStyle(.plain)
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField(L(.settingsAppPickerSearchPlaceholder), text: $query)
+                .textFieldStyle(.plain)
+                .focused($searchFocused)
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.tertiary)
                 }
+                .buttonStyle(.plain)
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .padding(12)
         .onAppear { searchFocused = true }
     }
