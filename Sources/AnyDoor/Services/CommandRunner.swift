@@ -29,6 +29,9 @@ struct DefaultCommandRunner: CommandRunner {
             process.standardOutput = outPipe
             process.standardError = errPipe
             try process.run()
+            defer {
+                if process.isRunning { process.terminate() }
+            }
 
             let deadline = Date().addingTimeInterval(timeout)
             while process.isRunning {
