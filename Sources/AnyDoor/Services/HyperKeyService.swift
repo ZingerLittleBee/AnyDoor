@@ -159,8 +159,11 @@ final class HyperKeyService {
         case .failed:
             if trigger != .none && isActive {
                 logger.error("Tap health failed, emergency clearing hyper mapping")
+                mutationToken &+= 1
+                let myToken = mutationToken
                 Task { @MainActor in
                     try? await HyperKeyController.shared.clear()
+                    guard myToken == mutationToken else { return }
                     isActive = false
                     lastError = .tapNotRunning
                     pushConfig()
