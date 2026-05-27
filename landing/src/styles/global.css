@@ -529,6 +529,10 @@ h2.sec-h{
 .hyper-toast .name{ font: 600 16px/1.2 var(--font-sans, system-ui); color: var(--color-text); text-align:center; }
 .hyper-toast .state{ font: 500 12px/1.2 var(--font-mono); color: var(--color-text-soft); }
 
+/* Hint visibility per mode */
+.hkstage[data-mode="fkeys"] .hint-hyper{ display: none; }
+.hkstage[data-mode="hyper"] .hint-fkeys{ display: none; }
+
 /* ─────────────────────────── Toggle cards ─────────────────────────── */
 .toggles-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px}
 .tcard{
