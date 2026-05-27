@@ -41,8 +41,21 @@ final class HotkeyService {
     fileprivate nonisolated(unsafe) var hyperConsumedByOther: Bool = false
     fileprivate nonisolated(unsafe) var suppressedKeyCodes: Set<Int> = []
 
+    /// When non-nil, the tap stops dispatching bound hotkeys and instead
+    /// reports trigger held state to the observer. Companion keyDowns are
+    /// allowed to propagate so a HotkeyRecorder NSEvent monitor can capture
+    /// them with their natural modifier flags — Caps-Lock-sourced F19 doesn't
+    /// always survive a suspended tap, so routing through the tap is the only
+    /// reliable detection path.
+    fileprivate nonisolated(unsafe) var recordingObserver: (@Sendable (Bool) -> Void)?
+
     /// Closure invoked when a Quick Press should be performed. Wired by AppDelegate.
     nonisolated(unsafe) var quickPressDispatcher: (@MainActor @Sendable (HyperKeyQuickPress) -> Void)?
+
+    /// Publicly readable current Hyper-held state. The HotkeyRecorder uses
+    /// this at commit time so a race between the async observer dispatch and
+    /// a companion keyDown can't drop the ✦ folding.
+    var isHyperHeld: Bool { hyperHeld }
 
     private var consecutiveRestartFailures: Int = 0
 
@@ -147,6 +160,24 @@ final class HotkeyService {
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: true) }
     }
 
+    /// Enter recording mode. The tap stays active so the Hyper trigger (which
+    /// some sources, notably Caps-Lock-remapped F19, can't be observed any
+    /// other way) is still seen. While set, the tap will: (a) keep tracking
+    /// hyperHeld and notify the observer, (b) skip dispatching bound
+    /// HotkeySnapshots, and (c) skip Quick Press emission.
+    func beginRecording(observer: @escaping @Sendable (Bool) -> Void) {
+        recordingObserver = observer
+        // Report current state so the recorder reflects a still-held trigger
+        // (e.g. user opens settings while Hyper is mid-press — unlikely but cheap).
+        if hyperHeld {
+            DispatchQueue.main.async { observer(true) }
+        }
+    }
+
+    func endRecording() {
+        recordingObserver = nil
+    }
+
     func stop() {
         watchdogTimer?.invalidate()
         watchdogTimer = nil
@@ -217,6 +248,7 @@ private func hotkeyCallback(
     }
 
     let virtKey = service.hyperVirtualKeyCode
+    let recording = service.recordingObserver
 
     // 1. Hyper trigger keyDown — set held, swallow.
     if virtKey >= 0 && type == .keyDown
@@ -226,17 +258,23 @@ private func hotkeyCallback(
             service.hyperDownAt = CACurrentMediaTime()
             service.hyperConsumedByOther = false
         }
+        if let observer = recording {
+            DispatchQueue.main.async { observer(true) }
+        }
         return nil
     }
 
-    // 2. Hyper trigger keyUp — possibly fire Quick Press.
+    // 2. Hyper trigger keyUp — possibly fire Quick Press (suppressed in
+    //    recording mode so a stray Quick Press doesn't escape into the field).
     if virtKey >= 0 && type == .keyUp
        && Int(event.getIntegerValueField(.keyboardEventKeycode)) == virtKey {
         let wasHeld = service.hyperHeld
         let consumedOther = service.hyperConsumedByOther
         service.hyperHeld = false
         service.hyperConsumedByOther = false
-        if wasHeld && !consumedOther {
+        if let observer = recording {
+            if wasHeld { DispatchQueue.main.async { observer(false) } }
+        } else if wasHeld && !consumedOther {
             let qp = service.hyperQuickPress
             let dispatcher = service.quickPressDispatcher
             DispatchQueue.main.async { dispatcher?(qp) }
@@ -245,8 +283,16 @@ private func hotkeyCallback(
     }
 
     // 3. Companion keyDown while Hyper-held — augment, match, suppress.
+    //    In recording mode, let the event pass through so the recorder's
+    //    NSEvent monitor can commit it (the recorder folds in hyperFlags
+    //    based on `isHyperHeld`). Mark consumed so Hyper-release won't
+    //    spuriously fire Quick Press.
     if type == .keyDown && service.hyperHeld {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        if recording != nil {
+            service.hyperConsumedByOther = true
+            return Unmanaged.passUnretained(event)
+        }
         var modifiers = Int(event.flags.rawValue & modifierMask)
         modifiers |= service.hyperModifierFlags
         service.hyperConsumedByOther = true
@@ -271,8 +317,9 @@ private func hotkeyCallback(
         }
     }
 
-    // 5. Normal (Hyper not held) keyDown matching.
-    if type == .keyDown {
+    // 5. Normal (Hyper not held) keyDown matching — skipped in recording mode
+    //    so existing bindings don't fire while the user is configuring one.
+    if type == .keyDown && recording == nil {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let modifiers = Int(event.flags.rawValue & modifierMask)
         for snapshot in service.snapshots {

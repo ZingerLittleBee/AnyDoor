@@ -156,7 +156,14 @@ struct HotkeyRecorder: View {
 
         stopRecording(notifyCoordinator: false)
         isRecording = true
-        HotkeyService.shared.suspend()
+        // Route Hyper trigger detection through HotkeyService's tap — it's
+        // the only path that reliably sees Caps-Lock-sourced F19. The tap
+        // suppresses bound-hotkey dispatch while the observer is set, so
+        // recording can't accidentally fire an existing binding.
+        HotkeyService.shared.beginRecording { held in
+            // Already on main; observer is dispatched via DispatchQueue.main.async.
+            hyperHeld = held
+        }
 
         let modMask: UInt64 = CGEventFlags.maskCommand.rawValue
             | CGEventFlags.maskControl.rawValue
@@ -174,6 +181,8 @@ struct HotkeyRecorder: View {
             let code = Int(event.keyCode)
 
             // Trigger keyDown — treat as a modifier press, never commit.
+            // Tap normally swallows this so the branch is a fallback for
+            // setups where the tap is down.
             if virtualKey >= 0 && code == virtualKey {
                 hyperHeld = true
                 return nil
@@ -190,9 +199,13 @@ struct HotkeyRecorder: View {
                 return nil
             }
 
-            // Hyper acts like a modifier — if held (or its synthesized mask is
-            // already present in the flag stream), fold it in before commit.
-            if hyperHeld || (hyperFlags != 0 && (mods & hyperFlags) == hyperFlags) {
+            // Hyper acts like a modifier — fold its flags in if (a) the tap
+            // currently reports the trigger held (authoritative, race-free),
+            // (b) the local @State has it (covers tap-down fallback), or
+            // (c) the synthesized hyper mask already rode the event flags.
+            let tapHyperHeld = HotkeyService.shared.isHyperHeld
+            if tapHyperHeld || hyperHeld
+               || (hyperFlags != 0 && (mods & hyperFlags) == hyperFlags) {
                 mods |= hyperFlags
             }
 
@@ -212,6 +225,8 @@ struct HotkeyRecorder: View {
         }
 
         // Track virtual F-key release to reset hyperHeld; pass non-virtual keys through.
+        // Same as keyDown: this is a fallback — tap normally drives hyperHeld
+        // through the recording observer.
         keyUpMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyUp) { event in
             let virtualKey = hyperKey.virtualKeyCode
             if virtualKey >= 0 && Int(event.keyCode) == virtualKey {
@@ -234,7 +249,7 @@ struct HotkeyRecorder: View {
         if let m = keyMonitor {
             NSEvent.removeMonitor(m)
             keyMonitor = nil
-            HotkeyService.shared.resume()
+            HotkeyService.shared.endRecording()
         }
         if let m = keyUpMonitor {
             NSEvent.removeMonitor(m)
