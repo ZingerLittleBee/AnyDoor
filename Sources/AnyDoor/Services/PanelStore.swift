@@ -292,6 +292,8 @@ final class PanelStore {
             DisplayBrightnessService.shared.bump(+1.0 / 16.0, target: .displayUnderMouse)
         case .brightnessDown:
             DisplayBrightnessService.shared.bump(-1.0 / 16.0, target: .displayUnderMouse)
+        case .showCommandPalette:
+            CommandPaletteWindowController.shared.toggle()
         }
     }
 
@@ -366,6 +368,14 @@ final class PanelStore {
                     action: action
                 ))
             }
+        }
+
+        if let descriptor = CommandPaletteService.shared.hotkey {
+            out.append(HotkeySnapshot(
+                keyCode: descriptor.keyCode,
+                modifierFlags: descriptor.modifierFlags,
+                action: .showCommandPalette
+            ))
         }
 
         HotkeyService.shared.updateSnapshots(out)

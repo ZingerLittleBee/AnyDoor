@@ -624,6 +624,48 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择应用程序" } }
       }
     },
+    "commandPalette.searchPlaceholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search commands" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索命令" } }
+      }
+    },
+    "commandPalette.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No matching commands" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有匹配的命令" } }
+      }
+    },
+    "commandPalette.builtinTag" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置" } }
+      }
+    },
+    "settings.general.commandPalette.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Command Palette" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "命令面板" } }
+      }
+    },
+    "settings.general.commandPalette.hotkey" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show command palette" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示命令面板" } }
+      }
+    },
+    "settings.general.commandPalette.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Press this shortcut anywhere to open the command palette and run any menu bar action." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在任意位置按下此快捷键即可打开命令面板，运行任意菜单栏命令。" } }
+      }
+    },
     "settings.general.about" : {
       "extractionState" : "manual",
       "localizations" : {

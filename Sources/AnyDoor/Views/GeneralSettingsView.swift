@@ -15,6 +15,7 @@ struct GeneralSettingsView: View {
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
     @State private var updateService = UpdateService.shared
     @State private var hyperKey = HyperKeyService.shared
+    @State private var commandPalette = CommandPaletteService.shared
 
     var body: some View {
         Form {
@@ -115,6 +116,24 @@ struct GeneralSettingsView: View {
                 }
             } header: {
                 LocalizedText(.settingsGeneralHyperKeySection)
+            }
+
+            Section {
+                LabeledContent {
+                    HotkeyRecorder(hotkey: Binding(
+                        get: { commandPalette.hotkey },
+                        set: { commandPalette.setHotkey($0) }
+                    )) { newValue in
+                        commandPalette.setHotkey(newValue)
+                    }
+                    .frame(width: 150, alignment: .trailing)
+                } label: { LocalizedText(.settingsGeneralCommandPaletteHotkey) }
+
+                LocalizedText(.settingsGeneralCommandPaletteDescription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                LocalizedText(.settingsGeneralCommandPaletteSection)
             }
 
             Section {

@@ -10,6 +10,7 @@ enum HotkeyAction: Sendable, Hashable {
     case runBuiltin(itemKey: String)
     case brightnessUp
     case brightnessDown
+    case showCommandPalette
 }
 
 /// Sendable snapshot passed across the CGEvent tap boundary.
