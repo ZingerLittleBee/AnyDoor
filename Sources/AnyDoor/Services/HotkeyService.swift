@@ -30,6 +30,56 @@ final class HotkeyService {
     /// toggle the lock back off.
     fileprivate nonisolated(unsafe) var keyboardLocked: Bool = false
 
+    // MARK: - Hyper Key support
+
+    fileprivate nonisolated(unsafe) var hyperVirtualKeyCode: Int = -1
+    fileprivate nonisolated(unsafe) var hyperModifierFlags: Int = 0
+    fileprivate nonisolated(unsafe) var hyperQuickPress: HyperKeyQuickPress = .doesNothing
+
+    fileprivate nonisolated(unsafe) var hyperHeld: Bool = false
+    fileprivate nonisolated(unsafe) var hyperDownAt: CFTimeInterval = 0
+    fileprivate nonisolated(unsafe) var hyperConsumedByOther: Bool = false
+    fileprivate nonisolated(unsafe) var suppressedKeyCodes: Set<Int> = []
+
+    /// Closure invoked when a Quick Press should be performed. Wired by AppDelegate.
+    nonisolated(unsafe) var quickPressDispatcher: (@MainActor @Sendable (HyperKeyQuickPress) -> Void)?
+
+    private var consecutiveRestartFailures: Int = 0
+
+    enum TapFailureReason: Sendable, Equatable {
+        case accessibilityRevoked
+        case tapCreateFailed
+    }
+
+    enum TapHealth: Sendable, Equatable {
+        case healthy
+        case suspendedByRecorder
+        case transientlyDown
+        case failed(reason: TapFailureReason)
+    }
+
+    var tapHealth: TapHealth {
+        if isSuspended { return .suspendedByRecorder }
+        if !HotkeyService.hasAccessibilityPermission { return .failed(reason: .accessibilityRevoked) }
+        if eventTap == nil {
+            return consecutiveRestartFailures >= 2 ? .failed(reason: .tapCreateFailed) : .transientlyDown
+        }
+        if let tap = eventTap, !CGEvent.tapIsEnabled(tap: tap) {
+            return consecutiveRestartFailures >= 2 ? .failed(reason: .tapCreateFailed) : .transientlyDown
+        }
+        return .healthy
+    }
+
+    func updateHyperConfig(virtualKey: Int, flags: Int, quickPress: HyperKeyQuickPress) {
+        hyperVirtualKeyCode = virtualKey
+        hyperModifierFlags = flags
+        hyperQuickPress = quickPress
+    }
+
+    func setQuickPressDispatcher(_ d: @escaping @MainActor @Sendable (HyperKeyQuickPress) -> Void) {
+        quickPressDispatcher = d
+    }
+
     private init() {}
 
     func setDispatcher(_ dispatcher: @escaping @MainActor @Sendable (HotkeyAction) -> Void) {
@@ -58,6 +108,7 @@ final class HotkeyService {
         guard eventTap == nil else { return }
 
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
+            | (1 << CGEventType.keyUp.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
@@ -70,10 +121,12 @@ final class HotkeyService {
             userInfo: selfPtr
         ) else {
             print("AnyDoor: Failed to create event tap. AX granted: \(AXIsProcessTrusted())")
+            consecutiveRestartFailures += 1
             return
         }
 
         eventTap = tap
+        consecutiveRestartFailures = 0
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
@@ -83,6 +136,9 @@ final class HotkeyService {
 
     func suspend() {
         isSuspended = true
+        hyperHeld = false
+        hyperConsumedByOther = false
+        suppressedKeyCodes.removeAll()
         if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
     }
 
