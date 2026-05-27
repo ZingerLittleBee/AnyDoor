@@ -482,6 +482,53 @@ h2.sec-h{
   .hkstage[data-mode="hyper"] .key[data-key="⇪"]{ animation: none; }
 }
 
+/* Hyper badge — appears center-screen on companion key press */
+.hyper-badge{
+  position: absolute;
+  top: 38%; left: 50%; transform: translate(-50%, 0);
+  padding: 6px 14px;
+  font: 700 18px/1 var(--font-mono);
+  color: #fff;
+  background: linear-gradient(135deg, rgba(157,90,255,.85), rgba(94,155,255,.85));
+  border-radius: 10px;
+  box-shadow: 0 0 24px rgba(157,90,255,.55);
+  backdrop-filter: blur(8px);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+  z-index: 5;
+}
+.hyper-badge.show{
+  opacity: 1; transform: translate(-50%, -10px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hyper-badge{ transition: opacity .2s ease; }
+  .hyper-badge.show{ transform: translate(-50%, 0); }
+}
+
+/* Hyper toast — payload for action bindings */
+.hyper-toast{
+  position: absolute;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 240px; padding: 22px 18px;
+  display: none; flex-direction: column; align-items: center; gap: 8px;
+  background: rgba(28,28,32,.85);
+  border: .5px solid var(--color-line-strong);
+  border-radius: 16px;
+  box-shadow: 0 12px 48px rgba(0,0,0,.45);
+  backdrop-filter: blur(12px);
+  z-index: 4;
+}
+.hyper-toast.show{ display: flex; }
+.hyper-toast .ico{
+  width: 44px; height: 44px; border-radius: 12px;
+  background: linear-gradient(135deg, rgba(157,90,255,.25), rgba(94,155,255,.2));
+  color: #b07eff;
+  display: grid; place-items: center;
+}
+.hyper-toast .ico svg{ width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2; }
+.hyper-toast .name{ font: 600 16px/1.2 var(--font-sans, system-ui); color: var(--color-text); text-align:center; }
+.hyper-toast .state{ font: 500 12px/1.2 var(--font-mono); color: var(--color-text-soft); }
+
 /* ─────────────────────────── Toggle cards ─────────────────────────── */
 .toggles-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px}
 .tcard{
