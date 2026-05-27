@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-27
+
 ### Added
 
 - Hyper Key: pick a single physical key (Caps Lock, left/right modifier, or

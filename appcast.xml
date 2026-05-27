@@ -3,52 +3,71 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.5.0</title>
+            <pubDate>Wed, 27 May 2026 15:35:13 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.5.0</sparkle:version>
+            <sparkle:shortVersionString>1.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- Hyper Key: pick a single physical key (Caps Lock, left/right modifier, or
+  F1–F12) and have it generate the `⌃⌥⌘` (or `⌃⌥⇧⌘`) combination, providing
+  a conflict-free shortcut layer in the spirit of Raycast's Hyper Key.
+  Configured in Settings → General with a green dot indicating the mapping
+  is live. Shortcuts bound to the Hyper combo render as `✦Key` in the
+  recorder, panel, and conflict alerts. `hidutil` remaps the trigger to a
+  reserved F19 (keyCode 80); the existing CGEvent tap maintains a
+  `hyperHeld` state machine, augments companion `keyDown` events with the
+  hyper modifier mask, suppresses the corresponding `keyUp`, and skips
+  Quick Press on a held release. A Quick Press picker chooses what a solo
+  tap does: nothing, Escape, or the trigger's original key (Caps Lock toggle
+  is emitted via `IOHIDPostEvent` to bypass our own sentinel-tagged tap).
+  Launch is split into an unconditional `reconcile` (only removes our own
+  hidutil residue, requires no permission) and a tap-gated `apply`, so a
+  crash + revoked Accessibility combo can never leave the user's keyboard
+  bricked. A 2-second watchdog observes tap health; emergency-clear paths
+  are token-guarded against concurrent `setTrigger` so a stale revert
+  cannot overwrite a fresh apply.
+- Hotkey recorder: pressed modifiers now render live while recording
+  instead of only appearing at commit time, and the Hyper trigger (when
+  configured) acts as a modifier in the recorder — pressing it shows ✦,
+  pressing it + a letter commits the combo as `✦Key`. Trigger detection
+  routes through the existing HotkeyService tap rather than suspending it,
+  because Caps-Lock-sourced F19 doesn't always survive a disabled tap on
+  every macOS build. The tap stays active in a "recording" mode that
+  suppresses bound-hotkey dispatch and Quick Press while still reporting
+  `hyperHeld` to the recorder; the recorder reads the authoritative
+  `isHyperHeld` synchronously at commit time so an async observer dispatch
+  cannot drop ✦ folding.
+
+### Fixed
+
+- App activation: switching to another app via a hotkey now routes through
+  `NSWorkspace.openApplication` (Launch Services) instead of
+  `NSRunningApplication.activate()`. On macOS 14+ the latter is silently
+  ignored when called from an `.accessory` app while a regular app holds
+  keyboard focus, so a hotkey pressed inside e.g. Warp would toggle the
+  current app via `hide()` (no activation right required) yet do nothing
+  when targeting a different app. The Launch Services path inherits user
+  activation rights and matches the route Raycast/Alfred use.
+- Settings: newly added app rows render an empty hotkey recorder showing
+  the placeholder text instead of literal `Key(-1)`. The sentinel `-1`
+  keyCode used to flag "not yet bound" now projects to a `nil`
+  `HotkeyDescriptor` in the panel, so the recorder picks its unbound
+  branch.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.5.0/AnyDoor-1.5.0.zip" length="5729418" type="application/octet-stream" sparkle:edSignature="pT/Am7RhKXBezIFPaas4yS+7obhcM1F6BGKHHxPXG1vyDNMtU8UpAKufSu7lrpbEQY8TmXqmouLNPQ1JyCreCA=="/>
+        </item>
+        <item>
             <title>1.4.0</title>
             <pubDate>Mon, 25 May 2026 18:19:22 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.4.0</sparkle:version>
             <sparkle:shortVersionString>1.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Added
-
-- Window layout actions: four new built-in actions (left half, right half,
-  maximize, center) that tile the frontmost window via Accessibility.
-  `WindowLayoutService` resolves the focused window through AX, picks the
-  screen with the largest overlap, and writes `kAXPosition`/`kAXSize`
-  after converting Cocoa `visibleFrame` to AX coordinates. Failures
-  (missing AX permission, no active window, full-screen window) surface
-  as localized toasts instead of silent no-ops. Pure geometry is unit
-  tested for clamping, odd widths, fractional frames, and exact-size
-  edge cases.
-- Window layout submenu: the four layout actions are grouped under a
-  single `windowLayout` row, exposed as a hover popover from the menu
-  bar and inline-expanded in Settings with drag-reorder + per-child
-  hotkey binding. Children are hotkey-conflict-checked against the rest
-  of the panel and snapshots refresh after reorder so global hotkeys
-  follow the new order without a relaunch. A one-shot
-  `windowLayoutDefaultsApplied_v1` backfill seeds the four children's
-  `displayOrder` (2010/2020/2030/2040) so existing installs adopt the
-  submenu without losing customizations.
-- Keep Awake duration presets: the Keep Awake row gains a clock
-  accessory with 15m / 30m / 1h / 2h / indefinite options backed by
-  `IOPMAssertion`. Whole-row tap and the global hotkey still toggle
-  indefinite to preserve muscle memory. The provider owns a single
-  expiration `Task` so timers never stack or leak across re-applies;
-  the hotkey path reads `await provider.currentState` instead of the
-  MainActor cache so a press at the exact moment of expiration cannot
-  invert the user's intent. Acquire failures resync the panel cache
-  from the provider, and the "Awake until HH:mm" subtitle is
-  re-formatted against `LocalizationManager.effectiveLocale` so a
-  runtime language switch refreshes the rendered time.
-
-### Changed
-
-- `PanelRowView` reserves a fixed 18pt trailing accessory slot on every
-  toggle row, so Keep Awake's new clock control aligns with the other
-  switches instead of widening its trailing region.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.4.0/AnyDoor-1.4.0.zip" length="5586443" type="application/octet-stream" sparkle:edSignature="dSlJZOjuWMhwlha/gDCqdwNtm4TiJ1+qfHttORJOEqXGr8lBr734c0W6woEpROozIoj8sSVCTdWLPJartnAsBw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.4.0/AnyDoor-1.4.0.zip" length="5586443" type="application/octet-stream" sparkle:edSignature="dSlJZOjuWMhwlha/gDCqdwNtm4TiJ1+qfHttORJOEqXGr8lBr734c0W6woEpROozIoj8sSVCTdWLPJartnAsBw=="/>
         </item>
         <item>
             <title>1.3.1</title>
@@ -58,15 +77,6 @@
             <sparkle:shortVersionString>1.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.3.1/AnyDoor-1.3.1.zip" length="5465882" type="application/octet-stream" sparkle:edSignature="FBRLOe68Az44DAo1iF4Ei4VRPZnDm9cxEfnSR0jdZyBbRtIH3SY7gCYIEsC7KD0UDtDfpCRBh2OyGfeYuENmBA=="/>
-        </item>
-        <item>
-            <title>1.3.0</title>
-            <pubDate>Sun, 24 May 2026 23:53:25 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.3.0</sparkle:version>
-            <sparkle:shortVersionString>1.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.3.0/AnyDoor-1.3.0.zip" length="5449728" type="application/octet-stream" sparkle:edSignature="Pi9CXUWVhJVD0i24XmTWBMcqhRBFlXpAu5PBcjEADtKiP4dMb5+EA/GSUQRY3M436qZwoYMsoXUWxU9XOuwLCw=="/>
         </item>
         <item>
             <title>1.2.0</title>
