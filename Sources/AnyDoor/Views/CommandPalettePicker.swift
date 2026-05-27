@@ -138,7 +138,7 @@ struct CommandPalettePicker: View {
                         .id(entry.id)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 7)
             }
             .frame(minHeight: 320, maxHeight: .infinity)
             .onChange(of: state.selectedIndex) { _, newIndex in
