@@ -199,8 +199,13 @@ struct CommandPalettePicker: View {
                         .id(item.entry.id)
                     }
                 }
-                .padding(.vertical, 12)
             }
+            // safeAreaInset reserves non-scrolling space at the top/bottom of
+            // the ScrollView. SwiftUI's scrollTo respects the safe area, so
+            // when a row reaches the end of the content, it stops 12pt above
+            // the panel edge instead of touching it.
+            .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 12) }
+            .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 12) }
             .frame(minHeight: 320, maxHeight: .infinity)
             .onChange(of: state.selectedIndex) { _, newIndex in
                 let entries = state.flatEntries
