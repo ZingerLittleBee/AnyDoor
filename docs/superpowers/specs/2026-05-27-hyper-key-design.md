@@ -74,8 +74,11 @@ final class HyperKeyService {
     private(set) var quickPress: HyperKeyQuickPress  // default .doesNothing
     private(set) var includeShift: Bool              // default true
 
-    /// True iff trigger != .none AND the hidutil mapping is currently applied
-    /// AND the HotkeyService tap is running. Drives the green status dot.
+    /// True iff trigger != .none AND a mapping is currently applied AND
+    /// `HotkeyService.tapHealth` is one of `.healthy / .suspendedByRecorder /
+    /// .transientlyDown`. Only `.failed` flips this to false. Drives the
+    /// green status dot in Settings. The state machine never observes the
+    /// recorder's transient suspension as "inactive".
     private(set) var isActive: Bool
 
     /// Set while an apply/clear is in flight. UI dims the picker during this.
@@ -169,13 +172,22 @@ actor HyperKeyController {
 
 enum HyperKeyVirtualKey { case f19 }   // keyCode 80; reserved enum for future expansion
 
-/// Stable identifier of "the entry we own" in UserKeyMapping. Persisted in
+/// Stable identifier of "an entry we may own" in UserKeyMapping. Persisted in
 /// UserDefaults across launches so we can recognize our own residue after a
 /// crash without nuking anyone else's mappings.
 struct MappingSignature: Codable, Sendable, Hashable {
     let src: UInt64   // HIDKeyboardModifierMappingSrc
     let dst: UInt64   // HIDKeyboardModifierMappingDst
 }
+
+/// Persisted **set** of signatures that *might* currently exist in hidutil
+/// because of us. A single `MappingSignature?` is not transactionally safe:
+/// if mapping {A} is live and we begin a switch to {B}, a crash between
+/// "persist B" and "RMW(remove: A, add: B)" leaves A in hidutil while disk
+/// remembers only B — A becomes unreclaimable. By persisting {A, B} for the
+/// duration of the transition and collapsing to {B} only after RMW succeeds,
+/// reconcile() at the next launch can clean up either or both.
+typealias OwnedSignatures = Set<MappingSignature>
 ```
 
 **Command runner injection:** the controller takes an injectable `CommandRunner` protocol (default impl wraps `ShellRunner` against `/usr/bin/hidutil`). Tests substitute a fake runner that returns canned stdout / stderr / exit code. This avoids touching the system binary during tests and makes failure injection trivial.
@@ -183,38 +195,71 @@ struct MappingSignature: Codable, Sendable, Hashable {
 Output is parsed with `JSONSerialization`. **Read-modify-write** semantics:
 
 1. `hidutil property --get UserKeyMapping` to fetch the current array.
-   - **Important**: on a clean system the command returns the literal string `(null)`, not JSON. Verified on macOS 15. The runner must treat the following as "empty array":
-     - exit code 0 + stdout `(null)\n`
-     - exit code 0 + stdout starts with `(` (the property-list null form)
-     - stdout containing no `UserKeyMapping` key
+   - **Exit code is authoritative**: non-zero exit is always a failure (`HyperKeyError.hidutilFailed(stderr:)`), regardless of stderr content. Never fall back to "empty array" on a failed `--get` — that path would silently overwrite any third-party `UserKeyMapping` with a `--set` based on a stale view of the world.
+   - **Only when exit code is 0**, treat the following stdout shapes as "empty array":
+     - `(null)\n` (the property-list null form macOS returns on a clean system; verified on macOS 15)
+     - any output containing no `UserKeyMapping` key
      - empty stdout
-   - Only treat as failure when the runner returns non-zero exit *and* non-empty stderr.
 2. Filter out any entry whose `(src, dst)` matches the signature we're about to remove (clear) or replace (apply).
 3. Append the new entry (apply) or skip (clear).
 4. `hidutil property --set '{"UserKeyMapping": <new array>}'`.
 
 This preserves third-party mappings — the file-replace semantics of `hidutil --set` is scoped at our process boundary by reading first.
 
-The new `MappingSignature` is **persisted to UserDefaults *before* the controller invokes hidutil**. Rationale: if the process crashes between `--set` succeeding and the Swift code returning, the persisted signature still correctly identifies the entry we just wrote. The next launch's `reconcile` removes it cleanly. Persisting *after* the call would leak orphan mappings under crashes / `latest-wins` token discards.
+The persisted state is the **OwnedSignatures set**, stored under `hyperKey.ownedSignatures` as a JSON-encoded array. The controller modifies UserDefaults *before* and *after* the hidutil call, with a deliberate ordering that makes every crash window recoverable:
 
 ```swift
 // HyperKeyController.apply pseudo:
 func apply(trigger:, virtualKey:) async throws -> MappingSignature {
-    let sig = MappingSignature(src: trigger.hidUsage!, dst: virtualKey.hidUsage)
-    UserDefaults.standard.persist(sig, forKey: "hyperKey.appliedSignature")
+    let newSig = MappingSignature(src: trigger.hidUsage!, dst: virtualKey.hidUsage)
+    let oldOwned = persistedOwnedSignatures()             // e.g. {A} or {}
+
+    // 1. Expand persisted set to include BOTH the existing mapping (if any)
+    //    and the new one. Crash now → next reconcile cleans up both.
+    persistOwnedSignatures(oldOwned.union([newSig]))
+
     do {
-        try await readModifyWrite(remove: lastWrittenSignature, add: sig)
-        lastWrittenSignature = sig
-        return sig
+        // 2. RMW: remove every owned signature from the current array, then
+        //    add newSig. Other parties' entries are preserved.
+        try await readModifyWrite(removeAll: oldOwned, add: newSig)
     } catch {
-        // Best-effort revert; on failure leave persisted signature in place so
-        // the next launch reconciles it.
-        try? await readModifyWrite(remove: sig, add: nil)
-        UserDefaults.standard.removeObject(forKey: "hyperKey.appliedSignature")
+        // RMW failed. Best-effort revert: try to remove newSig in case the
+        // --set partially succeeded. ONLY narrow the persisted set if we can
+        // prove the revert worked; otherwise leave it expanded so the next
+        // launch can still reconcile.
+        if (try? await readModifyWrite(removeAll: [newSig], add: nil)) != nil {
+            persistOwnedSignatures(oldOwned)              // back to {A}
+        }
+        // else: leave persisted set = oldOwned ∪ {newSig} for next launch
         throw error
     }
+
+    // 3. RMW succeeded: collapse persisted set to just {newSig}.
+    persistOwnedSignatures([newSig])
+    return newSig
+}
+
+func clear() async throws {
+    let owned = persistedOwnedSignatures()
+    guard !owned.isEmpty else { return }
+    try await readModifyWrite(removeAll: owned, add: nil)
+    persistOwnedSignatures([])                            // collapse to empty
 }
 ```
+
+**Crash-window matrix** (mapping A is live, user switches to B):
+
+| Crash at | Persisted set | hidutil state | Next launch reconcile result |
+|---|---|---|---|
+| Before step 1 | {A} | {A} | removes A ✓ |
+| After step 1, before --set | {A, B} | {A} | removes A; B was never written ✓ |
+| --set partially applied | {A, B} | possibly {A}, {B}, or {} | removes A and B (whichever present) ✓ |
+| After step 2, before step 3 | {A, B} | {B} | removes B (A already gone) ✓ |
+| After step 3 | {B} | {B} | nothing to do ✓ |
+
+No window leaves an entry in hidutil that the next launch cannot identify.
+
+`reconcile(persisted:)` mirrors `clear()` semantically — it just reads the persisted set instead of relying on in-memory state.
 
 ### Lifecycle
 
@@ -282,11 +327,14 @@ The Task-and-pray pattern under `applicationWillTerminate` doesn't actually wait
 
 ```swift
 func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-    guard HyperKeyService.shared.isActive else { return .terminateNow }
+    // Guard on ownership, NOT on isActive. After an emergency clear that
+    // failed mid-way, isActive may already be false while the persisted
+    // OwnedSignatures set is still non-empty — we still need to clean up.
+    guard HyperKeyController.shared.hasPersistedSignatures else {
+        return .terminateNow
+    }
 
     Task {
-        // controller.clear() uses Process which we wait on synchronously inside
-        // the actor; the await here is on actor reentry, not on a fire-and-forget.
         try? await withTimeout(milliseconds: 500) {
             try await HyperKeyController.shared.clear()
         }
@@ -295,6 +343,8 @@ func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.Termin
     return .terminateLater
 }
 ```
+
+`HyperKeyController.hasPersistedSignatures` is a sync property reading UserDefaults, safe to call from the main thread on the termination path.
 
 500 ms is enough for `hidutil` to round-trip in normal conditions. If it doesn't, we still terminate — the worst case is a residue that the next launch's `reconcile()` removes.
 
@@ -331,6 +381,15 @@ Add `.keyUp` to the existing mask:
 let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
     | (1 << CGEventType.keyUp.rawValue)
     | (1 << CGEventType.flagsChanged.rawValue)
+```
+
+**Keyboard-lock side-effect**: the existing keyboard-lock mode swallows `keyDown` and `flagsChanged`. Now that `keyUp` is in the mask, lock mode must also swallow `keyUp`, otherwise releases of letter keys held during lock would leak out and produce torn key state in the foreground app. Update the existing branch:
+
+```swift
+// HotkeyService.swift — existing keyboard-lock branch
+if service.keyboardLocked && (type == .keyDown || type == .flagsChanged || type == .keyUp) {
+    return nil
+}
 ```
 
 ### New configuration entry
@@ -460,18 +519,48 @@ func suspend() {
 
 ### Quick Press execution
 
+Synthesized events posted via `CGEvent.post` / `IOHIDPostEvent` are visible to AnyDoor's own CGEvent tap. Without precaution, a Quick Press configured as Escape would fire our tap's keyDown branch, potentially matching a user-bound `Esc` shortcut and triggering AnyDoor instead of reaching the foreground app. Solution: tag synthesized events with a sentinel value on `CGEventField.eventSourceUserData`, and skip such events in the tap callback before matching.
+
+```swift
+// Constants/HyperKey.swift
+/// Sentinel placed on getIntegerValueField(.eventSourceUserData) of every
+/// CGEvent AnyDoor synthesizes for Quick Press, so our own tap can identify
+/// and pass through its own emissions.
+let kAnyDoorSynthesizedEventTag: Int64 = 0x416E794400000001   // "AnyD\0\0\0\x01"
+```
+
 ```swift
 @MainActor
 private func performQuickPress(_ action: HyperKeyQuickPress) {
     switch action {
     case .doesNothing: return
     case .escape:
-        postKeyTap(keyCode: 53)
+        postSynthesizedKey(keyCode: 53)
     case .original:
         emitOriginal(for: HyperKeyService.shared.trigger)
     }
 }
+
+private func postSynthesizedKey(keyCode: CGKeyCode) {
+    guard let src = CGEventSource(stateID: .hidSystemState) else { return }
+    for isDown in [true, false] {
+        guard let ev = CGEvent(keyboardEventSource: src, virtualKey: keyCode, keyDown: isDown) else { continue }
+        ev.setIntegerValueField(.eventSourceUserData, value: kAnyDoorSynthesizedEventTag)
+        ev.post(tap: .cghidEventTap)
+    }
+}
 ```
+
+The tap callback gains an early bypass at the very top, before any Hyper or snapshot matching:
+
+```swift
+// In hotkeyCallback, immediately after the tapDisabled* handling block:
+if event.getIntegerValueField(.eventSourceUserData) == kAnyDoorSynthesizedEventTag {
+    return Unmanaged.passUnretained(event)   // our own emission; do not match
+}
+```
+
+`.original` paths that use `IOHIDPostEvent` (Caps Lock LED toggle) bypass `CGEvent.post` entirely and therefore don't need tagging — they're observed by the system as hardware events from a different source.
 
 `.original` is per-trigger:
 
@@ -668,6 +757,12 @@ ESC and Delete (no modifiers) keep their current cancel / clear semantics. They 
 
 ### Race
 - [ ] Rapidly toggle the picker A → B → A → None in under 100 ms. Final hidutil state matches the *last* selection; no orphan mapping; `isApplying` returns to false.
+- [ ] Simulated crash between "persist owned set {A, B}" and "RMW remove A add B": next launch reconciles both A and B; hidutil ends with neither.
+- [ ] Quick Press = Escape with a user-bound `Esc` hotkey present: tapping Hyper alone reaches the foreground app as Escape; the bound hotkey does **not** fire (sentinel bypass works).
+
+### Mapping recovery
+- [ ] hidutil `--get` returns non-zero exit + empty stderr: controller treats as failure; does **not** clobber existing `UserKeyMapping`; surfaces `hidutilFailed`.
+- [ ] Quit AnyDoor immediately after an emergency clear that left `lastError = .tapNotRunning` but did not finish cleanup: `applicationShouldTerminate` still drives the final `clear()` because `hasPersistedSignatures` is true.
 
 ### Edge cases
 - [ ] Running concurrently with Karabiner-Elements: a Karabiner-written entry remains after AnyDoor applies its own; turning AnyDoor's trigger to None leaves the Karabiner entry intact.
