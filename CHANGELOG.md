@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Command Palette: port-number searches now surface matching listening
+  processes in a dedicated Ports section. Port process rows are omitted while
+  the query is empty, and selecting a port row kills the owning PID through
+  the existing Port Manager flow with a success or failure toast.
+
 ## [1.7.0] - 2026-05-28
 
 ### Added

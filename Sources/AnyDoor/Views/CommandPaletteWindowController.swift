@@ -206,6 +206,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             AppSwitcher.toggle(bundleID: binding.appBundleID, appPath: binding.appPath)
         case .installedApp(let bundleID, let path):
             AppSwitcher.toggle(bundleID: bundleID, appPath: path)
+        case .portRecord(let record):
+            Task {
+                let result = await PortInventory.shared.kill(pid: record.pid)
+                ToastPresenter.shared.show(
+                    CommandPalettePortKillToast.style(for: record, result: result)
+                )
+            }
         case .builtin(let item):
             switch item.kind {
             case .toggle:
@@ -230,5 +237,21 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// Close when focus moves away (Spotlight UX).
     func windowDidResignKey(_ notification: Notification) {
         close()
+    }
+}
+
+enum CommandPalettePortKillToast {
+    @MainActor
+    static func style(for record: PortRecord, result: PortKillResult) -> ToastStyle {
+        switch result {
+        case .success:
+            return .success(L(.toastPortKillSuccess, record.processName, String(record.port)))
+        case .failure(.permissionDenied):
+            return .failure(L(.toastPortKillPermissionDenied, record.processName))
+        case .failure(.processGone):
+            return .success(L(.toastPortKillGone, record.processName))
+        case .failure(.other(let code)):
+            return .failure(L(.toastPortKillFailed, record.processName, String(code)))
+        }
     }
 }

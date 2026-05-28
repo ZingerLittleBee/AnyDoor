@@ -42,15 +42,16 @@ struct HotkeyDescriptor: Hashable, Sendable {
     }
 }
 
-/// A unified row visible to the SwiftUI views. Built from one of three sources.
+/// A unified row visible to the SwiftUI views. Some sources are command-palette-only.
 struct PanelEntry: Identifiable, Hashable {
     enum Source: Hashable {
         case appShortcut(UUID)                         // KeyBinding.id
         case builtin(BuiltinItem)
         case installedApp(bundleID: String, path: String) // Command-palette-only: installed but unbound
+        case portRecord(PortRecord)                    // Command-palette-only: listening TCP port process
     }
 
-    let id: String                     // "app:<uuid>" or "builtin:<key>" or "installedApp:<bundleID>"
+    let id: String
     let source: Source
     let displayOrder: Double
     let isVisible: Bool
@@ -67,6 +68,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .appShortcut(let id):                return "app:\(id.uuidString)"
         case .builtin(let item):                  return "builtin:\(item.rawValue)"
         case .installedApp(let bundleID, _):      return "installedApp:\(bundleID)"
+        case .portRecord(let record):             return "port:\(record.pid):\(record.port)"
         }
     }
 
@@ -79,6 +81,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .appShortcut: return title
         case .builtin(let item): return L(item.titleKey)
         case .installedApp: return title
+        case .portRecord: return title
         }
     }
 }
