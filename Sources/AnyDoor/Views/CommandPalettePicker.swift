@@ -142,96 +142,81 @@ struct CommandPalettePicker: View {
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
     }
 
-    /// Pre-flattens sections into one stream of rows so a single ForEach can
-    /// render headers + rows in order while assigning a globally unique flat
-    /// index to each row (matched against `state.selectedIndex`).
-    private struct RowItem: Identifiable {
-        let globalIndex: Int
-        let entry: PanelEntry
-        let headerTitleKey: L10n.Key?
-        let isFirstSection: Bool
-        var id: String { entry.id }
-    }
-
-    private var rowItems: [RowItem] {
-        var items: [RowItem] = []
-        var globalIndex = 0
-        for (sectionIdx, section) in state.filteredSections.enumerated() {
-            for (entryIdx, entry) in section.entries.enumerated() {
-                items.append(RowItem(
-                    globalIndex: globalIndex,
-                    entry: entry,
-                    headerTitleKey: entryIdx == 0 ? section.titleKey : nil,
-                    isFirstSection: sectionIdx == 0
-                ))
-                globalIndex += 1
-            }
-        }
-        return items
-    }
-
     private var entryList: some View {
         ScrollViewReader { proxy in
+            let entries = state.flatEntries
+            let selectedID: String? = entries.indices.contains(state.selectedIndex)
+                ? entries[state.selectedIndex].id
+                : nil
+
             ScrollView {
-                // Eager VStack (not Lazy) so ScrollViewReader.scrollTo always
-                // resolves to a fully-laid-out row, even when section headers
-                // appear above. With section grouping in play, Lazy layout
-                // caused selectedIndex changes to land the row past the
-                // visible bottom.
-                VStack(spacing: 0) {
-                    ForEach(rowItems) { item in
-                        // Wrap the optional header + row in one VStack so the
-                        // `.id` covers both. ScrollViewReader then treats the
-                        // header as part of the row's bounds — scrolling to
-                        // the first row of a section also brings its header
-                        // into view, instead of clipping it above the edge.
-                        VStack(spacing: 0) {
-                            if let key = item.headerTitleKey {
-                                sectionHeader(titleKey: key, isFirst: item.isFirstSection)
+                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    // Sentinel at the very top of the scroll content. Scrolling
+                    // here forces scroll offset back to 0 so the first section
+                    // header sits naturally above row 0 instead of pinning over
+                    // it (which would hide row 0 when newIndex reaches 0).
+                    Color.clear
+                        .frame(height: 0)
+                        .id("top-sentinel")
+                    ForEach(state.filteredSections) { section in
+                        Section {
+                            ForEach(section.entries) { entry in
+                                CommandPaletteRow(
+                                    entry: entry,
+                                    hyperFlags: state.hyperFlags,
+                                    isSelected: entry.id == selectedID,
+                                    onSelect: { onSelect(entry) }
+                                )
+                                .id(entry.id)
+                                // Rows share the pinned header's material
+                                // layering so the header/row boundary has no
+                                // visible double-material seam.
+                                .background(.thickMaterial)
                             }
-                            CommandPaletteRow(
-                                entry: item.entry,
-                                hyperFlags: state.hyperFlags,
-                                isSelected: item.globalIndex == state.selectedIndex,
-                                onSelect: { onSelect(item.entry) }
-                            )
+                        } header: {
+                            sectionHeader(titleKey: section.titleKey)
                         }
-                        .id(item.entry.id)
                     }
                 }
             }
-            // safeAreaInset reserves non-scrolling space at the top/bottom of
-            // the ScrollView. SwiftUI's scrollTo respects the safe area, so
-            // when a row reaches the end of the content, it stops 12pt above
-            // the panel edge instead of touching it.
-            .safeAreaInset(edge: .top, spacing: 0) { Color.clear.frame(height: 8) }
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
             .frame(minHeight: 320, maxHeight: .infinity)
-            .onChange(of: state.selectedIndex) { _, newIndex in
-                let entries = state.flatEntries
+            .onChange(of: state.selectedIndex) { oldIndex, newIndex in
                 guard entries.indices.contains(newIndex) else { return }
-                // No anchor → SwiftUI picks the minimum scroll required to
-                // bring the target into view. Matches Raycast: in-view rows
-                // don't trigger any scroll, and rows just off-screen scroll
-                // just enough to reveal them at the closest edge.
-                proxy.scrollTo(entries[newIndex].id)
+                if newIndex == 0 {
+                    // Top of list — scroll to the sentinel so the first
+                    // section header lands naturally at the top (not pinning
+                    // over row 0).
+                    proxy.scrollTo("top-sentinel")
+                } else if newIndex < oldIndex {
+                    // Nav up. ScrollTo the row above the target so the
+                    // target lands one row down — visible just below the
+                    // pinned section header instead of hidden behind it.
+                    proxy.scrollTo(entries[newIndex - 1].id)
+                } else {
+                    proxy.scrollTo(entries[newIndex].id)
+                }
             }
         }
     }
 
-    private func sectionHeader(titleKey: L10n.Key, isFirst: Bool) -> some View {
+    private func sectionHeader(titleKey: L10n.Key) -> some View {
         LocalizedText(titleKey)
             .font(.system(size: 11, weight: .semibold))
             .textCase(.uppercase)
             .foregroundStyle(.secondary)
             .tracking(0.6)
             .padding(.horizontal, 22)
-            // Uniform top spacing across sections so the first label has the
-            // same visual rhythm as later ones. The LazyVStack's outer 12pt
-            // padding still keeps the very top from clipping the first header.
-            .padding(.top, isFirst ? 4 : 14)
-            .padding(.bottom, 6)
+            // Uniform vertical padding regardless of section index so any
+            // section that becomes the pinned one has the same height. The
+            // `isFirst` differential collapsed the first section's band
+            // when it stuck to the top.
+            .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // Opaque background so rows scrolling underneath the pinned
+            // header are masked instead of bleeding through the palette's
+            // material.
+            .background(.thickMaterial)
     }
 }
 
