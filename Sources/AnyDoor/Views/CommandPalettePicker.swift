@@ -19,23 +19,34 @@ final class CommandPaletteState {
 
     let allSections: [CommandPaletteSection]
     let hyperFlags: Int
+    private let portInventory: PortInventory
+    private var portRefreshTask: Task<Void, Never>?
 
-    init(sections: [CommandPaletteSection], hyperFlags: Int) {
+    init(
+        sections: [CommandPaletteSection],
+        hyperFlags: Int,
+        portInventory: PortInventory = .shared
+    ) {
         self.allSections = sections
         self.hyperFlags = hyperFlags
+        self.portInventory = portInventory
     }
 
     /// Sections after applying the query filter, with empty sections dropped.
     var filteredSections: [CommandPaletteSection] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return allSections }
-        return allSections.compactMap { section in
+        var sections = allSections.compactMap { section in
             let matched = section.entries.filter { entry in
                 entry.localizedTitle().localizedCaseInsensitiveContains(trimmed)
                     || entry.title.localizedCaseInsensitiveContains(trimmed)
             }
             return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
         }
+        if let ports = portSection(matching: trimmed) {
+            sections.insert(ports, at: 0)
+        }
+        return sections
     }
 
     /// Flat list driving keyboard navigation. Sections are conceptual; the
@@ -60,6 +71,57 @@ final class CommandPaletteState {
         let list = flatEntries
         guard list.indices.contains(selectedIndex) else { return list.first }
         return list[selectedIndex]
+    }
+
+    func refreshPortsIfNeeded() {
+        guard Self.portSearchNeedle(from: query) != nil else { return }
+        guard !portInventory.isRefreshing, portRefreshTask == nil else { return }
+
+        portRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.portInventory.refresh()
+            self.portRefreshTask = nil
+        }
+    }
+
+    private func portSection(matching query: String) -> CommandPaletteSection? {
+        guard let needle = Self.portSearchNeedle(from: query) else { return nil }
+        let entries = portInventory.records
+            .filter { String($0.port).contains(needle) }
+            .sorted(by: Self.sortPorts)
+            .map { Self.portEntry(for: $0) }
+        guard !entries.isEmpty else { return nil }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionPorts, entries: entries)
+    }
+
+    private static func portSearchNeedle(from query: String) -> String? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawNeedle = trimmed.hasPrefix(":") ? String(trimmed.dropFirst()) : trimmed
+        guard !rawNeedle.isEmpty, rawNeedle.allSatisfy(\.isNumber) else { return nil }
+        return rawNeedle
+    }
+
+    private static func sortPorts(_ lhs: PortRecord, _ rhs: PortRecord) -> Bool {
+        if lhs.port != rhs.port { return lhs.port < rhs.port }
+        let nameOrder = lhs.processName.localizedCaseInsensitiveCompare(rhs.processName)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return lhs.pid < rhs.pid
+    }
+
+    private static func portEntry(for record: PortRecord) -> PanelEntry {
+        PanelEntry(
+            id: PanelEntry.id(for: .portRecord(record)),
+            source: .portRecord(record),
+            displayOrder: Double(record.port),
+            isVisible: true,
+            hotkey: nil,
+            title: record.processName,
+            subtitle: L(.commandPalettePortSubtitle, String(record.port), String(record.pid)),
+            symbol: "xmark.circle.fill",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
     }
 }
 
@@ -104,6 +166,7 @@ struct CommandPalettePicker: View {
         }
         .onChange(of: state.query) { _, _ in
             state.selectedIndex = 0
+            state.refreshPortsIfNeeded()
         }
     }
 
@@ -240,9 +303,7 @@ private struct CommandPaletteRow: View {
         HStack(spacing: 12) {
             icon
                 .frame(width: 22, height: 22)
-            Text(entry.localizedTitle())
-                .font(.system(size: 14, weight: .medium))
-                .lineLimit(1)
+            titleBlock
             Spacer()
             if let hotkey = entry.hotkey {
                 Text(hotkey.displayString(hyperFlags: hyperFlags))
@@ -269,6 +330,23 @@ private struct CommandPaletteRow: View {
     }
 
     @ViewBuilder
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(entry.localizedTitle())
+                .font(.system(size: 14, weight: .medium))
+                .lineLimit(1)
+            if case .portRecord = entry.source,
+               let subtitle = entry.subtitle,
+               !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    @ViewBuilder
     private var icon: some View {
         switch entry.source {
         case .appShortcut:
@@ -292,6 +370,10 @@ private struct CommandPaletteRow: View {
             Image(systemName: entry.symbol)
                 .font(.system(size: 15))
                 .foregroundStyle(.primary)
+        case .portRecord:
+            Image(systemName: entry.symbol)
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
         }
     }
 

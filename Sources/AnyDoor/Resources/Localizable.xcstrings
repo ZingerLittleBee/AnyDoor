@@ -620,8 +620,8 @@
     "commandPalette.searchPlaceholder" : {
       "extractionState" : "manual",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search commands" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索命令" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search commands, apps, ports" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索命令、应用、端口" } }
       }
     },
     "commandPalette.empty" : {
@@ -636,6 +636,13 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置" } }
+      }
+    },
+    "commandPalette.port.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Port :%@ · PID %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "端口 :%@ · PID %@" } }
       }
     },
     "commandPalette.section.commands" : {
@@ -657,6 +664,13 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Applications" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用" } }
+      }
+    },
+    "commandPalette.section.ports" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ports" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "端口" } }
       }
     },
     "settings.general.commandPalette.section" : {
@@ -1126,6 +1140,34 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Color pick failed" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取色失败" } }
+      }
+    },
+    "toast.portKill.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Failed to kill %@ (error %@)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "结束 %@ 失败（错误 %@）" } }
+      }
+    },
+    "toast.portKill.gone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ already exited" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 已退出" } }
+      }
+    },
+    "toast.portKill.permissionDenied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Failed to kill %@: permission denied" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "结束 %@ 失败：权限不足" } }
+      }
+    },
+    "toast.portKill.success" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Killed %@ on :%@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已结束 %@（:%@）" } }
       }
     },
     "toast.qrcode.noCode" : {

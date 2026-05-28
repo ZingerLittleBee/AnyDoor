@@ -268,6 +268,20 @@ final class PortInventoryTests: XCTestCase {
     }
 
     @MainActor
+    func testKillEPERMReturnsPermissionDeniedResult() async {
+        let r = PortRecord(port: 80, pid: 99, processName: "root-thing",
+                           executablePath: nil, commandLine: nil,
+                           binds: [PortBind(address: "*", family: .ipv4)])
+        let scanner = RecordingKillScanner(records: [r]) { _, _ in .failure(.EPERM) }
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+        await inv.refresh()
+
+        let result = await inv.kill(pid: 99)
+
+        XCTAssertEqual(result, .failure(.permissionDenied))
+    }
+
+    @MainActor
     func testKillESRCHIsNotRecordedAsFailure() async {
         let r = PortRecord(port: 80, pid: 99, processName: "x",
                            executablePath: nil, commandLine: nil,
@@ -309,6 +323,21 @@ final class PortInventoryTests: XCTestCase {
         await inv.kill(pid: 99)
         let sigs = scanner.killCalls.map(\.sig)
         XCTAssertEqual(sigs, [SIGTERM])
+    }
+
+    @MainActor
+    func testKillSuccessReturnsSuccessResult() async {
+        let r = PortRecord(port: 80, pid: 99, processName: "fast-exit",
+                           executablePath: nil, commandLine: nil,
+                           binds: [PortBind(address: "*", family: .ipv4)])
+        let scanner = RecordingKillScanner(records: [r]) { _, _ in .success }
+        let inv = PortInventory(scanner: scanner, defaults: isolatedDefaults())
+        await inv.refresh()
+        scanner.records = []
+
+        let result = await inv.kill(pid: 99)
+
+        XCTAssertEqual(result, .success)
     }
 
     @MainActor

@@ -96,23 +96,23 @@ final class PortInventory {
         return now().timeIntervalSince(lastSuccessfulRefreshAt) < cacheDuration
     }
 
-    func kill(pid: pid_t) async {
+    @discardableResult
+    func kill(pid: pid_t) async -> PortKillResult {
         killingPIDs.insert(pid)
+        defer { killingPIDs.remove(pid) }
 
         // Step 1: SIGTERM
         switch scanner.kill(pid: pid, signal: SIGTERM) {
         case .failure(.ESRCH):
             // Process already gone — treat as success.
             await refresh(force: true)
-            killingPIDs.remove(pid)
-            return
+            return .success
         case .failure(let code):
             let reason: KillFailure.Reason =
                 (code == .EPERM) ? .permissionDenied : .other(code.rawValue)
             failedKillPIDs[pid] = KillFailure(reason: reason, timestamp: .now)
             scheduleAutoDismiss(for: pid)
-            killingPIDs.remove(pid)
-            return
+            return .failure(reason)
         case .success:
             break
         }
@@ -127,17 +127,20 @@ final class PortInventory {
             case .success:
                 try? await Task.sleep(for: .milliseconds(200))
                 await refresh(force: true)
+                return .success
             case .failure(.ESRCH):
                 await refresh(force: true)
+                return .success
             case .failure(let code):
                 let reason: KillFailure.Reason =
                     (code == .EPERM) ? .permissionDenied : .other(code.rawValue)
                 failedKillPIDs[pid] = KillFailure(reason: reason, timestamp: .now)
                 scheduleAutoDismiss(for: pid)
+                return .failure(reason)
             }
         }
 
-        killingPIDs.remove(pid)
+        return .success
     }
 
     private func scheduleAutoDismiss(for pid: pid_t) {
@@ -205,4 +208,9 @@ struct KillFailure: Equatable, Sendable {
     }
     let reason: Reason
     let timestamp: Date
+}
+
+enum PortKillResult: Equatable, Sendable {
+    case success
+    case failure(KillFailure.Reason)
 }
