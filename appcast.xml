@@ -3,51 +3,74 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.7.0</title>
+            <pubDate>Thu, 28 May 2026 16:22:34 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.7.0</sparkle:version>
+            <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- Command Palette: every installed app on the system is now searchable, not
+  just apps the user explicitly bound to a hotkey. `CommandPaletteWindowController`
+  scans via `InstalledAppsScanner` when the palette opens, filters out bundle
+  IDs already represented by an app-shortcut row, and appends the remaining
+  apps to the Applications section after the bound rows. Selecting one routes
+  through `AppSwitcher.toggle`, identical to the bound-shortcut path. A new
+  `PanelEntry.Source.installedApp(bundleID:path:)` variant carries the
+  necessary data; it is command-palette-only and never surfaces in the menu
+  bar panel or settings UI.
+- Command Palette: sticky section headers. The Applications / Window Layout /
+  Commands labels stay pinned to the top of the scroll viewport as their rows
+  scroll past, matching the Raycast feel. Rows share the pinned header's
+  material layering on macOS < 26 so the header/row boundary has no visible
+  double-material seam. Arrow-key navigation now compensates for the pinned
+  header: moving up scrolls to the row above the target so the target lands
+  one row below the sticky band instead of hidden behind it, and a 0-height
+  top sentinel anchors the `newIndex == 0` case so the first section header
+  lands naturally above row 0 instead of pinning over it.
+
+### Changed
+
+- Menu bar panel: dismiss on Escape. The panel is a non-activating `NSPanel`
+  so a SwiftUI `keyDown` handler would never fire; a global + local
+  `NSEvent` monitor is now installed while the panel is visible so Escape
+  closes it whether AnyDoor or another app is frontmost.
+- Menu bar panel header removed. The AnyDoor title was redundant with the
+  status item icon, and the `%lld enabled` count was low-value noise on
+  every open. Dropping the header HStack also removes its now-orphaned
+  localization entries.
+- Menu bar panel footer removed. The Settings gear and Quit power icons
+  sat 2pt apart and were easy to mis-tap; both actions are already exposed
+  via the status item's right-click menu with the standard ⌘, and ⌘Q
+  shortcuts.
+- Command Palette adopts Liquid Glass on macOS 26+. Two new helpers in
+  `LiquidGlassCompatibility` — `adaptivePanelSurface(cornerRadius:)` for
+  non-interactive panel backgrounds and `adaptiveStickyHeaderSurface()` for
+  full-width pinned headers — apply `.glassEffect(.regular, in:)` and
+  `.background(.thinMaterial)` respectively, with `.thickMaterial` fallbacks
+  on earlier systems. The outer palette becomes one Liquid Glass surface so
+  the search field, rows, and headers read as a single material; per-row
+  `.thickMaterial` is dropped on macOS 26 to avoid double-layer composites
+  that previously made the list area look noticeably darker than the search
+  field. The sticky header uses `.thinMaterial` — heavy materials or a
+  nested `glassEffect` rendered as a dark opaque strip that broke the
+  design language.
+- Command Palette row icons: SF Symbols dropped from 18pt to 15pt so they
+  read at the same visual weight as the NSImage app icons, which carry
+  built-in transparent padding the symbols lacked.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.7.0/AnyDoor-1.7.0.zip" length="5936671" type="application/octet-stream" sparkle:edSignature="9apP+7BrNKkYnkq3M5w67EsTO15ZtmW6HMym21DJ613xkTCCuN6xJtXB1S/6NsP9XdCgsj81MZAfmajtu2i1Dw=="/>
+        </item>
+        <item>
             <title>1.6.0</title>
             <pubDate>Wed, 27 May 2026 19:58:22 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.6.0</sparkle:version>
             <sparkle:shortVersionString>1.6.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Added
-
-- System apps in App Shortcuts: Finder, System Settings, Calculator, and other
-  built-ins from `/System/Applications` or `/System/Library/CoreServices/Finder.app`
-  can now be bound to global hotkeys. A new `InstalledAppsScanner` enumerates
-  `/Applications`, `/System/Applications`, both `Utilities` subdirs, and
-  `~/Applications`, plus an explicit probe for Finder. The previous
-  `NSOpenPanel` (locked to `/Applications`) is replaced by a Spotlight-style
-  floating picker — borderless rounded `NSPanel` positioned near the top of
-  the active screen with a thick-material background, a large search field,
-  single-click selection, click-outside / Esc dismissal, and already-bound
-  apps automatically filtered out. Arrow keys move the highlighted row,
-  Enter selects, and a panel-level `NSEvent` key monitor intercepts arrow /
-  Return / Escape before the focused `TextField` can consume them so the
-  search input stays the keyboard target throughout.
-- Command Palette: a global launcher-style panel that surfaces every directly
-  invocable menu bar item — built-in toggles/actions, window-layout children,
-  and visible app shortcuts — grouped into labelled sections (Commands /
-  Window Layout / Applications) with uppercase muted headers. Configurable
-  trigger hotkey lives in Settings → General → Command Palette and is stored
-  via `CommandPaletteService` (UserDefaults); the snapshot is threaded into
-  `PanelStore.rebuildHotkeySnapshots` so the CGEvent tap picks it up without
-  a relaunch. Re-pressing the trigger while the palette is open dismisses it,
-  matching macOS Spotlight. Selection routes through `PanelStore.dispatch`,
-  so app rows toggle their target app and built-ins fire their normal
-  toggle / run path. Section headers are wrapped into each row's `id` bounds
-  so `ScrollViewReader` brings the label and row into view together when
-  navigating across groups, and `safeAreaInset` keeps an 8pt visual gap at
-  the top and bottom edges so the highlighted row never touches the panel
-  border.
-
-### Fixed
-
-- Settings → 面板: the Display Brightness sub-row hotkey recorder now lines
-  up with the Window Layout sub-row recorders along the panel's right edge
-  (was missing the 20pt trailing inset that the layout rows used).
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.6.0/AnyDoor-1.6.0.zip" length="5939862" type="application/octet-stream" sparkle:edSignature="rUBwweyOv4hG3kHCLRHexYQa0bAP8CtrYcJuSYM3V5Lv++OC2Xq/njmA4p3oRuK/MSONDCmzDqQbbeCDNKcMBg=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.6.0/AnyDoor-1.6.0.zip" length="5939862" type="application/octet-stream" sparkle:edSignature="rUBwweyOv4hG3kHCLRHexYQa0bAP8CtrYcJuSYM3V5Lv++OC2Xq/njmA4p3oRuK/MSONDCmzDqQbbeCDNKcMBg=="/>
         </item>
         <item>
             <title>1.5.0</title>
@@ -57,15 +80,6 @@
             <sparkle:shortVersionString>1.5.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.5.0/AnyDoor-1.5.0.zip" length="5729418" type="application/octet-stream" sparkle:edSignature="pT/Am7RhKXBezIFPaas4yS+7obhcM1F6BGKHHxPXG1vyDNMtU8UpAKufSu7lrpbEQY8TmXqmouLNPQ1JyCreCA=="/>
-        </item>
-        <item>
-            <title>1.4.0</title>
-            <pubDate>Mon, 25 May 2026 18:19:22 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.4.0</sparkle:version>
-            <sparkle:shortVersionString>1.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.4.0/AnyDoor-1.4.0.zip" length="5586443" type="application/octet-stream" sparkle:edSignature="dSlJZOjuWMhwlha/gDCqdwNtm4TiJ1+qfHttORJOEqXGr8lBr734c0W6woEpROozIoj8sSVCTdWLPJartnAsBw=="/>
         </item>
         <item>
             <title>1.2.0</title>

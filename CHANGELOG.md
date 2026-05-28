@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-05-28
+
 ### Added
 
 - Command Palette: every installed app on the system is now searchable, not
