@@ -31,15 +31,6 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Header
-            HStack {
-                Text("AnyDoor").font(.headline)
-                Spacer()
-                let count = panel.topLevelEntries.filter(\.isVisible).count
-                Text(L(.panelHeaderEnabledCount, count)).font(.caption).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 12).padding(.top, 4)
-
             if let version = updateService.availableVersion {
                 UpdateBannerView(
                     version: version,

@@ -58,7 +58,6 @@ enum L10n {
         case panelAppShortcutToggleHelp = "panel.appShortcut.toggleHelp"
         case panelFooterQuit = "panel.footer.quit"
         case panelFooterSettings = "panel.footer.settings"
-        case panelHeaderEnabledCount = "panel.header.enabledCount"
         case panelRowNeedsPermission = "panel.row.needsPermission"
         case clipboardEmpty = "clipboard.empty"
         case clipboardHeaderCountSuffix = "clipboard.header.countSuffix"

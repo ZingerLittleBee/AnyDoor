@@ -64,13 +64,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "设置" } }
       }
     },
-    "panel.header.enabledCount" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld enabled" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个已启用" } }
-      }
-    },
     "panel.row.needsPermission" : {
       "extractionState" : "manual",
       "localizations" : {
