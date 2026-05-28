@@ -6,6 +6,57 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Command Palette: every installed app on the system is now searchable, not
+  just apps the user explicitly bound to a hotkey. `CommandPaletteWindowController`
+  scans via `InstalledAppsScanner` when the palette opens, filters out bundle
+  IDs already represented by an app-shortcut row, and appends the remaining
+  apps to the Applications section after the bound rows. Selecting one routes
+  through `AppSwitcher.toggle`, identical to the bound-shortcut path. A new
+  `PanelEntry.Source.installedApp(bundleID:path:)` variant carries the
+  necessary data; it is command-palette-only and never surfaces in the menu
+  bar panel or settings UI.
+- Command Palette: sticky section headers. The Applications / Window Layout /
+  Commands labels stay pinned to the top of the scroll viewport as their rows
+  scroll past, matching the Raycast feel. Rows share the pinned header's
+  material layering on macOS < 26 so the header/row boundary has no visible
+  double-material seam. Arrow-key navigation now compensates for the pinned
+  header: moving up scrolls to the row above the target so the target lands
+  one row below the sticky band instead of hidden behind it, and a 0-height
+  top sentinel anchors the `newIndex == 0` case so the first section header
+  lands naturally above row 0 instead of pinning over it.
+
+### Changed
+
+- Menu bar panel: dismiss on Escape. The panel is a non-activating `NSPanel`
+  so a SwiftUI `keyDown` handler would never fire; a global + local
+  `NSEvent` monitor is now installed while the panel is visible so Escape
+  closes it whether AnyDoor or another app is frontmost.
+- Menu bar panel header removed. The AnyDoor title was redundant with the
+  status item icon, and the `%lld enabled` count was low-value noise on
+  every open. Dropping the header HStack also removes its now-orphaned
+  localization entries.
+- Menu bar panel footer removed. The Settings gear and Quit power icons
+  sat 2pt apart and were easy to mis-tap; both actions are already exposed
+  via the status item's right-click menu with the standard ⌘, and ⌘Q
+  shortcuts.
+- Command Palette adopts Liquid Glass on macOS 26+. Two new helpers in
+  `LiquidGlassCompatibility` — `adaptivePanelSurface(cornerRadius:)` for
+  non-interactive panel backgrounds and `adaptiveStickyHeaderSurface()` for
+  full-width pinned headers — apply `.glassEffect(.regular, in:)` and
+  `.background(.thinMaterial)` respectively, with `.thickMaterial` fallbacks
+  on earlier systems. The outer palette becomes one Liquid Glass surface so
+  the search field, rows, and headers read as a single material; per-row
+  `.thickMaterial` is dropped on macOS 26 to avoid double-layer composites
+  that previously made the list area look noticeably darker than the search
+  field. The sticky header uses `.thinMaterial` — heavy materials or a
+  nested `glassEffect` rendered as a dark opaque strip that broke the
+  design language.
+- Command Palette row icons: SF Symbols dropped from 18pt to 15pt so they
+  read at the same visual weight as the NSImage app icons, which carry
+  built-in transparent padding the symbols lacked.
+
 ## [1.6.0] - 2026-05-27
 
 ### Added

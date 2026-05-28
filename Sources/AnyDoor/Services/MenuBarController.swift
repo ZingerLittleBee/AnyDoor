@@ -17,6 +17,8 @@ final class MenuBarController {
     private var hostingView: NSHostingView<AnyView>?
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
+    private var globalKeyMonitor: Any?
+    private var localKeyMonitor: Any?
 
     init(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
@@ -163,10 +165,12 @@ final class MenuBarController {
         panel.orderFrontRegardless()
         button.highlight(true)
         installClickMonitors()
+        installKeyMonitors()
     }
 
     private func hidePanel() {
         removeClickMonitors()
+        removeKeyMonitors()
         statusItem?.button?.highlight(false)
         panel?.orderOut(nil)
         panel?.contentView = nil
@@ -239,6 +243,36 @@ final class MenuBarController {
         if let localClickMonitor { NSEvent.removeMonitor(localClickMonitor) }
         globalClickMonitor = nil
         localClickMonitor = nil
+    }
+
+    // MARK: - Escape-to-dismiss
+
+    /// Hide the panel when the user presses Escape. The panel is a
+    /// `.nonactivatingPanel`, so it never becomes key — a plain `.keyDown`
+    /// handler in the SwiftUI view wouldn't fire. A global monitor catches
+    /// Escape when another app is frontmost; the local monitor covers the
+    /// rare case where our own app is active (e.g. Settings window open).
+    private func installKeyMonitors() {
+        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: .keyDown
+        ) { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            MainActor.assumeIsolated { self?.hidePanel() }
+        }
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: .keyDown
+        ) { [weak self] event in
+            guard event.keyCode == 53 else { return event }
+            MainActor.assumeIsolated { self?.hidePanel() }
+            return nil
+        }
+    }
+
+    private func removeKeyMonitors() {
+        if let globalKeyMonitor { NSEvent.removeMonitor(globalKeyMonitor) }
+        if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
+        globalKeyMonitor = nil
+        localKeyMonitor = nil
     }
 
     // MARK: - Icon image

@@ -45,11 +45,12 @@ struct HotkeyDescriptor: Hashable, Sendable {
 /// A unified row visible to the SwiftUI views. Built from one of three sources.
 struct PanelEntry: Identifiable, Hashable {
     enum Source: Hashable {
-        case appShortcut(UUID)         // KeyBinding.id
+        case appShortcut(UUID)                         // KeyBinding.id
         case builtin(BuiltinItem)
+        case installedApp(bundleID: String, path: String) // Command-palette-only: installed but unbound
     }
 
-    let id: String                     // "app:<uuid>" or "builtin:<key>"
+    let id: String                     // "app:<uuid>" or "builtin:<key>" or "installedApp:<bundleID>"
     let source: Source
     let displayOrder: Double
     let isVisible: Bool
@@ -63,8 +64,9 @@ struct PanelEntry: Identifiable, Hashable {
 
     static func id(for source: Source) -> String {
         switch source {
-        case .appShortcut(let id): return "app:\(id.uuidString)"
-        case .builtin(let item):   return "builtin:\(item.rawValue)"
+        case .appShortcut(let id):                return "app:\(id.uuidString)"
+        case .builtin(let item):                  return "builtin:\(item.rawValue)"
+        case .installedApp(let bundleID, _):      return "installedApp:\(bundleID)"
         }
     }
 
@@ -76,6 +78,7 @@ struct PanelEntry: Identifiable, Hashable {
         switch source {
         case .appShortcut: return title
         case .builtin(let item): return L(item.titleKey)
+        case .installedApp: return title
         }
     }
 }
