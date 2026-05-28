@@ -83,7 +83,12 @@ struct CommandPalettePicker: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(.thickMaterial)
+        // Liquid Glass on macOS 26+; .thickMaterial on earlier systems.
+        // Driving the whole palette from one surface keeps the search field,
+        // rows, and section headers visually consistent — on macOS 26 the
+        // TextField picks up the system glass treatment automatically, which
+        // used to clash with the per-row .thickMaterial below.
+        .adaptivePanelSurface(cornerRadius: 16)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
@@ -168,10 +173,12 @@ struct CommandPalettePicker: View {
                                     onSelect: { onSelect(entry) }
                                 )
                                 .id(entry.id)
-                                // Rows share the pinned header's material
-                                // layering so the header/row boundary has no
-                                // visible double-material seam.
-                                .background(.thickMaterial)
+                                // Pre-macOS-26 fallback: rows share the pinned
+                                // header's material layering so the header/row
+                                // boundary has no visible double-material
+                                // seam. On macOS 26+ rows stay transparent on
+                                // top of the panel's Liquid Glass surface.
+                                .legacyMaterialBackground()
                             }
                         } header: {
                             sectionHeader(titleKey: section.titleKey)
@@ -213,10 +220,11 @@ struct CommandPalettePicker: View {
             // when it stuck to the top.
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Opaque background so rows scrolling underneath the pinned
-            // header are masked instead of bleeding through the palette's
-            // material.
-            .background(.thickMaterial)
+            // On macOS 26+ the header uses Liquid Glass so it reads as a
+            // distinct band on top of the panel's glass while still masking
+            // rows that scroll underneath. Earlier systems fall back to
+            // .thickMaterial for the same masking job.
+            .adaptiveStickyHeaderSurface()
     }
 }
 
