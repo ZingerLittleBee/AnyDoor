@@ -105,10 +105,41 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
 
         let appShortcuts = store.appShortcutChildren.filter(\.isVisible)
-        if !appShortcuts.isEmpty {
+        let boundBundleIDs: Set<String> = Set(appShortcuts.compactMap { entry in
+            guard case .appShortcut(let id) = entry.source,
+                  let binding = store.binding(id: id) else { return nil }
+            return binding.appBundleID
+        })
+
+        // Apps installed on the system but not bound to a hotkey are listed
+        // after the bound rows in the same section so they're searchable from
+        // the palette without polluting the menu-bar panel itself.
+        let scanned = InstalledAppsScanner.scan()
+        let unboundOrder = Double(appShortcuts.count) * 100 + 1_000_000
+        let installedExtras: [PanelEntry] = scanned
+            .filter { !boundBundleIDs.contains($0.bundleID) }
+            .enumerated()
+            .map { offset, app in
+                PanelEntry(
+                    id: PanelEntry.id(for: .installedApp(bundleID: app.bundleID, path: app.path)),
+                    source: .installedApp(bundleID: app.bundleID, path: app.path),
+                    displayOrder: unboundOrder + Double(offset),
+                    isVisible: true,
+                    hotkey: nil,
+                    title: app.displayName,
+                    subtitle: nil,
+                    symbol: "app.fill",
+                    kind: .submenu,
+                    toggleState: nil,
+                    permission: .notRequired
+                )
+            }
+
+        let combined = appShortcuts + installedExtras
+        if !combined.isEmpty {
             sections.append(CommandPaletteSection(
                 titleKey: .commandPaletteSectionApplications,
-                entries: appShortcuts
+                entries: combined
             ))
         }
 
