@@ -288,6 +288,10 @@ private struct CommandPaletteRow: View {
                     .font(.system(size: 18))
                     .foregroundStyle(.secondary)
             }
+        case .installedApp(_, let path):
+            Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+                .resizable()
+                .interpolation(.high)
         case .builtin:
             Image(systemName: entry.symbol)
                 .font(.system(size: 18))

@@ -173,6 +173,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         case .appShortcut(let id):
             guard let binding = PanelStore.shared.binding(id: id) else { return }
             AppSwitcher.toggle(bundleID: binding.appBundleID, appPath: binding.appPath)
+        case .installedApp(let bundleID, let path):
+            AppSwitcher.toggle(bundleID: bundleID, appPath: path)
         case .builtin(let item):
             switch item.kind {
             case .toggle:
