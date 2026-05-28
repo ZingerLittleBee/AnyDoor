@@ -277,8 +277,11 @@ private struct CommandPaletteRow: View {
                     .resizable()
                     .interpolation(.high)
             } else {
+                // SF Symbols carry no built-in transparent padding, so they
+                // need a smaller point size than the 22pt frame to read at
+                // the same visual weight as NSImage app icons.
                 Image(systemName: entry.symbol)
-                    .font(.system(size: 18))
+                    .font(.system(size: 15))
                     .foregroundStyle(.secondary)
             }
         case .installedApp(_, let path):
@@ -287,7 +290,7 @@ private struct CommandPaletteRow: View {
                 .interpolation(.high)
         case .builtin:
             Image(systemName: entry.symbol)
-                .font(.system(size: 18))
+                .font(.system(size: 15))
                 .foregroundStyle(.primary)
         }
     }
