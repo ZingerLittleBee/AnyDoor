@@ -14,11 +14,10 @@ private enum HoverPopoverTarget: Hashable {
 }
 
 struct MenuBarView: View {
-    /// Invoked by the footer's Settings button so the controller can dismiss
-    /// the panel before the Settings window opens.
+    /// Invoked when a row action needs the controller to dismiss the panel
+    /// (e.g. before opening another window or completing a clipboard copy).
     let onRequestClose: () -> Void
 
-    @Environment(\.openSettings) private var openSettings
     @State private var panel = PanelStore.shared
     @State private var updateService = UpdateService.shared
     @State private var popover: HoverPopover?
@@ -63,26 +62,6 @@ struct MenuBarView: View {
                 }
             }
             .padding(.horizontal, 4)
-
-            // Footer
-            VStack(spacing: 0) {
-                Divider()
-                    .padding(.horizontal, 8)
-                HStack(spacing: 2) {
-                    Spacer()
-                    footerIconButton(.panelFooterSettings, systemImage: "gearshape") {
-                        NSApp.activate()
-                        openSettings()
-                        onRequestClose()
-                    }
-                    footerIconButton(.panelFooterQuit, systemImage: "power") {
-                        NSApplication.shared.terminate(nil)
-                    }
-                }
-                .focusEffectDisabled()
-                .padding(.horizontal, 6)
-                .padding(.top, 4)
-            }
         }
         .padding(.vertical, 8).padding(.horizontal, 4)
         .frame(width: 260)
@@ -99,23 +78,6 @@ struct MenuBarView: View {
             // search field). Otherwise hide as before.
             if popover?.isHoldingFocus != true { popover?.hide() }
         }
-    }
-
-    private func footerIconButton(
-        _ titleKey: L10n.Key,
-        systemImage: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(.secondary)
-                .frame(width: 24, height: 22)
-                .contentShape(Rectangle())
-                .adaptiveInteractiveSurface(cornerRadius: 6)
-        }
-        .buttonStyle(.plain)
-        .help(L(titleKey))
     }
 
     @ViewBuilder
