@@ -72,8 +72,16 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
         installKeyMonitor()
         positionAtTopCenter()
-        window?.makeKeyAndOrderFront(nil)
+        // Activate the app BEFORE keying the window. Summoned from a global
+        // hotkey, this `.accessory` app is still in the background, so
+        // `makeKeyAndOrderFront` cannot make the panel the key window until the
+        // app is frontmost. With no key window, SwiftUI's @FocusState can't
+        // hold first responder on the search field, and the onAppear/onChange
+        // re-focus path oscillates every runloop tick (visible flicker, no
+        // typing) until the user clicks the field. Activating first lets the
+        // deferred focus assignment land on an already-key window.
         NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
     }
 
     /// Build the section groups shown in the palette. Sections with no
