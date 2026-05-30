@@ -80,7 +80,7 @@ final class BackupService {
                                     preferencesUpdated: 0, settingsApplied: 0)
 
         // App shortcuts — match by appBundleID.
-        let existingBindings = (try? context.fetch(FetchDescriptor<KeyBinding>())) ?? []
+        let existingBindings = try context.fetch(FetchDescriptor<KeyBinding>())
         // KeyBinding.appBundleID is not unique-constrained; on the rare duplicate, prefer the most recently inserted row.
         var bindingsByID = Dictionary(
             existingBindings.map { ($0.appBundleID, $0) },
@@ -113,7 +113,7 @@ final class BackupService {
 
         // Builtin preferences — match by itemKey; never insert unknown keys
         // (the local catalog is the source of truth for which items exist).
-        let existingPrefs = (try? context.fetch(FetchDescriptor<BuiltinPreference>())) ?? []
+        let existingPrefs = try context.fetch(FetchDescriptor<BuiltinPreference>())
         let prefsByKey = Dictionary(
             existingPrefs.map { ($0.itemKey, $0) },
             uniquingKeysWith: { first, _ in first }
