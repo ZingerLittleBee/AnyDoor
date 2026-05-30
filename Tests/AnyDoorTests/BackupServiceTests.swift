@@ -50,7 +50,8 @@ final class BackupServiceTests: XCTestCase {
     @MainActor
     func testExportOmitsAppPath() throws {
         // AppShortcutDTO has no appPath property — this is a compile-time guarantee.
-        // The test documents intent: the exported shortcut carries only the bundle ID.
+        // Behaviorally verify the omission: a machine-specific path must never
+        // leak into the serialized snapshot, only the portable bundle ID survives.
         let context = try makeContext()
         context.insert(KeyBinding(keyCode: 4, modifierFlags: 256,
                                   appBundleID: "com.apple.Safari", appName: "Safari",
@@ -61,6 +62,13 @@ final class BackupServiceTests: XCTestCase {
         let service = BackupService(context: context, defaults: makeDefaults(),
                                     appPathResolver: { _ in nil })
         let snapshot = service.exportSnapshot()
+        XCTAssertEqual(snapshot.appShortcuts.count, 1)
         XCTAssertEqual(snapshot.appShortcuts.first?.appBundleID, "com.apple.Safari")
+
+        // The serialized JSON must contain no trace of the foreign-username path.
+        let data = try BackupCodec.encode(snapshot)
+        let json = try XCTUnwrap(String(data: data, encoding: .utf8))
+        XCTAssertFalse(json.contains("/Users/alice"))
+        XCTAssertFalse(json.contains("Applications/Safari.app"))
     }
 }
