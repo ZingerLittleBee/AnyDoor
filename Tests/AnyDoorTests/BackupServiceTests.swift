@@ -74,7 +74,6 @@ final class BackupServiceTests: XCTestCase {
 
     // MARK: - Import tests
 
-    @MainActor
     private func snapshot(
         shortcuts: [AppShortcutDTO] = [],
         prefs: [BuiltinPreferenceDTO] = [],
@@ -96,7 +95,7 @@ final class BackupServiceTests: XCTestCase {
             appPathResolver: { id in id == "com.apple.Safari" ? "/Applications/Safari.app" : nil }
         )
 
-        let summary = service.importSnapshot(snapshot(shortcuts: [
+        let summary = try service.importSnapshot(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.apple.Safari", appName: "Safari",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 100)
@@ -113,7 +112,7 @@ final class BackupServiceTests: XCTestCase {
         let context = try makeContext()
         let service = BackupService(context: context, defaults: makeDefaults(),
                                     appPathResolver: { _ in nil })
-        let summary = service.importSnapshot(snapshot(shortcuts: [
+        let summary = try service.importSnapshot(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.unknown.App", appName: "Unknown",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 100)
@@ -136,7 +135,7 @@ final class BackupServiceTests: XCTestCase {
             context: context, defaults: makeDefaults(),
             appPathResolver: { _ in "/Applications/Safari.app" }
         )
-        let summary = service.importSnapshot(snapshot(shortcuts: [
+        let summary = try service.importSnapshot(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.apple.Safari", appName: "Safari",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 100)
@@ -163,7 +162,7 @@ final class BackupServiceTests: XCTestCase {
 
         let service = BackupService(context: context, defaults: makeDefaults(),
                                     appPathResolver: { _ in nil })
-        _ = service.importSnapshot(snapshot(shortcuts: [
+        _ = try service.importSnapshot(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.other.App", appName: "Other",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 200)
@@ -182,7 +181,7 @@ final class BackupServiceTests: XCTestCase {
 
         let service = BackupService(context: context, defaults: makeDefaults(),
                                     appPathResolver: { _ in nil })
-        let summary = service.importSnapshot(snapshot(prefs: [
+        let summary = try service.importSnapshot(snapshot(prefs: [
             BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
                                  displayOrder: 100, keyCode: 2, modifierFlags: 256)
         ]))
@@ -198,7 +197,7 @@ final class BackupServiceTests: XCTestCase {
         let context = try makeContext()
         let service = BackupService(context: context, defaults: makeDefaults(),
                                     appPathResolver: { _ in nil })
-        let summary = service.importSnapshot(snapshot(prefs: [
+        let summary = try service.importSnapshot(snapshot(prefs: [
             BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
                                  displayOrder: 100, keyCode: nil, modifierFlags: nil)
         ]))
@@ -212,12 +211,26 @@ final class BackupServiceTests: XCTestCase {
         let defaults = makeDefaults()
         let service = BackupService(context: context, defaults: defaults,
                                     appPathResolver: { _ in nil })
-        let summary = service.importSnapshot(snapshot(
+        let summary = try service.importSnapshot(snapshot(
             settings: ["menuBar.iconVisible": .bool(false),
                        "dev.bybee.AnyDoor.language": .string("en")]
         ))
         XCTAssertEqual(summary.settingsApplied, 2)
         XCTAssertEqual(defaults.bool(forKey: "menuBar.iconVisible"), false)
         XCTAssertEqual(defaults.string(forKey: "dev.bybee.AnyDoor.language"), "en")
+    }
+
+    @MainActor
+    func testImportSettingsAppliedCountExcludesNonWhitelistedKeys() throws {
+        let context = try makeContext()
+        let defaults = makeDefaults()
+        let service = BackupService(context: context, defaults: defaults,
+                                    appPathResolver: { _ in nil })
+        let summary = try service.importSnapshot(snapshot(
+            settings: ["menuBar.iconVisible": .bool(true),
+                       "SUSkippedVersion": .string("9.9.9")]
+        ))
+        XCTAssertEqual(summary.settingsApplied, 1)
+        XCTAssertNil(defaults.string(forKey: "SUSkippedVersion"))
     }
 }

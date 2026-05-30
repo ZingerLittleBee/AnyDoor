@@ -75,15 +75,16 @@ final class BackupService {
     // MARK: - Import (merge; import wins per key, local-only rows preserved)
 
     @discardableResult
-    func importSnapshot(_ snapshot: BackupSnapshot) -> ImportSummary {
+    func importSnapshot(_ snapshot: BackupSnapshot) throws -> ImportSummary {
         var summary = ImportSummary(shortcutsUpdated: 0, shortcutsInserted: 0,
                                     preferencesUpdated: 0, settingsApplied: 0)
 
         // App shortcuts — match by appBundleID.
         let existingBindings = (try? context.fetch(FetchDescriptor<KeyBinding>())) ?? []
+        // KeyBinding.appBundleID is not unique-constrained; on the rare duplicate, prefer the most recently inserted row.
         var bindingsByID = Dictionary(
             existingBindings.map { ($0.appBundleID, $0) },
-            uniquingKeysWith: { first, _ in first }
+            uniquingKeysWith: { _, last in last }
         )
         for dto in snapshot.appShortcuts {
             let resolvedPath = appPathResolver(dto.appBundleID) ?? ""
@@ -126,13 +127,10 @@ final class BackupService {
             summary.preferencesUpdated += 1
         }
 
-        try? context.save()
+        try context.save()
 
         // Settings — whitelisted UserDefaults.
-        SyncSettingsRegistry.write(snapshot.settings, to: defaults)
-        summary.settingsApplied = snapshot.settings.keys.filter { key in
-            SyncSettingsRegistry.entries.contains { $0.key == key }
-        }.count
+        summary.settingsApplied = SyncSettingsRegistry.write(snapshot.settings, to: defaults)
 
         return summary
     }

@@ -45,16 +45,20 @@ enum SyncSettingsRegistry {
     }
 
     /// Write whitelisted values into `defaults`. Keys outside the whitelist and
-    /// values whose type doesn't match the entry are ignored.
-    static func write(_ values: [String: SettingValue], to defaults: UserDefaults) {
+    /// values whose type doesn't match the entry are ignored. Returns the number
+    /// of values actually written.
+    @discardableResult
+    static func write(_ values: [String: SettingValue], to defaults: UserDefaults) -> Int {
+        var applied = 0
         for (key, value) in values {
             guard let entry = entriesByKey[key] else { continue }
             switch (entry.type, value) {
-            case (.bool, .bool(let v)):     defaults.set(v, forKey: key)
-            case (.int, .int(let v)):       defaults.set(v, forKey: key)
-            case (.string, .string(let v)): defaults.set(v, forKey: key)
+            case (.bool, .bool(let v)):     defaults.set(v, forKey: key); applied += 1
+            case (.int, .int(let v)):       defaults.set(v, forKey: key); applied += 1
+            case (.string, .string(let v)): defaults.set(v, forKey: key); applied += 1
             default: continue
             }
         }
+        return applied
     }
 }
