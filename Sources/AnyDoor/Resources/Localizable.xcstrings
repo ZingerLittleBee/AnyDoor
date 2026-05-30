@@ -1093,13 +1093,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "面板" } }
       }
     },
-    "settings.tab.sync" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步" } }
-      }
-    },
     "clipboard.text.chars" : {
       "extractionState" : "manual",
       "localizations" : {

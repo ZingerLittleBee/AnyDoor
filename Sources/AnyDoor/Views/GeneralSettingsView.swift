@@ -158,6 +158,8 @@ struct GeneralSettingsView: View {
                 LocalizedText(.settingsGeneralHistory)
             }
 
+            SyncSettingsView()
+
             Section {
                 @Bindable var updateService = updateService
 

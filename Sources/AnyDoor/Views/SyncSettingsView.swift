@@ -12,32 +12,31 @@ struct SyncSettingsView: View {
     @State private var statusMessage: String?
     @State private var isError = false
 
+    // Renders a single Section so it can be embedded inside the General tab's
+    // Form rather than living in its own tab.
     var body: some View {
-        Form {
-            Section {
-                LocalizedText(.settingsSyncDescription)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+        Section {
+            LocalizedText(.settingsSyncDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
 
-                HStack {
-                    Button { exportConfig() } label: {
-                        LocalizedText(.settingsSyncExportButton)
-                    }
-                    Button { importConfig() } label: {
-                        LocalizedText(.settingsSyncImportButton)
-                    }
+            HStack {
+                Button { exportConfig() } label: {
+                    LocalizedText(.settingsSyncExportButton)
                 }
-
-                if let statusMessage {
-                    Text(statusMessage)
-                        .font(.callout)
-                        .foregroundStyle(isError ? .red : .secondary)
+                Button { importConfig() } label: {
+                    LocalizedText(.settingsSyncImportButton)
                 }
-            } header: {
-                LocalizedText(.settingsSyncSection)
             }
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.callout)
+                    .foregroundStyle(isError ? .red : .secondary)
+            }
+        } header: {
+            LocalizedText(.settingsSyncSection)
         }
-        .formStyle(.grouped)
     }
 
     private func makeService() -> BackupService {
