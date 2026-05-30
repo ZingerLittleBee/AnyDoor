@@ -1023,6 +1023,62 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统" } }
       }
     },
+    "settings.sync.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Back up your app shortcuts, builtin preferences, and general settings to a file, or restore them from one. Restore merges into your current configuration." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将应用快捷键、内置项偏好和通用设置备份到文件,或从文件恢复。恢复会合并到当前配置中。" } }
+      }
+    },
+    "settings.sync.exportButton" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export to File…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出到文件…" } }
+      }
+    },
+    "settings.sync.exportFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Export failed: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出失败:%@" } }
+      }
+    },
+    "settings.sync.exportSuccess" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Exported successfully." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导出成功。" } }
+      }
+    },
+    "settings.sync.importButton" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Import from File…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从文件导入…" } }
+      }
+    },
+    "settings.sync.importFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Import failed: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "导入失败:%@" } }
+      }
+    },
+    "settings.sync.importSuccess" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Imported %1$d shortcuts and %2$d preferences." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已导入 %1$d 个快捷键和 %2$d 个偏好。" } }
+      }
+    },
+    "settings.sync.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Backup & Restore" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "备份与恢复" } }
+      }
+    },
     "settings.tab.general" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1035,6 +1091,13 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Panel" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "面板" } }
+      }
+    },
+    "settings.tab.sync" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sync" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同步" } }
       }
     },
     "clipboard.text.chars" : {
