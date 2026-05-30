@@ -9,4 +9,44 @@ final class BackupCodecTests: XCTestCase {
         let decoded = try JSONDecoder().decode([SettingValue].self, from: data)
         XCTAssertEqual(decoded, values)
     }
+
+    private func sampleSnapshot() -> BackupSnapshot {
+        BackupSnapshot(
+            schemaVersion: BackupSnapshot.currentSchemaVersion,
+            exportedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            appVersion: "1.2.3",
+            deviceName: "Test-Mac",
+            appShortcuts: [
+                AppShortcutDTO(appBundleID: "com.apple.Safari", appName: "Safari",
+                               keyCode: 4, modifierFlags: 256,
+                               isEnabled: true, isVisible: true, displayOrder: 100)
+            ],
+            builtinPreferences: [
+                BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
+                                     displayOrder: 200, keyCode: 2, modifierFlags: 256)
+            ],
+            settings: ["menuBar.iconVisible": .bool(true)]
+        )
+    }
+
+    func testSnapshotRoundTrips() throws {
+        let original = sampleSnapshot()
+        let data = try BackupCodec.encode(original)
+        let decoded = try BackupCodec.decode(data)
+        XCTAssertEqual(decoded, original)
+    }
+
+    func testDecodeRejectsUnsupportedSchemaVersion() throws {
+        var future = sampleSnapshot()
+        future.schemaVersion = 999
+        let data = try BackupCodec.encode(future)
+        XCTAssertThrowsError(try BackupCodec.decode(data)) { error in
+            XCTAssertEqual(error as? BackupCodecError, .unsupportedSchemaVersion(999))
+        }
+    }
+
+    func testDecodeRejectsGarbage() {
+        let garbage = Data("not json".utf8)
+        XCTAssertThrowsError(try BackupCodec.decode(garbage))
+    }
 }
