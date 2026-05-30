@@ -8,6 +8,23 @@ versioning.
 
 ### Added
 
+- Config sync: back up and restore configuration to/from a JSON file from
+  Settings → General → 备份与恢复. The export gathers app shortcuts
+  (`KeyBinding`), builtin preferences (`BuiltinPreference`), and a whitelisted
+  set of general settings (`SyncSettingsRegistry`) into a Codable
+  `BackupSnapshot`; clipboard history and machine-specific keys
+  (`hyperKey.ownedSignatures`, `PortInventory.viewMode`, `SUSkippedVersion`)
+  are deliberately excluded. Storage sits behind a `SyncBackend` protocol so
+  iCloud/Gist/S3 backends can be added later; the first backend is a local
+  file via NSSavePanel/NSOpenPanel. Import merges per key — app shortcuts by
+  `appBundleID`, builtin preferences by `itemKey` — with imported values
+  winning and local-only rows preserved; unknown preference keys are skipped.
+  `appPath` is never serialized and is re-resolved locally from the bundle ID
+  on import (via `NSWorkspace`), so backups stay portable across machines with
+  different usernames. After import, `reconcileAfterImport` re-reads the
+  affected settings into `CommandPaletteService`, `LocalizationManager`, and
+  `HyperKeyService` and rebuilds the hotkey snapshots, so imported hotkeys,
+  language, and menu-bar icon take effect without a relaunch.
 - Command Palette: port-number searches now surface matching listening
   processes in a dedicated Ports section. Port process rows are omitted while
   the query is empty, and selecting a port row kills the owning PID through
