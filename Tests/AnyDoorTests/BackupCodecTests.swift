@@ -49,4 +49,24 @@ final class BackupCodecTests: XCTestCase {
         let garbage = Data("not json".utf8)
         XCTAssertThrowsError(try BackupCodec.decode(garbage))
     }
+
+    func testLocalFileBackendUploadThenDownload() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("anydoor-backup-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let backend = LocalFileBackend(url: url)
+        let payload = Data("hello".utf8)
+        try await backend.upload(payload)
+        let read = try await backend.download()
+        XCTAssertEqual(read, payload)
+    }
+
+    func testLocalFileBackendDownloadReturnsNilWhenMissing() async throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("anydoor-missing-\(UUID().uuidString).json")
+        let backend = LocalFileBackend(url: url)
+        let read = try await backend.download()
+        XCTAssertNil(read)
+    }
 }
