@@ -71,4 +71,153 @@ final class BackupServiceTests: XCTestCase {
         XCTAssertFalse(json.contains("/Users/alice"))
         XCTAssertFalse(json.contains("Applications/Safari.app"))
     }
+
+    // MARK: - Import tests
+
+    @MainActor
+    private func snapshot(
+        shortcuts: [AppShortcutDTO] = [],
+        prefs: [BuiltinPreferenceDTO] = [],
+        settings: [String: SettingValue] = [:]
+    ) -> BackupSnapshot {
+        BackupSnapshot(
+            schemaVersion: BackupSnapshot.currentSchemaVersion,
+            exportedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            appVersion: "1.0", deviceName: nil,
+            appShortcuts: shortcuts, builtinPreferences: prefs, settings: settings
+        )
+    }
+
+    @MainActor
+    func testImportInsertsNewShortcutAndResolvesPath() throws {
+        let context = try makeContext()
+        let service = BackupService(
+            context: context, defaults: makeDefaults(),
+            appPathResolver: { id in id == "com.apple.Safari" ? "/Applications/Safari.app" : nil }
+        )
+
+        let summary = service.importSnapshot(snapshot(shortcuts: [
+            AppShortcutDTO(appBundleID: "com.apple.Safari", appName: "Safari",
+                           keyCode: 4, modifierFlags: 256,
+                           isEnabled: true, isVisible: true, displayOrder: 100)
+        ]))
+
+        XCTAssertEqual(summary.shortcutsInserted, 1)
+        let rows = try context.fetch(FetchDescriptor<KeyBinding>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.appPath, "/Applications/Safari.app")
+    }
+
+    @MainActor
+    func testImportInsertsShortcutWithEmptyPathWhenAppMissing() throws {
+        let context = try makeContext()
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        let summary = service.importSnapshot(snapshot(shortcuts: [
+            AppShortcutDTO(appBundleID: "com.unknown.App", appName: "Unknown",
+                           keyCode: 4, modifierFlags: 256,
+                           isEnabled: true, isVisible: true, displayOrder: 100)
+        ]))
+        XCTAssertEqual(summary.shortcutsInserted, 1)
+        let rows = try context.fetch(FetchDescriptor<KeyBinding>())
+        XCTAssertEqual(rows.first?.appPath, "")
+    }
+
+    @MainActor
+    func testImportUpdatesExistingShortcutByBundleIDAndReresolvesPath() throws {
+        let context = try makeContext()
+        context.insert(KeyBinding(keyCode: 0, modifierFlags: 0,
+                                  appBundleID: "com.apple.Safari", appName: "Old Safari",
+                                  appPath: "/Users/bob/Applications/Safari.app",
+                                  isEnabled: false, isVisible: true, displayOrder: 999))
+        try context.save()
+
+        let service = BackupService(
+            context: context, defaults: makeDefaults(),
+            appPathResolver: { _ in "/Applications/Safari.app" }
+        )
+        let summary = service.importSnapshot(snapshot(shortcuts: [
+            AppShortcutDTO(appBundleID: "com.apple.Safari", appName: "Safari",
+                           keyCode: 4, modifierFlags: 256,
+                           isEnabled: true, isVisible: true, displayOrder: 100)
+        ]))
+
+        XCTAssertEqual(summary.shortcutsUpdated, 1)
+        XCTAssertEqual(summary.shortcutsInserted, 0)
+        let rows = try context.fetch(FetchDescriptor<KeyBinding>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.keyCode, 4)
+        XCTAssertEqual(rows.first?.appName, "Safari")
+        XCTAssertEqual(rows.first?.isEnabled, true)
+        XCTAssertEqual(rows.first?.appPath, "/Applications/Safari.app")
+    }
+
+    @MainActor
+    func testImportKeepsLocalOnlyShortcuts() throws {
+        let context = try makeContext()
+        context.insert(KeyBinding(keyCode: 5, modifierFlags: 256,
+                                  appBundleID: "com.local.Only", appName: "Local",
+                                  appPath: "/Applications/Local.app",
+                                  isEnabled: true, isVisible: true, displayOrder: 100))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        _ = service.importSnapshot(snapshot(shortcuts: [
+            AppShortcutDTO(appBundleID: "com.other.App", appName: "Other",
+                           keyCode: 4, modifierFlags: 256,
+                           isEnabled: true, isVisible: true, displayOrder: 200)
+        ]))
+
+        let ids = try context.fetch(FetchDescriptor<KeyBinding>()).map(\.appBundleID).sorted()
+        XCTAssertEqual(ids, ["com.local.Only", "com.other.App"])
+    }
+
+    @MainActor
+    func testImportUpdatesExistingPreferenceByItemKey() throws {
+        let context = try makeContext()
+        context.insert(BuiltinPreference(itemKey: "darkMode", isVisible: false,
+                                         displayOrder: 999, keyCode: nil, modifierFlags: nil))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        let summary = service.importSnapshot(snapshot(prefs: [
+            BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
+                                 displayOrder: 100, keyCode: 2, modifierFlags: 256)
+        ]))
+
+        XCTAssertEqual(summary.preferencesUpdated, 1)
+        let pref = try context.fetch(FetchDescriptor<BuiltinPreference>()).first
+        XCTAssertEqual(pref?.isVisible, true)
+        XCTAssertEqual(pref?.keyCode, 2)
+    }
+
+    @MainActor
+    func testImportSkipsPreferenceWithUnknownItemKey() throws {
+        let context = try makeContext()
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        let summary = service.importSnapshot(snapshot(prefs: [
+            BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
+                                 displayOrder: 100, keyCode: nil, modifierFlags: nil)
+        ]))
+        XCTAssertEqual(summary.preferencesUpdated, 0)
+        XCTAssertEqual(try context.fetch(FetchDescriptor<BuiltinPreference>()).count, 0)
+    }
+
+    @MainActor
+    func testImportAppliesSettings() throws {
+        let context = try makeContext()
+        let defaults = makeDefaults()
+        let service = BackupService(context: context, defaults: defaults,
+                                    appPathResolver: { _ in nil })
+        let summary = service.importSnapshot(snapshot(
+            settings: ["menuBar.iconVisible": .bool(false),
+                       "dev.bybee.AnyDoor.language": .string("en")]
+        ))
+        XCTAssertEqual(summary.settingsApplied, 2)
+        XCTAssertEqual(defaults.bool(forKey: "menuBar.iconVisible"), false)
+        XCTAssertEqual(defaults.string(forKey: "dev.bybee.AnyDoor.language"), "en")
+    }
 }
