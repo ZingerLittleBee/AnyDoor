@@ -68,11 +68,7 @@ struct SyncSettingsView: View {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            guard let data = try LocalFileBackend(url: url).downloadSync() else {
-                statusMessage = L(.settingsSyncImportFailed, "no data")
-                isError = true
-                return
-            }
+            let data = try LocalFileBackend(url: url).downloadSync() ?? Data()
             let snapshot = try BackupCodec.decode(data)
             let service = makeService()
             let summary = try service.importSnapshot(snapshot)
