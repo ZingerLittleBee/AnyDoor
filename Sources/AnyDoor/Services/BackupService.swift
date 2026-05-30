@@ -134,4 +134,15 @@ final class BackupService {
 
         return summary
     }
+
+    /// Re-read settings into the services whose setters carry side effects that
+    /// raw UserDefaults writes bypass. Call after `importSnapshot` on the live
+    /// app (not needed in tests). Also rebuilds the panel + hotkey snapshots.
+    func reconcileAfterImport() async {
+        CommandPaletteService.shared.reloadFromDefaults()
+        LocalizationManager.shared.reloadFromDefaults()
+        await HyperKeyService.shared.reloadFromDefaults()
+        PanelStore.shared.rebuild()
+        PanelStore.shared.rebuildHotkeySnapshots()
+    }
 }

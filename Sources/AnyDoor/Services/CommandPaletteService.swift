@@ -36,6 +36,13 @@ final class CommandPaletteService {
         PanelStore.shared.rebuildHotkeySnapshots()
     }
 
+    /// Re-read the hotkey from UserDefaults after an external write (config import)
+    /// and rebuild the hotkey snapshots so the CGEvent tap picks it up.
+    func reloadFromDefaults() {
+        hotkey = Self.readFromDefaults()
+        PanelStore.shared.rebuildHotkeySnapshots()
+    }
+
     private static func readFromDefaults() -> HotkeyDescriptor? {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: keyCodeDefaultsKey) != nil,

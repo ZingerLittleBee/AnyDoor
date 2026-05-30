@@ -233,4 +233,21 @@ final class BackupServiceTests: XCTestCase {
         XCTAssertEqual(summary.settingsApplied, 1)
         XCTAssertNil(defaults.string(forKey: "SUSkippedVersion"))
     }
+
+    @MainActor
+    func testCommandPaletteReloadFromDefaultsPicksUpWrittenHotkey() {
+        UserDefaults.standard.removeObject(forKey: "commandPalette.hotkey.keyCode")
+        UserDefaults.standard.removeObject(forKey: "commandPalette.hotkey.modifierFlags")
+        defer {
+            UserDefaults.standard.removeObject(forKey: "commandPalette.hotkey.keyCode")
+            UserDefaults.standard.removeObject(forKey: "commandPalette.hotkey.modifierFlags")
+        }
+        UserDefaults.standard.set(49, forKey: "commandPalette.hotkey.keyCode")
+        UserDefaults.standard.set(256, forKey: "commandPalette.hotkey.modifierFlags")
+
+        CommandPaletteService.shared.reloadFromDefaults()
+
+        XCTAssertEqual(CommandPaletteService.shared.hotkey?.keyCode, 49)
+        XCTAssertEqual(CommandPaletteService.shared.hotkey?.modifierFlags, 256)
+    }
 }

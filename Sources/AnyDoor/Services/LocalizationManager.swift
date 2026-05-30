@@ -49,6 +49,13 @@ final class LocalizationManager {
         }
     }
 
+    /// Re-read the language preference from `defaults` after an external write
+    /// (config import). Updates the observable `preference` without re-persisting.
+    func reloadFromDefaults() {
+        let raw = defaults.string(forKey: Self.defaultsKey)
+        _preference = raw.flatMap(LanguagePreference.init(rawValue:)) ?? .system
+    }
+
     /// The resolved `Locale` to apply via `String(localized:locale:)` and SwiftUI's `\.locale`.
     var effectiveLocale: Locale {
         Locale(identifier: resolvedLocaleIdentifier())
