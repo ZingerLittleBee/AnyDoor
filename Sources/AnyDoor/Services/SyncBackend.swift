@@ -24,4 +24,15 @@ struct LocalFileBackend: SyncBackend {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
         return try Data(contentsOf: url)
     }
+
+    /// Synchronous variant for the panel-driven local flow (a save panel already
+    /// blocked the main thread; the write is small). Cloud backends use the async API.
+    func uploadSync(_ data: Data) throws {
+        try data.write(to: url, options: .atomic)
+    }
+
+    func downloadSync() throws -> Data? {
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try Data(contentsOf: url)
+    }
 }
