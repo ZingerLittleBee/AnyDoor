@@ -75,6 +75,17 @@ final class HyperKeyService {
         pushConfig()
     }
 
+    /// Re-read trigger/quickPress/includeShift from UserDefaults after an
+    /// external write (config import) and re-apply the HID mapping.
+    func reloadFromDefaults() async {
+        let raw = defaults.string(forKey: triggerKey) ?? HyperKeyTrigger.none.rawValue
+        trigger = HyperKeyTrigger(rawValue: raw) ?? .none
+        let qpRaw = defaults.string(forKey: quickPressKey) ?? HyperKeyQuickPress.doesNothing.rawValue
+        quickPress = HyperKeyQuickPress(rawValue: qpRaw) ?? .doesNothing
+        includeShift = defaults.object(forKey: includeShiftKey) as? Bool ?? true
+        await applyCurrent()
+    }
+
     private func drive(token: UInt64) async {
         isApplying = true
         defer { isApplying = false }
