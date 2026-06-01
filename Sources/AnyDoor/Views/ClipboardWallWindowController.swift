@@ -20,7 +20,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     /// Guards against re-entrant show/dismiss while the slide animation runs.
     private var isAnimating = false
-    private static let panelHeight: CGFloat = 300
+    private static let panelHeight: CGFloat = 285
     private static let animationDuration: TimeInterval = 0.22
 
     private var historyDirectory: URL { ClipboardHistoryStore.defaultHistoryDirectory() }
@@ -70,9 +70,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         installKeyMonitor()
 
         guard let window, let screen = NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        let onScreen = NSRect(x: visible.minX, y: visible.minY,
-                              width: visible.width, height: Self.panelHeight)
+        // Anchor to the screen's physical bottom edge (not visibleFrame, which
+        // sits above the Dock) so the panel is flush with no gap underneath.
+        let bounds = screen.frame
+        let onScreen = NSRect(x: bounds.minX, y: bounds.minY,
+                              width: bounds.width, height: Self.panelHeight)
         // A .nonactivatingPanel becomes key WITHOUT activating AnyDoor, so the
         // previously focused app keeps focus — paste returns there, and clicking
         // it makes us resign key (windowDidResignKey dismisses). Deliberately do
@@ -97,9 +99,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             completion?()
             return
         }
-        let visible = screen.visibleFrame
+        let bounds = screen.frame
         let height = window.frame.height
-        let offScreen = NSRect(x: visible.minX, y: visible.minY - height,
+        let offScreen = NSRect(x: bounds.minX, y: bounds.minY - height,
                                width: window.frame.width, height: height)
         isAnimating = true
         NSAnimationContext.runAnimationGroup({ ctx in
