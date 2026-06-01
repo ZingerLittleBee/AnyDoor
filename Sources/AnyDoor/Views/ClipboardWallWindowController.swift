@@ -21,6 +21,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
     private var globalMouseMonitor: Any?
+    private var changeObserver: (any NSObjectProtocol)?
+    private var refreshTimer: Timer?
     /// Accumulated scroll delta; selection advances each time it crosses a step.
     private var scrollAccum: CGFloat = 0
     private static let scrollStep: CGFloat = 40
@@ -56,8 +58,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         super.init(window: panel)
         panel.delegate = self
         // Refresh live when the history changes (e.g. a new copy is captured)
-        // so the open wall doesn't require a tab switch to show it.
-        NotificationCenter.default.addObserver(
+        // so the open wall doesn't require a tab switch to show it. Retain the
+        // token so the block-based observer stays registered.
+        changeObserver = NotificationCenter.default.addObserver(
             forName: .clipboardHistoryDidChange, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshIfVisible() }
@@ -68,6 +71,22 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private func refreshIfVisible() {
         guard window?.isVisible == true else { return }
         loadTimelineNow()
+    }
+
+    /// While the wall is open, poll the store as a guaranteed backstop to the
+    /// change notification — new captures land within one tick regardless.
+    private func startRefreshTimer() {
+        stopRefreshTimer()
+        let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshIfVisible() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        refreshTimer = timer
+    }
+
+    private func stopRefreshTimer() {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
 
     @available(*, unavailable)
@@ -114,6 +133,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated { self?.isAnimating = false }
         })
+
+        startRefreshTimer()
 
         // Enforce retention off the critical path, then refresh if it changed.
         Task {
@@ -171,9 +192,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     }
 
     /// Synchronously query the store and push the result into state. The fetch
-    /// runs on the main actor, so the wall renders with data immediately.
+    /// runs on the main actor, so the wall renders with data immediately. Skips
+    /// the update when the item set is unchanged so the periodic refresh doesn't
+    /// churn the view or reset the selection.
     private func loadTimelineNow() {
-        state.setItems(ClipboardHistoryStore.shared.timeline(category: state.category, query: state.query))
+        let fresh = ClipboardHistoryStore.shared.timeline(category: state.category, query: state.query)
+        guard fresh.map(\.id) != state.items.map(\.id) else { return }
+        state.setItems(fresh)
     }
 
     /// Prune (async) then re-query; used for filter changes and after edits,
@@ -317,7 +342,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         MainActor.assumeIsolated { previewURL as NSURL? }
     }
 
-    func windowWillClose(_ notification: Notification) { removeMonitors() }
+    func windowWillClose(_ notification: Notification) {
+        removeMonitors()
+        stopRefreshTimer()
+    }
     func windowDidResignKey(_ notification: Notification) {
         // Don't close while Quick Look is the key window.
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
