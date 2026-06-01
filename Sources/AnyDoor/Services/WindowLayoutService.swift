@@ -6,21 +6,57 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "windowLay
 
 /// A single, atomic window layout operation requested by the user.
 ///
-/// First version handles the four most common Rectangle-style commands
-/// against the currently focused window. Snap-to-grid, custom thirds and
-/// multi-display matching are intentionally out of scope.
+/// Covers Rectangle-style tiling against the focused window: halves,
+/// quarters, thirds, two-thirds, plus next/previous-display moves.
+/// Restore-previous-size and cycle behavior are intentionally out of scope.
 enum WindowLayoutAction: String, Sendable, CaseIterable {
     case leftHalf
     case rightHalf
+    case topHalf
+    case bottomHalf
+    case topLeftQuarter
+    case topRightQuarter
+    case bottomLeftQuarter
+    case bottomRightQuarter
+    case leftThird
+    case centerThird
+    case rightThird
+    case leftTwoThirds
+    case rightTwoThirds
     case maximize
     case center
+    case moveToNextDisplay
+    case moveToPreviousDisplay
+
+    /// True only for actions whose target is a different display. The service
+    /// routes these through `WindowLayoutGeometry.rectMovingToDisplay` instead
+    /// of `targetRect`.
+    var movesDisplay: Bool {
+        switch self {
+        case .moveToNextDisplay, .moveToPreviousDisplay: return true
+        default: return false
+        }
+    }
 
     var symbol: String {
         switch self {
-        case .leftHalf:  return "rectangle.lefthalf.filled"
-        case .rightHalf: return "rectangle.righthalf.filled"
-        case .maximize:  return "arrow.up.left.and.arrow.down.right"
-        case .center:    return "rectangle.center.inset.filled"
+        case .leftHalf:            return "rectangle.lefthalf.filled"
+        case .rightHalf:           return "rectangle.righthalf.filled"
+        case .topHalf:             return "rectangle.tophalf.filled"
+        case .bottomHalf:          return "rectangle.bottomhalf.filled"
+        case .topLeftQuarter:      return "square.split.2x2"
+        case .topRightQuarter:     return "square.split.2x2"
+        case .bottomLeftQuarter:   return "square.split.2x2"
+        case .bottomRightQuarter:  return "square.split.2x2"
+        case .leftThird:           return "rectangle.split.3x1"
+        case .centerThird:         return "rectangle.split.3x1"
+        case .rightThird:          return "rectangle.split.3x1"
+        case .leftTwoThirds:       return "rectangle.split.3x1"
+        case .rightTwoThirds:      return "rectangle.split.3x1"
+        case .maximize:            return "arrow.up.left.and.arrow.down.right"
+        case .center:              return "rectangle.center.inset.filled"
+        case .moveToNextDisplay:   return "rectangle.on.rectangle"
+        case .moveToPreviousDisplay: return "rectangle.on.rectangle"
         }
     }
 }
@@ -64,7 +100,101 @@ enum WindowLayoutGeometry {
             let x = visibleFrame.minX + (visibleFrame.width - width) / 2
             let y = visibleFrame.minY + (visibleFrame.height - height) / 2
             return CGRect(x: x, y: y, width: width, height: height)
+        case .topHalf:
+            let half = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: visibleFrame.width, height: half)
+        case .bottomHalf:
+            let half = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - half,
+                          width: visibleFrame.width, height: half)
+        case .topLeftQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY, width: w, height: h)
+        case .topRightQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.maxX - w, y: visibleFrame.minY, width: w, height: h)
+        case .bottomLeftQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - h, width: w, height: h)
+        case .bottomRightQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.maxX - w, y: visibleFrame.maxY - h, width: w, height: h)
+        case .leftThird:
+            let third = floor(visibleFrame.width / 3)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: third, height: visibleFrame.height)
+        case .rightThird:
+            let third = floor(visibleFrame.width / 3)
+            return CGRect(x: visibleFrame.maxX - third, y: visibleFrame.minY,
+                          width: third, height: visibleFrame.height)
+        case .centerThird:
+            // Center absorbs the rounding remainder so left|center|right tile
+            // the full width exactly: span from left third's right edge to
+            // right third's left edge.
+            let third = floor(visibleFrame.width / 3)
+            let minX = visibleFrame.minX + third
+            let maxX = visibleFrame.maxX - third
+            return CGRect(x: minX, y: visibleFrame.minY,
+                          width: maxX - minX, height: visibleFrame.height)
+        case .leftTwoThirds:
+            let twoThirds = floor(visibleFrame.width * 2 / 3)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: twoThirds, height: visibleFrame.height)
+        case .rightTwoThirds:
+            let twoThirds = floor(visibleFrame.width * 2 / 3)
+            return CGRect(x: visibleFrame.maxX - twoThirds, y: visibleFrame.minY,
+                          width: twoThirds, height: visibleFrame.height)
+        case .moveToNextDisplay, .moveToPreviousDisplay:
+            // Display-moving actions never reach targetRect; the service
+            // routes them to rectMovingToDisplay. Harmless identity fallback.
+            return visibleFrame
         }
+    }
+
+    /// Map a window from its source display's visible region into a
+    /// destination display's visible region, preserving relative position and
+    /// relative size (Rectangle-default proportional remap), then clamp the
+    /// result fully inside `toVisible`.
+    ///
+    /// All rects are in AX coordinates (top-left origin). A degenerate source
+    /// (zero width/height) falls back to the destination origin with the
+    /// window's original size, clamped to the destination.
+    static func rectMovingToDisplay(
+        windowFrame: CGRect,
+        fromVisible: CGRect,
+        toVisible: CGRect
+    ) -> CGRect {
+        guard fromVisible.width > 0, fromVisible.height > 0 else {
+            let w = floor(min(windowFrame.width, toVisible.width))
+            let h = floor(min(windowFrame.height, toVisible.height))
+            return CGRect(origin: toVisible.origin, size: CGSize(width: w, height: h))
+        }
+        let fx = (windowFrame.minX - fromVisible.minX) / fromVisible.width
+        let fy = (windowFrame.minY - fromVisible.minY) / fromVisible.height
+        let fw = windowFrame.width / fromVisible.width
+        let fh = windowFrame.height / fromVisible.height
+
+        // floor() keeps display moves pixel-aligned, matching targetRect.
+        var width = floor(min(fw * toVisible.width, toVisible.width))
+        var height = floor(min(fh * toVisible.height, toVisible.height))
+        var x = floor(toVisible.minX + fx * toVisible.width)
+        var y = floor(toVisible.minY + fy * toVisible.height)
+
+        // Clamp origin so the rect stays fully inside the destination.
+        x = min(max(x, toVisible.minX), toVisible.maxX - width)
+        y = min(max(y, toVisible.minY), toVisible.maxY - height)
+        // Guard against negative dimensions from pathological inputs.
+        width = max(width, 0)
+        height = max(height, 0)
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Index arithmetic for next/previous-display selection with wrap-around.
+    /// `delta` is +1 (next) or -1 (previous). `count` must be >= 1.
+    static func wrappedIndex(current: Int, delta: Int, count: Int) -> Int {
+        let raw = (current + delta) % count
+        return raw < 0 ? raw + count : raw
     }
 }
 
@@ -77,6 +207,7 @@ enum WindowLayoutError: Error, Sendable, Equatable {
     case noFocusedWindow
     case fullScreenWindowNotSupported
     case noScreenAvailable
+    case singleDisplay
     case axCallFailed(attribute: String, code: Int32)
 }
 
@@ -110,12 +241,18 @@ final class WindowLayoutService {
         try assertNotFullScreen(window)
 
         let currentFrame = try readFrame(of: window)
-        let visible = try visibleFrameInAXCoords(containing: currentFrame)
-        let target = WindowLayoutGeometry.targetRect(
-            action: action,
-            windowFrame: currentFrame,
-            visibleFrame: visible
-        )
+
+        let target: CGRect
+        if action.movesDisplay {
+            target = try displayMoveTarget(windowFrame: currentFrame, action: action)
+        } else {
+            let visible = try visibleFrameInAXCoords(containing: currentFrame)
+            target = WindowLayoutGeometry.targetRect(
+                action: action,
+                windowFrame: currentFrame,
+                visibleFrame: visible
+            )
+        }
 
         // Order matters on some apps: setting size before position avoids
         // a transient frame where the new position lands the old size off
@@ -125,6 +262,38 @@ final class WindowLayoutService {
         // about here.
         try writePosition(of: window, to: target.origin)
         try writeSize(of: window, to: target.size)
+    }
+
+    /// Compute the destination frame for a next/previous-display move.
+    /// Orders displays left-to-right (visibleFrame.minX, ties by minY), finds
+    /// the window's source display, then proportionally remaps onto the
+    /// wrapped neighbor. Throws `singleDisplay` when only one display exists.
+    private func displayMoveTarget(windowFrame: CGRect, action: WindowLayoutAction) throws -> CGRect {
+        let screens = NSScreen.screens
+        guard let primary = screens.first else {
+            throw WindowLayoutError.noScreenAvailable
+        }
+        guard screens.count >= 2 else {
+            throw WindowLayoutError.singleDisplay
+        }
+        let primaryHeight = primary.frame.height
+        let ordered = screens.sorted {
+            if $0.visibleFrame.minX != $1.visibleFrame.minX {
+                return $0.visibleFrame.minX < $1.visibleFrame.minX
+            }
+            return $0.visibleFrame.minY < $1.visibleFrame.minY
+        }
+        let source = try sourceScreen(containing: windowFrame)
+        guard let index = ordered.firstIndex(where: { $0 === source }) else {
+            throw WindowLayoutError.noScreenAvailable
+        }
+        let delta = (action == .moveToNextDisplay) ? 1 : -1
+        let destIndex = WindowLayoutGeometry.wrappedIndex(
+            current: index, delta: delta, count: ordered.count)
+        let fromVisible = Self.toAXCoords(rect: source.visibleFrame, primaryHeight: primaryHeight)
+        let toVisible = Self.toAXCoords(rect: ordered[destIndex].visibleFrame, primaryHeight: primaryHeight)
+        return WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: windowFrame, fromVisible: fromVisible, toVisible: toVisible)
     }
 
     // MARK: - AX helpers
@@ -226,16 +395,23 @@ final class WindowLayoutService {
     /// matching the "use main visibleFrame when matching is unreliable"
     /// rule.
     private func visibleFrameInAXCoords(containing windowAXFrame: CGRect) throws -> CGRect {
+        guard let primary = NSScreen.screens.first else {
+            throw WindowLayoutError.noScreenAvailable
+        }
+        let screen = try sourceScreen(containing: windowAXFrame)
+        return Self.toAXCoords(rect: screen.visibleFrame, primaryHeight: primary.frame.height)
+    }
+
+    /// Pick the screen whose AX-space frame has the largest intersection with
+    /// `windowAXFrame`. Equal-area ties tip to the earlier screen in
+    /// `NSScreen.screens`, which matches the order macOS reports. Falls back to
+    /// the primary screen when no overlap can be determined.
+    private func sourceScreen(containing windowAXFrame: CGRect) throws -> NSScreen {
         let screens = NSScreen.screens
         guard let primary = screens.first else {
             throw WindowLayoutError.noScreenAvailable
         }
         let primaryHeight = primary.frame.height
-
-        // Build AX rects for each screen and pick the one with the largest
-        // intersection area with the window. Equal-area ties tip to the
-        // earlier screen in `NSScreen.screens`, which matches the order
-        // macOS reports.
         var best: (screen: NSScreen, area: CGFloat)?
         for screen in screens {
             let frameAX = Self.toAXCoords(rect: screen.frame, primaryHeight: primaryHeight)
@@ -244,9 +420,7 @@ final class WindowLayoutService {
                 best = (screen, area)
             }
         }
-
-        let chosen = best?.screen ?? primary
-        return Self.toAXCoords(rect: chosen.visibleFrame, primaryHeight: primaryHeight)
+        return best?.screen ?? primary
     }
 
     /// Convert a Cocoa-coordinate rect (origin bottom-left, Y up,

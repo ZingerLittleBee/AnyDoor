@@ -109,4 +109,157 @@ final class WindowLayoutGeometryTests: XCTestCase {
         )
         XCTAssertEqual(target, visible)
     }
+
+    // MARK: - Halves (top/bottom)
+
+    func testTopHalf() {
+        let window = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let target = WindowLayoutGeometry.targetRect(
+            action: .topHalf, windowFrame: window, visibleFrame: visible
+        )
+        // floor(875/2) == 437, anchored at the visible top.
+        XCTAssertEqual(target, CGRect(x: 0, y: 25, width: 1440, height: 437))
+    }
+
+    func testBottomHalf() {
+        let window = CGRect(x: 100, y: 100, width: 400, height: 300)
+        let target = WindowLayoutGeometry.targetRect(
+            action: .bottomHalf, windowFrame: window, visibleFrame: visible
+        )
+        // height 437, bottom-anchored: maxY (900) - 437 == 463.
+        XCTAssertEqual(target, CGRect(x: 0, y: 463, width: 1440, height: 437))
+    }
+
+    func testTopAndBottomHalvesDoNotOverlap() {
+        let window = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let top = WindowLayoutGeometry.targetRect(action: .topHalf, windowFrame: window, visibleFrame: visible)
+        let bottom = WindowLayoutGeometry.targetRect(action: .bottomHalf, windowFrame: window, visibleFrame: visible)
+        XCTAssertLessThanOrEqual(top.maxY, bottom.minY, "halves must not overlap")
+        XCTAssertEqual(top.minY, visible.minY)
+        XCTAssertEqual(bottom.maxY, visible.maxY)
+    }
+
+    // MARK: - Quarters
+
+    func testTopLeftQuarter() {
+        let window = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let target = WindowLayoutGeometry.targetRect(action: .topLeftQuarter, windowFrame: window, visibleFrame: visible)
+        // floor(1440/2)=720, floor(875/2)=437, anchored top-left.
+        XCTAssertEqual(target, CGRect(x: 0, y: 25, width: 720, height: 437))
+    }
+
+    func testBottomRightQuarterMeetsTopLeft() {
+        let window = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let tl = WindowLayoutGeometry.targetRect(action: .topLeftQuarter, windowFrame: window, visibleFrame: visible)
+        let br = WindowLayoutGeometry.targetRect(action: .bottomRightQuarter, windowFrame: window, visibleFrame: visible)
+        // Right column starts at maxX - 720; bottom row starts at maxY - 437.
+        XCTAssertEqual(br, CGRect(x: 720, y: 463, width: 720, height: 437))
+        XCTAssertLessThanOrEqual(tl.maxX, br.minX, "columns must not overlap")
+        XCTAssertLessThanOrEqual(tl.maxY, br.minY, "rows must not overlap")
+        XCTAssertEqual(br.maxX, visible.maxX)
+        XCTAssertEqual(br.maxY, visible.maxY)
+    }
+
+    func testTopRightAndBottomLeftQuarters() {
+        let window = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let tr = WindowLayoutGeometry.targetRect(action: .topRightQuarter, windowFrame: window, visibleFrame: visible)
+        let bl = WindowLayoutGeometry.targetRect(action: .bottomLeftQuarter, windowFrame: window, visibleFrame: visible)
+        XCTAssertEqual(tr, CGRect(x: 720, y: 25, width: 720, height: 437))
+        XCTAssertEqual(bl, CGRect(x: 0, y: 463, width: 720, height: 437))
+    }
+
+    // MARK: - Thirds (tile the full width exactly)
+
+    func testThirdsTileFullWidth() {
+        let window = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let left = WindowLayoutGeometry.targetRect(action: .leftThird, windowFrame: window, visibleFrame: visible)
+        let center = WindowLayoutGeometry.targetRect(action: .centerThird, windowFrame: window, visibleFrame: visible)
+        let right = WindowLayoutGeometry.targetRect(action: .rightThird, windowFrame: window, visibleFrame: visible)
+        // floor(1440/3) == 480 each; full height.
+        XCTAssertEqual(left, CGRect(x: 0, y: 25, width: 480, height: 875))
+        XCTAssertEqual(right.maxX, visible.maxX)
+        // Center fills the gap between left.maxX and right.minX exactly.
+        XCTAssertEqual(center.minX, left.maxX)
+        XCTAssertEqual(center.maxX, right.minX)
+        // No gaps, no overlaps across the whole width.
+        XCTAssertEqual(left.minX, visible.minX)
+    }
+
+    func testThirdsTileNonDivisibleWidth() {
+        // 1000 / 3 -> floor 333; center must absorb the remainder so the
+        // three columns still cover [0, 1000] with no gap.
+        let odd = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let window = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let left = WindowLayoutGeometry.targetRect(action: .leftThird, windowFrame: window, visibleFrame: odd)
+        let center = WindowLayoutGeometry.targetRect(action: .centerThird, windowFrame: window, visibleFrame: odd)
+        let right = WindowLayoutGeometry.targetRect(action: .rightThird, windowFrame: window, visibleFrame: odd)
+        XCTAssertEqual(left.minX, 0)
+        XCTAssertEqual(right.maxX, 1000)
+        XCTAssertEqual(center.minX, left.maxX)
+        XCTAssertEqual(center.maxX, right.minX)
+        XCTAssertEqual(center.width, 1000 - left.width - right.width)
+    }
+
+    // MARK: - Two-thirds
+
+    func testTwoThirds() {
+        let window = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let left = WindowLayoutGeometry.targetRect(action: .leftTwoThirds, windowFrame: window, visibleFrame: visible)
+        let right = WindowLayoutGeometry.targetRect(action: .rightTwoThirds, windowFrame: window, visibleFrame: visible)
+        // floor(1440 * 2 / 3) == 960.
+        XCTAssertEqual(left, CGRect(x: 0, y: 25, width: 960, height: 875))
+        XCTAssertEqual(right, CGRect(x: 480, y: 25, width: 960, height: 875))
+        XCTAssertEqual(right.maxX, visible.maxX)
+    }
+
+    // MARK: - Cross-display remap
+
+    func testRemapSameSizeDisplaysPreservesRelativeFrame() {
+        let from = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let to = CGRect(x: 2000, y: 0, width: 1000, height: 800)
+        let window = CGRect(x: 100, y: 80, width: 400, height: 300)
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        // Same size: shift by the origin delta, size unchanged.
+        XCTAssertEqual(result, CGRect(x: 2100, y: 80, width: 400, height: 300))
+    }
+
+    func testRemapScalesToSmallerDisplay() {
+        let from = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let to = CGRect(x: 1000, y: 0, width: 500, height: 400)  // half size
+        let window = CGRect(x: 200, y: 200, width: 400, height: 400)
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        // Proportions: x 20% -> 1000 + 0.2*500 = 1100; y 25% -> 100;
+        // width 40% -> 200; height 50% -> 200.
+        XCTAssertEqual(result, CGRect(x: 1100, y: 100, width: 200, height: 200))
+    }
+
+    func testRemapClampsOversizedResultIntoDestination() {
+        let from = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let to = CGRect(x: 1000, y: 0, width: 600, height: 500)
+        // Window fills the source entirely -> would fill destination; ensure it
+        // stays within destination bounds.
+        let window = from
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        XCTAssertEqual(result, to)
+    }
+
+    func testRemapZeroSizedSourceFallsBackToDestinationOrigin() {
+        let from = CGRect(x: 0, y: 0, width: 0, height: 0)
+        let to = CGRect(x: 500, y: 500, width: 800, height: 600)
+        let window = CGRect(x: 10, y: 10, width: 300, height: 200)
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        // Degenerate source: place at destination origin, keep clamped size.
+        XCTAssertEqual(result, CGRect(x: 500, y: 500, width: 300, height: 200))
+    }
+
+    func testWrappedIndexNextAndPrevious() {
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 0, delta: 1, count: 3), 1)
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 2, delta: 1, count: 3), 0)
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 0, delta: -1, count: 3), 2)
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 1, delta: -1, count: 3), 0)
+    }
 }

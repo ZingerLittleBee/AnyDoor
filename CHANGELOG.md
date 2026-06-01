@@ -6,6 +6,17 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Window layout: the Window Layout submenu gains 13 new actions — top and
+  bottom halves, four quarter-screen corners, left/center/right thirds,
+  left/right two-thirds, and move-to-next / move-to-previous display. Each is
+  an independent, individually hotkey-bindable item. Tiling actions tile the
+  visible region exactly (the center third absorbs rounding so columns never
+  gap or overlap); display moves remap the focused window proportionally onto
+  the neighboring screen, ordered left-to-right with wrap-around, and surface a
+  toast when only one display is connected.
+
 ## [1.8.0] - 2026-06-01
 
 ### Added

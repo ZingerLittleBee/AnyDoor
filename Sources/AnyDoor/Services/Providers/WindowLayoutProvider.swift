@@ -53,6 +53,8 @@ final class WindowLayoutProvider: ActionProvider {
             return L(.toastWindowLayoutNoWindow)
         case .fullScreenWindowNotSupported:
             return L(.toastWindowLayoutFullScreen)
+        case .singleDisplay:
+            return L(.toastWindowLayoutSingleDisplay)
         case .noScreenAvailable, .axCallFailed:
             return L(.toastWindowLayoutFailed)
         }

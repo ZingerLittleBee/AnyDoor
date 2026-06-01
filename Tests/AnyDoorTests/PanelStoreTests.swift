@@ -37,13 +37,21 @@ final class PanelStoreTests: XCTestCase {
         // hiddenHotkey items (brightnessUp/brightnessDown) are seeded but
         // filtered out of topLevelEntries — they own a hotkey, not a row.
         // Window-layout children are partitioned into windowLayoutChildren, not topLevelEntries.
-        let windowChildKeys: Set<BuiltinItem> = [.windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter]
+        let windowChildKeys: Set<BuiltinItem> = [
+            .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
+            .windowTopHalf, .windowBottomHalf,
+            .windowTopLeftQuarter, .windowTopRightQuarter,
+            .windowBottomLeftQuarter, .windowBottomRightQuarter,
+            .windowLeftThird, .windowCenterThird, .windowRightThird,
+            .windowLeftTwoThirds, .windowRightTwoThirds,
+            .windowMoveNextDisplay, .windowMovePreviousDisplay,
+        ]
         let expectedVisible = BuiltinItem.allCases.filter {
             $0.kind != .hiddenHotkey && !windowChildKeys.contains($0)
         }
         XCTAssertEqual(store.topLevelEntries.count, expectedVisible.count)
         // Window children should appear in windowLayoutChildren instead
-        XCTAssertEqual(store.windowLayoutChildren.count, 4)
+        XCTAssertEqual(store.windowLayoutChildren.count, windowChildKeys.count)
         // Order should follow defaultOrder — first entry should be keepAwake (defaultOrder 100)
         let firstSource = store.topLevelEntries.first?.source
         XCTAssertEqual(firstSource, .builtin(.keepAwake))

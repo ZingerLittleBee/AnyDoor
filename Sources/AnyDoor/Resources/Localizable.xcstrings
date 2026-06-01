@@ -1,6 +1,104 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "builtin.windowTopHalf" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Top Half" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上半屏" } }
+      }
+    },
+    "builtin.windowBottomHalf" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Bottom Half" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "下半屏" } }
+      }
+    },
+    "builtin.windowTopLeftQuarter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Top Left" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "左上角" } }
+      }
+    },
+    "builtin.windowTopRightQuarter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Top Right" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "右上角" } }
+      }
+    },
+    "builtin.windowBottomLeftQuarter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Bottom Left" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "左下角" } }
+      }
+    },
+    "builtin.windowBottomRightQuarter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Bottom Right" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "右下角" } }
+      }
+    },
+    "builtin.windowLeftThird" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Left Third" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "左三分之一" } }
+      }
+    },
+    "builtin.windowCenterThird" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Center Third" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "中三分之一" } }
+      }
+    },
+    "builtin.windowRightThird" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Right Third" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "右三分之一" } }
+      }
+    },
+    "builtin.windowLeftTwoThirds" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Left Two Thirds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "左三分之二" } }
+      }
+    },
+    "builtin.windowRightTwoThirds" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Right Two Thirds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "右三分之二" } }
+      }
+    },
+    "builtin.windowMoveNextDisplay" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move to Next Display" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移到下一显示器" } }
+      }
+    },
+    "builtin.windowMovePreviousDisplay" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move to Previous Display" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移到上一显示器" } }
+      }
+    },
+    "toast.windowLayout.singleDisplay" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only one display" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只有一个显示器" } }
+      }
+    },
     "hotkey.recorder.clear" : {
       "extractionState" : "manual",
       "localizations" : {

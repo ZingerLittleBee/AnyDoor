@@ -33,6 +33,19 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case windowRightHalf
     case windowMaximize
     case windowCenter
+    case windowTopHalf
+    case windowBottomHalf
+    case windowTopLeftQuarter
+    case windowTopRightQuarter
+    case windowBottomLeftQuarter
+    case windowBottomRightQuarter
+    case windowLeftThird
+    case windowCenterThird
+    case windowRightThird
+    case windowLeftTwoThirds
+    case windowRightTwoThirds
+    case windowMoveNextDisplay
+    case windowMovePreviousDisplay
     case windowLayout
 
     enum Kind: Sendable {
@@ -50,7 +63,13 @@ enum BuiltinItem: String, CaseIterable, Sendable {
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
              .restartFinder, .restartDock, .restartMenuBar, .flushDNS, .clipboardWall,
-             .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter: return .action
+             .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
+             .windowTopHalf, .windowBottomHalf,
+             .windowTopLeftQuarter, .windowTopRightQuarter,
+             .windowBottomLeftQuarter, .windowBottomRightQuarter,
+             .windowLeftThird, .windowCenterThird, .windowRightThird,
+             .windowLeftTwoThirds, .windowRightTwoThirds,
+             .windowMoveNextDisplay, .windowMovePreviousDisplay: return .action
         case .brightness: return .brightnessControl
         case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
@@ -88,6 +107,19 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowRightHalf:   return .builtinWindowRightHalf
         case .windowMaximize:    return .builtinWindowMaximize
         case .windowCenter:      return .builtinWindowCenter
+        case .windowTopHalf:            return .builtinWindowTopHalf
+        case .windowBottomHalf:         return .builtinWindowBottomHalf
+        case .windowTopLeftQuarter:     return .builtinWindowTopLeftQuarter
+        case .windowTopRightQuarter:    return .builtinWindowTopRightQuarter
+        case .windowBottomLeftQuarter:  return .builtinWindowBottomLeftQuarter
+        case .windowBottomRightQuarter: return .builtinWindowBottomRightQuarter
+        case .windowLeftThird:          return .builtinWindowLeftThird
+        case .windowCenterThird:        return .builtinWindowCenterThird
+        case .windowRightThird:         return .builtinWindowRightThird
+        case .windowLeftTwoThirds:      return .builtinWindowLeftTwoThirds
+        case .windowRightTwoThirds:     return .builtinWindowRightTwoThirds
+        case .windowMoveNextDisplay:    return .builtinWindowMoveNextDisplay
+        case .windowMovePreviousDisplay: return .builtinWindowMovePreviousDisplay
         case .windowLayout:      return .builtinWindowLayout
         }
     }
@@ -124,6 +156,19 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowRightHalf: return "rectangle.righthalf.filled"
         case .windowMaximize: return "arrow.up.left.and.arrow.down.right"
         case .windowCenter: return "rectangle.center.inset.filled"
+        case .windowTopHalf: return "rectangle.tophalf.filled"
+        case .windowBottomHalf: return "rectangle.bottomhalf.filled"
+        case .windowTopLeftQuarter: return "square.split.2x2"
+        case .windowTopRightQuarter: return "square.split.2x2"
+        case .windowBottomLeftQuarter: return "square.split.2x2"
+        case .windowBottomRightQuarter: return "square.split.2x2"
+        case .windowLeftThird: return "rectangle.split.3x1"
+        case .windowCenterThird: return "rectangle.split.3x1"
+        case .windowRightThird: return "rectangle.split.3x1"
+        case .windowLeftTwoThirds: return "rectangle.split.3x1"
+        case .windowRightTwoThirds: return "rectangle.split.3x1"
+        case .windowMoveNextDisplay: return "rectangle.on.rectangle"
+        case .windowMovePreviousDisplay: return "rectangle.on.rectangle"
         case .windowLayout: return "macwindow"
         }
     }
@@ -157,10 +202,23 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .brightness: return 650
         case .brightnessUp: return 999_998
         case .brightnessDown: return 999_999
-        case .windowLeftHalf:  return 2010
-        case .windowRightHalf: return 2020
-        case .windowMaximize:  return 2030
-        case .windowCenter:    return 2040
+        case .windowLeftHalf:           return 2010
+        case .windowRightHalf:          return 2020
+        case .windowTopHalf:            return 2030
+        case .windowBottomHalf:         return 2040
+        case .windowTopLeftQuarter:     return 2050
+        case .windowTopRightQuarter:    return 2060
+        case .windowBottomLeftQuarter:  return 2070
+        case .windowBottomRightQuarter: return 2080
+        case .windowLeftThird:          return 2110
+        case .windowCenterThird:        return 2120
+        case .windowRightThird:         return 2130
+        case .windowLeftTwoThirds:      return 2140
+        case .windowRightTwoThirds:     return 2150
+        case .windowMaximize:           return 2160
+        case .windowCenter:             return 2170
+        case .windowMoveNextDisplay:    return 2180
+        case .windowMovePreviousDisplay: return 2190
         case .windowLayout:    return 2000
         }
     }
