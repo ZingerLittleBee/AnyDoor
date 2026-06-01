@@ -407,6 +407,27 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "截图" } }
       }
     },
+    "clipboard.kind.text" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Text" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文本" } }
+      }
+    },
+    "clipboard.kind.image" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Image" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图片" } }
+      }
+    },
+    "clipboard.kind.file" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "File" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文件" } }
+      }
+    },
     "clipboard.preview.cannotRender" : {
       "extractionState" : "manual",
       "localizations" : {

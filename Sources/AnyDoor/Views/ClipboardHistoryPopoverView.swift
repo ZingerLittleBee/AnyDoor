@@ -205,7 +205,9 @@ struct ClipboardHistoryPopoverView: View {
             } else {
                 LocalizedText(.clipboardPreviewMissingFile).foregroundStyle(.secondary)
             }
-        case .none:
+        case .text, .image, .file, .none:
+            // text/image/file previews are added by the paste-history tasks;
+            // until then they fall back to the generic "cannot preview" message.
             LocalizedText(.clipboardPreviewCannotRender).foregroundStyle(.secondary)
         }
     }

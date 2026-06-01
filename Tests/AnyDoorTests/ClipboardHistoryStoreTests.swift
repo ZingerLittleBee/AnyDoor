@@ -176,4 +176,22 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         XCTAssertTrue(try context.fetch(FetchDescriptor<ClipboardHistoryItem>()).isEmpty)
         try? FileManager.default.removeItem(at: directory)
     }
+
+    func testNewKindsAndFieldsPersist() throws {
+        let item = ClipboardHistoryItem(
+            kind: .text,
+            text: "hello",
+            previewTitle: "hello",
+            richData: Data([0x01, 0x02]),
+            richType: "public.rtf",
+            sourceBundleID: "com.apple.Safari",
+            sourceAppName: "Safari",
+            isFavorite: true
+        )
+        XCTAssertEqual(item.historyKind, .text)
+        XCTAssertEqual(item.richType, "public.rtf")
+        XCTAssertEqual(item.sourceAppName, "Safari")
+        XCTAssertTrue(item.isFavorite)
+        XCTAssertEqual(ClipboardHistoryKind.file.titleKey, .clipboardKindFile)
+    }
 }

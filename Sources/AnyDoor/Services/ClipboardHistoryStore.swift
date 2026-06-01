@@ -249,6 +249,14 @@ final class ClipboardHistoryStore {
             let url = historyDirectoryProvider().appendingPathComponent(fileName)
             guard let image = NSImage(contentsOf: url) else { throw ClipboardHistoryError.missingScreenshotFile }
             pasteboard.writeObjects([image])
+        case .text:
+            // Plain-text paste entries copy back as a string, mirroring OCR/QR.
+            guard let text = item.text else { throw ClipboardHistoryError.missingText }
+            pasteboard.setString(text, forType: .string)
+        case .image, .file:
+            // Rich image/file write-back is implemented by the paste tasks; no
+            // such rows exist yet, so reject any stray ones explicitly.
+            throw ClipboardHistoryError.missingText
         }
     }
 

@@ -80,7 +80,9 @@ struct ClipboardHistoryRow: View {
             Image(systemName: "qrcode")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
-        case .ocr, .none:
+        case .ocr, .text, .image, .file, .none:
+            // text/image/file rows are populated by the paste-history tasks;
+            // until those views land they share the OCR fallback glyph.
             Image(systemName: "text.viewfinder")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
