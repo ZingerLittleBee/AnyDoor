@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// A single clipboard entry rendered as a fixed-size card. Shows the source app
 /// icon, kind label, relative time, a kind-specific preview, and a favorite star.
@@ -19,8 +20,10 @@ struct ClipboardCardView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
+            // strokeBorder draws inside the edge so the 2pt line stays within the
+            // clipped bounds and its corners line up with the card's rounding.
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .opacity(item.isReferenceOnly && !ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) ? 0.5 : 1)
     }
@@ -96,13 +99,36 @@ struct ClipboardCardView: View {
                 Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
             }
         case .file:
-            VStack(spacing: 6) {
-                Image(systemName: "doc.fill").imageScale(.large)
-                Text(item.previewTitle).font(.caption2).lineLimit(2).multilineTextAlignment(.center)
-            }.padding(8)
+            // An image file gets a thumbnail like the image card; anything else
+            // falls back to a document glyph plus its name.
+            if let url = firstFileURL, isImageFile(url), let img = NSImage(contentsOf: url) {
+                Color.clear.overlay {
+                    Image(nsImage: img).resizable().scaledToFill()
+                }
+                .clipped()
+            } else {
+                VStack(spacing: 6) {
+                    Image(systemName: "doc.fill").imageScale(.large)
+                    Text(item.previewTitle).font(.caption2).lineLimit(2).multilineTextAlignment(.center)
+                }.padding(8)
+            }
         case .none:
             EmptyView()
         }
+    }
+
+    /// Resolved URL of the entry's first file: the copy stored in the history
+    /// directory when present, otherwise the original on-disk path.
+    private var firstFileURL: URL? {
+        guard let first = item.files.first else { return nil }
+        if let stored = first.storedName {
+            return historyDirectory.appendingPathComponent(stored)
+        }
+        return URL(fileURLWithPath: first.originalPath)
+    }
+
+    private func isImageFile(_ url: URL) -> Bool {
+        UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
     }
 
     private var footer: some View {
