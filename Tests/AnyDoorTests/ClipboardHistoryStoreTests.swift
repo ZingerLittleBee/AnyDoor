@@ -177,6 +177,85 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    func testRecordCapturedTextStoresPlainAndRich() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+
+        await store.record(
+            .text(plain: "hello\nworld", rich: Data([0x09]), richType: "public.rtf"),
+            source: ClipboardSource(bundleID: "com.apple.Safari", appName: "Safari")
+        )
+        await store.reload(kind: .text)
+
+        let item = try XCTUnwrap(store.items(for: .text).first)
+        XCTAssertEqual(item.text, "hello\nworld")
+        XCTAssertEqual(item.previewTitle, "hello")
+        XCTAssertEqual(item.richType, "public.rtf")
+        XCTAssertEqual(item.sourceAppName, "Safari")
+    }
+
+    func testRecordCapturedImageStoresPng() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) }, historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        await store.record(.image(png: Data([0x89, 0x50, 0x4E, 0x47])), source: nil)
+        await store.reload(kind: .image)
+
+        let item = try XCTUnwrap(store.items(for: .image).first)
+        let fileName = try XCTUnwrap(item.fileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(fileName).path))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testRecordCapturedFileCopiesIntoStorage() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) }, historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        let src = FileManager.default.temporaryDirectory.appendingPathComponent("doc-\(UUID().uuidString).txt")
+        try Data("payload".utf8).write(to: src)
+        defer { try? FileManager.default.removeItem(at: src) }
+
+        await store.record(.files(urls: [src]), source: nil)
+        await store.reload(kind: .file)
+
+        let item = try XCTUnwrap(store.items(for: .file).first)
+        let entry = try XCTUnwrap(item.files.first)
+        XCTAssertEqual(entry.originalName, src.lastPathComponent)
+        XCTAssertFalse(item.isReferenceOnly)
+        let stored = try XCTUnwrap(entry.storedName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(stored).path))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testRecordCapturedFileOverSizeLimitIsReferenceOnly() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(
+            now: { Date(timeIntervalSinceReferenceDate: 100) },
+            historyDirectory: directory,
+            maxCopiedFileBytes: 4
+        )
+        store.bootstrap(modelContainer: container)
+
+        let src = FileManager.default.temporaryDirectory.appendingPathComponent("big-\(UUID().uuidString).txt")
+        try Data(repeating: 0x41, count: 64).write(to: src)
+        defer { try? FileManager.default.removeItem(at: src) }
+
+        await store.record(.files(urls: [src]), source: nil)
+        await store.reload(kind: .file)
+
+        let item = try XCTUnwrap(store.items(for: .file).first)
+        XCTAssertTrue(item.isReferenceOnly)
+        XCTAssertNil(item.files.first?.storedName)
+        XCTAssertEqual(item.files.first?.originalPath, src.path)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     func testNewKindsAndFieldsPersist() throws {
         let item = ClipboardHistoryItem(
             kind: .text,

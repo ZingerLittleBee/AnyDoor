@@ -171,6 +171,7 @@ enum L10n {
         case settingsTabPanel = "settings.tab.panel"
         case clipboardTextChars = "clipboard.text.chars"
         case clipboardTextLines = "clipboard.text.lines"
+        case clipboardFileCount = "clipboard.file.count"
         case keepAwakeDuration15Min = "keepAwake.duration.15min"
         case keepAwakeDuration1Hour = "keepAwake.duration.1hour"
         case keepAwakeDuration2Hour = "keepAwake.duration.2hour"

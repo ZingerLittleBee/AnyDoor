@@ -7,6 +7,12 @@ import SwiftUI
 
 private let historyLogger = Logger(subsystem: "dev.bybee.AnyDoor", category: "clipboard-history")
 
+/// Source app metadata attached to a freshly captured clipboard payload.
+struct ClipboardSource: Sendable, Equatable {
+    let bundleID: String?
+    let appName: String?
+}
+
 enum ClipboardHistoryError: Error, Sendable {
     case modelContainerUnavailable
     case missingText
@@ -27,6 +33,7 @@ final class ClipboardHistoryStore {
     @ObservationIgnored private let maxItemsPerKind: Int
     @ObservationIgnored private let pruneThrottle: TimeInterval
     @ObservationIgnored private let historyDirectoryProvider: () -> URL
+    @ObservationIgnored private let maxCopiedFileBytes: Int
     @ObservationIgnored private var lastPrunedAt: Date?
 
     /// Publicly readable so SwiftUI views can let `@Observable` track reads in
@@ -42,13 +49,15 @@ final class ClipboardHistoryStore {
         maxAge: TimeInterval = 7 * 86_400,
         maxItemsPerKind: Int = 100,
         pruneThrottle: TimeInterval = 60,
-        historyDirectoryProvider: @escaping () -> URL = ClipboardHistoryStore.defaultHistoryDirectory
+        historyDirectoryProvider: @escaping () -> URL = ClipboardHistoryStore.defaultHistoryDirectory,
+        maxCopiedFileBytes: Int = 25 * 1_024 * 1_024
     ) {
         self.now = now
         self.maxAge = maxAge
         self.maxItemsPerKind = maxItemsPerKind
         self.pruneThrottle = pruneThrottle
         self.historyDirectoryProvider = historyDirectoryProvider
+        self.maxCopiedFileBytes = maxCopiedFileBytes
     }
 
     /// Convenience used by tests that want to pin the directory to a `tmp` URL
@@ -58,14 +67,16 @@ final class ClipboardHistoryStore {
         maxAge: TimeInterval = 7 * 86_400,
         maxItemsPerKind: Int = 100,
         pruneThrottle: TimeInterval = 60,
-        historyDirectory: URL
+        historyDirectory: URL,
+        maxCopiedFileBytes: Int = 25 * 1_024 * 1_024
     ) {
         self.init(
             now: now,
             maxAge: maxAge,
             maxItemsPerKind: maxItemsPerKind,
             pruneThrottle: pruneThrottle,
-            historyDirectoryProvider: { historyDirectory }
+            historyDirectoryProvider: { historyDirectory },
+            maxCopiedFileBytes: maxCopiedFileBytes
         )
     }
 
@@ -123,6 +134,110 @@ final class ClipboardHistoryStore {
             await reload(kind: .color)
         } catch {
             historyLogger.error("Failed to record color history: \(error)")
+        }
+    }
+
+    /// Record a freshly captured clipboard payload. Routing per kind:
+    /// text → plain + rich; image → PNG on disk; file → copy into storage
+    /// (or reference-only over the size ceiling).
+    func record(_ captured: CapturedClipboard, source: ClipboardSource?) async {
+        switch captured {
+        case .text(let plain, let rich, let richType):
+            await recordCapturedText(plain: plain, rich: rich, richType: richType, source: source)
+        case .image(let png):
+            await recordCapturedImage(png: png, source: source)
+        case .files(let urls):
+            await recordCapturedFiles(urls: urls, source: source)
+        }
+    }
+
+    private func recordCapturedText(plain: String, rich: Data?, richType: String?, source: ClipboardSource?) async {
+        guard let container = modelContainer else { return }
+        let item = ClipboardHistoryItem(
+            kind: .text,
+            text: plain,
+            previewTitle: Self.previewTitle(for: plain),
+            previewSubtitle: Self.textSubtitle(for: plain),
+            createdAt: now(),
+            richData: rich,
+            richType: richType,
+            sourceBundleID: source?.bundleID,
+            sourceAppName: source?.appName
+        )
+        container.mainContext.insert(item)
+        await saveAndRefresh(kind: .text, container: container)
+    }
+
+    private func recordCapturedImage(png: Data, source: ClipboardSource?) async {
+        guard let container = modelContainer else { return }
+        do {
+            let id = UUID()
+            let directory = historyDirectoryProvider()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileName = "\(id.uuidString).png"
+            try png.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+            let item = ClipboardHistoryItem(
+                id: id,
+                kind: .image,
+                fileName: fileName,
+                previewTitle: "",
+                createdAt: now(),
+                sourceBundleID: source?.bundleID,
+                sourceAppName: source?.appName
+            )
+            container.mainContext.insert(item)
+            await saveAndRefresh(kind: .image, container: container)
+        } catch {
+            historyLogger.error("Failed to record image history: \(error)")
+        }
+    }
+
+    private func recordCapturedFiles(urls: [URL], source: ClipboardSource?) async {
+        guard let container = modelContainer, !urls.isEmpty else { return }
+        do {
+            let directory = historyDirectoryProvider()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fm = FileManager.default
+            var entries: [ClipboardFileEntry] = []
+            var referenceOnly = false
+            for url in urls {
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDirectory || size > maxCopiedFileBytes {
+                    referenceOnly = true
+                    entries.append(ClipboardFileEntry(storedName: nil, originalName: url.lastPathComponent, originalPath: url.path))
+                } else {
+                    let storedName = "\(UUID().uuidString)-\(url.lastPathComponent)"
+                    try fm.copyItem(at: url, to: directory.appendingPathComponent(storedName))
+                    entries.append(ClipboardFileEntry(storedName: storedName, originalName: url.lastPathComponent, originalPath: url.path))
+                }
+            }
+            let manifest = try JSONEncoder().encode(entries)
+            let title = entries.count == 1 ? entries[0].originalName : L(.clipboardFileCount, entries.count)
+            let item = ClipboardHistoryItem(
+                kind: .file,
+                previewTitle: title,
+                createdAt: now(),
+                sourceBundleID: source?.bundleID,
+                sourceAppName: source?.appName,
+                filesManifest: manifest,
+                isReferenceOnly: referenceOnly
+            )
+            container.mainContext.insert(item)
+            await saveAndRefresh(kind: .file, container: container)
+        } catch {
+            historyLogger.error("Failed to record file history: \(error)")
+        }
+    }
+
+    /// Shared save + prune + reload tail used by the record helpers.
+    private func saveAndRefresh(kind: ClipboardHistoryKind, container: ModelContainer) async {
+        do {
+            try container.mainContext.save()
+            await pruneExpiredAndOverflow(force: true)
+            await reload(kind: kind)
+        } catch {
+            historyLogger.error("Failed to save \(kind.rawValue) history: \(error)")
         }
     }
 
@@ -187,11 +302,13 @@ final class ClipboardHistoryStore {
             }
             if !idsToDelete.isEmpty { try context.save() }
 
-            // Sweep orphan PNG files no longer referenced by surviving screenshot rows.
+            // Sweep orphan PNG files no longer referenced by surviving rows.
+            // Both .screenshot and .image rows persist a single PNG under fileName.
             let survivingFiles = Set(
                 all.compactMap { item -> String? in
                     guard !idsToDelete.contains(item.id),
                           item.kind == ClipboardHistoryKind.screenshot.rawValue
+                            || item.kind == ClipboardHistoryKind.image.rawValue
                     else { return nil }
                     return item.fileName
                 }

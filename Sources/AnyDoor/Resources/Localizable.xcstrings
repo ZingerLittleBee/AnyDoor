@@ -1114,6 +1114,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "面板" } }
       }
     },
+    "clipboard.file.count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld files" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个文件" } }
+      }
+    },
     "clipboard.text.chars" : {
       "extractionState" : "manual",
       "localizations" : {
