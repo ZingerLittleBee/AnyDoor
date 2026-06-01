@@ -129,14 +129,9 @@ struct ClipboardHistoryRow: View {
 
     /// Parse `"#RRGGBB"` (or `"RRGGBB"`) into a SwiftUI `Color`. Returns nil on
     /// malformed input so callers can fall back to a neutral swatch. Shared
-    /// with `ClipboardHistoryPopoverView`'s preview overlay.
+    /// with `ClipboardHistoryPopoverView`'s preview overlay. Delegates to the
+    /// single `Color(hex:)` parser in `Color+Hex.swift`.
     static func swatchColor(forHex hex: String?) -> Color? {
-        guard var raw = hex?.uppercased() else { return nil }
-        if raw.hasPrefix("#") { raw.removeFirst() }
-        guard raw.count == 6, let value = UInt32(raw, radix: 16) else { return nil }
-        let r = Double((value >> 16) & 0xFF) / 255.0
-        let g = Double((value >> 8) & 0xFF) / 255.0
-        let b = Double(value & 0xFF) / 255.0
-        return Color(.sRGB, red: r, green: g, blue: b, opacity: 1)
+        Color(hex: hex)
     }
 }

@@ -344,6 +344,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "魔杖" } }
       }
     },
+    "clipboard.category.all" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "All" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全部" } }
+      }
+    },
     "clipboard.empty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -358,11 +365,32 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "· %lld 条" } }
       }
     },
+    "clipboard.hint.close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
     "clipboard.hint.copy" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制" } }
+      }
+    },
+    "clipboard.hint.delete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除" } }
+      }
+    },
+    "clipboard.hint.pastePlain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Paste plain" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "纯文本粘贴" } }
       }
     },
     "clipboard.hint.preview" : {
@@ -454,6 +482,13 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "预览" } }
+      }
+    },
+    "clipboard.search.placeholder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Search…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "搜索…" } }
       }
     },
     "clipboard.toast.copyFailed" : {
