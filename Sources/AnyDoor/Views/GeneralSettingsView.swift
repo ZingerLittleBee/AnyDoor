@@ -13,6 +13,9 @@ struct GeneralSettingsView: View {
     @State private var automationGranted = false
     @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
+    @AppStorage(ClipboardPreferences.monitoringKey) private var clipboardMonitoring = true
+    @AppStorage(ClipboardPreferences.copyOnlyKey) private var clipboardCopyOnly = false
+    @AppStorage(ClipboardPreferences.retentionKey) private var clipboardRetentionDays = 30
     @State private var updateService = UpdateService.shared
     @State private var hyperKey = HyperKeyService.shared
     @State private var commandPalette = CommandPaletteService.shared
@@ -146,6 +149,19 @@ struct GeneralSettingsView: View {
                 automationRow
             } header: {
                 LocalizedText(.settingsGeneralPermissionsSection)
+            }
+
+            Section {
+                Toggle(isOn: $clipboardMonitoring) { LocalizedText(.settingsClipboardMonitoring) }
+                Toggle(isOn: $clipboardCopyOnly) { LocalizedText(.settingsClipboardCopyOnly) }
+                Picker(selection: $clipboardRetentionDays) {
+                    ForEach(ClipboardRetention.allCases, id: \.rawValue) { option in
+                        LocalizedText(option.titleKey).tag(option.rawValue)
+                    }
+                } label: { LocalizedText(.settingsClipboardRetention) }
+                .pickerStyle(.menu)
+            } header: {
+                LocalizedText(.settingsClipboard)
             }
 
             Section {

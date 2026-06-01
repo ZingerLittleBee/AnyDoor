@@ -722,6 +722,55 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关于与更新" } }
       }
     },
+    "settings.clipboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clipboard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "剪贴板" } }
+      }
+    },
+    "settings.clipboard.monitoring" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Capture clipboard history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用剪贴板监听" } }
+      }
+    },
+    "settings.clipboard.copyOnly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy only (don't auto-paste)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "仅复制，不自动粘贴" } }
+      }
+    },
+    "settings.clipboard.retention" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Keep history for" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留时长" } }
+      }
+    },
+    "settings.clipboard.retention.7" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "7 days" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "7 天" } }
+      }
+    },
+    "settings.clipboard.retention.30" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "30 days" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "30 天" } }
+      }
+    },
+    "settings.clipboard.retention.unlimited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unlimited" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不限" } }
+      }
+    },
     "settings.general.history" : {
       "extractionState" : "manual",
       "localizations" : {
