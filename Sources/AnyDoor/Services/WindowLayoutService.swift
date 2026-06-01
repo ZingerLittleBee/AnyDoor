@@ -166,8 +166,8 @@ enum WindowLayoutGeometry {
         toVisible: CGRect
     ) -> CGRect {
         guard fromVisible.width > 0, fromVisible.height > 0 else {
-            let w = min(windowFrame.width, toVisible.width)
-            let h = min(windowFrame.height, toVisible.height)
+            let w = floor(min(windowFrame.width, toVisible.width))
+            let h = floor(min(windowFrame.height, toVisible.height))
             return CGRect(origin: toVisible.origin, size: CGSize(width: w, height: h))
         }
         let fx = (windowFrame.minX - fromVisible.minX) / fromVisible.width
@@ -175,10 +175,11 @@ enum WindowLayoutGeometry {
         let fw = windowFrame.width / fromVisible.width
         let fh = windowFrame.height / fromVisible.height
 
-        var width = min(fw * toVisible.width, toVisible.width)
-        var height = min(fh * toVisible.height, toVisible.height)
-        var x = toVisible.minX + fx * toVisible.width
-        var y = toVisible.minY + fy * toVisible.height
+        // floor() keeps display moves pixel-aligned, matching targetRect.
+        var width = floor(min(fw * toVisible.width, toVisible.width))
+        var height = floor(min(fh * toVisible.height, toVisible.height))
+        var x = floor(toVisible.minX + fx * toVisible.width)
+        var y = floor(toVisible.minY + fy * toVisible.height)
 
         // Clamp origin so the rect stays fully inside the destination.
         x = min(max(x, toVisible.minX), toVisible.maxX - width)
