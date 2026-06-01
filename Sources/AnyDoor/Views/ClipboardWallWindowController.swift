@@ -248,12 +248,14 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit
-            if inputMode {
-                // Clear a non-empty query first; close once it is empty.
-                if state.query.isEmpty { dismiss(restoreFocus: true) }
-                else { state.query = ""; searchField?.stringValue = "" }
+            if state.query.isEmpty {
+                // Nothing to step back through: close outright, in either mode.
+                dismiss(restoreFocus: true)
+            } else if inputMode {
+                // A non-empty query clears first, leaving the field focused.
+                state.query = ""; searchField?.stringValue = ""
             } else {
-                // Card navigation → return focus to the search field.
+                // Card navigation over a search → return focus to edit/clear it.
                 state.isSearchFocused = true
             }
             return true
