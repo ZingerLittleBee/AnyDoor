@@ -273,4 +273,43 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         XCTAssertTrue(item.isFavorite)
         XCTAssertEqual(ClipboardHistoryKind.file.titleKey, .clipboardKindFile)
     }
+
+    func testTimelineFiltersByCategoryAndSearch() async throws {
+        let container = try makeContainer()
+        var now = Date(timeIntervalSinceReferenceDate: 100)
+        let store = ClipboardHistoryStore(now: { now })
+        store.bootstrap(modelContainer: container)
+
+        await store.record(.text(plain: "apple pie", rich: nil, richType: nil), source: nil)
+        now = Date(timeIntervalSinceReferenceDate: 200)
+        await store.record(.text(plain: "banana bread", rich: nil, richType: nil), source: nil)
+        now = Date(timeIntervalSinceReferenceDate: 300)
+        await store.recordColor(hex: "#ABCDEF")
+
+        // All → newest first across kinds.
+        let all = store.timeline(category: nil, query: "")
+        XCTAssertEqual(all.map(\.previewTitle), ["#ABCDEF", "banana bread", "apple pie"])
+
+        // Category filter.
+        let onlyText = store.timeline(category: .text, query: "")
+        XCTAssertEqual(onlyText.map(\.previewTitle), ["banana bread", "apple pie"])
+
+        // Case-insensitive search over preview/text.
+        let search = store.timeline(category: nil, query: "APPLE")
+        XCTAssertEqual(search.map(\.previewTitle), ["apple pie"])
+    }
+
+    func testToggleFavoriteAndDelete() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        await store.record(.text(plain: "keep me", rich: nil, richType: nil), source: nil)
+
+        let item = try XCTUnwrap(store.timeline(category: nil, query: "").first)
+        await store.toggleFavorite(item)
+        XCTAssertTrue(try XCTUnwrap(store.timeline(category: nil, query: "").first).isFavorite)
+
+        await store.delete(item)
+        XCTAssertTrue(store.timeline(category: nil, query: "").isEmpty)
+    }
 }

@@ -261,6 +261,65 @@ final class ClipboardHistoryStore {
         cachedItems[kind] ?? []
     }
 
+    /// Unified, time-sorted view across all kinds for the card wall. `category`
+    /// nil means "all"; `query` is a case-insensitive substring over preview title,
+    /// subtitle, and stored text. Reads directly from SwiftData (not the per-kind
+    /// cache) so it always reflects every kind in one pass.
+    func timeline(category: ClipboardHistoryKind?, query: String) -> [ClipboardHistoryItem] {
+        guard let container = modelContainer else { return [] }
+        let cutoff = now().addingTimeInterval(-maxAge)
+        var descriptor = FetchDescriptor<ClipboardHistoryItem>(
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        descriptor.predicate = #Predicate { $0.createdAt >= cutoff }
+        var rows = (try? container.mainContext.fetch(descriptor)) ?? []
+
+        if let category {
+            let raw = category.rawValue
+            rows = rows.filter { $0.kind == raw }
+        }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            let needle = trimmed.lowercased()
+            rows = rows.filter { item in
+                item.previewTitle.lowercased().contains(needle)
+                    || (item.previewSubtitle?.lowercased().contains(needle) ?? false)
+                    || (item.text?.lowercased().contains(needle) ?? false)
+            }
+        }
+        return rows
+    }
+
+    /// Flip a single item's favorite flag. Favorites are exempt from pruning.
+    func toggleFavorite(_ item: ClipboardHistoryItem) async {
+        guard let container = modelContainer else { return }
+        item.isFavorite.toggle()
+        try? container.mainContext.save()
+        if let kind = item.historyKind { await reload(kind: kind) }
+    }
+
+    /// Delete a single item and its on-disk payload (image PNG / copied files).
+    func delete(_ item: ClipboardHistoryItem) async {
+        guard let container = modelContainer else { return }
+        deleteScreenshotFileIfNeeded(for: item)   // covers .screenshot and .image (both use fileName)
+        deleteCopiedFilesIfNeeded(for: item)
+        let kind = item.historyKind
+        container.mainContext.delete(item)
+        try? container.mainContext.save()
+        if let kind { await reload(kind: kind) }
+    }
+
+    /// Remove copied-file payloads for a `.file` entry (no-op for reference-only).
+    private func deleteCopiedFilesIfNeeded(for item: ClipboardHistoryItem) {
+        guard item.kind == ClipboardHistoryKind.file.rawValue else { return }
+        let directory = historyDirectoryProvider()
+        for entry in item.files {
+            if let stored = entry.storedName {
+                try? FileManager.default.removeItem(at: directory.appendingPathComponent(stored))
+            }
+        }
+    }
+
     /// Resolves the on-disk PNG location for a screenshot history item, so the
     /// preview view can render it via `NSImage(contentsOf:)`. Returns `nil` for
     /// non-screenshot items or rows that lack a stored file name.
@@ -410,9 +469,9 @@ final class ClipboardHistoryStore {
     }
 
     private func deleteScreenshotFileIfNeeded(for item: ClipboardHistoryItem) {
-        guard item.kind == ClipboardHistoryKind.screenshot.rawValue,
-              let fileName = item.fileName
-        else { return }
+        guard item.kind == ClipboardHistoryKind.screenshot.rawValue
+                || item.kind == ClipboardHistoryKind.image.rawValue,
+              let fileName = item.fileName else { return }
         let url = historyDirectoryProvider().appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
     }
