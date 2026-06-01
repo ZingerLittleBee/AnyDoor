@@ -8,10 +8,15 @@ import SwiftUI
 @Observable
 final class ClipboardWallState {
     var category: ClipboardHistoryKind?      // nil == "All"
-    /// The live search filter. Driven entirely by the controller's key handler
-    /// (type to append, backspace to delete) so it always matches exactly what
-    /// the user typed — a focused NSTextField would select-all and mangle it.
+    /// The live search filter. Edited through the focusable `WallSearchField`
+    /// (a real NSTextField, so an input method editor can compose CJK text) when
+    /// in input mode; the controller also clears it on Esc.
     var query: String = ""
+    /// Whether the search field currently owns keyboard focus (input mode). When
+    /// false the wall is in card-navigation mode: arrow keys move the selection,
+    /// Enter pastes, etc. The window controller flips this to switch modes and
+    /// the `WallSearchField` follows it to grab or release first responder.
+    var isSearchFocused: Bool = false
     private(set) var items: [ClipboardHistoryItem] = []
     private(set) var selectedIndex: Int = 0
 

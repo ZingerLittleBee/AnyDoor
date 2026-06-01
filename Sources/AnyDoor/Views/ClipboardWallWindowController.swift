@@ -23,6 +23,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// its @Query/@Observable sources, so new captures only appeared after a tab
     /// switch forced a body re-evaluation. A LazyHStack keeps the rebuild cheap.
     private var hostingView: NSHostingView<AnyView>?
+    /// The wall's search field, published by `WallSearchField`. Held so the key
+    /// monitor can make it first responder synchronously for type-to-focus.
+    private weak var searchField: NSTextField?
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
     private var globalMouseMonitor: Any?
@@ -79,6 +82,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // category tab or search term.
         state.category = nil
         state.query = ""
+        // Open in card-navigation mode (search field unfocused); typing focuses
+        // it. Reset here so a prior session's focus state never leaks in.
+        state.isSearchFocused = false
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
@@ -160,7 +166,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             onSelect: { [weak self] item, plain in self?.paste(item, plain: plain) },
             onToggleFavorite: { item in
                 Task { await ClipboardHistoryStore.shared.toggleFavorite(item) }
-            }
+            },
+            registerSearchField: { [weak self] field in self?.searchField = field }
         )
         if let modelContainer {
             return AnyView(view.modelContainer(modelContainer))
@@ -229,51 +236,71 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         return true
     }
 
+    /// Route a key press by mode. In input mode the search field owns most keys
+    /// (text editing + IME), so we only intercept Esc and Enter and let the rest
+    /// fall through to the field; the field's own delegate hands focus back to
+    /// card navigation when → is pressed at the end of a non-empty query. In card
+    /// navigation mode arrows move the selection, Enter pastes, and typing a
+    /// printable character focuses the field (type-to-search). Returns whether
+    /// the event was consumed (a returned event keeps flowing to the field).
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
-        let searching = !state.query.isEmpty
+        let inputMode = state.isSearchFocused
         switch event.keyCode {
-        case 53:                                         // esc
-            // First clear an active search; close once the query is empty.
-            if searching { state.query = ""; return true }
-            dismiss(restoreFocus: true)
+        case 53:                                         // esc — staged exit
+            if inputMode {
+                // Clear a non-empty query first; close once it is empty.
+                if state.query.isEmpty { dismiss(restoreFocus: true) }
+                else { state.query = ""; searchField?.stringValue = "" }
+            } else {
+                // Card navigation → return focus to the search field.
+                state.isSearchFocused = true
+            }
             return true
-        case 123: state.moveLeft(); return true          // ←
-        case 124: state.moveRight(); return true         // →
         case 36, 76:                                     // ↵ / numpad enter
             if let item = state.selectedItem {
                 paste(item, plain: event.modifierFlags.contains(.option))
             }
             return true
+        case 123:                                        // ←
+            if inputMode { return false }                // move the text caret
+            state.moveLeft(); return true
+        case 124:                                        // →
+            if inputMode { return false }                // field delegate may exit
+            state.moveRight(); return true
         case 49:                                         // space
-            // A space extends an active query; otherwise it triggers Quick Look.
-            if searching { state.query.append(" "); return true }
-            toggleQuickLook()
-            return true
+            if inputMode { return false }                // insert a space
+            toggleQuickLook(); return true
         case 51:                                         // ⌫
-            // Backspace edits an active query; otherwise deletes the selection.
-            if searching {
-                state.query.removeLast()
-            } else if let item = state.selectedItem {
+            if inputMode { return false }                // delete a character
+            if let item = state.selectedItem {
                 Task { await ClipboardHistoryStore.shared.delete(item) }
             }
             return true
         default:
-            // Typing a printable character filters the timeline (type to search).
-            return appendTypedCharacter(event)
+            if inputMode { return false }                // field inserts / composes
+            return focusSearchOnType(event)
         }
     }
 
-    /// Append a printable keystroke to the search query. Ignores modifier combos
-    /// (⌘C etc.) and control/function keys. Returns whether it was consumed.
-    private func appendTypedCharacter(_ event: NSEvent) -> Bool {
+    /// Type-to-search from card navigation: a printable keystroke focuses the
+    /// search field and is then delivered to it (the event is returned, not
+    /// consumed, so the same press lands in the now-first-responder field —
+    /// keeping IME composition intact). Modifier combos and control keys are
+    /// ignored. The caret is parked at the end so an existing query is appended
+    /// to rather than replaced.
+    private func focusSearchOnType(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .function])
         guard modifiers.isEmpty,
               let characters = event.characters, !characters.isEmpty,
-              characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
+              characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+              let field = searchField
         else { return false }
-        state.query.append(characters)
-        return true
+        window?.makeFirstResponder(field)
+        let end = (field.stringValue as NSString).length
+        field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
+        state.isSearchFocused = true
+        return false
     }
 
     private func paste(_ item: ClipboardHistoryItem, plain: Bool) {

@@ -16,6 +16,9 @@ struct ClipboardWallView: View {
     let historyDirectory: URL
     let onSelect: (ClipboardHistoryItem, _ plain: Bool) -> Void
     let onToggleFavorite: (ClipboardHistoryItem) -> Void
+    /// Publishes the search field to the controller so type-to-focus can make it
+    /// first responder synchronously. No-op by default for previews/tests.
+    var registerSearchField: (NSTextField?) -> Void = { _ in }
 
     /// The most recent single tap, used to detect a double-click manually so
     /// selection fires instantly instead of waiting out SwiftUI's count:2
@@ -67,18 +70,14 @@ struct ClipboardWallView: View {
                 .buttonStyle(.plain)
             }
             Spacer()
-            // Read-only display; the query is driven by the controller's key
-            // handler (type to search), so there's no editable text field.
+            // A real, focusable field so an IME can compose CJK search text. The
+            // controller toggles focus between this field (input mode) and card
+            // navigation; see ClipboardWallWindowController.handle(_:).
             HStack(spacing: 4) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                if state.query.isEmpty {
-                    LocalizedText(.clipboardSearchPlaceholder).foregroundStyle(.secondary)
-                } else {
-                    Text(state.query)
-                }
-                Spacer(minLength: 0)
+                WallSearchField(state: state, registerField: registerSearchField)
+                    .frame(height: 18)
             }
-            .lineLimit(1)
             .frame(width: 160)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
