@@ -211,4 +211,55 @@ final class WindowLayoutGeometryTests: XCTestCase {
         XCTAssertEqual(right, CGRect(x: 480, y: 25, width: 960, height: 875))
         XCTAssertEqual(right.maxX, visible.maxX)
     }
+
+    // MARK: - Cross-display remap
+
+    func testRemapSameSizeDisplaysPreservesRelativeFrame() {
+        let from = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let to = CGRect(x: 2000, y: 0, width: 1000, height: 800)
+        let window = CGRect(x: 100, y: 80, width: 400, height: 300)
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        // Same size: shift by the origin delta, size unchanged.
+        XCTAssertEqual(result, CGRect(x: 2100, y: 80, width: 400, height: 300))
+    }
+
+    func testRemapScalesToSmallerDisplay() {
+        let from = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let to = CGRect(x: 1000, y: 0, width: 500, height: 400)  // half size
+        let window = CGRect(x: 200, y: 200, width: 400, height: 400)
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        // Proportions: x 20% -> 1000 + 0.2*500 = 1100; y 25% -> 100;
+        // width 40% -> 200; height 50% -> 200.
+        XCTAssertEqual(result, CGRect(x: 1100, y: 100, width: 200, height: 200))
+    }
+
+    func testRemapClampsOversizedResultIntoDestination() {
+        let from = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let to = CGRect(x: 1000, y: 0, width: 600, height: 500)
+        // Window fills the source entirely -> would fill destination; ensure it
+        // stays within destination bounds.
+        let window = from
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        XCTAssertEqual(result, to)
+    }
+
+    func testRemapZeroSizedSourceFallsBackToDestinationOrigin() {
+        let from = CGRect(x: 0, y: 0, width: 0, height: 0)
+        let to = CGRect(x: 500, y: 500, width: 800, height: 600)
+        let window = CGRect(x: 10, y: 10, width: 300, height: 200)
+        let result = WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: window, fromVisible: from, toVisible: to)
+        // Degenerate source: place at destination origin, keep clamped size.
+        XCTAssertEqual(result, CGRect(x: 500, y: 500, width: 300, height: 200))
+    }
+
+    func testWrappedIndexNextAndPrevious() {
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 0, delta: 1, count: 3), 1)
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 2, delta: 1, count: 3), 0)
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 0, delta: -1, count: 3), 2)
+        XCTAssertEqual(WindowLayoutGeometry.wrappedIndex(current: 1, delta: -1, count: 3), 0)
+    }
 }

@@ -151,6 +151,50 @@ enum WindowLayoutGeometry {
             return visibleFrame
         }
     }
+
+    /// Map a window from its source display's visible region into a
+    /// destination display's visible region, preserving relative position and
+    /// relative size (Rectangle-default proportional remap), then clamp the
+    /// result fully inside `toVisible`.
+    ///
+    /// All rects are in AX coordinates (top-left origin). A degenerate source
+    /// (zero width/height) falls back to the destination origin with the
+    /// window's original size, clamped to the destination.
+    static func rectMovingToDisplay(
+        windowFrame: CGRect,
+        fromVisible: CGRect,
+        toVisible: CGRect
+    ) -> CGRect {
+        guard fromVisible.width > 0, fromVisible.height > 0 else {
+            let w = min(windowFrame.width, toVisible.width)
+            let h = min(windowFrame.height, toVisible.height)
+            return CGRect(origin: toVisible.origin, size: CGSize(width: w, height: h))
+        }
+        let fx = (windowFrame.minX - fromVisible.minX) / fromVisible.width
+        let fy = (windowFrame.minY - fromVisible.minY) / fromVisible.height
+        let fw = windowFrame.width / fromVisible.width
+        let fh = windowFrame.height / fromVisible.height
+
+        var width = min(fw * toVisible.width, toVisible.width)
+        var height = min(fh * toVisible.height, toVisible.height)
+        var x = toVisible.minX + fx * toVisible.width
+        var y = toVisible.minY + fy * toVisible.height
+
+        // Clamp origin so the rect stays fully inside the destination.
+        x = min(max(x, toVisible.minX), toVisible.maxX - width)
+        y = min(max(y, toVisible.minY), toVisible.maxY - height)
+        // Guard against negative dimensions from pathological inputs.
+        width = max(width, 0)
+        height = max(height, 0)
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    /// Index arithmetic for next/previous-display selection with wrap-around.
+    /// `delta` is +1 (next) or -1 (previous). `count` must be >= 1.
+    static func wrappedIndex(current: Int, delta: Int, count: Int) -> Int {
+        let raw = (current + delta) % count
+        return raw < 0 ? raw + count : raw
+    }
 }
 
 /// Reasons a `WindowLayoutService.apply(_:)` call may fail.
