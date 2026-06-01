@@ -106,6 +106,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "亮度 +" } }
       }
     },
+    "builtin.clipboardWall" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clipboard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "剪贴板" } }
+      }
+    },
     "builtin.darkMode" : {
       "extractionState" : "manual",
       "localizations" : {

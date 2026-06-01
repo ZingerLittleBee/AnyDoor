@@ -10,6 +10,7 @@ enum L10n {
         case builtinBrightness = "builtin.brightness"
         case builtinBrightnessDown = "builtin.brightnessDown"
         case builtinBrightnessUp = "builtin.brightnessUp"
+        case builtinClipboardWall = "builtin.clipboardWall"
         case builtinDarkMode = "builtin.darkMode"
         case builtinDisplaySleep = "builtin.displaySleep"
         case builtinEmptyTrash = "builtin.emptyTrash"

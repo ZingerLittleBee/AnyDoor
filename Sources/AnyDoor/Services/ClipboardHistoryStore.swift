@@ -29,7 +29,7 @@ final class ClipboardHistoryStore {
 
     @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private let maxAge: TimeInterval
+    @ObservationIgnored private(set) var maxAge: TimeInterval
     @ObservationIgnored private let maxItemsPerKind: Int
     @ObservationIgnored private let pruneThrottle: TimeInterval
     @ObservationIgnored private let historyDirectoryProvider: () -> URL
@@ -89,6 +89,12 @@ final class ClipboardHistoryStore {
 
     func bootstrap(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
+    }
+
+    /// Override the retention window at runtime (e.g. from user preferences at
+    /// bootstrap). `.infinity` disables age-based pruning.
+    func setMaxAge(_ newValue: TimeInterval) {
+        self.maxAge = newValue
     }
 
     func recordText(kind: ClipboardHistoryKind, text: String) async {
