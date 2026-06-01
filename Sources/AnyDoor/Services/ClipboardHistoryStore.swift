@@ -342,13 +342,14 @@ final class ClipboardHistoryStore {
             let cutoff = current.addingTimeInterval(-maxAge)
             var idsToDelete = Set<UUID>()
 
-            for item in all where item.createdAt < cutoff {
+            // Favorites are exempt from both the age sweep and the overflow trim.
+            for item in all where !item.isFavorite && item.createdAt < cutoff {
                 idsToDelete.insert(item.id)
             }
 
             for kind in ClipboardHistoryKind.allCases {
                 let rows = all
-                    .filter { $0.kind == kind.rawValue && !idsToDelete.contains($0.id) }
+                    .filter { $0.kind == kind.rawValue && !$0.isFavorite && !idsToDelete.contains($0.id) }
                     .sorted { $0.createdAt > $1.createdAt }
                 for item in rows.dropFirst(maxItemsPerKind) {
                     idsToDelete.insert(item.id)
@@ -361,17 +362,21 @@ final class ClipboardHistoryStore {
             }
             if !idsToDelete.isEmpty { try context.save() }
 
-            // Sweep orphan PNG files no longer referenced by surviving rows.
-            // Both .screenshot and .image rows persist a single PNG under fileName.
-            let survivingFiles = Set(
-                all.compactMap { item -> String? in
-                    guard !idsToDelete.contains(item.id),
-                          item.kind == ClipboardHistoryKind.screenshot.rawValue
-                            || item.kind == ClipboardHistoryKind.image.rawValue
-                    else { return nil }
-                    return item.fileName
+            // Sweep orphan files no longer referenced by surviving rows.
+            // Both .screenshot and .image rows persist a single PNG under fileName;
+            // .file rows persist one or more copied payloads under storedName.
+            var survivingFiles = Set<String>()
+            for item in all where !idsToDelete.contains(item.id) {
+                if item.kind == ClipboardHistoryKind.screenshot.rawValue
+                    || item.kind == ClipboardHistoryKind.image.rawValue {
+                    if let fileName = item.fileName { survivingFiles.insert(fileName) }
                 }
-            )
+                if item.kind == ClipboardHistoryKind.file.rawValue {
+                    for entry in item.files {
+                        if let stored = entry.storedName { survivingFiles.insert(stored) }
+                    }
+                }
+            }
             removeOrphanScreenshotFiles(keeping: survivingFiles)
         } catch {
             historyLogger.error("Failed to prune clipboard history: \(error)")
@@ -482,7 +487,8 @@ final class ClipboardHistoryStore {
         guard let contents = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return
         }
-        for url in contents where url.pathExtension.lowercased() == "png" {
+        // Copied files keep arbitrary extensions, so do not restrict by ".png".
+        for url in contents {
             if !survivingFiles.contains(url.lastPathComponent) {
                 try? fm.removeItem(at: url)
             }

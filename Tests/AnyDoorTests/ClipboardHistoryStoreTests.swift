@@ -312,4 +312,36 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         await store.delete(item)
         XCTAssertTrue(store.timeline(category: nil, query: "").isEmpty)
     }
+
+    func testPruneExemptsFavorites() async throws {
+        let container = try makeContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
+        let store = ClipboardHistoryStore(now: { now }, maxItemsPerKind: 1)
+        store.bootstrap(modelContainer: container)
+
+        let context = container.mainContext
+        // Two text rows; the OLDER one is favorited and must survive the overflow trim.
+        context.insert(ClipboardHistoryItem(kind: .text, text: "old", previewTitle: "old", createdAt: now.addingTimeInterval(1), isFavorite: true))
+        context.insert(ClipboardHistoryItem(kind: .text, text: "new", previewTitle: "new", createdAt: now.addingTimeInterval(2)))
+        try context.save()
+
+        await store.pruneExpiredAndOverflow(force: true)
+        let titles = Set(store.timeline(category: .text, query: "").map(\.previewTitle))
+        XCTAssertTrue(titles.contains("old"))   // favorite survived
+        XCTAssertTrue(titles.contains("new"))
+    }
+
+    func testUnlimitedRetentionKeepsOldRows() async throws {
+        let container = try makeContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
+        let store = ClipboardHistoryStore(now: { now }, maxAge: .infinity)
+        store.bootstrap(modelContainer: container)
+
+        let context = container.mainContext
+        context.insert(ClipboardHistoryItem(kind: .text, text: "ancient", previewTitle: "ancient", createdAt: now.addingTimeInterval(-3650 * 86_400)))
+        try context.save()
+
+        await store.pruneExpiredAndOverflow(force: true)
+        XCTAssertEqual(store.timeline(category: .text, query: "").map(\.previewTitle), ["ancient"])
+    }
 }
