@@ -23,6 +23,10 @@ struct ClipboardWallView: View {
     private struct TapRecord { let index: Int; let date: Date }
     @State private var lastTap: TapRecord?
 
+    /// Drives the search field's keyboard focus. Mirrored into state so the
+    /// controller's key handler knows whether typing should search or navigate.
+    @FocusState private var searchFocused: Bool
+
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
         var rows = allItems
@@ -61,6 +65,10 @@ struct ClipboardWallView: View {
         // handling. Runs after the view updates, so it never mutates during body.
         .onAppear { state.setItems(items) }
         .onChange(of: items.map(\.id)) { _, _ in state.setItems(items) }
+        // Keep the controller informed of search focus, and honor its requests
+        // to focus the search field when the user starts typing while browsing.
+        .onChange(of: searchFocused) { _, focused in state.isSearchFocused = focused }
+        .onChange(of: state.searchFocusRequests) { _, _ in searchFocused = true }
     }
 
     private var tabs: some View {
@@ -84,6 +92,7 @@ struct ClipboardWallView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField(L(.clipboardSearchPlaceholder), text: $state.query)
                     .textFieldStyle(.plain).frame(width: 140)
+                    .focused($searchFocused)
             }
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))

@@ -12,6 +12,16 @@ final class ClipboardWallState {
     private(set) var items: [ClipboardHistoryItem] = []
     private(set) var selectedIndex: Int = 0
 
+    /// Whether the search field currently holds keyboard focus. The view keeps
+    /// this in sync via @FocusState; the controller reads it to decide whether a
+    /// keystroke should navigate cards or be typed into the search field.
+    var isSearchFocused: Bool = false
+    /// Bumped to ask the view to focus the search field (e.g. the user started
+    /// typing while browsing). The view focuses on change.
+    private(set) var searchFocusRequests: Int = 0
+
+    func requestSearchFocus() { searchFocusRequests += 1 }
+
     /// All category tabs in display order: All, then text/image/file, then the
     /// four legacy kinds. `nil` is the leading "All" tab.
     static let categoryOrder: [ClipboardHistoryKind?] = [

@@ -79,6 +79,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // category tab or search term.
         state.category = nil
         state.query = ""
+        state.isSearchFocused = false
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
@@ -231,9 +232,26 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
-        // While the search field is first responder, let typing through (but
-        // still honor Esc / arrows when the field is empty is overkill — keep
-        // it simple: Esc always closes, arrows always navigate).
+
+        // Esc always closes, whether or not search is focused.
+        if event.keyCode == 53 { dismiss(restoreFocus: true); return true }
+
+        // When the search field is focused, arrows still navigate cards and
+        // Enter still pastes, but everything else (typing, backspace, space) is
+        // left for the text field to handle.
+        if state.isSearchFocused {
+            switch event.keyCode {
+            case 123: state.moveLeft(); return true
+            case 124: state.moveRight(); return true
+            case 36, 76:
+                if let item = state.selectedItem {
+                    paste(item, plain: event.modifierFlags.contains(.option))
+                }
+                return true
+            default: return false
+            }
+        }
+
         switch event.keyCode {
         case 123: state.moveLeft(); return true          // ←
         case 124: state.moveRight(); return true         // →
@@ -249,9 +267,24 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 Task { await ClipboardHistoryStore.shared.delete(item) }
             }
             return true
-        case 53: dismiss(restoreFocus: true); return true // esc
-        default: return false
+        default:
+            // Typing a printable character while browsing starts a search.
+            return startSearchIfTyping(event)
         }
+    }
+
+    /// When the user types a printable character while browsing (search not
+    /// focused), seed the query with it and focus the search field so further
+    /// typing edits the query directly. Returns whether the event was consumed.
+    private func startSearchIfTyping(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .function])
+        guard modifiers.isEmpty,
+              let characters = event.characters, !characters.isEmpty,
+              characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
+        else { return false }
+        state.query.append(characters)
+        state.requestSearchFocus()
+        return true
     }
 
     private func paste(_ item: ClipboardHistoryItem, plain: Bool) {
