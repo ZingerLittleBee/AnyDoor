@@ -30,14 +30,22 @@ enum ClipboardSearch {
         }
     }
 
-    /// Split a raw query into lowercased, non-empty whitespace-delimited tokens.
+    /// Fold case, diacritics, and width so "cafe" matches "café" and "123"
+    /// matches full-width "１２３" — closer to what a user expects than a plain
+    /// lowercased comparison.
+    static func fold(_ string: String) -> String {
+        string.folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+                       locale: .current)
+    }
+
+    /// Split a raw query into folded, non-empty whitespace-delimited tokens.
     static func tokenize(_ query: String) -> [String] {
-        query.lowercased()
+        fold(query)
             .split(whereSeparator: { $0.isWhitespace })
             .map(String.init)
     }
 
-    /// The lowercased text a query is matched against: the entry's content only.
+    /// The folded text a query is matched against: the entry's content only.
     /// Excludes `previewSubtitle` (line/char counts) by design.
     static func searchableText(for item: ClipboardHistoryItem) -> String {
         var parts: [String] = [item.previewTitle]
@@ -47,7 +55,7 @@ enum ClipboardSearch {
             parts.append(file.originalName)
             parts.append(file.originalPath)
         }
-        return parts.joined(separator: "\n").lowercased()
+        return fold(parts.joined(separator: "\n"))
     }
 
     /// When a query matches an item only on text *below* the visible first line,
@@ -57,12 +65,12 @@ enum ClipboardSearch {
     static func matchSnippet(for item: ClipboardHistoryItem, query: String) -> String? {
         let tokens = tokenize(query)
         guard !tokens.isEmpty else { return nil }
-        let title = item.previewTitle.lowercased()
+        let title = fold(item.previewTitle)
         if tokens.contains(where: { title.contains($0) }) { return nil }
         guard let text = item.text else { return nil }
         for line in text.split(whereSeparator: \.isNewline) {
-            let lower = line.lowercased()
-            if tokens.contains(where: { lower.contains($0) }) {
+            let folded = fold(String(line))
+            if tokens.contains(where: { folded.contains($0) }) {
                 return line.trimmingCharacters(in: .whitespaces)
             }
         }

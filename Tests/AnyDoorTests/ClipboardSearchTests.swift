@@ -86,6 +86,23 @@ final class ClipboardSearchTests: XCTestCase {
         XCTAssertEqual(titles(out), ["便宜且消除崩溃路径"])
     }
 
+    func testDiacriticInsensitiveMatching() {
+        let items = [text("café au lait"), text("plain coffee")]
+        let out = ClipboardSearch.filter(items, category: nil, query: "cafe")
+        XCTAssertEqual(titles(out), ["café au lait"])
+    }
+
+    func testDiacriticInsensitiveBothDirections() {
+        // An accented query must also find unaccented content.
+        let items = [text("naive approach")]
+        XCTAssertEqual(ClipboardSearch.filter(items, category: nil, query: "naïve").count, 1)
+    }
+
+    func testFullWidthDigitsMatchHalfWidthQuery() {
+        let items = [text("port １２３４")]
+        XCTAssertEqual(ClipboardSearch.filter(items, category: nil, query: "1234").count, 1)
+    }
+
     // MARK: - Multi-token AND semantics
 
     func testAllTokensMustMatch() {
