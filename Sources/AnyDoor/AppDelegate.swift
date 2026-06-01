@@ -206,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyService.shared.stop()
+        clipboardWatcher?.stop()
     }
 
     @MainActor
