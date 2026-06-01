@@ -1,15 +1,21 @@
 import AppKit
+import SwiftData
 import SwiftUI
 
 /// The card-wall content: category tabs, a search field, a horizontal row of
-/// cards, and a keyboard-hint footer. Selection + filtering live in
-/// `ClipboardWallState`; the window controller owns querying and paste.
+/// cards, and a keyboard-hint footer. Items come from a SwiftData `@Query`, so
+/// the view re-renders automatically whenever the watcher records a new copy —
+/// no manual reload plumbing. The filtered list is mirrored into
+/// `ClipboardWallState` so the window controller's keyboard handling (paste /
+/// delete the selected item) operates on exactly what the view shows.
 struct ClipboardWallView: View {
+    @Query(sort: \ClipboardHistoryItem.createdAt, order: .reverse)
+    private var allItems: [ClipboardHistoryItem]
+
     @Bindable var state: ClipboardWallState
     let historyDirectory: URL
     let onSelect: (ClipboardHistoryItem, _ plain: Bool) -> Void
     let onToggleFavorite: (ClipboardHistoryItem) -> Void
-    let onFilterChange: () -> Void
 
     /// The most recent single tap, used to detect a double-click manually so
     /// selection fires instantly instead of waiting out SwiftUI's count:2
@@ -17,24 +23,44 @@ struct ClipboardWallView: View {
     private struct TapRecord { let index: Int; let date: Date }
     @State private var lastTap: TapRecord?
 
+    /// The query result narrowed by the active category tab and search text.
+    private var filtered: [ClipboardHistoryItem] {
+        var rows = allItems
+        if let category = state.category {
+            let raw = category.rawValue
+            rows = rows.filter { $0.kind == raw }
+        }
+        let needle = state.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !needle.isEmpty {
+            rows = rows.filter { item in
+                item.previewTitle.lowercased().contains(needle)
+                    || (item.previewSubtitle?.lowercased().contains(needle) ?? false)
+                    || (item.text?.lowercased().contains(needle) ?? false)
+            }
+        }
+        return rows
+    }
+
     var body: some View {
-        VStack(spacing: 10) {
+        let items = filtered
+        return VStack(spacing: 10) {
             tabs
-            if state.items.isEmpty {
+            if items.isEmpty {
                 Spacer()
                 LocalizedText(.clipboardEmpty).foregroundStyle(.secondary)
                 Spacer()
             } else {
-                cards
+                cards(items)
             }
             hints
         }
         .padding(14)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
-        // Re-query the store whenever the active tab or search text changes.
-        .onChange(of: state.category) { _, _ in onFilterChange() }
-        .onChange(of: state.query) { _, _ in onFilterChange() }
+        // Mirror the displayed list into state for the controller's keyboard
+        // handling. Runs after the view updates, so it never mutates during body.
+        .onAppear { state.setItems(items) }
+        .onChange(of: items.map(\.id)) { _, _ in state.setItems(items) }
     }
 
     private var tabs: some View {
@@ -64,13 +90,13 @@ struct ClipboardWallView: View {
         }
     }
 
-    private var cards: some View {
+    private func cards(_ items: [ClipboardHistoryItem]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 // Lazy so only on-screen cards are realized; a plain HStack would
                 // build and lay out every card on open and stutter the slide-in.
                 LazyHStack(spacing: 10) {
-                    ForEach(Array(state.items.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         ClipboardCardView(
                             item: item,
                             isSelected: index == state.selectedIndex,

@@ -1,6 +1,7 @@
 import AppKit
 import QuartzCore
 import QuickLookUI
+import SwiftData
 import SwiftUI
 
 /// Bottom, full-width overlay that hosts the clipboard card wall. Summoned by
@@ -12,17 +13,19 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     /// Set by AppDelegate so paste-from-history can suppress the self-write.
     weak var watcher: ClipboardWatcher?
+    /// The shared SwiftData container, injected by AppDelegate. Needed so the
+    /// wall's @Query observes the same context the watcher writes to.
+    var modelContainer: ModelContainer?
 
     private let state = ClipboardWallState()
     /// Built once and reused across opens. Rebuilding the whole SwiftUI tree on
     /// every show realizes all cards as the slide-in starts, which stutters the
-    /// animation; reusing it means show just moves already-rendered content.
-    private var hostingView: NSHostingView<ClipboardWallView>?
+    /// animation; reusing it means show just moves already-rendered content. The
+    /// content is a @Query-driven view, so it re-renders on store changes itself.
+    private var hostingView: NSHostingView<AnyView>?
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
     private var globalMouseMonitor: Any?
-    private var changeObserver: (any NSObjectProtocol)?
-    private var refreshTimer: Timer?
     /// Accumulated scroll delta; selection advances each time it crosses a step.
     private var scrollAccum: CGFloat = 0
     private static let scrollStep: CGFloat = 40
@@ -60,36 +63,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         panel.becomesKeyOnlyIfNeeded = false
         super.init(window: panel)
         panel.delegate = self
-        // Refresh live when the history changes (e.g. a new copy is captured)
-        // so the open wall doesn't require a tab switch to show it. Retain the
-        // token so the block-based observer stays registered.
-        changeObserver = NotificationCenter.default.addObserver(
-            forName: .clipboardHistoryDidChange, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshIfVisible() }
-        }
-    }
-
-    /// Re-query and update the open wall in place; ignored when hidden.
-    private func refreshIfVisible() {
-        guard window?.isVisible == true else { return }
-        loadTimelineNow()
-    }
-
-    /// While the wall is open, poll the store as a guaranteed backstop to the
-    /// change notification — new captures land within one tick regardless.
-    private func startRefreshTimer() {
-        stopRefreshTimer()
-        let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.refreshIfVisible() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        refreshTimer = timer
-    }
-
-    private func stopRefreshTimer() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
     }
 
     @available(*, unavailable)
@@ -101,16 +74,15 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func show() {
-        // Populate synchronously so the first render already has data; an async
-        // reload would land mid-animation and the heavy first render (image
-        // decoding) would stutter the slide-in.
-        loadTimelineNow()
+        // Always open on "All" with no search so a freshly copied item (of any
+        // kind) is guaranteed to be visible rather than hidden behind a leftover
+        // category tab or search term.
+        state.category = nil
+        state.query = ""
         // Force the watcher to capture immediately so content copied just before
-        // opening shows up now, rather than after the next ~0.5s poll tick.
-        Task { [weak self] in
-            await self?.watcher?.poll()
-            self?.loadTimelineNow()
-        }
+        // opening shows up now, rather than after the next ~0.5s poll tick. The
+        // @Query-backed view re-renders on its own once the store changes.
+        Task { [weak self] in await self?.watcher?.poll() }
         buildHostingViewIfNeeded()
         installMonitors()
 
@@ -144,13 +116,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             MainActor.assumeIsolated { self?.isAnimating = false }
         })
 
-        startRefreshTimer()
-
-        // Enforce retention off the critical path, then refresh if it changed.
-        Task {
-            await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false)
-            loadTimelineNow()
-        }
+        // Enforce retention off the critical path; the @Query view reflects any
+        // resulting deletions automatically.
+        Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false) }
     }
 
     /// Slide the panel down off-screen, then close it. When `restoreFocus` is
@@ -182,19 +150,26 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         })
     }
 
-    private func makeWallView() -> ClipboardWallView {
-        ClipboardWallView(
+    /// The wall content, with the shared SwiftData container injected so its
+    /// @Query observes the same context the watcher writes to. Wrapped in AnyView
+    /// because `.modelContainer` changes the concrete view type.
+    private func makeWallView() -> AnyView {
+        let view = ClipboardWallView(
             state: state,
             historyDirectory: historyDirectory,
             onSelect: { [weak self] item, plain in self?.paste(item, plain: plain) },
-            onToggleFavorite: { [weak self] item in
-                Task { await ClipboardHistoryStore.shared.toggleFavorite(item); self?.reloadItems() }
-            },
-            onFilterChange: { [weak self] in self?.reloadItems() }
+            onToggleFavorite: { item in
+                Task { await ClipboardHistoryStore.shared.toggleFavorite(item) }
+            }
         )
+        if let modelContainer {
+            return AnyView(view.modelContainer(modelContainer))
+        }
+        return AnyView(view)
     }
 
-    /// Build and install the SwiftUI host once; later shows reuse it.
+    /// Build and install the SwiftUI host once; later shows reuse it. The view is
+    /// @Query-backed, so it re-renders on store changes without a manual reload.
     private func buildHostingViewIfNeeded() {
         guard hostingView == nil else { return }
         let host = NSHostingView(rootView: makeWallView())
@@ -202,29 +177,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
         hostingView = host
-    }
-
-    /// Synchronously query the store and push the result into state. The fetch
-    /// runs on the main actor, so the wall renders with data immediately. Skips
-    /// the update when the item set is unchanged so the periodic refresh doesn't
-    /// churn the view or reset the selection.
-    private func loadTimelineNow() {
-        let fresh = ClipboardHistoryStore.shared.timeline(category: state.category, query: state.query)
-        guard fresh.map(\.id) != state.items.map(\.id) else { return }
-        state.setItems(fresh)
-        // Re-push the root view so the reused host re-renders with the new items.
-        // Reassigning the items array alone does not reliably invalidate a reused
-        // NSHostingView, whereas a fresh rootView always re-evaluates the body.
-        hostingView?.rootView = makeWallView()
-    }
-
-    /// Prune (async) then re-query; used for filter changes and after edits,
-    /// where a brief delay before refresh is fine.
-    private func reloadItems() {
-        Task {
-            await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false)
-            loadTimelineNow()
-        }
     }
 
     private func installMonitors() {
@@ -295,7 +247,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             toggleQuickLook(); return true
         case 51:                                         // ⌫ → delete selected
             if let item = state.selectedItem {
-                Task { await ClipboardHistoryStore.shared.delete(item); self.reloadItems() }
+                Task { await ClipboardHistoryStore.shared.delete(item) }
             }
             return true
         case 53: dismiss(restoreFocus: true); return true // esc
@@ -361,7 +313,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     func windowWillClose(_ notification: Notification) {
         removeMonitors()
-        stopRefreshTimer()
     }
     func windowDidResignKey(_ notification: Notification) {
         // Don't close while Quick Look is the key window.

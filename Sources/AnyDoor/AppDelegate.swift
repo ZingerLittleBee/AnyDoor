@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardWatcher = watcher
         ClipboardWatcher.shared = watcher
         ClipboardWallWindowController.shared.watcher = watcher
+        ClipboardWallWindowController.shared.modelContainer = modelContainer
 
         // Register providers
         let providers: [any BuiltinProvider] = [
