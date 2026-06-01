@@ -6,21 +6,57 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "windowLay
 
 /// A single, atomic window layout operation requested by the user.
 ///
-/// First version handles the four most common Rectangle-style commands
-/// against the currently focused window. Snap-to-grid, custom thirds and
-/// multi-display matching are intentionally out of scope.
+/// Covers Rectangle-style tiling against the focused window: halves,
+/// quarters, thirds, two-thirds, plus next/previous-display moves.
+/// Restore-previous-size and cycle behavior are intentionally out of scope.
 enum WindowLayoutAction: String, Sendable, CaseIterable {
     case leftHalf
     case rightHalf
+    case topHalf
+    case bottomHalf
+    case topLeftQuarter
+    case topRightQuarter
+    case bottomLeftQuarter
+    case bottomRightQuarter
+    case leftThird
+    case centerThird
+    case rightThird
+    case leftTwoThirds
+    case rightTwoThirds
     case maximize
     case center
+    case moveToNextDisplay
+    case moveToPreviousDisplay
+
+    /// True only for actions whose target is a different display. The service
+    /// routes these through `WindowLayoutGeometry.rectMovingToDisplay` instead
+    /// of `targetRect`.
+    var movesDisplay: Bool {
+        switch self {
+        case .moveToNextDisplay, .moveToPreviousDisplay: return true
+        default: return false
+        }
+    }
 
     var symbol: String {
         switch self {
-        case .leftHalf:  return "rectangle.lefthalf.filled"
-        case .rightHalf: return "rectangle.righthalf.filled"
-        case .maximize:  return "arrow.up.left.and.arrow.down.right"
-        case .center:    return "rectangle.center.inset.filled"
+        case .leftHalf:            return "rectangle.lefthalf.filled"
+        case .rightHalf:           return "rectangle.righthalf.filled"
+        case .topHalf:             return "rectangle.tophalf.filled"
+        case .bottomHalf:          return "rectangle.bottomhalf.filled"
+        case .topLeftQuarter:      return "square.split.2x2"
+        case .topRightQuarter:     return "square.split.2x2"
+        case .bottomLeftQuarter:   return "square.split.2x2"
+        case .bottomRightQuarter:  return "square.split.2x2"
+        case .leftThird:           return "rectangle.split.3x1"
+        case .centerThird:         return "rectangle.split.3x1"
+        case .rightThird:          return "rectangle.split.3x1"
+        case .leftTwoThirds:       return "rectangle.split.3x1"
+        case .rightTwoThirds:      return "rectangle.split.3x1"
+        case .maximize:            return "arrow.up.left.and.arrow.down.right"
+        case .center:              return "rectangle.center.inset.filled"
+        case .moveToNextDisplay:   return "rectangle.on.rectangle"
+        case .moveToPreviousDisplay: return "rectangle.on.rectangle"
         }
     }
 }
@@ -64,6 +100,55 @@ enum WindowLayoutGeometry {
             let x = visibleFrame.minX + (visibleFrame.width - width) / 2
             let y = visibleFrame.minY + (visibleFrame.height - height) / 2
             return CGRect(x: x, y: y, width: width, height: height)
+        case .topHalf:
+            let half = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: visibleFrame.width, height: half)
+        case .bottomHalf:
+            let half = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - half,
+                          width: visibleFrame.width, height: half)
+        case .topLeftQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY, width: w, height: h)
+        case .topRightQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.maxX - w, y: visibleFrame.minY, width: w, height: h)
+        case .bottomLeftQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.maxY - h, width: w, height: h)
+        case .bottomRightQuarter:
+            let w = floor(visibleFrame.width / 2), h = floor(visibleFrame.height / 2)
+            return CGRect(x: visibleFrame.maxX - w, y: visibleFrame.maxY - h, width: w, height: h)
+        case .leftThird:
+            let third = floor(visibleFrame.width / 3)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: third, height: visibleFrame.height)
+        case .rightThird:
+            let third = floor(visibleFrame.width / 3)
+            return CGRect(x: visibleFrame.maxX - third, y: visibleFrame.minY,
+                          width: third, height: visibleFrame.height)
+        case .centerThird:
+            // Center absorbs the rounding remainder so left|center|right tile
+            // the full width exactly: span from left third's right edge to
+            // right third's left edge.
+            let third = floor(visibleFrame.width / 3)
+            let minX = visibleFrame.minX + third
+            let maxX = visibleFrame.maxX - third
+            return CGRect(x: minX, y: visibleFrame.minY,
+                          width: maxX - minX, height: visibleFrame.height)
+        case .leftTwoThirds:
+            let twoThirds = floor(visibleFrame.width * 2 / 3)
+            return CGRect(x: visibleFrame.minX, y: visibleFrame.minY,
+                          width: twoThirds, height: visibleFrame.height)
+        case .rightTwoThirds:
+            let twoThirds = floor(visibleFrame.width * 2 / 3)
+            return CGRect(x: visibleFrame.maxX - twoThirds, y: visibleFrame.minY,
+                          width: twoThirds, height: visibleFrame.height)
+        case .moveToNextDisplay, .moveToPreviousDisplay:
+            // Display-moving actions never reach targetRect; the service
+            // routes them to rectMovingToDisplay. Harmless identity fallback.
+            return visibleFrame
         }
     }
 }
