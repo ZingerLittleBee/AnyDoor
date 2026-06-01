@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The card-wall content: category tabs, a search field, a horizontal row of
@@ -9,6 +10,12 @@ struct ClipboardWallView: View {
     let onSelect: (ClipboardHistoryItem, _ plain: Bool) -> Void
     let onToggleFavorite: (ClipboardHistoryItem) -> Void
     let onFilterChange: () -> Void
+
+    /// The most recent single tap, used to detect a double-click manually so
+    /// selection fires instantly instead of waiting out SwiftUI's count:2
+    /// disambiguation delay.
+    private struct TapRecord { let index: Int; let date: Date }
+    @State private var lastTap: TapRecord?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -69,10 +76,10 @@ struct ClipboardWallView: View {
                             onToggleFavorite: { onToggleFavorite(item) }
                         )
                         .id(index)
-                        // Double-click pastes into the active app; a single
-                        // click only moves selection (declare count:2 first).
-                        .onTapGesture(count: 2) { state.select(index); onSelect(item, false) }
-                        .onTapGesture(count: 1) { state.select(index) }
+                        // Single tap selects immediately; a second tap on the
+                        // same card within the system double-click interval
+                        // pastes. Manual timing avoids the count:2 gesture delay.
+                        .onTapGesture { handleTap(index: index, item: item) }
                     }
                 }
                 .padding(.vertical, 2)
@@ -97,5 +104,19 @@ struct ClipboardWallView: View {
 
     private func hint(_ key: String, _ label: L10n.Key) -> some View {
         HStack(spacing: 4) { Text(key).bold(); LocalizedText(label) }
+    }
+
+    /// Select on the first tap; treat a quick second tap on the same card as a
+    /// double-click and paste.
+    private func handleTap(index: Int, item: ClipboardHistoryItem) {
+        let now = Date()
+        if let last = lastTap, last.index == index,
+           now.timeIntervalSince(last.date) <= NSEvent.doubleClickInterval {
+            lastTap = nil
+            onSelect(item, false)
+        } else {
+            state.select(index)
+            lastTap = TapRecord(index: index, date: now)
+        }
     }
 }
