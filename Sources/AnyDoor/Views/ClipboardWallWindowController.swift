@@ -42,7 +42,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private var historyDirectory: URL { ClipboardHistoryStore.defaultHistoryDirectory() }
 
     private init() {
-        let panel = NSPanel(
+        let panel = ClipboardWallPanel(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 220),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false
@@ -55,6 +55,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         panel.isReleasedWhenClosed = false
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        // Become key as soon as shown so keyboard nav / search work without
+        // waiting for a control to demand it.
+        panel.becomesKeyOnlyIfNeeded = false
         super.init(window: panel)
         panel.delegate = self
         // Refresh live when the history changes (e.g. a new copy is captured)
@@ -121,9 +124,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         hostingView?.frame = NSRect(origin: .zero, size: onScreen.size)
         hostingView?.layoutSubtreeIfNeeded()
         window.setFrame(onScreen.offsetBy(dx: 0, dy: -Self.panelHeight), display: false)
-        // Activate so the panel can become key and receive keyboard events; the
-        // prior app is reactivated on dismiss, so focus is returned, not stolen.
-        NSApp.activate(ignoringOtherApps: true)
+        // Make the panel key WITHOUT activating AnyDoor: ClipboardWallPanel
+        // overrides canBecomeKey, and the .nonactivatingPanel style keeps the
+        // previously active app active, so it doesn't visibly lose focus while
+        // the wall is up (Paste-style). Keyboard nav and search still work.
         window.makeKeyAndOrderFront(nil)
         isAnimating = true
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -354,4 +358,14 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // A click elsewhere already moved focus; don't yank it back.
         dismiss(restoreFocus: false)
     }
+}
+
+/// A borderless panel that can still become key. NSWindow refuses key status
+/// for borderless windows by default, which would leave the wall unable to
+/// receive keyboard events; overriding `canBecomeKey` lets it become key via
+/// the .nonactivatingPanel style without activating AnyDoor — so the prior app
+/// stays active and does not visibly lose focus.
+final class ClipboardWallPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
 }
