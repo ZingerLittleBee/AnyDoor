@@ -99,7 +99,11 @@ struct ClipboardWallView: View {
                             matchSnippet: ClipboardSearch.matchSnippet(for: item, query: state.query),
                             onToggleFavorite: { onToggleFavorite(item) }
                         )
-                        .id(index)
+                        // Identify by the item's stable id (matching the ForEach
+                        // key). A positional `.id(index)` here conflicts with the
+                        // element-id ForEach and breaks diffing when the filtered
+                        // set changes.
+                        .id(item.id)
                         // Single tap selects immediately; a second tap on the
                         // same card within the system double-click interval
                         // pastes. Manual timing avoids the count:2 gesture delay.
@@ -109,7 +113,8 @@ struct ClipboardWallView: View {
                 .padding(.vertical, 2)
             }
             .onChange(of: state.selectedIndex) { _, new in
-                withAnimation { proxy.scrollTo(new, anchor: .center) }
+                guard items.indices.contains(new) else { return }
+                withAnimation { proxy.scrollTo(items[new].id, anchor: .center) }
             }
         }
     }
