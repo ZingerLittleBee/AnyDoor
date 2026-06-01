@@ -8,6 +8,35 @@ versioning.
 
 ### Added
 
+- Clipboard history: a Paste-style clipboard manager. A background
+  `ClipboardWatcher` polls the pasteboard and `ClipboardCapture` classifies
+  each copy into text, image, or file references, persisting them through
+  `ClipboardHistoryStore` (SwiftData). A bottom card wall, summoned by ⌘⇧V via
+  the `ClipboardWallWindowController`, presents the history as a horizontally
+  scrolling card wall with category tabs for all / text / image / file plus the
+  existing screenshot, color, OCR, and QR-code histories, and live search over
+  the timeline. Search matching lives in a pure, unit-tested `ClipboardSearch`:
+  it tokenizes the query on whitespace and requires every token to appear (AND
+  semantics) against the entry's content only — title, full text, color hex,
+  and file names, never the metadata subtitle — and folds case, diacritics, and
+  width so "cafe" finds "café" and "1234" finds "１２３４". The search field is a
+  real focusable `NSTextField` (`WallSearchField`) so an input method editor can
+  compose CJK queries, with two keyboard modes: card navigation (arrows select,
+  Enter pastes, Space previews, typing focuses the field) and input (the field
+  owns text editing and IME; → at the end of a non-empty query hands focus back
+  to card navigation). Esc stages the exit — a non-empty query clears, an empty
+  query closes the wall. Selecting a card pastes into
+  the frontmost app — rich paste by default, plain-text paste with ⌥↵ — driven
+  by `ClipboardPasteService` (`writePayload`/`synthesizePaste`); items can be
+  favorited, deleted, or previewed inline with Quick Look (space). Retention is
+  configurable in Settings → General; the prune pass exempts favorites so
+  starred entries survive the retention window. The watcher honors privacy
+  rules (transient/concealed pasteboard types are skipped) and a per-item size
+  ceiling, and `noteSelfWrite` suppresses re-capturing the app's own paste
+  writes. Deferred for now: the app-exclusion list editor and disk-budget UI —
+  the preference keys exist and the watcher already honors them, only the
+  editor surfaces are pending. Backups deliberately exclude clipboard history
+  (see config sync below).
 - Config sync: back up and restore configuration to/from a JSON file from
   Settings → General → 备份与恢复. The export gathers app shortcuts
   (`KeyBinding`), builtin preferences (`BuiltinPreference`), and a whitelisted

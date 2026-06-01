@@ -13,6 +13,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "seeder")
 ///   via `BuiltinItem(rawValue:)`.
 enum BuiltinPreferenceSeeder {
     private static let windowLayoutBackfillFlag = "windowLayoutDefaultsApplied_v1"
+    private static let clipboardWallHotkeyFlag = "clipboardWallDefaultHotkey_v1"
 
     @MainActor
     static func seedIfNeeded(in context: ModelContext) {
@@ -43,8 +44,38 @@ enum BuiltinPreferenceSeeder {
             }
 
             applyWindowLayoutBackfillIfNeeded(in: context)
+            applyClipboardWallHotkeyIfNeeded(in: context)
         } catch {
             logger.error("BuiltinPreference seeding failed: \(error)")
+        }
+    }
+
+    /// One-shot seed of the default clipboard-wall hotkey (Command+Shift+V).
+    /// Skips when the combo is already bound by another built-in, or when the
+    /// clipboard-wall row already carries a user-chosen hotkey. The flag is set
+    /// regardless of outcome so this only ever runs once.
+    @MainActor
+    private static func applyClipboardWallHotkeyIfNeeded(in context: ModelContext) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: clipboardWallHotkeyFlag) else { return }
+        defer { defaults.set(true, forKey: clipboardWallHotkeyFlag) }   // one-shot regardless of outcome
+
+        // Command+Shift+V — keyCode 9 (kVK_ANSI_V), modifierFlags 0x12_0000 (command|shift).
+        let keyCode = 9
+        let modifierFlags = 0x12_0000
+        do {
+            let rows = try context.fetch(FetchDescriptor<BuiltinPreference>())
+            // Conflict check: if any row already binds this exact combo, leave empty.
+            let taken = rows.contains { $0.keyCode == keyCode && $0.modifierFlags == modifierFlags }
+            guard !taken else { return }
+            guard let row = rows.first(where: { $0.itemKey == BuiltinItem.clipboardWall.rawValue }) else { return }
+            guard row.keyCode == nil else { return }   // user already set one
+            row.keyCode = keyCode
+            row.modifierFlags = modifierFlags
+            try context.save()
+            logger.info("Seeded default Command+Shift+V hotkey for clipboard wall")
+        } catch {
+            logger.error("clipboardWall hotkey seed failed: \(error)")
         }
     }
 

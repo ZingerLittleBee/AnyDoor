@@ -80,7 +80,11 @@ struct ClipboardHistoryRow: View {
             Image(systemName: "qrcode")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
-        case .ocr, .none:
+        case .ocr, .text, .image, .file, .none:
+            // The per-kind hover row intentionally renders only the four legacy
+            // kinds (ocr/color/qrcode/screenshot). text/image/file are surfaced
+            // exclusively in the clipboard wall, so they fall back to the OCR
+            // glyph here by design.
             Image(systemName: "text.viewfinder")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
@@ -127,14 +131,9 @@ struct ClipboardHistoryRow: View {
 
     /// Parse `"#RRGGBB"` (or `"RRGGBB"`) into a SwiftUI `Color`. Returns nil on
     /// malformed input so callers can fall back to a neutral swatch. Shared
-    /// with `ClipboardHistoryPopoverView`'s preview overlay.
+    /// with `ClipboardHistoryPopoverView`'s preview overlay. Delegates to the
+    /// single `Color(hex:)` parser in `Color+Hex.swift`.
     static func swatchColor(forHex hex: String?) -> Color? {
-        guard var raw = hex?.uppercased() else { return nil }
-        if raw.hasPrefix("#") { raw.removeFirst() }
-        guard raw.count == 6, let value = UInt32(raw, radix: 16) else { return nil }
-        let r = Double((value >> 16) & 0xFF) / 255.0
-        let g = Double((value >> 8) & 0xFF) / 255.0
-        let b = Double(value & 0xFF) / 255.0
-        return Color(.sRGB, red: r, green: g, blue: b, opacity: 1)
+        Color(hex: hex)
     }
 }

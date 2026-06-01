@@ -176,4 +176,189 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         XCTAssertTrue(try context.fetch(FetchDescriptor<ClipboardHistoryItem>()).isEmpty)
         try? FileManager.default.removeItem(at: directory)
     }
+
+    func testRecordCapturedTextStoresPlainAndRich() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+
+        await store.record(
+            .text(plain: "hello\nworld", rich: Data([0x09]), richType: "public.rtf"),
+            source: ClipboardSource(bundleID: "com.apple.Safari", appName: "Safari")
+        )
+        await store.reload(kind: .text)
+
+        let item = try XCTUnwrap(store.items(for: .text).first)
+        XCTAssertEqual(item.text, "hello\nworld")
+        XCTAssertEqual(item.previewTitle, "hello")
+        XCTAssertEqual(item.richType, "public.rtf")
+        XCTAssertEqual(item.sourceAppName, "Safari")
+    }
+
+    func testRecordCapturedImageStoresPng() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) }, historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        await store.record(.image(png: Data([0x89, 0x50, 0x4E, 0x47])), source: nil)
+        await store.reload(kind: .image)
+
+        let item = try XCTUnwrap(store.items(for: .image).first)
+        let fileName = try XCTUnwrap(item.fileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(fileName).path))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testRecordCapturedFileCopiesIntoStorage() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) }, historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        let src = FileManager.default.temporaryDirectory.appendingPathComponent("doc-\(UUID().uuidString).txt")
+        try Data("payload".utf8).write(to: src)
+        defer { try? FileManager.default.removeItem(at: src) }
+
+        await store.record(.files(urls: [src]), source: nil)
+        await store.reload(kind: .file)
+
+        let item = try XCTUnwrap(store.items(for: .file).first)
+        let entry = try XCTUnwrap(item.files.first)
+        XCTAssertEqual(entry.originalName, src.lastPathComponent)
+        XCTAssertFalse(item.isReferenceOnly)
+        let stored = try XCTUnwrap(entry.storedName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent(stored).path))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testRecordCapturedFileOverSizeLimitIsReferenceOnly() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(
+            now: { Date(timeIntervalSinceReferenceDate: 100) },
+            historyDirectory: directory,
+            maxCopiedFileBytes: 4
+        )
+        store.bootstrap(modelContainer: container)
+
+        let src = FileManager.default.temporaryDirectory.appendingPathComponent("big-\(UUID().uuidString).txt")
+        try Data(repeating: 0x41, count: 64).write(to: src)
+        defer { try? FileManager.default.removeItem(at: src) }
+
+        await store.record(.files(urls: [src]), source: nil)
+        await store.reload(kind: .file)
+
+        let item = try XCTUnwrap(store.items(for: .file).first)
+        XCTAssertTrue(item.isReferenceOnly)
+        XCTAssertNil(item.files.first?.storedName)
+        XCTAssertEqual(item.files.first?.originalPath, src.path)
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testNewKindsAndFieldsPersist() throws {
+        let item = ClipboardHistoryItem(
+            kind: .text,
+            text: "hello",
+            previewTitle: "hello",
+            richData: Data([0x01, 0x02]),
+            richType: "public.rtf",
+            sourceBundleID: "com.apple.Safari",
+            sourceAppName: "Safari",
+            isFavorite: true
+        )
+        XCTAssertEqual(item.historyKind, .text)
+        XCTAssertEqual(item.richType, "public.rtf")
+        XCTAssertEqual(item.sourceAppName, "Safari")
+        XCTAssertTrue(item.isFavorite)
+        XCTAssertEqual(ClipboardHistoryKind.file.titleKey, .clipboardKindFile)
+    }
+
+    func testTimelineFiltersByCategoryAndSearch() async throws {
+        let container = try makeContainer()
+        var now = Date(timeIntervalSinceReferenceDate: 100)
+        let store = ClipboardHistoryStore(now: { now })
+        store.bootstrap(modelContainer: container)
+
+        await store.record(.text(plain: "apple pie", rich: nil, richType: nil), source: nil)
+        now = Date(timeIntervalSinceReferenceDate: 200)
+        await store.record(.text(plain: "banana bread", rich: nil, richType: nil), source: nil)
+        now = Date(timeIntervalSinceReferenceDate: 300)
+        await store.recordColor(hex: "#ABCDEF")
+
+        // All → newest first across kinds.
+        let all = store.timeline(category: nil, query: "")
+        XCTAssertEqual(all.map(\.previewTitle), ["#ABCDEF", "banana bread", "apple pie"])
+
+        // Category filter.
+        let onlyText = store.timeline(category: .text, query: "")
+        XCTAssertEqual(onlyText.map(\.previewTitle), ["banana bread", "apple pie"])
+
+        // Case-insensitive search over preview/text.
+        let search = store.timeline(category: nil, query: "APPLE")
+        XCTAssertEqual(search.map(\.previewTitle), ["apple pie"])
+    }
+
+    func testToggleFavoriteAndDelete() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        await store.record(.text(plain: "keep me", rich: nil, richType: nil), source: nil)
+
+        let item = try XCTUnwrap(store.timeline(category: nil, query: "").first)
+        await store.toggleFavorite(item)
+        XCTAssertTrue(try XCTUnwrap(store.timeline(category: nil, query: "").first).isFavorite)
+
+        await store.delete(item)
+        XCTAssertTrue(store.timeline(category: nil, query: "").isEmpty)
+    }
+
+    func testPruneExemptsFavorites() async throws {
+        let container = try makeContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
+        let store = ClipboardHistoryStore(now: { now }, maxItemsPerKind: 1)
+        store.bootstrap(modelContainer: container)
+
+        let context = container.mainContext
+        // Two text rows; the OLDER one is favorited and must survive the overflow trim.
+        context.insert(ClipboardHistoryItem(kind: .text, text: "old", previewTitle: "old", createdAt: now.addingTimeInterval(1), isFavorite: true))
+        context.insert(ClipboardHistoryItem(kind: .text, text: "new", previewTitle: "new", createdAt: now.addingTimeInterval(2)))
+        try context.save()
+
+        await store.pruneExpiredAndOverflow(force: true)
+        let titles = Set(store.timeline(category: .text, query: "").map(\.previewTitle))
+        XCTAssertTrue(titles.contains("old"))   // favorite survived
+        XCTAssertTrue(titles.contains("new"))
+    }
+
+    func testUnlimitedRetentionKeepsOldRows() async throws {
+        let container = try makeContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
+        let store = ClipboardHistoryStore(now: { now }, maxAge: .infinity)
+        store.bootstrap(modelContainer: container)
+
+        let context = container.mainContext
+        context.insert(ClipboardHistoryItem(kind: .text, text: "ancient", previewTitle: "ancient", createdAt: now.addingTimeInterval(-3650 * 86_400)))
+        try context.save()
+
+        await store.pruneExpiredAndOverflow(force: true)
+        XCTAssertEqual(store.timeline(category: .text, query: "").map(\.previewTitle), ["ancient"])
+    }
+
+    func testPastePayloadPlainVsRich() throws {
+        let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorPaste-\(UUID().uuidString)"))
+
+        let rich = NSAttributedString(string: "styled")
+        let rtf = try XCTUnwrap(rich.rtf(from: NSRange(location: 0, length: rich.length)))
+        let item = ClipboardHistoryItem(kind: .text, text: "styled", previewTitle: "styled",
+                                        richData: rtf, richType: NSPasteboard.PasteboardType.rtf.rawValue)
+
+        ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: nil)
+        XCTAssertEqual(pb.data(forType: .rtf), rtf)
+        XCTAssertEqual(pb.string(forType: .string), "styled")
+
+        ClipboardPasteService.writePayload(for: item, asPlainText: true, to: pb, historyDirectory: nil)
+        XCTAssertNil(pb.data(forType: .rtf))   // plain mode drops rich payload
+        XCTAssertEqual(pb.string(forType: .string), "styled")
+    }
 }

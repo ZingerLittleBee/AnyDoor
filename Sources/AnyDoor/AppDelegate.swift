@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
     private var settingsCaptureWindow: NSWindow?
+    private var clipboardWatcher: ClipboardWatcher?
 
     override init() {
         do {
@@ -50,7 +51,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Bootstrap clipboard history store so providers can record entries.
         ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
+        ClipboardHistoryStore.shared.setMaxAge(ClipboardPreferences.retention.maxAge)
         Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true) }
+
+        // Start the clipboard watcher and hand it to the wall controller so the
+        // controller can suppress its own write-backs from being re-recorded.
+        let watcher = ClipboardWatcher(store: ClipboardHistoryStore.shared)
+        watcher.start()
+        clipboardWatcher = watcher
+        ClipboardWatcher.shared = watcher
+        ClipboardWallWindowController.shared.watcher = watcher
+        ClipboardWallWindowController.shared.modelContainer = modelContainer
 
         // Register providers
         let providers: [any BuiltinProvider] = [
@@ -80,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WindowLayoutProvider(item: .windowRightHalf, action: .rightHalf),
             WindowLayoutProvider(item: .windowMaximize, action: .maximize),
             WindowLayoutProvider(item: .windowCenter, action: .center),
+            ClipboardWallProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
 
@@ -196,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyService.shared.stop()
+        clipboardWatcher?.stop()
     }
 
     @MainActor

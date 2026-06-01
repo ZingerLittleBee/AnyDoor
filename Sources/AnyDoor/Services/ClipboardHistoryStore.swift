@@ -7,6 +7,18 @@ import SwiftUI
 
 private let historyLogger = Logger(subsystem: "dev.bybee.AnyDoor", category: "clipboard-history")
 
+/// Source app metadata attached to a freshly captured clipboard payload.
+struct ClipboardSource: Sendable, Equatable {
+    let bundleID: String?
+    let appName: String?
+}
+
+extension Notification.Name {
+    /// Posted after the clipboard history changes (new capture or clear) so an
+    /// open aggregated view can refresh live.
+    static let clipboardHistoryDidChange = Notification.Name("clipboardHistoryDidChange")
+}
+
 enum ClipboardHistoryError: Error, Sendable {
     case modelContainerUnavailable
     case missingText
@@ -23,10 +35,11 @@ final class ClipboardHistoryStore {
 
     @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private let now: () -> Date
-    @ObservationIgnored private let maxAge: TimeInterval
+    @ObservationIgnored private(set) var maxAge: TimeInterval
     @ObservationIgnored private let maxItemsPerKind: Int
     @ObservationIgnored private let pruneThrottle: TimeInterval
     @ObservationIgnored private let historyDirectoryProvider: () -> URL
+    @ObservationIgnored private let maxCopiedFileBytes: Int
     @ObservationIgnored private var lastPrunedAt: Date?
 
     /// Publicly readable so SwiftUI views can let `@Observable` track reads in
@@ -42,13 +55,15 @@ final class ClipboardHistoryStore {
         maxAge: TimeInterval = 7 * 86_400,
         maxItemsPerKind: Int = 100,
         pruneThrottle: TimeInterval = 60,
-        historyDirectoryProvider: @escaping () -> URL = ClipboardHistoryStore.defaultHistoryDirectory
+        historyDirectoryProvider: @escaping () -> URL = ClipboardHistoryStore.defaultHistoryDirectory,
+        maxCopiedFileBytes: Int = 25 * 1_024 * 1_024
     ) {
         self.now = now
         self.maxAge = maxAge
         self.maxItemsPerKind = maxItemsPerKind
         self.pruneThrottle = pruneThrottle
         self.historyDirectoryProvider = historyDirectoryProvider
+        self.maxCopiedFileBytes = maxCopiedFileBytes
     }
 
     /// Convenience used by tests that want to pin the directory to a `tmp` URL
@@ -58,14 +73,16 @@ final class ClipboardHistoryStore {
         maxAge: TimeInterval = 7 * 86_400,
         maxItemsPerKind: Int = 100,
         pruneThrottle: TimeInterval = 60,
-        historyDirectory: URL
+        historyDirectory: URL,
+        maxCopiedFileBytes: Int = 25 * 1_024 * 1_024
     ) {
         self.init(
             now: now,
             maxAge: maxAge,
             maxItemsPerKind: maxItemsPerKind,
             pruneThrottle: pruneThrottle,
-            historyDirectoryProvider: { historyDirectory }
+            historyDirectoryProvider: { historyDirectory },
+            maxCopiedFileBytes: maxCopiedFileBytes
         )
     }
 
@@ -78,6 +95,12 @@ final class ClipboardHistoryStore {
 
     func bootstrap(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
+    }
+
+    /// Override the retention window at runtime (e.g. from user preferences at
+    /// bootstrap). `.infinity` disables age-based pruning.
+    func setMaxAge(_ newValue: TimeInterval) {
+        self.maxAge = newValue
     }
 
     func recordText(kind: ClipboardHistoryKind, text: String) async {
@@ -126,6 +149,113 @@ final class ClipboardHistoryStore {
         }
     }
 
+    /// Record a freshly captured clipboard payload. Routing per kind:
+    /// text → plain + rich; image → PNG on disk; file → copy into storage
+    /// (or reference-only over the size ceiling).
+    func record(_ captured: CapturedClipboard, source: ClipboardSource?) async {
+        switch captured {
+        case .text(let plain, let rich, let richType):
+            await recordCapturedText(plain: plain, rich: rich, richType: richType, source: source)
+        case .image(let png):
+            await recordCapturedImage(png: png, source: source)
+        case .files(let urls):
+            await recordCapturedFiles(urls: urls, source: source)
+        }
+    }
+
+    private func recordCapturedText(plain: String, rich: Data?, richType: String?, source: ClipboardSource?) async {
+        guard let container = modelContainer else { return }
+        let item = ClipboardHistoryItem(
+            kind: .text,
+            text: plain,
+            previewTitle: Self.previewTitle(for: plain),
+            previewSubtitle: Self.textSubtitle(for: plain),
+            createdAt: now(),
+            richData: rich,
+            richType: richType,
+            sourceBundleID: source?.bundleID,
+            sourceAppName: source?.appName
+        )
+        container.mainContext.insert(item)
+        await saveAndRefresh(kind: .text, container: container)
+    }
+
+    private func recordCapturedImage(png: Data, source: ClipboardSource?) async {
+        guard let container = modelContainer else { return }
+        do {
+            let id = UUID()
+            let directory = historyDirectoryProvider()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileName = "\(id.uuidString).png"
+            try png.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+            let item = ClipboardHistoryItem(
+                id: id,
+                kind: .image,
+                fileName: fileName,
+                previewTitle: "",
+                createdAt: now(),
+                sourceBundleID: source?.bundleID,
+                sourceAppName: source?.appName
+            )
+            container.mainContext.insert(item)
+            await saveAndRefresh(kind: .image, container: container)
+        } catch {
+            historyLogger.error("Failed to record image history: \(error)")
+        }
+    }
+
+    private func recordCapturedFiles(urls: [URL], source: ClipboardSource?) async {
+        guard let container = modelContainer, !urls.isEmpty else { return }
+        do {
+            let directory = historyDirectoryProvider()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fm = FileManager.default
+            var entries: [ClipboardFileEntry] = []
+            var referenceOnly = false
+            for url in urls {
+                let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDirectory || size > maxCopiedFileBytes {
+                    referenceOnly = true
+                    entries.append(ClipboardFileEntry(storedName: nil, originalName: url.lastPathComponent, originalPath: url.path))
+                } else {
+                    let storedName = "\(UUID().uuidString)-\(url.lastPathComponent)"
+                    try fm.copyItem(at: url, to: directory.appendingPathComponent(storedName))
+                    entries.append(ClipboardFileEntry(storedName: storedName, originalName: url.lastPathComponent, originalPath: url.path))
+                }
+            }
+            let manifest = try JSONEncoder().encode(entries)
+            let title = entries.count == 1 ? entries[0].originalName : L(.clipboardFileCount, entries.count)
+            let item = ClipboardHistoryItem(
+                kind: .file,
+                previewTitle: title,
+                createdAt: now(),
+                sourceBundleID: source?.bundleID,
+                sourceAppName: source?.appName,
+                filesManifest: manifest,
+                isReferenceOnly: referenceOnly
+            )
+            container.mainContext.insert(item)
+            await saveAndRefresh(kind: .file, container: container)
+        } catch {
+            historyLogger.error("Failed to record file history: \(error)")
+        }
+    }
+
+    /// Shared save + prune + reload tail used by the record helpers.
+    private func saveAndRefresh(kind: ClipboardHistoryKind, container: ModelContainer) async {
+        do {
+            try container.mainContext.save()
+            await pruneExpiredAndOverflow(force: true)
+            await reload(kind: kind)
+            // Notify any open aggregated view (the wall) so a new capture shows
+            // up live instead of only after the user switches a tab.
+            NotificationCenter.default.post(name: .clipboardHistoryDidChange, object: nil)
+        } catch {
+            historyLogger.error("Failed to save \(kind.rawValue) history: \(error)")
+        }
+    }
+
     func reload(kind: ClipboardHistoryKind) async {
         guard let container = modelContainer else {
             cachedItems[kind] = []
@@ -144,6 +274,51 @@ final class ClipboardHistoryStore {
 
     func items(for kind: ClipboardHistoryKind) -> [ClipboardHistoryItem] {
         cachedItems[kind] ?? []
+    }
+
+    /// Unified, time-sorted view across all kinds for the card wall. `category`
+    /// nil means "all"; `query` is matched by `ClipboardSearch` over the entry's
+    /// content. Reads directly from SwiftData (not the per-kind cache) so it
+    /// always reflects every kind in one pass.
+    func timeline(category: ClipboardHistoryKind?, query: String) -> [ClipboardHistoryItem] {
+        guard let container = modelContainer else { return [] }
+        let cutoff = now().addingTimeInterval(-maxAge)
+        var descriptor = FetchDescriptor<ClipboardHistoryItem>(
+            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+        )
+        descriptor.predicate = #Predicate { $0.createdAt >= cutoff }
+        let rows = (try? container.mainContext.fetch(descriptor)) ?? []
+        return ClipboardSearch.filter(rows, category: category, query: query)
+    }
+
+    /// Flip a single item's favorite flag. Favorites are exempt from pruning.
+    func toggleFavorite(_ item: ClipboardHistoryItem) async {
+        guard let container = modelContainer else { return }
+        item.isFavorite.toggle()
+        try? container.mainContext.save()
+        if let kind = item.historyKind { await reload(kind: kind) }
+    }
+
+    /// Delete a single item and its on-disk payload (image PNG / copied files).
+    func delete(_ item: ClipboardHistoryItem) async {
+        guard let container = modelContainer else { return }
+        deleteScreenshotFileIfNeeded(for: item)   // covers .screenshot and .image (both use fileName)
+        deleteCopiedFilesIfNeeded(for: item)
+        let kind = item.historyKind
+        container.mainContext.delete(item)
+        try? container.mainContext.save()
+        if let kind { await reload(kind: kind) }
+    }
+
+    /// Remove copied-file payloads for a `.file` entry (no-op for reference-only).
+    private func deleteCopiedFilesIfNeeded(for item: ClipboardHistoryItem) {
+        guard item.kind == ClipboardHistoryKind.file.rawValue else { return }
+        let directory = historyDirectoryProvider()
+        for entry in item.files {
+            if let stored = entry.storedName {
+                try? FileManager.default.removeItem(at: directory.appendingPathComponent(stored))
+            }
+        }
     }
 
     /// Resolves the on-disk PNG location for a screenshot history item, so the
@@ -168,13 +343,14 @@ final class ClipboardHistoryStore {
             let cutoff = current.addingTimeInterval(-maxAge)
             var idsToDelete = Set<UUID>()
 
-            for item in all where item.createdAt < cutoff {
+            // Favorites are exempt from both the age sweep and the overflow trim.
+            for item in all where !item.isFavorite && item.createdAt < cutoff {
                 idsToDelete.insert(item.id)
             }
 
             for kind in ClipboardHistoryKind.allCases {
                 let rows = all
-                    .filter { $0.kind == kind.rawValue && !idsToDelete.contains($0.id) }
+                    .filter { $0.kind == kind.rawValue && !$0.isFavorite && !idsToDelete.contains($0.id) }
                     .sorted { $0.createdAt > $1.createdAt }
                 for item in rows.dropFirst(maxItemsPerKind) {
                     idsToDelete.insert(item.id)
@@ -187,15 +363,21 @@ final class ClipboardHistoryStore {
             }
             if !idsToDelete.isEmpty { try context.save() }
 
-            // Sweep orphan PNG files no longer referenced by surviving screenshot rows.
-            let survivingFiles = Set(
-                all.compactMap { item -> String? in
-                    guard !idsToDelete.contains(item.id),
-                          item.kind == ClipboardHistoryKind.screenshot.rawValue
-                    else { return nil }
-                    return item.fileName
+            // Sweep orphan files no longer referenced by surviving rows.
+            // Both .screenshot and .image rows persist a single PNG under fileName;
+            // .file rows persist one or more copied payloads under storedName.
+            var survivingFiles = Set<String>()
+            for item in all where !idsToDelete.contains(item.id) {
+                if item.kind == ClipboardHistoryKind.screenshot.rawValue
+                    || item.kind == ClipboardHistoryKind.image.rawValue {
+                    if let fileName = item.fileName { survivingFiles.insert(fileName) }
                 }
-            )
+                if item.kind == ClipboardHistoryKind.file.rawValue {
+                    for entry in item.files {
+                        if let stored = entry.storedName { survivingFiles.insert(stored) }
+                    }
+                }
+            }
             removeOrphanScreenshotFiles(keeping: survivingFiles)
         } catch {
             historyLogger.error("Failed to prune clipboard history: \(error)")
@@ -249,7 +431,24 @@ final class ClipboardHistoryStore {
             let url = historyDirectoryProvider().appendingPathComponent(fileName)
             guard let image = NSImage(contentsOf: url) else { throw ClipboardHistoryError.missingScreenshotFile }
             pasteboard.writeObjects([image])
+        case .text:
+            // Plain-text paste entries copy back as a string, mirroring OCR/QR.
+            guard let text = item.text else { throw ClipboardHistoryError.missingText }
+            pasteboard.setString(text, forType: .string)
+        case .image, .file:
+            // `copyToPasteboard` is the legacy per-kind hover-popover copy path and
+            // only handles text/ocr/qrcode/color/screenshot. Image and file rows do
+            // exist (the watcher creates them), but their write-back goes through
+            // `ClipboardPasteService` from the clipboard wall, not here — so reject
+            // any stray image/file rows that reach this path.
+            throw ClipboardHistoryError.missingText
         }
+
+        // Reached only when the switch above performed a write (every other case
+        // throws before this point). Suppress the watcher so it doesn't re-capture
+        // this app-originated re-copy as a duplicate generic text/image entry.
+        // Still synchronous on the @MainActor store, so race-free vs the poll.
+        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
     }
 
     func clearAll() async {
@@ -261,6 +460,7 @@ final class ClipboardHistoryStore {
                 cachedItems[kind] = []
             }
             lastPrunedAt = nil
+            NotificationCenter.default.post(name: .clipboardHistoryDidChange, object: nil)
         }
 
         guard let container = modelContainer else { return }
@@ -285,9 +485,9 @@ final class ClipboardHistoryStore {
     }
 
     private func deleteScreenshotFileIfNeeded(for item: ClipboardHistoryItem) {
-        guard item.kind == ClipboardHistoryKind.screenshot.rawValue,
-              let fileName = item.fileName
-        else { return }
+        guard item.kind == ClipboardHistoryKind.screenshot.rawValue
+                || item.kind == ClipboardHistoryKind.image.rawValue,
+              let fileName = item.fileName else { return }
         let url = historyDirectoryProvider().appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
     }
@@ -298,7 +498,8 @@ final class ClipboardHistoryStore {
         guard let contents = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return
         }
-        for url in contents where url.pathExtension.lowercased() == "png" {
+        // Copied files keep arbitrary extensions, so do not restrict by ".png".
+        for url in contents {
             if !survivingFiles.contains(url.lastPathComponent) {
                 try? fm.removeItem(at: url)
             }

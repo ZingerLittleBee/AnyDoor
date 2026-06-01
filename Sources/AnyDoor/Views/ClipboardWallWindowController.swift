@@ -1,0 +1,385 @@
+import AppKit
+import QuartzCore
+import QuickLookUI
+import SwiftData
+import SwiftUI
+
+/// Bottom, full-width overlay that hosts the clipboard card wall. Summoned by
+/// the clipboard-wall hotkey (via ClipboardWallProvider) or the panel row.
+/// Mirrors CommandPaletteWindowController's activation/key-monitor pattern.
+@MainActor
+final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate, QLPreviewPanelDataSource {
+    static let shared = ClipboardWallWindowController()
+
+    /// Set by AppDelegate so paste-from-history can suppress the self-write.
+    weak var watcher: ClipboardWatcher?
+    /// The shared SwiftData container, injected by AppDelegate. Needed so the
+    /// wall's @Query observes the same context the watcher writes to.
+    var modelContainer: ModelContainer?
+
+    private let state = ClipboardWallState()
+    /// Rebuilt fresh on every show. Reusing it across opens breaks SwiftUI
+    /// reactivity — a reused host that was ordered out does not re-subscribe to
+    /// its @Query/@Observable sources, so new captures only appeared after a tab
+    /// switch forced a body re-evaluation. A LazyHStack keeps the rebuild cheap.
+    private var hostingView: NSHostingView<AnyView>?
+    /// The wall's search field, published by `WallSearchField`. Held so the key
+    /// monitor can make it first responder synchronously for type-to-focus.
+    private weak var searchField: NSTextField?
+    private var keyMonitor: Any?
+    private var scrollMonitor: Any?
+    private var globalMouseMonitor: Any?
+    /// Accumulated scroll delta; selection advances each time it crosses a step.
+    private var scrollAccum: CGFloat = 0
+    private static let scrollStep: CGFloat = 40
+    private var previewURL: URL?
+
+    /// The app that was frontmost when the wall opened. The wall activates
+    /// AnyDoor so its panel can become key (a background .accessory app's panel
+    /// won't otherwise receive keyboard events); focus is returned here on
+    /// paste/Esc so the net effect is no focus theft.
+    private weak var previousApp: NSRunningApplication?
+
+    /// Guards against re-entrant show/dismiss while the slide animation runs.
+    private var isAnimating = false
+    private static let panelHeight: CGFloat = 285
+    private static let animationDuration: TimeInterval = 0.22
+
+    private var historyDirectory: URL { ClipboardHistoryStore.defaultHistoryDirectory() }
+
+    private init() {
+        let panel = ClipboardWallPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 220),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered, defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        panel.isReleasedWhenClosed = false
+        panel.isFloatingPanel = true
+        panel.hidesOnDeactivate = false
+        // Become key as soon as shown so keyboard nav / search work without
+        // waiting for a control to demand it.
+        panel.becomesKeyOnlyIfNeeded = false
+        super.init(window: panel)
+        panel.delegate = self
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    func toggle() {
+        guard !isAnimating else { return }
+        if window?.isVisible == true { dismiss(restoreFocus: true) } else { show() }
+    }
+
+    private func show() {
+        // Always open on "All" with no search so a freshly copied item (of any
+        // kind) is guaranteed to be visible rather than hidden behind a leftover
+        // category tab or search term.
+        state.category = nil
+        state.query = ""
+        // Open in card-navigation mode (search field unfocused); typing focuses
+        // it. Reset here so a prior session's focus state never leaks in.
+        state.isSearchFocused = false
+        // Force the watcher to capture immediately so content copied just before
+        // opening shows up now, rather than after the next ~0.5s poll tick. The
+        // @Query-backed view re-renders on its own once the store changes.
+        Task { [weak self] in await self?.watcher?.poll() }
+        installHostingView()
+        installMonitors()
+
+        guard let window, let screen = NSScreen.main else { return }
+        // Remember who had focus so paste/Esc can hand it back.
+        if let front = NSWorkspace.shared.frontmostApplication,
+           front.processIdentifier != NSRunningApplication.current.processIdentifier {
+            previousApp = front
+        }
+        // Anchor to the screen's physical bottom edge (not visibleFrame, which
+        // sits above the Dock) so the panel is flush with no gap underneath.
+        let bounds = screen.frame
+        let onScreen = NSRect(x: bounds.minX, y: bounds.minY,
+                              width: bounds.width, height: Self.panelHeight)
+        // Lay the content out at its final size now, off-screen, so any pending
+        // render work happens before the slide rather than stuttering it.
+        hostingView?.frame = NSRect(origin: .zero, size: onScreen.size)
+        hostingView?.layoutSubtreeIfNeeded()
+        window.setFrame(onScreen.offsetBy(dx: 0, dy: -Self.panelHeight), display: false)
+        // Make the panel key WITHOUT activating AnyDoor: ClipboardWallPanel
+        // overrides canBecomeKey, and the .nonactivatingPanel style keeps the
+        // previously active app active, so it doesn't visibly lose focus while
+        // the wall is up (Paste-style). Keyboard nav and search still work.
+        window.makeKeyAndOrderFront(nil)
+        isAnimating = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Self.animationDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .linear)
+            window.animator().setFrame(onScreen, display: true)
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated { self?.isAnimating = false }
+        })
+
+        // Enforce retention off the critical path; the @Query view reflects any
+        // resulting deletions automatically.
+        Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false) }
+    }
+
+    /// Slide the panel down off-screen, then close it. When `restoreFocus` is
+    /// true the previously frontmost app is reactivated first (Esc / paste);
+    /// for a click elsewhere it is false, since that click already moved focus.
+    /// `completion` runs after the window has ordered out, so paste can post ⌘V
+    /// once focus has returned. No-op if already hidden or mid-animation.
+    private func dismiss(restoreFocus: Bool, completion: (@Sendable () -> Void)? = nil) {
+        guard !isAnimating, let window, window.isVisible, let screen = NSScreen.main else {
+            completion?()
+            return
+        }
+        if restoreFocus { previousApp?.activate() }
+        let bounds = screen.frame
+        let height = window.frame.height
+        let offScreen = NSRect(x: bounds.minX, y: bounds.minY - height,
+                               width: window.frame.width, height: height)
+        isAnimating = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Self.animationDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .linear)
+            window.animator().setFrame(offScreen, display: true)
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                self?.isAnimating = false
+                self?.close()
+                completion?()
+            }
+        })
+    }
+
+    /// The wall content, with the shared SwiftData container injected so its
+    /// @Query observes the same context the watcher writes to. Wrapped in AnyView
+    /// because `.modelContainer` changes the concrete view type.
+    private func makeWallView() -> AnyView {
+        let view = ClipboardWallView(
+            state: state,
+            historyDirectory: historyDirectory,
+            onSelect: { [weak self] item, plain in self?.paste(item, plain: plain) },
+            onToggleFavorite: { item in
+                Task { await ClipboardHistoryStore.shared.toggleFavorite(item) }
+            },
+            registerSearchField: { [weak self] field in self?.searchField = field }
+        )
+        if let modelContainer {
+            return AnyView(view.modelContainer(modelContainer))
+        }
+        return AnyView(view)
+    }
+
+    /// Build and install a fresh SwiftUI host. The view is @Query-backed, so a
+    /// fresh host re-subscribes and re-renders on store changes on every open.
+    private func installHostingView() {
+        let host = NSHostingView(rootView: makeWallView())
+        host.frame = window?.contentLayoutRect ?? .zero
+        host.autoresizingMask = [.width, .height]
+        window?.contentView = host
+        hostingView = host
+    }
+
+    private func installMonitors() {
+        removeMonitors()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let consumed = MainActor.assumeIsolated { self?.handle(event) ?? false }
+            return consumed ? nil : event
+        }
+        // Translate the scroll wheel / trackpad swipe into card navigation; the
+        // horizontal ScrollView otherwise ignores a plain vertical mouse wheel.
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            let consumed = MainActor.assumeIsolated { self?.handleScroll(event) ?? false }
+            return consumed ? nil : event
+        }
+        // A global mouse-down fires only for clicks NOT delivered to our app —
+        // i.e. anywhere outside the wall — so any such click dismisses it.
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+                self.dismiss(restoreFocus: false)
+            }
+        }
+    }
+
+    private func removeMonitors() {
+        for monitor in [keyMonitor, scrollMonitor, globalMouseMonitor] {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
+        keyMonitor = nil
+        scrollMonitor = nil
+        globalMouseMonitor = nil
+        scrollAccum = 0
+    }
+
+    /// Step the selection as scroll delta accumulates past `scrollStep`. Uses
+    /// whichever axis dominates so both a vertical mouse wheel and a horizontal
+    /// trackpad swipe flip through the cards. Negative delta advances right.
+    private func handleScroll(_ event: NSEvent) -> Bool {
+        guard let window, window.isVisible else { return false }
+        // Ignore trackpad inertia so flicking doesn't keep advancing after the
+        // fingers lift; only act on the user's active scroll.
+        guard event.momentumPhase == [] else { return true }
+        let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+            ? event.scrollingDeltaX : event.scrollingDeltaY
+        scrollAccum += delta
+        while scrollAccum <= -Self.scrollStep { state.moveRight(); scrollAccum += Self.scrollStep }
+        while scrollAccum >= Self.scrollStep { state.moveLeft(); scrollAccum -= Self.scrollStep }
+        return true
+    }
+
+    /// Route a key press by mode. In input mode the search field owns most keys
+    /// (text editing + IME), so we only intercept Esc and Enter and let the rest
+    /// fall through to the field; the field's own delegate hands focus back to
+    /// card navigation when → is pressed at the end of a non-empty query. In card
+    /// navigation mode arrows move the selection, Enter pastes, and typing a
+    /// printable character focuses the field (type-to-search). Returns whether
+    /// the event was consumed (a returned event keeps flowing to the field).
+    private func handle(_ event: NSEvent) -> Bool {
+        guard let window, window.isVisible else { return false }
+        let inputMode = state.isSearchFocused
+        switch event.keyCode {
+        case 53:                                         // esc — staged exit
+            if state.query.isEmpty {
+                // Nothing to step back through: close outright, in either mode.
+                dismiss(restoreFocus: true)
+            } else if inputMode {
+                // A non-empty query clears first, leaving the field focused.
+                state.query = ""; searchField?.stringValue = ""
+            } else {
+                // Card navigation over a search → return focus to edit/clear it.
+                state.isSearchFocused = true
+            }
+            return true
+        case 36, 76:                                     // ↵ / numpad enter
+            if let item = state.selectedItem {
+                paste(item, plain: event.modifierFlags.contains(.option))
+            }
+            return true
+        case 123:                                        // ←
+            if inputMode { return false }                // move the text caret
+            state.moveLeft(); return true
+        case 124:                                        // →
+            if inputMode { return false }                // field delegate may exit
+            state.moveRight(); return true
+        case 49:                                         // space
+            if inputMode { return false }                // insert a space
+            toggleQuickLook(); return true
+        case 51:                                         // ⌫
+            if inputMode { return false }                // delete a character
+            if let item = state.selectedItem {
+                Task { await ClipboardHistoryStore.shared.delete(item) }
+            }
+            return true
+        default:
+            if inputMode { return false }                // field inserts / composes
+            return focusSearchOnType(event)
+        }
+    }
+
+    /// Type-to-search from card navigation: a printable keystroke focuses the
+    /// search field and is then delivered to it (the event is returned, not
+    /// consumed, so the same press lands in the now-first-responder field —
+    /// keeping IME composition intact). Modifier combos and control keys are
+    /// ignored. The caret is parked at the end so an existing query is appended
+    /// to rather than replaced.
+    private func focusSearchOnType(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .function])
+        guard modifiers.isEmpty,
+              let characters = event.characters, !characters.isEmpty,
+              characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
+              let field = searchField
+        else { return false }
+        window?.makeFirstResponder(field)
+        let end = (field.stringValue as NSString).length
+        field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
+        state.isSearchFocused = true
+        return false
+    }
+
+    private func paste(_ item: ClipboardHistoryItem, plain: Bool) {
+        if !ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) {
+            ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
+            return
+        }
+        let pb = NSPasteboard.general
+        ClipboardPasteService.writePayload(for: item, asPlainText: plain, to: pb, historyDirectory: historyDirectory)
+        watcher?.noteSelfWrite(changeCount: pb.changeCount)
+        // Slide out first; reactivating the prior app returns focus there, so
+        // the synthesized ⌘V lands in it rather than on our panel.
+        dismiss(restoreFocus: true) { [copyOnly = ClipboardPreferences.copyOnly] in
+            guard !copyOnly else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                ClipboardPasteService.synthesizePaste()
+            }
+        }
+    }
+
+    // MARK: - Quick Look (space)
+    private func toggleQuickLook() {
+        guard let panel = QLPreviewPanel.shared() else { return }
+        if QLPreviewPanel.sharedPreviewPanelExists() && panel.isVisible {
+            panel.orderOut(nil)
+            return
+        }
+        previewURL = quickLookURL(for: state.selectedItem)
+        guard previewURL != nil else { return }
+        panel.dataSource = self
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func quickLookURL(for item: ClipboardHistoryItem?) -> URL? {
+        guard let item, let kind = item.historyKind else { return nil }
+        switch kind {
+        case .image, .screenshot:
+            guard let f = item.fileName else { return nil }
+            return historyDirectory.appendingPathComponent(f)
+        case .file:
+            if let stored = item.files.first?.storedName { return historyDirectory.appendingPathComponent(stored) }
+            if let path = item.files.first?.originalPath { return URL(fileURLWithPath: path) }
+            return nil
+        default:
+            return nil   // text/color preview is already visible on the card
+        }
+    }
+
+    // QLPreviewPanelDataSource is not main-actor annotated, but Quick Look only
+    // invokes these on the main thread. Mark them nonisolated and hop back onto
+    // the main actor to read the main-actor-isolated previewURL.
+    nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
+        MainActor.assumeIsolated { previewURL == nil ? 0 : 1 }
+    }
+    nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
+        MainActor.assumeIsolated { previewURL as NSURL? }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        removeMonitors()
+    }
+    func windowDidResignKey(_ notification: Notification) {
+        // Don't close while Quick Look is the key window.
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+        // Ignore the resign that the slide-out animation itself triggers.
+        guard !isAnimating else { return }
+        // A click elsewhere already moved focus; don't yank it back.
+        dismiss(restoreFocus: false)
+    }
+}
+
+/// A borderless panel that can still become key. NSWindow refuses key status
+/// for borderless windows by default, which would leave the wall unable to
+/// receive keyboard events; overriding `canBecomeKey` lets it become key via
+/// the .nonactivatingPanel style without activating AnyDoor — so the prior app
+/// stays active and does not visibly lose focus.
+final class ClipboardWallPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}

@@ -14,6 +14,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case screenshot
     case ocr
     case pickColor
+    case clipboardWall
     case displaySleep
     case systemSleep
     case hideDock
@@ -48,7 +49,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
-             .restartFinder, .restartDock, .restartMenuBar, .flushDNS,
+             .restartFinder, .restartDock, .restartMenuBar, .flushDNS, .clipboardWall,
              .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter: return .action
         case .brightness: return .brightnessControl
         case .brightnessUp, .brightnessDown: return .hiddenHotkey
@@ -68,6 +69,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .screenshot:        return .builtinScreenshot
         case .ocr:               return .builtinOCR
         case .pickColor:         return .builtinPickColor
+        case .clipboardWall:     return .builtinClipboardWall
         case .displaySleep:      return .builtinDisplaySleep
         case .systemSleep:       return .builtinSystemSleep
         case .hideDock:          return .builtinHideDock
@@ -103,6 +105,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .screenshot: return "camera.viewfinder"
         case .ocr: return "text.viewfinder"
         case .pickColor: return "eyedropper"
+        case .clipboardWall: return "doc.on.clipboard"
         case .displaySleep: return "moon.zzz.fill"
         case .systemSleep: return "powersleep"
         case .hideDock: return "dock.rectangle"
@@ -139,6 +142,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .screenshot: return 900
         case .ocr: return 950
         case .pickColor: return 975
+        case .clipboardWall: return 250
         case .displaySleep: return 1000
         case .systemSleep: return 1100
         case .hideDock: return 1200
