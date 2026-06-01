@@ -15,6 +15,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     private let state = ClipboardWallState()
     private var keyMonitor: Any?
+    private var scrollMonitor: Any?
+    private var globalMouseMonitor: Any?
+    /// Accumulated scroll delta; selection advances each time it crosses a step.
+    private var scrollAccum: CGFloat = 0
+    private static let scrollStep: CGFloat = 8
     private var previewURL: URL?
 
     /// The app that was frontmost when the wall opened. The wall activates
@@ -72,7 +77,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
 
-        installKeyMonitor()
+        installMonitors()
 
         guard let window, let screen = NSScreen.main else { return }
         // Remember who had focus so paste/Esc can hand it back.
@@ -137,16 +142,52 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
-    private func installKeyMonitor() {
-        removeKeyMonitor()
+    private func installMonitors() {
+        removeMonitors()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let consumed = MainActor.assumeIsolated { self?.handle(event) ?? false }
             return consumed ? nil : event
         }
+        // Translate the scroll wheel / trackpad swipe into card navigation; the
+        // horizontal ScrollView otherwise ignores a plain vertical mouse wheel.
+        scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            let consumed = MainActor.assumeIsolated { self?.handleScroll(event) ?? false }
+            return consumed ? nil : event
+        }
+        // A global mouse-down fires only for clicks NOT delivered to our app —
+        // i.e. anywhere outside the wall — so any such click dismisses it.
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+                self.dismiss(restoreFocus: false)
+            }
+        }
     }
 
-    private func removeKeyMonitor() {
-        if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
+    private func removeMonitors() {
+        for monitor in [keyMonitor, scrollMonitor, globalMouseMonitor] {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+        }
+        keyMonitor = nil
+        scrollMonitor = nil
+        globalMouseMonitor = nil
+        scrollAccum = 0
+    }
+
+    /// Step the selection as scroll delta accumulates past `scrollStep`. Uses
+    /// whichever axis dominates so both a vertical mouse wheel and a horizontal
+    /// trackpad swipe flip through the cards. Negative delta advances right.
+    private func handleScroll(_ event: NSEvent) -> Bool {
+        guard let window, window.isVisible else { return false }
+        let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
+            ? event.scrollingDeltaX : event.scrollingDeltaY
+        scrollAccum += delta
+        while scrollAccum <= -Self.scrollStep { state.moveRight(); scrollAccum += Self.scrollStep }
+        while scrollAccum >= Self.scrollStep { state.moveLeft(); scrollAccum -= Self.scrollStep }
+        return true
     }
 
     private func handle(_ event: NSEvent) -> Bool {
@@ -230,7 +271,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         MainActor.assumeIsolated { previewURL as NSURL? }
     }
 
-    func windowWillClose(_ notification: Notification) { removeKeyMonitor() }
+    func windowWillClose(_ notification: Notification) { removeMonitors() }
     func windowDidResignKey(_ notification: Notification) {
         // Don't close while Quick Look is the key window.
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
