@@ -19,7 +19,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private var globalMouseMonitor: Any?
     /// Accumulated scroll delta; selection advances each time it crosses a step.
     private var scrollAccum: CGFloat = 0
-    private static let scrollStep: CGFloat = 8
+    private static let scrollStep: CGFloat = 40
     private var previewURL: URL?
 
     /// The app that was frontmost when the wall opened. The wall activates
@@ -182,6 +182,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// trackpad swipe flip through the cards. Negative delta advances right.
     private func handleScroll(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        // Ignore trackpad inertia so flicking doesn't keep advancing after the
+        // fingers lift; only act on the user's active scroll.
+        guard event.momentumPhase == [] else { return true }
         let delta = abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY)
             ? event.scrollingDeltaX : event.scrollingDeltaY
         scrollAccum += delta
