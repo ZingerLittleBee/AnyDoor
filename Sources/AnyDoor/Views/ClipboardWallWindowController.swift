@@ -15,8 +15,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     private let state = ClipboardWallState()
     private var keyMonitor: Any?
-    private var globalMouseMonitor: Any?
     private var previewURL: URL?
+
+    /// The app that was frontmost when the wall opened. The wall activates
+    /// AnyDoor so its panel can become key (a background .accessory app's panel
+    /// won't otherwise receive keyboard events); focus is returned here on
+    /// paste/Esc so the net effect is no focus theft.
+    private weak var previousApp: NSRunningApplication?
 
     /// Guards against re-entrant show/dismiss while the slide animation runs.
     private var isAnimating = false
@@ -48,7 +53,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     func toggle() {
         guard !isAnimating else { return }
-        if window?.isVisible == true { dismiss() } else { show() }
+        if window?.isVisible == true { dismiss(restoreFocus: true) } else { show() }
     }
 
     private func show() {
@@ -70,16 +75,20 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         installKeyMonitor()
 
         guard let window, let screen = NSScreen.main else { return }
+        // Remember who had focus so paste/Esc can hand it back.
+        if let front = NSWorkspace.shared.frontmostApplication,
+           front.processIdentifier != NSRunningApplication.current.processIdentifier {
+            previousApp = front
+        }
         // Anchor to the screen's physical bottom edge (not visibleFrame, which
         // sits above the Dock) so the panel is flush with no gap underneath.
         let bounds = screen.frame
         let onScreen = NSRect(x: bounds.minX, y: bounds.minY,
                               width: bounds.width, height: Self.panelHeight)
-        // A .nonactivatingPanel becomes key WITHOUT activating AnyDoor, so the
-        // previously focused app keeps focus — paste returns there, and clicking
-        // it makes us resign key (windowDidResignKey dismisses). Deliberately do
-        // NOT call NSApp.activate here, which would steal focus from that app.
         window.setFrame(onScreen.offsetBy(dx: 0, dy: -Self.panelHeight), display: false)
+        // Activate so the panel can become key and receive keyboard events; the
+        // prior app is reactivated on dismiss, so focus is returned, not stolen.
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         isAnimating = true
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -91,14 +100,17 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         })
     }
 
-    /// Slide the panel down off-screen, then close it. `completion` runs after
-    /// the window has ordered out (so paste can post ⌘V once focus has returned
-    /// to the prior app). No-op if already hidden or mid-animation.
-    private func dismiss(completion: (@Sendable () -> Void)? = nil) {
+    /// Slide the panel down off-screen, then close it. When `restoreFocus` is
+    /// true the previously frontmost app is reactivated first (Esc / paste);
+    /// for a click elsewhere it is false, since that click already moved focus.
+    /// `completion` runs after the window has ordered out, so paste can post ⌘V
+    /// once focus has returned. No-op if already hidden or mid-animation.
+    private func dismiss(restoreFocus: Bool, completion: (@Sendable () -> Void)? = nil) {
         guard !isAnimating, let window, window.isVisible, let screen = NSScreen.main else {
             completion?()
             return
         }
+        if restoreFocus { previousApp?.activate() }
         let bounds = screen.frame
         let height = window.frame.height
         let offScreen = NSRect(x: bounds.minX, y: bounds.minY - height,
@@ -131,22 +143,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             let consumed = MainActor.assumeIsolated { self?.handle(event) ?? false }
             return consumed ? nil : event
         }
-        // A global mouse-down fires only for clicks NOT delivered to our app —
-        // i.e. anywhere outside the wall — so any such click dismisses it. This
-        // is more reliable than windowDidResignKey for a non-activating panel.
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
-                self.dismiss()
-            }
-        }
     }
 
     private func removeKeyMonitor() {
-        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor); self.globalMouseMonitor = nil }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
     }
 
@@ -170,7 +169,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 Task { await ClipboardHistoryStore.shared.delete(item); self.reloadItems() }
             }
             return true
-        case 53: dismiss(); return true                  // esc
+        case 53: dismiss(restoreFocus: true); return true // esc
         default: return false
         }
     }
@@ -183,9 +182,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         let pb = NSPasteboard.general
         ClipboardPasteService.writePayload(for: item, asPlainText: plain, to: pb, historyDirectory: historyDirectory)
         watcher?.noteSelfWrite(changeCount: pb.changeCount)
-        // Slide out first; once the panel has ordered out, key returns to the
-        // prior app, so the synthesized ⌘V lands there rather than on our panel.
-        dismiss { [copyOnly = ClipboardPreferences.copyOnly] in
+        // Slide out first; reactivating the prior app returns focus there, so
+        // the synthesized ⌘V lands in it rather than on our panel.
+        dismiss(restoreFocus: true) { [copyOnly = ClipboardPreferences.copyOnly] in
             guard !copyOnly else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 ClipboardPasteService.synthesizePaste()
@@ -237,6 +236,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
         // Ignore the resign that the slide-out animation itself triggers.
         guard !isAnimating else { return }
-        dismiss()
+        // A click elsewhere already moved focus; don't yank it back.
+        dismiss(restoreFocus: false)
     }
 }
