@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-06-02
+
 ### Added
 
 - Window layout: the Window Layout submenu gains 13 new actions — top and
