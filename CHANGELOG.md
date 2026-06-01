@@ -15,7 +15,17 @@ versioning.
   the `ClipboardWallWindowController`, presents the history as a horizontally
   scrolling card wall with category tabs for all / text / image / file plus the
   existing screenshot, color, OCR, and QR-code histories, and live search over
-  the timeline. Selecting a card pastes into
+  the timeline. Search matching lives in a pure, unit-tested `ClipboardSearch`:
+  it tokenizes the query on whitespace and requires every token to appear (AND
+  semantics) against the entry's content only — title, full text, color hex,
+  and file names, never the metadata subtitle — and folds case, diacritics, and
+  width so "cafe" finds "café" and "1234" finds "１２３４". The search field is a
+  real focusable `NSTextField` (`WallSearchField`) so an input method editor can
+  compose CJK queries, with two keyboard modes: card navigation (arrows select,
+  Enter pastes, Space previews, typing focuses the field) and input (the field
+  owns text editing and IME; → at the end of a non-empty query hands focus back
+  to card navigation). Esc stages the exit — a non-empty query clears, an empty
+  query closes the wall. Selecting a card pastes into
   the frontmost app — rich paste by default, plain-text paste with ⌥↵ — driven
   by `ClipboardPasteService` (`writePayload`/`synthesizePaste`); items can be
   favorited, deleted, or previewed inline with Quick Look (space). Retention is
