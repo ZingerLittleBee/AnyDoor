@@ -15,7 +15,7 @@ struct ClipboardCardView: View {
             preview.frame(maxWidth: .infinity, maxHeight: .infinity)
             footer
         }
-        .frame(width: 150, height: 150)
+        .frame(width: 190, height: 190)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)

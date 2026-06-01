@@ -15,11 +15,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     private let state = ClipboardWallState()
     private var keyMonitor: Any?
+    private var globalMouseMonitor: Any?
     private var previewURL: URL?
 
     /// Guards against re-entrant show/dismiss while the slide animation runs.
     private var isAnimating = false
-    private static let panelHeight: CGFloat = 220
+    private static let panelHeight: CGFloat = 300
     private static let animationDuration: TimeInterval = 0.22
 
     private var historyDirectory: URL { ClipboardHistoryStore.defaultHistoryDirectory() }
@@ -128,9 +129,22 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             let consumed = MainActor.assumeIsolated { self?.handle(event) ?? false }
             return consumed ? nil : event
         }
+        // A global mouse-down fires only for clicks NOT delivered to our app —
+        // i.e. anywhere outside the wall — so any such click dismisses it. This
+        // is more reliable than windowDidResignKey for a non-activating panel.
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+                self.dismiss()
+            }
+        }
     }
 
     private func removeKeyMonitor() {
+        if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor); self.globalMouseMonitor = nil }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor); self.keyMonitor = nil }
     }
 

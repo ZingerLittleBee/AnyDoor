@@ -69,7 +69,10 @@ struct ClipboardWallView: View {
                             onToggleFavorite: { onToggleFavorite(item) }
                         )
                         .id(index)
-                        .onTapGesture { state.select(index); onSelect(item, false) }
+                        // Double-click pastes into the active app; a single
+                        // click only moves selection (declare count:2 first).
+                        .onTapGesture(count: 2) { state.select(index); onSelect(item, false) }
+                        .onTapGesture(count: 1) { state.select(index) }
                     }
                 }
                 .padding(.vertical, 2)
