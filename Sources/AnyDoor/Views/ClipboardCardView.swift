@@ -17,6 +17,7 @@ struct ClipboardCardView: View {
         }
         .frame(width: 190, height: 190)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
                 .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
@@ -72,14 +73,25 @@ struct ClipboardCardView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .padding(8)
         case .color:
-            Rectangle().fill(Color(hex: item.colorHex) ?? .black)
+            (Color(hex: item.colorHex) ?? .black)
                 .overlay(alignment: .bottomLeading) {
-                    Text(item.colorHex ?? "").font(.caption2).foregroundStyle(.white).padding(8)
+                    Text((item.colorHex ?? "").uppercased())
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(.black.opacity(0.35), in: Capsule())
+                        .padding(8)
                 }
         case .image, .screenshot:
             if let fileName = item.fileName,
                let img = NSImage(contentsOf: historyDirectory.appendingPathComponent(fileName)) {
-                Image(nsImage: img).resizable().scaledToFill().clipped()
+                // Color.clear takes the offered preview frame; the image fills it
+                // as an overlay and is clipped to those bounds, so a large image
+                // can't overflow and cover the header/footer.
+                Color.clear.overlay {
+                    Image(nsImage: img).resizable().scaledToFill()
+                }
+                .clipped()
             } else {
                 Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
             }
