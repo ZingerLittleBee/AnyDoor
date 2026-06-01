@@ -25,20 +25,7 @@ struct ClipboardWallView: View {
 
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
-        var rows = allItems
-        if let category = state.category {
-            let raw = category.rawValue
-            rows = rows.filter { $0.kind == raw }
-        }
-        let needle = state.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if !needle.isEmpty {
-            rows = rows.filter { item in
-                item.previewTitle.lowercased().contains(needle)
-                    || (item.previewSubtitle?.lowercased().contains(needle) ?? false)
-                    || (item.text?.lowercased().contains(needle) ?? false)
-            }
-        }
-        return rows
+        ClipboardSearch.filter(allItems, category: state.category, query: state.query)
     }
 
     var body: some View {
@@ -109,6 +96,7 @@ struct ClipboardWallView: View {
                             item: item,
                             isSelected: index == state.selectedIndex,
                             historyDirectory: historyDirectory,
+                            matchSnippet: ClipboardSearch.matchSnippet(for: item, query: state.query),
                             onToggleFavorite: { onToggleFavorite(item) }
                         )
                         .id(index)

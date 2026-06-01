@@ -277,9 +277,9 @@ final class ClipboardHistoryStore {
     }
 
     /// Unified, time-sorted view across all kinds for the card wall. `category`
-    /// nil means "all"; `query` is a case-insensitive substring over preview title,
-    /// subtitle, and stored text. Reads directly from SwiftData (not the per-kind
-    /// cache) so it always reflects every kind in one pass.
+    /// nil means "all"; `query` is matched by `ClipboardSearch` over the entry's
+    /// content. Reads directly from SwiftData (not the per-kind cache) so it
+    /// always reflects every kind in one pass.
     func timeline(category: ClipboardHistoryKind?, query: String) -> [ClipboardHistoryItem] {
         guard let container = modelContainer else { return [] }
         let cutoff = now().addingTimeInterval(-maxAge)
@@ -287,22 +287,8 @@ final class ClipboardHistoryStore {
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         descriptor.predicate = #Predicate { $0.createdAt >= cutoff }
-        var rows = (try? container.mainContext.fetch(descriptor)) ?? []
-
-        if let category {
-            let raw = category.rawValue
-            rows = rows.filter { $0.kind == raw }
-        }
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            let needle = trimmed.lowercased()
-            rows = rows.filter { item in
-                item.previewTitle.lowercased().contains(needle)
-                    || (item.previewSubtitle?.lowercased().contains(needle) ?? false)
-                    || (item.text?.lowercased().contains(needle) ?? false)
-            }
-        }
-        return rows
+        let rows = (try? container.mainContext.fetch(descriptor)) ?? []
+        return ClipboardSearch.filter(rows, category: category, query: query)
     }
 
     /// Flip a single item's favorite flag. Favorites are exempt from pruning.

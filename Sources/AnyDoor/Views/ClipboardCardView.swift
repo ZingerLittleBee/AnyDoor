@@ -7,6 +7,9 @@ struct ClipboardCardView: View {
     let item: ClipboardHistoryItem
     let isSelected: Bool
     let historyDirectory: URL
+    /// The text line that matched the active search, when the match falls below
+    /// the visible first line. Shown so a search hit is visible on the card.
+    var matchSnippet: String? = nil
     let onToggleFavorite: () -> Void
 
     var body: some View {
@@ -71,10 +74,21 @@ struct ClipboardCardView: View {
     private var preview: some View {
         switch item.historyKind {
         case .text, .ocr, .qrcode:
-            Text(item.text ?? item.previewTitle)
-                .font(.system(size: 11)).lineLimit(6)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(8)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.text ?? item.previewTitle)
+                    .font(.system(size: 11)).lineLimit(matchSnippet == nil ? 6 : 3)
+                // Surface the matched line so a search hit buried below the first
+                // line is visible rather than leaving the card looking unrelated.
+                if let matchSnippet {
+                    Text(matchSnippet)
+                        .font(.system(size: 10)).lineLimit(2)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5).padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(8)
         case .color:
             (Color(hex: item.colorHex) ?? .black)
                 .overlay(alignment: .bottomLeading) {
