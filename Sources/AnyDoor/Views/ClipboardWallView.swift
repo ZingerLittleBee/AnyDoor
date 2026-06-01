@@ -8,6 +8,7 @@ struct ClipboardWallView: View {
     let historyDirectory: URL
     let onSelect: (ClipboardHistoryItem, _ plain: Bool) -> Void
     let onToggleFavorite: (ClipboardHistoryItem) -> Void
+    let onFilterChange: () -> Void
 
     var body: some View {
         VStack(spacing: 10) {
@@ -24,6 +25,9 @@ struct ClipboardWallView: View {
         .padding(14)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
+        // Re-query the store whenever the active tab or search text changes.
+        .onChange(of: state.category) { _, _ in onFilterChange() }
+        .onChange(of: state.query) { _, _ in onFilterChange() }
     }
 
     private var tabs: some View {

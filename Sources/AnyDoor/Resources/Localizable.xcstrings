@@ -498,6 +498,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制失败" } }
       }
     },
+    "clipboard.toast.fileMissing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Original file is no longer available" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原文件已不存在，无法粘贴" } }
+      }
+    },
     "port.action.clearError" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -81,6 +81,7 @@ enum L10n {
         case clipboardPreviewMissingFile = "clipboard.preview.missingFile"
         case clipboardPreviewTitle = "clipboard.preview.title"
         case clipboardToastCopyFailed = "clipboard.toast.copyFailed"
+        case clipboardToastFileMissing = "clipboard.toast.fileMissing"
         case portActionClearError = "port.action.clearError"
         case portActionKillPID = "port.action.killPID"
         case portBindCount = "port.bindCount"
