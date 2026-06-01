@@ -79,7 +79,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // category tab or search term.
         state.category = nil
         state.query = ""
-        state.isSearchFocused = false
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
@@ -232,27 +231,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
-
-        // Esc always closes, whether or not search is focused.
-        if event.keyCode == 53 { dismiss(restoreFocus: true); return true }
-
-        // When the search field is focused, arrows still navigate cards and
-        // Enter still pastes, but everything else (typing, backspace, space) is
-        // left for the text field to handle.
-        if state.isSearchFocused {
-            switch event.keyCode {
-            case 123: state.moveLeft(); return true
-            case 124: state.moveRight(); return true
-            case 36, 76:
-                if let item = state.selectedItem {
-                    paste(item, plain: event.modifierFlags.contains(.option))
-                }
-                return true
-            default: return false
-            }
-        }
-
+        let searching = !state.query.isEmpty
         switch event.keyCode {
+        case 53:                                         // esc
+            // First clear an active search; close once the query is empty.
+            if searching { state.query = ""; return true }
+            dismiss(restoreFocus: true)
+            return true
         case 123: state.moveLeft(); return true          // ←
         case 124: state.moveRight(); return true         // →
         case 36, 76:                                     // ↵ / numpad enter
@@ -260,30 +245,34 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 paste(item, plain: event.modifierFlags.contains(.option))
             }
             return true
-        case 49:                                         // space → Quick Look
-            toggleQuickLook(); return true
-        case 51:                                         // ⌫ → delete selected
-            if let item = state.selectedItem {
+        case 49:                                         // space
+            // A space extends an active query; otherwise it triggers Quick Look.
+            if searching { state.query.append(" "); return true }
+            toggleQuickLook()
+            return true
+        case 51:                                         // ⌫
+            // Backspace edits an active query; otherwise deletes the selection.
+            if searching {
+                state.query.removeLast()
+            } else if let item = state.selectedItem {
                 Task { await ClipboardHistoryStore.shared.delete(item) }
             }
             return true
         default:
-            // Typing a printable character while browsing starts a search.
-            return startSearchIfTyping(event)
+            // Typing a printable character filters the timeline (type to search).
+            return appendTypedCharacter(event)
         }
     }
 
-    /// When the user types a printable character while browsing (search not
-    /// focused), seed the query with it and focus the search field so further
-    /// typing edits the query directly. Returns whether the event was consumed.
-    private func startSearchIfTyping(_ event: NSEvent) -> Bool {
+    /// Append a printable keystroke to the search query. Ignores modifier combos
+    /// (⌘C etc.) and control/function keys. Returns whether it was consumed.
+    private func appendTypedCharacter(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .function])
         guard modifiers.isEmpty,
               let characters = event.characters, !characters.isEmpty,
               characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
         else { return false }
         state.query.append(characters)
-        state.requestSearchFocus()
         return true
     }
 
