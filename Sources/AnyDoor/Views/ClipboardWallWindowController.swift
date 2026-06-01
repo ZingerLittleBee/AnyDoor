@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 import QuickLookUI
 import SwiftUI
 
@@ -15,6 +16,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private let state = ClipboardWallState()
     private var keyMonitor: Any?
     private var previewURL: URL?
+
+    /// Guards against re-entrant show/dismiss while the slide animation runs.
+    private var isAnimating = false
+    private static let panelHeight: CGFloat = 220
+    private static let animationDuration: TimeInterval = 0.22
 
     private var historyDirectory: URL { ClipboardHistoryStore.defaultHistoryDirectory() }
 
@@ -40,7 +46,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func toggle() {
-        if window?.isVisible == true { close() } else { show() }
+        guard !isAnimating else { return }
+        if window?.isVisible == true { dismiss() } else { show() }
     }
 
     private func show() {
@@ -60,9 +67,51 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         window?.contentView = host
 
         installKeyMonitor()
-        positionAtBottom()
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+
+        guard let window, let screen = NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        let onScreen = NSRect(x: visible.minX, y: visible.minY,
+                              width: visible.width, height: Self.panelHeight)
+        // A .nonactivatingPanel becomes key WITHOUT activating AnyDoor, so the
+        // previously focused app keeps focus — paste returns there, and clicking
+        // it makes us resign key (windowDidResignKey dismisses). Deliberately do
+        // NOT call NSApp.activate here, which would steal focus from that app.
+        window.setFrame(onScreen.offsetBy(dx: 0, dy: -Self.panelHeight), display: false)
+        window.makeKeyAndOrderFront(nil)
+        isAnimating = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Self.animationDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .linear)
+            window.animator().setFrame(onScreen, display: true)
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated { self?.isAnimating = false }
+        })
+    }
+
+    /// Slide the panel down off-screen, then close it. `completion` runs after
+    /// the window has ordered out (so paste can post ⌘V once focus has returned
+    /// to the prior app). No-op if already hidden or mid-animation.
+    private func dismiss(completion: (@Sendable () -> Void)? = nil) {
+        guard !isAnimating, let window, window.isVisible, let screen = NSScreen.main else {
+            completion?()
+            return
+        }
+        let visible = screen.visibleFrame
+        let height = window.frame.height
+        let offScreen = NSRect(x: visible.minX, y: visible.minY - height,
+                               width: window.frame.width, height: height)
+        isAnimating = true
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Self.animationDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .linear)
+            window.animator().setFrame(offScreen, display: true)
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                self?.isAnimating = false
+                self?.close()
+                completion?()
+            }
+        })
     }
 
     /// Re-query the store using current category/search and push into state.
@@ -71,13 +120,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false)
             state.setItems(ClipboardHistoryStore.shared.timeline(category: state.category, query: state.query))
         }
-    }
-
-    private func positionAtBottom() {
-        guard let window, let screen = NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        let height: CGFloat = 220
-        window.setFrame(NSRect(x: visible.minX, y: visible.minY, width: visible.width, height: height), display: true)
     }
 
     private func installKeyMonitor() {
@@ -112,7 +154,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 Task { await ClipboardHistoryStore.shared.delete(item); self.reloadItems() }
             }
             return true
-        case 53: close(); return true                    // esc
+        case 53: dismiss(); return true                  // esc
         default: return false
         }
     }
@@ -122,12 +164,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
             return
         }
-        close()
         let pb = NSPasteboard.general
         ClipboardPasteService.writePayload(for: item, asPlainText: plain, to: pb, historyDirectory: historyDirectory)
         watcher?.noteSelfWrite(changeCount: pb.changeCount)
-        if !ClipboardPreferences.copyOnly {
-            // Defer so focus returns to the prior app before ⌘V is posted.
+        // Slide out first; once the panel has ordered out, key returns to the
+        // prior app, so the synthesized ⌘V lands there rather than on our panel.
+        dismiss { [copyOnly = ClipboardPreferences.copyOnly] in
+            guard !copyOnly else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                 ClipboardPasteService.synthesizePaste()
             }
@@ -176,6 +219,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     func windowDidResignKey(_ notification: Notification) {
         // Don't close while Quick Look is the key window.
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
-        close()
+        // Ignore the resign that the slide-out animation itself triggers.
+        guard !isAnimating else { return }
+        dismiss()
     }
 }

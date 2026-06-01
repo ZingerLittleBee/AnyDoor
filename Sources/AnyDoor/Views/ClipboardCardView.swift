@@ -26,14 +26,17 @@ struct ClipboardCardView: View {
 
     private var header: some View {
         HStack(spacing: 6) {
-            sourceIcon.frame(width: 16, height: 16)
-            kindLabel
-                .font(.caption2).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                kindLabel
+                    .font(.caption2).foregroundStyle(.secondary)
+                Text(item.createdAt, style: .relative)
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
             Spacer()
-            Text(item.createdAt, style: .relative)
-                .font(.caption2).foregroundStyle(.tertiary)
+            // Prominent source-app logo (Paste-style), top-right of the card.
+            sourceIcon.frame(width: 22, height: 22)
         }
-        .padding(.horizontal, 8).padding(.vertical, 6)
+        .padding(.horizontal, 8).padding(.top, 6).padding(.bottom, 4)
     }
 
     /// Localized kind label that reacts to live language switches. Renders empty
@@ -47,13 +50,16 @@ struct ClipboardCardView: View {
         }
     }
 
+    /// The source app's icon, resolved from the captured bundle identifier. Hidden
+    /// for entries with no recorded source (e.g. legacy OCR/screenshot items) so
+    /// the header stays clean rather than showing a generic placeholder.
     @ViewBuilder
     private var sourceIcon: some View {
         if let bundleID = item.sourceBundleID,
            let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable()
-        } else {
-            Image(systemName: "doc.on.clipboard").resizable().scaledToFit().foregroundStyle(.secondary)
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                .resizable().scaledToFit()
+                .help(item.sourceAppName ?? "")
         }
     }
 
