@@ -14,6 +14,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     weak var watcher: ClipboardWatcher?
 
     private let state = ClipboardWallState()
+    /// Built once and reused across opens. Rebuilding the whole SwiftUI tree on
+    /// every show realizes all cards as the slide-in starts, which stutters the
+    /// animation; reusing it means show just moves already-rendered content.
+    private var hostingView: NSHostingView<ClipboardWallView>?
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
     private var globalMouseMonitor: Any?
@@ -66,20 +70,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // reload would land mid-animation and the heavy first render (image
         // decoding) would stutter the slide-in.
         loadTimelineNow()
-        let view = ClipboardWallView(
-            state: state,
-            historyDirectory: historyDirectory,
-            onSelect: { [weak self] item, plain in self?.paste(item, plain: plain) },
-            onToggleFavorite: { [weak self] item in
-                Task { await ClipboardHistoryStore.shared.toggleFavorite(item); self?.reloadItems() }
-            },
-            onFilterChange: { [weak self] in self?.reloadItems() }
-        )
-        let host = NSHostingView(rootView: view)
-        host.frame = window?.contentLayoutRect ?? .zero
-        host.autoresizingMask = [.width, .height]
-        window?.contentView = host
-
+        buildHostingViewIfNeeded()
         installMonitors()
 
         guard let window, let screen = NSScreen.main else { return }
@@ -93,6 +84,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         let bounds = screen.frame
         let onScreen = NSRect(x: bounds.minX, y: bounds.minY,
                               width: bounds.width, height: Self.panelHeight)
+        // Lay the content out at its final size now, off-screen, so any pending
+        // render work happens before the slide rather than stuttering it.
+        hostingView?.frame = NSRect(origin: .zero, size: onScreen.size)
+        hostingView?.layoutSubtreeIfNeeded()
         window.setFrame(onScreen.offsetBy(dx: 0, dy: -Self.panelHeight), display: false)
         // Activate so the panel can become key and receive keyboard events; the
         // prior app is reactivated on dismiss, so focus is returned, not stolen.
@@ -141,6 +136,25 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 completion?()
             }
         })
+    }
+
+    /// Build and install the SwiftUI host once; later shows reuse it.
+    private func buildHostingViewIfNeeded() {
+        guard hostingView == nil else { return }
+        let view = ClipboardWallView(
+            state: state,
+            historyDirectory: historyDirectory,
+            onSelect: { [weak self] item, plain in self?.paste(item, plain: plain) },
+            onToggleFavorite: { [weak self] item in
+                Task { await ClipboardHistoryStore.shared.toggleFavorite(item); self?.reloadItems() }
+            },
+            onFilterChange: { [weak self] in self?.reloadItems() }
+        )
+        let host = NSHostingView(rootView: view)
+        host.frame = window?.contentLayoutRect ?? .zero
+        host.autoresizingMask = [.width, .height]
+        window?.contentView = host
+        hostingView = host
     }
 
     /// Synchronously query the store and push the result into state. The fetch

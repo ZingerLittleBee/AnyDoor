@@ -67,7 +67,9 @@ struct ClipboardWallView: View {
     private var cards: some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
+                // Lazy so only on-screen cards are realized; a plain HStack would
+                // build and lay out every card on open and stutter the slide-in.
+                LazyHStack(spacing: 10) {
                     ForEach(Array(state.items.enumerated()), id: \.element.id) { index, item in
                         ClipboardCardView(
                             item: item,
