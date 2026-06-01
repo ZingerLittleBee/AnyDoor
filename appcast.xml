@@ -3,65 +3,76 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.8.0</title>
+            <pubDate>Mon, 01 Jun 2026 19:02:52 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.8.0</sparkle:version>
+            <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- Clipboard history: a Paste-style clipboard manager. A background
+  `ClipboardWatcher` polls the pasteboard and `ClipboardCapture` classifies
+  each copy into text, image, or file references, persisting them through
+  `ClipboardHistoryStore` (SwiftData). A bottom card wall, summoned by ⌘⇧V via
+  the `ClipboardWallWindowController`, presents the history as a horizontally
+  scrolling card wall with category tabs for all / text / image / file plus the
+  existing screenshot, color, OCR, and QR-code histories, and live search over
+  the timeline. Search matching lives in a pure, unit-tested `ClipboardSearch`:
+  it tokenizes the query on whitespace and requires every token to appear (AND
+  semantics) against the entry's content only — title, full text, color hex,
+  and file names, never the metadata subtitle — and folds case, diacritics, and
+  width so "cafe" finds "café" and "1234" finds "１２３４". The search field is a
+  real focusable `NSTextField` (`WallSearchField`) so an input method editor can
+  compose CJK queries, with two keyboard modes: card navigation (arrows select,
+  Enter pastes, Space previews, typing focuses the field) and input (the field
+  owns text editing and IME; → at the end of a non-empty query hands focus back
+  to card navigation). Esc stages the exit — a non-empty query clears, an empty
+  query closes the wall. Selecting a card pastes into
+  the frontmost app — rich paste by default, plain-text paste with ⌥↵ — driven
+  by `ClipboardPasteService` (`writePayload`/`synthesizePaste`); items can be
+  favorited, deleted, or previewed inline with Quick Look (space). Retention is
+  configurable in Settings → General; the prune pass exempts favorites so
+  starred entries survive the retention window. The watcher honors privacy
+  rules (transient/concealed pasteboard types are skipped) and a per-item size
+  ceiling, and `noteSelfWrite` suppresses re-capturing the app's own paste
+  writes. Deferred for now: the app-exclusion list editor and disk-budget UI —
+  the preference keys exist and the watcher already honors them, only the
+  editor surfaces are pending. Backups deliberately exclude clipboard history
+  (see config sync below).
+- Config sync: back up and restore configuration to/from a JSON file from
+  Settings → General → 备份与恢复. The export gathers app shortcuts
+  (`KeyBinding`), builtin preferences (`BuiltinPreference`), and a whitelisted
+  set of general settings (`SyncSettingsRegistry`) into a Codable
+  `BackupSnapshot`; clipboard history and machine-specific keys
+  (`hyperKey.ownedSignatures`, `PortInventory.viewMode`, `SUSkippedVersion`)
+  are deliberately excluded. Storage sits behind a `SyncBackend` protocol so
+  iCloud/Gist/S3 backends can be added later; the first backend is a local
+  file via NSSavePanel/NSOpenPanel. Import merges per key — app shortcuts by
+  `appBundleID`, builtin preferences by `itemKey` — with imported values
+  winning and local-only rows preserved; unknown preference keys are skipped.
+  `appPath` is never serialized and is re-resolved locally from the bundle ID
+  on import (via `NSWorkspace`), so backups stay portable across machines with
+  different usernames. After import, `reconcileAfterImport` re-reads the
+  affected settings into `CommandPaletteService`, `LocalizationManager`, and
+  `HyperKeyService` and rebuilds the hotkey snapshots, so imported hotkeys,
+  language, and menu-bar icon take effect without a relaunch.
+- Command Palette: port-number searches now surface matching listening
+  processes in a dedicated Ports section. Port process rows are omitted while
+  the query is empty, and selecting a port row kills the owning PID through
+  the existing Port Manager flow with a success or failure toast.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.0/AnyDoor-1.8.0.zip" length="6342339" type="application/octet-stream" sparkle:edSignature="I8Zvp4Rm1CUa2+GovDS3+duZTxuT9l8/1ATSq5fagx4be0dsZL+0Ndw07I5NGnTjGm60+0SgrrYNoJAbn7L2Aw=="/>
+        </item>
+        <item>
             <title>1.7.0</title>
             <pubDate>Thu, 28 May 2026 16:22:34 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.7.0</sparkle:version>
             <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Added
-
-- Command Palette: every installed app on the system is now searchable, not
-  just apps the user explicitly bound to a hotkey. `CommandPaletteWindowController`
-  scans via `InstalledAppsScanner` when the palette opens, filters out bundle
-  IDs already represented by an app-shortcut row, and appends the remaining
-  apps to the Applications section after the bound rows. Selecting one routes
-  through `AppSwitcher.toggle`, identical to the bound-shortcut path. A new
-  `PanelEntry.Source.installedApp(bundleID:path:)` variant carries the
-  necessary data; it is command-palette-only and never surfaces in the menu
-  bar panel or settings UI.
-- Command Palette: sticky section headers. The Applications / Window Layout /
-  Commands labels stay pinned to the top of the scroll viewport as their rows
-  scroll past, matching the Raycast feel. Rows share the pinned header's
-  material layering on macOS < 26 so the header/row boundary has no visible
-  double-material seam. Arrow-key navigation now compensates for the pinned
-  header: moving up scrolls to the row above the target so the target lands
-  one row below the sticky band instead of hidden behind it, and a 0-height
-  top sentinel anchors the `newIndex == 0` case so the first section header
-  lands naturally above row 0 instead of pinning over it.
-
-### Changed
-
-- Menu bar panel: dismiss on Escape. The panel is a non-activating `NSPanel`
-  so a SwiftUI `keyDown` handler would never fire; a global + local
-  `NSEvent` monitor is now installed while the panel is visible so Escape
-  closes it whether AnyDoor or another app is frontmost.
-- Menu bar panel header removed. The AnyDoor title was redundant with the
-  status item icon, and the `%lld enabled` count was low-value noise on
-  every open. Dropping the header HStack also removes its now-orphaned
-  localization entries.
-- Menu bar panel footer removed. The Settings gear and Quit power icons
-  sat 2pt apart and were easy to mis-tap; both actions are already exposed
-  via the status item's right-click menu with the standard ⌘, and ⌘Q
-  shortcuts.
-- Command Palette adopts Liquid Glass on macOS 26+. Two new helpers in
-  `LiquidGlassCompatibility` — `adaptivePanelSurface(cornerRadius:)` for
-  non-interactive panel backgrounds and `adaptiveStickyHeaderSurface()` for
-  full-width pinned headers — apply `.glassEffect(.regular, in:)` and
-  `.background(.thinMaterial)` respectively, with `.thickMaterial` fallbacks
-  on earlier systems. The outer palette becomes one Liquid Glass surface so
-  the search field, rows, and headers read as a single material; per-row
-  `.thickMaterial` is dropped on macOS 26 to avoid double-layer composites
-  that previously made the list area look noticeably darker than the search
-  field. The sticky header uses `.thinMaterial` — heavy materials or a
-  nested `glassEffect` rendered as a dark opaque strip that broke the
-  design language.
-- Command Palette row icons: SF Symbols dropped from 18pt to 15pt so they
-  read at the same visual weight as the NSImage app icons, which carry
-  built-in transparent padding the symbols lacked.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.7.0/AnyDoor-1.7.0.zip" length="5936671" type="application/octet-stream" sparkle:edSignature="9apP+7BrNKkYnkq3M5w67EsTO15ZtmW6HMym21DJ613xkTCCuN6xJtXB1S/6NsP9XdCgsj81MZAfmajtu2i1Dw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.7.0/AnyDoor-1.7.0.zip" length="5936671" type="application/octet-stream" sparkle:edSignature="9apP+7BrNKkYnkq3M5w67EsTO15ZtmW6HMym21DJ613xkTCCuN6xJtXB1S/6NsP9XdCgsj81MZAfmajtu2i1Dw=="/>
         </item>
         <item>
             <title>1.6.0</title>
@@ -71,15 +82,6 @@
             <sparkle:shortVersionString>1.6.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.6.0/AnyDoor-1.6.0.zip" length="5939862" type="application/octet-stream" sparkle:edSignature="rUBwweyOv4hG3kHCLRHexYQa0bAP8CtrYcJuSYM3V5Lv++OC2Xq/njmA4p3oRuK/MSONDCmzDqQbbeCDNKcMBg=="/>
-        </item>
-        <item>
-            <title>1.5.0</title>
-            <pubDate>Wed, 27 May 2026 15:35:13 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.5.0</sparkle:version>
-            <sparkle:shortVersionString>1.5.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.5.0/AnyDoor-1.5.0.zip" length="5729418" type="application/octet-stream" sparkle:edSignature="pT/Am7RhKXBezIFPaas4yS+7obhcM1F6BGKHHxPXG1vyDNMtU8UpAKufSu7lrpbEQY8TmXqmouLNPQ1JyCreCA=="/>
         </item>
         <item>
             <title>1.2.0</title>

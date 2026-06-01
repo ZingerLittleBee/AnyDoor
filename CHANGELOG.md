@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-06-01
+
 ### Added
 
 - Clipboard history: a Paste-style clipboard manager. A background
