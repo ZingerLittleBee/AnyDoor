@@ -206,6 +206,7 @@ enum WindowLayoutError: Error, Sendable, Equatable {
     case noFocusedWindow
     case fullScreenWindowNotSupported
     case noScreenAvailable
+    case singleDisplay
     case axCallFailed(attribute: String, code: Int32)
 }
 
@@ -239,12 +240,18 @@ final class WindowLayoutService {
         try assertNotFullScreen(window)
 
         let currentFrame = try readFrame(of: window)
-        let visible = try visibleFrameInAXCoords(containing: currentFrame)
-        let target = WindowLayoutGeometry.targetRect(
-            action: action,
-            windowFrame: currentFrame,
-            visibleFrame: visible
-        )
+
+        let target: CGRect
+        if action.movesDisplay {
+            target = try displayMoveTarget(windowFrame: currentFrame, action: action)
+        } else {
+            let visible = try visibleFrameInAXCoords(containing: currentFrame)
+            target = WindowLayoutGeometry.targetRect(
+                action: action,
+                windowFrame: currentFrame,
+                visibleFrame: visible
+            )
+        }
 
         // Order matters on some apps: setting size before position avoids
         // a transient frame where the new position lands the old size off
@@ -254,6 +261,38 @@ final class WindowLayoutService {
         // about here.
         try writePosition(of: window, to: target.origin)
         try writeSize(of: window, to: target.size)
+    }
+
+    /// Compute the destination frame for a next/previous-display move.
+    /// Orders displays left-to-right (visibleFrame.minX, ties by minY), finds
+    /// the window's source display, then proportionally remaps onto the
+    /// wrapped neighbor. Throws `singleDisplay` when only one display exists.
+    private func displayMoveTarget(windowFrame: CGRect, action: WindowLayoutAction) throws -> CGRect {
+        let screens = NSScreen.screens
+        guard let primary = screens.first else {
+            throw WindowLayoutError.noScreenAvailable
+        }
+        guard screens.count >= 2 else {
+            throw WindowLayoutError.singleDisplay
+        }
+        let primaryHeight = primary.frame.height
+        let ordered = screens.sorted {
+            if $0.visibleFrame.minX != $1.visibleFrame.minX {
+                return $0.visibleFrame.minX < $1.visibleFrame.minX
+            }
+            return $0.visibleFrame.minY < $1.visibleFrame.minY
+        }
+        let source = try sourceScreen(containing: windowFrame)
+        guard let index = ordered.firstIndex(where: { $0 === source }) else {
+            throw WindowLayoutError.noScreenAvailable
+        }
+        let delta = (action == .moveToNextDisplay) ? 1 : -1
+        let destIndex = WindowLayoutGeometry.wrappedIndex(
+            current: index, delta: delta, count: ordered.count)
+        let fromVisible = Self.toAXCoords(rect: source.visibleFrame, primaryHeight: primaryHeight)
+        let toVisible = Self.toAXCoords(rect: ordered[destIndex].visibleFrame, primaryHeight: primaryHeight)
+        return WindowLayoutGeometry.rectMovingToDisplay(
+            windowFrame: windowFrame, fromVisible: fromVisible, toVisible: toVisible)
     }
 
     // MARK: - AX helpers
@@ -355,16 +394,23 @@ final class WindowLayoutService {
     /// matching the "use main visibleFrame when matching is unreliable"
     /// rule.
     private func visibleFrameInAXCoords(containing windowAXFrame: CGRect) throws -> CGRect {
+        guard let primary = NSScreen.screens.first else {
+            throw WindowLayoutError.noScreenAvailable
+        }
+        let screen = try sourceScreen(containing: windowAXFrame)
+        return Self.toAXCoords(rect: screen.visibleFrame, primaryHeight: primary.frame.height)
+    }
+
+    /// Pick the screen whose AX-space frame has the largest intersection with
+    /// `windowAXFrame`. Equal-area ties tip to the earlier screen in
+    /// `NSScreen.screens`, which matches the order macOS reports. Falls back to
+    /// the primary screen when no overlap can be determined.
+    private func sourceScreen(containing windowAXFrame: CGRect) throws -> NSScreen {
         let screens = NSScreen.screens
         guard let primary = screens.first else {
             throw WindowLayoutError.noScreenAvailable
         }
         let primaryHeight = primary.frame.height
-
-        // Build AX rects for each screen and pick the one with the largest
-        // intersection area with the window. Equal-area ties tip to the
-        // earlier screen in `NSScreen.screens`, which matches the order
-        // macOS reports.
         var best: (screen: NSScreen, area: CGFloat)?
         for screen in screens {
             let frameAX = Self.toAXCoords(rect: screen.frame, primaryHeight: primaryHeight)
@@ -373,9 +419,7 @@ final class WindowLayoutService {
                 best = (screen, area)
             }
         }
-
-        let chosen = best?.screen ?? primary
-        return Self.toAXCoords(rect: chosen.visibleFrame, primaryHeight: primaryHeight)
+        return best?.screen ?? primary
     }
 
     /// Convert a Cocoa-coordinate rect (origin bottom-left, Y up,
