@@ -55,6 +55,19 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         panel.hidesOnDeactivate = false
         super.init(window: panel)
         panel.delegate = self
+        // Refresh live when the history changes (e.g. a new copy is captured)
+        // so the open wall doesn't require a tab switch to show it.
+        NotificationCenter.default.addObserver(
+            forName: .clipboardHistoryDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshIfVisible() }
+        }
+    }
+
+    /// Re-query and update the open wall in place; ignored when hidden.
+    private func refreshIfVisible() {
+        guard window?.isVisible == true else { return }
+        loadTimelineNow()
     }
 
     @available(*, unavailable)

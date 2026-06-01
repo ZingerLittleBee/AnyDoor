@@ -13,6 +13,12 @@ struct ClipboardSource: Sendable, Equatable {
     let appName: String?
 }
 
+extension Notification.Name {
+    /// Posted after the clipboard history changes (new capture or clear) so an
+    /// open aggregated view can refresh live.
+    static let clipboardHistoryDidChange = Notification.Name("clipboardHistoryDidChange")
+}
+
 enum ClipboardHistoryError: Error, Sendable {
     case modelContainerUnavailable
     case missingText
@@ -242,6 +248,9 @@ final class ClipboardHistoryStore {
             try container.mainContext.save()
             await pruneExpiredAndOverflow(force: true)
             await reload(kind: kind)
+            // Notify any open aggregated view (the wall) so a new capture shows
+            // up live instead of only after the user switches a tab.
+            NotificationCenter.default.post(name: .clipboardHistoryDidChange, object: nil)
         } catch {
             historyLogger.error("Failed to save \(kind.rawValue) history: \(error)")
         }
@@ -465,6 +474,7 @@ final class ClipboardHistoryStore {
                 cachedItems[kind] = []
             }
             lastPrunedAt = nil
+            NotificationCenter.default.post(name: .clipboardHistoryDidChange, object: nil)
         }
 
         guard let container = modelContainer else { return }
