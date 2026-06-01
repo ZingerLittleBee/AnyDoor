@@ -105,6 +105,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // reload would land mid-animation and the heavy first render (image
         // decoding) would stutter the slide-in.
         loadTimelineNow()
+        // Force the watcher to capture immediately so content copied just before
+        // opening shows up now, rather than after the next ~0.5s poll tick.
+        Task { [weak self] in
+            await self?.watcher?.poll()
+            self?.loadTimelineNow()
+        }
         buildHostingViewIfNeeded()
         installMonitors()
 
