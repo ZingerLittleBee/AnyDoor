@@ -206,8 +206,9 @@ struct ClipboardHistoryPopoverView: View {
                 LocalizedText(.clipboardPreviewMissingFile).foregroundStyle(.secondary)
             }
         case .text, .image, .file, .none:
-            // text/image/file previews are added by the paste-history tasks;
-            // until then they fall back to the generic "cannot preview" message.
+            // The per-kind hover popover intentionally renders only the four legacy
+            // kinds (ocr/color/qrcode/screenshot). text/image/file are surfaced
+            // exclusively in the clipboard wall, so they fall back here by design.
             LocalizedText(.clipboardPreviewCannotRender).foregroundStyle(.secondary)
         }
     }

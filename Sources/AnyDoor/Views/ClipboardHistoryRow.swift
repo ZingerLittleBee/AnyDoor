@@ -81,8 +81,10 @@ struct ClipboardHistoryRow: View {
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
         case .ocr, .text, .image, .file, .none:
-            // text/image/file rows are populated by the paste-history tasks;
-            // until those views land they share the OCR fallback glyph.
+            // The per-kind hover row intentionally renders only the four legacy
+            // kinds (ocr/color/qrcode/screenshot). text/image/file are surfaced
+            // exclusively in the clipboard wall, so they fall back to the OCR
+            // glyph here by design.
             Image(systemName: "text.viewfinder")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)

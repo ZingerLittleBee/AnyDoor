@@ -6,6 +6,11 @@ import Foundation
 /// a repeating timer started by `start()`.
 @MainActor
 final class ClipboardWatcher {
+    /// Weak handle to the live watcher so other code (providers that write to the
+    /// general pasteboard) can call `noteSelfWrite`. `AppDelegate` owns the strong
+    /// reference; this must stay weak to avoid a retain cycle.
+    @MainActor static weak var shared: ClipboardWatcher?
+
     private let store: ClipboardHistoryStore
     private let pasteboard: NSPasteboard
     private let sourceProvider: () -> ClipboardSource?

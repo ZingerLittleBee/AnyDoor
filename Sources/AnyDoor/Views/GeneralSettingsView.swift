@@ -160,6 +160,12 @@ struct GeneralSettingsView: View {
                     }
                 } label: { LocalizedText(.settingsClipboardRetention) }
                 .pickerStyle(.menu)
+                .onChange(of: clipboardRetentionDays) { _, _ in
+                    // Apply the new retention window immediately; otherwise a
+                    // shortened window would only take effect after restart.
+                    ClipboardHistoryStore.shared.setMaxAge(ClipboardPreferences.retention.maxAge)
+                    Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true) }
+                }
             } header: {
                 LocalizedText(.settingsClipboard)
             }

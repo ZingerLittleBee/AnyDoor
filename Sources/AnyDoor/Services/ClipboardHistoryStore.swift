@@ -441,10 +441,19 @@ final class ClipboardHistoryStore {
             guard let text = item.text else { throw ClipboardHistoryError.missingText }
             pasteboard.setString(text, forType: .string)
         case .image, .file:
-            // Rich image/file write-back is implemented by the paste tasks; no
-            // such rows exist yet, so reject any stray ones explicitly.
+            // `copyToPasteboard` is the legacy per-kind hover-popover copy path and
+            // only handles text/ocr/qrcode/color/screenshot. Image and file rows do
+            // exist (the watcher creates them), but their write-back goes through
+            // `ClipboardPasteService` from the clipboard wall, not here — so reject
+            // any stray image/file rows that reach this path.
             throw ClipboardHistoryError.missingText
         }
+
+        // Reached only when the switch above performed a write (every other case
+        // throws before this point). Suppress the watcher so it doesn't re-capture
+        // this app-originated re-copy as a duplicate generic text/image entry.
+        // Still synchronous on the @MainActor store, so race-free vs the poll.
+        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
     }
 
     func clearAll() async {

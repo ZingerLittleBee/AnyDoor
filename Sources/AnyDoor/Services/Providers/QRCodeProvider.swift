@@ -30,6 +30,10 @@ actor QRCodeProvider: ActionProvider {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.setString(text, forType: .string)
+                // Suppress the watcher so it doesn't re-capture this QR payload as
+                // a generic text entry. Done in the same synchronous MainActor block
+                // as the write to stay race-free against the 0.5s poll.
+                ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             }
             await ClipboardHistoryStore.shared.recordText(kind: .qrcode, text: text)
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }

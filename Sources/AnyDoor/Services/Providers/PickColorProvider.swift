@@ -23,6 +23,10 @@ actor PickColorProvider: ActionProvider {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()
                 pasteboard.setString(hex, forType: .string)
+                // Suppress the watcher so it doesn't re-capture this picked color
+                // as a generic text entry. Done in the same synchronous MainActor
+                // block as the write to stay race-free against the 0.5s poll.
+                ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             }
             await ClipboardHistoryStore.shared.recordColor(hex: hex)
             let colorMsg = await MainActor.run { L(.toastColorCopied, hex) }

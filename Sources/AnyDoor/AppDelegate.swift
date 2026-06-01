@@ -59,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let watcher = ClipboardWatcher(store: ClipboardHistoryStore.shared)
         watcher.start()
         clipboardWatcher = watcher
+        ClipboardWatcher.shared = watcher
         ClipboardWallWindowController.shared.watcher = watcher
 
         // Register providers
