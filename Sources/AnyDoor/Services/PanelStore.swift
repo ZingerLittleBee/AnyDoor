@@ -19,10 +19,16 @@ final class PanelStore {
     private(set) var appShortcutChildren: [PanelEntry] = []
     private(set) var windowLayoutChildren: [PanelEntry] = []
 
-    /// The four window-layout child items that are partitioned out of topLevelEntries
+    /// The window-layout child items that are partitioned out of topLevelEntries
     /// and exposed separately via `windowLayoutChildren`.
     private static let windowLayoutChildKeys: Set<BuiltinItem> = [
         .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
+        .windowTopHalf, .windowBottomHalf,
+        .windowTopLeftQuarter, .windowTopRightQuarter,
+        .windowBottomLeftQuarter, .windowBottomRightQuarter,
+        .windowLeftThird, .windowCenterThird, .windowRightThird,
+        .windowLeftTwoThirds, .windowRightTwoThirds,
+        .windowMoveNextDisplay, .windowMovePreviousDisplay,
     ]
 
     private var providers: [BuiltinItem: any BuiltinProvider] = [:]
