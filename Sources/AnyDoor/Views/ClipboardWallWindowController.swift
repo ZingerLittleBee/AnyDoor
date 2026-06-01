@@ -182,10 +182,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         })
     }
 
-    /// Build and install the SwiftUI host once; later shows reuse it.
-    private func buildHostingViewIfNeeded() {
-        guard hostingView == nil else { return }
-        let view = ClipboardWallView(
+    private func makeWallView() -> ClipboardWallView {
+        ClipboardWallView(
             state: state,
             historyDirectory: historyDirectory,
             onSelect: { [weak self] item, plain in self?.paste(item, plain: plain) },
@@ -194,7 +192,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             },
             onFilterChange: { [weak self] in self?.reloadItems() }
         )
-        let host = NSHostingView(rootView: view)
+    }
+
+    /// Build and install the SwiftUI host once; later shows reuse it.
+    private func buildHostingViewIfNeeded() {
+        guard hostingView == nil else { return }
+        let host = NSHostingView(rootView: makeWallView())
         host.frame = window?.contentLayoutRect ?? .zero
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
@@ -209,6 +212,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         let fresh = ClipboardHistoryStore.shared.timeline(category: state.category, query: state.query)
         guard fresh.map(\.id) != state.items.map(\.id) else { return }
         state.setItems(fresh)
+        // Re-push the root view so the reused host re-renders with the new items.
+        // Reassigning the items array alone does not reliably invalidate a reused
+        // NSHostingView, whereas a fresh rootView always re-evaluates the body.
+        hostingView?.rootView = makeWallView()
     }
 
     /// Prune (async) then re-query; used for filter changes and after edits,
