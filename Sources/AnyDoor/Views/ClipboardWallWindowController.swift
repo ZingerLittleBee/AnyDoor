@@ -18,10 +18,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     var modelContainer: ModelContainer?
 
     private let state = ClipboardWallState()
-    /// Built once and reused across opens. Rebuilding the whole SwiftUI tree on
-    /// every show realizes all cards as the slide-in starts, which stutters the
-    /// animation; reusing it means show just moves already-rendered content. The
-    /// content is a @Query-driven view, so it re-renders on store changes itself.
+    /// Rebuilt fresh on every show. Reusing it across opens breaks SwiftUI
+    /// reactivity — a reused host that was ordered out does not re-subscribe to
+    /// its @Query/@Observable sources, so new captures only appeared after a tab
+    /// switch forced a body re-evaluation. A LazyHStack keeps the rebuild cheap.
     private var hostingView: NSHostingView<AnyView>?
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
@@ -83,7 +83,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
         Task { [weak self] in await self?.watcher?.poll() }
-        buildHostingViewIfNeeded()
+        installHostingView()
         installMonitors()
 
         guard let window, let screen = NSScreen.main else { return }
@@ -168,10 +168,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         return AnyView(view)
     }
 
-    /// Build and install the SwiftUI host once; later shows reuse it. The view is
-    /// @Query-backed, so it re-renders on store changes without a manual reload.
-    private func buildHostingViewIfNeeded() {
-        guard hostingView == nil else { return }
+    /// Build and install a fresh SwiftUI host. The view is @Query-backed, so a
+    /// fresh host re-subscribes and re-renders on store changes on every open.
+    private func installHostingView() {
         let host = NSHostingView(rootView: makeWallView())
         host.frame = window?.contentLayoutRect ?? .zero
         host.autoresizingMask = [.width, .height]
