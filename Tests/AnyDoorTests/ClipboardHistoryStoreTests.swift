@@ -344,4 +344,21 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         await store.pruneExpiredAndOverflow(force: true)
         XCTAssertEqual(store.timeline(category: .text, query: "").map(\.previewTitle), ["ancient"])
     }
+
+    func testPastePayloadPlainVsRich() throws {
+        let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorPaste-\(UUID().uuidString)"))
+
+        let rich = NSAttributedString(string: "styled")
+        let rtf = try XCTUnwrap(rich.rtf(from: NSRange(location: 0, length: rich.length)))
+        let item = ClipboardHistoryItem(kind: .text, text: "styled", previewTitle: "styled",
+                                        richData: rtf, richType: NSPasteboard.PasteboardType.rtf.rawValue)
+
+        ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: nil)
+        XCTAssertEqual(pb.data(forType: .rtf), rtf)
+        XCTAssertEqual(pb.string(forType: .string), "styled")
+
+        ClipboardPasteService.writePayload(for: item, asPlainText: true, to: pb, historyDirectory: nil)
+        XCTAssertNil(pb.data(forType: .rtf))   // plain mode drops rich payload
+        XCTAssertEqual(pb.string(forType: .string), "styled")
+    }
 }
