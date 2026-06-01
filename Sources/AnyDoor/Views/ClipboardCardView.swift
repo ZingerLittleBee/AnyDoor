@@ -87,7 +87,7 @@ struct ClipboardCardView: View {
                 }
         case .image, .screenshot:
             if let fileName = item.fileName,
-               let img = NSImage(contentsOf: historyDirectory.appendingPathComponent(fileName)) {
+               let img = ClipboardThumbnail.image(at: historyDirectory.appendingPathComponent(fileName)) {
                 // Color.clear takes the offered preview frame; the image fills it
                 // as an overlay and is clipped to those bounds, so a large image
                 // can't overflow and cover the header/footer.
@@ -101,7 +101,7 @@ struct ClipboardCardView: View {
         case .file:
             // An image file gets a thumbnail like the image card; anything else
             // falls back to a document glyph plus its name.
-            if let url = firstFileURL, isImageFile(url), let img = NSImage(contentsOf: url) {
+            if let url = firstFileURL, isImageFile(url), let img = ClipboardThumbnail.image(at: url) {
                 Color.clear.overlay {
                     Image(nsImage: img).resizable().scaledToFill()
                 }

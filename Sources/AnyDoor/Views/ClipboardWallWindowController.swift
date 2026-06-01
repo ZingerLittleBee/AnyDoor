@@ -62,7 +62,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func show() {
-        reloadItems()
+        // Populate synchronously so the first render already has data; an async
+        // reload would land mid-animation and the heavy first render (image
+        // decoding) would stutter the slide-in.
+        loadTimelineNow()
         let view = ClipboardWallView(
             state: state,
             historyDirectory: historyDirectory,
@@ -103,6 +106,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated { self?.isAnimating = false }
         })
+
+        // Enforce retention off the critical path, then refresh if it changed.
+        Task {
+            await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false)
+            loadTimelineNow()
+        }
     }
 
     /// Slide the panel down off-screen, then close it. When `restoreFocus` is
@@ -134,11 +143,18 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         })
     }
 
-    /// Re-query the store using current category/search and push into state.
+    /// Synchronously query the store and push the result into state. The fetch
+    /// runs on the main actor, so the wall renders with data immediately.
+    private func loadTimelineNow() {
+        state.setItems(ClipboardHistoryStore.shared.timeline(category: state.category, query: state.query))
+    }
+
+    /// Prune (async) then re-query; used for filter changes and after edits,
+    /// where a brief delay before refresh is fine.
     private func reloadItems() {
         Task {
             await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false)
-            state.setItems(ClipboardHistoryStore.shared.timeline(category: state.category, query: state.query))
+            loadTimelineNow()
         }
     }
 
