@@ -6,6 +6,22 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Spotlight app picker pinned a CPU core to 100% when left open. The search
+  field re-focus handler reasserted focus on every runloop tick whenever the
+  system refused to return first-responder (a SwiftUI focus / AppKit
+  first-responder desync, e.g. the floating panel sitting on another Space):
+  each failed attempt fired the change handler again, never settling. The
+  handler now gives up after a few consecutive failed strikes and resets the
+  counter once focus is genuinely regained, so a stray hit-test still reclaims
+  focus once but a desync can no longer spin. The loop was amplified by two
+  per-frame costs, now removed: `filteredApps` re-scanned every installed app
+  on each of its several reads per render (now memoized behind an
+  observation-ignored cache over a precomputed pool), and each row resolved its
+  Finder icon via NSWorkspace on every body pass (now resolved once per row in
+  a task).
+
 ## [1.8.1] - 2026-06-02
 
 ### Added

@@ -14,19 +14,35 @@ final class SpotlightPickerState {
     let allApps: [InstalledApp]
     let excludedBundleIDs: Set<String>
 
+    // Apps minus the excluded set, computed once. The picker never mutates its
+    // source list, so there is no need to re-filter the exclusions every read.
+    @ObservationIgnored private let pool: [InstalledApp]
+    // Memoize the last query result. A single render pass reads `filteredApps`
+    // several times; without this each read re-scans every installed app.
+    // Marked @ObservationIgnored so writing it from the getter does not feed
+    // back into SwiftUI's observation graph and retrigger invalidation.
+    @ObservationIgnored private var cache: (query: String, result: [InstalledApp])?
+
     init(apps: [InstalledApp], excluded: Set<String>) {
         self.allApps = apps
         self.excludedBundleIDs = excluded
+        self.pool = apps.filter { !excluded.contains($0.bundleID) }
     }
 
     var filteredApps: [InstalledApp] {
-        let pool = allApps.filter { !excludedBundleIDs.contains($0.bundleID) }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return pool }
-        return pool.filter { app in
-            app.displayName.localizedCaseInsensitiveContains(trimmed)
-                || app.bundleID.localizedCaseInsensitiveContains(trimmed)
+        if let cache, cache.query == trimmed { return cache.result }
+        let result: [InstalledApp]
+        if trimmed.isEmpty {
+            result = pool
+        } else {
+            result = pool.filter { app in
+                app.displayName.localizedCaseInsensitiveContains(trimmed)
+                    || app.bundleID.localizedCaseInsensitiveContains(trimmed)
+            }
         }
+        cache = (query: trimmed, result: result)
+        return result
     }
 
     func moveDown() {
@@ -54,6 +70,9 @@ struct SpotlightAppPicker: View {
     let onCancel: () -> Void
 
     @FocusState private var searchFocused: Bool
+    // Counts consecutive failed attempts to reclaim focus. Reset whenever focus
+    // is actually regained; used to break the re-focus loop (see below).
+    @State private var refocusStrikes = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,11 +101,21 @@ struct SpotlightAppPicker: View {
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: searchFocused) { _, focused in
-            // Search field must always be the keyboard target — re-focus if
-            // something (e.g. a stray hit-test in the panel chrome) steals it.
-            if !focused {
-                DispatchQueue.main.async { searchFocused = true }
+            // Keep the search field as the keyboard target — re-focus if a
+            // stray hit-test in the panel chrome steals it. But reasserting
+            // focus every runloop tick pins a CPU core when the system refuses
+            // to hand first-responder back (focus desync while the panel sits
+            // on another Space, etc.): each attempt fails, fires this handler
+            // again, and the loop never settles. Bail out after a few rapid
+            // strikes. Regaining focus resets the counter, and the window
+            // controller closes the panel on resignKey, so giving up is safe.
+            if focused {
+                refocusStrikes = 0
+                return
             }
+            guard refocusStrikes < 3 else { return }
+            refocusStrikes += 1
+            DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: state.query) { _, _ in
             state.selectedIndex = 0
@@ -167,13 +196,20 @@ private struct SpotlightRow: View {
     let onSelect: () -> Void
 
     @State private var isHovering = false
+    @State private var icon: NSImage?
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: app.path))
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 28, height: 28)
+            Group {
+                if let icon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                } else {
+                    Color.clear
+                }
+            }
+            .frame(width: 28, height: 28)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(app.displayName)
@@ -207,6 +243,11 @@ private struct SpotlightRow: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
+        .task(id: app.bundleID) {
+            // Resolve the Finder icon once per row. NSWorkspace.icon(forFile:)
+            // touches disk, so doing it on every body pass is wasteful.
+            icon = NSWorkspace.shared.icon(forFile: app.path)
+        }
     }
 
     private var rowBackground: Color {
