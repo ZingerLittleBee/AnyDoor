@@ -298,6 +298,7 @@ private struct CommandPaletteRow: View {
     let onSelect: () -> Void
 
     @State private var isHovering = false
+    @State private var appIcon: NSImage?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -327,6 +328,13 @@ private struct CommandPaletteRow: View {
         .contentShape(Rectangle())
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
+        .task(id: entry.id) {
+            // Resolve the Finder icon once per row. NSWorkspace.icon(forFile:)
+            // touches disk, so doing it on every body pass stalls the first
+            // scroll as LazyVStack materializes a fresh batch of rows.
+            guard let path = iconPath else { return }
+            appIcon = NSWorkspace.shared.icon(forFile: path)
+        }
     }
 
     @ViewBuilder
@@ -348,33 +356,46 @@ private struct CommandPaletteRow: View {
 
     @ViewBuilder
     private var icon: some View {
+        if iconPath != nil {
+            // App-backed row: render the cached icon loaded in `.task`. Never
+            // resolve it inside `body` — see the .task comment above.
+            Group {
+                if let appIcon {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .interpolation(.high)
+                } else {
+                    Color.clear
+                }
+            }
+        } else {
+            // SF Symbols carry no built-in transparent padding, so they need a
+            // smaller point size than the 22pt frame to read at the same visual
+            // weight as NSImage app icons. Built-in toggles read at full
+            // strength; port records match the dimmer fallback weight.
+            Image(systemName: entry.symbol)
+                .font(.system(size: 15))
+                .foregroundStyle(isBuiltin ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+        }
+    }
+
+    /// File path whose Finder icon backs this row, or nil when the row draws an
+    /// SF Symbol instead. App shortcuts and installed apps resolve a real icon;
+    /// built-ins and port records use a symbol.
+    private var iconPath: String? {
         switch entry.source {
         case .appShortcut:
-            if let path = PanelStore.shared.binding(id: bindingID).map(\.appPath) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: path))
-                    .resizable()
-                    .interpolation(.high)
-            } else {
-                // SF Symbols carry no built-in transparent padding, so they
-                // need a smaller point size than the 22pt frame to read at
-                // the same visual weight as NSImage app icons.
-                Image(systemName: entry.symbol)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.secondary)
-            }
+            return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
-            Image(nsImage: NSWorkspace.shared.icon(forFile: path))
-                .resizable()
-                .interpolation(.high)
-        case .builtin:
-            Image(systemName: entry.symbol)
-                .font(.system(size: 15))
-                .foregroundStyle(.primary)
-        case .portRecord:
-            Image(systemName: entry.symbol)
-                .font(.system(size: 15))
-                .foregroundStyle(.secondary)
+            return path
+        case .builtin, .portRecord:
+            return nil
         }
+    }
+
+    private var isBuiltin: Bool {
+        if case .builtin = entry.source { return true }
+        return false
     }
 
     private var bindingID: UUID {

@@ -6,6 +6,18 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Command Palette stuttered on the first scroll, then ran smoothly afterwards.
+  `CommandPaletteRow` resolved its Finder icon via `NSWorkspace.icon(forFile:)`
+  inside `body` — a synchronous disk read on every body pass with no caching —
+  so when `LazyVStack` materialized a fresh batch of rows on the first scroll,
+  each row hit disk in the same frame and dropped frames; reused rows never
+  re-ran, so later scrolling stayed smooth. The icon is now loaded once per row
+  in a `task` and cached in `@State`, leaving `body` a pure in-memory read. This
+  is the twin of the 1.8.2 `SpotlightRow` fix, which missed the command palette
+  row.
+
 ## [1.8.2] - 2026-06-02
 
 ### Fixed
