@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-06-02
+
 ### Fixed
 
 - Spotlight app picker pinned a CPU core to 100% when left open. The search

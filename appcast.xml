@@ -3,25 +3,39 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.8.2</title>
+            <pubDate>Tue, 02 Jun 2026 15:09:46 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.8.2</sparkle:version>
+            <sparkle:shortVersionString>1.8.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Fixed
+
+- Spotlight app picker pinned a CPU core to 100% when left open. The search
+  field re-focus handler reasserted focus on every runloop tick whenever the
+  system refused to return first-responder (a SwiftUI focus / AppKit
+  first-responder desync, e.g. the floating panel sitting on another Space):
+  each failed attempt fired the change handler again, never settling. The
+  handler now gives up after a few consecutive failed strikes and resets the
+  counter once focus is genuinely regained, so a stray hit-test still reclaims
+  focus once but a desync can no longer spin. The loop was amplified by two
+  per-frame costs, now removed: `filteredApps` re-scanned every installed app
+  on each of its several reads per render (now memoized behind an
+  observation-ignored cache over a precomputed pool), and each row resolved its
+  Finder icon via NSWorkspace on every body pass (now resolved once per row in
+  a task).
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.2/AnyDoor-1.8.2.zip" length="6356638" type="application/octet-stream" sparkle:edSignature="wGYgZPF9rtJr9NSJbg8+0prfr53A2kDuh+0beascPFvNHn/a14VUyEKMGIJYcmcK4qLxL1OOIE6mXSIqJjaJDA=="/>
+        </item>
+        <item>
             <title>1.8.1</title>
             <pubDate>Tue, 02 Jun 2026 01:42:58 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.8.1</sparkle:version>
             <sparkle:shortVersionString>1.8.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Added
-
-- Window layout: the Window Layout submenu gains 13 new actions — top and
-  bottom halves, four quarter-screen corners, left/center/right thirds,
-  left/right two-thirds, and move-to-next / move-to-previous display. Each is
-  an independent, individually hotkey-bindable item. Tiling actions tile the
-  visible region exactly (the center third absorbs rounding so columns never
-  gap or overlap); display moves remap the focused window proportionally onto
-  the neighboring screen, ordered left-to-right with wrap-around, and surface a
-  toast when only one display is connected.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.1/AnyDoor-1.8.1.zip" length="6415743" type="application/octet-stream" sparkle:edSignature="l4C71Mf0g12ZIG0Tu6sZGgSONGDpj1ZkvtUxoRuSqPDqueaejcXm5HcxcaVaEZLvrQogBLwNvB6y34EL+/SpDQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.1/AnyDoor-1.8.1.zip" length="6415743" type="application/octet-stream" sparkle:edSignature="l4C71Mf0g12ZIG0Tu6sZGgSONGDpj1ZkvtUxoRuSqPDqueaejcXm5HcxcaVaEZLvrQogBLwNvB6y34EL+/SpDQ=="/>
         </item>
         <item>
             <title>1.8.0</title>
@@ -31,15 +45,6 @@
             <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.0/AnyDoor-1.8.0.zip" length="6342339" type="application/octet-stream" sparkle:edSignature="I8Zvp4Rm1CUa2+GovDS3+duZTxuT9l8/1ATSq5fagx4be0dsZL+0Ndw07I5NGnTjGm60+0SgrrYNoJAbn7L2Aw=="/>
-        </item>
-        <item>
-            <title>1.7.0</title>
-            <pubDate>Thu, 28 May 2026 16:22:34 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.7.0</sparkle:version>
-            <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.7.0/AnyDoor-1.7.0.zip" length="5936671" type="application/octet-stream" sparkle:edSignature="9apP+7BrNKkYnkq3M5w67EsTO15ZtmW6HMym21DJ613xkTCCuN6xJtXB1S/6NsP9XdCgsj81MZAfmajtu2i1Dw=="/>
         </item>
         <item>
             <title>1.2.0</title>
