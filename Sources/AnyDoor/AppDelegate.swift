@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
             let config = ModelConfiguration(url: storeURL)
             modelContainer = try ModelContainer(
-                for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
+                for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, HostProfile.self,
                 configurations: config
             )
 
