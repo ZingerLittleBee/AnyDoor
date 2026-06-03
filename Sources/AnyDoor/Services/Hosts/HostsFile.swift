@@ -45,15 +45,16 @@ enum HostsFile {
         let prefix = trimTrailingNewlines(parsed.prefix)
         if !prefix.isEmpty { sections.append(prefix) }
 
-        if !activeProfiles.isEmpty {
-            var blockLines: [String] = [beginMarker]
-            for profile in activeProfiles {
-                blockLines.append("# --- \(sanitizeName(profile.name)) ---")
-                let body = trimTrailingNewlines(sanitizeContent(profile.content))
-                if !body.isEmpty { blockLines.append(body) }
-            }
-            blockLines.append(endMarker)
-            sections.append(blockLines.joined(separator: "\n"))
+        // Blank profiles (no meaningful content) contribute nothing — not even a
+        // header — so toggling or deleting them produces an unchanged file and
+        // never triggers a privileged write.
+        let entries: [String] = activeProfiles.compactMap { profile in
+            let body = trimTrailingNewlines(sanitizeContent(profile.content))
+            guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return "# --- \(sanitizeName(profile.name)) ---\n\(body)"
+        }
+        if !entries.isEmpty {
+            sections.append(([beginMarker] + entries + [endMarker]).joined(separator: "\n"))
         }
 
         let suffix = trimTrailingNewlines(parsed.suffix)

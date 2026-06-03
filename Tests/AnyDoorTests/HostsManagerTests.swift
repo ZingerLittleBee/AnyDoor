@@ -58,7 +58,10 @@ final class HostsManagerTests: XCTestCase {
 
     func test_deactivate_removesManagedBlock() async throws {
         let mock = MockHostsWriter()
-        let (mgr, _) = try makeManager(writer: mock)
+        // Stateful live: each write becomes the new file content, so the no-op
+        // skip behaves as it would against the real /etc/hosts.
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
         mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
         let p = mgr.profiles[0]
         await mgr.setActive(p, true)
@@ -66,6 +69,44 @@ final class HostsManagerTests: XCTestCase {
         let written = try XCTUnwrap(mock.lastWritten)
         XCTAssertFalse(written.contains(HostsFile.beginMarker))
         XCTAssertTrue(written.contains("127.0.0.1 localhost"))
+    }
+
+    // MARK: - Blank profiles never trigger a privileged write
+
+    func test_activateBlankProfile_skipsWrite() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
+        mgr.createProfile(name: "Blank", content: "")
+        await mgr.setActive(mgr.profiles[0], true)
+        XCTAssertEqual(mock.writeCount, 0, "A blank profile changes nothing; no privileged write")
+        XCTAssertTrue(mgr.profiles[0].isActive, "Activation is still recorded in the model")
+    }
+
+    func test_deleteBlankActiveProfile_skipsWrite() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
+        mgr.createProfile(name: "Blank", content: "")
+        await mgr.setActive(mgr.profiles[0], true)
+        await mgr.deleteProfile(mgr.profiles[0])
+        XCTAssertEqual(mock.writeCount, 0, "Deleting a blank profile requires no authorization")
+        XCTAssertEqual(mgr.profiles.count, 0)
+    }
+
+    // MARK: - System hosts editing
+
+    func test_updateSystemHosts_writesEditedPrefix_preservesManagedBlock() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
+        await mgr.setActive(mgr.profiles[0], true)
+        await mgr.updateSystemHosts("10.0.0.1 newsystem")
+        let written = try XCTUnwrap(mock.lastWritten)
+        XCTAssertTrue(written.contains("10.0.0.1 newsystem"))       // edited system content
+        XCTAssertTrue(written.contains("1.2.3.4 dev.example.com"))  // managed block preserved
+        XCTAssertTrue(written.contains(HostsFile.beginMarker))
     }
 
     // MARK: - Fix 1: debounce / coalesce

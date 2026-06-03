@@ -79,6 +79,27 @@ final class HostsFileTests: XCTestCase {
         XCTAssertEqual(ends, 1)
     }
 
+    func test_compose_skipsBlankProfile_noBlock() {
+        let parsed = HostsFile.Parsed(prefix: "127.0.0.1 localhost", managed: nil, suffix: "")
+        let out = HostsFile.compose(parsed: parsed,
+                                    activeProfiles: [(name: "Empty", content: "")])
+        XCTAssertFalse(out.contains(HostsFile.beginMarker))
+        XCTAssertFalse(out.contains("# --- Empty ---"))
+        XCTAssertTrue(out.contains("127.0.0.1 localhost"))
+    }
+
+    func test_compose_skipsBlankAmongNonBlank() {
+        let parsed = HostsFile.Parsed(prefix: "127.0.0.1 localhost", managed: nil, suffix: "")
+        let out = HostsFile.compose(
+            parsed: parsed,
+            activeProfiles: [(name: "Empty", content: "   \n  "),
+                             (name: "Real", content: "1.2.3.4 real")]
+        )
+        XCTAssertTrue(out.contains("# --- Real ---"))
+        XCTAssertTrue(out.contains("1.2.3.4 real"))
+        XCTAssertFalse(out.contains("# --- Empty ---"))
+    }
+
     func test_compose_isIdempotent() {
         let parsed = HostsFile.Parsed(prefix: "127.0.0.1 localhost", managed: nil, suffix: "tail")
         let profiles = [(name: "A", content: "1.1.1.1 a"), (name: "B", content: "2.2.2.2 b")]

@@ -7,6 +7,7 @@ struct HostsEditorView: View {
     @State private var selection: UUID?
     @State private var draftName: String = ""
     @State private var draftContent: String = ""
+    @State private var draftSystemContent: String = ""
     @State private var showRestoreConfirm = false
 
     var body: some View {
@@ -71,15 +72,27 @@ struct HostsEditorView: View {
                 Button("取消", role: .cancel) {}
             }
         } else {
-            VStack(alignment: .leading) {
-                Text(manager.systemHosts)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("系统 Hosts")
+                    .font(.headline)
+                TextEditor(text: $draftSystemContent)
                     .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                Button("用默认编辑器打开") {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: "/etc/hosts"))
+                    .border(.quaternary)
+                HStack {
+                    Button("保存") {
+                        Task {
+                            await manager.updateSystemHosts(draftSystemContent)
+                            draftSystemContent = manager.systemHosts
+                        }
+                    }
+                    Spacer()
+                    Button("用默认编辑器打开") {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: "/etc/hosts"))
+                    }
                 }
             }
             .padding()
+            .onAppear { draftSystemContent = manager.systemHosts }
         }
     }
 
@@ -91,6 +104,7 @@ struct HostsEditorView: View {
     private func loadDraft() {
         draftName = selectedProfile?.name ?? ""
         draftContent = selectedProfile?.content ?? ""
+        if selection == nil { draftSystemContent = manager.systemHosts }
     }
 
     private func deleteSelected() {

@@ -8,10 +8,17 @@
 
 Add a hosts-file management feature to AnyDoor. Users can create, edit, and
 delete named host profiles, activate any subset of them (multiple active at
-once, merged), and apply the result to `/etc/hosts`. The system's pre-existing
-hosts content is never modified by AnyDoor; it is shown read-only with an
-"open in external editor" entry point. Writes to `/etc/hosts` go through a
-privileged helper so the user authorizes once instead of on every change.
+once, merged), and apply the result to `/etc/hosts`. Writes to `/etc/hosts` go
+through a privileged helper so the user authorizes once instead of on every
+change.
+
+> **Revision (post-implementation):** Two requirements changed after the first
+> build. (1) The system's existing hosts content is now **editable** in-app, not
+> read-only: editing it rewrites the system portion (prefix) while preserving
+> AnyDoor's managed block. The "open in external editor" entry point remains.
+> (2) Operations on a **blank** profile (empty content) and any change that would
+> not alter the file are skipped — blank profiles contribute nothing to the
+> managed block and never trigger a privileged write / authorization prompt.
 
 The UX reference is the Raycast `ihosts` extension, adapted to AnyDoor's
 existing menu-bar-panel + hover-popover interaction model.
@@ -21,7 +28,8 @@ existing menu-bar-panel + hover-popover interaction model.
 - Create / edit / delete user-defined host profiles.
 - Activate profiles via checkboxes; multiple active profiles are merged into
   one managed block.
-- Never modify the system's existing hosts content. Show it read-only and
+- Show and let the user edit the system's existing hosts content; editing
+  rewrites the system portion while preserving AnyDoor's managed block. Also
   provide an "open `/etc/hosts` in default editor" action.
 - Password-free writes after a one-time approval (privileged helper).
 - One-time backup of the original `/etc/hosts`, plus two restore actions:

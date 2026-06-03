@@ -125,6 +125,31 @@ final class HostsManager {
         await scheduleApply()
     }
 
+    /// Edit the system portion of `/etc/hosts` in place. The edited content
+    /// becomes the new prefix; AnyDoor's managed block (active profiles) is
+    /// re-appended so user profiles survive a system-hosts edit.
+    func updateSystemHosts(_ newContent: String) async {
+        // Serialize against any in-flight composed apply.
+        await applyTask?.value
+
+        var backupError: Error?
+        do {
+            try backup.ensureOriginalBackup()
+        } catch {
+            backupError = error
+            logger.warning("Backup creation failed: \(error)")
+        }
+        do {
+            try await applyContent(composedContent(systemPrefix: newContent))
+            lastError = backupError != nil ? "备份创建失败，可能无法完整恢复" : nil
+            reload()
+        } catch {
+            lastError = String(describing: error)
+            logger.error("System hosts edit failed: \(error)")
+            reload()
+        }
+    }
+
     /// Destructive restore (UI must confirm): overwrite with first-run backup.
     func restoreFirstRunBackup() async {
         // Wait for any in-flight composed apply to finish before overwriting.
@@ -178,7 +203,7 @@ final class HostsManager {
         }
 
         do {
-            try await applyToSystemThrowing()
+            try await applyContent(composedContent(systemPrefix: nil))
             try? modelContainer?.mainContext.save()
             // Surface backup warning instead of clearing error on success.
             if let _ = backupError {
@@ -196,14 +221,30 @@ final class HostsManager {
         }
     }
 
-    private func applyToSystemThrowing() async throws {
-        let writer = makeWriter()
-        let parsed = HostsFile.parse(readLiveHosts())
+    /// Build the full `/etc/hosts` text. When `systemPrefix` is nil the existing
+    /// system content is preserved from the live file; otherwise it is replaced
+    /// (used by `updateSystemHosts`). The managed block is always rebuilt from
+    /// the currently active profiles.
+    private func composedContent(systemPrefix: String?) -> String {
+        let parsed: HostsFile.Parsed
+        if let systemPrefix {
+            parsed = HostsFile.Parsed(prefix: systemPrefix, managed: nil, suffix: "")
+        } else {
+            parsed = HostsFile.parse(readLiveHosts())
+        }
         let active = profiles
             .filter(\.isActive)
             .sorted { $0.displayOrder < $1.displayOrder }
             .map { (name: $0.name, content: $0.content) }
-        let newContent = HostsFile.compose(parsed: parsed, activeProfiles: active)
-        try await writer.write(newContent)
+        return HostsFile.compose(parsed: parsed, activeProfiles: active)
+    }
+
+    /// Write `content` through the current writer, skipping the privileged write
+    /// entirely when it would not change the file (e.g. toggling or deleting a
+    /// blank profile) so the user is never prompted for a no-op.
+    private func applyContent(_ content: String) async throws {
+        guard content != readLiveHosts() else { return }
+        let writer = makeWriter()
+        try await writer.write(content)
     }
 }
