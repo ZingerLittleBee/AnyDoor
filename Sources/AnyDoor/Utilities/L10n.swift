@@ -17,6 +17,7 @@ enum L10n {
         case builtinFlushDNS = "builtin.flushDNS"
         case builtinHideDesktopIcons = "builtin.hideDesktopIcons"
         case builtinHideDock = "builtin.hideDock"
+        case builtinHostsManager = "builtin.hostsManager"
         case builtinKeepAwake = "builtin.keepAwake"
         case builtinKeyboardLock = "builtin.keyboardLock"
         case builtinLockScreen = "builtin.lockScreen"
