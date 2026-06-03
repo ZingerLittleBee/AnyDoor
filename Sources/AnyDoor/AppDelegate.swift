@@ -107,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ClipboardWallProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
+        HostsManager.shared.bootstrap(modelContainer: modelContainer)
 
         // Brightness control (external DDC/CI displays). Arch-selected backend.
         #if arch(arm64)
