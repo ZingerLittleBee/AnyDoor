@@ -147,31 +147,15 @@ struct HostsEditorView: View {
         }
     }
 
-    /// The content area: editable in edit mode, a read-only selectable view
-    /// otherwise. Rounded card styling.
+    /// The content area: the same text view in both modes (only `isEditable`
+    /// changes) so toggling edit never shifts the text. Rounded card styling.
     @ViewBuilder
     private func editorArea(text: Binding<String>) -> some View {
-        Group {
-            if mode == .edit {
-                TextEditor(text: text)
-                    .font(.system(.body, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                    .padding(6)
-            } else {
-                ScrollView {
-                    Text(text.wrappedValue.isEmpty ? "（空）" : text.wrappedValue)
-                        .foregroundStyle(text.wrappedValue.isEmpty ? .secondary : .primary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                        .font(.system(.body, design: .monospaced))
-                        .padding(6)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .textBackgroundColor))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        PlainTextEditor(text: text, isEditable: mode == .edit)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .textBackgroundColor))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
     }
 
     /// "编辑" in view mode (enters edit mode) or "保存" in edit mode (runs the
