@@ -87,7 +87,7 @@ struct HostsEditorView: View {
                     }
                     Spacer()
                     Button("用默认编辑器打开") {
-                        NSWorkspace.shared.open(URL(fileURLWithPath: "/etc/hosts"))
+                        HostsFileOpener.open()
                     }
                 }
             }

@@ -23,7 +23,7 @@ struct HostsManagerPopoverView: View {
                 Text("系统 Hosts")
                 Spacer()
                 Button {
-                    NSWorkspace.shared.open(URL(fileURLWithPath: "/etc/hosts"))
+                    HostsFileOpener.open()
                 } label: { Image(systemName: "arrow.up.forward.app") }
                     .buttonStyle(.borderless)
             }
