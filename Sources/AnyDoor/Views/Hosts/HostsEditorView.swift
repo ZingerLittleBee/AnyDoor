@@ -24,6 +24,7 @@ struct HostsEditorView: View {
     @State private var draftSystemContent: String = ""
     @State private var showRestoreConfirm = false
     @State private var showRemoveConfirm = false
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         NavigationSplitView {
@@ -97,7 +98,28 @@ struct HostsEditorView: View {
                         await manager.updateProfile(profile, name: draftName, content: draftContent)
                     }
                     Spacer()
-                    Button("移除", role: .destructive) { showRemoveConfirm = true }
+                    Button("删除", role: .destructive) { showDeleteConfirm = true }
+                        .tint(.red)
+                }
+            }
+            .padding()
+            .confirmationDialog("删除配置「\(draftName)」？此操作不可撤销。",
+                                isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+                Button("删除", role: .destructive) { delete(profile) }
+                Button("取消", role: .cancel) {}
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("系统 Hosts").font(.headline)
+                editorArea(text: $draftSystemContent)
+                HStack {
+                    modeButton {
+                        await manager.updateSystemHosts(draftSystemContent)
+                        draftSystemContent = manager.systemHosts
+                    }
+                    Spacer()
+                    Button("用默认编辑器打开") { HostsFileOpener.open() }
+                    Button("移除托管块", role: .destructive) { showRemoveConfirm = true }
                         .tint(.red)
                     Button("恢复首次备份") { showRestoreConfirm = true }
                 }
@@ -113,20 +135,6 @@ struct HostsEditorView: View {
                 Button("恢复", role: .destructive) { Task { await manager.restoreFirstRunBackup() } }
                 Button("取消", role: .cancel) {}
             }
-        } else {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("系统 Hosts").font(.headline)
-                editorArea(text: $draftSystemContent)
-                HStack {
-                    modeButton {
-                        await manager.updateSystemHosts(draftSystemContent)
-                        draftSystemContent = manager.systemHosts
-                    }
-                    Spacer()
-                    Button("用默认编辑器打开") { HostsFileOpener.open() }
-                }
-            }
-            .padding()
             .onAppear { draftSystemContent = manager.systemHosts }
         }
     }
