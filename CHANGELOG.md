@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-06-03
+
 ### Fixed
 
 - Hosts writes failed silently on signed (Developer ID) builds: activating a
