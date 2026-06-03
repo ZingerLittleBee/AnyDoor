@@ -6,6 +6,17 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Hosts writes failed silently on signed (Developer ID) builds: activating a
+  profile reverted its toggle and `/etc/hosts` was never written. The privileged
+  helper's caller code-signing requirement hard-coded the wrong team OU
+  (`4GH398M5WH`, detected from an Apple Development cert) instead of the Developer
+  ID Application team ID (`9VM4RM39R3`), so `SecCodeCheckValidity` rejected the
+  legitimately-signed app on every XPC connection and each write rolled back.
+  Corrected the requirement to the real team OU, verified with
+  `codesign --verify -R` against the signed app.
+
 ## [1.9.0] - 2026-06-03
 
 ### Added

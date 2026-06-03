@@ -10,9 +10,10 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, HostsHelperPro
     private let writeQueue = DispatchQueue(label: "dev.bybee.AnyDoor.HostsHelper.write")
 
     // anchor apple generic + our Team ID + our app identifier.
-    // TODO(Task 14): verify this OU matches the Developer ID Application cert used for release; detected from the Apple Development cert on the dev machine.
+    // OU is the Developer ID Application Team ID (verified via
+    // `codesign --verify -R` against the signed /Applications/AnyDoor.app).
     private static let clientRequirement =
-        "anchor apple generic and certificate leaf[subject.OU] = \"4GH398M5WH\" and identifier \"dev.bybee.AnyDoor\""
+        "anchor apple generic and certificate leaf[subject.OU] = \"9VM4RM39R3\" and identifier \"dev.bybee.AnyDoor\""
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection conn: NSXPCConnection) -> Bool {
         guard isValidClient(conn) else { return false }
