@@ -31,6 +31,7 @@ let package = Package(
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "DDC", package: "DDC.swift"),
+                "HostsHelperShared",
             ],
             resources: [
                 .process("Resources"),
@@ -40,6 +41,19 @@ let package = Package(
             ],
             plugins: [
                 .plugin(name: "XCStringsCompilerPlugin")
+            ]
+        ),
+        .target(
+            name: "HostsHelperShared",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .executableTarget(
+            name: "AnyDoorHostsHelper",
+            dependencies: ["HostsHelperShared"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
             ]
         ),
         .testTarget(
