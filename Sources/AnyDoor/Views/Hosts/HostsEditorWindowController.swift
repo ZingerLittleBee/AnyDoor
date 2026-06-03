@@ -14,7 +14,10 @@ final class HostsEditorWindowController: NSWindowController, NSWindowDelegate {
         )
         panel.title = "Hosts"
         panel.isReleasedWhenClosed = false
-        panel.level = .floating
+        // A normal-level window (not floating) that does not hide when the app
+        // deactivates; RegularWindowCoordinator keeps it reachable via Dock /
+        // Cmd-Tab while it is open.
+        panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         super.init(window: panel)
         panel.delegate = self
@@ -30,6 +33,7 @@ final class HostsEditorWindowController: NSWindowController, NSWindowDelegate {
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
         HostsManager.shared.refresh()
+        if let window { RegularWindowCoordinator.shared.track(window) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.center()
