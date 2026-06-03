@@ -56,7 +56,8 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, HostsHelperPro
     }
 
     func helperVersion(withReply reply: @escaping (String) -> Void) {
-        reply(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown")
+        // The helper is a bare Mach-O without an Info.plist; read the shared constant instead.
+        reply(HostsHelperConstants.helperVersion)
     }
 
     /// Write to a temp file in /etc (same filesystem so rename is atomic), then

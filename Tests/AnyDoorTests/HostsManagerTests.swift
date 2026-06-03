@@ -10,13 +10,15 @@ final class HostsManagerTests: XCTestCase {
     }
 
     private func makeManager(writer: HostsWriter,
-                             live: @escaping () -> String = { "127.0.0.1 localhost\n" }) throws
+                             live: @escaping () -> String = { "127.0.0.1 localhost\n" },
+                             debounceInterval: Duration = .milliseconds(150)) throws
         -> (HostsManager, ModelContainer) {
         let container = try makeContainer()
         let mgr = HostsManager(writer: writer,
                                backup: HostsBackupStore(backupDirectory: FileManager.default.temporaryDirectory
                                    .appendingPathComponent(UUID().uuidString), readLiveHosts: live),
-                               readLiveHosts: live)
+                               readLiveHosts: live,
+                               debounceInterval: debounceInterval)
         mgr.bootstrap(modelContainer: container)
         return (mgr, container)
     }
@@ -64,5 +66,54 @@ final class HostsManagerTests: XCTestCase {
         let written = try XCTUnwrap(mock.lastWritten)
         XCTAssertFalse(written.contains(HostsFile.beginMarker))
         XCTAssertTrue(written.contains("127.0.0.1 localhost"))
+    }
+
+    // MARK: - Fix 1: debounce / coalesce
+
+    func test_rapidToggles_coalesceIntoSingleWrite() async throws {
+        let mock = MockHostsWriter()
+        // Use a small debounce so the test runs quickly but both calls still land in the window.
+        let (mgr, _) = try makeManager(writer: mock, debounceInterval: .milliseconds(30))
+        mgr.createProfile(name: "Alpha", content: "1.1.1.1 alpha")
+        mgr.createProfile(name: "Beta", content: "2.2.2.2 beta")
+        // Capture IDs to look up profiles after awaiting — avoids sending isolated objects off-actor.
+        let alphaID = mgr.profiles[0].id
+        let betaID = mgr.profiles[1].id
+        // Fire two concurrent activations within the debounce window using Task so they both
+        // enqueue before the debounce window expires, then await both.
+        let t1 = Task { @MainActor in
+            if let p = mgr.profiles.first(where: { $0.id == alphaID }) {
+                await mgr.setActive(p, true)
+            }
+        }
+        let t2 = Task { @MainActor in
+            if let p = mgr.profiles.first(where: { $0.id == betaID }) {
+                await mgr.setActive(p, true)
+            }
+        }
+        await t1.value
+        await t2.value
+        // Only one write should have reached the system.
+        XCTAssertEqual(mock.writeCount, 1, "Rapid concurrent toggles must coalesce into a single write")
+        // The single write must contain both profiles' content.
+        let written = try XCTUnwrap(mock.lastWritten)
+        XCTAssertTrue(written.contains("1.1.1.1 alpha"))
+        XCTAssertTrue(written.contains("2.2.2.2 beta"))
+    }
+
+    // MARK: - Fix 3: backup failure surfaced but write proceeds
+
+    func test_backupFailure_surfacedButWriteProceeds() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock, debounceInterval: .milliseconds(1))
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        // Inject a backup failure.
+        mgr.backup.backupErrorOverride = HostsWriterError.writeFailed("backup dir unwritable")
+        let profile = mgr.profiles[0]
+        await mgr.setActive(profile, true)
+        // Write should still have proceeded.
+        XCTAssertEqual(mock.writeCount, 1, "Write must proceed even when backup creation fails")
+        // lastError must surface the backup warning to the user.
+        XCTAssertNotNil(mgr.lastError, "lastError must be non-nil after backup failure")
     }
 }

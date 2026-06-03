@@ -10,7 +10,14 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hosts")
 @Observable @MainActor
 final class HostsManager {
     static let shared = HostsManager(
-        writer: HostsManager.makeDefaultWriter(),
+        makeWriter: {
+            // Re-evaluate on every write so the privileged helper is used as soon
+            // as the user approves it — without requiring an app relaunch.
+            if HelperManager.shared.readiness() == .enabled {
+                return PrivilegedHelperWriter()
+            }
+            return AppleScriptWriter()
+        },
         backup: HostsBackupStore.makeDefault(),
         readLiveHosts: { (try? String(contentsOf: URL(fileURLWithPath: "/etc/hosts"), encoding: .utf8)) ?? "" }
     )
@@ -20,26 +27,43 @@ final class HostsManager {
     private(set) var systemHosts: String = ""
     private(set) var lastError: String?
 
-    private let writer: HostsWriter
-    private let backup: HostsBackupStore
+    // MARK: - Writer factory (re-evaluated per write so helper approval takes effect immediately)
+    private let makeWriter: () -> HostsWriter
+    // `var` so tests can inject backupErrorOverride on the value-type HostsBackupStore.
+    var backup: HostsBackupStore
     private let readLiveHosts: () -> String
     private var modelContainer: ModelContainer?
 
-    init(writer: HostsWriter, backup: HostsBackupStore, readLiveHosts: @escaping () -> String) {
-        self.writer = writer
+    // MARK: - Debounce / serialization state
+    private let debounceInterval: Duration
+    private var applyPending = false
+    private var applyTask: Task<Void, Never>?
+
+    // MARK: - Init
+
+    /// Designated initialiser. Accepts a factory so the writer can be re-resolved per write.
+    init(makeWriter: @escaping () -> HostsWriter,
+         backup: HostsBackupStore,
+         readLiveHosts: @escaping () -> String,
+         debounceInterval: Duration = .milliseconds(150)) {
+        self.makeWriter = makeWriter
         self.backup = backup
         self.readLiveHosts = readLiveHosts
+        self.debounceInterval = debounceInterval
     }
 
-    @MainActor
-    private static func makeDefaultWriter() -> HostsWriter {
-        if HelperManager.shared.ensureRegistered() {
-            return PrivilegedHelperWriter()
-        }
-        return AppleScriptWriter()
+    /// Convenience initialiser for tests that supply a fixed writer.
+    convenience init(writer: HostsWriter,
+                     backup: HostsBackupStore,
+                     readLiveHosts: @escaping () -> String,
+                     debounceInterval: Duration = .milliseconds(150)) {
+        self.init(makeWriter: { writer }, backup: backup, readLiveHosts: readLiveHosts,
+                  debounceInterval: debounceInterval)
     }
 
     func bootstrap(modelContainer: ModelContainer) {
+        // Attempt helper registration once at startup (cheap; falls through if already registered).
+        _ = HelperManager.shared.ensureRegistered()
         self.modelContainer = modelContainer
         reload()
     }
@@ -73,7 +97,7 @@ final class HostsManager {
         context.delete(profile)
         try? context.save()
         reload()
-        if wasActive { await applyToSystem() }
+        if wasActive { await scheduleApply() }
     }
 
     /// Edit a profile. Persists immediately; re-applies only if active.
@@ -82,7 +106,7 @@ final class HostsManager {
         profile.content = content
         profile.updatedAt = Date()
         if profile.isActive {
-            await applyAndPersist()
+            await scheduleApply()
         } else {
             try? modelContainer?.mainContext.save()
             reload()
@@ -91,26 +115,27 @@ final class HostsManager {
 
     /// Toggle activation. Applies first; persists only on success.
     func setActive(_ profile: HostProfile, _ active: Bool) async {
-        let previous = profile.isActive
         profile.isActive = active
-        await applyAndPersist(onFailureRollback: { profile.isActive = previous })
+        await scheduleApply()
     }
 
     /// DEFAULT safe restore: remove only AnyDoor's managed block.
     func removeManagedBlock() async {
         for p in profiles { p.isActive = false }
-        await applyAndPersist()
+        await scheduleApply()
     }
 
     /// Destructive restore (UI must confirm): overwrite with first-run backup.
     func restoreFirstRunBackup() async {
-        // Extract the backup content on the main actor before the async write,
-        // avoiding a Swift 6 data-race when sending self.backup to nonisolated code.
+        // Wait for any in-flight composed apply to finish before overwriting.
+        await applyTask?.value
+
         guard let original = backup.originalContents() else {
-            lastError = "No backup available"
+            lastError = "无可用备份"
             return
         }
         do {
+            let writer = makeWriter()
             try await writer.write(original)
             for p in profiles { p.isActive = false }
             try? modelContainer?.mainContext.save()
@@ -120,30 +145,59 @@ final class HostsManager {
         }
     }
 
+    // MARK: - Debounce / serialize
+
+    /// Coalescing debounced entry-point for composed applies. All callers that
+    /// go through the compose path use this instead of `applyAndPersist` directly.
+    private func scheduleApply() async {
+        applyPending = true
+        if applyTask == nil {
+            applyTask = Task { @MainActor in
+                try? await Task.sleep(for: self.debounceInterval)
+                // Serial retry loop: pick up any toggle that arrived during the write.
+                while self.applyPending {
+                    self.applyPending = false
+                    await self.applyAndPersist()
+                }
+                self.applyTask = nil
+            }
+        }
+        await applyTask?.value
+    }
+
     // MARK: - Apply
 
-    private func applyAndPersist(onFailureRollback rollback: (() -> Void)? = nil) async {
+    private func applyAndPersist() async {
+        // Capture backup error; a failed backup must not abort the write.
+        var backupError: Error?
         do {
-            try? backup.ensureOriginalBackup()
+            try backup.ensureOriginalBackup()
+        } catch {
+            backupError = error
+            logger.warning("Backup creation failed: \(error)")
+        }
+
+        do {
             try await applyToSystemThrowing()
             try? modelContainer?.mainContext.save()
-            lastError = nil
+            // Surface backup warning instead of clearing error on success.
+            if let _ = backupError {
+                lastError = "备份创建失败，可能无法完整恢复"
+            } else {
+                lastError = nil
+            }
             reload()
         } catch {
-            rollback?()
+            // Discard unsaved in-memory mutations so reload() sees the persisted state.
+            modelContainer?.mainContext.rollback()
             lastError = String(describing: error)
             logger.error("Apply failed: \(error)")
             reload()
         }
     }
 
-    /// Non-throwing convenience used by delete (state already persisted).
-    private func applyToSystem() async {
-        try? backup.ensureOriginalBackup()
-        do { try await applyToSystemThrowing() } catch { lastError = String(describing: error) }
-    }
-
     private func applyToSystemThrowing() async throws {
+        let writer = makeWriter()
         let parsed = HostsFile.parse(readLiveHosts())
         let active = profiles
             .filter(\.isActive)

@@ -13,7 +13,7 @@ struct HostsEditorView: View {
         NavigationSplitView {
             List(selection: $selection) {
                 Section {
-                    Label("System Hosts", systemImage: "cpu").tag(Optional<UUID>.none)
+                    Label("系统 Hosts", systemImage: "cpu").tag(Optional<UUID>.none)
                 }
                 Section {
                     ForEach(manager.profiles) { profile in
@@ -30,7 +30,7 @@ struct HostsEditorView: View {
             .frame(minWidth: 220)
             .toolbar {
                 ToolbarItem {
-                    Button { manager.createProfile(name: "New Profile") } label: {
+                    Button { manager.createProfile(name: "新配置") } label: {
                         Image(systemName: "plus")
                     }
                 }
@@ -42,6 +42,7 @@ struct HostsEditorView: View {
         } detail: {
             detail
         }
+        .safeAreaInset(edge: .top) { HelperApprovalBanner() }
         .onChange(of: selection) { _, _ in loadDraft() }
     }
 
@@ -49,7 +50,7 @@ struct HostsEditorView: View {
     private var detail: some View {
         if let profile = selectedProfile {
             VStack(alignment: .leading, spacing: 8) {
-                TextField("Name", text: $draftName)
+                TextField("名称", text: $draftName)
                     .textFieldStyle(.roundedBorder)
                 TextEditor(text: $draftContent)
                     .font(.system(.body, design: .monospaced))

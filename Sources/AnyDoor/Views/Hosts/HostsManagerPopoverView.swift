@@ -10,6 +10,7 @@ struct HostsManagerPopoverView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            HelperApprovalBanner()
             if let error = manager.lastError {
                 Text(error)
                     .font(.caption2)
@@ -19,7 +20,7 @@ struct HostsManagerPopoverView: View {
             // System Hosts (read-only)
             HStack {
                 Image(systemName: "cpu")
-                Text("System Hosts")
+                Text("系统 Hosts")
                 Spacer()
                 Button {
                     NSWorkspace.shared.open(URL(fileURLWithPath: "/etc/hosts"))
@@ -62,7 +63,7 @@ struct HostsManagerPopoverView: View {
     }
 
     private func newProfileName() -> String {
-        let base = "New Profile"
+        let base = "新配置"
         let existing = Set(manager.profiles.map(\.name))
         if !existing.contains(base) { return base }
         var i = 2

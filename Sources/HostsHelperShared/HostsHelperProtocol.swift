@@ -7,6 +7,8 @@ public enum HostsHelperConstants {
     public static let machServiceName = "dev.bybee.AnyDoor.HostsHelper"
     /// Upper bound on a single write payload (bytes) to bound helper memory.
     public static let maxPayloadBytes = 1_048_576  // 1 MiB
+    /// Bump alongside protocol or behavior changes so the app can detect stale helpers.
+    public static let helperVersion = "1"
 }
 
 /// XPC interface implemented by the root helper.
