@@ -2,8 +2,10 @@ import SwiftUI
 
 /// Master-detail editor: profile list on the left, content editor on the right.
 ///
-/// Opens in read-only **view** mode to prevent accidental writes; the user must
-/// click "编辑" to enter **edit** mode. Switching the selected host file resets
+/// Profile names are renamed inline in the list (a freshly created profile
+/// drops straight into rename). The right pane shows only the content body —
+/// opening in read-only **view** mode to prevent accidental writes; the user
+/// clicks "编辑" to enter **edit** mode. Switching the selected host file resets
 /// back to view mode. System Hosts editing rewrites the system portion while
 /// preserving the managed block.
 struct HostsEditorView: View {
@@ -19,9 +21,11 @@ struct HostsEditorView: View {
 
     @State private var selection: Selection? = .system
     @State private var mode: Mode = .view
-    @State private var draftName: String = ""
     @State private var draftContent: String = ""
     @State private var draftSystemContent: String = ""
+    @State private var renamingID: UUID?
+    @State private var renameText: String = ""
+    @FocusState private var renameFieldFocused: Bool
     @State private var showRestoreConfirm = false
     @State private var showDeleteConfirm = false
 
@@ -33,18 +37,16 @@ struct HostsEditorView: View {
                 }
                 Section {
                     ForEach(manager.profiles) { profile in
-                        HStack {
-                            Image(systemName: profile.isActive ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(profile.isActive ? .green : .secondary)
-                                .onTapGesture { Task { await manager.setActive(profile, !profile.isActive) } }
-                            Text(profile.name)
-                        }
-                        .tag(Selection.profile(profile.id))
-                        .contextMenu {
-                            Button(role: .destructive) { delete(profile) } label: {
-                                Label("删除", systemImage: "trash")
+                        profileRow(profile)
+                            .tag(Selection.profile(profile.id))
+                            .contextMenu {
+                                Button { beginRename(profile) } label: {
+                                    Label("重命名", systemImage: "pencil")
+                                }
+                                Button(role: .destructive) { delete(profile) } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
                             }
-                        }
                     }
                 }
             }
@@ -53,7 +55,7 @@ struct HostsEditorView: View {
             // list's focus, so Return inside the content editor still inserts a
             // newline rather than toggling.
             .onKeyPress(.return) {
-                guard let profile = selectedProfile else { return .ignored }
+                guard renamingID == nil, let profile = selectedProfile else { return .ignored }
                 Task { await manager.setActive(profile, !profile.isActive) }
                 return .handled
             }
@@ -61,9 +63,7 @@ struct HostsEditorView: View {
             .onDeleteCommand { deleteSelected() }
             .toolbar {
                 ToolbarItem {
-                    Button { manager.createProfile(name: "新配置") } label: {
-                        Image(systemName: "plus")
-                    }
+                    Button { addProfile() } label: { Image(systemName: "plus") }
                 }
                 ToolbarItem {
                     Button { deleteSelected() } label: { Image(systemName: "trash") }
@@ -79,22 +79,39 @@ struct HostsEditorView: View {
             mode = .view
             loadDraft()
         }
+        // Commit an in-progress rename when its field loses focus (Enter, click
+        // away, or selecting another row).
+        .onChange(of: renameFieldFocused) { _, focused in
+            if !focused { commitRename() }
+        }
+    }
+
+    @ViewBuilder
+    private func profileRow(_ profile: HostProfile) -> some View {
+        HStack {
+            Image(systemName: profile.isActive ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(profile.isActive ? .green : .secondary)
+                .onTapGesture { Task { await manager.setActive(profile, !profile.isActive) } }
+            if renamingID == profile.id {
+                TextField("名称", text: $renameText)
+                    .textFieldStyle(.plain)
+                    .focused($renameFieldFocused)
+                    .onSubmit { commitRename() }
+            } else {
+                Text(profile.name)
+                    .onTapGesture(count: 2) { beginRename(profile) }
+            }
+        }
     }
 
     @ViewBuilder
     private var detail: some View {
         if let profile = selectedProfile {
             VStack(alignment: .leading, spacing: 8) {
-                if mode == .edit {
-                    TextField("名称", text: $draftName)
-                        .textFieldStyle(.roundedBorder)
-                } else {
-                    Text(draftName).font(.headline)
-                }
                 editorArea(text: $draftContent)
                 HStack {
                     modeButton {
-                        await manager.updateProfile(profile, name: draftName, content: draftContent)
+                        await manager.updateProfile(profile, name: profile.name, content: draftContent)
                     }
                     Spacer()
                     Button("删除", role: .destructive) { showDeleteConfirm = true }
@@ -102,14 +119,13 @@ struct HostsEditorView: View {
                 }
             }
             .padding()
-            .confirmationDialog("删除配置「\(draftName)」？此操作不可撤销。",
+            .confirmationDialog("删除配置「\(profile.name)」？此操作不可撤销。",
                                 isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button("删除", role: .destructive) { delete(profile) }
                 Button("取消", role: .cancel) {}
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
-                Text("系统 Hosts").font(.headline)
                 editorArea(text: $draftSystemContent)
                 HStack {
                     modeButton {
@@ -132,25 +148,30 @@ struct HostsEditorView: View {
     }
 
     /// The content area: editable in edit mode, a read-only selectable view
-    /// otherwise.
+    /// otherwise. Rounded card styling.
     @ViewBuilder
     private func editorArea(text: Binding<String>) -> some View {
-        if mode == .edit {
-            TextEditor(text: text)
-                .font(.system(.body, design: .monospaced))
-                .border(.quaternary)
-        } else {
-            ScrollView {
-                Text(text.wrappedValue.isEmpty ? "（空）" : text.wrappedValue)
-                    .foregroundStyle(text.wrappedValue.isEmpty ? .secondary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+        Group {
+            if mode == .edit {
+                TextEditor(text: text)
                     .font(.system(.body, design: .monospaced))
-                    .padding(4)
+                    .scrollContentBackground(.hidden)
+                    .padding(6)
+            } else {
+                ScrollView {
+                    Text(text.wrappedValue.isEmpty ? "（空）" : text.wrappedValue)
+                        .foregroundStyle(text.wrappedValue.isEmpty ? .secondary : .primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .font(.system(.body, design: .monospaced))
+                        .padding(6)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .border(.quaternary)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
     }
 
     /// "编辑" in view mode (enters edit mode) or "保存" in edit mode (runs the
@@ -175,9 +196,33 @@ struct HostsEditorView: View {
     }
 
     private func loadDraft() {
-        draftName = selectedProfile?.name ?? ""
         draftContent = selectedProfile?.content ?? ""
         if case .system = selection { draftSystemContent = manager.systemHosts }
+    }
+
+    private func addProfile() {
+        manager.createProfile(name: "新配置")
+        // The new profile sorts last (highest displayOrder); select it and drop
+        // straight into inline rename so the user types the name in the list.
+        if let new = manager.profiles.last {
+            selection = .profile(new.id)
+            beginRename(new)
+        }
+    }
+
+    private func beginRename(_ profile: HostProfile) {
+        renamingID = profile.id
+        renameText = profile.name
+        DispatchQueue.main.async { renameFieldFocused = true }
+    }
+
+    private func commitRename() {
+        guard let id = renamingID,
+              let profile = manager.profiles.first(where: { $0.id == id }) else { return }
+        renamingID = nil
+        let name = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != profile.name else { return }
+        Task { await manager.updateProfile(profile, name: name, content: profile.content) }
     }
 
     private func deleteSelected() {
