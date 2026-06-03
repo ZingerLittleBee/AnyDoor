@@ -1,8 +1,11 @@
 import SwiftUI
 
 /// Master-detail editor: profile list on the left, content editor on the right.
-/// System Hosts is editable and rewrites the system portion while preserving
-/// the managed block.
+///
+/// Opens in read-only **view** mode to prevent accidental writes; the user must
+/// click "编辑" to enter **edit** mode. Switching the selected host file resets
+/// back to view mode. System Hosts editing rewrites the system portion while
+/// preserving the managed block.
 struct HostsEditorView: View {
     @Bindable var manager: HostsManager
     // A dedicated case for System Hosts instead of a nil UUID tag: List single
@@ -12,7 +15,10 @@ struct HostsEditorView: View {
         case system
         case profile(UUID)
     }
+    private enum Mode { case view, edit }
+
     @State private var selection: Selection? = .system
+    @State private var mode: Mode = .view
     @State private var draftName: String = ""
     @State private var draftContent: String = ""
     @State private var draftSystemContent: String = ""
@@ -60,21 +66,27 @@ struct HostsEditorView: View {
             detail
         }
         .safeAreaInset(edge: .top) { HelperApprovalBanner() }
-        .onChange(of: selection) { _, _ in loadDraft() }
+        // Switching files always returns to the safe read-only view mode.
+        .onChange(of: selection) { _, _ in
+            mode = .view
+            loadDraft()
+        }
     }
 
     @ViewBuilder
     private var detail: some View {
         if let profile = selectedProfile {
             VStack(alignment: .leading, spacing: 8) {
-                TextField("名称", text: $draftName)
-                    .textFieldStyle(.roundedBorder)
-                TextEditor(text: $draftContent)
-                    .font(.system(.body, design: .monospaced))
-                    .border(.quaternary)
+                if mode == .edit {
+                    TextField("名称", text: $draftName)
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    Text(draftName).font(.headline)
+                }
+                editorArea(text: $draftContent)
                 HStack {
-                    Button("保存") {
-                        Task { await manager.updateProfile(profile, name: draftName, content: draftContent) }
+                    modeButton {
+                        await manager.updateProfile(profile, name: draftName, content: draftContent)
                     }
                     Spacer()
                     Button("移除托管块") { Task { await manager.removeManagedBlock() } }
@@ -89,26 +101,57 @@ struct HostsEditorView: View {
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
-                Text("系统 Hosts")
-                    .font(.headline)
-                TextEditor(text: $draftSystemContent)
-                    .font(.system(.body, design: .monospaced))
-                    .border(.quaternary)
+                Text("系统 Hosts").font(.headline)
+                editorArea(text: $draftSystemContent)
                 HStack {
-                    Button("保存") {
-                        Task {
-                            await manager.updateSystemHosts(draftSystemContent)
-                            draftSystemContent = manager.systemHosts
-                        }
+                    modeButton {
+                        await manager.updateSystemHosts(draftSystemContent)
+                        draftSystemContent = manager.systemHosts
                     }
                     Spacer()
-                    Button("用默认编辑器打开") {
-                        HostsFileOpener.open()
-                    }
+                    Button("用默认编辑器打开") { HostsFileOpener.open() }
                 }
             }
             .padding()
             .onAppear { draftSystemContent = manager.systemHosts }
+        }
+    }
+
+    /// The content area: editable in edit mode, a read-only selectable view
+    /// otherwise.
+    @ViewBuilder
+    private func editorArea(text: Binding<String>) -> some View {
+        if mode == .edit {
+            TextEditor(text: text)
+                .font(.system(.body, design: .monospaced))
+                .border(.quaternary)
+        } else {
+            ScrollView {
+                Text(text.wrappedValue.isEmpty ? "（空）" : text.wrappedValue)
+                    .foregroundStyle(text.wrappedValue.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+                    .font(.system(.body, design: .monospaced))
+                    .padding(4)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .border(.quaternary)
+        }
+    }
+
+    /// "编辑" in view mode (enters edit mode) or "保存" in edit mode (runs the
+    /// save action, then returns to view mode).
+    @ViewBuilder
+    private func modeButton(save: @escaping () async -> Void) -> some View {
+        if mode == .edit {
+            Button("保存") {
+                Task {
+                    await save()
+                    mode = .view
+                }
+            }
+        } else {
+            Button("编辑") { mode = .edit }
         }
     }
 
