@@ -49,9 +49,12 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        .target(
+            name: "XPCAuditToken"
+        ),
         .executableTarget(
             name: "AnyDoorHostsHelper",
-            dependencies: ["HostsHelperShared"],
+            dependencies: ["HostsHelperShared", "XPCAuditToken"],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

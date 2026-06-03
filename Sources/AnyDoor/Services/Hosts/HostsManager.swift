@@ -31,9 +31,11 @@ final class HostsManager {
         self.readLiveHosts = readLiveHosts
     }
 
-    /// TEMPORARY (Task 6): the privileged helper is not implemented yet.
+    @MainActor
     private static func makeDefaultWriter() -> HostsWriter {
-        // TODO(Task 8): prefer PrivilegedHelperWriter when the helper is registered.
+        if HelperManager.shared.ensureRegistered() {
+            return PrivilegedHelperWriter()
+        }
         return AppleScriptWriter()
     }
 
