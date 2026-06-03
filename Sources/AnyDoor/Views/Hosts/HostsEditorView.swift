@@ -39,6 +39,11 @@ struct HostsEditorView: View {
                             Text(profile.name)
                         }
                         .tag(Selection.profile(profile.id))
+                        .contextMenu {
+                            Button(role: .destructive) { delete(profile) } label: {
+                                Label("删除", systemImage: "trash")
+                            }
+                        }
                     }
                 }
             }
@@ -51,6 +56,8 @@ struct HostsEditorView: View {
                 Task { await manager.setActive(profile, !profile.isActive) }
                 return .handled
             }
+            // Delete / Backspace removes the selected profile.
+            .onDeleteCommand { deleteSelected() }
             .toolbar {
                 ToolbarItem {
                     Button { manager.createProfile(name: "新配置") } label: {
@@ -168,7 +175,11 @@ struct HostsEditorView: View {
 
     private func deleteSelected() {
         guard let profile = selectedProfile else { return }
+        delete(profile)
+    }
+
+    private func delete(_ profile: HostProfile) {
+        if selection == .profile(profile.id) { selection = .system }
         Task { await manager.deleteProfile(profile) }
-        selection = .system
     }
 }
