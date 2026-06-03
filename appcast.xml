@@ -3,30 +3,64 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>1.9.0</title>
+            <pubDate>Wed, 03 Jun 2026 19:29:35 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>1.9.0</sparkle:version>
+            <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- Hosts management: create, edit, delete, and activate named host profiles and
+  apply the merged result to `/etc/hosts`. A new `hostsManager` built-in opens
+  a hover popover for quick activation toggles plus a single button into a
+  master-detail editor window. Writes go through a privileged helper
+  (`SMAppService` LaunchDaemon over XPC) so the user authorizes once and writes
+  are password-free thereafter; ad-hoc/dev builds fall back to an
+  AppleScript admin-prompt writer. The helper validates every caller by audit
+  token (`SecCodeCopyGuestWithAttributes` + code-signing requirement, closing
+  the PID-recycling window), caps the payload, serializes writes, and replaces
+  `/etc/hosts` atomically (temp file in `/etc` → fsync → root:wheel 0644 →
+  rename). `HostsManager` is the single source of truth: it composes a marked
+  managed block between sentinel comments while preserving the system content
+  before and after it verbatim, applies first and persists only on success
+  (rolling back from the store on failure), debounces and serializes rapid
+  activation toggles into one consistent write, and skips the privileged write
+  entirely when the result would be unchanged (so toggling or deleting a blank
+  profile never prompts for authorization). System Hosts is editable in the
+  window — saving rewrites the system portion while preserving the managed
+  block — and the editor opens in read-only view mode by default, requiring an
+  explicit 编辑 to enter edit mode and resetting to view mode when switching
+  files, to prevent accidental writes. Profiles can be deleted from the detail
+  pane, a right-click menu, or the Delete key, and Return toggles activation
+  for the selected profile. A one-time backup of the original `/etc/hosts` is
+  captured before the first managed write and surfaced as a confirmed
+  "恢复首次备份" recovery; an in-app banner deep-links to System Settings when
+  the helper awaits approval.
+
+### Fixed
+
+- Command Palette stuttered on the first scroll, then ran smoothly afterwards.
+  `CommandPaletteRow` resolved its Finder icon via `NSWorkspace.icon(forFile:)`
+  inside `body` — a synchronous disk read on every body pass with no caching —
+  so when `LazyVStack` materialized a fresh batch of rows on the first scroll,
+  each row hit disk in the same frame and dropped frames; reused rows never
+  re-ran, so later scrolling stayed smooth. The icon is now loaded once per row
+  in a `task` and cached in `@State`, leaving `body` a pure in-memory read. This
+  is the twin of the 1.8.2 `SpotlightRow` fix, which missed the command palette
+  row.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.9.0/AnyDoor-1.9.0.zip" length="6750886" type="application/octet-stream" sparkle:edSignature="yD3frJIBFDUXwm0sVCLKF16CIeoDps8c1yMViVbXH4LrW3ZwHwmODxbFXskU/wS5rB8tRDiKIlKaNi8Ca4npDQ=="/>
+        </item>
+        <item>
             <title>1.8.2</title>
             <pubDate>Tue, 02 Jun 2026 15:09:46 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.8.2</sparkle:version>
             <sparkle:shortVersionString>1.8.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Fixed
-
-- Spotlight app picker pinned a CPU core to 100% when left open. The search
-  field re-focus handler reasserted focus on every runloop tick whenever the
-  system refused to return first-responder (a SwiftUI focus / AppKit
-  first-responder desync, e.g. the floating panel sitting on another Space):
-  each failed attempt fired the change handler again, never settling. The
-  handler now gives up after a few consecutive failed strikes and resets the
-  counter once focus is genuinely regained, so a stray hit-test still reclaims
-  focus once but a desync can no longer spin. The loop was amplified by two
-  per-frame costs, now removed: `filteredApps` re-scanned every installed app
-  on each of its several reads per render (now memoized behind an
-  observation-ignored cache over a precomputed pool), and each row resolved its
-  Finder icon via NSWorkspace on every body pass (now resolved once per row in
-  a task).
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.2/AnyDoor-1.8.2.zip" length="6356638" type="application/octet-stream" sparkle:edSignature="wGYgZPF9rtJr9NSJbg8+0prfr53A2kDuh+0beascPFvNHn/a14VUyEKMGIJYcmcK4qLxL1OOIE6mXSIqJjaJDA=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.2/AnyDoor-1.8.2.zip" length="6356638" type="application/octet-stream" sparkle:edSignature="wGYgZPF9rtJr9NSJbg8+0prfr53A2kDuh+0beascPFvNHn/a14VUyEKMGIJYcmcK4qLxL1OOIE6mXSIqJjaJDA=="/>
         </item>
         <item>
             <title>1.8.1</title>
@@ -36,15 +70,6 @@
             <sparkle:shortVersionString>1.8.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.1/AnyDoor-1.8.1.zip" length="6415743" type="application/octet-stream" sparkle:edSignature="l4C71Mf0g12ZIG0Tu6sZGgSONGDpj1ZkvtUxoRuSqPDqueaejcXm5HcxcaVaEZLvrQogBLwNvB6y34EL+/SpDQ=="/>
-        </item>
-        <item>
-            <title>1.8.0</title>
-            <pubDate>Mon, 01 Jun 2026 19:02:52 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.8.0</sparkle:version>
-            <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.0/AnyDoor-1.8.0.zip" length="6342339" type="application/octet-stream" sparkle:edSignature="I8Zvp4Rm1CUa2+GovDS3+duZTxuT9l8/1ATSq5fagx4be0dsZL+0Ndw07I5NGnTjGm60+0SgrrYNoJAbn7L2Aw=="/>
         </item>
         <item>
             <title>1.2.0</title>

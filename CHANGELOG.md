@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-06-03
+
 ### Added
 
 - Hosts management: create, edit, delete, and activate named host profiles and
