@@ -6,6 +6,35 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Hosts management: create, edit, delete, and activate named host profiles and
+  apply the merged result to `/etc/hosts`. A new `hostsManager` built-in opens
+  a hover popover for quick activation toggles plus a single button into a
+  master-detail editor window. Writes go through a privileged helper
+  (`SMAppService` LaunchDaemon over XPC) so the user authorizes once and writes
+  are password-free thereafter; ad-hoc/dev builds fall back to an
+  AppleScript admin-prompt writer. The helper validates every caller by audit
+  token (`SecCodeCopyGuestWithAttributes` + code-signing requirement, closing
+  the PID-recycling window), caps the payload, serializes writes, and replaces
+  `/etc/hosts` atomically (temp file in `/etc` → fsync → root:wheel 0644 →
+  rename). `HostsManager` is the single source of truth: it composes a marked
+  managed block between sentinel comments while preserving the system content
+  before and after it verbatim, applies first and persists only on success
+  (rolling back from the store on failure), debounces and serializes rapid
+  activation toggles into one consistent write, and skips the privileged write
+  entirely when the result would be unchanged (so toggling or deleting a blank
+  profile never prompts for authorization). System Hosts is editable in the
+  window — saving rewrites the system portion while preserving the managed
+  block — and the editor opens in read-only view mode by default, requiring an
+  explicit 编辑 to enter edit mode and resetting to view mode when switching
+  files, to prevent accidental writes. Profiles can be deleted from the detail
+  pane, a right-click menu, or the Delete key, and Return toggles activation
+  for the selected profile. A one-time backup of the original `/etc/hosts` is
+  captured before the first managed write and surfaced as a confirmed
+  "恢复首次备份" recovery; an in-app banner deep-links to System Settings when
+  the helper awaits approval.
+
 ### Fixed
 
 - Command Palette stuttered on the first scroll, then ran smoothly afterwards.
