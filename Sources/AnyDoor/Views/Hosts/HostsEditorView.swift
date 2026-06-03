@@ -23,7 +23,6 @@ struct HostsEditorView: View {
     @State private var draftContent: String = ""
     @State private var draftSystemContent: String = ""
     @State private var showRestoreConfirm = false
-    @State private var showRemoveConfirm = false
     @State private var showDeleteConfirm = false
 
     var body: some View {
@@ -119,17 +118,10 @@ struct HostsEditorView: View {
                     }
                     Spacer()
                     Button("用默认编辑器打开") { HostsFileOpener.open() }
-                    Button("移除托管块", role: .destructive) { showRemoveConfirm = true }
-                        .tint(.red)
                     Button("恢复首次备份") { showRestoreConfirm = true }
                 }
             }
             .padding()
-            .confirmationDialog("移除 AnyDoor 托管块？将停用所有配置并从 /etc/hosts 中删除托管内容（系统内容保留）。",
-                                isPresented: $showRemoveConfirm, titleVisibility: .visible) {
-                Button("移除", role: .destructive) { Task { await manager.removeManagedBlock() } }
-                Button("取消", role: .cancel) {}
-            }
             .confirmationDialog("覆盖 /etc/hosts 为首次备份？外部改动将丢失。",
                                 isPresented: $showRestoreConfirm, titleVisibility: .visible) {
                 Button("恢复", role: .destructive) { Task { await manager.restoreFirstRunBackup() } }

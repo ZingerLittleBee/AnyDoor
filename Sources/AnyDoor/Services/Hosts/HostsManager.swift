@@ -119,12 +119,6 @@ final class HostsManager {
         await scheduleApply()
     }
 
-    /// DEFAULT safe restore: remove only AnyDoor's managed block.
-    func removeManagedBlock() async {
-        for p in profiles { p.isActive = false }
-        await scheduleApply()
-    }
-
     /// Edit the system portion of `/etc/hosts` in place. The edited content
     /// becomes the new prefix; AnyDoor's managed block (active profiles) is
     /// re-appended so user profiles survive a system-hosts edit.
