@@ -59,6 +59,11 @@ struct HostsManagerPopoverView: View {
             .padding(.horizontal, 8).padding(.vertical, 6)
         }
         .frame(width: 240)
+        // fixedSize forces the full intrinsic height so the hover panel measures
+        // and shows every row instead of clipping the bottom buttons.
+        .fixedSize(horizontal: false, vertical: true)
+        .background(.regularMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .onHover { onHoverChange($0) }
     }
 
