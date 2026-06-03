@@ -49,16 +49,11 @@ struct HostsManagerPopoverView: View {
             Image(systemName: "list.bullet.rectangle").foregroundStyle(.secondary)
             Text("Hosts 管理").font(.headline)
             Spacer()
-            Button { manager.createProfile(name: newProfileName()) } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.plain)
-            .help("新建")
             Button { onEdit() } label: {
-                Image(systemName: "pencil")
+                Image(systemName: "macwindow")
             }
             .buttonStyle(.plain)
-            .help("编辑")
+            .help("打开 Hosts 管理窗口")
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
@@ -93,14 +88,5 @@ struct HostsManagerPopoverView: View {
         .onTapGesture {
             Task { await manager.setActive(profile, !profile.isActive) }
         }
-    }
-
-    private func newProfileName() -> String {
-        let base = "新配置"
-        let existing = Set(manager.profiles.map(\.name))
-        if !existing.contains(base) { return base }
-        var i = 2
-        while existing.contains("\(base) \(i)") { i += 1 }
-        return "\(base) \(i)"
     }
 }
