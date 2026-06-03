@@ -37,6 +37,14 @@ struct HostsEditorView: View {
                 }
             }
             .frame(minWidth: 220)
+            // Return toggles activation for the selected profile. Scoped to the
+            // list's focus, so Return inside the content editor still inserts a
+            // newline rather than toggling.
+            .onKeyPress(.return) {
+                guard let profile = selectedProfile else { return .ignored }
+                Task { await manager.setActive(profile, !profile.isActive) }
+                return .handled
+            }
             .toolbar {
                 ToolbarItem {
                     Button { manager.createProfile(name: "新配置") } label: {
