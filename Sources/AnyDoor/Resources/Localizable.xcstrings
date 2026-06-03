@@ -253,6 +253,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐藏 Dock" } }
       }
     },
+    "builtin.hostsManager" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hosts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Hosts 管理" } }
+      }
+    },
     "builtin.keepAwake" : {
       "extractionState" : "manual",
       "localizations" : {

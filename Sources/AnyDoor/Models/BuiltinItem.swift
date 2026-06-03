@@ -47,6 +47,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case windowMoveNextDisplay
     case windowMovePreviousDisplay
     case windowLayout
+    case hostsManager
 
     enum Kind: Sendable {
         case toggle
@@ -58,7 +59,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
 
     var kind: Kind {
         switch self {
-        case .appShortcuts, .portManager, .windowLayout: return .submenu
+        case .appShortcuts, .portManager, .windowLayout, .hostsManager: return .submenu
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
@@ -121,6 +122,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowMoveNextDisplay:    return .builtinWindowMoveNextDisplay
         case .windowMovePreviousDisplay: return .builtinWindowMovePreviousDisplay
         case .windowLayout:      return .builtinWindowLayout
+        case .hostsManager:      return .builtinHostsManager
         }
     }
 
@@ -170,6 +172,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowMoveNextDisplay: return "rectangle.on.rectangle"
         case .windowMovePreviousDisplay: return "rectangle.on.rectangle"
         case .windowLayout: return "macwindow"
+        case .hostsManager: return "list.bullet.rectangle"
         }
     }
 
@@ -220,6 +223,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowMoveNextDisplay:    return 2180
         case .windowMovePreviousDisplay: return 2190
         case .windowLayout:    return 2000
+        case .hostsManager:    return 1950
         }
     }
 

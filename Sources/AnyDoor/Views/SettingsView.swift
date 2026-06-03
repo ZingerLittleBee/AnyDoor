@@ -14,5 +14,9 @@ struct SettingsView: View {
                 }
         }
         .frame(width: 560, height: 480)
+        // Adopt .regular activation policy while Settings is open so the window
+        // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
+        // focuses another app.
+        .background(RegularWindowRegistrar())
     }
 }

@@ -318,6 +318,29 @@ struct MenuBarView: View {
                 )
             }
             popover.show(anchoredTo: convertedTriggerFrame(for: target))
+        case .submenu(.hostsManager):
+            popover.needsKeyFocus = false
+            // Refresh before measuring so the panel sizes to the current profile
+            // list; deferring this left the popover too short and clipped the
+            // bottom rows.
+            HostsManager.shared.refresh()
+            popover.updateContent {
+                HostsManagerPopoverView(
+                    manager: HostsManager.shared,
+                    onHoverChange: { gate.popoverHover($0) },
+                    onEdit: {
+                        gate.reset()
+                        popover.hide()
+                        HostsEditorWindowController.shared.show()
+                        onRequestClose()
+                    },
+                    onClose: {
+                        gate.reset()
+                        popover.hide()
+                    }
+                )
+            }
+            popover.show(anchoredTo: convertedTriggerFrame(for: target))
         case .submenu:
             // Other builtin submenu items (none today) — nothing to mount.
             break

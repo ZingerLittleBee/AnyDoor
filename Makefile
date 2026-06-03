@@ -21,6 +21,9 @@ install: swift-release
 	@mkdir -p $(APP_DIR)/Contents/Resources
 	@mkdir -p $(APP_DIR)/Contents/Frameworks
 	@cp $(BINARY) $(APP_DIR)/Contents/MacOS/
+	@cp .build/release/AnyDoorHostsHelper $(APP_DIR)/Contents/MacOS/ 2>/dev/null || true
+	@mkdir -p $(APP_DIR)/Contents/Library/LaunchDaemons
+	@cp Resources/dev.bybee.AnyDoor.HostsHelper.plist $(APP_DIR)/Contents/Library/LaunchDaemons/
 	@cp Info.plist $(APP_DIR)/Contents/
 	@cp Resources/AppIcon.icns $(APP_DIR)/Contents/Resources/
 	@rm -rf $(APP_DIR)/Contents/Resources/$(APP_NAME)_$(APP_NAME).bundle

@@ -1,0 +1,23 @@
+import SwiftUI
+
+/// Shown in the Hosts popover and editor when the privileged helper is
+/// registered but still awaiting the user's approval in System Settings.
+/// Renders nothing when the helper is enabled or unavailable (dev/ad-hoc
+/// builds fall back to the AppleScript writer and need no nagging).
+struct HelperApprovalBanner: View {
+    var body: some View {
+        if HelperManager.shared.readiness() == .requiresApproval {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.shield")
+                    .foregroundStyle(.orange)
+                Text("需要在系统设置中授权后台帮助程序")
+                    .font(.caption2)
+                Spacer()
+                Button("授权") { HelperManager.shared.openApprovalSettings() }
+                    .buttonStyle(.borderless)
+                    .font(.caption2)
+            }
+            .padding(.horizontal, 8).padding(.vertical, 4)
+        }
+    }
+}

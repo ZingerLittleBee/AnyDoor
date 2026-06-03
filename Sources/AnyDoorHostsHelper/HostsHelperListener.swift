@@ -1,0 +1,89 @@
+import Foundation
+import HostsHelperShared
+import Security
+import XPCAuditToken
+
+/// XPC listener delegate running as root. Validates each caller's code
+/// signature before exposing the interface, serializes writes, and replaces
+/// /etc/hosts atomically.
+final class HostsHelperListener: NSObject, NSXPCListenerDelegate, HostsHelperProtocol, @unchecked Sendable {
+    private let writeQueue = DispatchQueue(label: "dev.bybee.AnyDoor.HostsHelper.write")
+
+    // anchor apple generic + our Team ID + our app identifier.
+    // TODO(Task 14): verify this OU matches the Developer ID Application cert used for release; detected from the Apple Development cert on the dev machine.
+    private static let clientRequirement =
+        "anchor apple generic and certificate leaf[subject.OU] = \"4GH398M5WH\" and identifier \"dev.bybee.AnyDoor\""
+
+    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection conn: NSXPCConnection) -> Bool {
+        guard isValidClient(conn) else { return false }
+        conn.exportedInterface = NSXPCInterface(with: HostsHelperProtocol.self)
+        conn.exportedObject = self
+        conn.resume()
+        return true
+    }
+
+    private func isValidClient(_ conn: NSXPCConnection) -> Bool {
+        // Audit-token guest lookup closes the PID-recycling TOCTOU window that a
+        // PID-based check would leave open.
+        var ok: ObjCBool = false
+        var token = AnyDoorXPCPeerAuditToken(conn, &ok)
+        guard ok.boolValue else { return false }
+        let tokenData = Data(bytes: &token, count: MemoryLayout.size(ofValue: token))
+        let attrs = [kSecGuestAttributeAudit: tokenData] as CFDictionary
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, attrs, [], &code) == errSecSuccess,
+              let code else { return false }
+        var req: SecRequirement?
+        guard SecRequirementCreateWithString(Self.clientRequirement as CFString, [], &req) == errSecSuccess,
+              let req else { return false }
+        return SecCodeCheckValidity(code, [], req) == errSecSuccess
+    }
+
+    // MARK: HostsHelperProtocol
+
+    func writeHosts(_ content: String, withReply reply: @escaping (String?) -> Void) {
+        guard content.utf8.count <= HostsHelperConstants.maxPayloadBytes else {
+            reply("payload too large"); return
+        }
+        writeQueue.async {
+            do {
+                try Self.atomicWrite(content)
+                reply(nil)
+            } catch {
+                reply(String(describing: error))
+            }
+        }
+    }
+
+    func helperVersion(withReply reply: @escaping (String) -> Void) {
+        // The helper is a bare Mach-O without an Info.plist; read the shared constant instead.
+        reply(HostsHelperConstants.helperVersion)
+    }
+
+    /// Write to a temp file in /etc (same filesystem so rename is atomic), then
+    /// fsync, set root:wheel 0644, and rename over /etc/hosts.
+    private static func atomicWrite(_ content: String) throws {
+        let dir = "/etc"
+        let template = "\(dir)/.hosts.anydoor.XXXXXX"
+        var bytes = Array(template.utf8) + [0]
+        let fd = bytes.withUnsafeMutableBufferPointer { mkstemp($0.baseAddress!) }
+        guard fd >= 0 else { throw NSError(domain: "hosts", code: Int(errno)) }
+        let tmpPath = String(cString: bytes)
+        defer { unlink(tmpPath) }
+
+        let data = Array(content.utf8)
+        var written = 0
+        while written < data.count {
+            let n = data[written...].withUnsafeBytes { write(fd, $0.baseAddress, data.count - written) }
+            if n <= 0 { close(fd); throw NSError(domain: "hosts", code: Int(errno)) }
+            written += n
+        }
+        fsync(fd)
+        fchown(fd, 0, 0)            // root:wheel
+        fchmod(fd, 0o644)
+        close(fd)
+        guard rename(tmpPath, "\(dir)/hosts") == 0 else {
+            throw NSError(domain: "hosts", code: Int(errno))
+        }
+    }
+}

@@ -146,6 +146,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Framewor
 
 BIN_PATH="$(swift build --show-bin-path -c release "${BUILD_FLAGS[@]}")"
 cp "$BIN_PATH/AnyDoor" "$APP/Contents/MacOS/AnyDoor"
+cp "$BIN_PATH/AnyDoorHostsHelper" "$APP/Contents/MacOS/AnyDoorHostsHelper"
+mkdir -p "$APP/Contents/Library/LaunchDaemons"
+cp Resources/dev.bybee.AnyDoor.HostsHelper.plist "$APP/Contents/Library/LaunchDaemons/"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp Info.plist "$APP/Contents/Info.plist"
 
@@ -196,6 +199,7 @@ done
 
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Resources/AnyDoor_AnyDoor.bundle"
+codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoorHostsHelper"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoor"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP"
 
