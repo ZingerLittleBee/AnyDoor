@@ -230,10 +230,14 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .submenu, .brightnessControl, .hiddenHotkey:
                 break
             }
-        case .calcResult:
-            // Real copy + toast logic is added in a later step (needs the
-            // toast.calc.copied string). Exhaustiveness stub for now.
-            break
+        case .calcResult(let result):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(result.copyText, forType: .string)
+            // Suppress clipboard-history capture, matching every other internal
+            // copy path (PickColor / OCR / QRCode / Screenshot).
+            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+            ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
         }
     }
 
