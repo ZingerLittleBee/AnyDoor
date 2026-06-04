@@ -388,7 +388,7 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord:
+        case .builtin, .portRecord, .calcResult:
             return nil
         }
     }

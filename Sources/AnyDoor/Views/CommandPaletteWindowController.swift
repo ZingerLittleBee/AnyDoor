@@ -230,6 +230,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .submenu, .brightnessControl, .hiddenHotkey:
                 break
             }
+        case .calcResult:
+            // Real copy + toast logic is added in a later step (needs the
+            // toast.calc.copied string). Exhaustiveness stub for now.
+            break
         }
     }
 
