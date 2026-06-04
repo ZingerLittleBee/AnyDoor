@@ -3,25 +3,46 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>2.0.0</title>
+            <pubDate>Thu, 04 Jun 2026 14:14:37 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>2.0.0</sparkle:version>
+            <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- Command Palette: inline scientific calculator. Typing a math expression
+  surfaces a Calculator section at the top of the palette; pressing Return
+  copies the result and shows a toast. A hand-written, dependency-free
+  recursive-descent evaluator (`Calculator` / `CalcTokenizer` / `CalcEvaluator`
+  / `CalcFunctions`) runs per keystroke on the main thread — chosen over
+  `NSExpression` because it never raises an uncatchable Objective-C exception
+  on malformed input and has no arbitrary-selector injection surface; any
+  failure simply returns `nil` and shows no section. Supports `+ - * / ^`
+  (right-associative power), unary minus, parentheses, a number-suffix percent
+  literal (`1234 * 8%` → `98.72`, `200 + 10%` → `200.1`), the constants `pi`
+  and `e`, and scientific functions (`sqrt`, `cbrt`, `ln`, `log`/`log10`,
+  `log2`, `exp`, `sin`/`cos`/`tan` and inverses/hyperbolics in radians,
+  `floor`/`ceil`/`round`, plus binary `pow`/`min`/`max`). Detection is
+  deliberately conservative: bare numbers stay a port search and bare constants
+  don't steal command search, so the section only appears for clear expressions
+  — prefix with `=` to force calculation of a bare number or constant (`=8080`,
+  `=pi`). The displayed result is grouped/locale-aware while the copied text is
+  locale-independent (`.` decimal, no grouping); the copy suppresses
+  clipboard-history capture like the other internal copy paths, and input
+  length / token count / recursion depth are bounded as a safety guard.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.0/AnyDoor-2.0.0.zip" length="6777369" type="application/octet-stream" sparkle:edSignature="B9NRPPKKDIa/NXpDB4XUTAtVdSsPa2g5nfQy75TKQI9OI/54xxFVqBLnOX8e5hJ0CGNcNMusuJiEeL9tC/1xBA=="/>
+        </item>
+        <item>
             <title>1.9.1</title>
             <pubDate>Wed, 03 Jun 2026 19:48:53 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>1.9.1</sparkle:version>
             <sparkle:shortVersionString>1.9.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Fixed
-
-- Hosts writes failed silently on signed (Developer ID) builds: activating a
-  profile reverted its toggle and `/etc/hosts` was never written. The privileged
-  helper's caller code-signing requirement hard-coded the wrong team OU
-  (`4GH398M5WH`, detected from an Apple Development cert) instead of the Developer
-  ID Application team ID (`9VM4RM39R3`), so `SecCodeCheckValidity` rejected the
-  legitimately-signed app on every XPC connection and each write rolled back.
-  Corrected the requirement to the real team OU, verified with
-  `codesign --verify -R` against the signed app.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.9.1/AnyDoor-1.9.1.zip" length="6750227" type="application/octet-stream" sparkle:edSignature="XtNNzszENtFzFqa3s6TgrHkkQ5p0TMHILT1Je1SQ2Di+HX+QsZtEXr96SeP2qfdZlzg/AIMN95glYSsBo2U8CQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.9.1/AnyDoor-1.9.1.zip" length="6750227" type="application/octet-stream" sparkle:edSignature="XtNNzszENtFzFqa3s6TgrHkkQ5p0TMHILT1Je1SQ2Di+HX+QsZtEXr96SeP2qfdZlzg/AIMN95glYSsBo2U8CQ=="/>
         </item>
         <item>
             <title>1.9.0</title>
@@ -31,15 +52,6 @@
             <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.9.0/AnyDoor-1.9.0.zip" length="6750886" type="application/octet-stream" sparkle:edSignature="yD3frJIBFDUXwm0sVCLKF16CIeoDps8c1yMViVbXH4LrW3ZwHwmODxbFXskU/wS5rB8tRDiKIlKaNi8Ca4npDQ=="/>
-        </item>
-        <item>
-            <title>1.8.2</title>
-            <pubDate>Tue, 02 Jun 2026 15:09:46 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.8.2</sparkle:version>
-            <sparkle:shortVersionString>1.8.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.8.2/AnyDoor-1.8.2.zip" length="6356638" type="application/octet-stream" sparkle:edSignature="wGYgZPF9rtJr9NSJbg8+0prfr53A2kDuh+0beascPFvNHn/a14VUyEKMGIJYcmcK4qLxL1OOIE6mXSIqJjaJDA=="/>
         </item>
         <item>
             <title>1.2.0</title>
