@@ -66,4 +66,51 @@ final class CalculatorTests: XCTestCase {
         XCTAssertThrowsError(try CalcFunctions.apply("pow", [2]))      // wrong arity
         XCTAssertThrowsError(try CalcFunctions.apply("sqrt", [1, 2]))  // wrong arity
     }
+
+    // MARK: - Evaluator
+
+    private func eval(_ s: String) throws -> Double {
+        try CalcEvaluator.evaluate(try CalcTokenizer.tokenize(s))
+    }
+
+    func test_eval_precedenceAndAssociativity() throws {
+        XCTAssertEqual(try eval("2+3*4"), 14, accuracy: 1e-12)
+        XCTAssertEqual(try eval("2^3^2"), 512, accuracy: 1e-9)   // right-assoc
+        XCTAssertEqual(try eval("-2^2"), -4, accuracy: 1e-12)
+        XCTAssertEqual(try eval("2^-2"), 0.25, accuracy: 1e-12)
+        XCTAssertEqual(try eval("(-2)^2"), 4, accuracy: 1e-12)
+    }
+
+    func test_eval_parensAndUnary() throws {
+        XCTAssertEqual(try eval("-(3+4)"), -7, accuracy: 1e-12)
+        XCTAssertEqual(try eval("2*(3+4)"), 14, accuracy: 1e-12)
+    }
+
+    func test_eval_functionsAndConstants() throws {
+        XCTAssertEqual(try eval("sqrt(2)"), 1.4142135623, accuracy: 1e-9)
+        XCTAssertEqual(try eval("sin(pi/2)"), 1, accuracy: 1e-12)
+        XCTAssertEqual(try eval("ln(e)"), 1, accuracy: 1e-12)
+        XCTAssertEqual(try eval("pow(2,10)"), 1024, accuracy: 1e-9)
+        XCTAssertEqual(try eval("min(3,5)"), 3, accuracy: 1e-12)
+        XCTAssertEqual(try eval("max(3,5)"), 5, accuracy: 1e-12)
+    }
+
+    func test_eval_percentLiteral() throws {
+        XCTAssertEqual(try eval("50%"), 0.5, accuracy: 1e-12)
+        XCTAssertEqual(try eval("1234*8%"), 98.72, accuracy: 1e-9)
+        XCTAssertEqual(try eval("200+10%"), 200.1, accuracy: 1e-9)
+    }
+
+    func test_eval_invalidInputsThrow() {
+        XCTAssertThrowsError(try eval("1/0"))       // +Inf → notFinite
+        XCTAssertThrowsError(try eval("(1+2)%"))    // percent only follows a number literal
+        XCTAssertThrowsError(try eval("pow(2)"))    // wrong arity
+        XCTAssertThrowsError(try eval("()"))
+        XCTAssertThrowsError(try eval("2 ** abc"))
+    }
+
+    func test_eval_tooDeepThrows() {
+        let deep = String(repeating: "(", count: 200) + "1" + String(repeating: ")", count: 200)
+        XCTAssertThrowsError(try eval(deep))
+    }
 }
