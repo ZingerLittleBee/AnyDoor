@@ -367,9 +367,7 @@ private struct CommandPaletteRow: View {
             Text(entry.localizedTitle())
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(1)
-            if case .portRecord = entry.source,
-               let subtitle = entry.subtitle,
-               !subtitle.isEmpty {
+            if showsSubtitle, let subtitle = entry.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -414,6 +412,15 @@ private struct CommandPaletteRow: View {
             return path
         case .builtin, .portRecord, .calcResult:
             return nil
+        }
+    }
+
+    /// Port records and calculator results both render their subtitle (the port
+    /// detail line, or the original expression for a calc result).
+    private var showsSubtitle: Bool {
+        switch entry.source {
+        case .portRecord, .calcResult: return true
+        default: return false
         }
     }
 
