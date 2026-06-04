@@ -51,6 +51,16 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
     private func show() {
         let sections = collectSections()
+        // Warm the icon cache for every app-backed row off the main thread, so
+        // the first scroll into the Applications section finds resolved icons
+        // instead of cold-cache disk hits. Mirrors CommandPaletteRow.iconPath.
+        AppIconCache.prewarm(sections.flatMap(\.entries).compactMap { entry in
+            switch entry.source {
+            case .installedApp(_, let path): return path
+            case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
+            case .builtin, .portRecord, .calcResult: return nil
+            }
+        })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
         let pickerState = CommandPaletteState(sections: sections, hyperFlags: hyperFlags)
         self.state = pickerState

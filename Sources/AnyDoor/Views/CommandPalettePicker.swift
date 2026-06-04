@@ -353,11 +353,16 @@ private struct CommandPaletteRow: View {
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
         .task(id: entry.id) {
-            // Resolve the Finder icon once per row. NSWorkspace.icon(forFile:)
-            // touches disk, so doing it on every body pass stalls the first
-            // scroll as LazyVStack materializes a fresh batch of rows.
+            // Resolve the Finder icon via the shared cache. A warm path
+            // (prewarmed apps, recycled rows) seeds synchronously with no
+            // flash; a cold path resolves off the main thread, so the first
+            // scroll into the Applications section never blocks on disk I/O.
             guard let path = iconPath else { return }
-            appIcon = NSWorkspace.shared.icon(forFile: path)
+            if let cached = AppIconCache.cached(path) {
+                appIcon = cached
+            } else {
+                appIcon = await AppIconCache.icon(for: path)
+            }
         }
     }
 
