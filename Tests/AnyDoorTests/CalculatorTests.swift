@@ -40,4 +40,30 @@ final class CalculatorTests: XCTestCase {
         let long = String(repeating: "1", count: 300)
         XCTAssertThrowsError(try CalcTokenizer.tokenize(long))
     }
+
+    // MARK: - Functions table
+
+    func test_functions_constants() {
+        XCTAssertEqual(CalcFunctions.constants["pi"]!, Double.pi, accuracy: 1e-12)
+        XCTAssertEqual(CalcFunctions.constants["e"]!, 2.718281828459045, accuracy: 1e-12)
+    }
+
+    func test_functions_unaryApply() throws {
+        XCTAssertEqual(try CalcFunctions.apply("sqrt", [9]), 3, accuracy: 1e-12)
+        XCTAssertEqual(try CalcFunctions.apply("ln", [2.718281828459045]), 1, accuracy: 1e-9)
+        XCTAssertEqual(try CalcFunctions.apply("log", [1000]), 3, accuracy: 1e-12)
+        XCTAssertEqual(try CalcFunctions.apply("log10", [1000]), 3, accuracy: 1e-12)
+    }
+
+    func test_functions_binaryApply() throws {
+        XCTAssertEqual(try CalcFunctions.apply("pow", [2, 10]), 1024, accuracy: 1e-9)
+        XCTAssertEqual(try CalcFunctions.apply("min", [3, 5]), 3)
+        XCTAssertEqual(try CalcFunctions.apply("max", [3, 5]), 5)
+    }
+
+    func test_functions_unknownAndArityThrow() {
+        XCTAssertThrowsError(try CalcFunctions.apply("nope", [1]))
+        XCTAssertThrowsError(try CalcFunctions.apply("pow", [2]))      // wrong arity
+        XCTAssertThrowsError(try CalcFunctions.apply("sqrt", [1, 2]))  // wrong arity
+    }
 }
