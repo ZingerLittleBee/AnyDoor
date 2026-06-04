@@ -66,7 +66,7 @@ Pure computation. No `@MainActor`. `Sendable`. Well-bounded, fully unit-testable
 
 ```
 Calculator/
-├── CalcToken.swift       # Token enum: number, operator, paren, identifier, percent
+├── CalcToken.swift       # Token enum: number, operator, paren, comma, identifier, percent
 ├── CalcTokenizer.swift   # String → [CalcToken]; throws CalcError on bad input
 ├── CalcEvaluator.swift   # Recursive-descent parser + evaluator → Double
 └── Calculator.swift      # Public facade: detection + evaluate + formatting
@@ -100,13 +100,18 @@ Implemented inside `Calculator.evaluate(query:)`:
   conflict with ports: the port needle requires an all-numeric string, and the
   leading `=` fails that test, so the ports section never appears for `=…`.
 - **Auto-detect (no prefix)** — show the section only when **both** hold:
-  - (a) cheap `looksLikeExpression` heuristic passes — contains an operator
-    (`+ * / ^`, or a `-` not in leading-unary position), or `(`, or a known
-    function/constant name. This excludes a bare port number `8080` and a lone
-    number `5`.
+  - (a) cheap `looksLikeExpression` heuristic passes — the query contains an
+    operator (`+ * / ^ %`, or a `-` not in leading-unary position), or a `(`, or
+    a **function call** (a known function name immediately followed by `(`). The
+    heuristic keys on operator/paren structure, **not** on a bare name being
+    present. This excludes a bare port number `8080`, a lone number `5`, and —
+    importantly — a bare constant `pi` or `e` (which must not steal command/app
+    search). `pi/2`, `2*pi`, `sin(`, `sqrt(2)` auto-trigger because they carry an
+    operator or a function-call paren.
   - (b) evaluation succeeds.
   If either fails → no section (silent hide; consistent with "parse failure is
   quiet" decision).
+  - To compute a **bare constant** on its own, use the force prefix: `=pi`, `=e`.
 
 ### Interaction with the Ports section
 
@@ -128,13 +133,18 @@ number.
 
 - **Operators:** `+ - * / ^` (`^` = exponent), unary minus, parentheses.
   - Precedence (low → high): `+ -` < `* /` < unary `-` < `^`. So `-2^2` = `-(2^2)` = -4.
-  - `^` is **right-associative**: `2^3^2` = `2^(3^2)` = 512.
-- **Percentage literal:** a number followed by `%` means "÷ 100".
-  `1234 * 8%` → `98.72`. (Contextual `200 + 10%` = 220 is **excluded**.)
+  - `^` is **right-associative**, and its right operand accepts a unary minus:
+    `2^3^2` = `2^(3^2)` = 512; `2^-2` = 0.25; `(-2)^2` = 4.
+- **Percentage literal:** `%` is a **postfix on a number literal only**, meaning
+  "÷ 100". `50%` = 0.5; `1234 * 8%` = 98.72; `200 + 10%` = 200.1. A `%` after
+  anything other than a number literal is invalid: `(1+2)%` does **not** parse
+  (→ no section). (Contextual `200 + 10%` = 220 is **explicitly excluded**.)
 - **Constants:** `pi`, `e`.
 - **Functions (radians):**
-  - Unary: `sqrt cbrt abs ln log log2 exp sin cos tan asin acos atan sinh cosh tanh floor ceil round`
-  - Binary: `pow(x, y)`, `min(a, b)`, `max(a, b)`
+  - Unary: `sqrt cbrt abs ln log log10 log2 exp sin cos tan asin acos atan sinh cosh tanh floor ceil round`
+  - `ln` = natural log (base *e*); `log` = base-10 log; `log10` is an alias of `log`.
+  - Binary: `pow(x, y)`, `min(a, b)`, `max(a, b)` — require a `,` token in the
+    tokenizer to separate arguments.
 - The function/constant set lives in a single lookup table; adding functions is a
   one-table edit.
 - **Trig uses radians** (`sin(pi/2)` = 1) — mathematically consistent, clean impl.
@@ -152,8 +162,8 @@ number.
    `sections.insert(calc, at: 0)` (above ports). Because `selectedIndex` resets
    to 0 on query change (existing `onChange`), the calc row is selected by
    default → Return copies immediately.
-   - Calc entry: `symbol: "function"` (or `"equal.square"`), `title` = display,
-     `subtitle` = the original expression, `kind: .action`.
+   - Calc entry: `symbol: "function"`, `title` = display, `subtitle` = the
+     original expression, `kind: .action`.
 
 3. **`CommandPaletteRow`** (`Views/CommandPalettePicker.swift`) — extend the
    subtitle-rendering condition (currently `case .portRecord`) to also cover
@@ -161,9 +171,13 @@ number.
    `iconPath` returns `nil` for `.calcResult` → SF Symbol path.
 
 4. **`commit()`** (`Views/CommandPaletteWindowController.swift`) — add
-   `.calcResult` case: write `copyText` to `NSPasteboard.general`, `close()`
-   (already called at top of `commit`), then
-   `ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))`.
+   `.calcResult` case:
+   - `pasteboard.clearContents()` then `setString(result.copyText, forType: .string)`.
+   - **Immediately** call `ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)`
+     so the result is **not** recorded in clipboard history — matching every
+     other internal copy path (PickColor / OCR / QRCode / Screenshot all do this).
+   - `close()` (already called at top of `commit`), then
+     `ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))`.
 
 5. **Localization** (`Utilities/L10n.swift` + `Resources/Localizable.xcstrings`) —
    add two keys with both `en` and `zh-Hans` entries (and any other locales the
@@ -178,8 +192,27 @@ number.
 - **Display** (`display`): integers render without a decimal (`4`, not `4.0`);
   decimals to ~10 significant digits with trailing zeros trimmed; thousands
   grouping applied; very large/small magnitudes fall back to scientific notation.
-- **Copy** (`copyText`): plain numeric string, no grouping separators, so it
-  pastes cleanly into other fields.
+  The display formatter may localize the grouping/decimal symbols.
+- **Copy** (`copyText`): **locale-independent** — fixed `.` decimal separator, no
+  grouping separators, so it pastes cleanly into other fields and reproduces
+  across locales. Build it with a fixed `Locale(identifier: "en_US_POSIX")` (or
+  plain `String`/`Decimal` formatting). Do **not** share a mutable `static`
+  `NumberFormatter` between the display and copy paths — under Swift 6 strict
+  concurrency a shared mutable formatter is not cleanly `Sendable`; construct
+  formatters locally (or keep them as `let` POSIX-locale instances).
+
+## Performance & Safety Guards
+
+`Calculator.evaluate(query:)` runs on the **main thread**, synchronously, on every
+keystroke (inside `filteredSections`). To keep it cheap and bounded:
+
+- **Input length cap:** reject (return `nil`) when the trimmed query exceeds a max
+  length (e.g. 256 chars) before tokenizing.
+- **Token count cap:** bail out if the token stream exceeds a max count.
+- **Recursion depth cap:** the recursive-descent parser tracks depth and fails
+  (returns `nil`) past a limit (e.g. 64), so pathological nesting `((((…))))`
+  cannot blow the stack.
+- All guards fail **silently** (no section), consistent with the quiet-failure rule.
 
 ## Testing (TDD)
 
@@ -188,14 +221,17 @@ The evaluator is a pure function — write tests first. Add to existing
 and add a `CalculatorTests.swift` for the unit).
 
 **Evaluator unit:**
-- Precedence & associativity: `2+3*4` = 14, `2^3^2` (define & test associativity),
-  `-2^2`.
-- Parentheses & unary minus: `-(3+4)`, `2*(3+4)`.
-- Functions: `sqrt(2)` ≈ 1.41421356, `sin(pi/2)` = 1, `log(1000)` = 3, `pow(2,10)` = 1024.
+- Precedence & associativity: `2+3*4` = 14, `2^3^2` = 512 (right-assoc),
+  `-2^2` = -4, `2^-2` = 0.25, `(-2)^2` = 4.
+- Parentheses & unary minus: `-(3+4)` = -7, `2*(3+4)` = 14.
+- Functions: `sqrt(2)` ≈ 1.41421356, `sin(pi/2)` = 1, `ln(e)` = 1,
+  `log(1000)` = 3, `log10(1000)` = 3, `pow(2,10)` = 1024, `min(3,5)` = 3, `max(3,5)` = 5.
 - Constants: `pi`, `e`.
-- Percentage literal: `50%` = 0.5, `1234*8%` = 98.72.
-- Failure → nil: `1/0`, `sqrt(` , `1 +`, `2 ** abc`, empty, `()`.
+- Percentage literal: `50%` = 0.5, `1234*8%` = 98.72, `200+10%` = 200.1;
+  `(1+2)%` → nil (invalid: `%` only follows a number literal).
+- Failure → nil: `1/0`, `sqrt(`, `1 +`, `2 ** abc`, empty, `()`, `pow(2)` (arity).
 - Non-finite → nil: results that produce `NaN`/`Inf`.
+- Guard limits → nil: over-long input, over-deep nesting `((((…))))`.
 
 **Formatting:**
 - Integer vs decimal, trailing-zero trim, thousands grouping, scientific fallback,
@@ -204,6 +240,8 @@ and add a `CalculatorTests.swift` for the unit).
 **Detection:**
 - `8080` → nil (no calc), `=8080` → 8080, `5` → nil, `1+2` → 3, `sqrt(2)` → ≈1.414,
   `   2 + 2  ` (whitespace) → 4.
+- Bare constants do **not** auto-trigger: `pi` → nil, `e` → nil; but `=pi` → ≈3.14159,
+  `pi/2` → ≈1.5708, `2*e` → ≈5.4366.
 
 ## Out of Scope / Future
 
