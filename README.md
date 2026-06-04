@@ -48,6 +48,16 @@ region, and more.
 - Flat list and process-grouped tree views.
 - Live refresh with retry on scan failure.
 
+### Command Palette
+
+- A Spotlight-style launcher (global hotkey) that searches and runs any
+  command, app, built-in, or listening port from one place.
+- Inline calculator: type a math expression and the result appears at the top
+  — press Return to copy it. Supports arithmetic, parentheses, powers (`^`),
+  percentage literals (`1234 * 8%`), the constants `pi` / `e`, and scientific
+  functions (`sqrt`, `sin`, `log`, `pow`, …; trig in radians). Bare numbers
+  stay a port search; prefix with `=` to force calculation (e.g. `=8080`).
+
 ### Menu bar panel
 
 - Click the menu bar icon to open a Liquid Glass panel listing every

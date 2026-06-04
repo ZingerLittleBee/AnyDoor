@@ -6,6 +6,29 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Command Palette: inline scientific calculator. Typing a math expression
+  surfaces a Calculator section at the top of the palette; pressing Return
+  copies the result and shows a toast. A hand-written, dependency-free
+  recursive-descent evaluator (`Calculator` / `CalcTokenizer` / `CalcEvaluator`
+  / `CalcFunctions`) runs per keystroke on the main thread — chosen over
+  `NSExpression` because it never raises an uncatchable Objective-C exception
+  on malformed input and has no arbitrary-selector injection surface; any
+  failure simply returns `nil` and shows no section. Supports `+ - * / ^`
+  (right-associative power), unary minus, parentheses, a number-suffix percent
+  literal (`1234 * 8%` → `98.72`, `200 + 10%` → `200.1`), the constants `pi`
+  and `e`, and scientific functions (`sqrt`, `cbrt`, `ln`, `log`/`log10`,
+  `log2`, `exp`, `sin`/`cos`/`tan` and inverses/hyperbolics in radians,
+  `floor`/`ceil`/`round`, plus binary `pow`/`min`/`max`). Detection is
+  deliberately conservative: bare numbers stay a port search and bare constants
+  don't steal command search, so the section only appears for clear expressions
+  — prefix with `=` to force calculation of a bare number or constant (`=8080`,
+  `=pi`). The displayed result is grouped/locale-aware while the copied text is
+  locale-independent (`.` decimal, no grouping); the copy suppresses
+  clipboard-history capture like the other internal copy paths, and input
+  length / token count / recursion depth are bounded as a safety guard.
+
 ## [1.9.1] - 2026-06-03
 
 ### Fixed

@@ -46,7 +46,31 @@ final class CommandPaletteState {
         if let ports = portSection(matching: trimmed) {
             sections.insert(ports, at: 0)
         }
+        if let calc = calcSection(matching: trimmed) {
+            sections.insert(calc, at: 0)
+        }
         return sections
+    }
+
+    /// Builds a one-row "Calculator" section when `query` is a calc expression.
+    /// Inserted at the top of `filteredSections`, so it is selected by default
+    /// and Return copies the result immediately.
+    private func calcSection(matching query: String) -> CommandPaletteSection? {
+        guard let result = Calculator.evaluate(query: query) else { return nil }
+        let entry = PanelEntry(
+            id: PanelEntry.id(for: .calcResult(result)),
+            source: .calcResult(result),
+            displayOrder: 0,
+            isVisible: true,
+            hotkey: nil,
+            title: result.display,
+            subtitle: query.trimmingCharacters(in: .whitespacesAndNewlines),
+            symbol: "function",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
+        return CommandPaletteSection(titleKey: .commandPaletteSectionCalculator, entries: [entry])
     }
 
     /// Flat list driving keyboard navigation. Sections are conceptual; the
@@ -343,9 +367,7 @@ private struct CommandPaletteRow: View {
             Text(entry.localizedTitle())
                 .font(.system(size: 14, weight: .medium))
                 .lineLimit(1)
-            if case .portRecord = entry.source,
-               let subtitle = entry.subtitle,
-               !subtitle.isEmpty {
+            if showsSubtitle, let subtitle = entry.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -388,8 +410,17 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord:
+        case .builtin, .portRecord, .calcResult:
             return nil
+        }
+    }
+
+    /// Port records and calculator results both render their subtitle (the port
+    /// detail line, or the original expression for a calc result).
+    private var showsSubtitle: Bool {
+        switch entry.source {
+        case .portRecord, .calcResult: return true
+        default: return false
         }
     }
 

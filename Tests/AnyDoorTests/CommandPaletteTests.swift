@@ -99,6 +99,42 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(style.message, "结束 root-thing 失败：权限不足")
     }
 
+    @MainActor
+    func testCalcExpressionShowsCalculatorSectionAtTop() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "1+2"
+
+        XCTAssertEqual(state.filteredSections.first?.titleKey, .commandPaletteSectionCalculator)
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        guard case .calcResult(let result) = entry.source else {
+            return XCTFail("Expected a calc result entry")
+        }
+        XCTAssertEqual(result.copyText, "3")
+        XCTAssertEqual(entry.title, "3")
+        XCTAssertEqual(entry.subtitle, "1+2")
+        XCTAssertEqual(entry.symbol, "function")
+    }
+
+    @MainActor
+    func testForcePrefixCalculatesBareNumber() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "=8080"
+
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        guard case .calcResult(let result) = entry.source else {
+            return XCTFail("Expected a calc result entry")
+        }
+        XCTAssertEqual(result.copyText, "8080")
+    }
+
+    @MainActor
+    func testBareNumberDoesNotShowCalculatorSection() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "8080"
+
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionCalculator })
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 

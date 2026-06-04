@@ -49,6 +49,7 @@ struct PanelEntry: Identifiable, Hashable {
         case builtin(BuiltinItem)
         case installedApp(bundleID: String, path: String) // Command-palette-only: installed but unbound
         case portRecord(PortRecord)                    // Command-palette-only: listening TCP port process
+        case calcResult(CalcResult)                    // Command-palette-only: evaluated expression
     }
 
     let id: String
@@ -69,6 +70,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .builtin(let item):                  return "builtin:\(item.rawValue)"
         case .installedApp(let bundleID, _):      return "installedApp:\(bundleID)"
         case .portRecord(let record):             return "port:\(record.pid):\(record.port)"
+        case .calcResult(let result):             return "calc:\(result.copyText)"
         }
     }
 
@@ -82,6 +84,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .builtin(let item): return L(item.titleKey)
         case .installedApp: return title
         case .portRecord: return title
+        case .calcResult(let result): return result.display
         }
     }
 }
