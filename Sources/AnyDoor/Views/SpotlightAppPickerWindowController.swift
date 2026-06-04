@@ -47,6 +47,9 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
         onSelect: @escaping (InstalledApp) -> Void
     ) {
         self.onSelect = onSelect
+        // Warm the icon cache off the main thread so the first scroll does not
+        // block on cold-cache disk hits. See AppIconCache.
+        AppIconCache.prewarm(apps.map(\.path))
         let pickerState = SpotlightPickerState(apps: apps, excluded: excluded)
         self.state = pickerState
 
