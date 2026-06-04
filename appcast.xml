@@ -3,37 +3,41 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>2.0.1</title>
+            <pubDate>Thu, 04 Jun 2026 16:52:12 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>2.0.1</sparkle:version>
+            <sparkle:shortVersionString>2.0.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Fixed
+
+- Command Palette still stuttered on the first scroll into the Applications
+  section, despite the 1.9.0 fix. That fix moved `NSWorkspace.icon(forFile:)`
+  out of `body` into a `task`, which stopped the per-body-pass re-resolution
+  but not the stutter: a SwiftUI `task` closure inherits the view's `@MainActor`
+  isolation, so the synchronous disk read still ran on the main thread — and
+  when `LazyVStack` materialized a fresh batch of app rows on the first scroll,
+  several cold-cache icon reads landed in the same frame and dropped it. A new
+  shared `AppIconCache` (a `@MainActor` cache modeled on `ClipboardThumbnail`)
+  now offloads the disk read to a detached task and memoizes icons by path; the
+  non-Sendable `NSImage` crosses back to the main actor via a small
+  `@unchecked Sendable` box. Rows seed synchronously from the cache on a warm
+  path (no flash) and resolve off-main on a miss, and both window controllers
+  prewarm every app icon when the palette / picker opens so even the first
+  scroll finds icons already resolved. The same path-keyed cache backs both the
+  command palette and the Spotlight app picker.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.1/AnyDoor-2.0.1.zip" length="6792216" type="application/octet-stream" sparkle:edSignature="1e0/1hygW0VOXTC4kfFg0N27pb5yUjtI8qt4xgKH+BeWJ/6sagC6HsqwwLisDu75LHSnV8UKYS/q0mNWJdqSCA=="/>
+        </item>
+        <item>
             <title>2.0.0</title>
             <pubDate>Thu, 04 Jun 2026 14:14:37 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>2.0.0</sparkle:version>
             <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Added
-
-- Command Palette: inline scientific calculator. Typing a math expression
-  surfaces a Calculator section at the top of the palette; pressing Return
-  copies the result and shows a toast. A hand-written, dependency-free
-  recursive-descent evaluator (`Calculator` / `CalcTokenizer` / `CalcEvaluator`
-  / `CalcFunctions`) runs per keystroke on the main thread — chosen over
-  `NSExpression` because it never raises an uncatchable Objective-C exception
-  on malformed input and has no arbitrary-selector injection surface; any
-  failure simply returns `nil` and shows no section. Supports `+ - * / ^`
-  (right-associative power), unary minus, parentheses, a number-suffix percent
-  literal (`1234 * 8%` → `98.72`, `200 + 10%` → `200.1`), the constants `pi`
-  and `e`, and scientific functions (`sqrt`, `cbrt`, `ln`, `log`/`log10`,
-  `log2`, `exp`, `sin`/`cos`/`tan` and inverses/hyperbolics in radians,
-  `floor`/`ceil`/`round`, plus binary `pow`/`min`/`max`). Detection is
-  deliberately conservative: bare numbers stay a port search and bare constants
-  don't steal command search, so the section only appears for clear expressions
-  — prefix with `=` to force calculation of a bare number or constant (`=8080`,
-  `=pi`). The displayed result is grouped/locale-aware while the copied text is
-  locale-independent (`.` decimal, no grouping); the copy suppresses
-  clipboard-history capture like the other internal copy paths, and input
-  length / token count / recursion depth are bounded as a safety guard.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.0/AnyDoor-2.0.0.zip" length="6777369" type="application/octet-stream" sparkle:edSignature="B9NRPPKKDIa/NXpDB4XUTAtVdSsPa2g5nfQy75TKQI9OI/54xxFVqBLnOX8e5hJ0CGNcNMusuJiEeL9tC/1xBA=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.0/AnyDoor-2.0.0.zip" length="6777369" type="application/octet-stream" sparkle:edSignature="B9NRPPKKDIa/NXpDB4XUTAtVdSsPa2g5nfQy75TKQI9OI/54xxFVqBLnOX8e5hJ0CGNcNMusuJiEeL9tC/1xBA=="/>
         </item>
         <item>
             <title>1.9.1</title>
@@ -43,15 +47,6 @@
             <sparkle:shortVersionString>1.9.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.9.1/AnyDoor-1.9.1.zip" length="6750227" type="application/octet-stream" sparkle:edSignature="XtNNzszENtFzFqa3s6TgrHkkQ5p0TMHILT1Je1SQ2Di+HX+QsZtEXr96SeP2qfdZlzg/AIMN95glYSsBo2U8CQ=="/>
-        </item>
-        <item>
-            <title>1.9.0</title>
-            <pubDate>Wed, 03 Jun 2026 19:29:35 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.9.0</sparkle:version>
-            <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.9.0/AnyDoor-1.9.0.zip" length="6750886" type="application/octet-stream" sparkle:edSignature="yD3frJIBFDUXwm0sVCLKF16CIeoDps8c1yMViVbXH4LrW3ZwHwmODxbFXskU/wS5rB8tRDiKIlKaNi8Ca4npDQ=="/>
         </item>
         <item>
             <title>1.2.0</title>

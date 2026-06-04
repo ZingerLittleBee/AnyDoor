@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-06-04
+
 ### Fixed
 
 - Command Palette still stuttered on the first scroll into the Applications
