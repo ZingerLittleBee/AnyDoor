@@ -113,4 +113,45 @@ final class CalculatorTests: XCTestCase {
         let deep = String(repeating: "(", count: 200) + "1" + String(repeating: ")", count: 200)
         XCTAssertThrowsError(try eval(deep))
     }
+
+    // MARK: - Facade: detection
+
+    func test_facade_bareNumberAndConstantsAreNotDetected() {
+        XCTAssertNil(Calculator.evaluate(query: "8080"))
+        XCTAssertNil(Calculator.evaluate(query: "5"))
+        XCTAssertNil(Calculator.evaluate(query: "pi"))
+        XCTAssertNil(Calculator.evaluate(query: "e"))
+        XCTAssertNil(Calculator.evaluate(query: "-5"))   // bare negative number
+    }
+
+    func test_facade_forcePrefix() throws {
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "=8080")).copyText, "8080")
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "=pi")).value, Double.pi, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "=5")).copyText, "5")
+    }
+
+    func test_facade_autoDetectExpressions() throws {
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "1+2")).copyText, "3")
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "   2 + 2  ")).copyText, "4")
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "pi/2")).value, Double.pi / 2, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "2*e")).value, 2 * M_E, accuracy: 1e-9)
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "sqrt(2)")).value, 1.41421356, accuracy: 1e-7)
+    }
+
+    func test_facade_failuresReturnNil() {
+        XCTAssertNil(Calculator.evaluate(query: "1 +"))
+        XCTAssertNil(Calculator.evaluate(query: "sqrt("))
+        XCTAssertNil(Calculator.evaluate(query: "1/0"))
+        XCTAssertNil(Calculator.evaluate(query: ""))
+        XCTAssertNil(Calculator.evaluate(query: "="))
+    }
+
+    // MARK: - Facade: formatting (copyText is locale-independent)
+
+    func test_facade_copyTextFormatting() throws {
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "2+2")).copyText, "4")        // integer, no ".0"
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "1/4")).copyText, "0.25")
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "1000*1000")).copyText, "1000000") // no grouping
+        XCTAssertEqual(try XCTUnwrap(Calculator.evaluate(query: "10/4")).copyText, "2.5")     // trailing zero trimmed
+    }
 }
