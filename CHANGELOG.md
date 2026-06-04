@@ -6,6 +6,24 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Command Palette still stuttered on the first scroll into the Applications
+  section, despite the 1.9.0 fix. That fix moved `NSWorkspace.icon(forFile:)`
+  out of `body` into a `task`, which stopped the per-body-pass re-resolution
+  but not the stutter: a SwiftUI `task` closure inherits the view's `@MainActor`
+  isolation, so the synchronous disk read still ran on the main thread — and
+  when `LazyVStack` materialized a fresh batch of app rows on the first scroll,
+  several cold-cache icon reads landed in the same frame and dropped it. A new
+  shared `AppIconCache` (a `@MainActor` cache modeled on `ClipboardThumbnail`)
+  now offloads the disk read to a detached task and memoizes icons by path; the
+  non-Sendable `NSImage` crosses back to the main actor via a small
+  `@unchecked Sendable` box. Rows seed synchronously from the cache on a warm
+  path (no flash) and resolve off-main on a miss, and both window controllers
+  prewarm every app icon when the palette / picker opens so even the first
+  scroll finds icons already resolved. The same path-keyed cache backs both the
+  command palette and the Spotlight app picker.
+
 ## [2.0.0] - 2026-06-04
 
 ### Added

@@ -244,9 +244,14 @@ private struct SpotlightRow: View {
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onSelect)
         .task(id: app.bundleID) {
-            // Resolve the Finder icon once per row. NSWorkspace.icon(forFile:)
-            // touches disk, so doing it on every body pass is wasteful.
-            icon = NSWorkspace.shared.icon(forFile: app.path)
+            // Resolve the Finder icon via the shared cache: a warm path seeds
+            // synchronously, a cold path resolves off the main thread so the
+            // first scroll never blocks on disk I/O. See AppIconCache.
+            if let cached = AppIconCache.cached(app.path) {
+                icon = cached
+            } else {
+                icon = await AppIconCache.icon(for: app.path)
+            }
         }
     }
 
