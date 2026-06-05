@@ -53,6 +53,11 @@ struct RegularWindowRegistrar: NSViewRepresentable {
         // lookup to the next runloop tick.
         DispatchQueue.main.async {
             if let window = view.window {
+                // Opt this window out of state restoration so macOS does not
+                // reopen Settings on the next launch. Complements the app-level
+                // opt-out in `AppDelegate` for windows restored via a per-window
+                // restoration class rather than the application state coder.
+                window.isRestorable = false
                 RegularWindowCoordinator.shared.track(window)
             }
         }

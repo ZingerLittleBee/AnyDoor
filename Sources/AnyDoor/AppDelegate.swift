@@ -225,6 +225,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         clipboardWatcher?.stop()
     }
 
+    // MARK: - State restoration
+
+    // AnyDoor is a menu-bar utility: no window should appear unless the user
+    // explicitly opens it. Opting out of application state restoration stops
+    // macOS from reopening the Settings window when the app auto-launches at
+    // login (or via "reopen windows when logging back in"). The user can still
+    // open Settings from the menu-bar item at any time.
+    func application(_ app: NSApplication, shouldSaveApplicationState coder: NSCoder) -> Bool {
+        false
+    }
+
+    func application(_ app: NSApplication, shouldRestoreApplicationState coder: NSCoder) -> Bool {
+        false
+    }
+
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard HyperKeyController.shared.hasPersistedSignatures else {
