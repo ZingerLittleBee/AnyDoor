@@ -3,32 +3,40 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>2.0.2</title>
+            <pubDate>Fri, 05 Jun 2026 23:49:07 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>2.0.2</sparkle:version>
+            <sparkle:shortVersionString>2.0.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Fixed
+
+- The Settings window reopened on its own whenever AnyDoor auto-launched at
+  login. macOS state restoration was reopening the previous session's window,
+  but AnyDoor is a menu-bar utility where no window should appear unbidden. The
+  app now opts out of application state restoration
+  (`application(_:shouldRestoreApplicationState:)` and `shouldSaveApplicationState`
+  return `false`) and additionally marks the Settings window non-restorable as a
+  fallback for the per-window restoration path. Settings still opens on demand
+  from the menu-bar item.
+- The menu-bar panel could run off the bottom of the screen once enough items
+  were enabled, leaving the lower rows unreachable. The panel height is now
+  capped to the usable screen height; any overflow scrolls inside the panel
+  (`NSScrollView` wrapping the measured hosting view, with rounded-corner
+  clipping preserved). Hover sub-popovers (App Shortcuts, Port Manager,
+  brightness, clipboard history) re-anchor correctly as the list scrolls.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.2/AnyDoor-2.0.2.zip" length="6794023" type="application/octet-stream" sparkle:edSignature="3tveyLagl9mo9thO2FOv5WkSAdmMp8gsKWzJrkVyVlOIhjmXSrBCndmFKtOYeljuge1QX73/J+QXb4hNie7PDg=="/>
+        </item>
+        <item>
             <title>2.0.1</title>
             <pubDate>Thu, 04 Jun 2026 16:52:12 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>2.0.1</sparkle:version>
             <sparkle:shortVersionString>2.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Fixed
-
-- Command Palette still stuttered on the first scroll into the Applications
-  section, despite the 1.9.0 fix. That fix moved `NSWorkspace.icon(forFile:)`
-  out of `body` into a `task`, which stopped the per-body-pass re-resolution
-  but not the stutter: a SwiftUI `task` closure inherits the view's `@MainActor`
-  isolation, so the synchronous disk read still ran on the main thread — and
-  when `LazyVStack` materialized a fresh batch of app rows on the first scroll,
-  several cold-cache icon reads landed in the same frame and dropped it. A new
-  shared `AppIconCache` (a `@MainActor` cache modeled on `ClipboardThumbnail`)
-  now offloads the disk read to a detached task and memoizes icons by path; the
-  non-Sendable `NSImage` crosses back to the main actor via a small
-  `@unchecked Sendable` box. Rows seed synchronously from the cache on a warm
-  path (no flash) and resolve off-main on a miss, and both window controllers
-  prewarm every app icon when the palette / picker opens so even the first
-  scroll finds icons already resolved. The same path-keyed cache backs both the
-  command palette and the Spotlight app picker.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.1/AnyDoor-2.0.1.zip" length="6792216" type="application/octet-stream" sparkle:edSignature="1e0/1hygW0VOXTC4kfFg0N27pb5yUjtI8qt4xgKH+BeWJ/6sagC6HsqwwLisDu75LHSnV8UKYS/q0mNWJdqSCA=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.1/AnyDoor-2.0.1.zip" length="6792216" type="application/octet-stream" sparkle:edSignature="1e0/1hygW0VOXTC4kfFg0N27pb5yUjtI8qt4xgKH+BeWJ/6sagC6HsqwwLisDu75LHSnV8UKYS/q0mNWJdqSCA=="/>
         </item>
         <item>
             <title>2.0.0</title>
@@ -38,15 +46,6 @@
             <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.0/AnyDoor-2.0.0.zip" length="6777369" type="application/octet-stream" sparkle:edSignature="B9NRPPKKDIa/NXpDB4XUTAtVdSsPa2g5nfQy75TKQI9OI/54xxFVqBLnOX8e5hJ0CGNcNMusuJiEeL9tC/1xBA=="/>
-        </item>
-        <item>
-            <title>1.9.1</title>
-            <pubDate>Wed, 03 Jun 2026 19:48:53 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>1.9.1</sparkle:version>
-            <sparkle:shortVersionString>1.9.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v1.9.1/AnyDoor-1.9.1.zip" length="6750227" type="application/octet-stream" sparkle:edSignature="XtNNzszENtFzFqa3s6TgrHkkQ5p0TMHILT1Je1SQ2Di+HX+QsZtEXr96SeP2qfdZlzg/AIMN95glYSsBo2U8CQ=="/>
         </item>
         <item>
             <title>1.2.0</title>

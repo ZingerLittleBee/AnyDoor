@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-06-05
+
 ### Fixed
 
 - The Settings window reopened on its own whenever AnyDoor auto-launched at
