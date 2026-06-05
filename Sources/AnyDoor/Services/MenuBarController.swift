@@ -10,8 +10,8 @@ import SwiftUI
 /// directly toggles the icon with no scene-graph involvement.
 @MainActor
 final class MenuBarController {
-    /// Slack left between the panel and the screen edges when capping height.
-    private static let panelScreenMargin: CGFloat = 8
+    /// Fraction of the usable screen height the panel may occupy when capping.
+    private static let panelHeightFraction: CGFloat = 0.8
 
     private let modelContainer: ModelContainer
 
@@ -141,11 +141,11 @@ final class MenuBarController {
         }
         hostingView.sizingOptions = []
 
-        // Cap the panel height to the usable screen height so a long feature
-        // list never runs off-screen; the overflow scrolls inside the panel.
-        // With no resolvable screen, leave the height uncapped.
+        // Cap the panel height to a fraction of the usable screen height so a
+        // long feature list never runs off-screen; the overflow scrolls inside
+        // the panel. With no resolvable screen, leave the height uncapped.
         let maxHeight = (button.window?.screen?.visibleFrame.height)
-            .map { $0 - Self.panelScreenMargin } ?? .greatestFiniteMagnitude
+            .map { $0 * Self.panelHeightFraction } ?? .greatestFiniteMagnitude
         let panelSize = NSSize(
             width: contentSize.width,
             height: min(contentSize.height, max(1, maxHeight))
