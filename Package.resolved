@@ -1,5 +1,5 @@
 {
-  "originHash" : "90331f38bf394e04a4b608c9793301a6b16a6efab2a421468a6554c4444de4f3",
+  "originHash" : "e0a24088e9ff3379ec91d6957ad82556a1ad6a9f3792ac383588f537cf24c45f",
   "pins" : [
     {
       "identity" : "askforpermission",
@@ -7,15 +7,6 @@
       "location" : "https://github.com/riko2chen/AskForPermission.git",
       "state" : {
         "revision" : "91f4dde33f9f5dd58a89d72f3f05aa4b149a1f0e"
-      }
-    },
-    {
-      "identity" : "ddc.swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/reitermarkus/DDC.swift",
-      "state" : {
-        "branch" : "master",
-        "revision" : "15b3ef8235a831e0d7812dbdf12d6a4bb16d3bd6"
       }
     },
     {
