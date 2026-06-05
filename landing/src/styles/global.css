@@ -292,10 +292,9 @@ h2.sec-h{
 .hero-meta{display:flex; gap:24px; color:var(--color-text-soft); font-size:12.5px; margin-top: 22px}
 .hero-meta .check{color: var(--color-mac-green); margin-right:5px}
 .feature-pills{display:flex; flex-wrap:wrap; gap:8px; margin-top: 22px}
-.feature-pills span{
+.feature-pills > span{
   font-size: 12px; padding: 6px 12px;
   background: rgba(255,255,255,.05);
-  border: .5px solid var(--color-line);
   border-radius: 999px; color: var(--color-text-dim);
 }
 
