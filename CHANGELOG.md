@@ -6,6 +6,23 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The Settings window reopened on its own whenever AnyDoor auto-launched at
+  login. macOS state restoration was reopening the previous session's window,
+  but AnyDoor is a menu-bar utility where no window should appear unbidden. The
+  app now opts out of application state restoration
+  (`application(_:shouldRestoreApplicationState:)` and `shouldSaveApplicationState`
+  return `false`) and additionally marks the Settings window non-restorable as a
+  fallback for the per-window restoration path. Settings still opens on demand
+  from the menu-bar item.
+- The menu-bar panel could run off the bottom of the screen once enough items
+  were enabled, leaving the lower rows unreachable. The panel height is now
+  capped to the usable screen height; any overflow scrolls inside the panel
+  (`NSScrollView` wrapping the measured hosting view, with rounded-corner
+  clipping preserved). Hover sub-popovers (App Shortcuts, Port Manager,
+  brightness, clipboard history) re-anchor correctly as the list scrolls.
+
 ## [2.0.1] - 2026-06-04
 
 ### Fixed
