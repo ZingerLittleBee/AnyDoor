@@ -39,4 +39,8 @@ export const icons = {
   bolt:       () => wrap(`<path d="M13 2L3 14h7l-1 8 10-12h-7z"/>`),
   clipboard:  () => wrap(`<rect x="6" y="4" width="12" height="18" rx="2"/><path d="M9 4V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1"/>`),
   door:       () => wrap(`<path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><path d="M4 21h16"/><circle cx="14.5" cy="13" r="0.9" fill="currentColor"/>`, 1.8),
+  sun:        () => wrap(`<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`),
+  layout:     () => wrap(`<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/>`),
+  server:     () => wrap(`<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>`),
+  command:    () => wrap(`<path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z"/>`),
 };

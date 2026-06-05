@@ -48,8 +48,8 @@ import { samplePorts } from '../lib/data';
 
     <div class="pm-main">
       <div class="pm-search">
-        <span set:html={icons.search()} style="width:16px; height:16px; color: var(--color-text-soft)" />
-        <input id="pm-input" placeholder={copy.ports.placeholder.zh} data-ph-zh={copy.ports.placeholder.zh} data-ph-en={copy.ports.placeholder.en} />
+        <span set:html={icons.search()} style="width:16px; height:16px; color: var(--color-text-soft)" aria-hidden="true" />
+        <input id="pm-input" placeholder={copy.ports.placeholder.zh} aria-label={copy.ports.placeholder.en} data-ph-zh={copy.ports.placeholder.zh} data-ph-en={copy.ports.placeholder.en} />
         <span class="count" id="pm-count">{samplePorts.length}</span>
       </div>
       <div class="pm-list" id="pm-list">
@@ -117,7 +117,9 @@ import { samplePorts } from '../lib/data';
   // Sync placeholder with current language
   const syncPh = () => {
     const lang = document.documentElement.getAttribute('data-lang') || 'zh';
-    input.placeholder = lang === 'en' ? (input.dataset.phEn || '') : (input.dataset.phZh || '');
+    const ph = lang === 'en' ? (input.dataset.phEn || '') : (input.dataset.phZh || '');
+    input.placeholder = ph;
+    input.setAttribute('aria-label', ph);
   };
   syncPh();
   new MutationObserver(syncPh).observe(document.documentElement, { attributes: true, attributeFilter: ['data-lang'] });
@@ -126,14 +128,18 @@ import { samplePorts } from '../lib/data';
   input.addEventListener('input', () => { userTyping = true; filter(input.value); });
   input.addEventListener('focus', () => { userTyping = true; });
 
-  // Auto-type "node" demo until user touches the input
+  // Auto-type "node" demo until user touches the input (skipped when the user
+  // prefers reduced motion).
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const stages = ['', 'n', 'no', 'nod', 'node'];
   let i = 0;
-  const auto = setInterval(() => {
-    if (userTyping) { clearInterval(auto); return; }
-    input.value = stages[i % stages.length];
-    filter(input.value);
-    i++;
-    if (i > stages.length + 3) i = 0;
-  }, 700);
+  if (!reduceMotion) {
+    const auto = setInterval(() => {
+      if (userTyping) { clearInterval(auto); return; }
+      input.value = stages[i % stages.length];
+      filter(input.value);
+      i++;
+      if (i > stages.length + 3) i = 0;
+    }, 700);
+  }
 </script>

@@ -14,10 +14,10 @@ import { copy } from '../lib/copy';
 
   <div class="faq">
     {copy.faq.items.map((item, i) => (
-      <div class={`faq-item ${i === 0 ? 'is-open' : ''}`} data-faq>
+      <div class={`faq-item ${i === 0 ? 'is-open' : ''}`} data-faq role="button" tabindex="0" aria-expanded={i === 0 ? 'true' : 'false'}>
         <div class="faq-q">
           <span><span data-i18n-zh>{item.q.zh}</span><span data-i18n-en>{item.q.en}</span></span>
-          <span class="ic" set:html={icons.plus()} style="width:20px;height:20px" />
+          <span class="ic" set:html={icons.plus()} style="width:20px;height:20px" aria-hidden="true" />
         </div>
         <div class="faq-a">
           <span data-i18n-zh>{item.a.zh}</span><span data-i18n-en>{item.a.en}</span>
@@ -29,8 +29,16 @@ import { copy } from '../lib/copy';
 
 <script>
   document.querySelectorAll<HTMLElement>('[data-faq]').forEach((item) => {
-    item.addEventListener('click', () => {
-      item.classList.toggle('is-open');
+    const toggle = () => {
+      const open = item.classList.toggle('is-open');
+      item.setAttribute('aria-expanded', String(open));
+    };
+    item.addEventListener('click', toggle);
+    item.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
     });
   });
 </script>
