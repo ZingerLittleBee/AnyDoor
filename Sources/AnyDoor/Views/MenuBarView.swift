@@ -423,10 +423,35 @@ private struct ScreenFrameReader: NSViewRepresentable {
     final class FrameReportingView: NSView {
         var onChange: ((NSRect) -> Void)?
         private var lastFrame: NSRect = .zero
+        private var scrollObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            // Fires on both attach and detach; on detach `enclosingScrollView`
+            // is nil, so this also tears the observer down (no deinit needed,
+            // which Swift 6 forbids for this non-Sendable token anyway).
+            observeEnclosingScroll()
             reportFrame()
+        }
+
+        /// When the panel content scrolls (tall feature lists), the row's
+        /// on-screen position changes without triggering a layout pass, so the
+        /// cached hover-popover anchor would go stale. Track the enclosing
+        /// scroll view's clip bounds and re-report on every scroll.
+        private func observeEnclosingScroll() {
+            if let scrollObserver {
+                NotificationCenter.default.removeObserver(scrollObserver)
+                self.scrollObserver = nil
+            }
+            guard let clipView = enclosingScrollView?.contentView else { return }
+            clipView.postsBoundsChangedNotifications = true
+            scrollObserver = NotificationCenter.default.addObserver(
+                forName: NSView.boundsDidChangeNotification,
+                object: clipView,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportFrame() }
+            }
         }
 
         override func setFrameSize(_ newSize: NSSize) {

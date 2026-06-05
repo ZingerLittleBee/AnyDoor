@@ -10,6 +10,9 @@ import SwiftUI
 /// directly toggles the icon with no scene-graph involvement.
 @MainActor
 final class MenuBarController {
+    /// Slack left between the panel and the screen edges when capping height.
+    private static let panelScreenMargin: CGFloat = 8
+
     private let modelContainer: ModelContainer
 
     private var statusItem: NSStatusItem?
@@ -132,25 +135,65 @@ final class MenuBarController {
         // — that pegs the CPU and overflows the stack.
         hostingView.sizingOptions = .intrinsicContentSize
         hostingView.layoutSubtreeIfNeeded()
-        var size = hostingView.fittingSize
-        if size.width < 1 || size.height < 1 {
-            size = NSSize(width: 260, height: 320)
+        var contentSize = hostingView.fittingSize
+        if contentSize.width < 1 || contentSize.height < 1 {
+            contentSize = NSSize(width: 260, height: 320)
         }
         hostingView.sizingOptions = []
-        hostingView.frame = NSRect(origin: .zero, size: size)
-        hostingView.autoresizingMask = [.width, .height]
+
+        // Cap the panel height to the usable screen height so a long feature
+        // list never runs off-screen; the overflow scrolls inside the panel.
+        // With no resolvable screen, leave the height uncapped.
+        let maxHeight = (button.window?.screen?.visibleFrame.height)
+            .map { $0 - Self.panelScreenMargin } ?? .greatestFiniteMagnitude
+        let panelSize = NSSize(
+            width: contentSize.width,
+            height: min(contentSize.height, max(1, maxHeight))
+        )
+
+        let contentView: NSView
+        if contentSize.height > panelSize.height {
+            // Content taller than the screen: scroll it. The hosting view keeps
+            // its full natural height as the scroll document; the scroll view
+            // clips to the capped viewport. `sizingOptions = []` already detached
+            // window sizing, so nothing here can drive a window resize.
+            hostingView.frame = NSRect(origin: .zero, size: contentSize)
+            hostingView.autoresizingMask = [.width]
+            let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: panelSize))
+            scrollView.documentView = hostingView
+            scrollView.hasVerticalScroller = true
+            scrollView.scrollerStyle = .overlay
+            scrollView.autohidesScrollers = true
+            scrollView.drawsBackground = false
+            scrollView.automaticallyAdjustsContentInsets = false
+            // Round the viewport so the panel keeps its corner radius even when
+            // the SwiftUI content's own rounded background has scrolled off.
+            scrollView.wantsLayer = true
+            scrollView.layer?.cornerRadius = 12
+            scrollView.layer?.cornerCurve = .continuous
+            scrollView.layer?.masksToBounds = true
+            // NSHostingView is flipped, so the document's top sits at the top;
+            // make sure the panel opens scrolled to the first row.
+            scrollView.contentView.scroll(to: .zero)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+            contentView = scrollView
+        } else {
+            // A plain NSView container keeps the hosting view out of the window's
+            // constraint-based layout, so nothing can drive a window resize.
+            hostingView.frame = NSRect(origin: .zero, size: panelSize)
+            hostingView.autoresizingMask = [.width, .height]
+            let container = NSView(frame: NSRect(origin: .zero, size: panelSize))
+            container.addSubview(hostingView)
+            contentView = container
+        }
 
         let panel = NSPanel(
-            contentRect: NSRect(origin: .zero, size: size),
+            contentRect: NSRect(origin: .zero, size: panelSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
-        // A plain NSView container keeps the hosting view out of the window's
-        // constraint-based layout, so nothing can drive a window resize.
-        let container = NSView(frame: NSRect(origin: .zero, size: size))
-        container.addSubview(hostingView)
-        panel.contentView = container
+        panel.contentView = contentView
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
