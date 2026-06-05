@@ -1,137 +1,150 @@
+<!-- This file mirrors CLAUDE.md; keep the two in sync when either changes. -->
+
 # AnyDoor
 
-macOS 菜单栏应用，通过全局快捷键一键切换（打开/隐藏）指定应用程序。
+A macOS menu-bar toolbox. At its core it toggles (show/hide) a target application via a global hotkey, and builds a set of system-level quick actions on top of that: clipboard history, hosts management, external display brightness, Hyper Key, window layout, command palette, and more.
 
-## 技术栈
+## Tech Stack
 
-- Swift 6.2，严格并发模式 (`.swiftLanguageMode(.v6)`)
+- Swift 6.2, strict concurrency mode (`.swiftLanguageMode(.v6)`)
 - macOS 14+
-- macOS 26+ 上启用 Liquid Glass；更早的受支持系统使用普通材质背景。
-- SwiftUI (`MenuBarExtra` + `Settings`)
-- SwiftData 持久化
-- CGEvent tap 全局热键监听
-- SPM 构建
+- Liquid Glass on macOS 26+; earlier supported systems fall back to a plain material background.
+- SwiftUI `Settings` scene + AppKit `MenuBarController` (the menu-bar item is managed directly by `NSStatusItem`, **not** `MenuBarExtra` — see below)
+- SwiftData persistence
+- CGEvent tap for global hotkey monitoring
+- Privileged XPC helper (`AnyDoorHostsHelper`) writes `/etc/hosts` (with an AppleScript fallback when the helper isn't enabled — see Architecture Notes)
+- Sparkle for auto-updates; DDC.swift for external display brightness; AskForPermission for permission onboarding
+- SPM build, with an in-repo build-tool plugin that compiles the `.xcstrings` string catalog
 
-## 构建和运行
+## Build and Run
 
 ```bash
-# 构建
+# Build
 swift build
 
-# 运行（开发模式，进程身份不带 Bundle ID）
+# Run (dev mode; the process has no Bundle ID identity)
 swift run AnyDoor
 
-# Release 构建
+# Release build
 swift build -c release
 
-# 安装为 /Applications/AnyDoor.app（写入 Info.plist，Bundle ID = dev.bybee.AnyDoor）
+# Install as /Applications/AnyDoor.app (writes Info.plist, Bundle ID = dev.bybee.AnyDoor)
 make install
 
-# 卸载
+# Uninstall
 make uninstall
 
-# 热重载开发（需要 watchexec）
+# Hot-reload development (requires watchexec)
 make
 ```
 
-运行需要 macOS 辅助功能权限（系统设置 → 隐私与安全性 → 辅助功能）。
+Running requires the macOS Accessibility permission (System Settings → Privacy & Security → Accessibility).
 
-`swift run` 和 `make install` 后的 `.app` 是**两个不同的进程身份**，需要分别授权辅助功能。生产使用走 `make install`；日常开发用 `swift run`。SwiftData 存储路径已被固定，两种方式共享同一份数据（见下文）。
+The `.app` from `swift run` and the one from `make install` are **two distinct process identities** and must each be granted Accessibility separately. Use `make install` for production; use `swift run` for daily development. The SwiftData store path is pinned so both paths share the same data (see below).
 
-## 项目结构
+Release tooling lives in the `Makefile`: `make sparkle-tools` (downloads the Sparkle CLI, pinned to 2.9.2), `make release <version>` / `make release-dryrun <version>` (drive `scripts/release.sh`, sourcing `.env`), and `make notary-profile` / `make notary-check` (notarization via `xcrun notarytool`, requires `APPLE_ID` / `APPLE_TEAM_ID` / `NOTARY_PROFILE` in `.env`). Release notes go under `## [Unreleased]` in `CHANGELOG.md` (do not hand-author a `## [x.y.z]` heading); `scripts/release.sh` rewrites that heading to `## [<version>] - <today>` on release. Its preflight (step 1) asserts: `[Unreleased]` is non-empty, `Info.plist` `SUPublicEDKey` is not a placeholder (run `scripts/sparkle-bin/generate_keys` first), a codesigning cert matching `SIGNING_IDENTITY` is in the login keychain, `sign_update` / `generate_appcast` are installed (`make sparkle-tools`), the `notarytool` keychain profile is configured, and `gh` is logged in.
+
+## Project Structure
+
+The codebase is large; the layout below is organized by subsystem (not a file-by-file listing). SPM targets: `AnyDoor` (main app), `HostsHelperShared` (shared XPC-contract library), `XPCAuditToken` (ObjC shim exposing the XPC peer audit token), `AnyDoorHostsHelper` (privileged helper executable), `AnyDoorTests`, and `XCStringsCompilerPlugin` (a `.buildTool()` plugin at `Plugins/XCStringsCompiler`, attached to `AnyDoor`, that compiles `.xcstrings` string catalogs via `xcrun xcstringstool` at build time — this is why localization works under plain `swift build` without Xcode).
 
 ```
 Sources/AnyDoor/
-├── AnyDoor.swift              # @main, MenuBarExtra + Settings Scene
-├── AppDelegate.swift           # ModelContainer, providers registry, HotkeyService bootstrap
-├── Models/
-│   ├── KeyBinding.swift        # App shortcut bindings (SwiftData)
-│   ├── BuiltinItem.swift       # Code-defined catalog of system toggle/action items
-│   ├── BuiltinPreference.swift # User customization (visibility / order / hotkey) for built-ins
-│   ├── PanelEntry.swift        # Unified view model + HotkeyDescriptor + PermissionStatus
-│   └── HotkeyAction.swift      # HotkeyAction enum + HotkeySnapshot
+├── AnyDoor.swift               # @main, Settings scene only (menu bar is managed by MenuBarController)
+├── AppDelegate.swift           # ModelContainer, providers registry, service bootstrap, state-restoration opt-out
+├── Models/                     # SwiftData @Model (exactly these 4 = the ModelContainer schema):
+│                               #   KeyBinding / BuiltinPreference / ClipboardHistoryItem / HostProfile.
+│                               #   Value types: BuiltinItem / PanelEntry (+ HotkeyDescriptor) /
+│                               #   HotkeyAction (+ HotkeySnapshot) / HyperKey.swift (HyperKeyTrigger /
+│                               #   HyperKeyQuickPress / HyperKeyVirtualKey) / PortRecord / MenuBarIcon /
+│                               #   BackupSnapshot (Codable backup DTO, NOT a SwiftData @Model)
 ├── Services/
-│   ├── HotkeyService.swift     # CGEvent tap, dispatches HotkeyAction via injected closure
-│   ├── PanelStore.swift        # @Observable, merges all three sources, owns provider registry
-│   ├── AppSwitcher.swift       # App launch/hide/activate
-│   ├── AppleScriptRunner.swift # NSAppleScript wrapper
-│   ├── ShellRunner.swift       # Process + timeout wrapper
-│   ├── BuiltinPreferenceSeeder.swift
-│   ├── KeyBindingOrderBackfill.swift
-│   └── Providers/
-│       ├── BuiltinProvider.swift
-│       ├── KeepAwakeProvider.swift
-│       ├── HideDesktopIconsProvider.swift
-│       ├── ShowHiddenFilesProvider.swift
-│       ├── MuteAudioProvider.swift
-│       ├── DarkModeProvider.swift
-│       ├── LockScreenProvider.swift
-│       └── EmptyTrashProvider.swift
-├── Utilities/
-│   └── KeyCodeMap.swift
+│   ├── Core         HotkeyService / PanelStore / AppSwitcher / MenuBarController /
+│   │                SettingsOpener / RegularWindowCoordinator / LaunchAtLogin / LocalizationManager
+│   ├── Seeding      BuiltinPreferenceSeeder / KeyBindingOrderBackfill (idempotent launch-time migrations)
+│   ├── Runners      AppleScriptRunner / ShellRunner / CommandRunner / AutomationPermission
+│   ├── Providers/   22 ToggleProvider/ActionProvider types (BuiltinProvider.swift holds the protocols);
+│   │                most are their own actor (see Architecture Notes)
+│   ├── Clipboard    ClipboardWatcher / ClipboardHistoryStore / ClipboardCapture / ClipboardPasteService /
+│   │                ClipboardSearch / ClipboardPreferences / ColorSampler / TextRecognizer /
+│   │                BarcodeRecognizer / RegionCapture
+│   ├── Hosts/       HostsManager / HostsFile (parse+compose) / HostsWriter (protocol + AppleScriptWriter
+│   │                fallback) / PrivilegedHelperWriter / HelperManager (XPC helper install) /
+│   │                HostsBackupStore / MockHostsWriter
+│   ├── Brightness/  DisplayBrightnessService + BrightnessController (actor, VCP 0x10 serializer) +
+│   │                DDCBackend (Arm64 / Intel) + OSDBridge
+│   ├── Calculator/  Inline calculator for the command palette (Calculator entry point → CalcResult /
+│   │                CalcTokenizer / CalcEvaluator / CalcFunctions / CalcToken)
+│   ├── Hyper Key    HyperKeyService / HyperKeyController / QuickPressEmitter
+│   ├── Cmd Palette  CommandPaletteService / InstalledAppsScanner / PortInventory / PortScanner
+│   ├── Win Layout   WindowLayoutService
+│   ├── Sync/Backup  BackupService / BackupCodec / SyncBackend (protocol + LocalFileBackend) / SyncSettingsRegistry
+│   └── Updates      UpdateService / UpdaterAdapter (protocol; NullUpdaterAdapter fallback) /
+│                    SparkleUpdaterBridge (defines SparkleUpdaterAdapter)
+├── Utilities/                  # KeyCodeMap / AppIconCache / L10n / color & thumbnail helpers / SystemSound
 └── Views/
-    ├── MenuBarView.swift              # Menu bar panel root
-    ├── PanelRowView.swift             # Single row: toggle / action / submenu
-    ├── HoverPopover.swift             # NSWindow side popover + HoverGate timing
-    ├── AppShortcutsPopoverView.swift  # Popover content for app shortcuts
-    ├── HotkeyRecorder.swift           # Inline hotkey recording field
-    ├── SettingsView.swift             # TabView host
-    ├── PanelSettingsView.swift        # 面板 tab: drag / visibility / hotkey
-    └── GeneralSettingsView.swift      # 通用 tab (placeholder)
+    ├── Panel        MenuBarView / PanelRowView / HoverPopover / HotkeyRecorder / HotkeyLabel
+    ├── Popovers     AppShortcuts / Brightness / WindowLayout / PortManager / HostsManager popovers
+    ├── Clipboard    ClipboardWall* / ClipboardHistory* / ClipboardCardView
+    ├── Cmd Palette  CommandPalettePicker / SpotlightAppPicker (+ WindowController)
+    ├── Hosts/       HostsEditorView / PlainTextEditor / HelperApprovalBanner
+    ├── Settings     SettingsView (TabView: Panel + General only) / PanelSettingsView /
+    │                GeneralSettingsView (embeds SyncSettingsView as a section)
+    └── Common       Toast* / UpdateBannerView / LiquidGlassCompatibility / ScreenshotPreviewWindow
 ```
 
-## 架构要点
+## Architecture Notes
 
-- **ModelContainer 共享**：在 `AppDelegate.init()` 中创建，通过 `.modelContainer()` 传递给所有 SwiftUI 视图。不要创建多个 ModelContainer 实例。
-- **固定存储路径**：ModelContainer 显式配置 `url: ~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store`，避免 `swift run` 和 `.app` 因 Bundle ID 差异写入不同位置。`AppDelegate` 启动时会一次性从遗留 `default.store` 迁移并清理（见 `migrateLegacyStore`）。**修改 ModelConfiguration 时必须保留这条路径**，否则用户数据会"丢失"。
-- **CGEvent 回调并发安全**：回调函数是 C 风格的自由函数，不在 `@MainActor` 上。使用 `HotkeySnapshot`（Sendable 值类型，含 `HotkeyAction`）+ `nonisolated(unsafe)` 存储来安全传递数据。
-- **CGEvent tap 超时与 watchdog**：系统对 tap 回调有 ~1 秒预算，超时会触发 `.tapDisabledByTimeout` 自动禁用 tap。当前防御方式：
-  - 回调只做按键匹配，实际工作 `DispatchQueue.main.async` 派发
-  - 收到 `tapDisabledBy*` 时回调内 inline 重新启用
-  - 2 秒 watchdog 检测 `CGEvent.tapIsEnabled`，必要时 `restart()`（销毁并重建 tap）
-  - **绝不要在回调里做同步耗时工作**（I/O、SwiftData fetch、模态弹窗等）
-- **修饰键对齐**：录入和检测都使用 `CGEventFlags` 位掩码（`maskCommand | maskControl | maskAlternate | maskShift`），不要用 `NSEvent.ModifierFlags`。
-- **录入时暂停监听**：录入快捷键时调用 `HotkeyService.suspend()`，完成后 `resume()`，避免录入触发已有绑定。watchdog 通过 `isSuspended` 跳过自动重启。
-- **数据变更通知**：增删绑定后显式调用 `modelContext.save()` 和 `AppDelegate.refreshBindings()` 刷新 HotkeyService。
-- **切换语义**：`AppSwitcher.toggle` 用 `app.isActive`（最前应用判定）而非 `app.isHidden`。当目标已是最前则 `hide()`，否则 `activate()`；未运行则 `openApplication`。改判定条件会改变交互语义。
-- **PanelStore 是单一真相源**：三路数据（BuiltinItem 静态清单 + BuiltinPreference 偏好 + KeyBinding 应用快捷键）在 `PanelStore` 合并；视图只读 `topLevelEntries` 与 `appShortcutChildren`。**写入路径都要经过 PanelStore 的 mutation 方法**（setBuiltinVisibility、setBuiltinHotkey、reorderTopLevel 等），它们会自动 save SwiftData、rebuild 视图状态、并 `rebuildHotkeySnapshots()` 推到 HotkeyService。
-- **HotkeyAction 派发**：HotkeyService 的回调使用注入的 `dispatcher` 闭包，在 `AppDelegate.applicationDidFinishLaunching` 中绑定到 `PanelStore.shared.dispatch`；不要直接在 HotkeyService 内引用 PanelStore，保持 HotkeyService 与具体业务解耦。
-- **Provider 隔离**：每个 ToggleProvider / ActionProvider 是独立 actor，setState 在自己的 actor 上串行；`PanelStore` 是 `@MainActor`，跨 Provider 的写操作通过 `Task { await … }` 在 MainActor 调度。
+- **Shared ModelContainer**: created in `AppDelegate.init()` and handed to all SwiftUI views via `.modelContainer()`. Do not create multiple ModelContainer instances.
+- **Pinned store path**: ModelContainer is explicitly configured with `url: ~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store` so `swift run` and the `.app` don't write to different locations due to Bundle ID differences. The schema registers exactly four `@Model` types — `KeyBinding`, `BuiltinPreference`, `ClipboardHistoryItem`, `HostProfile`. On launch `AppDelegate` performs a one-time migration from the legacy `default.store` and cleans it up (see `migrateLegacyStore`). **Keep this path when changing the ModelConfiguration**, otherwise user data appears "lost".
+- **Launch-time SwiftData seeding/migration**: besides `migrateLegacyStore`, `AppDelegate.applicationDidFinishLaunching` runs idempotent `BuiltinPreferenceSeeder` (one `BuiltinPreference` row per `BuiltinItem`, appends newly added builtins at max order+1, uses versioned backfill flags) and `KeyBindingOrderBackfill` (assigns stride-100 `displayOrder` to legacy zero-order rows). New `@Model` fields **must carry inline defaults** so SwiftData lightweight migration can backfill existing rows (see `KeyBinding.isEnabled/isVisible/displayOrder`).
+- **CGEvent callback concurrency safety**: the callback is a C-style free function, not on `@MainActor`. Data is passed safely via `HotkeySnapshot` (a Sendable value type carrying `HotkeyAction`) plus `nonisolated(unsafe)` storage.
+- **CGEvent tap timeout & watchdog**: the system budgets the tap callback at ~1 second; exceeding it triggers `.tapDisabledByTimeout` and auto-disables the tap. Current defenses:
+  - the callback only matches keys; real work is dispatched via `DispatchQueue.main.async`
+  - on `tapDisabledBy*` the tap is re-enabled inline inside the callback
+  - a 2-second watchdog checks `CGEvent.tapIsEnabled` and calls `restart()` (tears down and rebuilds the tap) if needed
+  - **never do synchronous expensive work inside the callback** (I/O, SwiftData fetch, modal dialogs, etc.)
+- **HotkeyService health & keyboard lock**: `HotkeyService` exposes `tapHealth` (`healthy` / `suspendedByRecorder` / `transientlyDown` / `failed`) so the UI can surface accessibility-revoked or tap-create failures; a hard failure is only reported after ≥2 consecutive restart attempts fail. `setKeyboardLocked(_:)` powers a keyboard-lock feature — while locked the callback swallows all unmatched key events, but registered hotkeys still fire so the same shortcut can unlock.
+- **Modifier alignment**: both recording and detection use `CGEventFlags` bitmasks (`maskCommand | maskControl | maskAlternate | maskShift`); do not use `NSEvent.ModifierFlags`.
+- **Suppress dispatch while recording**: when recording a hotkey, the recorder calls `HotkeyService.beginRecording(observer:)` / `endRecording()`. The tap stays **active** (so the Caps-Lock/F19 Hyper trigger is still observed) but bound-hotkey dispatch and Quick Press are suppressed while `recordingObserver` is set, so recording can't fire an existing binding. `suspend()` / `resume()` (which fully disable the tap, and which the watchdog honors via `isSuspended`) exist but are **not** used by the recorder.
+- **Data-change notification**: binding add/remove flows through `PanelStore.addAppShortcut` / `deleteAppShortcut`, which internally `save()` SwiftData, `rebuild()` view state, and `rebuildHotkeySnapshots()` to refresh HotkeyService — views do not call `modelContext.save()` directly. (`AppDelegate.refreshBindings()` still exists as a hot-reload helper but currently has no callers.)
+- **Toggle semantics**: `AppSwitcher.toggle` uses `app.isActive` (frontmost check) rather than `app.isHidden`. If the target is already frontmost it calls `app.hide()`; otherwise (not frontmost, or not running) it routes through `NSWorkspace.openApplication(at:)` (`activate(at:)`) — deliberately **not** `NSRunningApplication.activate()`, which macOS 14+ silently ignores when an `.accessory` app tries to activate while another regular app holds focus. Changing the condition changes the interaction semantics.
+- **PanelStore is the single source of truth**: three data sources (the static `BuiltinItem` catalog + `BuiltinPreference` preferences + `KeyBinding` app shortcuts) are merged in `PanelStore.rebuild()`; views read `topLevelEntries`, `appShortcutChildren`, and `windowLayoutChildren` (window-layout child rows are partitioned out separately). **All writes must go through PanelStore's mutation methods** (`setBuiltinVisibility`, `setBuiltinHotkey`, `updateAppShortcut`, `reorderTopLevel`, `reorderAppShortcuts`, `reorderWindowChildren`, `addAppShortcut`, `deleteAppShortcut`), which save SwiftData, `rebuild()` view state, and call `rebuildHotkeySnapshots()` to push to HotkeyService — except `reorderAppShortcuts`, which only changes display order and intentionally skips the snapshot rebuild. `rebuildHotkeySnapshots()` also draws from a **fourth** hotkey source: the Command Palette hotkey (`CommandPaletteService.shared.hotkey`). PanelStore additionally owns the provider registry and the activation paths (`dispatch`, `toggle`, `run`, `setKeepAwakeDuration`) with per-item in-flight guards.
+- **HotkeyAction dispatch**: HotkeyService's callback uses an injected `dispatcher` closure, bound in `AppDelegate.applicationDidFinishLaunching` to `PanelStore.shared.dispatch`. Do not reference PanelStore directly inside HotkeyService — keep HotkeyService decoupled from business logic.
+- **Provider isolation**: most ToggleProvider / ActionProvider implementations are their own `actor` and `setState` / `run` runs serially on that actor; the UI/window-coupled ones (`ClipboardWallProvider`, `WindowLayoutProvider`) are `@MainActor final class` instead. There are 22 concrete provider types (`BuiltinProvider.swift` holds only the `ToggleProvider` / `ActionProvider` protocols). `PanelStore` is `@MainActor`, and cross-provider writes are scheduled on the MainActor via `Task { await … }`.
+- **The menu bar is not MenuBarExtra**: the menu-bar item is owned by the AppKit `MenuBarController` (`NSStatusItem` + a floating `NSPanel`). SwiftUI `MenuBarExtra` with `isInserted: false` infinite-loops the scene graph on macOS 26, so `AnyDoor.swift` keeps only the `Settings` scene. When AppKit needs to open Settings it goes through `SettingsOpener` (an off-screen `NSHostingView` mounted at launch captures the `\.openSettings` closure).
+- **Window state restoration must stay off**: this is a menu-bar utility — no window should appear on launch. `AppDelegate.application(_:shouldRestoreApplicationState:)` / `shouldSaveApplicationState` return `false` so macOS won't reopen the previous Settings window on login auto-launch; `RegularWindowRegistrar` additionally sets the Settings window `isRestorable = false` as a fallback for the per-window restoration path. **Any new window must be verified not to be restored.**
+- **Dynamic activation policy**: normally `.accessory` (no Dock icon). `RegularWindowCoordinator` switches to `.regular` while a "real" window (Settings, the Hosts editor) is open — otherwise the window slips behind and can't be resurfaced — and reverts to `.accessory` once the last one closes.
+- **AppDelegate lifecycle extras**: `applicationShouldTerminate` clears the Hyper Key mapping (racing a 500 ms timeout) before quitting; `applicationShouldHandleReopen` re-opens Settings when AnyDoor is relaunched with no visible window, so a hidden menu-bar icon can be re-enabled.
+- **Privileged hosts writes**: when the XPC helper is enabled, `/etc/hosts` is written by `AnyDoorHostsHelper` (a privileged LaunchDaemon installed via `SMAppService.daemon`); `HostsManager` coordinates and `PrivilegedHelperWriter` talks over XPC. When the helper is **not** enabled (ad-hoc/dev builds, or before approval), the main app falls back to `AppleScriptWriter`, which copies a temp file over `/etc/hosts` via an administrator-authorized `do shell script`. `HostsManager.makeWriter` re-resolves the writer on every write from `HelperManager.readiness()`, so helper approval takes effect without a relaunch (`MockHostsWriter` is for tests). The helper validates every caller's code signature via the peer **audit token** (the `XPCAuditToken` ObjC shim, which redeclares the private `NSXPCConnection.auditToken`) — requiring Team ID `9VM4RM39R3` + identifier `dev.bybee.AnyDoor` — to close the PID-recycle TOCTOU window. The XPC contract (`@objc HostsHelperProtocol` + `HostsHelperConstants`, including a 1 MiB payload cap) lives in the shared `HostsHelperShared` target, imported by both the app and the helper.
+- **Brightness backend selected by architecture**: `DisplayBrightnessService` drives a `BrightnessController` (an `actor` that serializes DDC VCP 0x10 I/O and retries a failed write once); the `DDCBackend` is injected into that controller in `AppDelegate`, where `#if arch(arm64)` chooses `Arm64DDCBackend` else `IntelDDCBackend`. Brightness up/down are hidden hotkeys (`HotkeyAction.brightnessUp/Down`).
+- **Hyper Key: two-phase + watchdog**: the trigger is remapped to virtual key **F19** (keyCode 80) via `hidutil` `UserKeyMapping`; HotkeyService then re-emits the Hyper modifier flags (Ctrl+Opt+Cmd, plus Shift when `includeShift` is on). Phase 1 — at launch `AppDelegate` unconditionally calls `HyperKeyController.reconcile()`, which **clears** any leftover owned mapping (crash recovery; the controller records the hidutil entries it owns in the `hyperKey.ownedSignatures` UserDefaults key so it never nukes third-party mappings). Phase 2 — `HyperKeyService.bootstrapAfterTap` runs once the tap is ready, re-applies the active trigger, uses a `mutationToken` to stop stale async work from overwriting newer state, and runs a 2-second watchdog following `HotkeyService.tapHealth`. The trigger/quickPress/includeShift config lives in **UserDefaults** (not SwiftData). Tapping the trigger alone fires a **Quick Press** action (none / Escape / original key) via `QuickPressEmitter`, whose synthesized CGEvents carry `kAnyDoorSynthesizedEventTag` on `eventSourceUserData` so the tap passes through its own emissions (the Caps-Lock "original" case toggles via IOKit `IOHIDSetModifierLockState`). The mapping is cleared on system power-off (`willPowerOffNotification`) and on termination (gated on `hasPersistedSignatures`).
+- **Config sync / backup**: backup (Settings → General) serializes app shortcuts (`KeyBinding`), builtin preferences (`BuiltinPreference`), and whitelisted general settings (`SyncSettingsRegistry`) into a schema-versioned Codable `BackupSnapshot`. Clipboard history and machine-specific keys are excluded, `appPath` is never serialized (re-resolved from bundle ID on import), import merges per key (imported wins, local-only rows kept), and `reconcileAfterImport` re-reads settings into CommandPaletteService / LocalizationManager / HyperKeyService and rebuilds hotkey snapshots so changes apply without relaunch. Storage sits behind a `SyncBackend` protocol (current backend: `LocalFileBackend`).
+- **Localization**: UI strings go through `LocalizationManager.shared` (system / Simplified Chinese / English), injected via `.environment`. New user-facing strings use `L10n` / `LocalizedText`; do not hardcode them. The `.xcstrings` catalog is compiled at build time by the `XCStringsCompilerPlugin` build-tool plugin.
 
-## 相关 Skills
+## Related Skills
 
-以下 skills 已安装，在相关任务中应主动使用：
+The following skills are installed and should be used proactively for relevant tasks:
 
-- **macos-design-guidelines** — Apple HIG for Mac。构建 macOS UI、菜单栏、工具栏、窗口管理、键盘快捷键时使用。
-- **axiom-swiftdata** — SwiftData 模式，@Model、@Query、@Relationship、ModelContext 模式、Swift 6 并发时使用。
-- **axiom-swiftui-26-ref** — iOS/macOS 26 SwiftUI 新特性，Liquid Glass 设计系统、@Animatable 宏等。
-- **swiftui-liquid-glass** — Liquid Glass API 实现和审查。
-- **axiom-swift-concurrency** — Swift 并发模式，@MainActor、Sendable、nonisolated(unsafe)、Task、Actor 等并发安全模式。
-- **swift-expert** — Swift 语言专家知识，覆盖语言特性和最佳实践。
-- **macos-developer** — macOS 应用开发，CGEvent、NSWorkspace、辅助功能权限等底层 API。
+- **macos-design-guidelines** — Apple HIG for Mac. Use when building macOS UI, menu bars, toolbars, window management, keyboard shortcuts.
+- **axiom-swiftdata** — SwiftData patterns: @Model, @Query, @Relationship, ModelContext patterns, Swift 6 concurrency.
+- **axiom-swiftui-26-ref** — iOS/macOS 26 SwiftUI features, the Liquid Glass design system, the @Animatable macro, etc.
+- **swiftui-liquid-glass** — Liquid Glass API implementation and review.
+- **axiom-swift-concurrency** — Swift concurrency patterns: @MainActor, Sendable, nonisolated(unsafe), Task, Actor, etc.
+- **swift-expert** — Swift language expertise covering language features and best practices.
+- **macos-developer** — macOS app development: CGEvent, NSWorkspace, Accessibility permission, and other low-level APIs.
 
-## 注意事项
+## Notes
 
-- 应用使用 `.accessory` 激活策略，不显示 Dock 图标
-- 事件 tap 使用 `.cghidEventTap` 确保最高优先级
-- `displayKey` 是 `@Transient` 计算属性，不持久化
-- 界面语言为中文
+- The app uses the `.accessory` activation policy and shows no Dock icon.
+- The event tap uses `.cghidEventTap` to ensure highest priority.
+- `displayKey` is a `@Transient` computed property on `KeyBinding` and is not persisted.
+- The interface language is Chinese.
 
 ## Code Conventions
 
+- **All content in CLAUDE.md (and other repo-committed documentation) must be written in English.**
 - **All code comments must be written in English.**
 - **All commit messages must be written in English.**
 - **All PR titles and descriptions must be written in English.**
 - UI-facing strings (labels, messages shown to the user) remain in Chinese.
-
-## 发版流程（`make release <version>`）
-
-发行说明**必须写在 `CHANGELOG.md` 的 `## [Unreleased]` 段下**，不要手动新建 `## [x.y.z]` 标题。`scripts/release.sh` 会在执行时自动把 `## [Unreleased]` 重写为 `## [Unreleased]\n\n## [<version>] - <today>`（见 `scripts/release.sh:107`），并在 preflight 阶段断言 `[Unreleased]` 非空（`scripts/release.sh:57-59`）。
-
-运行 `make release <version>` 前需确认这些 preflight 检查全部就绪，否则脚本会在第 1 步退出：
-
-- `Info.plist` 的 `SUPublicEDKey` 不能是占位符（先跑 `scripts/sparkle-bin/generate_keys` 并把公钥写回）
-- 登录钥匙串里有匹配 `SIGNING_IDENTITY` 的 codesigning 证书
-- `sign_update` / `generate_appcast` 已安装（`make sparkle-tools`）
-- `notarytool` 的 keychain profile 已配置
-- `gh` CLI 已登录
