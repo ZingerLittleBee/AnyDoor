@@ -1,7 +1,5 @@
-@import "tailwindcss";
-
 /* ─────────────────────────── Tokens ─────────────────────────── */
-@theme {
+:root {
   --color-bg: #050507;
   --color-surface: rgba(28, 28, 32, 0.85);
   --color-line: rgba(255, 255, 255, 0.08);
@@ -32,6 +30,17 @@ body{
   -webkit-font-smoothing: antialiased;
   overflow-x: hidden;
 }
+
+/* Minimal reset (this project no longer pulls in Tailwind's preflight) */
+button, input, select, textarea { font: inherit; color: inherit; }
+button { background: none; border: none; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; margin: 0; }
+
+/* Visible keyboard focus (previously missing — WCAG 2.4.7) */
+:focus-visible { outline: 2px solid var(--color-accent-2); outline-offset: 2px; border-radius: 4px; }
+:focus:not(:focus-visible) { outline: none; }
+.pm-search input:focus-visible { outline: 2px solid var(--color-accent-2); outline-offset: 0; }
 
 body::before{
   content:"";
@@ -283,10 +292,9 @@ h2.sec-h{
 .hero-meta{display:flex; gap:24px; color:var(--color-text-soft); font-size:12.5px; margin-top: 22px}
 .hero-meta .check{color: var(--color-mac-green); margin-right:5px}
 .feature-pills{display:flex; flex-wrap:wrap; gap:8px; margin-top: 22px}
-.feature-pills span{
+.feature-pills > span{
   font-size: 12px; padding: 6px 12px;
   background: rgba(255,255,255,.05);
-  border: .5px solid var(--color-line);
   border-radius: 999px; color: var(--color-text-dim);
 }
 
@@ -533,6 +541,30 @@ h2.sec-h{
 .hkstage[data-mode="fkeys"] .hint-hyper{ display: none; }
 .hkstage[data-mode="hyper"] .hint-fkeys{ display: none; }
 
+/* ─────────────────────────── Feature grid ─────────────────────────── */
+.feat-grid{display:grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 56px}
+.feat-card{
+  display:flex; gap:16px; align-items:flex-start;
+  background: rgba(28,28,32,.55);
+  border: .5px solid var(--color-line);
+  border-radius: 18px;
+  padding: 22px;
+  transition: border-color .2s, transform .2s;
+}
+.feat-card:hover{border-color: var(--color-line-strong); transform: translateY(-2px)}
+.feat-card:last-child{grid-column: 1 / -1}
+.feat-ico{width:42px; height:42px; border-radius:11px; display:grid; place-items:center; flex:0 0 42px}
+.feat-ico svg{width:20px; height:20px}
+.feat-body{flex:1; min-width:0}
+.feat-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px}
+.feat-head h3{font-size:17px; font-weight:600; margin:0; letter-spacing:-.01em}
+.feat-tag{
+  font: 600 10.5px/1 var(--font-mono); color: var(--color-text-soft);
+  background: rgba(255,255,255,.05); border:.5px solid var(--color-line);
+  border-radius:999px; padding:5px 9px; letter-spacing:.03em; white-space:nowrap;
+}
+.feat-card p{font-size:13.5px; color:var(--color-text-dim); margin:0; line-height:1.45}
+
 /* ─────────────────────────── Toggle cards ─────────────────────────── */
 .toggles-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px}
 .tcard{
@@ -548,7 +580,7 @@ h2.sec-h{
 .tcard .head{display:flex; align-items:center; justify-content:space-between; gap:10px}
 .tcard .ico{width:38px; height:38px; border-radius:10px; background: rgba(255,255,255,.06); display:grid; place-items:center}
 .tcard.is-on .ico{background: var(--ico-on-bg, rgba(94,155,255,.18)); color: var(--ico-on-color, #5e9bff)}
-.tcard h4{font-size:17px; font-weight:600; margin: 14px 0 4px; letter-spacing:-.01em}
+.tcard h3{font-size:17px; font-weight:600; margin: 14px 0 4px; letter-spacing:-.01em}
 .tcard p{font-size:13.5px; color:var(--color-text-dim); margin:0; line-height:1.4}
 .tcard .state{font-size:11.5px; color:var(--color-text-soft); margin-top:10px; font-family: var(--font-mono); letter-spacing:.04em}
 .tcard.dark-card.is-on{background: #000}
@@ -803,10 +835,21 @@ h2.sec-h{
 .footer .links a:hover{color: var(--color-text)}
 .footer .bot{margin-top: 28px; color: var(--color-text-soft); font-size: 12px; display:flex; justify-content:space-between; flex-wrap: wrap; gap: 12px}
 
+/* ─────────────────────────── Reduced motion ─────────────────────────── */
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* ─────────────────────────── Responsive ─────────────────────────── */
 @media (max-width: 860px){
   .hero{grid-template-columns: 1fr; padding-top:120px}
   .hero-stage{justify-content:flex-start; margin-top: 30px}
+  .feat-grid{grid-template-columns: 1fr}
   .toggles-grid{grid-template-columns: 1fr 1fr}
   .pm-wrap{grid-template-columns: 1fr}
   .pm-side{height: 240px}

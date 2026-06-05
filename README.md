@@ -290,9 +290,11 @@ publishes it.
 
 ## Acknowledgements
 
-- [DDC.swift](https://github.com/reitermarkus/DDC.swift) (MIT) — DDC/CI brightness control for external displays on Intel Macs.
-- [AskForPermission](https://github.com/riko2chen/AskForPermission) — macOS accessibility permission helper.
-- [Sparkle](https://sparkle-project.org/) — application auto-update.
+Bundled third-party code; full license texts in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).
+
+- [MonitorControl](https://github.com/MonitorControl/MonitorControl) (MIT) — its `IntelDDC` is vendored for DDC/CI brightness control of external displays on Intel Macs (itself adapted from [@reitermarkus](https://github.com/reitermarkus)'s work).
+- [Sparkle](https://sparkle-project.org/) (MIT) — application auto-update.
+- [AskForPermission](https://github.com/riko2chen/AskForPermission) (MIT) — macOS accessibility permission helper.
 
 ## License
 

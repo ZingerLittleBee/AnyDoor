@@ -2,7 +2,7 @@
 
 import type { Bi } from './copy';
 
-// Menu-panel rows (mirror the AnyDoor screenshots, all 22 items).
+// Menu-panel rows — a representative slice of the default-visible top-level items.
 export type PanelItem = {
   key: string;
   type: 'submenu' | 'toggle' | 'action';
@@ -23,6 +23,7 @@ export const panelItems: PanelItem[] = [
   { key: 'lock',         type: 'action',  icon: 'lock',       label: { zh: '锁定屏幕', en: 'Lock Screen' } },
   { key: 'trash',        type: 'action',  icon: 'trash',      label: { zh: '清空废纸篓', en: 'Empty Trash' } },
   { key: 'screenshot',   type: 'action',  icon: 'camera',     label: { zh: '截图到剪贴板', en: 'Screenshot to Clipboard' } },
+  { key: 'clipboardWall',type: 'action',  icon: 'clipboard',  label: { zh: '剪贴板历史', en: 'Clipboard History' }, hotkey: ['⌘', '⇧', 'V'] },
   { key: 'displaySleep', type: 'action',  icon: 'sleepZ',     label: { zh: '显示器睡眠', en: 'Display Sleep' } },
   { key: 'systemSleep',  type: 'action',  icon: 'moon',       label: { zh: '系统休眠', en: 'System Sleep' } },
   { key: 'hideDock',     type: 'toggle',  icon: 'dock',       label: { zh: '隐藏 Dock', en: 'Hide Dock' } },
@@ -32,9 +33,12 @@ export const panelItems: PanelItem[] = [
   { key: 'restartMB',    type: 'action',  icon: 'upload',     label: { zh: '重启菜单栏', en: 'Restart Menu Bar' } },
   { key: 'flushDNS',     type: 'action',  icon: 'refreshDNS', label: { zh: '刷新 DNS', en: 'Flush DNS' } },
   { key: 'kbLock',       type: 'toggle',  icon: 'keyOff',     label: { zh: '禁用键盘', en: 'Keyboard Lock' } },
-  { key: 'ocr',          type: 'action',  icon: 'ocr',        label: { zh: '屏幕取词', en: 'Screen OCR' }, hotkey: ['⇧', '⌘', '2'] },
+  { key: 'ocr',          type: 'action',  icon: 'ocr',        label: { zh: '屏幕取词', en: 'Screen OCR' } },
   { key: 'pickColor',    type: 'action',  icon: 'eyedropper', label: { zh: '屏幕取色', en: 'Pick Color' } },
   { key: 'qr',           type: 'action',  icon: 'qr',         label: { zh: '识别二维码', en: 'Scan QR Code' } },
+  { key: 'brightness',   type: 'submenu', icon: 'sun',        label: { zh: '显示器亮度', en: 'Display Brightness' } },
+  { key: 'windowLayout', type: 'submenu', icon: 'layout',     label: { zh: '窗口布局', en: 'Window Layout' } },
+  { key: 'hostsManager', type: 'submenu', icon: 'server',     label: { zh: 'Hosts 管理', en: 'Hosts Manager' } },
 ];
 
 // Toggles defaulted on
@@ -176,5 +180,74 @@ export const hyperBindings: HyperBinding[] = [
     name: { zh: '静音', en: 'Mute' },
     stateOn: { zh: '已静音', en: 'Muted' },
     icon: 'mute',
+  },
+];
+
+// "And there is more" showcase — the headline subsystems that don't have their
+// own section above. Mirrors the real app (CLAUDE.md feature set).
+export type FeatureCard = {
+  key: string;
+  icon: string;            // key into icons.ts
+  accent: string;          // icon tint
+  name: Bi;
+  desc: Bi;
+  tag: Bi;                 // small mono pill (hotkey / hint)
+};
+
+export const moreFeatures: FeatureCard[] = [
+  {
+    key: 'clipboard',
+    icon: 'clipboard',
+    accent: '#5e9bff',
+    name: { zh: '剪贴板历史墙', en: 'Clipboard Wall' },
+    desc: {
+      zh: '持久化剪贴板历史——文本、图片、文件，外加截图、取色、OCR、二维码的结果，按类别分页、可搜索、可收藏。',
+      en: 'A persistent clipboard history — text, images, files, plus screenshot / color / OCR / QR results — paged by category, searchable, favoritable.',
+    },
+    tag: { zh: '⌘ ⇧ V', en: '⌘ ⇧ V' },
+  },
+  {
+    key: 'brightness',
+    icon: 'sun',
+    accent: '#ff9f0a',
+    name: { zh: '外接显示器亮度', en: 'Display Brightness' },
+    desc: {
+      zh: '通过 DDC/CI 控制外接显示器亮度,带原生 OSD 提示。热键调节鼠标所在的那块屏。',
+      en: 'Drive external-monitor brightness over DDC/CI with the native OSD. Hotkeys nudge the display under your cursor.',
+    },
+    tag: { zh: 'DDC · VCP 0x10', en: 'DDC · VCP 0x10' },
+  },
+  {
+    key: 'window',
+    icon: 'layout',
+    accent: '#30d158',
+    name: { zh: '窗口布局', en: 'Window Layout' },
+    desc: {
+      zh: '把前台窗口贴到半屏、四分之一屏、居中或铺满——每个布局动作都能绑定一个热键。',
+      en: 'Snap the focused window to halves, quarters, center, or fill — every layout action is its own bindable hotkey.',
+    },
+    tag: { zh: '17 个动作', en: '17 actions' },
+  },
+  {
+    key: 'hosts',
+    icon: 'server',
+    accent: '#bf5af2',
+    name: { zh: 'Hosts 管理', en: 'Hosts Manager' },
+    desc: {
+      zh: '在菜单栏里编辑 /etc/hosts,启用/停用 profile。写入由特权 XPC helper 完成,校验调用方代码签名。',
+      en: 'Edit /etc/hosts and flip host profiles from the menu bar. Writes go through a privileged XPC helper that verifies the caller’s code signature.',
+    },
+    tag: { zh: '特权 helper', en: 'XPC helper' },
+  },
+  {
+    key: 'palette',
+    icon: 'command',
+    accent: '#ff375f',
+    name: { zh: '命令面板', en: 'Command Palette' },
+    desc: {
+      zh: '一个热键唤起的搜索框:启动已安装 App、跳转端口、跑内置动作,还内置一个科学计算器。',
+      en: 'A hotkey-summoned search box: launch installed apps, jump to ports, run built-in actions — with an inline scientific calculator.',
+    },
+    tag: { zh: '搜索 · 计算', en: 'Search · calc' },
   },
 ];

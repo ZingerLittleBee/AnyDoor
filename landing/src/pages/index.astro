@@ -3,6 +3,7 @@ import '../styles/global.css';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
 import HotkeyDemo from '../components/HotkeyDemo.astro';
+import MoreFeatures from '../components/MoreFeatures.astro';
 import Toggles from '../components/Toggles.astro';
 import PortManager from '../components/PortManager.astro';
 import Actions from '../components/Actions.astro';
@@ -17,13 +18,45 @@ import Footer from '../components/Footer.astro';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>AnyDoor — 一颗按键，一扇任意门</title>
-    <meta name="description" content="A macOS menu bar control center driven by global hotkeys." />
+    <title>AnyDoor — 一颗按键，一扇任意门 · macOS menu bar control center</title>
+    <meta name="description" content="AnyDoor is a free, open-source macOS menu bar control center driven by global hotkeys: launch and toggle apps, flip system settings, manage ports and hosts, and run built-in actions — without leaving the keyboard." />
+    <link rel="canonical" href="https://anydoor.app/" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+
+    <!-- Open Graph -->
     <meta property="og:title" content="AnyDoor — macOS menu bar control center" />
-    <meta property="og:description" content="Bind any key combination to launch and toggle apps, flip system settings, or run one-off actions." />
+    <meta property="og:description" content="Bind any key combination to launch and toggle apps, flip system settings, or run one-off actions — all without leaving the keyboard." />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://anydoor.app/" />
+    <meta property="og:site_name" content="AnyDoor" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:image" content="https://anydoor.app/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="AnyDoor — one key, any door. A macOS menu bar control center." />
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="AnyDoor — macOS menu bar control center" />
+    <meta name="twitter:description" content="One key. Any door. A macOS menu bar control center driven by global hotkeys." />
+    <meta name="twitter:image" content="https://anydoor.app/og.png" />
+
     <meta name="theme-color" content="#050507" />
+
+    <script type="application/ld+json" set:html={JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'AnyDoor',
+      applicationCategory: 'UtilitiesApplication',
+      operatingSystem: 'macOS 14+',
+      url: 'https://anydoor.app/',
+      downloadUrl: 'https://github.com/ZingerLittleBee/AnyDoor/releases',
+      sameAs: ['https://github.com/ZingerLittleBee/AnyDoor'],
+      license: 'https://github.com/ZingerLittleBee/AnyDoor/blob/main/LICENSE',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    })} />
   </head>
   <body>
     <div class="cursor-glow" id="cursor-glow"></div>
@@ -33,6 +66,7 @@ import Footer from '../components/Footer.astro';
     <main>
       <Hero />
       <HotkeyDemo />
+      <MoreFeatures />
       <Toggles />
       <PortManager />
       <Actions />
@@ -44,13 +78,22 @@ import Footer from '../components/Footer.astro';
     <Footer />
 
     <script>
-      // Cursor glow follows pointer.
+      // Cursor glow follows pointer — one compositor-only write per frame, and
+      // only on fine pointers when the user hasn't asked to reduce motion.
       const glow = document.getElementById('cursor-glow');
-      if (glow) {
+      const finePointer = window.matchMedia('(pointer: fine)').matches;
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (glow && finePointer && !reduceMotion) {
+        let x = 0, y = 0, raf = 0;
         window.addEventListener('mousemove', (e) => {
-          glow.style.left = e.clientX + 'px';
-          glow.style.top = e.clientY + 'px';
-        });
+          x = e.clientX; y = e.clientY;
+          if (!raf) raf = requestAnimationFrame(() => {
+            glow.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`;
+            raf = 0;
+          });
+        }, { passive: true });
+      } else if (glow) {
+        glow.style.display = 'none';
       }
     </script>
   </body>

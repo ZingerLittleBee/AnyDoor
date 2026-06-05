@@ -21,8 +21,18 @@ export const copy = {
     meta2: { zh: 'macOS 14+', en: 'macOS 14+' },
     meta3: { zh: 'MIT 协议', en: 'MIT License' },
     pills: {
-      zh: ['全局热键', '端口管理', '深色模式', '屏幕 OCR', '取色器', '识别二维码', 'Liquid Glass', 'Hyper Key'],
-      en: ['Global hotkeys', 'Port manager', 'Dark mode', 'Screen OCR', 'Color picker', 'QR scan', 'Liquid Glass', 'Hyper Key'],
+      zh: ['全局热键', '端口管理', '剪贴板历史', '命令面板', 'Hosts 管理', '显示器亮度', '窗口布局', '深色模式', '屏幕 OCR', '取色器', '识别二维码', 'Liquid Glass', 'Hyper Key'],
+      en: ['Global hotkeys', 'Port manager', 'Clipboard history', 'Command palette', 'Hosts editor', 'Display brightness', 'Window layout', 'Dark mode', 'Screen OCR', 'Color picker', 'QR scan', 'Liquid Glass', 'Hyper Key'],
+    },
+  },
+
+  features: {
+    eyebrow: { zh: '不止于此', en: 'And there is more' },
+    h2a: { zh: '一个菜单栏，', en: 'One menu bar,' },
+    h2b: { zh: '一整套工具箱。', en: 'a whole toolbox.' },
+    lede: {
+      zh: '剪贴板历史、外接显示器亮度、窗口布局、Hosts 管理、命令面板——更多系统级能力，全都收进同一个面板、同一套热键。',
+      en: 'Clipboard history, external-display brightness, window layout, hosts management, a command palette — more system-level power, folded into the same panel and the same hotkeys.',
     },
   },
 
@@ -76,7 +86,7 @@ export const copy = {
     noMatch: { zh: '无匹配端口', en: 'No matching ports' },
     panelTitle: { zh: '端口管理', en: 'Port Manager' },
     appShortcuts: { zh: '应用快捷键', en: 'App Shortcuts' },
-    enabled: { zh: '22 个已启用', en: '22 enabled' },
+    enabled: { zh: '26 个已启用', en: '26 enabled' },
   },
 
   actions: {
@@ -107,7 +117,6 @@ export const copy = {
     tabPanel: { zh: '面板', en: 'Panel' },
     tabGeneral: { zh: '通用', en: 'General' },
     record: { zh: '点击录入', en: 'Click to record' },
-    recordPress: { zh: '请按下…', en: 'Press keys…' },
     hint: { zh: '系统条目无法删除，只能隐藏；应用快捷键可自由增删。', en: 'System items can be hidden but not removed; app shortcuts can be added or removed freely.' },
     badgeSubmenu: { zh: '子菜单', en: 'submenu' },
     badgeToggle: { zh: '开关', en: 'toggle' },
@@ -116,7 +125,7 @@ export const copy = {
     metaSubmenu: { zh: '系统 · 子菜单', en: 'system · submenu' },
     metaAction: { zh: '系统 · 动作', en: 'system · action' },
     twoBindings: { zh: '2 个绑定', en: '2 bindings' },
-    portsCount: { zh: '26 个端口', en: '26 ports' },
+    portsCount: { zh: '实时', en: 'Live' },
   },
 
   download: {
@@ -126,11 +135,10 @@ export const copy = {
     lede: { zh: '免费、开源、本地运行，没有任何遥测。', en: 'Free, open source, runs entirely locally. No telemetry, no account.' },
     dmgTitle: { zh: '下载 .dmg', en: 'Download the .dmg' },
     dmgDesc: { zh: '签名 + 公证的安装包，集成 Sparkle 自动更新。', en: 'Signed + notarized installer with Sparkle auto-update built in.' },
-    dmgBtn: { zh: '下载 AnyDoor 1.1.0', en: 'Download AnyDoor 1.1.0' },
+    dmgBtn: { zh: '下载 AnyDoor v', en: 'Download AnyDoor v' },
     brewTitle: { zh: '或者用源码构建', en: 'Or build from source' },
     brewDesc: { zh: '从源码构建并安装到 /Applications。', en: 'Build the release binary and install to /Applications.' },
     copy: { zh: '复制', en: 'Copy' },
-    copied: { zh: '已复制', en: 'Copied' },
   },
 
   faq: {
@@ -151,7 +159,7 @@ export const copy = {
       },
       {
         q: { zh: '怎么打包做开发自定义？', en: 'How do I build it myself?' },
-        a: { zh: '仓库里包含完整的 Make 流水线：make swift-release 构建二进制，make release 1.1.0 做签名 + 公证 + 上传 GitHub Release + 更新 Sparkle appcast。', en: 'The repo ships a complete Make pipeline: `make swift-release` builds the binary, `make release 1.1.0` signs, notarizes, ships to GitHub Releases, and refreshes the Sparkle appcast.' },
+        a: { zh: '仓库里包含完整的 Make 流水线：make swift-release 构建二进制，make release <version> 做签名 + 公证 + 上传 GitHub Release + 更新 Sparkle appcast。', en: 'The repo ships a complete Make pipeline: `make swift-release` builds the binary, `make release <version>` signs, notarizes, ships to GitHub Releases, and refreshes the Sparkle appcast.' },
       },
     ] as { q: Bi; a: Bi }[],
   },
@@ -162,8 +170,3 @@ export const copy = {
     built: { zh: 'Made with Swift 6.2 in 2026.', en: 'Made with Swift 6.2 in 2026.' },
   },
 };
-
-// Render helper — emits both language nodes; CSS hides the inactive one.
-export function bi(s: Bi): string {
-  return `<span data-i18n-zh>${s.zh}</span><span data-i18n-en>${s.en}</span>`;
-}

@@ -3435,6 +3435,74 @@
         }
       }
     },
+    "toast.emptyTrash.success": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trash emptied"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已清空废纸篓"
+          }
+        }
+      }
+    },
+    "toast.emptyTrash.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed to empty the Trash"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空废纸篓失败"
+          }
+        }
+      }
+    },
+    "toast.emptyTrash.alreadyEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trash is already empty"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "废纸篓已经是空的"
+          }
+        }
+      }
+    },
+    "toast.emptyTrash.permissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Automation to empty the Trash"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请授予自动化权限以清空废纸篓"
+          }
+        }
+      }
+    },
     "toast.ocr.noText": {
       "extractionState": "manual",
       "localizations": {

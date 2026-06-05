@@ -15,12 +15,12 @@ import { copy } from '../lib/copy';
     <a href="#download"><span data-i18n-zh>{copy.nav.download.zh}</span><span data-i18n-en>{copy.nav.download.en}</span></a>
   </div>
   <div class="nav-cta">
-    <div class="lang-toggle" role="tablist">
-      <button data-lang-btn="zh">中</button>
-      <button data-lang-btn="en">EN</button>
+    <div class="lang-toggle" role="group" aria-label="Language / 语言">
+      <button type="button" data-lang-btn="zh" aria-pressed="false" lang="zh">中</button>
+      <button type="button" data-lang-btn="en" aria-pressed="false" lang="en">EN</button>
     </div>
     <a class="gh" href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer" aria-label="GitHub">
-      <span set:html={icons.github()} style="width:14px;height:14px" />
+      <span set:html={icons.github()} style="width:14px;height:14px" aria-hidden="true" />
     </a>
   </div>
 </nav>
@@ -32,7 +32,9 @@ import { copy } from '../lib/copy';
     document.documentElement.setAttribute('data-lang', lang);
     document.documentElement.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
     document.querySelectorAll<HTMLButtonElement>('[data-lang-btn]').forEach((b) => {
-      b.classList.toggle('is-active', b.dataset.langBtn === lang);
+      const active = b.dataset.langBtn === lang;
+      b.classList.toggle('is-active', active);
+      b.setAttribute('aria-pressed', String(active));
     });
     try { localStorage.setItem(KEY, lang); } catch {}
   };

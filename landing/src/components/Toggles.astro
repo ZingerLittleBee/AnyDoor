@@ -4,7 +4,7 @@ import { copy } from '../lib/copy';
 import { toggleCards, defaultOnToggles } from '../lib/data';
 ---
 
-<section class="section container-x" id="features" data-screen-label="03 Toggles">
+<section class="section container-x" id="toggles" data-screen-label="03 Toggles">
   <div class="eyebrow">
     <span class="dot" style="background: var(--color-accent-2); box-shadow: 0 0 12px var(--color-accent-2)" />
     <span data-i18n-zh>{copy.toggles.eyebrow.zh}</span><span data-i18n-en>{copy.toggles.eyebrow.en}</span>
@@ -30,9 +30,9 @@ import { toggleCards, defaultOnToggles } from '../lib/data';
             <div class="ico" set:html={icons[card.icon as keyof typeof icons]?.()} />
             <button class={`toggle ${isOn ? 'on' : ''}`} data-tcard-toggle={card.key} aria-label={card.name.en} />
           </div>
-          <h4>
+          <h3>
             <span data-i18n-zh>{card.name.zh}</span><span data-i18n-en>{card.name.en}</span>
-          </h4>
+          </h3>
           <p>
             <span data-i18n-zh>{card.desc.zh}</span><span data-i18n-en>{card.desc.en}</span>
           </p>

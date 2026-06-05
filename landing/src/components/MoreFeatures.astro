@@ -1,0 +1,33 @@
+---
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+import { moreFeatures } from '../lib/data';
+import Bi from './Bi.astro';
+---
+
+<section class="section container-x" id="features" data-screen-label="02 Features">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-accent); box-shadow: 0 0 12px var(--color-accent)" />
+    <Bi text={copy.features.eyebrow} />
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><Bi text={copy.features.h2a} /></span><br />
+    <span class="accent-text"><Bi text={copy.features.h2b} /></span>
+  </h2>
+  <p class="lede"><Bi text={copy.features.lede} /></p>
+
+  <div class="feat-grid">
+    {moreFeatures.map((f) => (
+      <div class="feat-card">
+        <div class="feat-ico" style={`background:${f.accent}26; color:${f.accent}`} set:html={icons[f.icon as keyof typeof icons]?.()} aria-hidden="true" />
+        <div class="feat-body">
+          <div class="feat-head">
+            <h3><Bi text={f.name} /></h3>
+            <span class="feat-tag"><Bi text={f.tag} /></span>
+          </div>
+          <p><Bi text={f.desc} /></p>
+        </div>
+      </div>
+    ))}
+  </div>
+</section>

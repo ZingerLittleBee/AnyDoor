@@ -1,0 +1,13 @@
+---
+// Renders both language variants; CSS (html[data-lang]) hides the inactive one.
+// Replaces the hand-rolled `<span data-i18n-zh>…</span><span data-i18n-en>…</span>`
+// pair so bilingual rendering is type-checked against the `Bi` shape.
+import type { Bi } from '../lib/copy';
+
+interface Props {
+  text: Bi;
+}
+const { text } = Astro.props;
+---
+
+<span data-i18n-zh>{text.zh}</span><span data-i18n-en>{text.en}</span>
