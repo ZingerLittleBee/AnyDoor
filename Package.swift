@@ -14,10 +14,6 @@ let package = Package(
             url: "https://github.com/sparkle-project/Sparkle",
             exact: "2.9.2"
         ),
-        .package(
-            url: "https://github.com/reitermarkus/DDC.swift",
-            branch: "master"
-        ),
     ],
     targets: [
         .plugin(
@@ -30,7 +26,6 @@ let package = Package(
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "DDC", package: "DDC.swift"),
                 "HostsHelperShared",
             ],
             resources: [

@@ -11,7 +11,7 @@ A macOS menu-bar toolbox. At its core it toggles (show/hide) a target applicatio
 - SwiftData persistence
 - CGEvent tap for global hotkey monitoring
 - Privileged XPC helper (`AnyDoorHostsHelper`) writes `/etc/hosts` (with an AppleScript fallback when the helper isn't enabled — see Architecture Notes)
-- Sparkle for auto-updates; DDC.swift for external display brightness; AskForPermission for permission onboarding
+- Sparkle for auto-updates; MonitorControl's MIT `IntelDDC` (vendored under `Services/Brightness/Vendor/`) for Intel external-display brightness; AskForPermission for permission onboarding. Bundled third-party license texts live in `THIRD-PARTY-LICENSES.md`.
 - SPM build, with an in-repo build-tool plugin that compiles the `.xcstrings` string catalog
 
 ## Build and Run

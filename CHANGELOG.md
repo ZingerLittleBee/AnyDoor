@@ -20,6 +20,12 @@ versioning.
 - The menu-bar panel height cap is now a proportion of the usable screen height
   (80%) instead of a fixed 8pt margin, leaving more breathing room on tall
   displays. Overflow still scrolls inside the panel.
+- External-display brightness on Intel Macs now uses MonitorControl's
+  MIT-licensed `IntelDDC`, vendored into the app, instead of the upstream
+  `reitermarkus/DDC.swift` dependency, which ships with no license. The DDC/CI
+  behavior is unchanged; Apple Silicon continues to use the existing
+  `Arm64DDCBackend`. Bundled third-party license texts are now collected in
+  `THIRD-PARTY-LICENSES.md`.
 
 ### Fixed
 
