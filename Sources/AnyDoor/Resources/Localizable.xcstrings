@@ -3469,6 +3469,23 @@
         }
       }
     },
+    "toast.emptyTrash.alreadyEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trash is already empty"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "废纸篓已经是空的"
+          }
+        }
+      }
+    },
     "toast.emptyTrash.permissionDenied": {
       "extractionState": "manual",
       "localizations": {

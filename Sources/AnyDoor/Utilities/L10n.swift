@@ -213,6 +213,7 @@ enum L10n {
         case toastCalcCopied = "toast.calc.copied"
         case toastColorCopied = "toast.color.copied"
         case toastCopiedToClipboard = "toast.copiedToClipboard"
+        case toastEmptyTrashAlreadyEmpty = "toast.emptyTrash.alreadyEmpty"
         case toastEmptyTrashFailed = "toast.emptyTrash.failed"
         case toastEmptyTrashPermissionDenied = "toast.emptyTrash.permissionDenied"
         case toastEmptyTrashSuccess = "toast.emptyTrash.success"
