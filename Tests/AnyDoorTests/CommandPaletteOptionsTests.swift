@@ -109,6 +109,38 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
+    func testIsOptionParentIncludesPortManager() {
+        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.portManager))
+    }
+
+    @MainActor
+    func testPortOptionsSortedWithKillAffordance() {
+        let previous = LocalizationManager.shared.preference
+        LocalizationManager.shared.preference = .en
+        defer { LocalizationManager.shared.preference = previous }
+
+        let records = [
+            PortRecord(port: 8080, pid: 43, processName: "java",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+            PortRecord(port: 3000, pid: 42, processName: "node",
+                       executablePath: nil, commandLine: nil,
+                       binds: [PortBind(address: "*", family: .ipv4)]),
+        ]
+        let options = CommandPaletteOptions.portOptions(records: records)
+        XCTAssertEqual(options.map(\.id), ["port.42.3000", "port.43.8080"])
+        XCTAssertEqual(options.map(\.title), ["node", "java"])
+        XCTAssertEqual(options.first?.subtitle, "Port :3000 · PID 42")
+        XCTAssertEqual(options.first?.symbol, "xmark.circle.fill")
+        XCTAssertFalse(options.contains { $0.role == .destructive })
+    }
+
+    @MainActor
+    func testPortOptionsEmptyWhenNoRecords() {
+        XCTAssertTrue(CommandPaletteOptions.portOptions(records: []).isEmpty)
+    }
+
+    @MainActor
     private func sampleOptions() -> [CommandPaletteOption] {
         [
             CommandPaletteOption(id: "a", title: "Alpha", symbol: "clock", perform: {}),

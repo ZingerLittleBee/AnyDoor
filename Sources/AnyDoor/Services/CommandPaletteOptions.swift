@@ -45,7 +45,7 @@ enum CommandPaletteOptions {
     /// Items that drill into a second level instead of acting directly.
     static func isOptionParent(_ item: BuiltinItem) -> Bool {
         switch item {
-        case .keepAwake, .scheduledShutdown, .brightness, .hostsManager: return true
+        case .keepAwake, .scheduledShutdown, .brightness, .hostsManager, .portManager: return true
         default: return false
         }
     }
@@ -57,7 +57,7 @@ enum CommandPaletteOptions {
     static func shouldListInPalette(_ item: BuiltinItem, hasExternalDDC: Bool) -> Bool {
         switch item {
         case .brightness: return hasExternalDDC
-        case .hostsManager: return true
+        case .hostsManager, .portManager: return true
         default: return false
         }
     }
@@ -75,6 +75,9 @@ enum CommandPaletteOptions {
         case .hostsManager:
             HostsManager.shared.reload()
             return hostsOptions(profiles: HostsManager.shared.profiles)
+        case .portManager:
+            await PortInventory.shared.refresh()
+            return portOptions(records: PortInventory.shared.records)
         default:
             return nil
         }
@@ -171,5 +174,32 @@ enum CommandPaletteOptions {
             perform: { HostsEditorWindowController.shared.show() }
         ))
         return options
+    }
+
+    /// One option per listening port (sorted by port, then process name, then
+    /// pid). Selecting a row kills the owning process and shows the standard
+    /// kill toast. The id is unique because `PortRecord` identity is (pid, port).
+    static func portOptions(records: [PortRecord]) -> [CommandPaletteOption] {
+        records.sorted(by: portSort).map { record in
+            CommandPaletteOption(
+                id: "port.\(record.pid).\(record.port)",
+                title: record.processName,
+                subtitle: L(.commandPalettePortSubtitle, String(record.port), String(record.pid)),
+                symbol: "xmark.circle.fill",
+                perform: {
+                    let result = await PortInventory.shared.kill(pid: record.pid)
+                    ToastPresenter.shared.show(
+                        CommandPalettePortKillToast.style(for: record, result: result)
+                    )
+                }
+            )
+        }
+    }
+
+    private static func portSort(_ lhs: PortRecord, _ rhs: PortRecord) -> Bool {
+        if lhs.port != rhs.port { return lhs.port < rhs.port }
+        let nameOrder = lhs.processName.localizedCaseInsensitiveCompare(rhs.processName)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return lhs.pid < rhs.pid
     }
 }
