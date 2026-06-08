@@ -5,6 +5,14 @@ import AppKit
 /// action (delegating to the relevant service); it is not `Sendable`, so options
 /// live only on the MainActor (held by `CommandPaletteState`), never inside the
 /// value-typed `PanelEntry`.
+/// Display text for a destructive-action confirmation shown before `perform`
+/// runs. Pure value type so builders stay unit-testable.
+struct CommandPaletteConfirmation: Equatable {
+    let title: String
+    let message: String
+    let confirmLabel: String
+}
+
 struct CommandPaletteOption: Identifiable {
     enum Role { case normal, destructive }
 
@@ -14,6 +22,9 @@ struct CommandPaletteOption: Identifiable {
     let symbol: String
     let role: Role
     let isChecked: Bool
+    /// When non-nil, committing this option asks for confirmation (showing this
+    /// descriptor) before running `perform`.
+    let confirmation: CommandPaletteConfirmation?
     let perform: @MainActor () async -> Void
 
     init(
@@ -23,6 +34,7 @@ struct CommandPaletteOption: Identifiable {
         symbol: String,
         role: Role = .normal,
         isChecked: Bool = false,
+        confirmation: CommandPaletteConfirmation? = nil,
         perform: @escaping @MainActor () async -> Void
     ) {
         self.id = id
@@ -31,6 +43,7 @@ struct CommandPaletteOption: Identifiable {
         self.symbol = symbol
         self.role = role
         self.isChecked = isChecked
+        self.confirmation = confirmation
         self.perform = perform
     }
 }
@@ -186,6 +199,7 @@ enum CommandPaletteOptions {
                 title: record.processName,
                 subtitle: L(.commandPalettePortSubtitle, String(record.port), String(record.pid)),
                 symbol: "xmark.circle.fill",
+                confirmation: portKillConfirmation(for: record),
                 perform: {
                     let result = await PortInventory.shared.kill(pid: record.pid)
                     ToastPresenter.shared.show(
@@ -194,6 +208,18 @@ enum CommandPaletteOptions {
                 }
             )
         }
+    }
+
+    /// The Raycast-style confirmation shown before a port's process is killed.
+    /// Shared by the drill-in port options and the root numeric-search rows so
+    /// both kill paths read identically.
+    static func portKillConfirmation(for record: PortRecord) -> CommandPaletteConfirmation {
+        CommandPaletteConfirmation(
+            title: L(.commandPalettePortKillConfirmTitle),
+            message: L(.commandPalettePortKillConfirmMessage,
+                       record.processName, String(record.port), String(record.pid)),
+            confirmLabel: L(.commandPalettePortKillConfirmButton)
+        )
     }
 
     private static func portSort(_ lhs: PortRecord, _ rhs: PortRecord) -> Bool {

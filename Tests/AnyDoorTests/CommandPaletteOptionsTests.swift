@@ -109,6 +109,29 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
+    func testPortKillConfirmationText() {
+        let previous = LocalizationManager.shared.preference
+        LocalizationManager.shared.preference = .en
+        defer { LocalizationManager.shared.preference = previous }
+        let record = PortRecord(port: 3000, pid: 42, processName: "node",
+                                executablePath: nil, commandLine: nil,
+                                binds: [PortBind(address: "*", family: .ipv4)])
+        let c = CommandPaletteOptions.portKillConfirmation(for: record)
+        XCTAssertEqual(c.title, "Kill process?")
+        XCTAssertEqual(c.message, "node (port :3000 · PID 42) will be terminated.")
+        XCTAssertEqual(c.confirmLabel, "Kill")
+    }
+
+    @MainActor
+    func testPortOptionsCarryConfirmationOthersDoNot() {
+        let record = PortRecord(port: 3000, pid: 42, processName: "node",
+                                executablePath: nil, commandLine: nil,
+                                binds: [PortBind(address: "*", family: .ipv4)])
+        XCTAssertNotNil(CommandPaletteOptions.portOptions(records: [record]).first?.confirmation)
+        XCTAssertNil(CommandPaletteOptions.keepAwakeOptions(isOn: false).first?.confirmation)
+    }
+
+    @MainActor
     func testIsOptionParentIncludesPortManager() {
         XCTAssertTrue(CommandPaletteOptions.isOptionParent(.portManager))
     }
