@@ -108,4 +108,54 @@ extension ScheduledShutdownServiceTests {
         await service.executeShutdown()
         XCTAssertEqual(executor.calls, [true])
     }
+
+    @MainActor
+    func testBootstrapReArmsFutureFireDate() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        suite.set(now.timeIntervalSince1970 + 600, forKey: "scheduledShutdown.fireDate")
+        let service = ScheduledShutdownService(
+            executor: MockShutdownExecutor(), warning: MockShutdownWarning(),
+            defaults: suite, now: { now }
+        )
+
+        service.bootstrapOnLaunch()
+
+        guard case .armed(let fireDate) = service.state else { return XCTFail("expected armed") }
+        XCTAssertEqual(fireDate.timeIntervalSince1970, now.timeIntervalSince1970 + 600, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testBootstrapCancelsMissedFireDateWithoutFiring() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        suite.set(now.timeIntervalSince1970 - 600, forKey: "scheduledShutdown.fireDate") // past
+        let executor = MockShutdownExecutor()
+        let service = ScheduledShutdownService(
+            executor: executor, warning: MockShutdownWarning(), defaults: suite, now: { now }
+        )
+
+        service.bootstrapOnLaunch()
+
+        XCTAssertEqual(service.state, .off)
+        XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
+        XCTAssertEqual(executor.calls, [])  // did NOT shut down retroactively
+    }
+
+    @MainActor
+    func testHandleWakeOverdueEntersWarningFlowAndFires() {
+        // fireDate is in the past relative to the wake clock → overdue → fire.
+        var current = Date(timeIntervalSince1970: 1_000_000)
+        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let executor = MockShutdownExecutor()
+        let service = ScheduledShutdownService(
+            executor: executor, warning: MockShutdownWarning(), defaults: suite, now: { current }
+        )
+        service.arm(.minutes(1))                 // fireDate = now + 60
+        current = current.addingTimeInterval(120) // simulate sleeping past it
+
+        service.handleWake()
+
+        XCTAssertEqual(service.state, .off)       // performFire cleared state
+    }
 }

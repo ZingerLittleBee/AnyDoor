@@ -84,6 +84,65 @@ final class ScheduledShutdownService {
         notify()
     }
 
+    // MARK: - Lifecycle
+
+    /// Re-arm (or clear) from the persisted absolute target on app launch, and
+    /// register the wake observer. A deadline missed while the app was quit is
+    /// cancelled (never fired retroactively).
+    func bootstrapOnLaunch() {
+        registerWakeObserver()
+        guard let fireDate = persistedFireDate() else { return }
+        if fireDate.timeIntervalSince(now()) > 0 {
+            armAt(fireDate: fireDate, persist: false)
+        } else {
+            defaults.removeObject(forKey: Self.fireDateKey)
+            state = .off
+            notify()
+            ToastPresenter.shared.show(.failure(L(.shutdownToastMissed)))
+        }
+    }
+
+    /// Re-read live state after a backup import. Config getters read fresh, so
+    /// this only re-arms the timer from the (possibly changed) persisted target.
+    func reloadFromDefaults() {
+        invalidateTimers()
+        warning.dismiss()
+        if let fireDate = persistedFireDate(), fireDate.timeIntervalSince(now()) > 0 {
+            armAt(fireDate: fireDate, persist: false)
+            return
+        }
+        defaults.removeObject(forKey: Self.fireDateKey)
+        state = .off
+        notify()
+    }
+
+    /// Internal for testing: re-validate against the wall clock after wake. If
+    /// the deadline passed while asleep, enter the warning flow (which fires
+    /// immediately when overdue — the cancelable warning keeps that safe).
+    func handleWake() {
+        guard case .armed(let fireDate) = state else { return }
+        invalidateTimers()
+        if fireDate.timeIntervalSince(now()) <= 0 {
+            beginWarning()
+        } else {
+            scheduleTimers(fireDate: fireDate)
+        }
+    }
+
+    private func registerWakeObserver() {
+        guard wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleWake() }
+        }
+    }
+
+    private func persistedFireDate() -> Date? {
+        guard let ts = defaults.object(forKey: Self.fireDateKey) as? Double else { return nil }
+        return Date(timeIntervalSince1970: ts)
+    }
+
     // MARK: - Timers (anchored to the absolute fireDate)
 
     private func scheduleTimers(fireDate: Date) {
@@ -155,8 +214,9 @@ final class ScheduledShutdownService {
 }
 
 // TEMP stubs — removed in Task 5 (L key) and Task 9 (window controller).
-// Task 5 deletes this and adds the real L10n.Key case.
+// Task 5 deletes these and adds the real L10n.Key cases.
 private extension L10n.Key { static var shutdownToastFailed: L10n.Key { .builtinKeepAwake } }
+private extension L10n.Key { static var shutdownToastMissed: L10n.Key { .builtinKeepAwake } }
 // Task 9 deletes this and adds the real controller.
 @MainActor
 final class ShutdownWarningWindowController: ShutdownWarningPresenting {
