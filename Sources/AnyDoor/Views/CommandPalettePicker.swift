@@ -59,6 +59,27 @@ final class CommandPaletteState {
 
     func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
 
+    // MARK: - Destructive-action confirmation
+
+    /// A confirmation awaiting the user's decision. Held on the MainActor (like
+    /// `CommandPaletteOption`) because `perform` is a non-Sendable closure.
+    struct PendingConfirmation {
+        let confirmation: CommandPaletteConfirmation
+        let perform: @MainActor () async -> Void
+    }
+
+    private(set) var pendingConfirmation: PendingConfirmation?
+    var isConfirming: Bool { pendingConfirmation != nil }
+
+    /// Hold a destructive action behind a confirmation card instead of running
+    /// it immediately. The window controller runs `perform` on confirm.
+    func requestConfirmation(_ confirmation: CommandPaletteConfirmation,
+                             perform: @escaping @MainActor () async -> Void) {
+        pendingConfirmation = PendingConfirmation(confirmation: confirmation, perform: perform)
+    }
+
+    func cancelConfirmation() { pendingConfirmation = nil }
+
     /// What the window controller should do after applying the Esc-key policy.
     enum EscapeOutcome: Equatable { case clearedQuery, poppedToRoot, dismiss }
 

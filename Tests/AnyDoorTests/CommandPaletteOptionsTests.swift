@@ -172,6 +172,19 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
+    func testRequestAndCancelConfirmation() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        XCTAssertFalse(state.isConfirming)
+        let c = CommandPaletteConfirmation(title: "T", message: "M", confirmLabel: "Kill")
+        state.requestConfirmation(c, perform: {})
+        XCTAssertTrue(state.isConfirming)
+        XCTAssertEqual(state.pendingConfirmation?.confirmation, c)
+        state.cancelConfirmation()
+        XCTAssertFalse(state.isConfirming)
+        XCTAssertNil(state.pendingConfirmation)
+    }
+
+    @MainActor
     func testEnterOptionsSwitchesLevelAndResetsQuery() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         state.query = "stale"
