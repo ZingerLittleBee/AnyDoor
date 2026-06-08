@@ -10,28 +10,33 @@ versioning.
 
 - Command palette: option-bearing commands now open a keyboard-navigable
   second-level menu instead of acting with a default. Selecting Keep Awake,
-  Scheduled Shutdown, Brightness, or Hosts drills into that command's options
-  (Raycast-style push) — a back header shows the parent, Return runs an option
-  and dismisses, and Esc / an empty-query Backspace / clicking the header return
-  to the root, with the second level itself searchable. Keep Awake and Scheduled
-  Shutdown mirror their panel duration presets (15 / 30 / 60 / 120 min,
-  indefinite, plus a destructive Turn Off / Cancel only when active); Brightness
-  lists 0 / 25 / 50 / 75 / 100 % steps applied to every external DDC display and
-  appears only when one is present; Hosts lists each profile with an active
-  checkmark (selecting toggles it, which may prompt for admin authorization on
-  the privileged write) plus an always-present "Edit hosts…" that opens the
-  editor window. A new `CommandPaletteOptions` (`@MainActor`) is the single
+  Scheduled Shutdown, Brightness, Hosts, or Port Manager drills into that
+  command's options (Raycast-style push) — a back header shows the parent,
+  Return runs an option and dismisses, and Esc / an empty-query Backspace /
+  clicking the header return to the root, with the second level itself
+  searchable (matching both titles and subtitles, so typing a port number
+  narrows the port list). Keep Awake and Scheduled Shutdown mirror their panel
+  duration presets (15 / 30 / 60 / 120 min, indefinite, plus a destructive Turn
+  Off / Cancel only when active); Brightness lists 0 / 25 / 50 / 75 / 100 %
+  steps applied to every external DDC display and appears only when one is
+  present; Hosts lists each profile with an active checkmark (selecting toggles
+  it, which may prompt for admin authorization on the privileged write) plus an
+  always-present "Edit hosts…" that opens the editor window; Port Manager lists
+  every listening TCP port (process name with a port · pid subtitle) and Return
+  kills that port's process with the usual toast. A new `CommandPaletteOptions`
+  (`@MainActor`) is the single
   source of truth for which builtins are option parents and their options, with
   pure per-item builders that take already-fetched state (`isOn` / `isArmed` /
-  `displays` / `profiles`) so they unit-test without singletons; each option's
-  action runs through the existing services (`setKeepAwakeDuration` /
-  `setScheduledShutdownDuration` / `DisplayBrightnessService.setBrightness` /
-  `HostsManager.setActive`) so the palette and the panel never drift. Option
-  rows reuse the existing list/row rendering via a new command-palette-only
-  `PanelEntry.Source.paletteOption(id:)` (a `String` id, the action looked up on
-  the MainActor), and `CommandPaletteState` gains a root ⇄ options navigation
-  stack. App Shortcuts, Window Layout, and Ports keep their existing flat,
-  directly-searchable sections.
+  `displays` / `profiles` / port records) so they unit-test without singletons;
+  each option's action runs through the existing services (`setKeepAwakeDuration`
+  / `setScheduledShutdownDuration` / `DisplayBrightnessService.setBrightness` /
+  `HostsManager.setActive` / `PortInventory.kill`) so the palette and the panel
+  never drift. Option rows reuse the existing list/row rendering via a new
+  command-palette-only `PanelEntry.Source.paletteOption(id:)` (a `String` id, the
+  action looked up on the MainActor), and `CommandPaletteState` gains a root ⇄
+  options navigation stack. App Shortcuts and Window Layout keep their existing
+  flat, directly-searchable sections; the Port Manager drill-in replaces the
+  earlier hidden "type a port number" search.
 - Scheduled Shutdown: arm a one-shot countdown to shut the Mac down from the
   menu-bar panel, with a cancelable pre-fire warning, graceful (default) or
   optional forced shutdown, and the schedule surviving relaunch.
