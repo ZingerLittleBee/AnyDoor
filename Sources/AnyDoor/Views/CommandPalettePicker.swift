@@ -318,15 +318,22 @@ struct CommandPalettePicker: View {
                 .onTapGesture { state.cancelConfirmation() }
 
             VStack(spacing: 14) {
+                // Center the glyph across the full card width rather than its
+                // intrinsic bounds — the triangle's left/right bearing otherwise
+                // reads as slightly off-center. Tint matches the destructive
+                // Kill button so the card has one coherent danger color.
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 28))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity)
                 Text(confirmation.title)
                     .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
                 Text(confirmation.message)
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 10) {
