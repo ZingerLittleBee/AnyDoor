@@ -100,12 +100,20 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         let store = PanelStore.shared
         var sections: [CommandPaletteSection] = []
 
+        let hasExternalDDC = DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC)
         let commands = store.topLevelEntries.filter { entry in
             guard entry.isVisible else { return false }
-            if case .builtin(let item) = entry.source {
-                return item.kind == .toggle || item.kind == .action
+            guard case .builtin(let item) = entry.source else { return false }
+            switch item.kind {
+            case .toggle, .action:
+                return true
+            case .brightnessControl, .submenu:
+                // Only the option parents the palette drills into; App Shortcuts,
+                // Window Layout and Port Manager keep their own flat sections.
+                return CommandPaletteOptions.shouldListInPalette(item, hasExternalDDC: hasExternalDDC)
+            case .hiddenHotkey:
+                return false
             }
-            return false
         }
         if !commands.isEmpty {
             sections.append(CommandPaletteSection(
@@ -208,8 +216,18 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 commit(entry)
             }
             return true
-        case 53:
-            cancel()
+        case 51: // Delete/Backspace: pop the second level only when the query is empty
+            if !state.isAtRoot, state.query.isEmpty {
+                state.popToRoot()
+                return true
+            }
+            return false // otherwise let the search field delete a character
+        case 53: // Esc: pop to root from the second level, else dismiss
+            if state.isAtRoot {
+                cancel()
+            } else {
+                state.popToRoot()
+            }
             return true
         default:
             return false
@@ -217,6 +235,27 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func commit(_ entry: PanelEntry) {
+        // Option parents drill into a second level instead of closing.
+        if case .builtin(let item) = entry.source, CommandPaletteOptions.isOptionParent(item) {
+            Task { @MainActor [weak self] in
+                guard let self, let state = self.state else { return }
+                if let options = await CommandPaletteOptions.options(for: item), !options.isEmpty {
+                    state.enterOptions(parentTitle: L(item.titleKey), options)
+                } else {
+                    self.close() // nothing to drill into (e.g. brightness lost its display)
+                }
+            }
+            return
+        }
+
+        // A second-level option runs its action, then dismisses.
+        if case .paletteOption(let id) = entry.source {
+            let option = state?.option(id: id)
+            close()
+            if let option { Task { await option.perform() } }
+            return
+        }
+
         close()
         switch entry.source {
         case .appShortcut(let id):
@@ -249,7 +288,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
         case .paletteOption:
-            break
+            break // handled above
         }
     }
 
