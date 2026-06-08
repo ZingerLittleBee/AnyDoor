@@ -1,6 +1,50 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "commandPalette.brightness.level": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "%d%%" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "%d%%" }
+        }
+      }
+    },
+    "commandPalette.hosts.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Edit hosts…" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "编辑 hosts…" }
+        }
+      }
+    },
+    "commandPalette.option.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Back" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "返回" }
+        }
+      }
+    },
+    "commandPalette.option.searchPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Filter options" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "筛选选项" }
+        }
+      }
+    },
     "builtin.scheduledShutdown": {
       "extractionState": "manual",
       "localizations": {

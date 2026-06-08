@@ -248,6 +248,10 @@ enum L10n {
         case settingsShutdownForcedHelp = "settings.shutdown.forcedHelp"
         case settingsShutdownWarningLead = "settings.shutdown.warningLead"
         case settingsShutdownDefaultDuration = "settings.shutdown.defaultDuration"
+        case commandPaletteOptionBack = "commandPalette.option.back"
+        case commandPaletteOptionSearchPlaceholder = "commandPalette.option.searchPlaceholder"
+        case commandPaletteBrightnessLevel = "commandPalette.brightness.level"
+        case commandPaletteHostsEdit = "commandPalette.hosts.edit"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
