@@ -63,7 +63,10 @@ final class CommandPaletteState {
     var filteredOptionEntries: [PanelEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return optionEntries }
-        return optionEntries.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+        return optionEntries.filter {
+            $0.title.localizedCaseInsensitiveContains(trimmed)
+                || ($0.subtitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
+        }
     }
 
     let allSections: [CommandPaletteSection]

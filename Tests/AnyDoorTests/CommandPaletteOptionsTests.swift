@@ -173,6 +173,19 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
+    func testSecondLevelSearchMatchesSubtitle() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Ports", [
+            CommandPaletteOption(id: "port.42.3000", title: "node",
+                                 subtitle: "Port :3000 · PID 42", symbol: "xmark.circle.fill", perform: {}),
+            CommandPaletteOption(id: "port.43.8080", title: "java",
+                                 subtitle: "Port :8080 · PID 43", symbol: "xmark.circle.fill", perform: {}),
+        ])
+        state.query = "3000"
+        XCTAssertEqual(state.flatEntries.map(\.id), ["option:port.42.3000"])
+    }
+
+    @MainActor
     func testPopToRootRestoresRoot() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         state.enterOptions(parentTitle: "Keep Awake", sampleOptions())
