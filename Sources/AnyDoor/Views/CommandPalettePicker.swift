@@ -71,17 +71,13 @@ final class CommandPaletteState {
 
     let allSections: [CommandPaletteSection]
     let hyperFlags: Int
-    private let portInventory: PortInventory
-    private var portRefreshTask: Task<Void, Never>?
 
     init(
         sections: [CommandPaletteSection],
-        hyperFlags: Int,
-        portInventory: PortInventory = .shared
+        hyperFlags: Int
     ) {
         self.allSections = sections
         self.hyperFlags = hyperFlags
-        self.portInventory = portInventory
     }
 
     /// Sections after applying the query filter, with empty sections dropped.
@@ -95,9 +91,6 @@ final class CommandPaletteState {
                     || entry.title.localizedCaseInsensitiveContains(trimmed)
             }
             return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
-        }
-        if let ports = portSection(matching: trimmed) {
-            sections.insert(ports, at: 0)
         }
         if let calc = calcSection(matching: trimmed) {
             sections.insert(calc, at: 0)
@@ -153,56 +146,6 @@ final class CommandPaletteState {
         return list[selectedIndex]
     }
 
-    func refreshPortsIfNeeded() {
-        guard Self.portSearchNeedle(from: query) != nil else { return }
-        guard !portInventory.isRefreshing, portRefreshTask == nil else { return }
-
-        portRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.portInventory.refresh()
-            self.portRefreshTask = nil
-        }
-    }
-
-    private func portSection(matching query: String) -> CommandPaletteSection? {
-        guard let needle = Self.portSearchNeedle(from: query) else { return nil }
-        let entries = portInventory.records
-            .filter { String($0.port).contains(needle) }
-            .sorted(by: Self.sortPorts)
-            .map { Self.portEntry(for: $0) }
-        guard !entries.isEmpty else { return nil }
-        return CommandPaletteSection(titleKey: .commandPaletteSectionPorts, entries: entries)
-    }
-
-    private static func portSearchNeedle(from query: String) -> String? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawNeedle = trimmed.hasPrefix(":") ? String(trimmed.dropFirst()) : trimmed
-        guard !rawNeedle.isEmpty, rawNeedle.allSatisfy(\.isNumber) else { return nil }
-        return rawNeedle
-    }
-
-    private static func sortPorts(_ lhs: PortRecord, _ rhs: PortRecord) -> Bool {
-        if lhs.port != rhs.port { return lhs.port < rhs.port }
-        let nameOrder = lhs.processName.localizedCaseInsensitiveCompare(rhs.processName)
-        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-        return lhs.pid < rhs.pid
-    }
-
-    private static func portEntry(for record: PortRecord) -> PanelEntry {
-        PanelEntry(
-            id: PanelEntry.id(for: .portRecord(record)),
-            source: .portRecord(record),
-            displayOrder: Double(record.port),
-            isVisible: true,
-            hotkey: nil,
-            title: record.processName,
-            subtitle: L(.commandPalettePortSubtitle, String(record.port), String(record.pid)),
-            symbol: "xmark.circle.fill",
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
-        )
-    }
 }
 
 struct CommandPalettePicker: View {
@@ -250,7 +193,6 @@ struct CommandPalettePicker: View {
         }
         .onChange(of: state.query) { _, _ in
             state.selectedIndex = 0
-            state.refreshPortsIfNeeded()
         }
     }
 
