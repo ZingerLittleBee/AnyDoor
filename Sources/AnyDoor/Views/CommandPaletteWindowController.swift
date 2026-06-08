@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult: return nil
+            case .builtin, .portRecord, .calcResult, .paletteOption: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -248,6 +248,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             // copy path (PickColor / OCR / QRCode / Screenshot).
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
+        case .paletteOption:
+            break
         }
     }
 
