@@ -107,4 +107,51 @@ final class CommandPaletteOptionsTests: XCTestCase {
         XCTAssertFalse(CommandPaletteOptions.isOptionParent(.muteAudio))
         XCTAssertFalse(CommandPaletteOptions.isOptionParent(.windowLayout))
     }
+
+    @MainActor
+    private func sampleOptions() -> [CommandPaletteOption] {
+        [
+            CommandPaletteOption(id: "a", title: "Alpha", symbol: "clock", perform: {}),
+            CommandPaletteOption(id: "b", title: "Beta", symbol: "clock", perform: {}),
+        ]
+    }
+
+    @MainActor
+    func testEnterOptionsSwitchesLevelAndResetsQuery() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "stale"
+        state.selectedIndex = 3
+
+        state.enterOptions(parentTitle: "Keep Awake", sampleOptions())
+
+        XCTAssertFalse(state.isAtRoot)
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertEqual(state.flatEntries.map(\.id), ["option:a", "option:b"])
+        XCTAssertTrue(state.filteredSections.isEmpty) // dynamic sections suppressed off-root
+        XCTAssertEqual(state.option(id: "a")?.title, "Alpha")
+    }
+
+    @MainActor
+    func testSecondLevelSearchFilters() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Keep Awake", sampleOptions())
+        state.query = "bet"
+        XCTAssertEqual(state.flatEntries.map(\.id), ["option:b"])
+    }
+
+    @MainActor
+    func testPopToRootRestoresRoot() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Keep Awake", sampleOptions())
+        state.query = "x"
+        state.selectedIndex = 1
+
+        state.popToRoot()
+
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertNil(state.option(id: "a"))
+    }
 }

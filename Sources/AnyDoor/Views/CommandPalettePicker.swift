@@ -17,6 +17,55 @@ final class CommandPaletteState {
     var query: String = ""
     var selectedIndex: Int = 0
 
+    enum Level: Equatable { case root; case options(parentTitle: String) }
+
+    private(set) var level: Level = .root
+    private var optionsByID: [String: CommandPaletteOption] = [:]
+    private var optionEntries: [PanelEntry] = []
+
+    var isAtRoot: Bool { level == .root }
+
+    /// Push a second level built from `options`; resets the search + selection.
+    func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
+        optionsByID = Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) })
+        optionEntries = options.enumerated().map { index, option in
+            PanelEntry(
+                id: PanelEntry.id(for: .paletteOption(id: option.id)),
+                source: .paletteOption(id: option.id),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: option.title,
+                subtitle: option.subtitle,
+                symbol: option.symbol,
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        level = .options(parentTitle: parentTitle)
+        query = ""
+        selectedIndex = 0
+    }
+
+    /// Return to the root level, clearing the option state + search + selection.
+    func popToRoot() {
+        level = .root
+        optionsByID = [:]
+        optionEntries = []
+        query = ""
+        selectedIndex = 0
+    }
+
+    func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
+
+    /// Option entries filtered by the second-level query.
+    var filteredOptionEntries: [PanelEntry] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return optionEntries }
+        return optionEntries.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+    }
+
     let allSections: [CommandPaletteSection]
     let hyperFlags: Int
     private let portInventory: PortInventory
@@ -34,6 +83,7 @@ final class CommandPaletteState {
 
     /// Sections after applying the query filter, with empty sections dropped.
     var filteredSections: [CommandPaletteSection] {
+        guard isAtRoot else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return allSections }
         var sections = allSections.compactMap { section in
@@ -76,7 +126,10 @@ final class CommandPaletteState {
     /// Flat list driving keyboard navigation. Sections are conceptual; the
     /// selection index is global across all visible entries.
     var flatEntries: [PanelEntry] {
-        filteredSections.flatMap(\.entries)
+        switch level {
+        case .root:    return filteredSections.flatMap(\.entries)
+        case .options: return filteredOptionEntries
+        }
     }
 
     func moveDown() {
