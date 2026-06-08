@@ -84,6 +84,17 @@ struct MenuBarView: View {
                 onPermission: openPermissionsSettings,
                 trailingAccessory: AnyView(keepAwakeDurationMenu)
             )
+        } else if case .builtin(.scheduledShutdown) = entry.source {
+            PanelRowView(
+                entry: entry,
+                onToggle: {
+                    Task { await panel.toggle(.scheduledShutdown) }
+                },
+                onAction: {},
+                onSubmenu: {},
+                onPermission: openPermissionsSettings,
+                trailingAccessory: AnyView(scheduledShutdownDurationMenu)
+            )
         } else if case let .builtin(item) = entry.source, item.kind == .submenu {
             let target = HoverPopoverTarget.submenu(item)
             PanelRowView(
@@ -206,6 +217,47 @@ struct MenuBarView: View {
         } label: {
             // Timed durations never get a check mark — the row's subtitle
             // already shows the active end-time which is the more useful cue.
+            Text(L(titleKey))
+        }
+    }
+
+    /// SwiftUI Menu rendered inside the Scheduled Shutdown row's trailing
+    /// accessory. Mirrors `keepAwakeDurationMenu`: countdown presets without
+    /// expanding the popover system.
+    @ViewBuilder
+    private var scheduledShutdownDurationMenu: some View {
+        let state = panel.scheduledShutdownState
+        Menu {
+            scheduledShutdownDurationButton(15, titleKey: .scheduledShutdownDuration15Min)
+            scheduledShutdownDurationButton(30, titleKey: .scheduledShutdownDuration30Min)
+            scheduledShutdownDurationButton(60, titleKey: .scheduledShutdownDuration1Hour)
+            scheduledShutdownDurationButton(120, titleKey: .scheduledShutdownDuration2Hour)
+            if state.isArmed {
+                Divider()
+                Button(role: .destructive) {
+                    Task { await panel.setScheduledShutdownDuration(nil) }
+                } label: {
+                    LocalizedText(.scheduledShutdownDurationCancel)
+                }
+            }
+        } label: {
+            Image(systemName: "clock")
+                .font(.system(size: 11, weight: .regular))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 18)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(L(.scheduledShutdownDurationMenuHelp))
+    }
+
+    @ViewBuilder
+    private func scheduledShutdownDurationButton(_ minutes: Int, titleKey: L10n.Key) -> some View {
+        Button {
+            Task { await panel.setScheduledShutdownDuration(.minutes(minutes)) }
+        } label: {
             Text(L(titleKey))
         }
     }
