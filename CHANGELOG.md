@@ -8,6 +8,10 @@ versioning.
 
 ### Added
 
+- Command palette: option-bearing commands (Keep Awake, Scheduled Shutdown,
+  Brightness, Hosts) now open a keyboard-navigable second-level menu instead of
+  acting with a default. Drill in with Return, pick an option to run it, and go
+  back with Esc or an empty-query Backspace.
 - Scheduled Shutdown: arm a one-shot countdown to shut the Mac down from the
   menu-bar panel, with a cancelable pre-fire warning, graceful (default) or
   optional forced shutdown, and the schedule surviving relaunch.
