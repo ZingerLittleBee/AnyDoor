@@ -77,6 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ScreenshotProvider(),
             DisplaySleepProvider(),
             SystemSleepProvider(),
+            ScheduledShutdownProvider(),
             HideDockProvider(),
             AutoHideMenuBarProvider(),
             RestartFinderProvider(),
@@ -108,6 +109,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
+
+        // Scheduled Shutdown: push state to the panel and re-arm any persisted
+        // schedule (or cancel a deadline missed while the app was quit).
+        ScheduledShutdownService.shared.onChange = { state in
+            PanelStore.shared.onScheduledShutdownStateChange(state)
+        }
+        ScheduledShutdownService.shared.bootstrapOnLaunch()
 
         // Brightness control (external DDC/CI displays). Arch-selected backend.
         #if arch(arm64)
