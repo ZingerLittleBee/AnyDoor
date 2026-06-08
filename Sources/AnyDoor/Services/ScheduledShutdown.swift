@@ -41,12 +41,15 @@ protocol ShutdownWarningPresenting: AnyObject {
 }
 
 /// Production executor. Graceful uses System Events (Automation permission only,
-/// honors unsaved-work prompts). The forced branch (privileged helper) is wired
-/// in a later task; until then both modes shut down gracefully.
+/// honors unsaved-work prompts); forced routes through the privileged helper.
 struct SystemShutdownExecutor: ShutdownExecuting {
     func shutDown(forced: Bool) async throws {
-        _ = try await AppleScriptRunner.run(
-            "tell application \"System Events\" to shut down"
-        )
+        if forced {
+            try await PrivilegedShutdownClient().shutDown()
+        } else {
+            _ = try await AppleScriptRunner.run(
+                "tell application \"System Events\" to shut down"
+            )
+        }
     }
 }
