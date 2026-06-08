@@ -22,6 +22,9 @@ enum SyncSettingsRegistry {
         Entry(key: "hyperKey.trigger", type: .string),
         Entry(key: "hyperKey.quickPress", type: .string),
         Entry(key: "hyperKey.includeShift", type: .bool),
+        Entry(key: "scheduledShutdown.forced", type: .bool),
+        Entry(key: "scheduledShutdown.warningLeadSeconds", type: .int),
+        Entry(key: "scheduledShutdown.defaultMinutes", type: .int),
     ]
 
     private static let entriesByKey: [String: Entry] =

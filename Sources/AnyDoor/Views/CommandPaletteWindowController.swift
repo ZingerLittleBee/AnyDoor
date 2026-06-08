@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult: return nil
+            case .builtin, .portRecord, .calcResult, .paletteOption: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -72,6 +72,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             },
             onCancel: { [weak self] in
                 self?.cancel()
+            },
+            onConfirm: { [weak self] in
+                self?.confirmPending()
             }
         )
 
@@ -100,12 +103,20 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         let store = PanelStore.shared
         var sections: [CommandPaletteSection] = []
 
+        let hasExternalDDC = DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC)
         let commands = store.topLevelEntries.filter { entry in
             guard entry.isVisible else { return false }
-            if case .builtin(let item) = entry.source {
-                return item.kind == .toggle || item.kind == .action
+            guard case .builtin(let item) = entry.source else { return false }
+            switch item.kind {
+            case .toggle, .action:
+                return true
+            case .brightnessControl, .submenu:
+                // Only the option parents the palette drills into; App Shortcuts,
+                // Window Layout and Port Manager keep their own flat sections.
+                return CommandPaletteOptions.shouldListInPalette(item, hasExternalDDC: hasExternalDDC)
+            case .hiddenHotkey:
+                return false
             }
-            return false
         }
         if !commands.isEmpty {
             sections.append(CommandPaletteSection(
@@ -196,6 +207,17 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         guard let window, window.isVisible, window.isKeyWindow else { return false }
         guard let state else { return false }
 
+        // A confirmation card captures the keyboard: Return confirms, Esc cancels,
+        // every other key is swallowed so nothing leaks into the search field.
+        if state.isConfirming {
+            switch keyCode {
+            case 36, 76: confirmPending()
+            case 53: state.cancelConfirmation()
+            default: break
+            }
+            return true
+        }
+
         switch keyCode {
         case 125:
             state.moveDown()
@@ -208,8 +230,16 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 commit(entry)
             }
             return true
-        case 53:
-            cancel()
+        case 51: // Delete/Backspace: pop the second level only when the query is empty
+            if !state.isAtRoot, state.query.isEmpty {
+                state.popToRoot()
+                return true
+            }
+            return false // otherwise let the search field delete a character
+        case 53: // Esc: clear a non-empty query first, then pop the second level / dismiss
+            if state.handleEscape() == .dismiss {
+                cancel()
+            }
             return true
         default:
             return false
@@ -217,6 +247,50 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func commit(_ entry: PanelEntry) {
+        // Option parents drill into a second level instead of closing.
+        if case .builtin(let item) = entry.source, CommandPaletteOptions.isOptionParent(item) {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let options = await CommandPaletteOptions.options(for: item)
+                // Re-check after the await: the window may have resigned key and
+                // closed (which nils `state`) during option building.
+                guard let state = self.state, self.window?.isVisible == true else { return }
+                if let options {
+                    // Drill in even when empty (e.g. no listening ports) so the
+                    // palette shows its empty state instead of silently closing.
+                    state.enterOptions(parentTitle: L(item.titleKey), options)
+                } else {
+                    self.close() // not an option parent right now (brightness lost its display)
+                }
+            }
+            return
+        }
+
+        // A second-level option either confirms (destructive, e.g. a port kill)
+        // or runs its action and dismisses.
+        if case .paletteOption(let id) = entry.source {
+            guard let option = state?.option(id: id) else { close(); return }
+            if let confirmation = option.confirmation {
+                state?.requestConfirmation(confirmation, perform: option.perform)
+            } else {
+                close()
+                Task { await option.perform() }
+            }
+            return
+        }
+
+        // Killing a port from the root numeric search asks for confirmation too.
+        if case .portRecord(let record) = entry.source {
+            let confirmation = CommandPaletteOptions.portKillConfirmation(for: record)
+            state?.requestConfirmation(confirmation) {
+                let result = await PortInventory.shared.kill(pid: record.pid)
+                ToastPresenter.shared.show(
+                    CommandPalettePortKillToast.style(for: record, result: result)
+                )
+            }
+            return
+        }
+
         close()
         switch entry.source {
         case .appShortcut(let id):
@@ -224,13 +298,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             AppSwitcher.toggle(bundleID: binding.appBundleID, appPath: binding.appPath)
         case .installedApp(let bundleID, let path):
             AppSwitcher.toggle(bundleID: bundleID, appPath: path)
-        case .portRecord(let record):
-            Task {
-                let result = await PortInventory.shared.kill(pid: record.pid)
-                ToastPresenter.shared.show(
-                    CommandPalettePortKillToast.style(for: record, result: result)
-                )
-            }
+        case .portRecord:
+            break // handled above (routed through confirmation)
         case .builtin(let item):
             switch item.kind {
             case .toggle:
@@ -248,7 +317,17 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             // copy path (PickColor / OCR / QRCode / Screenshot).
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
+        case .paletteOption:
+            break // handled above
         }
+    }
+
+    /// Run the pending confirmation's action, then dismiss. Reads `perform`
+    /// before `close()` (which nils `state` via `windowWillClose`).
+    private func confirmPending() {
+        guard let perform = state?.pendingConfirmation?.perform else { return }
+        close()
+        Task { await perform() }
     }
 
     private func cancel() {

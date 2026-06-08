@@ -19,6 +19,9 @@ struct GeneralSettingsView: View {
     @State private var updateService = UpdateService.shared
     @State private var hyperKey = HyperKeyService.shared
     @State private var commandPalette = CommandPaletteService.shared
+    @AppStorage(ScheduledShutdownService.forcedKey) private var shutdownForced = false
+    @AppStorage(ScheduledShutdownService.warningLeadKey) private var shutdownWarningLead = 60
+    @AppStorage(ScheduledShutdownService.defaultMinutesKey) private var shutdownDefaultMinutes = 30
 
     var body: some View {
         Form {
@@ -142,6 +145,35 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 LocalizedText(.settingsGeneralCommandPaletteSection)
+            }
+
+            Section {
+                Toggle(isOn: $shutdownForced) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        LocalizedText(.settingsShutdownForced)
+                        LocalizedText(.settingsShutdownForcedHelp)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .onChange(of: shutdownForced) { _, isOn in
+                    // Forced needs the privileged helper. Guide the user to
+                    // enable it if it isn't already.
+                    if isOn, HelperManager.shared.readiness() != .enabled {
+                        _ = HelperManager.shared.ensureRegistered()
+                        if HelperManager.shared.readiness() == .requiresApproval {
+                            HelperManager.shared.openApprovalSettings()
+                        }
+                    }
+                }
+                Stepper(value: $shutdownWarningLead, in: 0...300, step: 15) {
+                    Text(L(.settingsShutdownWarningLead) + ": \(shutdownWarningLead)")
+                }
+                Stepper(value: $shutdownDefaultMinutes, in: 5...240, step: 5) {
+                    Text(L(.settingsShutdownDefaultDuration) + ": \(shutdownDefaultMinutes)")
+                }
+            } header: {
+                LocalizedText(.settingsShutdown)
             }
 
             Section {

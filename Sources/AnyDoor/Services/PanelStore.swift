@@ -46,6 +46,11 @@ final class PanelStore {
     /// callback and from explicit mutations through `setKeepAwakeDuration`.
     private(set) var keepAwakeState: KeepAwakeState = .off
 
+    /// Current Scheduled Shutdown state. Owns the `.armed(fireDate:)` value used
+    /// by the subtitle. Pushed in via `onScheduledShutdownStateChange` from the
+    /// service and from explicit mutations through `setScheduledShutdownDuration`.
+    private(set) var scheduledShutdownState: ScheduledShutdownState = .off
+
     /// Per-item in-flight guard preventing overlapping toggles from desynchronizing state.
     private var togglesInFlight: Set<BuiltinItem> = []
 
@@ -161,6 +166,13 @@ final class PanelStore {
             case .timed(let endDate):
                 return L(.panelSubtitleKeepAwakeUntil, keepAwakeEndTimeString(endDate))
             }
+        case .scheduledShutdown:
+            switch scheduledShutdownState {
+            case .off:
+                return nil
+            case .armed(let fireDate):
+                return L(.panelSubtitleShutdownAt, shutdownTimeString(fireDate))
+            }
         default:
             return nil
         }
@@ -179,6 +191,16 @@ final class PanelStore {
         return formatter.string(from: endDate)
     }
 
+    /// Renders the shutdown target time using the app's current language. Built
+    /// per call because a `DateFormatter`'s locale is frozen at construction.
+    private func shutdownTimeString(_ fireDate: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        formatter.locale = LocalizationManager.shared.effectiveLocale
+        return formatter.string(from: fireDate)
+    }
+
     /// Refresh every toggle provider's state. Called from MenuBarView.onAppear.
     func refreshAll() async {
         for (item, provider) in providers {
@@ -195,6 +217,8 @@ final class PanelStore {
         if let provider = providers[.keepAwake] as? KeepAwakeProvider {
             keepAwakeState = await provider.currentState
         }
+        scheduledShutdownState = ScheduledShutdownService.shared.state
+        toggleStates[.scheduledShutdown] = scheduledShutdownState.isArmed
         rebuild()
     }
 
@@ -216,6 +240,17 @@ final class PanelStore {
             defer { togglesInFlight.remove(item) }
             let current = await provider.currentState
             await setKeepAwakeDuration(current.isOn ? nil : .indefinite)
+            return
+        }
+
+        if item == .scheduledShutdown {
+            guard !togglesInFlight.contains(item) else { return }
+            togglesInFlight.insert(item)
+            defer { togglesInFlight.remove(item) }
+            let armed = ScheduledShutdownService.shared.state.isArmed
+            await setScheduledShutdownDuration(
+                armed ? nil : .minutes(ScheduledShutdownService.shared.defaultMinutes)
+            )
             return
         }
 
@@ -261,6 +296,26 @@ final class PanelStore {
     func onKeepAwakeStateChange(_ state: KeepAwakeState) {
         keepAwakeState = state
         toggleStates[.keepAwake] = state.isOn
+        rebuild()
+    }
+
+    /// Apply a Scheduled Shutdown duration (or `nil` to cancel). Caches state
+    /// eagerly so the panel doesn't render a stale frame.
+    func setScheduledShutdownDuration(_ duration: ScheduledShutdownDuration?) async {
+        if let duration {
+            ScheduledShutdownService.shared.arm(duration)
+        } else {
+            ScheduledShutdownService.shared.cancel()
+        }
+        scheduledShutdownState = ScheduledShutdownService.shared.state
+        toggleStates[.scheduledShutdown] = scheduledShutdownState.isArmed
+        rebuild()
+    }
+
+    /// Callback target wired into `ScheduledShutdownService.onChange`.
+    func onScheduledShutdownStateChange(_ state: ScheduledShutdownState) {
+        scheduledShutdownState = state
+        toggleStates[.scheduledShutdown] = state.isArmed
         rebuild()
     }
 

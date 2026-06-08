@@ -1,6 +1,248 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "commandPalette.brightness.level": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "%d%%" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "%d%%" }
+        }
+      }
+    },
+    "commandPalette.hosts.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Edit hosts…" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "编辑 hosts…" }
+        }
+      }
+    },
+    "commandPalette.option.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Back" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "返回" }
+        }
+      }
+    },
+    "commandPalette.option.searchPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Filter options" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "筛选选项" }
+        }
+      }
+    },
+    "builtin.scheduledShutdown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Scheduled Shutdown" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "定时关机" }
+        }
+      }
+    },
+    "panel.subtitle.shutdownAt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Shut down at %@" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "将于 %@ 关机" }
+        }
+      }
+    },
+    "scheduledShutdown.duration.15min": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "In 15 minutes" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "15 分钟后" }
+        }
+      }
+    },
+    "scheduledShutdown.duration.30min": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "In 30 minutes" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "30 分钟后" }
+        }
+      }
+    },
+    "scheduledShutdown.duration.1hour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "In 1 hour" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "1 小时后" }
+        }
+      }
+    },
+    "scheduledShutdown.duration.2hour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "In 2 hours" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "2 小时后" }
+        }
+      }
+    },
+    "scheduledShutdown.duration.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Cancel Shutdown" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "取消定时关机" }
+        }
+      }
+    },
+    "scheduledShutdown.duration.menuHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Schedule a shutdown" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "设置定时关机" }
+        }
+      }
+    },
+    "shutdown.toast.missed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Scheduled shutdown expired and was not run" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "定时关机计划已过期，未执行" }
+        }
+      }
+    },
+    "shutdown.toast.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Scheduled shutdown failed" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "定时关机失败" }
+        }
+      }
+    },
+    "shutdown.warning.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Scheduled Shutdown" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "定时关机" }
+        }
+      }
+    },
+    "shutdown.warning.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Shutting down in %lld seconds" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "将在 %lld 秒后关机" }
+        }
+      }
+    },
+    "shutdown.warning.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Cancel" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "取消" }
+        }
+      }
+    },
+    "settings.shutdown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Scheduled Shutdown" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "定时关机" }
+        }
+      }
+    },
+    "settings.shutdown.forced": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Force shutdown" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "强制关机" }
+        }
+      }
+    },
+    "settings.shutdown.forcedHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Skip unsaved-work prompts. Requires the privileged helper." }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "跳过未保存内容提示，需要启用特权助手。" }
+        }
+      }
+    },
+    "settings.shutdown.warningLead": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Warning before shutdown (seconds)" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "关机前提醒（秒）" }
+        }
+      }
+    },
+    "settings.shutdown.defaultDuration": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Hotkey default duration (minutes)" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "热键默认时长（分钟）" }
+        }
+      }
+    },
     "builtin.windowTopHalf": {
       "extractionState": "manual",
       "localizations": {
@@ -1969,6 +2211,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "内置"
+          }
+        }
+      }
+    },
+    "commandPalette.confirm.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        }
+      }
+    },
+    "commandPalette.portKill.confirmTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kill process?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "结束进程？"
+          }
+        }
+      }
+    },
+    "commandPalette.portKill.confirmMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (port :%@ · PID %@) will be terminated."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@（端口 :%@ · PID %@）将被结束。"
+          }
+        }
+      }
+    },
+    "commandPalette.portKill.confirmButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kill"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "结束"
           }
         }
       }

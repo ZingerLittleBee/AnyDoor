@@ -17,6 +17,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case clipboardWall
     case displaySleep
     case systemSleep
+    case scheduledShutdown
     case hideDock
     case autoHideMenuBar
     case restartFinder
@@ -61,7 +62,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         switch self {
         case .appShortcuts, .portManager, .windowLayout, .hostsManager: return .submenu
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
-             .hideDock, .autoHideMenuBar, .keyboardLock: return .toggle
+             .hideDock, .autoHideMenuBar, .keyboardLock, .scheduledShutdown: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
              .restartFinder, .restartDock, .restartMenuBar, .flushDNS, .clipboardWall,
              .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
@@ -92,6 +93,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .clipboardWall:     return .builtinClipboardWall
         case .displaySleep:      return .builtinDisplaySleep
         case .systemSleep:       return .builtinSystemSleep
+        case .scheduledShutdown: return .builtinScheduledShutdown
         case .hideDock:          return .builtinHideDock
         case .autoHideMenuBar:   return .builtinAutoHideMenuBar
         case .restartFinder:     return .builtinRestartFinder
@@ -142,6 +144,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .clipboardWall: return "doc.on.clipboard"
         case .displaySleep: return "moon.zzz.fill"
         case .systemSleep: return "powersleep"
+        case .scheduledShutdown: return "power"
         case .hideDock: return "dock.rectangle"
         case .autoHideMenuBar: return "menubar.rectangle"
         case .restartFinder: return "macwindow.on.rectangle"
@@ -193,6 +196,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .clipboardWall: return 250
         case .displaySleep: return 1000
         case .systemSleep: return 1100
+        case .scheduledShutdown: return 1150
         case .hideDock: return 1200
         case .autoHideMenuBar: return 1300
         case .restartFinder: return 1400

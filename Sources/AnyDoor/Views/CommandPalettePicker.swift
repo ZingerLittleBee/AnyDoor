@@ -17,6 +17,99 @@ final class CommandPaletteState {
     var query: String = ""
     var selectedIndex: Int = 0
 
+    enum Level: Equatable { case root; case options(parentTitle: String) }
+
+    private(set) var level: Level = .root
+    private var optionsByID: [String: CommandPaletteOption] = [:]
+    private var optionEntries: [PanelEntry] = []
+
+    var isAtRoot: Bool { level == .root }
+
+    /// Push a second level built from `options`; resets the search + selection.
+    func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
+        optionsByID = Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) })
+        optionEntries = options.enumerated().map { index, option in
+            PanelEntry(
+                id: PanelEntry.id(for: .paletteOption(id: option.id)),
+                source: .paletteOption(id: option.id),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: option.title,
+                subtitle: option.subtitle,
+                symbol: option.symbol,
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        level = .options(parentTitle: parentTitle)
+        query = ""
+        selectedIndex = 0
+    }
+
+    /// Return to the root level, clearing the option state + search + selection.
+    func popToRoot() {
+        level = .root
+        optionsByID = [:]
+        optionEntries = []
+        query = ""
+        selectedIndex = 0
+    }
+
+    func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
+
+    // MARK: - Destructive-action confirmation
+
+    /// A confirmation awaiting the user's decision. Held on the MainActor (like
+    /// `CommandPaletteOption`) because `perform` is a non-Sendable closure.
+    struct PendingConfirmation {
+        let confirmation: CommandPaletteConfirmation
+        let perform: @MainActor () async -> Void
+    }
+
+    private(set) var pendingConfirmation: PendingConfirmation?
+    var isConfirming: Bool { pendingConfirmation != nil }
+
+    /// Hold a destructive action behind a confirmation card instead of running
+    /// it immediately. The window controller runs `perform` on confirm.
+    func requestConfirmation(_ confirmation: CommandPaletteConfirmation,
+                             perform: @escaping @MainActor () async -> Void) {
+        pendingConfirmation = PendingConfirmation(confirmation: confirmation, perform: perform)
+    }
+
+    func cancelConfirmation() { pendingConfirmation = nil }
+
+    /// What the window controller should do after applying the Esc-key policy.
+    enum EscapeOutcome: Equatable { case clearedQuery, poppedToRoot, dismiss }
+
+    /// Esc-key policy: a non-empty query is cleared first (at either level); an
+    /// empty query pops to the root from the second level, or asks the window to
+    /// dismiss at the root.
+    @discardableResult
+    func handleEscape() -> EscapeOutcome {
+        if !query.isEmpty {
+            query = ""
+            // Reset the selection ourselves rather than relying on the view's
+            // `.onChange(of: query)`, matching popToRoot()/enterOptions().
+            selectedIndex = 0
+            return .clearedQuery
+        }
+        if isAtRoot { return .dismiss }
+        popToRoot()
+        return .poppedToRoot
+    }
+
+    /// Option entries filtered by the second-level query.
+    var filteredOptionEntries: [PanelEntry] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return optionEntries }
+        return optionEntries.filter {
+            $0.title.localizedCaseInsensitiveContains(trimmed)
+                || ($0.subtitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
+        }
+    }
+
     let allSections: [CommandPaletteSection]
     let hyperFlags: Int
     private let portInventory: PortInventory
@@ -34,6 +127,7 @@ final class CommandPaletteState {
 
     /// Sections after applying the query filter, with empty sections dropped.
     var filteredSections: [CommandPaletteSection] {
+        guard isAtRoot else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return allSections }
         var sections = allSections.compactMap { section in
@@ -73,30 +167,9 @@ final class CommandPaletteState {
         return CommandPaletteSection(titleKey: .commandPaletteSectionCalculator, entries: [entry])
     }
 
-    /// Flat list driving keyboard navigation. Sections are conceptual; the
-    /// selection index is global across all visible entries.
-    var flatEntries: [PanelEntry] {
-        filteredSections.flatMap(\.entries)
-    }
-
-    func moveDown() {
-        let count = flatEntries.count
-        guard count > 0 else { return }
-        selectedIndex = min(selectedIndex + 1, count - 1)
-    }
-
-    func moveUp() {
-        let count = flatEntries.count
-        guard count > 0 else { return }
-        selectedIndex = max(selectedIndex - 1, 0)
-    }
-
-    func commitSelection() -> PanelEntry? {
-        let list = flatEntries
-        guard list.indices.contains(selectedIndex) else { return list.first }
-        return list[selectedIndex]
-    }
-
+    /// Refresh the listening-port inventory when the query looks like a port
+    /// number, so the "Ports" section reflects the live state. Coalesced so a
+    /// burst of keystrokes triggers at most one in-flight scan.
     func refreshPortsIfNeeded() {
         guard Self.portSearchNeedle(from: query) != nil else { return }
         guard !portInventory.isRefreshing, portRefreshTask == nil else { return }
@@ -108,6 +181,9 @@ final class CommandPaletteState {
         }
     }
 
+    /// Builds a "Ports" section listing every listening TCP port whose number
+    /// contains the (numeric) query. Inserted at the top of `filteredSections`
+    /// so a port lookup surfaces immediately; Return on a row kills the process.
     private func portSection(matching query: String) -> CommandPaletteSection? {
         guard let needle = Self.portSearchNeedle(from: query) else { return nil }
         let entries = portInventory.records
@@ -147,25 +223,58 @@ final class CommandPaletteState {
             permission: .notRequired
         )
     }
+
+    /// Flat list driving keyboard navigation. Sections are conceptual; the
+    /// selection index is global across all visible entries.
+    var flatEntries: [PanelEntry] {
+        switch level {
+        case .root:    return filteredSections.flatMap(\.entries)
+        case .options: return filteredOptionEntries
+        }
+    }
+
+    func moveDown() {
+        let count = flatEntries.count
+        guard count > 0 else { return }
+        selectedIndex = min(selectedIndex + 1, count - 1)
+    }
+
+    func moveUp() {
+        let count = flatEntries.count
+        guard count > 0 else { return }
+        selectedIndex = max(selectedIndex - 1, 0)
+    }
+
+    func commitSelection() -> PanelEntry? {
+        let list = flatEntries
+        guard list.indices.contains(selectedIndex) else { return list.first }
+        return list[selectedIndex]
+    }
+
 }
 
 struct CommandPalettePicker: View {
     @Bindable var state: CommandPaletteState
     let onSelect: (PanelEntry) -> Void
     let onCancel: () -> Void
+    let onConfirm: () -> Void
 
     @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
+            if !state.isAtRoot { backHeader }
+
             searchField
 
             Divider().opacity(0.4)
 
             if state.flatEntries.isEmpty {
                 emptyState
-            } else {
+            } else if state.isAtRoot {
                 entryList
+            } else {
+                optionList
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -180,6 +289,11 @@ struct CommandPalettePicker: View {
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            if let pending = state.pendingConfirmation {
+                confirmCard(pending.confirmation)
+            }
+        }
         .onAppear {
             DispatchQueue.main.async { searchFocused = true }
         }
@@ -194,16 +308,104 @@ struct CommandPalettePicker: View {
         }
     }
 
+    /// Raycast-style in-palette confirmation for a destructive action. The
+    /// dimmed backdrop reads as modal; the window controller's key monitor maps
+    /// Return → confirm and Esc → cancel while this is shown.
+    private func confirmCard(_ confirmation: CommandPaletteConfirmation) -> some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { state.cancelConfirmation() }
+
+            VStack(spacing: 14) {
+                // Center the glyph across the full card width rather than its
+                // intrinsic bounds — the triangle's left/right bearing otherwise
+                // reads as slightly off-center. Tint matches the destructive
+                // Kill button so the card has one coherent danger color.
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity)
+                Text(confirmation.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                Text(confirmation.message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    confirmButton(L(.commandPaletteConfirmCancel), hintText: "Esc", tint: .secondary) {
+                        state.cancelConfirmation()
+                    }
+                    confirmButton(confirmation.confirmLabel, hintSymbol: "return", tint: .red, action: onConfirm)
+                }
+                .padding(.top, 2)
+            }
+            .padding(22)
+            .frame(maxWidth: 340)
+            .adaptivePanelSurface(cornerRadius: 14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(radius: 24, y: 8)
+        }
+    }
+
+    private func confirmButton(_ title: String, hintText: String? = nil, hintSymbol: String? = nil,
+                               tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title).font(.system(size: 13, weight: .medium))
+                keyHint(text: hintText, symbol: hintSymbol)
+            }
+            .foregroundStyle(tint == .secondary ? AnyShapeStyle(.primary) : AnyShapeStyle(tint))
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(tint == .red ? Color.red.opacity(0.14) : Color.primary.opacity(0.06))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A small key-cap badge. Uses an SF Symbol (e.g. `return`) when given one —
+    /// raw glyphs like "↵" carry odd font metrics that sit high in the badge —
+    /// and a fixed minimum box so text and symbol hints center identically.
+    @ViewBuilder
+    private func keyHint(text: String?, symbol: String?) -> some View {
+        Group {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 11, weight: .medium))
+            } else if let text {
+                Text(text).font(.system(size: 11, design: .rounded))
+            }
+        }
+        .frame(minWidth: 16, minHeight: 15)
+        .padding(.horizontal, 4).padding(.vertical, 1)
+        .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.primary.opacity(0.1)))
+    }
+
     private var searchField: some View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 22, weight: .regular))
                 .foregroundStyle(.secondary)
-            TextField(L(.commandPaletteSearchPlaceholder), text: $state.query)
+            TextField(L(state.isAtRoot ? .commandPaletteSearchPlaceholder : .commandPaletteOptionSearchPlaceholder), text: $state.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
                 .focused($searchFocused)
                 .onSubmit {
+                    // While a confirmation card is up the key monitor already
+                    // swallows Return; guard here too so onSubmit can never
+                    // commit a list row behind the card.
+                    guard !state.isConfirming else { return }
                     if let entry = state.commitSelection() {
                         onSelect(entry)
                     }
@@ -221,6 +423,67 @@ struct CommandPalettePicker: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private var backHeader: some View {
+        Button {
+            state.popToRoot()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                if case let .options(parentTitle) = state.level {
+                    Text(parentTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 2)
+        .help(L(.commandPaletteOptionBack))
+    }
+
+    private var optionList: some View {
+        ScrollViewReader { proxy in
+            let entries = state.flatEntries
+            let selectedID: String? = entries.indices.contains(state.selectedIndex)
+                ? entries[state.selectedIndex].id
+                : nil
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(entries) { entry in
+                        CommandPaletteRow(
+                            entry: entry,
+                            hyperFlags: state.hyperFlags,
+                            isSelected: entry.id == selectedID,
+                            option: optionForEntry(entry),
+                            onSelect: { onSelect(entry) }
+                        )
+                        .id(entry.id)
+                        .legacyMaterialBackground()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
+            .frame(minHeight: 320, maxHeight: .infinity)
+            .onChange(of: state.selectedIndex) { _, newIndex in
+                guard entries.indices.contains(newIndex) else { return }
+                proxy.scrollTo(entries[newIndex].id)
+            }
+        }
+    }
+
+    /// Resolve the option backing a `.paletteOption` entry so the row can render
+    /// its checkmark / destructive styling.
+    private func optionForEntry(_ entry: PanelEntry) -> CommandPaletteOption? {
+        guard case let .paletteOption(id) = entry.source else { return nil }
+        return state.option(id: id)
     }
 
     private var emptyState: some View {
@@ -319,6 +582,7 @@ private struct CommandPaletteRow: View {
     let entry: PanelEntry
     let hyperFlags: Int
     let isSelected: Bool
+    var option: CommandPaletteOption? = nil
     let onSelect: () -> Void
 
     @State private var isHovering = false
@@ -330,7 +594,11 @@ private struct CommandPaletteRow: View {
                 .frame(width: 22, height: 22)
             titleBlock
             Spacer()
-            if let hotkey = entry.hotkey {
+            if let option, option.isChecked {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            } else if let hotkey = entry.hotkey {
                 Text(hotkey.displayString(hyperFlags: hyperFlags))
                     .font(.system(size: 12, design: .rounded))
                     .padding(.horizontal, 6)
@@ -371,6 +639,7 @@ private struct CommandPaletteRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(entry.localizedTitle())
                 .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(option?.role == .destructive ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
                 .lineLimit(1)
             if showsSubtitle, let subtitle = entry.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
@@ -399,7 +668,7 @@ private struct CommandPaletteRow: View {
             // SF Symbols carry no built-in transparent padding, so they need a
             // smaller point size than the 22pt frame to read at the same visual
             // weight as NSImage app icons. Built-in toggles read at full
-            // strength; port records match the dimmer fallback weight.
+            // strength; other symbol rows match the dimmer fallback weight.
             Image(systemName: entry.symbol)
                 .font(.system(size: 15))
                 .foregroundStyle(isBuiltin ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
@@ -415,16 +684,17 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult:
+        case .builtin, .portRecord, .calcResult, .paletteOption:
             return nil
         }
     }
 
-    /// Port records and calculator results both render their subtitle (the port
-    /// detail line, or the original expression for a calc result).
+    /// Port records, calculator results, and second-level options render their
+    /// subtitle (the port detail line, the original expression for a calc
+    /// result, or the port detail line for a port option).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult: return true
+        case .portRecord, .calcResult, .paletteOption: return true
         default: return false
         }
     }

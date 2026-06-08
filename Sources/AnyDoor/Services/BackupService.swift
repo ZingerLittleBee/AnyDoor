@@ -142,6 +142,7 @@ final class BackupService {
         CommandPaletteService.shared.reloadFromDefaults()
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()
+        ScheduledShutdownService.shared.reloadFromDefaults()
         PanelStore.shared.rebuild()
         PanelStore.shared.rebuildHotkeySnapshots()
     }
