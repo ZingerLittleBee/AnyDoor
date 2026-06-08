@@ -257,6 +257,7 @@ struct CommandPalettePicker: View {
     @Bindable var state: CommandPaletteState
     let onSelect: (PanelEntry) -> Void
     let onCancel: () -> Void
+    let onConfirm: () -> Void
 
     @FocusState private var searchFocused: Bool
 
@@ -288,6 +289,11 @@ struct CommandPalettePicker: View {
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            if let pending = state.pendingConfirmation {
+                confirmCard(pending.confirmation)
+            }
+        }
         .onAppear {
             DispatchQueue.main.async { searchFocused = true }
         }
@@ -300,6 +306,69 @@ struct CommandPalettePicker: View {
             state.selectedIndex = 0
             state.refreshPortsIfNeeded()
         }
+    }
+
+    /// Raycast-style in-palette confirmation for a destructive action. The
+    /// dimmed backdrop reads as modal; the window controller's key monitor maps
+    /// Return → confirm and Esc → cancel while this is shown.
+    private func confirmCard(_ confirmation: CommandPaletteConfirmation) -> some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { state.cancelConfirmation() }
+
+            VStack(spacing: 14) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.orange)
+                Text(confirmation.title)
+                    .font(.system(size: 16, weight: .semibold))
+                Text(confirmation.message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    confirmButton(L(.commandPaletteConfirmCancel), hint: "Esc", tint: .secondary) {
+                        state.cancelConfirmation()
+                    }
+                    confirmButton(confirmation.confirmLabel, hint: "↵", tint: .red, action: onConfirm)
+                }
+                .padding(.top, 2)
+            }
+            .padding(22)
+            .frame(maxWidth: 340)
+            .adaptivePanelSurface(cornerRadius: 14)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(radius: 24, y: 8)
+        }
+    }
+
+    private func confirmButton(_ title: String, hint: String, tint: Color,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title).font(.system(size: 13, weight: .medium))
+                Text(hint)
+                    .font(.system(size: 11, design: .rounded))
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.primary.opacity(0.1)))
+            }
+            .foregroundStyle(tint == .secondary ? AnyShapeStyle(.primary) : AnyShapeStyle(tint))
+            .padding(.horizontal, 14).padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(tint == .red ? Color.red.opacity(0.14) : Color.primary.opacity(0.06))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var searchField: some View {

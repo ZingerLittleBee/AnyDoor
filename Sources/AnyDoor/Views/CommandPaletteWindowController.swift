@@ -72,6 +72,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             },
             onCancel: { [weak self] in
                 self?.cancel()
+            },
+            onConfirm: { [weak self] in
+                self?.confirmPending()
             }
         )
 
