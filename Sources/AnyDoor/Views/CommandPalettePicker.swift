@@ -337,10 +337,10 @@ struct CommandPalettePicker: View {
                     .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 10) {
-                    confirmButton(L(.commandPaletteConfirmCancel), hint: "Esc", tint: .secondary) {
+                    confirmButton(L(.commandPaletteConfirmCancel), hintText: "Esc", tint: .secondary) {
                         state.cancelConfirmation()
                     }
-                    confirmButton(confirmation.confirmLabel, hint: "↵", tint: .red, action: onConfirm)
+                    confirmButton(confirmation.confirmLabel, hintSymbol: "return", tint: .red, action: onConfirm)
                 }
                 .padding(.top, 2)
             }
@@ -356,15 +356,12 @@ struct CommandPalettePicker: View {
         }
     }
 
-    private func confirmButton(_ title: String, hint: String, tint: Color,
-                               action: @escaping () -> Void) -> some View {
+    private func confirmButton(_ title: String, hintText: String? = nil, hintSymbol: String? = nil,
+                               tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Text(title).font(.system(size: 13, weight: .medium))
-                Text(hint)
-                    .font(.system(size: 11, design: .rounded))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.primary.opacity(0.1)))
+                keyHint(text: hintText, symbol: hintSymbol)
             }
             .foregroundStyle(tint == .secondary ? AnyShapeStyle(.primary) : AnyShapeStyle(tint))
             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -376,6 +373,23 @@ struct CommandPalettePicker: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// A small key-cap badge. Uses an SF Symbol (e.g. `return`) when given one —
+    /// raw glyphs like "↵" carry odd font metrics that sit high in the badge —
+    /// and a fixed minimum box so text and symbol hints center identically.
+    @ViewBuilder
+    private func keyHint(text: String?, symbol: String?) -> some View {
+        Group {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 11, weight: .medium))
+            } else if let text {
+                Text(text).font(.system(size: 11, design: .rounded))
+            }
+        }
+        .frame(minWidth: 16, minHeight: 15)
+        .padding(.horizontal, 4).padding(.vertical, 1)
+        .background(RoundedRectangle(cornerRadius: 4, style: .continuous).fill(Color.primary.opacity(0.1)))
     }
 
     private var searchField: some View {
