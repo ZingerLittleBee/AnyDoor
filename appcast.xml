@@ -3,31 +3,88 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>2.1.0</title>
+            <pubDate>Mon, 08 Jun 2026 22:59:53 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>2.1.0</sparkle:version>
+            <sparkle:shortVersionString>2.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[
+### Added
+
+- Command palette: option-bearing commands now open a keyboard-navigable
+  second-level menu instead of acting with a default. Selecting Keep Awake,
+  Scheduled Shutdown, Brightness, Hosts, or Port Manager drills into that
+  command's options (Raycast-style push) — a back header shows the parent and
+  Return runs an option and dismisses. Esc clears a non-empty search first;
+  with an empty search it returns to the root from the second level or closes
+  the palette at the root (an empty-query Backspace or clicking the header also
+  returns to the root). The second level itself is searchable (matching both
+  titles and subtitles, so typing a port number narrows the port list). Keep Awake and Scheduled Shutdown mirror their panel
+  duration presets (15 / 30 / 60 / 120 min, indefinite, plus a destructive Turn
+  Off / Cancel only when active); Brightness lists 0 / 25 / 50 / 75 / 100 %
+  steps applied to every external DDC display and appears only when one is
+  present; Hosts lists each profile with an active checkmark (selecting toggles
+  it, which may prompt for admin authorization on the privileged write) plus an
+  always-present "Edit hosts…" that opens the editor window; Port Manager lists
+  every listening TCP port (process name with a port · pid subtitle). Killing a
+  port — from either the drill-in or the root numeric search — now asks first
+  with a Raycast-style in-palette confirmation card (Return confirms, Esc
+  cancels), so a stray keystroke can't terminate a process; on confirm it kills
+  with the usual toast. A new `CommandPaletteOptions`
+  (`@MainActor`) is the single
+  source of truth for which builtins are option parents and their options, with
+  pure per-item builders that take already-fetched state (`isOn` / `isArmed` /
+  `displays` / `profiles` / port records) so they unit-test without singletons;
+  each option's action runs through the existing services (`setKeepAwakeDuration`
+  / `setScheduledShutdownDuration` / `DisplayBrightnessService.setBrightness` /
+  `HostsManager.setActive` / `PortInventory.kill`) so the palette and the panel
+  never drift. Option rows reuse the existing list/row rendering via a new
+  command-palette-only `PanelEntry.Source.paletteOption(id:)` (a `String` id, the
+  action looked up on the MainActor), and `CommandPaletteState` gains a root ⇄
+  options navigation stack. App Shortcuts and Window Layout keep their existing
+  flat, directly-searchable sections, and typing a port number at the root still
+  surfaces a Ports section for a quick kill — alongside the new Port Manager
+  drill-in, ports stay reachable both ways.
+- Scheduled Shutdown: arm a one-shot countdown to shut the Mac down from the
+  menu-bar panel, with a cancelable pre-fire warning, graceful (default) or
+  optional forced shutdown, and the schedule surviving relaunch.
+- Emptying the Trash now reports its outcome with a bottom-center toast,
+  matching the other quick actions (pick color, OCR, port kill). It shows a
+  success message when the Trash is cleared, a distinct hint when the Trash is
+  already empty, and a permission prompt when Automation access is denied.
+  Dismissing Finder's confirmation dialog is treated as an intentional no-op
+  and stays silent.
+
+### Changed
+
+- The menu-bar panel height cap is now a proportion of the usable screen height
+  (80%) instead of a fixed 8pt margin, leaving more breathing room on tall
+  displays. Overflow still scrolls inside the panel.
+- External-display brightness on Intel Macs now uses MonitorControl's
+  MIT-licensed `IntelDDC`, vendored into the app, instead of the upstream
+  `reitermarkus/DDC.swift` dependency, which ships with no license. The DDC/CI
+  behavior is unchanged; Apple Silicon continues to use the existing
+  `Arm64DDCBackend`. Bundled third-party license texts are now collected in
+  `THIRD-PARTY-LICENSES.md`.
+
+### Fixed
+
+- Triggering Empty Trash on an already-empty Trash surfaced a spurious failure.
+  Finder returns `-128` both for that case and when its confirmation dialog is
+  cancelled; the empty case is now short-circuited before the AppleScript call
+  and the cancelled case is handled silently.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.1.0/AnyDoor-2.1.0.zip" length="6873562" type="application/octet-stream" sparkle:edSignature="1Efk6JM65IXAJyVzt6ZN3EhDzJihuklAPwbFO+XgG53prrDc4OvHwc0q9i7gOQbaHcaXCq9S3pTEsQahSlbuBg=="/>
+        </item>
+        <item>
             <title>2.0.2</title>
             <pubDate>Fri, 05 Jun 2026 23:49:07 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>2.0.2</sparkle:version>
             <sparkle:shortVersionString>2.0.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
-### Fixed
-
-- The Settings window reopened on its own whenever AnyDoor auto-launched at
-  login. macOS state restoration was reopening the previous session's window,
-  but AnyDoor is a menu-bar utility where no window should appear unbidden. The
-  app now opts out of application state restoration
-  (`application(_:shouldRestoreApplicationState:)` and `shouldSaveApplicationState`
-  return `false`) and additionally marks the Settings window non-restorable as a
-  fallback for the per-window restoration path. Settings still opens on demand
-  from the menu-bar item.
-- The menu-bar panel could run off the bottom of the screen once enough items
-  were enabled, leaving the lower rows unreachable. The panel height is now
-  capped to the usable screen height; any overflow scrolls inside the panel
-  (`NSScrollView` wrapping the measured hosting view, with rounded-corner
-  clipping preserved). Hover sub-popovers (App Shortcuts, Port Manager,
-  brightness, clipboard history) re-anchor correctly as the list scrolls.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.2/AnyDoor-2.0.2.zip" length="6794023" type="application/octet-stream" sparkle:edSignature="3tveyLagl9mo9thO2FOv5WkSAdmMp8gsKWzJrkVyVlOIhjmXSrBCndmFKtOYeljuge1QX73/J+QXb4hNie7PDg=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.2/AnyDoor-2.0.2.zip" length="6794023" type="application/octet-stream" sparkle:edSignature="3tveyLagl9mo9thO2FOv5WkSAdmMp8gsKWzJrkVyVlOIhjmXSrBCndmFKtOYeljuge1QX73/J+QXb4hNie7PDg=="/>
         </item>
         <item>
             <title>2.0.1</title>
@@ -37,15 +94,6 @@
             <sparkle:shortVersionString>2.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.1/AnyDoor-2.0.1.zip" length="6792216" type="application/octet-stream" sparkle:edSignature="1e0/1hygW0VOXTC4kfFg0N27pb5yUjtI8qt4xgKH+BeWJ/6sagC6HsqwwLisDu75LHSnV8UKYS/q0mNWJdqSCA=="/>
-        </item>
-        <item>
-            <title>2.0.0</title>
-            <pubDate>Thu, 04 Jun 2026 14:14:37 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>2.0.0</sparkle:version>
-            <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.0.0/AnyDoor-2.0.0.zip" length="6777369" type="application/octet-stream" sparkle:edSignature="B9NRPPKKDIa/NXpDB4XUTAtVdSsPa2g5nfQy75TKQI9OI/54xxFVqBLnOX8e5hJ0CGNcNMusuJiEeL9tC/1xBA=="/>
         </item>
         <item>
             <title>1.2.0</title>

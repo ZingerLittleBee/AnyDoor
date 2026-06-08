@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-08
+
 ### Added
 
 - Command palette: option-bearing commands now open a keyboard-navigable
