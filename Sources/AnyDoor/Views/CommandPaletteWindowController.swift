@@ -204,6 +204,17 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         guard let window, window.isVisible, window.isKeyWindow else { return false }
         guard let state else { return false }
 
+        // A confirmation card captures the keyboard: Return confirms, Esc cancels,
+        // every other key is swallowed so nothing leaks into the search field.
+        if state.isConfirming {
+            switch keyCode {
+            case 36, 76: confirmPending()
+            case 53: state.cancelConfirmation()
+            default: break
+            }
+            return true
+        }
+
         switch keyCode {
         case 125:
             state.moveDown()
@@ -252,11 +263,28 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             return
         }
 
-        // A second-level option runs its action, then dismisses.
+        // A second-level option either confirms (destructive, e.g. a port kill)
+        // or runs its action and dismisses.
         if case .paletteOption(let id) = entry.source {
-            let option = state?.option(id: id)
-            close()
-            if let option { Task { await option.perform() } }
+            guard let option = state?.option(id: id) else { close(); return }
+            if let confirmation = option.confirmation {
+                state?.requestConfirmation(confirmation, perform: option.perform)
+            } else {
+                close()
+                Task { await option.perform() }
+            }
+            return
+        }
+
+        // Killing a port from the root numeric search asks for confirmation too.
+        if case .portRecord(let record) = entry.source {
+            let confirmation = CommandPaletteOptions.portKillConfirmation(for: record)
+            state?.requestConfirmation(confirmation) {
+                let result = await PortInventory.shared.kill(pid: record.pid)
+                ToastPresenter.shared.show(
+                    CommandPalettePortKillToast.style(for: record, result: result)
+                )
+            }
             return
         }
 
@@ -267,13 +295,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             AppSwitcher.toggle(bundleID: binding.appBundleID, appPath: binding.appPath)
         case .installedApp(let bundleID, let path):
             AppSwitcher.toggle(bundleID: bundleID, appPath: path)
-        case .portRecord(let record):
-            Task {
-                let result = await PortInventory.shared.kill(pid: record.pid)
-                ToastPresenter.shared.show(
-                    CommandPalettePortKillToast.style(for: record, result: result)
-                )
-            }
+        case .portRecord:
+            break // handled above (routed through confirmation)
         case .builtin(let item):
             switch item.kind {
             case .toggle:
@@ -294,6 +317,14 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         case .paletteOption:
             break // handled above
         }
+    }
+
+    /// Run the pending confirmation's action, then dismiss. Reads `perform`
+    /// before `close()` (which nils `state` via `windowWillClose`).
+    private func confirmPending() {
+        guard let perform = state?.pendingConfirmation?.perform else { return }
+        close()
+        Task { await perform() }
     }
 
     private func cancel() {
