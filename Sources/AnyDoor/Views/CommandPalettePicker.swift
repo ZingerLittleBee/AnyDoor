@@ -211,14 +211,18 @@ struct CommandPalettePicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if !state.isAtRoot { backHeader }
+
             searchField
 
             Divider().opacity(0.4)
 
             if state.flatEntries.isEmpty {
                 emptyState
-            } else {
+            } else if state.isAtRoot {
                 entryList
+            } else {
+                optionList
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -252,7 +256,7 @@ struct CommandPalettePicker: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 22, weight: .regular))
                 .foregroundStyle(.secondary)
-            TextField(L(.commandPaletteSearchPlaceholder), text: $state.query)
+            TextField(L(state.isAtRoot ? .commandPaletteSearchPlaceholder : .commandPaletteOptionSearchPlaceholder), text: $state.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
                 .focused($searchFocused)
@@ -274,6 +278,67 @@ struct CommandPalettePicker: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    private var backHeader: some View {
+        Button {
+            state.popToRoot()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                if case let .options(parentTitle) = state.level {
+                    Text(parentTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 20)
+        .padding(.top, 14)
+        .padding(.bottom, 2)
+        .help(L(.commandPaletteOptionBack))
+    }
+
+    private var optionList: some View {
+        ScrollViewReader { proxy in
+            let entries = state.flatEntries
+            let selectedID: String? = entries.indices.contains(state.selectedIndex)
+                ? entries[state.selectedIndex].id
+                : nil
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(entries) { entry in
+                        CommandPaletteRow(
+                            entry: entry,
+                            hyperFlags: state.hyperFlags,
+                            isSelected: entry.id == selectedID,
+                            option: optionForEntry(entry),
+                            onSelect: { onSelect(entry) }
+                        )
+                        .id(entry.id)
+                        .legacyMaterialBackground()
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
+            .frame(minHeight: 320, maxHeight: .infinity)
+            .onChange(of: state.selectedIndex) { _, newIndex in
+                guard entries.indices.contains(newIndex) else { return }
+                proxy.scrollTo(entries[newIndex].id)
+            }
+        }
+    }
+
+    /// Resolve the option backing a `.paletteOption` entry so the row can render
+    /// its checkmark / destructive styling.
+    private func optionForEntry(_ entry: PanelEntry) -> CommandPaletteOption? {
+        guard case let .paletteOption(id) = entry.source else { return nil }
+        return state.option(id: id)
     }
 
     private var emptyState: some View {
@@ -372,6 +437,7 @@ private struct CommandPaletteRow: View {
     let entry: PanelEntry
     let hyperFlags: Int
     let isSelected: Bool
+    var option: CommandPaletteOption? = nil
     let onSelect: () -> Void
 
     @State private var isHovering = false
@@ -383,7 +449,11 @@ private struct CommandPaletteRow: View {
                 .frame(width: 22, height: 22)
             titleBlock
             Spacer()
-            if let hotkey = entry.hotkey {
+            if let option, option.isChecked {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            } else if let hotkey = entry.hotkey {
                 Text(hotkey.displayString(hyperFlags: hyperFlags))
                     .font(.system(size: 12, design: .rounded))
                     .padding(.horizontal, 6)
@@ -424,6 +494,7 @@ private struct CommandPaletteRow: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(entry.localizedTitle())
                 .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(option?.role == .destructive ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
                 .lineLimit(1)
             if showsSubtitle, let subtitle = entry.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
@@ -477,7 +548,7 @@ private struct CommandPaletteRow: View {
     /// detail line, or the original expression for a calc result).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult: return true
+        case .portRecord, .calcResult, .paletteOption: return true
         default: return false
         }
     }
