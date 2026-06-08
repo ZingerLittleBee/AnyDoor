@@ -212,11 +212,3 @@ final class ScheduledShutdownService {
         onChange?(state)
     }
 }
-
-// TEMP stub — removed in Task 9 (real window controller).
-@MainActor
-final class ShutdownWarningWindowController: ShutdownWarningPresenting {
-    func present(totalSeconds: Int, onCancel: @escaping @MainActor () -> Void) {}
-    func update(secondsRemaining: Int) {}
-    func dismiss() {}
-}
