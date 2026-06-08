@@ -59,6 +59,26 @@ final class CommandPaletteState {
 
     func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
 
+    /// What the window controller should do after applying the Esc-key policy.
+    enum EscapeOutcome: Equatable { case clearedQuery, poppedToRoot, dismiss }
+
+    /// Esc-key policy: a non-empty query is cleared first (at either level); an
+    /// empty query pops to the root from the second level, or asks the window to
+    /// dismiss at the root.
+    @discardableResult
+    func handleEscape() -> EscapeOutcome {
+        if !query.isEmpty {
+            query = ""
+            // Reset the selection ourselves rather than relying on the view's
+            // `.onChange(of: query)`, matching popToRoot()/enterOptions().
+            selectedIndex = 0
+            return .clearedQuery
+        }
+        if isAtRoot { return .dismiss }
+        popToRoot()
+        return .poppedToRoot
+    }
+
     /// Option entries filtered by the second-level query.
     var filteredOptionEntries: [PanelEntry] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)

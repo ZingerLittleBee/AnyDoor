@@ -11,11 +11,12 @@ versioning.
 - Command palette: option-bearing commands now open a keyboard-navigable
   second-level menu instead of acting with a default. Selecting Keep Awake,
   Scheduled Shutdown, Brightness, Hosts, or Port Manager drills into that
-  command's options (Raycast-style push) — a back header shows the parent,
-  Return runs an option and dismisses, and Esc / an empty-query Backspace /
-  clicking the header return to the root, with the second level itself
-  searchable (matching both titles and subtitles, so typing a port number
-  narrows the port list). Keep Awake and Scheduled Shutdown mirror their panel
+  command's options (Raycast-style push) — a back header shows the parent and
+  Return runs an option and dismisses. Esc clears a non-empty search first;
+  with an empty search it returns to the root from the second level or closes
+  the palette at the root (an empty-query Backspace or clicking the header also
+  returns to the root). The second level itself is searchable (matching both
+  titles and subtitles, so typing a port number narrows the port list). Keep Awake and Scheduled Shutdown mirror their panel
   duration presets (15 / 30 / 60 / 120 min, indefinite, plus a destructive Turn
   Off / Cancel only when active); Brightness lists 0 / 25 / 50 / 75 / 100 %
   steps applied to every external DDC display and appears only when one is

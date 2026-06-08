@@ -186,6 +186,55 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
+    func testEscapeAtRootClearsNonEmptyQuery() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "abc"
+        state.selectedIndex = 3
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testEscapeAtRootWithEmptyQueryDismisses() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        XCTAssertEqual(state.handleEscape(), .dismiss)
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testEscapeTreatsWhitespaceOnlyQueryAsContent() {
+        // Whitespace is content the user typed (the clear button shows for it
+        // too), so Esc clears it first instead of closing / popping.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "   "
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertEqual(state.query, "")
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testEscapeInOptionsClearsNonEmptyQueryWithoutPopping() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Keep Awake", sampleOptions())
+        state.query = "bet"
+        state.selectedIndex = 1
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertFalse(state.isAtRoot) // stays in the second level
+    }
+
+    @MainActor
+    func testEscapeInOptionsWithEmptyQueryPopsToRoot() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterOptions(parentTitle: "Keep Awake", sampleOptions())
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
     func testPopToRootRestoresRoot() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         state.enterOptions(parentTitle: "Keep Awake", sampleOptions())

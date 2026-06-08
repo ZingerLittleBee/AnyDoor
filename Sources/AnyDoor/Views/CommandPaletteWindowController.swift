@@ -222,11 +222,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 return true
             }
             return false // otherwise let the search field delete a character
-        case 53: // Esc: pop to root from the second level, else dismiss
-            if state.isAtRoot {
+        case 53: // Esc: clear a non-empty query first, then pop the second level / dismiss
+            if state.handleEscape() == .dismiss {
                 cancel()
-            } else {
-                state.popToRoot()
             }
             return true
         default:
