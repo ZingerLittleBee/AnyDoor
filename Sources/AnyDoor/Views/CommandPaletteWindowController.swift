@@ -238,8 +238,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         // Option parents drill into a second level instead of closing.
         if case .builtin(let item) = entry.source, CommandPaletteOptions.isOptionParent(item) {
             Task { @MainActor [weak self] in
-                guard let self, let state = self.state else { return }
-                if let options = await CommandPaletteOptions.options(for: item), !options.isEmpty {
+                guard let self else { return }
+                let options = await CommandPaletteOptions.options(for: item)
+                // Re-check after the await: the window may have resigned key and
+                // closed (which nils `state`) during option building.
+                guard let state = self.state, self.window?.isVisible == true else { return }
+                if let options, !options.isEmpty {
                     state.enterOptions(parentTitle: L(item.titleKey), options)
                 } else {
                     self.close() // nothing to drill into (e.g. brightness lost its display)
