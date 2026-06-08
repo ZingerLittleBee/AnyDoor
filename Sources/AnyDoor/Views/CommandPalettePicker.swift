@@ -381,6 +381,10 @@ struct CommandPalettePicker: View {
                 .font(.system(size: 22, weight: .regular))
                 .focused($searchFocused)
                 .onSubmit {
+                    // While a confirmation card is up the key monitor already
+                    // swallows Return; guard here too so onSubmit can never
+                    // commit a list row behind the card.
+                    guard !state.isConfirming else { return }
                     if let entry = state.commitSelection() {
                         onSelect(entry)
                     }
