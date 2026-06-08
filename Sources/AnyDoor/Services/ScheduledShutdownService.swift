@@ -37,6 +37,10 @@ final class ScheduledShutdownService {
     private var countdownTimer: Timer?
     private var wakeObserver: NSObjectProtocol?
 
+    /// The shutdown kicked off by `performFire()`. Retained so it isn't dropped
+    /// mid-flight and so tests can await exactly that invocation.
+    private(set) var fireTask: Task<Void, Never>?
+
     init(
         executor: any ShutdownExecuting,
         warning: any ShutdownWarningPresenting,
@@ -187,7 +191,7 @@ final class ScheduledShutdownService {
         state = .off
         defaults.removeObject(forKey: Self.fireDateKey)
         notify()
-        Task { await self.executeShutdown() }
+        fireTask = Task { await self.executeShutdown() }
     }
 
     /// Internal for testing: the awaitable shutdown call. Surfaces failures

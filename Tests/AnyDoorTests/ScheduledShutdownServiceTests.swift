@@ -95,8 +95,11 @@ extension ScheduledShutdownServiceTests {
         XCTAssertEqual(service.state, .off)
         XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
 
-        await service.executeShutdown()
-        XCTAssertEqual(executor.calls, [false])  // graceful by default
+        // performFire() kicks off the shutdown on its own Task; await exactly
+        // that task rather than calling executeShutdown() again (which would
+        // double-count the executor invocation).
+        await service.fireTask?.value
+        XCTAssertEqual(executor.calls, [false])  // graceful by default, fired once
     }
 
     @MainActor
