@@ -468,7 +468,7 @@ private struct CommandPaletteRow: View {
             // SF Symbols carry no built-in transparent padding, so they need a
             // smaller point size than the 22pt frame to read at the same visual
             // weight as NSImage app icons. Built-in toggles read at full
-            // strength; port records match the dimmer fallback weight.
+            // strength; other symbol rows match the dimmer fallback weight.
             Image(systemName: entry.symbol)
                 .font(.system(size: 15))
                 .foregroundStyle(isBuiltin ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
@@ -484,16 +484,17 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .paletteOption:
+        case .builtin, .calcResult, .paletteOption:
             return nil
         }
     }
 
-    /// Port records and calculator results both render their subtitle (the port
-    /// detail line, or the original expression for a calc result).
+    /// Calculator results and second-level options render their subtitle (the
+    /// original expression for a calc result, the port detail line for a port
+    /// option, etc.).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .paletteOption: return true
+        case .calcResult, .paletteOption: return true
         default: return false
         }
     }

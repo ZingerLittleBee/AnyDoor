@@ -195,7 +195,7 @@ struct PanelSettingsView: View {
             panel.setBuiltinHotkey(item, hotkey: hotkey)
         case let .appShortcut(id):
             panel.updateAppShortcut(id: id, hotkey: hotkey)
-        case .installedApp, .portRecord, .calcResult, .paletteOption:
+        case .installedApp, .calcResult, .paletteOption:
             // Command-palette-only source; never surfaces in the settings UI.
             break
         }
@@ -207,7 +207,7 @@ struct PanelSettingsView: View {
             panel.setBuiltinHotkey(item, hotkey: nil)
         case let .appShortcut(id):
             panel.updateAppShortcut(id: id, hotkey: nil)
-        case .installedApp, .portRecord, .calcResult, .paletteOption:
+        case .installedApp, .calcResult, .paletteOption:
             // Command-palette-only source; never surfaces in the settings UI.
             break
         }
