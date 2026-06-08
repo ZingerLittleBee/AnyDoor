@@ -36,8 +36,9 @@ versioning.
   command-palette-only `PanelEntry.Source.paletteOption(id:)` (a `String` id, the
   action looked up on the MainActor), and `CommandPaletteState` gains a root ⇄
   options navigation stack. App Shortcuts and Window Layout keep their existing
-  flat, directly-searchable sections; the Port Manager drill-in replaces the
-  earlier hidden "type a port number" search.
+  flat, directly-searchable sections, and typing a port number at the root still
+  surfaces a Ports section for a quick kill — alongside the new Port Manager
+  drill-in, ports stay reachable both ways.
 - Scheduled Shutdown: arm a one-shot countdown to shut the Mac down from the
   menu-bar panel, with a cancelable pre-fire warning, graceful (default) or
   optional forced shutdown, and the schedule surviving relaunch.

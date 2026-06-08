@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .calcResult, .paletteOption: return nil
+            case .builtin, .portRecord, .calcResult, .paletteOption: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -267,6 +267,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             AppSwitcher.toggle(bundleID: binding.appBundleID, appPath: binding.appPath)
         case .installedApp(let bundleID, let path):
             AppSwitcher.toggle(bundleID: bundleID, appPath: path)
+        case .portRecord(let record):
+            Task {
+                let result = await PortInventory.shared.kill(pid: record.pid)
+                ToastPresenter.shared.show(
+                    CommandPalettePortKillToast.style(for: record, result: result)
+                )
+            }
         case .builtin(let item):
             switch item.kind {
             case .toggle:
