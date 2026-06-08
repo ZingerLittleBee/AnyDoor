@@ -5,13 +5,13 @@ import HostsHelperShared
 struct PrivilegedHelperWriter: HostsWriter {
     func write(_ content: String) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let conn = NSXPCConnection(machServiceName: HostsHelperConstants.machServiceName,
+            let conn = NSXPCConnection(machServiceName: PrivilegedHelperConstants.machServiceName,
                                        options: .privileged)
-            conn.remoteObjectInterface = NSXPCInterface(with: HostsHelperProtocol.self)
+            conn.remoteObjectInterface = NSXPCInterface(with: PrivilegedHelperProtocol.self)
             conn.resume()
             let proxy = conn.remoteObjectProxyWithErrorHandler { error in
                 cont.resume(throwing: HostsWriterError.writeFailed(String(describing: error)))
-            } as? HostsHelperProtocol
+            } as? PrivilegedHelperProtocol
             guard let proxy else {
                 conn.invalidate()
                 cont.resume(throwing: HostsWriterError.writeFailed("no proxy"))

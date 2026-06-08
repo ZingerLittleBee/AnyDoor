@@ -6,7 +6,7 @@ import XPCAuditToken
 /// XPC listener delegate running as root. Validates each caller's code
 /// signature before exposing the interface, serializes writes, and replaces
 /// /etc/hosts atomically.
-final class HostsHelperListener: NSObject, NSXPCListenerDelegate, HostsHelperProtocol, @unchecked Sendable {
+final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelperProtocol, @unchecked Sendable {
     private let writeQueue = DispatchQueue(label: "dev.bybee.AnyDoor.HostsHelper.write")
 
     // anchor apple generic + our Team ID + our app identifier.
@@ -17,7 +17,7 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, HostsHelperPro
 
     func listener(_ listener: NSXPCListener, shouldAcceptNewConnection conn: NSXPCConnection) -> Bool {
         guard isValidClient(conn) else { return false }
-        conn.exportedInterface = NSXPCInterface(with: HostsHelperProtocol.self)
+        conn.exportedInterface = NSXPCInterface(with: PrivilegedHelperProtocol.self)
         conn.exportedObject = self
         conn.resume()
         return true
@@ -40,10 +40,10 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, HostsHelperPro
         return SecCodeCheckValidity(code, [], req) == errSecSuccess
     }
 
-    // MARK: HostsHelperProtocol
+    // MARK: PrivilegedHelperProtocol
 
     func writeHosts(_ content: String, withReply reply: @escaping (String?) -> Void) {
-        guard content.utf8.count <= HostsHelperConstants.maxPayloadBytes else {
+        guard content.utf8.count <= PrivilegedHelperConstants.maxPayloadBytes else {
             reply("payload too large"); return
         }
         writeQueue.async {
@@ -58,7 +58,7 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, HostsHelperPro
 
     func helperVersion(withReply reply: @escaping (String) -> Void) {
         // The helper is a bare Mach-O without an Info.plist; read the shared constant instead.
-        reply(HostsHelperConstants.helperVersion)
+        reply(PrivilegedHelperConstants.helperVersion)
     }
 
     /// Write to a temp file in /etc (same filesystem so rename is atomic), then
