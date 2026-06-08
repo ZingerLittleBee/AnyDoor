@@ -129,7 +129,6 @@ enum L10n {
         case commandPaletteSectionCommands = "commandPalette.section.commands"
         case commandPaletteSectionWindowLayout = "commandPalette.section.windowLayout"
         case commandPaletteSectionApplications = "commandPalette.section.applications"
-        case commandPaletteSectionPorts = "commandPalette.section.ports"
         case commandPaletteSectionCalculator = "commandPalette.section.calculator"
         case settingsGeneralCommandPaletteSection = "settings.general.commandPalette.section"
         case settingsGeneralCommandPaletteHotkey = "settings.general.commandPalette.hotkey"
