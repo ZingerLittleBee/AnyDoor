@@ -23,8 +23,11 @@ versioning.
   present; Hosts lists each profile with an active checkmark (selecting toggles
   it, which may prompt for admin authorization on the privileged write) plus an
   always-present "Edit hosts…" that opens the editor window; Port Manager lists
-  every listening TCP port (process name with a port · pid subtitle) and Return
-  kills that port's process with the usual toast. A new `CommandPaletteOptions`
+  every listening TCP port (process name with a port · pid subtitle). Killing a
+  port — from either the drill-in or the root numeric search — now asks first
+  with a Raycast-style in-palette confirmation card (Return confirms, Esc
+  cancels), so a stray keystroke can't terminate a process; on confirm it kills
+  with the usual toast. A new `CommandPaletteOptions`
   (`@MainActor`) is the single
   source of truth for which builtins are option parents and their options, with
   pure per-item builders that take already-fetched state (`isOn` / `isArmed` /
