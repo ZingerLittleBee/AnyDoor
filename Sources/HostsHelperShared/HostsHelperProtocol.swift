@@ -19,4 +19,8 @@ public enum PrivilegedHelperConstants {
     func writeHosts(_ content: String, withReply reply: @escaping (String?) -> Void)
     /// Returns the helper's bundle/build version for diagnostics + upgrade checks.
     func helperVersion(withReply reply: @escaping (String) -> Void)
+    /// Power the machine off as root. Replies with nil on success or an error
+    /// message. A fixed verb — no caller-supplied arguments — so there is no
+    /// command-injection surface.
+    func shutDown(withReply reply: @escaping (String?) -> Void)
 }

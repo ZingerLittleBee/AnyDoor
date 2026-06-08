@@ -61,6 +61,21 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelp
         reply(PrivilegedHelperConstants.helperVersion)
     }
 
+    func shutDown(withReply reply: @escaping (String?) -> Void) {
+        writeQueue.async {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/sbin/shutdown")
+            proc.arguments = ["-h", "now"]
+            do {
+                try proc.run()
+                // The machine is going down; reply best-effort before exit.
+                reply(nil)
+            } catch {
+                reply(String(describing: error))
+            }
+        }
+    }
+
     /// Write to a temp file in /etc (same filesystem so rename is atomic), then
     /// fsync, set root:wheel 0644, and rename over /etc/hosts.
     private static func atomicWrite(_ content: String) throws {
