@@ -213,11 +213,7 @@ final class ScheduledShutdownService {
     }
 }
 
-// TEMP stubs — removed in Task 5 (L key) and Task 9 (window controller).
-// Task 5 deletes these and adds the real L10n.Key cases.
-private extension L10n.Key { static var shutdownToastFailed: L10n.Key { .builtinKeepAwake } }
-private extension L10n.Key { static var shutdownToastMissed: L10n.Key { .builtinKeepAwake } }
-// Task 9 deletes this and adds the real controller.
+// TEMP stub — removed in Task 9 (real window controller).
 @MainActor
 final class ShutdownWarningWindowController: ShutdownWarningPresenting {
     func present(totalSeconds: Int, onCancel: @escaping @MainActor () -> Void) {}
