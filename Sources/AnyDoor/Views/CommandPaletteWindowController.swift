@@ -243,10 +243,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 // Re-check after the await: the window may have resigned key and
                 // closed (which nils `state`) during option building.
                 guard let state = self.state, self.window?.isVisible == true else { return }
-                if let options, !options.isEmpty {
+                if let options {
+                    // Drill in even when empty (e.g. no listening ports) so the
+                    // palette shows its empty state instead of silently closing.
                     state.enterOptions(parentTitle: L(item.titleKey), options)
                 } else {
-                    self.close() // nothing to drill into (e.g. brightness lost its display)
+                    self.close() // not an option parent right now (brightness lost its display)
                 }
             }
             return
