@@ -8,6 +8,9 @@ versioning.
 
 ### Added
 
+- Scheduled Shutdown: arm a one-shot countdown to shut the Mac down from the
+  menu-bar panel, with a cancelable pre-fire warning, graceful (default) or
+  optional forced shutdown, and the schedule surviving relaunch.
 - Emptying the Trash now reports its outcome with a bottom-center toast,
   matching the other quick actions (pick color, OCR, port kill). It shows a
   success message when the Trash is cleared, a distinct hint when the Trash is
