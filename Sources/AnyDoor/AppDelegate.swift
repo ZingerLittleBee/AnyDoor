@@ -17,6 +17,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsCaptureWindow: NSWindow?
     private var clipboardWatcher: ClipboardWatcher?
 
+    /// Monotonic process-launch reference (seconds since boot). Captured at
+    /// instantiation — the earliest reliable point, since the delegate exists
+    /// before any callback and a login-launch reopen can precede
+    /// `applicationDidFinishLaunching`. See `shouldOpenSettingsForReopen`.
+    private let launchUptime = ProcessInfo.processInfo.systemUptime
+
+    /// How long after launch a no-window reopen is still attributed to the
+    /// system's login auto-launch rather than a user relaunch.
+    static let reopenSettingsLaunchGrace: TimeInterval = 3
+
     override init() {
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -273,13 +283,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// the `.accessory` policy (no Dock icon). Re-launching AnyDoor from
     /// Finder/Spotlight lands here; with no visible window, re-open Settings so
     /// the user can turn the icon back on.
+    ///
+    /// macOS starts a login item by sending a reopen Apple Event, which also
+    /// lands here with `flag == false` on a fresh menu-bar launch — we must NOT
+    /// pop Settings open on every login. `shouldOpenSettingsForReopen` gates on
+    /// process age so only a genuine post-launch relaunch surfaces Settings.
     @MainActor
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows flag: Bool) -> Bool {
-        if !flag {
+        let elapsed = ProcessInfo.processInfo.systemUptime - launchUptime
+        if Self.shouldOpenSettingsForReopen(hasVisibleWindows: flag, secondsSinceLaunch: elapsed) {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         }
         return true
+    }
+
+    /// Decides whether a reopen event should surface Settings. A reopen with no
+    /// visible windows that arrives within `reopenSettingsLaunchGrace` of launch
+    /// is the system's login auto-launch and is ignored; a later one is a user
+    /// relaunch (e.g. re-enabling a hidden menu-bar icon) and opens Settings.
+    static func shouldOpenSettingsForReopen(hasVisibleWindows: Bool,
+                                            secondsSinceLaunch: TimeInterval) -> Bool {
+        guard !hasVisibleWindows else { return false }
+        return secondsSinceLaunch >= reopenSettingsLaunchGrace
     }
 
     /// Hot-reload entry point used by views after data changes.
