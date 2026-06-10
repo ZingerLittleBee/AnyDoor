@@ -9,7 +9,7 @@
             <sparkle:version>2.1.0</sparkle:version>
             <sparkle:shortVersionString>2.1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description><![CDATA[
+            <description sparkle:format="markdown"><![CDATA[
 ### Added
 
 - Command palette: option-bearing commands now open a keyboard-navigable

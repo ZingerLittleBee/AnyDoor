@@ -298,7 +298,11 @@ item_re = re.compile(
 def repl(m):
     block = m.group(1)
     block = re.sub(r'<description>.*?</description>', '', block, flags=re.DOTALL)
-    cdata = f'<description><![CDATA[\n{notes}\n]]></description>\n'
+    # Sparkle 2.9+ renders inline release notes as Markdown when the
+    # description carries sparkle:format="markdown" (requires macOS 12+, which
+    # our macOS 14 minimum satisfies). Without it, Sparkle treats the CDATA as
+    # HTML and shows the raw "###"/"-" markers literally.
+    cdata = f'<description sparkle:format="markdown"><![CDATA[\n{notes}\n]]></description>\n'
     return block + cdata + m.group(2)
 new_text, count = item_re.subn(repl, text, count=1)
 if count == 0:
