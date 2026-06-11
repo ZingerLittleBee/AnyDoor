@@ -6,6 +6,14 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Screen Text Recognition and QR-code scanning now explicitly request macOS
+  Screen Recording access before launching the interactive capture flow, and
+  show a permission-specific toast when access is denied instead of silently
+  behaving like the selection was cancelled. OCR recognition also covers
+  Traditional Chinese (`zh-Hant`) with Vision language detection enabled.
+
 ## [2.1.0] - 2026-06-08
 
 ### Added
