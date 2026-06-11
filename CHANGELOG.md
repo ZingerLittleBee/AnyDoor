@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-06-12
+
 ### Fixed
 
 - Screen Text Recognition and QR-code scanning now explicitly request macOS
