@@ -4,6 +4,9 @@ import ImageIO
 
 /// Errors surfaced by the OCR capture pipeline.
 enum OCRError: Error {
+    /// macOS denied Screen Recording access, so the selected pixels cannot be read.
+    case screenCapturePermissionDenied
+
     /// screencapture produced a file but it could not be decoded into a CGImage.
     case imageDecodeFailed
 }
@@ -22,19 +25,37 @@ enum RegionCapture {
     /// Throws `OCRError.imageDecodeFailed` when a file is produced but cannot be
     /// decoded, and rethrows any process-launch failure.
     static func captureRegion() async throws -> CGImage? {
+        try await captureRegion(
+            hasScreenCaptureAccess: { ScreenCapturePermission.isGranted },
+            requestScreenCaptureAccess: { ScreenCapturePermission.request() },
+            runScreencapture: { tempPath in
+                // -i: interactive; -s: selection-only (disables spacebar window mode).
+                // timeout nil: the user controls how long the selection takes.
+                _ = try await ShellRunner.run(
+                    "/usr/sbin/screencapture",
+                    args: ["-i", "-s", tempPath],
+                    timeout: nil
+                )
+            }
+        )
+    }
+
+    static func captureRegion(
+        hasScreenCaptureAccess: @Sendable () -> Bool,
+        requestScreenCaptureAccess: @Sendable () -> Bool,
+        runScreencapture: @Sendable (String) async throws -> Void
+    ) async throws -> CGImage? {
+        guard hasScreenCaptureAccess() || requestScreenCaptureAccess() else {
+            throw OCRError.screenCapturePermissionDenied
+        }
+
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("anydoor-ocr-\(UUID().uuidString).png")
         let tempPath = tempURL.path
         defer { try? FileManager.default.removeItem(at: tempURL) }
 
         do {
-            // -i: interactive; -s: selection-only (disables spacebar window mode).
-            // timeout nil: the user controls how long the selection takes.
-            _ = try await ShellRunner.run(
-                "/usr/sbin/screencapture",
-                args: ["-i", "-s", tempPath],
-                timeout: nil
-            )
+            try await runScreencapture(tempPath)
         } catch BuiltinError.shellFailed {
             // Non-zero exit. screencapture's cancel exit code is undocumented,
             // so do not treat this as a failure here — fall through to the

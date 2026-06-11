@@ -11,6 +11,7 @@ struct GeneralSettingsView: View {
     @Environment(LocalizationManager.self) private var localization
     @State private var accessibilityGranted = HotkeyService.hasAccessibilityPermission
     @State private var automationGranted = false
+    @State private var screenCaptureGranted = ScreenCapturePermission.isGranted
     @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
     @AppStorage(ClipboardPreferences.monitoringKey) private var clipboardMonitoring = true
@@ -179,6 +180,7 @@ struct GeneralSettingsView: View {
             Section {
                 accessibilityRow
                 automationRow
+                screenCaptureRow
             } header: {
                 LocalizedText(.settingsGeneralPermissionsSection)
             }
@@ -241,6 +243,7 @@ struct GeneralSettingsView: View {
             while !Task.isCancelled {
                 accessibilityGranted = HotkeyService.hasAccessibilityPermission
                 automationGranted = AutomationPermission.isGranted
+                screenCaptureGranted = ScreenCapturePermission.isGranted
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -332,6 +335,30 @@ struct GeneralSettingsView: View {
                             AutomationPermission.request()
                         }.value
                         if !granted { AutomationPermission.openSettings() }
+                    }
+                } label: { LocalizedText(.settingsGeneralPermissionRequest) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var screenCaptureRow: some View {
+        HStack {
+            Label {
+                LocalizedText(.settingsGeneralPermissionScreenRecording)
+            } icon: {
+                Image(systemName: "rectangle.on.rectangle")
+            }
+            Spacer()
+            if screenCaptureGranted {
+                Label { LocalizedText(.settingsGeneralPermissionGranted) } icon: { Image(systemName: "checkmark.circle.fill") }
+                    .foregroundStyle(.green)
+            } else {
+                Button {
+                    let granted = ScreenCapturePermission.request()
+                    screenCaptureGranted = granted
+                    if !granted {
+                        ScreenCapturePermission.openSettings()
                     }
                 } label: { LocalizedText(.settingsGeneralPermissionRequest) }
             }

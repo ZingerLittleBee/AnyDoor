@@ -27,6 +27,23 @@ final class RegionCaptureTests: XCTestCase {
         try png.write(to: url)
     }
 
+    func testCaptureRegionThrowsBeforeLaunchingToolWhenScreenCapturePermissionIsDenied() async throws {
+        do {
+            _ = try await RegionCapture.captureRegion(
+                hasScreenCaptureAccess: { false },
+                requestScreenCaptureAccess: { false },
+                runScreencapture: { _ in
+                    XCTFail("screencapture must not launch without Screen Recording permission")
+                }
+            )
+            XCTFail("expected screen capture permission denial")
+        } catch OCRError.screenCapturePermissionDenied {
+            // Expected.
+        } catch {
+            XCTFail("expected screen capture permission denial, got \(error)")
+        }
+    }
+
     /// Reproduces the OCRProvider flow: decode a screencapture-style PNG, then delete
     /// the file (as `RegionCapture.captureRegion` does via `defer`) before recognition.
     /// The decoded CGImage must not lazily depend on the now-deleted file.

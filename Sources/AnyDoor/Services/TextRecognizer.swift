@@ -4,16 +4,27 @@ import Vision
 
 /// Recognizes text in a still image using the macOS Vision framework.
 enum TextRecognizer {
+    struct Configuration: Equatable, Sendable {
+        let automaticallyDetectsLanguage: Bool
+        let recognitionLanguages: [String]
+    }
+
+    static let defaultConfiguration = Configuration(
+        automaticallyDetectsLanguage: true,
+        recognitionLanguages: ["zh-Hans", "zh-Hant", "en-US"]
+    )
+
     /// Recognizes text in `image`. Returns one string per recognized text block,
     /// ordered top-to-bottom. An empty array means no text was found (not an error).
     static func recognize(_ image: CGImage) async throws -> [String] {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[String], Error>) in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
+                    let configuration = defaultConfiguration
                     let request = VNRecognizeTextRequest()
                     request.recognitionLevel = .accurate
-                    request.automaticallyDetectsLanguage = false
-                    request.recognitionLanguages = ["zh-Hans", "en-US"]
+                    request.automaticallyDetectsLanguage = configuration.automaticallyDetectsLanguage
+                    request.recognitionLanguages = configuration.recognitionLanguages
 
                     let handler = VNImageRequestHandler(cgImage: image, options: [:])
                     try handler.perform([request])

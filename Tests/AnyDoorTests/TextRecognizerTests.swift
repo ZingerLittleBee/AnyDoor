@@ -37,6 +37,12 @@ final class TextRecognizerTests: XCTestCase {
         return cgImage
     }
 
+    func testDefaultConfigurationCoversTraditionalChinese() {
+        let configuration = TextRecognizer.defaultConfiguration
+        XCTAssertTrue(configuration.automaticallyDetectsLanguage)
+        XCTAssertTrue(configuration.recognitionLanguages.contains("zh-Hant"))
+    }
+
     func testRecognizesEnglishText() async throws {
         let image = try renderImage(lines: ["Hello World"])
         let result = try await TextRecognizer.recognize(image)

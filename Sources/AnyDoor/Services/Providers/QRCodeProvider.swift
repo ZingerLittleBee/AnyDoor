@@ -38,6 +38,9 @@ actor QRCodeProvider: ActionProvider {
             await ClipboardHistoryStore.shared.recordText(kind: .qrcode, text: text)
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
             await ToastPresenter.shared.show(.success(successMsg))
+        } catch OCRError.screenCapturePermissionDenied {
+            let errMsg = await MainActor.run { L(.toastScreenCapturePermissionDenied) }
+            await ToastPresenter.shared.show(.failure(errMsg))
         } catch {
             let errMsg = await MainActor.run { L(.toastRecognitionFailed) }
             await ToastPresenter.shared.show(.failure(errMsg))

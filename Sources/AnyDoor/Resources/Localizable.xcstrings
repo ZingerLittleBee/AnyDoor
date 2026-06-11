@@ -3065,6 +3065,23 @@
         }
       }
     },
+    "settings.general.permission.screenRecording": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screen Recording"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "屏幕录制"
+          }
+        }
+      }
+    },
     "settings.general.permissionsSection": {
       "extractionState": "manual",
       "localizations": {
@@ -3945,6 +3962,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "识别失败"
+          }
+        }
+      }
+    },
+    "toast.screenCapture.permissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Screen Recording to capture text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请授予屏幕录制权限以取词"
           }
         }
       }
