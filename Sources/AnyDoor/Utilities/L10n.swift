@@ -94,6 +94,7 @@ enum L10n {
         case clipboardHintCategory = "clipboard.hint.category"
         case clipboardHintClose = "clipboard.hint.close"
         case clipboardHintCopy = "clipboard.hint.copy"
+        case clipboardHintEditCategories = "clipboard.hint.editCategories"
         case clipboardHintDelete = "clipboard.hint.delete"
         case clipboardHintPastePlain = "clipboard.hint.pastePlain"
         case clipboardHintPreview = "clipboard.hint.preview"

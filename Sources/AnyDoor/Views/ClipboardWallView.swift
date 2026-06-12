@@ -151,6 +151,16 @@ struct ClipboardWallView: View {
         .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
                     in: Capsule())
         .foregroundStyle(active ? Color.white : Color.primary)
+        // Edit-mode cue alongside the jiggle: a dashed outline on every
+        // capsule while ⌘ is held, like a "cut here" marquee.
+        .overlay {
+            if reorderArmed {
+                Capsule().strokeBorder(
+                    Color.secondary.opacity(0.7),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 2.5])
+                )
+            }
+        }
         .contentShape(Capsule())
         .onTapGesture { state.category = cat }
         .overlay {
@@ -212,7 +222,7 @@ struct ClipboardWallView: View {
     /// target while its animation is running would kick the moved tab around.
     private func jiggleAmplitude(for cat: ClipboardWallCategory) -> Double {
         let scalarSum = cat.persistentID.unicodeScalars.reduce(0) { $0 + Int($1.value) }
-        return scalarSum.isMultiple(of: 2) ? 1.8 : -1.8
+        return scalarSum.isMultiple(of: 2) ? 3.2 : -3.2
     }
 
     /// Named coordinate space of the tab row's scrolled content; capsule
@@ -397,6 +407,7 @@ struct ClipboardWallView: View {
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
             hint("⇥", .clipboardHintCategory)
+            hint("⌘", .clipboardHintEditCategories)
             hint("↵", .clipboardHintCopy)
             hint("⌥↵", .clipboardHintPastePlain)
             hint("space", .clipboardHintPreview)
