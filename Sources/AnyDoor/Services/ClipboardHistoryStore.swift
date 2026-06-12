@@ -283,15 +283,16 @@ final class ClipboardHistoryStore {
     func timeline(category: ClipboardHistoryKind?, query: String) -> [ClipboardHistoryItem] {
         guard let container = modelContainer else { return [] }
         let cutoff = now().addingTimeInterval(-maxAge)
-        var descriptor = FetchDescriptor<ClipboardHistoryItem>(
+        let descriptor = FetchDescriptor<ClipboardHistoryItem>(
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        // Favorites are exempt from pruning, so keep them visible past the
-        // retention cutoff too — otherwise an old favorite survives on disk
-        // but silently disappears from the timeline.
-        descriptor.predicate = #Predicate { $0.createdAt >= cutoff || $0.isFavorite }
         let rows = (try? container.mainContext.fetch(descriptor)) ?? []
-        return ClipboardSearch.filter(rows, category: category, query: query)
+        // Favorites and tagged items are exempt from pruning, so keep them
+        // visible past the retention cutoff too. Array emptiness is not
+        // reliably expressible in #Predicate, so filter in memory — row
+        // counts are capped per kind, this is cheap.
+        let visible = rows.filter { $0.createdAt >= cutoff || $0.isFavorite || !$0.tagIDs.isEmpty }
+        return ClipboardSearch.filter(visible, category: category, query: query)
     }
 
     /// Flip a single item's favorite flag. Favorites are exempt from pruning.
@@ -300,6 +301,46 @@ final class ClipboardHistoryStore {
         item.isFavorite.toggle()
         try? container.mainContext.save()
         if let kind = item.historyKind { await reload(kind: kind) }
+    }
+
+    /// Toggle a custom-category tag on one item. Tagged items are exempt from
+    /// pruning, like favorites.
+    func toggleTag(_ item: ClipboardHistoryItem, tagID: String) async {
+        guard let container = modelContainer else { return }
+        if let index = item.tagIDs.firstIndex(of: tagID) {
+            item.tagIDs.remove(at: index)
+        } else {
+            item.tagIDs.append(tagID)
+        }
+        try? container.mainContext.save()
+        if let kind = item.historyKind { await reload(kind: kind) }
+    }
+
+    /// Strip a deleted tag's id from every item so the tag stops blocking
+    /// pruning. Called when the user deletes a tag definition.
+    func removeTagFromAllItems(_ tagID: String) async {
+        guard let container = modelContainer else { return }
+        let all = (try? container.mainContext.fetch(FetchDescriptor<ClipboardHistoryItem>())) ?? []
+        var changed = false
+        for item in all where item.tagIDs.contains(tagID) {
+            item.tagIDs.removeAll { $0 == tagID }
+            changed = true
+        }
+        if changed { try? container.mainContext.save() }
+    }
+
+    /// Launch-time hygiene: drop tag ids that no longer exist in the registry
+    /// (covers a crash between a registry delete and the item sweep), so a
+    /// stale id cannot exempt items from pruning forever.
+    func cleanUpUnknownTags(validIDs: Set<String>) async {
+        guard let container = modelContainer else { return }
+        let all = (try? container.mainContext.fetch(FetchDescriptor<ClipboardHistoryItem>())) ?? []
+        var changed = false
+        for item in all where item.tagIDs.contains(where: { !validIDs.contains($0) }) {
+            item.tagIDs.removeAll { !validIDs.contains($0) }
+            changed = true
+        }
+        if changed { try? container.mainContext.save() }
     }
 
     /// Persist an edited text payload for a text-bearing item. The rich payload
@@ -364,14 +405,15 @@ final class ClipboardHistoryStore {
             let cutoff = current.addingTimeInterval(-maxAge)
             var idsToDelete = Set<UUID>()
 
-            // Favorites are exempt from both the age sweep and the overflow trim.
-            for item in all where !item.isFavorite && item.createdAt < cutoff {
+            // Favorites and tagged items are exempt from both the age sweep
+            // and the overflow trim.
+            for item in all where !item.isFavorite && item.tagIDs.isEmpty && item.createdAt < cutoff {
                 idsToDelete.insert(item.id)
             }
 
             for kind in ClipboardHistoryKind.allCases {
                 let rows = all
-                    .filter { $0.kind == kind.rawValue && !$0.isFavorite && !idsToDelete.contains($0.id) }
+                    .filter { $0.kind == kind.rawValue && !$0.isFavorite && $0.tagIDs.isEmpty && !idsToDelete.contains($0.id) }
                     .sorted { $0.createdAt > $1.createdAt }
                 for item in rows.dropFirst(maxItemsPerKind) {
                     idsToDelete.insert(item.id)

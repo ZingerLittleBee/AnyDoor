@@ -63,6 +63,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
         ClipboardHistoryStore.shared.setMaxAge(ClipboardPreferences.retention.maxAge)
         Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true) }
+        // Drop tag ids whose definition no longer exists (crash between a
+        // registry delete and the item sweep) so they can't block pruning.
+        Task {
+            await ClipboardHistoryStore.shared.cleanUpUnknownTags(
+                validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
+            )
+        }
 
         // Start the clipboard watcher and hand it to the wall controller so the
         // controller can suppress its own write-backs from being re-recorded.
