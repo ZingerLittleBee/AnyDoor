@@ -169,6 +169,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             onToggleFavorite: { item in
                 Task { await ClipboardHistoryStore.shared.toggleFavorite(item) }
             },
+            onEdit: { [weak self] item in self?.beginEdit(item) },
+            onCopy: { [weak self] item in self?.copyWithoutPasting(item) },
+            onDelete: { item in
+                Task { await ClipboardHistoryStore.shared.delete(item) }
+            },
             registerSearchField: { [weak self] field in self?.searchField = field }
         )
         if let modelContainer {
@@ -358,6 +363,32 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 ClipboardPasteService.synthesizePaste()
             }
         }
+    }
+
+    // MARK: - Context-menu actions
+
+    /// "Edit" from a card's context menu: open the floating text editor. The
+    /// wall stays open behind it (windowDidResignKey exempts the text panel);
+    /// key status returns to the wall when the editor closes.
+    private func beginEdit(_ item: ClipboardHistoryItem) {
+        guard item.historyKind?.isTextBearing == true else { return }
+        ClipboardTextWindow.shared.showEditor(item: item) { [weak self] in
+            self?.window?.makeKey()
+        }
+    }
+
+    /// "Copy" from a card's context menu: write the payload to the pasteboard
+    /// without pasting or dismissing the wall.
+    private func copyWithoutPasting(_ item: ClipboardHistoryItem) {
+        guard ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) else {
+            ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
+            return
+        }
+        let pb = NSPasteboard.general
+        ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: historyDirectory)
+        // Suppress the watcher so the re-copy isn't captured as a duplicate.
+        watcher?.noteSelfWrite(changeCount: pb.changeCount)
+        ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 
     // MARK: - Quick Look (space)

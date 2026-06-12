@@ -16,6 +16,10 @@ struct ClipboardWallView: View {
     let historyDirectory: URL
     let onSelect: (ClipboardHistoryItem, _ plain: Bool) -> Void
     let onToggleFavorite: (ClipboardHistoryItem) -> Void
+    /// Context-menu actions, injected by the window controller.
+    let onEdit: (ClipboardHistoryItem) -> Void
+    let onCopy: (ClipboardHistoryItem) -> Void
+    let onDelete: (ClipboardHistoryItem) -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
     /// first responder synchronously. No-op by default for previews/tests.
     var registerSearchField: (NSTextField?) -> Void = { _ in }
@@ -96,7 +100,12 @@ struct ClipboardWallView: View {
                             isSelected: index == state.selectedIndex,
                             historyDirectory: historyDirectory,
                             matchSnippet: ClipboardSearch.matchSnippet(for: item, query: state.query),
-                            onToggleFavorite: { onToggleFavorite(item) }
+                            onToggleFavorite: { onToggleFavorite(item) },
+                            // Select the card the user right-clicked so the
+                            // action visibly applies to it.
+                            onEdit: { state.select(index); onEdit(item) },
+                            onCopy: { state.select(index); onCopy(item) },
+                            onDelete: { state.select(index); onDelete(item) }
                         )
                         // Identify by the item's stable id (matching the ForEach
                         // key). A positional `.id(index)` here conflicts with the

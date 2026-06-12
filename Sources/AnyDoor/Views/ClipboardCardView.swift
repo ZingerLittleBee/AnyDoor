@@ -11,6 +11,10 @@ struct ClipboardCardView: View {
     /// the visible first line. Shown so a search hit is visible on the card.
     var matchSnippet: String? = nil
     let onToggleFavorite: () -> Void
+    /// Context-menu actions; nil hides the matching menu item (previews/tests).
+    var onEdit: (() -> Void)? = nil
+    var onCopy: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -29,6 +33,36 @@ struct ClipboardCardView: View {
                 .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .opacity(item.isReferenceOnly && !ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) ? 0.5 : 1)
+        .contextMenu { contextMenuItems }
+    }
+
+    /// Right-click menu. Edit only appears for text-bearing kinds; Favorite
+    /// flips its label with the current state.
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        if item.historyKind?.isTextBearing == true, let onEdit {
+            Button(action: onEdit) {
+                Label { LocalizedText(.clipboardActionEdit) } icon: { Image(systemName: "pencil") }
+            }
+        }
+        if let onCopy {
+            Button(action: onCopy) {
+                Label { LocalizedText(.clipboardActionCopy) } icon: { Image(systemName: "doc.on.doc") }
+            }
+        }
+        Button(action: onToggleFavorite) {
+            Label {
+                LocalizedText(item.isFavorite ? .clipboardActionUnfavorite : .clipboardActionFavorite)
+            } icon: {
+                Image(systemName: item.isFavorite ? "star.slash" : "star")
+            }
+        }
+        if let onDelete {
+            Divider()
+            Button(role: .destructive, action: onDelete) {
+                Label { LocalizedText(.clipboardActionDelete) } icon: { Image(systemName: "trash") }
+            }
+        }
     }
 
     private var header: some View {
