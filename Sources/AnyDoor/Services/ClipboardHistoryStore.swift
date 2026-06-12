@@ -261,6 +261,8 @@ final class ClipboardHistoryStore {
             cachedItems[kind] = []
             return
         }
+        // Intentionally cutoff-only: exempt favorites/tagged items past the
+        // cutoff surface via timeline(category:query:), not this cache.
         let rawKind = kind.rawValue
         let cutoff = now().addingTimeInterval(-maxAge)
         let descriptor = FetchDescriptor<ClipboardHistoryItem>(
@@ -307,8 +309,9 @@ final class ClipboardHistoryStore {
     /// pruning, like favorites.
     func toggleTag(_ item: ClipboardHistoryItem, tagID: String) async {
         guard let container = modelContainer else { return }
-        if let index = item.tagIDs.firstIndex(of: tagID) {
-            item.tagIDs.remove(at: index)
+        if item.tagIDs.contains(tagID) {
+            // removeAll (not remove(at:)) so a duplicated id can never stick.
+            item.tagIDs.removeAll { $0 == tagID }
         } else {
             item.tagIDs.append(tagID)
         }
@@ -326,7 +329,12 @@ final class ClipboardHistoryStore {
             item.tagIDs.removeAll { $0 == tagID }
             changed = true
         }
-        if changed { try? container.mainContext.save() }
+        if changed {
+            try? container.mainContext.save()
+            // Reclaim rows (and their on-disk payloads) that were exempt from
+            // pruning only because of the deleted tag.
+            await pruneExpiredAndOverflow(force: true)
+        }
     }
 
     /// Launch-time hygiene: drop tag ids that no longer exist in the registry

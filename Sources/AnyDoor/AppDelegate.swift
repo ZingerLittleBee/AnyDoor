@@ -62,13 +62,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Bootstrap clipboard history store so providers can record entries.
         ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
         ClipboardHistoryStore.shared.setMaxAge(ClipboardPreferences.retention.maxAge)
-        Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true) }
-        // Drop tag ids whose definition no longer exists (crash between a
-        // registry delete and the item sweep) so they can't block pruning.
+        // First drop tag ids whose definition no longer exists (crash between
+        // a registry delete and the item sweep), then run the forced prune so
+        // rows that were exempt only by a ghost tag are reclaimed — including
+        // their on-disk payloads — right at launch.
         Task {
             await ClipboardHistoryStore.shared.cleanUpUnknownTags(
                 validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
             )
+            await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
         }
 
         // Start the clipboard watcher and hand it to the wall controller so the

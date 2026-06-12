@@ -454,6 +454,7 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         await store.pruneExpiredAndOverflow(force: true)
 
         let survivors = try context.fetch(FetchDescriptor<ClipboardHistoryItem>()).map(\.text)
+        XCTAssertEqual(survivors.count, 4)               // oldTagged + 0 + the 2-per-kind cap (3, 2)
         XCTAssertTrue(survivors.contains("oldTagged"))   // age-exempt
         XCTAssertTrue(survivors.contains("0"))           // overflow-exempt
         XCTAssertFalse(survivors.contains("1"))          // untagged overflow goes
