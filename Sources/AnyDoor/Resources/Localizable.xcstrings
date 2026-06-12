@@ -2017,7 +2017,7 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Delete category \"%@\"? Items are kept; they just become prunable again."
+            "value": "Delete category \"%@\"? Items are kept; they're just subject to automatic cleanup again."
           }
         },
         "zh-Hans": {

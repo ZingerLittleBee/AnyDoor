@@ -79,6 +79,7 @@ final class ClipboardWallState {
     private(set) var categories: [ClipboardWallCategory] = ClipboardWallState.order(tags: [])
 
     func setCategories(_ order: [ClipboardWallCategory]) {
+        guard order != categories else { return }
         categories = order
         // The active tag may have just been deleted; never strand the wall on
         // a tab that no longer exists.

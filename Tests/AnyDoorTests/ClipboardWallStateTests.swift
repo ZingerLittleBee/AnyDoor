@@ -60,6 +60,15 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.category, .all)
     }
 
+    func testSetCategoriesKeepsActiveTagWhenStillPresent() {
+        let state = ClipboardWallState()
+        let tags = [ClipboardTag(id: "t1", name: "工作")]
+        state.setCategories(ClipboardWallState.order(tags: tags))
+        state.category = .tag("t1")
+        state.setCategories(ClipboardWallState.order(tags: tags + [ClipboardTag(id: "t2", name: "生活")]))
+        XCTAssertEqual(state.category, .tag("t1"))
+    }
+
     func testTagFilterAccessors() {
         XCTAssertEqual(ClipboardWallCategory.tag("t1").tagFilter, "t1")
         XCTAssertNil(ClipboardWallCategory.tag("t1").kindFilter)

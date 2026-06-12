@@ -91,6 +91,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Open in card-navigation mode (search field unfocused); typing focuses
         // it. Reset here so a prior session's focus state never leaks in.
         state.isSearchFocused = false
+        // Never resurface a stale tag dialog (it may pin a deleted item).
+        state.tagDialog = nil
+        state.tagDialogText = ""
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
