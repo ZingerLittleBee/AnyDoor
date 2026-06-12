@@ -1620,6 +1620,23 @@
         }
       }
     },
+    "clipboard.hint.category": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Category"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换分类"
+          }
+        }
+      }
+    },
     "clipboard.hint.close": {
       "extractionState": "manual",
       "localizations": {

@@ -140,6 +140,7 @@ struct ClipboardWallView: View {
     private var hints: some View {
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
+            hint("⇥", .clipboardHintCategory)
             hint("↵", .clipboardHintCopy)
             hint("⌥↵", .clipboardHintPastePlain)
             hint("space", .clipboardHintPreview)

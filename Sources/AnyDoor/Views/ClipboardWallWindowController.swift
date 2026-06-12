@@ -297,6 +297,17 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         case 49:                                         // space
             if inputMode { return false }                // insert a space
             togglePreview(); return true
+        case 48:                                         // tab — cycle category tabs
+            // Works in both modes; the field never needs a literal tab. The
+            // filtered list changes, so drop an open text preview rather than
+            // leave it showing an item from the previous tab.
+            if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
+            if event.modifierFlags.contains(.shift) {
+                state.selectPreviousCategory()
+            } else {
+                state.selectNextCategory()
+            }
+            return true
         case 51:                                         // ⌫
             if inputMode { return false }                // delete a character
             if let item = state.selectedItem {

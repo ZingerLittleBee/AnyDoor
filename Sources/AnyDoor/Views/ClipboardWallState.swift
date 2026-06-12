@@ -63,4 +63,14 @@ final class ClipboardWallState {
     func moveLeft() { selectedIndex = max(0, selectedIndex - 1) }
     func moveRight() { selectedIndex = min(max(0, items.count - 1), selectedIndex + 1) }
     func select(_ index: Int) { if items.indices.contains(index) { selectedIndex = index } }
+
+    /// Cycle the active category tab (Tab / Shift-Tab), wrapping at both ends.
+    func selectNextCategory() { stepCategory(by: 1) }
+    func selectPreviousCategory() { stepCategory(by: -1) }
+
+    private func stepCategory(by delta: Int) {
+        let order = Self.categoryOrder
+        let current = order.firstIndex(of: category) ?? 0
+        category = order[(current + delta + order.count) % order.count]
+    }
 }

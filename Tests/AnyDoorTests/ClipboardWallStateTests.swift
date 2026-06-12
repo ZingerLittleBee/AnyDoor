@@ -29,6 +29,20 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.query, "foo")
     }
 
+    func testCategoryCyclingWrapsBothWays() {
+        let state = ClipboardWallState()
+        XCTAssertEqual(state.category, .all)
+        state.selectNextCategory()
+        XCTAssertEqual(state.category, .favorites)
+        state.selectPreviousCategory()
+        XCTAssertEqual(state.category, .all)
+        // Wrap backwards from the first tab to the last, and forward again.
+        state.selectPreviousCategory()
+        XCTAssertEqual(state.category, ClipboardWallState.categoryOrder.last)
+        state.selectNextCategory()
+        XCTAssertEqual(state.category, .all)
+    }
+
     func testCategoryKindFilter() {
         XCTAssertNil(ClipboardWallCategory.all.kindFilter)
         XCTAssertNil(ClipboardWallCategory.favorites.kindFilter)
