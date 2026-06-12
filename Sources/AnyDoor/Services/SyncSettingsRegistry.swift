@@ -26,6 +26,7 @@ enum SyncSettingsRegistry {
         Entry(key: "scheduledShutdown.warningLeadSeconds", type: .int),
         Entry(key: "scheduledShutdown.defaultMinutes", type: .int),
         Entry(key: "clipboard.customTags", type: .string),
+        Entry(key: "clipboard.categoryOrder", type: .string),
     ]
 
     private static let entriesByKey: [String: Entry] =

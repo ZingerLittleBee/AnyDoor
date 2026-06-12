@@ -36,6 +36,12 @@ versioning.
 - Clipboard wall: Tab / Shift-Tab cycles through the category tabs (wrapping,
   custom tabs included), scrolling the active capsule into view when the tab
   row overflows.
+- Clipboard wall: hold ⌘ and drag a category tab to reorder the row — tabs
+  shuffle live as the pointer crosses a neighbor's midpoint, and the order
+  persists (and rides settings backup) as a list of stable category ids, so
+  deleting a tag drops only its entry while newly created tags append at the
+  end. The drag is ⌘-gated so plain clicks, right-click tab menus, and the
+  row's horizontal scrolling are untouched.
 - Clipboard wall: file cards gain a "Reveal in Finder" context-menu item. It
   prefers the file's original path and falls back to the copy stored in the
   history directory when the original is gone.

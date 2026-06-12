@@ -28,6 +28,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private weak var searchField: NSTextField?
     private var keyMonitor: Any?
     private var scrollMonitor: Any?
+    private var flagsMonitor: Any?
     private var globalMouseMonitor: Any?
     /// Accumulated scroll delta; selection advances each time it crosses a step.
     private var scrollAccum: CGFloat = 0
@@ -98,6 +99,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Never resurface a stale tag dialog (it may pin a deleted item).
         state.tagDialog = nil
         state.tagDialogText = ""
+        // Seed from the live flags: the wall hotkey itself carries ⌘, and the
+        // monitor only reports subsequent changes.
+        state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.command)
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
@@ -232,6 +236,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             let consumed = MainActor.assumeIsolated { self?.handleScroll(event) ?? false }
             return consumed ? nil : event
         }
+        // Track ⌘ so the view can enable tab drag-to-reorder reactively.
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.state.isReorderModifierHeld = event.modifierFlags.contains(.command)
+            }
+            return event
+        }
         // A global mouse-down fires only for clicks NOT delivered to our app —
         // i.e. anywhere outside the wall — so any such click dismisses it.
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
@@ -248,11 +259,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     }
 
     private func removeMonitors() {
-        for monitor in [keyMonitor, scrollMonitor, globalMouseMonitor] {
+        for monitor in [keyMonitor, scrollMonitor, flagsMonitor, globalMouseMonitor] {
             if let monitor { NSEvent.removeMonitor(monitor) }
         }
         keyMonitor = nil
         scrollMonitor = nil
+        flagsMonitor = nil
         globalMouseMonitor = nil
         scrollAccum = 0
     }

@@ -31,6 +31,17 @@ enum ClipboardWallCategory: Hashable {
         if case .tag(let id) = self { return id }
         return nil
     }
+
+    /// Stable string identity used to persist the user's tab order
+    /// (`ClipboardCategoryOrder`).
+    var persistentID: String {
+        switch self {
+        case .all: return "all"
+        case .favorites: return "favorites"
+        case .kind(let kind): return "kind:\(kind.rawValue)"
+        case .tag(let id): return "tag:\(id)"
+        }
+    }
 }
 
 /// Observable view state for the clipboard wall: the active category tab, the
@@ -64,6 +75,11 @@ final class ClipboardWallState {
     var tagDialog: TagDialog?
     /// Backing text for the dialog's name field.
     var tagDialogText: String = ""
+
+    /// True while ⌘ is held, fed by the controller's flagsChanged monitor.
+    /// Gates the tab capsules' drag-to-reorder gesture so a plain drag in the
+    /// tab row never fights the row's horizontal scrolling or tab clicks.
+    var isReorderModifierHeld: Bool = false
 
     /// One-stop dialog presenter: seeds the name field, releases search focus
     /// (the overlay owns the keyboard), and raises the dialog.
