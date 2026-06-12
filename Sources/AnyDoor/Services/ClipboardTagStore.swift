@@ -46,6 +46,8 @@ final class ClipboardTagStore {
 
     /// Creates a tag with the trimmed name. Returns nil for an empty name;
     /// returns the existing tag instead of creating a duplicate name.
+    /// The duplicate check is an exact string match (case- and
+    /// normalization-sensitive) by design.
     @discardableResult
     func createTag(name: String) -> ClipboardTag? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)

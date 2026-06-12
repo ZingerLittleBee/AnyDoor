@@ -4,11 +4,19 @@ import XCTest
 @MainActor
 final class ClipboardTagStoreTests: XCTestCase {
     private var defaults: UserDefaults!
+    private var suiteName: String!
 
     override func setUp() {
         super.setUp()
-        defaults = UserDefaults(suiteName: "ClipboardTagStoreTests")!
-        defaults.removePersistentDomain(forName: "ClipboardTagStoreTests")
+        suiteName = "ClipboardTagStoreTests-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults = nil
+        suiteName = nil
+        super.tearDown()
     }
 
     func testCreateTrimsAndPersistsAcrossReload() {
@@ -50,6 +58,12 @@ final class ClipboardTagStoreTests: XCTestCase {
         store.deleteTag(id: work.id)
         XCTAssertTrue(store.tags.isEmpty)
         XCTAssertTrue(ClipboardTagStore(defaults: defaults).tags.isEmpty)
+    }
+
+    func testReloadFallsBackToEmptyOnCorruptedJSON() {
+        defaults.set("not json", forKey: ClipboardTagStore.defaultsKey)
+        let store = ClipboardTagStore(defaults: defaults)
+        XCTAssertTrue(store.tags.isEmpty)
     }
 
     func testOrderIsCreationOrder() {
