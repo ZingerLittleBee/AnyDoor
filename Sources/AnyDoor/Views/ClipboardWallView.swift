@@ -36,10 +36,18 @@ struct ClipboardWallView: View {
     @State private var lastTap: TapRecord?
     @FocusState private var tagFieldFocused: Bool
 
-    /// ⌘-drag tab reordering: each capsule's frame in the tab row's named
-    /// coordinate space, and the capsule currently being dragged.
+    /// ⌘-drag tab reordering. `tabFrames` tracks each capsule's frame in the
+    /// row's named coordinate space; `dragStartFrames` snapshots them when a
+    /// drag begins, and all drag math uses the snapshot — live frames would
+    /// include the offsets the drag itself applies (a feedback loop). The
+    /// array is not mutated until release: during the drag the dragged
+    /// capsule follows the pointer via offset, the others shift aside toward
+    /// the projected drop slot (`dropIndex`), and `onEnded` commits.
     @State private var tabFrames: [ClipboardWallCategory: CGRect] = [:]
     @State private var draggedTab: ClipboardWallCategory?
+    @State private var dragStartFrames: [ClipboardWallCategory: CGRect] = [:]
+    @State private var dragTranslation: CGFloat = 0
+    @State private var dropIndex: Int?
 
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
@@ -87,7 +95,7 @@ struct ClipboardWallView: View {
             // field out of the window.
             ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
+                HStack(spacing: Self.tabSpacing) {
                     ForEach(state.categories, id: \.self) { cat in
                         tabCapsule(cat)
                             .id(cat)
@@ -156,21 +164,23 @@ struct ClipboardWallView: View {
             Color.clear.preference(key: TabFramePreferenceKey.self,
                                    value: [cat: proxy.frame(in: .named(Self.tabRowSpace))])
         })
-        .scaleEffect(draggedTab == cat ? 1.06 : 1)
-        .opacity(draggedTab == cat ? 0.8 : 1)
+        .offset(x: capsuleOffset(cat))
+        .scaleEffect(draggedTab == cat ? 1.08 : 1)
+        .opacity(draggedTab == cat ? 0.85 : 1)
+        .shadow(color: .black.opacity(draggedTab == cat ? 0.25 : 0), radius: 4, y: 1)
         .zIndex(draggedTab == cat ? 1 : 0)
-        // ⌘-drag reorders the tabs. The mask flips per the live modifier
-        // state: with ⌘ down only the drag runs (the capsule's click is
-        // moot mid-drag); otherwise the gesture is inert and clicks /
-        // right-clicks behave as usual. Mouse drags never scroll an
-        // NSScrollView on macOS, so the row's scrolling is unaffected.
-        .gesture(reorderGesture(for: cat),
-                 including: state.isReorderModifierHeld && state.tagDialog == nil ? .gesture : .subviews)
+        // ⌘-drag reorders the tabs. With ⌘ down only the drag runs (the
+        // capsule's click is moot mid-drag); otherwise the gesture is inert
+        // and clicks / right-clicks behave as usual. Mouse drags never scroll
+        // an NSScrollView on macOS, so the row's scrolling is unaffected.
+        .gesture(reorderGesture(for: cat), including: reorderMask)
     }
 
     /// Named coordinate space of the tab row's scrolled content; capsule
     /// frames and the reorder drag are both measured in it.
     private static let tabRowSpace = "wallTabRow"
+    /// The tab row's HStack spacing; slot-shift math must match the layout.
+    private static let tabSpacing: CGFloat = 8
 
     private struct TabFramePreferenceKey: PreferenceKey {
         static let defaultValue: [ClipboardWallCategory: CGRect] = [:]
@@ -180,33 +190,77 @@ struct ClipboardWallView: View {
         }
     }
 
-    /// Live drag-to-reorder: when the pointer crosses the midpoint of another
-    /// capsule, the dragged tab moves there (animated), so the row shuffles
-    /// while dragging. The midpoint rule keeps unequal-width capsules from
-    /// swapping back and forth, and the new order persists on release.
+    private var reorderMask: GestureMask {
+        // Keep the gesture alive if ⌘ is released mid-drag, so onEnded still
+        // commits and cleans up instead of stranding the floating capsule.
+        if draggedTab != nil { return .gesture }
+        return state.isReorderModifierHeld && state.tagDialog == nil ? .gesture : .subviews
+    }
+
     private func reorderGesture(for cat: ClipboardWallCategory) -> some Gesture {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.tabRowSpace))
             .onChanged { value in
-                draggedTab = cat
-                guard let from = state.categories.firstIndex(of: cat),
-                      let (target, frame) = tabFrames.first(where: {
-                          $0.key != cat
-                              && $0.value.minX <= value.location.x
-                              && value.location.x < $0.value.maxX
-                      }),
-                      let to = state.categories.firstIndex(of: target)
-                else { return }
-                guard (to > from && value.location.x > frame.midX)
-                        || (to < from && value.location.x < frame.midX) else { return }
-                var order = state.categories
-                order.move(fromOffsets: IndexSet(integer: from),
-                           toOffset: to > from ? to + 1 : to)
-                withAnimation(.snappy(duration: 0.18)) { state.setCategories(order) }
+                if draggedTab != cat {
+                    draggedTab = cat
+                    dragStartFrames = tabFrames
+                }
+                // The capsule follows the pointer unanimated; only the slot
+                // shifts of the other capsules animate.
+                dragTranslation = value.translation.width
+                let target = projectedDropIndex(for: cat)
+                if target != dropIndex {
+                    withAnimation(.snappy(duration: 0.18)) { dropIndex = target }
+                }
             }
             .onEnded { _ in
-                draggedTab = nil
-                ClipboardCategoryOrder.save(state.categories)
+                let committed = previewOrder()
+                withAnimation(.snappy(duration: 0.18)) {
+                    if let committed { state.setCategories(committed) }
+                    draggedTab = nil
+                    dragTranslation = 0
+                    dropIndex = nil
+                    dragStartFrames = [:]
+                }
+                if let committed { ClipboardCategoryOrder.save(committed) }
             }
+    }
+
+    /// Index the dragged tab would land at if released now: the number of
+    /// other capsules whose (drag-start) midpoint lies left of the dragged
+    /// capsule's current center.
+    private func projectedDropIndex(for cat: ClipboardWallCategory) -> Int? {
+        guard let frame = dragStartFrames[cat] else { return nil }
+        let center = frame.midX + dragTranslation
+        return state.categories.count { other in
+            guard other != cat, let f = dragStartFrames[other] else { return false }
+            return f.midX < center
+        }
+    }
+
+    /// The tab order as it would be after dropping at `dropIndex`; nil while
+    /// no drag is active or when the drop would change nothing.
+    private func previewOrder() -> [ClipboardWallCategory]? {
+        guard let dragged = draggedTab, let to = dropIndex,
+              let from = state.categories.firstIndex(of: dragged) else { return nil }
+        var order = state.categories
+        order.remove(at: from)
+        order.insert(dragged, at: min(to, order.count))
+        return order != state.categories ? order : nil
+    }
+
+    /// Drag-time offsets: the dragged capsule follows the pointer; every
+    /// other capsule shifts one slot toward the vacated side once the
+    /// projected drop crosses it (±1 slot = the dragged capsule's width plus
+    /// the row spacing, since that is the gap that moves).
+    private func capsuleOffset(_ cat: ClipboardWallCategory) -> CGFloat {
+        guard let dragged = draggedTab else { return 0 }
+        if cat == dragged { return dragTranslation }
+        guard let preview = previewOrder(),
+              let oldIndex = state.categories.firstIndex(of: cat),
+              let newIndex = preview.firstIndex(of: cat),
+              let dragFrame = dragStartFrames[dragged]
+        else { return 0 }
+        return CGFloat(newIndex - oldIndex) * (dragFrame.width + Self.tabSpacing)
     }
 
     /// Rename / delete for a custom tag tab. Both open the in-wall dialog
