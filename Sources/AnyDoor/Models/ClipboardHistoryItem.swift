@@ -61,11 +61,13 @@ final class ClipboardHistoryItem {
     var isFavorite: Bool = false
     var filesManifest: Data?
     var isReferenceOnly: Bool = false
-    /// IDs of user-defined categories (`ClipboardTag.id`) this item belongs
-    /// to. Inline default so SwiftData lightweight migration backfills
-    /// existing rows. Non-empty exempts the item from pruning, like
-    /// `isFavorite`.
-    var tagIDs: [String] = []
+    /// JSON-encoded ids of user-defined categories (`ClipboardTag.id`).
+    /// Stored as an optional String scalar instead of a `[String]`
+    /// transformable: lightweight migration leaves a new transformable column
+    /// NULL on existing rows, and the secure-unarchive transformer then
+    /// throws when those rows are faulted (launch crash). An optional scalar
+    /// decodes NULL as nil safely. nil ⇔ no tags.
+    private var tagIDsJSON: String?
 
     init(
         id: UUID = UUID(),
@@ -100,7 +102,25 @@ final class ClipboardHistoryItem {
         self.isFavorite = isFavorite
         self.filesManifest = filesManifest
         self.isReferenceOnly = isReferenceOnly
-        self.tagIDs = tagIDs
+        self.tagIDsJSON = nil
+        if !tagIDs.isEmpty { self.tagIDs = tagIDs }
+    }
+
+    /// IDs of user-defined categories this item belongs to. Computed facade
+    /// over `tagIDsJSON`; non-empty exempts the item from pruning, like
+    /// `isFavorite`. Never referenced inside a `#Predicate`.
+    var tagIDs: [String] {
+        get {
+            guard let tagIDsJSON else { return [] }
+            return (try? JSONDecoder().decode([String].self, from: Data(tagIDsJSON.utf8))) ?? []
+        }
+        set {
+            if newValue.isEmpty {
+                tagIDsJSON = nil
+            } else if let data = try? JSONEncoder().encode(newValue) {
+                tagIDsJSON = String(data: data, encoding: .utf8)
+            }
+        }
     }
 
     @Transient var historyKind: ClipboardHistoryKind? {
