@@ -103,6 +103,9 @@ struct ClipboardWallView: View {
                 }
                 .coordinateSpace(name: Self.tabRowSpace)
             }
+            // The lifted (scaled, shadowed) dragged capsule and the ⌘-mode
+            // delete badges poke past the row's tight bounds; don't clip them.
+            .scrollClipDisabled()
             .onChange(of: state.category) { _, new in
                 withAnimation { proxy.scrollTo(new) }
             }
@@ -128,30 +131,28 @@ struct ClipboardWallView: View {
     @ViewBuilder
     private func tabCapsule(_ cat: ClipboardWallCategory) -> some View {
         let active = state.category == cat
-        Button {
-            state.category = cat
-        } label: {
-            HStack(spacing: 3) {
-                if cat == .favorites {
-                    Image(systemName: "star.fill").font(.system(size: 8))
-                }
-                if let key = cat.titleKey {
-                    LocalizedText(key)
-                } else if let id = cat.tagFilter {
-                    Text(ClipboardTagStore.shared.name(for: id) ?? "")
-                }
+        let jiggling = reorderArmed && draggedTab != cat
+        // A plain view + tap gesture, not a Button: the reorder drag must own
+        // mouse tracking on the same surface, and a Button's own click
+        // recognition competes with it (and brought a focus ring the row
+        // doesn't want).
+        HStack(spacing: 3) {
+            if cat == .favorites {
+                Image(systemName: "star.fill").font(.system(size: 8))
             }
-            .font(.caption)
-            .padding(.horizontal, 10).padding(.vertical, 4)
-            .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
-                        in: Capsule())
-            .foregroundStyle(active ? Color.white : Color.primary)
+            if let key = cat.titleKey {
+                LocalizedText(key)
+            } else if let id = cat.tagFilter {
+                Text(ClipboardTagStore.shared.name(for: id) ?? "")
+            }
         }
-        .buttonStyle(.plain)
-        // The active capsule is the selection indicator; a keyboard
-        // focus ring on top of it (Tab is claimed for tab cycling
-        // anyway) just adds noise.
-        .focusEffectDisabled()
+        .font(.caption)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
+                    in: Capsule())
+        .foregroundStyle(active ? Color.white : Color.primary)
+        .contentShape(Capsule())
+        .onTapGesture { state.category = cat }
         .overlay {
             // Custom tags are managed from their own tab; builtins have no menu.
             // Return an empty menu while the dialog dimmer is up so right-clicks
@@ -164,16 +165,54 @@ struct ClipboardWallView: View {
             Color.clear.preference(key: TabFramePreferenceKey.self,
                                    value: [cat: proxy.frame(in: .named(Self.tabRowSpace))])
         })
+        .overlay(alignment: .topTrailing) {
+            // Launchpad-style delete badge on custom tags while ⌘-mode is
+            // active. Routes into the existing confirm dialog, whose copy
+            // tells the user the category's items are kept.
+            if jiggling, let id = cat.tagFilter {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color(nsColor: .systemGray))
+                    .background(Circle().fill(.background).padding(1))
+                    .padding(2)
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        guard ClipboardTextWindow.shared.yieldToModal() else { return }
+                        state.presentTagDialog(.confirmDelete(tagID: id))
+                    }
+                    .offset(x: 7, y: -7)
+            }
+        }
+        // Jiggle while ⌘ is held — the macOS "icons are movable now" signal.
+        // Alternating sign per slot keeps neighbors out of phase; the capsule
+        // being dragged stays level under the pointer.
+        .rotationEffect(.degrees(jiggleAngle(for: cat, jiggling: jiggling)))
+        .animation(jiggling
+                   ? .easeInOut(duration: 0.13).repeatForever(autoreverses: true)
+                   : .easeOut(duration: 0.1),
+                   value: jiggling)
         .offset(x: capsuleOffset(cat))
         .scaleEffect(draggedTab == cat ? 1.08 : 1)
         .opacity(draggedTab == cat ? 0.85 : 1)
         .shadow(color: .black.opacity(draggedTab == cat ? 0.25 : 0), radius: 4, y: 1)
         .zIndex(draggedTab == cat ? 1 : 0)
-        // ⌘-drag reorders the tabs. With ⌘ down only the drag runs (the
-        // capsule's click is moot mid-drag); otherwise the gesture is inert
-        // and clicks / right-clicks behave as usual. Mouse drags never scroll
-        // an NSScrollView on macOS, so the row's scrolling is unaffected.
-        .gesture(reorderGesture(for: cat), including: reorderMask)
+        // Always attached; only a ⌘-initiated drag arms reordering (checked
+        // in onChanged). High priority so it beats the tap once the pointer
+        // actually moves; a plain click stays a tab switch. Mouse drags never
+        // scroll an NSScrollView on macOS, so the row's scrolling is fine.
+        .highPriorityGesture(reorderGesture(for: cat))
+    }
+
+    /// Whether ⌘-reorder mode is active (modifier held, no modal dialog up).
+    private var reorderArmed: Bool {
+        state.isReorderModifierHeld && state.tagDialog == nil
+    }
+
+    private func jiggleAngle(for cat: ClipboardWallCategory, jiggling: Bool) -> Double {
+        guard jiggling else { return 0 }
+        let index = state.categories.firstIndex(of: cat) ?? 0
+        return index.isMultiple(of: 2) ? 1.8 : -1.8
     }
 
     /// Named coordinate space of the tab row's scrolled content; capsule
@@ -190,20 +229,18 @@ struct ClipboardWallView: View {
         }
     }
 
-    private var reorderMask: GestureMask {
-        // Keep the gesture alive if ⌘ is released mid-drag, so onEnded still
-        // commits and cleans up instead of stranding the floating capsule.
-        if draggedTab != nil { return .gesture }
-        return state.isReorderModifierHeld && state.tagDialog == nil ? .gesture : .subviews
-    }
-
     private func reorderGesture(for cat: ClipboardWallCategory) -> some Gesture {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.tabRowSpace))
             .onChanged { value in
-                if draggedTab != cat {
+                if draggedTab == nil {
+                    // Only a ⌘-initiated drag arms reordering; a plain drag
+                    // on the row is inert. Once armed it stays armed for the
+                    // whole drag, even if ⌘ lifts mid-way.
+                    guard reorderArmed else { return }
                     draggedTab = cat
                     dragStartFrames = tabFrames
                 }
+                guard draggedTab == cat else { return }
                 // The capsule follows the pointer unanimated; only the slot
                 // shifts of the other capsules animate.
                 dragTranslation = value.translation.width
@@ -213,6 +250,7 @@ struct ClipboardWallView: View {
                 }
             }
             .onEnded { _ in
+                guard draggedTab == cat else { return }
                 let committed = previewOrder()
                 withAnimation(.snappy(duration: 0.18)) {
                     if let committed { state.setCategories(committed) }
