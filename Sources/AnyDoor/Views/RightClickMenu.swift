@@ -53,11 +53,13 @@ struct RightClickMenu: NSViewRepresentable {
 final class ClosureMenuItem: NSMenuItem {
     private let handler: () -> Void
 
-    init(title: String, systemImage: String, handler: @escaping () -> Void) {
+    init(title: String, systemImage: String? = nil, handler: @escaping () -> Void) {
         self.handler = handler
         super.init(title: title, action: #selector(invoke), keyEquivalent: "")
         target = self
-        image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
+        if let systemImage {
+            image = NSImage(systemSymbolName: systemImage, accessibilityDescription: nil)
+        }
     }
 
     @available(*, unavailable)

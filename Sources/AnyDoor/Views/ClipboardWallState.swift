@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A clipboard-wall filter tab. `favorites` and `tag` cut across kinds, so
 /// they are their own cases rather than a `ClipboardHistoryKind`.
-enum ClipboardWallCategory: Equatable {
+enum ClipboardWallCategory: Equatable, Hashable {
     case all
     case favorites
     case kind(ClipboardHistoryKind)

@@ -187,6 +187,14 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             onDelete: { item in
                 Task { await ClipboardHistoryStore.shared.delete(item) }
             },
+            onToggleTag: { item, tagID in
+                Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tagID) }
+            },
+            onNewTag: { [weak self] item in
+                self?.state.tagDialogText = ""
+                self?.state.isSearchFocused = false
+                self?.state.tagDialog = .create(item: item)
+            },
             registerSearchField: { [weak self] field in self?.searchField = field }
         )
         if let modelContainer {
@@ -250,6 +258,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Scrolling over the floating text panel belongs to its text view,
         // not to card navigation.
         if ClipboardTextWindow.shared.owns(event.window) { return false }
+        // The tab row hosts its own horizontal ScrollView; let scrolls over
+        // that strip reach it instead of becoming card navigation.
+        if event.window === window,
+           event.locationInWindow.y > window.contentLayoutRect.maxY - 48 {
+            return false
+        }
         // Ignore trackpad inertia so flicking doesn't keep advancing after the
         // fingers lift; only act on the user's active scroll.
         guard event.momentumPhase == [] else { return true }

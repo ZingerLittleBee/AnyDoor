@@ -15,6 +15,8 @@ struct ClipboardCardView: View {
     var onEdit: (() -> Void)? = nil
     var onCopy: (() -> Void)? = nil
     var onRevealInFinder: (() -> Void)? = nil
+    var onToggleTag: ((String) -> Void)? = nil
+    var onNewTag: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     var body: some View {
@@ -64,6 +66,7 @@ struct ClipboardCardView: View {
             systemImage: item.isFavorite ? "star.slash" : "star",
             handler: onToggleFavorite
         ))
+        if let submenu = makeTagSubmenu() { menu.addItem(submenu) }
         if let onDelete {
             menu.addItem(.separator())
             menu.addItem(ClosureMenuItem(
@@ -71,6 +74,25 @@ struct ClipboardCardView: View {
             ))
         }
         return menu
+    }
+
+    /// "Add to Category ▸": checkable entries for every user-defined tag plus
+    /// "New Category…". Built at click time so registry order, names, and the
+    /// item's membership are current.
+    private func makeTagSubmenu() -> NSMenuItem? {
+        guard let onToggleTag, let onNewTag else { return nil }
+        let parent = NSMenuItem(title: L(.clipboardActionAddToTag), action: nil, keyEquivalent: "")
+        parent.image = NSImage(systemSymbolName: "tag", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        for tag in ClipboardTagStore.shared.tags {
+            let entry = ClosureMenuItem(title: tag.name) { onToggleTag(tag.id) }
+            entry.state = item.tagIDs.contains(tag.id) ? .on : .off
+            submenu.addItem(entry)
+        }
+        if !submenu.items.isEmpty { submenu.addItem(.separator()) }
+        submenu.addItem(ClosureMenuItem(title: L(.clipboardTagNew), systemImage: "plus", handler: onNewTag))
+        parent.submenu = submenu
+        return parent
     }
 
     private var header: some View {

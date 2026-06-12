@@ -21,6 +21,8 @@ struct ClipboardWallView: View {
     let onCopy: (ClipboardHistoryItem) -> Void
     let onRevealInFinder: (ClipboardHistoryItem) -> Void
     let onDelete: (ClipboardHistoryItem) -> Void
+    let onToggleTag: (ClipboardHistoryItem, String) -> Void
+    let onNewTag: (ClipboardHistoryItem) -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
     /// first responder synchronously. No-op by default for previews/tests.
     var registerSearchField: (NSTextField?) -> Void = { _ in }
@@ -36,6 +38,7 @@ struct ClipboardWallView: View {
         ClipboardSearch.filter(allItems,
                                category: state.category.kindFilter,
                                favoritesOnly: state.category == .favorites,
+                               tagID: state.category.tagFilter,
                                query: state.query)
     }
 
@@ -59,32 +62,22 @@ struct ClipboardWallView: View {
         // handling. Runs after the view updates, so it never mutates during body.
         .onAppear { state.setItems(items) }
         .onChange(of: items.map(\.id)) { _, _ in state.setItems(items) }
+        .onAppear { state.setCategories(ClipboardWallState.order(tags: ClipboardTagStore.shared.tags)) }
+        .onChange(of: ClipboardTagStore.shared.tags) { _, newTags in
+            state.setCategories(ClipboardWallState.order(tags: newTags))
+        }
     }
 
     private var tabs: some View {
         HStack(spacing: 8) {
-            ForEach(Array(state.categories.enumerated()), id: \.offset) { _, cat in
-                let active = state.category == cat
-                Button {
-                    state.category = cat
-                } label: {
-                    HStack(spacing: 3) {
-                        if cat == .favorites {
-                            Image(systemName: "star.fill").font(.system(size: 8))
-                        }
-                        LocalizedText(cat.titleKey ?? .clipboardCategoryAll)
+            // Horizontal scroll so many custom tags can't push the search
+            // field out of the window.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(state.categories, id: \.self) { cat in
+                        tabCapsule(cat)
                     }
-                    .font(.caption)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
-                                in: Capsule())
-                    .foregroundStyle(active ? Color.white : Color.primary)
                 }
-                .buttonStyle(.plain)
-                // The active capsule is the selection indicator; a keyboard
-                // focus ring on top of it (Tab is claimed for tab cycling
-                // anyway) just adds noise.
-                .focusEffectDisabled()
             }
             Spacer()
             // A real, focusable field so an IME can compose CJK search text. The
@@ -99,6 +92,57 @@ struct ClipboardWallView: View {
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         }
+    }
+
+    @ViewBuilder
+    private func tabCapsule(_ cat: ClipboardWallCategory) -> some View {
+        let active = state.category == cat
+        Button {
+            state.category = cat
+        } label: {
+            HStack(spacing: 3) {
+                if cat == .favorites {
+                    Image(systemName: "star.fill").font(.system(size: 8))
+                }
+                if let key = cat.titleKey {
+                    LocalizedText(key)
+                } else if let id = cat.tagFilter {
+                    Text(ClipboardTagStore.shared.name(for: id) ?? "")
+                }
+            }
+            .font(.caption)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
+                        in: Capsule())
+            .foregroundStyle(active ? Color.white : Color.primary)
+        }
+        .buttonStyle(.plain)
+        // The active capsule is the selection indicator; a keyboard
+        // focus ring on top of it (Tab is claimed for tab cycling
+        // anyway) just adds noise.
+        .focusEffectDisabled()
+        .overlay {
+            // Custom tags are managed from their own tab; builtins have no menu.
+            if let id = cat.tagFilter {
+                RightClickMenu(makeMenu: { tagTabMenu(tagID: id) })
+            }
+        }
+    }
+
+    /// Rename / delete for a custom tag tab. Both open the in-wall dialog
+    /// overlay (rendered by Task 6); deletion asks for confirmation because
+    /// items lose their retention exemption.
+    private func tagTabMenu(tagID: String) -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ClosureMenuItem(title: L(.clipboardTagRename), systemImage: "pencil") {
+            state.tagDialogText = ClipboardTagStore.shared.name(for: tagID) ?? ""
+            state.isSearchFocused = false
+            state.tagDialog = .rename(tagID: tagID)
+        })
+        menu.addItem(ClosureMenuItem(title: L(.clipboardTagDelete), systemImage: "trash") {
+            state.tagDialog = .confirmDelete(tagID: tagID)
+        })
+        return menu
     }
 
     private func cards(_ items: [ClipboardHistoryItem]) -> some View {
@@ -119,6 +163,8 @@ struct ClipboardWallView: View {
                             onEdit: { state.select(index); onEdit(item) },
                             onCopy: { state.select(index); onCopy(item) },
                             onRevealInFinder: { state.select(index); onRevealInFinder(item) },
+                            onToggleTag: { state.select(index); onToggleTag(item, $0) },
+                            onNewTag: { state.select(index); onNewTag(item) },
                             onDelete: { state.select(index); onDelete(item) }
                         )
                         // Identify by the item's stable id (matching the ForEach
