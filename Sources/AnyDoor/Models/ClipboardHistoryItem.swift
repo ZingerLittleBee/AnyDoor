@@ -21,6 +21,15 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
         case .file:       return .clipboardKindFile
         }
     }
+
+    /// Kinds whose payload is a plain string in `text` — the ones the floating
+    /// text panel can preview and edit.
+    var isTextBearing: Bool {
+        switch self {
+        case .text, .ocr, .qrcode: return true
+        case .color, .screenshot, .image, .file: return false
+        }
+    }
 }
 
 /// One file inside a `.file` clipboard entry. `storedName` is the copy held in

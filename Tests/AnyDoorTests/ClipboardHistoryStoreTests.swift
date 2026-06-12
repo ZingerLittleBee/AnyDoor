@@ -361,4 +361,45 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         XCTAssertNil(pb.data(forType: .rtf))   // plain mode drops rich payload
         XCTAssertEqual(pb.string(forType: .string), "styled")
     }
+
+    func testUpdateTextRewritesPreviewAndClearsRichPayload() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        let created = Date(timeIntervalSinceReferenceDate: 50)
+        let item = ClipboardHistoryItem(
+            kind: .text,
+            text: "old text",
+            previewTitle: "old text",
+            createdAt: created,
+            richData: Data([0x01]),
+            richType: "public.rtf"
+        )
+        container.mainContext.insert(item)
+        try container.mainContext.save()
+
+        await store.updateText(item, newText: "new first line\nsecond line")
+
+        XCTAssertEqual(item.text, "new first line\nsecond line")
+        XCTAssertEqual(item.previewTitle, "new first line")
+        XCTAssertNotNil(item.previewSubtitle)
+        // The stale rich payload would win on paste and resurrect the pre-edit
+        // content, so editing must clear it.
+        XCTAssertNil(item.richData)
+        XCTAssertNil(item.richType)
+        // The card keeps its position in the wall.
+        XCTAssertEqual(item.createdAt, created)
+        // The per-kind cache reflects the edit.
+        XCTAssertEqual(store.items(for: .text).map(\.text), ["new first line\nsecond line"])
+    }
+
+    func testTextBearingKinds() {
+        XCTAssertTrue(ClipboardHistoryKind.text.isTextBearing)
+        XCTAssertTrue(ClipboardHistoryKind.ocr.isTextBearing)
+        XCTAssertTrue(ClipboardHistoryKind.qrcode.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.color.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.image.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.screenshot.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.file.isTextBearing)
+    }
 }

@@ -299,6 +299,21 @@ final class ClipboardHistoryStore {
         if let kind = item.historyKind { await reload(kind: kind) }
     }
 
+    /// Persist an edited text payload for a text-bearing item. The rich payload
+    /// is cleared — it no longer matches the edited plain text and would
+    /// otherwise win on paste. `createdAt` is preserved so the card keeps its
+    /// position in the wall.
+    func updateText(_ item: ClipboardHistoryItem, newText: String) async {
+        guard let container = modelContainer else { return }
+        item.text = newText
+        item.previewTitle = Self.previewTitle(for: newText)
+        item.previewSubtitle = Self.textSubtitle(for: newText)
+        item.richData = nil
+        item.richType = nil
+        try? container.mainContext.save()
+        if let kind = item.historyKind { await reload(kind: kind) }
+    }
+
     /// Delete a single item and its on-disk payload (image PNG / copied files).
     func delete(_ item: ClipboardHistoryItem) async {
         guard let container = modelContainer else { return }
