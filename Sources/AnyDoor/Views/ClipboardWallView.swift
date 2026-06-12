@@ -81,6 +81,10 @@ struct ClipboardWallView: View {
                     .foregroundStyle(active ? Color.white : Color.primary)
                 }
                 .buttonStyle(.plain)
+                // The active capsule is the selection indicator; a keyboard
+                // focus ring on top of it (Tab is claimed for tab cycling
+                // anyway) just adds noise.
+                .focusEffectDisabled()
             }
             Spacer()
             // A real, focusable field so an IME can compose CJK search text. The
