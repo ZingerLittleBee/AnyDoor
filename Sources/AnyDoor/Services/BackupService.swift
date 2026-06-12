@@ -143,6 +143,13 @@ final class BackupService {
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()
         ScheduledShutdownService.shared.reloadFromDefaults()
+        ClipboardTagStore.shared.reload()
+        // An import may remove tag definitions, leaving items tagged with ids
+        // that no longer exist. Sweep those ghost ids and reclaim storage.
+        await ClipboardHistoryStore.shared.cleanUpUnknownTags(
+            validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
+        )
+        await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
         PanelStore.shared.rebuild()
         PanelStore.shared.rebuildHotkeySnapshots()
     }

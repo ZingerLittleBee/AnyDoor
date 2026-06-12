@@ -361,4 +361,155 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         XCTAssertNil(pb.data(forType: .rtf))   // plain mode drops rich payload
         XCTAssertEqual(pb.string(forType: .string), "styled")
     }
+
+    func testUpdateTextRewritesPreviewAndClearsRichPayload() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        let created = Date(timeIntervalSinceReferenceDate: 50)
+        let item = ClipboardHistoryItem(
+            kind: .text,
+            text: "old text",
+            previewTitle: "old text",
+            createdAt: created,
+            richData: Data([0x01]),
+            richType: "public.rtf"
+        )
+        container.mainContext.insert(item)
+        try container.mainContext.save()
+
+        await store.updateText(item, newText: "new first line\nsecond line")
+
+        XCTAssertEqual(item.text, "new first line\nsecond line")
+        XCTAssertEqual(item.previewTitle, "new first line")
+        XCTAssertNotNil(item.previewSubtitle)
+        // The stale rich payload would win on paste and resurrect the pre-edit
+        // content, so editing must clear it.
+        XCTAssertNil(item.richData)
+        XCTAssertNil(item.richType)
+        // The card keeps its position in the wall.
+        XCTAssertEqual(item.createdAt, created)
+        // The per-kind cache reflects the edit.
+        XCTAssertEqual(store.items(for: .text).map(\.text), ["new first line\nsecond line"])
+    }
+
+    func testUpdateTextIgnoresWhitespaceOnlyText() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        let item = ClipboardHistoryItem(kind: .text, text: "keep me", previewTitle: "keep me")
+        container.mainContext.insert(item)
+        try container.mainContext.save()
+
+        await store.updateText(item, newText: "   \n\t")
+
+        XCTAssertEqual(item.text, "keep me")
+        XCTAssertEqual(item.previewTitle, "keep me")
+    }
+
+    func testTextBearingKinds() {
+        XCTAssertTrue(ClipboardHistoryKind.text.isTextBearing)
+        XCTAssertTrue(ClipboardHistoryKind.ocr.isTextBearing)
+        XCTAssertTrue(ClipboardHistoryKind.qrcode.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.color.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.image.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.screenshot.isTextBearing)
+        XCTAssertFalse(ClipboardHistoryKind.file.isTextBearing)
+    }
+
+    func testToggleTagAddsAndRemoves() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        let item = ClipboardHistoryItem(kind: .text, text: "a", previewTitle: "a")
+        container.mainContext.insert(item)
+        try container.mainContext.save()
+
+        await store.toggleTag(item, tagID: "t1")
+        XCTAssertEqual(item.tagIDs, ["t1"])
+        await store.toggleTag(item, tagID: "t1")
+        XCTAssertEqual(item.tagIDs, [])
+    }
+
+    func testPruneExemptsTaggedItems() async throws {
+        let container = try makeContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
+        let store = ClipboardHistoryStore(now: { now }, maxItemsPerKind: 2)
+        store.bootstrap(modelContainer: container)
+        let context = container.mainContext
+
+        let oldTagged = ClipboardHistoryItem(kind: .ocr, text: "oldTagged", previewTitle: "oldTagged",
+                                             createdAt: now.addingTimeInterval(-8 * 86_400))
+        oldTagged.tagIDs = ["t1"]
+        context.insert(oldTagged)
+        // Overflow pressure: 4 fresh rows with a 2-per-kind cap.
+        for index in 0..<4 {
+            let row = ClipboardHistoryItem(kind: .ocr, text: "\(index)", previewTitle: "\(index)",
+                                           createdAt: now.addingTimeInterval(TimeInterval(index)))
+            if index == 0 { row.tagIDs = ["t1"] }   // oldest fresh row, tagged
+            context.insert(row)
+        }
+        try context.save()
+
+        await store.pruneExpiredAndOverflow(force: true)
+
+        let survivors = try context.fetch(FetchDescriptor<ClipboardHistoryItem>()).map(\.text)
+        XCTAssertEqual(survivors.count, 4)               // oldTagged + 0 + the 2-per-kind cap (3, 2)
+        XCTAssertTrue(survivors.contains("oldTagged"))   // age-exempt
+        XCTAssertTrue(survivors.contains("0"))           // overflow-exempt
+        XCTAssertFalse(survivors.contains("1"))          // untagged overflow goes
+    }
+
+    func testRemoveTagFromAllItemsRestoresPrunability() async throws {
+        let container = try makeContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
+        let store = ClipboardHistoryStore(now: { now })
+        store.bootstrap(modelContainer: container)
+        let context = container.mainContext
+        let expired = ClipboardHistoryItem(kind: .text, text: "expired", previewTitle: "expired",
+                                           createdAt: now.addingTimeInterval(-8 * 86_400))
+        expired.tagIDs = ["t1"]
+        context.insert(expired)
+        try context.save()
+
+        await store.removeTagFromAllItems("t1")
+        XCTAssertEqual(expired.tagIDs, [])
+        await store.pruneExpiredAndOverflow(force: true)
+        let rows = try context.fetch(FetchDescriptor<ClipboardHistoryItem>())
+        XCTAssertTrue(rows.isEmpty)
+    }
+
+    func testCleanUpUnknownTagsDropsStaleIDsOnly() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        let context = container.mainContext
+        let item = ClipboardHistoryItem(kind: .text, text: "a", previewTitle: "a")
+        item.tagIDs = ["alive", "ghost"]
+        context.insert(item)
+        try context.save()
+
+        await store.cleanUpUnknownTags(validIDs: ["alive"])
+        XCTAssertEqual(item.tagIDs, ["alive"])
+    }
+
+    func testTimelineKeepsOldTaggedItems() async throws {
+        let container = try makeContainer()
+        let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
+        let store = ClipboardHistoryStore(now: { now })
+        store.bootstrap(modelContainer: container)
+        let context = container.mainContext
+        let oldTagged = ClipboardHistoryItem(kind: .text, text: "oldTagged", previewTitle: "oldTagged",
+                                             createdAt: now.addingTimeInterval(-8 * 86_400))
+        oldTagged.tagIDs = ["t1"]
+        context.insert(oldTagged)
+        let oldPlain = ClipboardHistoryItem(kind: .text, text: "oldPlain", previewTitle: "oldPlain",
+                                            createdAt: now.addingTimeInterval(-8 * 86_400))
+        context.insert(oldPlain)
+        try context.save()
+
+        let titles = store.timeline(category: nil, query: "").map(\.previewTitle)
+        XCTAssertTrue(titles.contains("oldTagged"))
+        XCTAssertFalse(titles.contains("oldPlain"))
+    }
 }

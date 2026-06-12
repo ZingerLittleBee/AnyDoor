@@ -160,6 +160,50 @@ final class ClipboardSearchTests: XCTestCase {
         XCTAssertEqual(titles(out), ["a"])
     }
 
+    // MARK: - Favorites narrowing
+
+    func testFavoritesOnlyKeepsFavoritesAcrossKinds() {
+        let t = text("plain")
+        let fav = text("starred")
+        fav.isFavorite = true
+        let favColor = color("#FF8800")
+        favColor.isFavorite = true
+        let out = ClipboardSearch.filter([t, fav, favColor], category: nil,
+                                         favoritesOnly: true, query: "")
+        XCTAssertEqual(titles(out), ["starred", "#FF8800"])
+    }
+
+    func testFavoritesOnlyComposesWithQuery() {
+        let fav = text("starred codex")
+        fav.isFavorite = true
+        let plain = text("codex plain")
+        let out = ClipboardSearch.filter([fav, plain], category: nil,
+                                         favoritesOnly: true, query: "codex")
+        XCTAssertEqual(titles(out), ["starred codex"])
+    }
+
+    // MARK: - Tag narrowing
+
+    func testTagIDKeepsOnlyItemsCarryingThatTag() {
+        let tagged = text("tagged")
+        tagged.tagIDs = ["t1", "t2"]
+        let other = text("other")
+        other.tagIDs = ["t9"]
+        let plain = text("plain")
+        let out = ClipboardSearch.filter([tagged, other, plain], category: nil,
+                                         tagID: "t1", query: "")
+        XCTAssertEqual(titles(out), ["tagged"])
+    }
+
+    func testTagIDComposesWithQuery() {
+        let match = text("codex tagged")
+        match.tagIDs = ["t1"]
+        let wrongTag = text("codex other")
+        let out = ClipboardSearch.filter([match, wrongTag], category: nil,
+                                         tagID: "t1", query: "codex")
+        XCTAssertEqual(titles(out), ["codex tagged"])
+    }
+
     // MARK: - Order preservation
 
     func testRecencyOrderIsPreserved() {

@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// A single clipboard entry rendered as a fixed-size card. Shows the source app
-/// icon, kind label, relative time, a kind-specific preview, and a favorite star.
+/// icon, kind label, relative time, and a kind-specific preview.
 struct ClipboardCardView: View {
     let item: ClipboardHistoryItem
     let isSelected: Bool
@@ -11,13 +11,22 @@ struct ClipboardCardView: View {
     /// the visible first line. Shown so a search hit is visible on the card.
     var matchSnippet: String? = nil
     let onToggleFavorite: () -> Void
+    /// Context-menu actions; nil hides the matching menu item (previews/tests).
+    var onEdit: (() -> Void)? = nil
+    var onCopy: (() -> Void)? = nil
+    var onRevealInFinder: (() -> Void)? = nil
+    var onToggleTag: ((String) -> Void)? = nil
+    var onNewTag: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    /// When true the context menu returns empty, blocking right-clicks while a
+    /// modal overlay (e.g. the tag dialog) is up above the card wall.
+    var menuSuppressed: () -> Bool = { false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
             preview.frame(maxWidth: .infinity, maxHeight: .infinity)
-            footer
         }
         .frame(width: 190, height: 190)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -29,6 +38,66 @@ struct ClipboardCardView: View {
                 .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .opacity(item.isReferenceOnly && !ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) ? 0.5 : 1)
+        // Native NSMenu instead of .contextMenu: SwiftUI's menu bridge
+        // flash-resizes item icons on open (macOS 26); NSMenuItem.image renders
+        // them Finder-style, stable. Left clicks pass through to the card.
+        .overlay { RightClickMenu(makeMenu: makeContextMenu) }
+    }
+
+    /// Right-click menu, built at click time so favorite state and language
+    /// are current. Edit only appears for text-bearing kinds.
+    private func makeContextMenu() -> NSMenu {
+        // Return empty when the wall has a modal overlay active (e.g. tag dialog).
+        if menuSuppressed() { return NSMenu() }
+        let menu = NSMenu()
+        if item.historyKind?.isTextBearing == true, let onEdit {
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionEdit), systemImage: "pencil", handler: onEdit
+            ))
+        }
+        if let onCopy {
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionCopy), systemImage: "doc.on.doc", handler: onCopy
+            ))
+        }
+        if item.historyKind == .file, let onRevealInFinder {
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionRevealInFinder), systemImage: "folder",
+                handler: onRevealInFinder
+            ))
+        }
+        menu.addItem(ClosureMenuItem(
+            title: L(item.isFavorite ? .clipboardActionUnfavorite : .clipboardActionFavorite),
+            systemImage: item.isFavorite ? "star.slash" : "star",
+            handler: onToggleFavorite
+        ))
+        if let submenu = makeTagSubmenu() { menu.addItem(submenu) }
+        if let onDelete {
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionDelete), systemImage: "trash", handler: onDelete
+            ))
+        }
+        return menu
+    }
+
+    /// "Add to Category ▸": checkable entries for every user-defined tag plus
+    /// "New Category…". Built at click time so registry order, names, and the
+    /// item's membership are current.
+    private func makeTagSubmenu() -> NSMenuItem? {
+        guard let onToggleTag, let onNewTag else { return nil }
+        let parent = NSMenuItem(title: L(.clipboardActionAddToTag), action: nil, keyEquivalent: "")
+        parent.image = NSImage(systemSymbolName: "tag", accessibilityDescription: nil)
+        let submenu = NSMenu()
+        for tag in ClipboardTagStore.shared.tags {
+            let entry = ClosureMenuItem(title: tag.name) { onToggleTag(tag.id) }
+            entry.state = item.tagIDs.contains(tag.id) ? .on : .off
+            submenu.addItem(entry)
+        }
+        if !submenu.items.isEmpty { submenu.addItem(.separator()) }
+        submenu.addItem(ClosureMenuItem(title: L(.clipboardTagNew), systemImage: "plus", handler: onNewTag))
+        parent.submenu = submenu
+        return parent
     }
 
     private var header: some View {
@@ -40,6 +109,12 @@ struct ClipboardCardView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
+            // Passive favorite badge; toggling lives in the context menu.
+            if item.isFavorite {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.yellow)
+            }
             // Prominent source-app logo (Paste-style), top-right of the card.
             sourceIcon.frame(width: 22, height: 22)
         }
@@ -104,7 +179,7 @@ struct ClipboardCardView: View {
                let img = ClipboardThumbnail.image(at: historyDirectory.appendingPathComponent(fileName)) {
                 // Color.clear takes the offered preview frame; the image fills it
                 // as an overlay and is clipped to those bounds, so a large image
-                // can't overflow and cover the header/footer.
+                // can't overflow and cover the header.
                 Color.clear.overlay {
                     Image(nsImage: img).resizable().scaledToFill()
                 }
@@ -145,15 +220,4 @@ struct ClipboardCardView: View {
         UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
     }
 
-    private var footer: some View {
-        HStack {
-            Spacer()
-            Button(action: onToggleFavorite) {
-                Image(systemName: item.isFavorite ? "star.fill" : "star")
-                    .foregroundStyle(item.isFavorite ? .yellow : .secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-    }
 }

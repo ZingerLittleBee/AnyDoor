@@ -23,10 +23,63 @@ final class ClipboardWallStateTests: XCTestCase {
 
     func testCategoryAndSearchAreHeld() {
         let state = ClipboardWallState()
-        state.category = .image
+        state.category = .kind(.image)
         state.query = "foo"
-        XCTAssertEqual(state.category, .image)
+        XCTAssertEqual(state.category, .kind(.image))
         XCTAssertEqual(state.query, "foo")
+    }
+
+    func testCategoryCyclingWrapsBothWays() {
+        let state = ClipboardWallState()
+        XCTAssertEqual(state.category, .all)
+        state.selectNextCategory()
+        XCTAssertEqual(state.category, .favorites)
+        state.selectPreviousCategory()
+        XCTAssertEqual(state.category, .all)
+        // Wrap backwards from the first tab to the last, and forward again.
+        state.selectPreviousCategory()
+        XCTAssertEqual(state.category, state.categories.last)
+        state.selectNextCategory()
+        XCTAssertEqual(state.category, .all)
+    }
+
+    func testCyclingIncludesCustomTags() {
+        let state = ClipboardWallState()
+        let tags = [ClipboardTag(id: "t1", name: "工作")]
+        state.setCategories(ClipboardWallState.order(tags: tags))
+        state.selectNextCategory()   // .all → .favorites
+        state.selectNextCategory()   // .favorites → .tag("t1")
+        XCTAssertEqual(state.category, .tag("t1"))
+    }
+
+    func testSetCategoriesFallsBackToAllWhenActiveTagRemoved() {
+        let state = ClipboardWallState()
+        state.setCategories(ClipboardWallState.order(tags: [ClipboardTag(id: "t1", name: "工作")]))
+        state.category = .tag("t1")
+        state.setCategories(ClipboardWallState.order(tags: []))
+        XCTAssertEqual(state.category, .all)
+    }
+
+    func testSetCategoriesKeepsActiveTagWhenStillPresent() {
+        let state = ClipboardWallState()
+        let tags = [ClipboardTag(id: "t1", name: "工作")]
+        state.setCategories(ClipboardWallState.order(tags: tags))
+        state.category = .tag("t1")
+        state.setCategories(ClipboardWallState.order(tags: tags + [ClipboardTag(id: "t2", name: "生活")]))
+        XCTAssertEqual(state.category, .tag("t1"))
+    }
+
+    func testTagFilterAccessors() {
+        XCTAssertEqual(ClipboardWallCategory.tag("t1").tagFilter, "t1")
+        XCTAssertNil(ClipboardWallCategory.tag("t1").kindFilter)
+        XCTAssertNil(ClipboardWallCategory.all.tagFilter)
+        XCTAssertNil(ClipboardWallCategory.tag("t1").titleKey)
+    }
+
+    func testCategoryKindFilter() {
+        XCTAssertNil(ClipboardWallCategory.all.kindFilter)
+        XCTAssertNil(ClipboardWallCategory.favorites.kindFilter)
+        XCTAssertEqual(ClipboardWallCategory.kind(.text).kindFilter, .text)
     }
 
     func testEmptyItemsHasNilSelection() {

@@ -21,6 +21,15 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
         case .file:       return .clipboardKindFile
         }
     }
+
+    /// Kinds whose payload is a plain string in `text` — the ones the floating
+    /// text panel can preview and edit.
+    var isTextBearing: Bool {
+        switch self {
+        case .text, .ocr, .qrcode: return true
+        case .color, .screenshot, .image, .file: return false
+        }
+    }
 }
 
 /// One file inside a `.file` clipboard entry. `storedName` is the copy held in
@@ -52,6 +61,13 @@ final class ClipboardHistoryItem {
     var isFavorite: Bool = false
     var filesManifest: Data?
     var isReferenceOnly: Bool = false
+    /// JSON-encoded ids of user-defined categories (`ClipboardTag.id`).
+    /// Stored as an optional String scalar instead of a `[String]`
+    /// transformable: lightweight migration leaves a new transformable column
+    /// NULL on existing rows, and the secure-unarchive transformer then
+    /// throws when those rows are faulted (launch crash). An optional scalar
+    /// decodes NULL as nil safely. nil ⇔ no tags.
+    private var tagIDsJSON: String?
 
     init(
         id: UUID = UUID(),
@@ -68,7 +84,8 @@ final class ClipboardHistoryItem {
         sourceAppName: String? = nil,
         isFavorite: Bool = false,
         filesManifest: Data? = nil,
-        isReferenceOnly: Bool = false
+        isReferenceOnly: Bool = false,
+        tagIDs: [String] = []
     ) {
         self.id = id
         self.kind = kind.rawValue
@@ -85,6 +102,25 @@ final class ClipboardHistoryItem {
         self.isFavorite = isFavorite
         self.filesManifest = filesManifest
         self.isReferenceOnly = isReferenceOnly
+        self.tagIDsJSON = nil
+        if !tagIDs.isEmpty { self.tagIDs = tagIDs }
+    }
+
+    /// IDs of user-defined categories this item belongs to. Computed facade
+    /// over `tagIDsJSON`; non-empty exempts the item from pruning, like
+    /// `isFavorite`. Never referenced inside a `#Predicate`.
+    var tagIDs: [String] {
+        get {
+            guard let tagIDsJSON else { return [] }
+            return (try? JSONDecoder().decode([String].self, from: Data(tagIDsJSON.utf8))) ?? []
+        }
+        set {
+            if newValue.isEmpty {
+                tagIDsJSON = nil
+            } else if let data = try? JSONEncoder().encode(newValue) {
+                tagIDsJSON = String(data: data, encoding: .utf8)
+            }
+        }
     }
 
     @Transient var historyKind: ClipboardHistoryKind? {

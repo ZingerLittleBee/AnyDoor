@@ -16,6 +16,15 @@ struct ClipboardWallView: View {
     let historyDirectory: URL
     let onSelect: (ClipboardHistoryItem, _ plain: Bool) -> Void
     let onToggleFavorite: (ClipboardHistoryItem) -> Void
+    /// Context-menu actions, injected by the window controller.
+    let onEdit: (ClipboardHistoryItem) -> Void
+    let onCopy: (ClipboardHistoryItem) -> Void
+    let onRevealInFinder: (ClipboardHistoryItem) -> Void
+    let onDelete: (ClipboardHistoryItem) -> Void
+    let onToggleTag: (ClipboardHistoryItem, String) -> Void
+    let onNewTag: (ClipboardHistoryItem) -> Void
+    let onTagDialogCommit: () -> Void
+    let onTagDialogCancel: () -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
     /// first responder synchronously. No-op by default for previews/tests.
     var registerSearchField: (NSTextField?) -> Void = { _ in }
@@ -25,10 +34,28 @@ struct ClipboardWallView: View {
     /// disambiguation delay.
     private struct TapRecord { let index: Int; let date: Date }
     @State private var lastTap: TapRecord?
+    @FocusState private var tagFieldFocused: Bool
+
+    /// ⌘-drag tab reordering. `tabFrames` tracks each capsule's frame in the
+    /// row's named coordinate space; `dragStartFrames` snapshots them when a
+    /// drag begins, and all drag math uses the snapshot — live frames would
+    /// include the offsets the drag itself applies (a feedback loop). The
+    /// array is not mutated until release: during the drag the dragged
+    /// capsule follows the pointer via offset, the others shift aside toward
+    /// the projected drop slot (`dropIndex`), and `onEnded` commits.
+    @State private var tabFrames: [ClipboardWallCategory: CGRect] = [:]
+    @State private var draggedTab: ClipboardWallCategory?
+    @State private var dragStartFrames: [ClipboardWallCategory: CGRect] = [:]
+    @State private var dragTranslation: CGFloat = 0
+    @State private var dropIndex: Int?
 
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
-        ClipboardSearch.filter(allItems, category: state.category, query: state.query)
+        ClipboardSearch.filter(allItems,
+                               category: state.category.kindFilter,
+                               favoritesOnly: state.category == .favorites,
+                               tagID: state.category.tagFilter,
+                               query: state.query)
     }
 
     var body: some View {
@@ -51,23 +78,40 @@ struct ClipboardWallView: View {
         // handling. Runs after the view updates, so it never mutates during body.
         .onAppear { state.setItems(items) }
         .onChange(of: items.map(\.id)) { _, _ in state.setItems(items) }
+        .onAppear {
+            state.setCategories(ClipboardCategoryOrder.apply(
+                to: ClipboardWallState.order(tags: ClipboardTagStore.shared.tags)))
+        }
+        .onChange(of: ClipboardTagStore.shared.tags) { _, newTags in
+            state.setCategories(ClipboardCategoryOrder.apply(
+                to: ClipboardWallState.order(tags: newTags)))
+        }
+        .overlay { if state.tagDialog != nil { tagDialogOverlay } }
     }
 
     private var tabs: some View {
         HStack(spacing: 8) {
-            ForEach(Array(ClipboardWallState.categoryOrder.enumerated()), id: \.offset) { _, cat in
-                let active = state.category == cat
-                Button {
-                    state.category = cat
-                } label: {
-                    LocalizedText(cat?.titleKey ?? .clipboardCategoryAll)
-                        .font(.caption)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
-                                    in: Capsule())
-                        .foregroundStyle(active ? Color.white : Color.primary)
+            // Horizontal scroll so many custom tags can't push the search
+            // field out of the window.
+            ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: Self.tabSpacing) {
+                    ForEach(state.categories, id: \.self) { cat in
+                        tabCapsule(cat)
+                            .id(cat)
+                    }
                 }
-                .buttonStyle(.plain)
+                .coordinateSpace(name: Self.tabRowSpace)
+            }
+            // The lifted (scaled, shadowed) dragged capsule and the ⌘-mode
+            // delete badges poke past the row's tight bounds; don't clip them.
+            .scrollClipDisabled()
+            .onChange(of: state.category) { _, new in
+                withAnimation { proxy.scrollTo(new) }
+            }
+            .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+                MainActor.assumeIsolated { tabFrames = frames }
+            }
             }
             Spacer()
             // A real, focusable field so an IME can compose CJK search text. The
@@ -84,6 +128,238 @@ struct ClipboardWallView: View {
         }
     }
 
+    @ViewBuilder
+    private func tabCapsule(_ cat: ClipboardWallCategory) -> some View {
+        let active = state.category == cat
+        let jiggling = reorderArmed && draggedTab != cat
+        // A plain view + tap gesture, not a Button: the reorder drag must own
+        // mouse tracking on the same surface, and a Button's own click
+        // recognition competes with it (and brought a focus ring the row
+        // doesn't want).
+        HStack(spacing: 3) {
+            if cat == .favorites {
+                Image(systemName: "star.fill").font(.system(size: 8))
+            }
+            if let key = cat.titleKey {
+                LocalizedText(key)
+            } else if let id = cat.tagFilter {
+                Text(ClipboardTagStore.shared.name(for: id) ?? "")
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 10).padding(.vertical, 4)
+        .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
+                    in: Capsule())
+        .foregroundStyle(active ? Color.white : Color.primary)
+        // Edit-mode cue alongside the jiggle: a dashed outline on every
+        // capsule while ⌘ is held, like a "cut here" marquee.
+        .overlay {
+            if reorderArmed {
+                Capsule().strokeBorder(
+                    Color.secondary.opacity(0.7),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 2.5])
+                )
+            }
+        }
+        .contentShape(Capsule())
+        .onTapGesture { state.category = cat }
+        .overlay {
+            // Custom tags are managed from their own tab; builtins have no menu.
+            // Return an empty menu while the dialog dimmer is up so right-clicks
+            // can't stack a second dialog behind it.
+            if let id = cat.tagFilter {
+                RightClickMenu(makeMenu: { state.tagDialog == nil ? tagTabMenu(tagID: id) : NSMenu() })
+            }
+        }
+        .background(GeometryReader { proxy in
+            Color.clear.preference(key: TabFramePreferenceKey.self,
+                                   value: [cat: proxy.frame(in: .named(Self.tabRowSpace))])
+        })
+        // Jiggle while ⌘ is held — the macOS "icons are movable now" signal.
+        // Alternating sign keeps neighbors out of phase; the capsule being
+        // dragged stays level under the pointer.
+        .modifier(JiggleEffect(active: jiggling, amplitude: jiggleAmplitude(for: cat)))
+        // After the rotation on purpose: the badge sits still (anchored to
+        // the layout bounds) while the capsule wiggles underneath it.
+        .overlay(alignment: .topTrailing) {
+            // Launchpad-style delete badge on custom tags while ⌘-mode is
+            // active. Routes into the existing confirm dialog, whose copy
+            // tells the user the category's items are kept.
+            if jiggling, let id = cat.tagFilter {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color(nsColor: .systemGray))
+                    .background(Circle().fill(.background).padding(1))
+                    .padding(2)
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        guard ClipboardTextWindow.shared.yieldToModal() else { return }
+                        state.presentTagDialog(.confirmDelete(tagID: id))
+                    }
+                    .offset(x: 7, y: -7)
+            }
+        }
+        .offset(x: capsuleOffset(cat))
+        .scaleEffect(draggedTab == cat ? 1.08 : 1)
+        .opacity(draggedTab == cat ? 0.85 : 1)
+        .shadow(color: .black.opacity(draggedTab == cat ? 0.25 : 0), radius: 4, y: 1)
+        .zIndex(draggedTab == cat ? 1 : 0)
+        // Always attached; only a ⌘-initiated drag arms reordering (checked
+        // in onChanged). High priority so it beats the tap once the pointer
+        // actually moves; a plain click stays a tab switch. Mouse drags never
+        // scroll an NSScrollView on macOS, so the row's scrolling is fine.
+        .highPriorityGesture(reorderGesture(for: cat))
+    }
+
+    /// Whether ⌘-reorder mode is active (modifier held, no modal dialog up).
+    private var reorderArmed: Bool {
+        state.isReorderModifierHeld && state.tagDialog == nil
+    }
+
+    /// Swing direction by a stable per-category value, NOT the current index:
+    /// a reorder changes indices mid-jiggle, and flipping a capsule's rotation
+    /// target while its animation is running would kick the moved tab around.
+    private func jiggleAmplitude(for cat: ClipboardWallCategory) -> Double {
+        let scalarSum = cat.persistentID.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return scalarSum.isMultiple(of: 2) ? 3.2 : -3.2
+    }
+
+    /// Named coordinate space of the tab row's scrolled content; capsule
+    /// frames and the reorder drag are both measured in it.
+    private static let tabRowSpace = "wallTabRow"
+    /// The tab row's HStack spacing; slot-shift math must match the layout.
+    private static let tabSpacing: CGFloat = 8
+
+    /// Launchpad-style wiggle driven by a private phase state, so the
+    /// repeating animation is scoped to the rotation alone. Attaching
+    /// `.animation(.repeatForever…, value:)` to the capsule instead would
+    /// capture every animatable change that lands in the same update — at
+    /// drag drop, the moved capsule's slide into its new slot — leaving it
+    /// oscillating between its old and new positions indefinitely.
+    private struct JiggleEffect: ViewModifier {
+        let active: Bool
+        /// Signed degrees; the sign staggers neighboring capsules' phase.
+        let amplitude: Double
+        @State private var phase = false
+
+        func body(content: Content) -> some View {
+            content
+                .rotationEffect(.degrees(phase ? amplitude : 0))
+                .onChange(of: active) { _, on in setPhase(on) }
+                .onAppear { if active { setPhase(true) } }
+        }
+
+        private func setPhase(_ on: Bool) {
+            if on {
+                withAnimation(.easeInOut(duration: 0.13).repeatForever(autoreverses: true)) {
+                    phase = true
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.1)) { phase = false }
+            }
+        }
+    }
+
+    private struct TabFramePreferenceKey: PreferenceKey {
+        static let defaultValue: [ClipboardWallCategory: CGRect] = [:]
+        static func reduce(value: inout [ClipboardWallCategory: CGRect],
+                           nextValue: () -> [ClipboardWallCategory: CGRect]) {
+            value.merge(nextValue()) { _, new in new }
+        }
+    }
+
+    private func reorderGesture(for cat: ClipboardWallCategory) -> some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.tabRowSpace))
+            .onChanged { value in
+                if draggedTab == nil {
+                    // Only a ⌘-initiated drag arms reordering; a plain drag
+                    // on the row is inert. Once armed it stays armed for the
+                    // whole drag, even if ⌘ lifts mid-way.
+                    guard reorderArmed else { return }
+                    draggedTab = cat
+                    dragStartFrames = tabFrames
+                }
+                guard draggedTab == cat else { return }
+                // The capsule follows the pointer unanimated; only the slot
+                // shifts of the other capsules animate.
+                dragTranslation = value.translation.width
+                let target = projectedDropIndex(for: cat)
+                if target != dropIndex {
+                    withAnimation(.snappy(duration: 0.18)) { dropIndex = target }
+                }
+            }
+            .onEnded { _ in
+                guard draggedTab == cat else { return }
+                let committed = previewOrder()
+                withAnimation(.snappy(duration: 0.18)) {
+                    if let committed { state.setCategories(committed) }
+                    draggedTab = nil
+                    dragTranslation = 0
+                    dropIndex = nil
+                    dragStartFrames = [:]
+                }
+                if let committed { ClipboardCategoryOrder.save(committed) }
+            }
+    }
+
+    /// Index the dragged tab would land at if released now: the number of
+    /// other capsules whose (drag-start) midpoint lies left of the dragged
+    /// capsule's current center.
+    private func projectedDropIndex(for cat: ClipboardWallCategory) -> Int? {
+        guard let frame = dragStartFrames[cat] else { return nil }
+        let center = frame.midX + dragTranslation
+        return state.categories.count { other in
+            guard other != cat, let f = dragStartFrames[other] else { return false }
+            return f.midX < center
+        }
+    }
+
+    /// The tab order as it would be after dropping at `dropIndex`; nil while
+    /// no drag is active or when the drop would change nothing.
+    private func previewOrder() -> [ClipboardWallCategory]? {
+        guard let dragged = draggedTab, let to = dropIndex,
+              let from = state.categories.firstIndex(of: dragged) else { return nil }
+        var order = state.categories
+        order.remove(at: from)
+        order.insert(dragged, at: min(to, order.count))
+        return order != state.categories ? order : nil
+    }
+
+    /// Drag-time offsets: the dragged capsule follows the pointer; every
+    /// other capsule shifts one slot toward the vacated side once the
+    /// projected drop crosses it (±1 slot = the dragged capsule's width plus
+    /// the row spacing, since that is the gap that moves).
+    private func capsuleOffset(_ cat: ClipboardWallCategory) -> CGFloat {
+        guard let dragged = draggedTab else { return 0 }
+        if cat == dragged { return dragTranslation }
+        guard let preview = previewOrder(),
+              let oldIndex = state.categories.firstIndex(of: cat),
+              let newIndex = preview.firstIndex(of: cat),
+              let dragFrame = dragStartFrames[dragged]
+        else { return 0 }
+        return CGFloat(newIndex - oldIndex) * (dragFrame.width + Self.tabSpacing)
+    }
+
+    /// Rename / delete for a custom tag tab. Both open the in-wall dialog
+    /// overlay (rendered by Task 6); deletion asks for confirmation because
+    /// items lose their retention exemption.
+    private func tagTabMenu(tagID: String) -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(ClosureMenuItem(title: L(.clipboardTagRename), systemImage: "pencil") {
+            // A floating text preview must not stay over the modal overlay,
+            // but a dirty editor resolves its discard prompt first.
+            guard ClipboardTextWindow.shared.yieldToModal() else { return }
+            state.presentTagDialog(.rename(tagID: tagID),
+                                   initialText: ClipboardTagStore.shared.name(for: tagID) ?? "")
+        })
+        menu.addItem(ClosureMenuItem(title: L(.clipboardTagDelete), systemImage: "trash") {
+            guard ClipboardTextWindow.shared.yieldToModal() else { return }
+            state.presentTagDialog(.confirmDelete(tagID: tagID))
+        })
+        return menu
+    }
+
     private func cards(_ items: [ClipboardHistoryItem]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -96,7 +372,16 @@ struct ClipboardWallView: View {
                             isSelected: index == state.selectedIndex,
                             historyDirectory: historyDirectory,
                             matchSnippet: ClipboardSearch.matchSnippet(for: item, query: state.query),
-                            onToggleFavorite: { onToggleFavorite(item) }
+                            onToggleFavorite: { onToggleFavorite(item) },
+                            // Select the card the user right-clicked so the
+                            // action visibly applies to it.
+                            onEdit: { state.select(index); onEdit(item) },
+                            onCopy: { state.select(index); onCopy(item) },
+                            onRevealInFinder: { state.select(index); onRevealInFinder(item) },
+                            onToggleTag: { state.select(index); onToggleTag(item, $0) },
+                            onNewTag: { state.select(index); onNewTag(item) },
+                            onDelete: { state.select(index); onDelete(item) },
+                            menuSuppressed: { state.tagDialog != nil }
                         )
                         // Identify by the item's stable id (matching the ForEach
                         // key). A positional `.id(index)` here conflicts with the
@@ -121,6 +406,8 @@ struct ClipboardWallView: View {
     private var hints: some View {
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
+            hint("⇥", .clipboardHintCategory)
+            hint("⌘", .clipboardHintEditCategories)
             hint("↵", .clipboardHintCopy)
             hint("⌥↵", .clipboardHintPastePlain)
             hint("space", .clipboardHintPreview)
@@ -146,5 +433,54 @@ struct ClipboardWallView: View {
             state.select(index)
             lastTap = TapRecord(index: index, date: now)
         }
+    }
+
+    /// Create / rename / delete-confirm card. Lives inside the wall window —
+    /// an app-modal NSAlert would steal key status and trip the wall's
+    /// resign-key dismissal.
+    private var tagDialogOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .onTapGesture { onTagDialogCancel() }
+            VStack(spacing: 12) {
+                switch state.tagDialog {
+                case .create:
+                    LocalizedText(.clipboardTagCreateTitle).font(.headline)
+                    tagNameField
+                case .rename:
+                    LocalizedText(.clipboardTagRenameTitle).font(.headline)
+                    tagNameField
+                case .confirmDelete(let tagID):
+                    Text(L(.clipboardTagDeletePrompt, ClipboardTagStore.shared.name(for: tagID) ?? ""))
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                case nil:
+                    EmptyView()
+                }
+                HStack(spacing: 8) {
+                    Button(action: onTagDialogCancel) { LocalizedText(.clipboardEditCancel) }
+                    Button(action: onTagDialogCommit) {
+                        LocalizedText(isDeleteDialog ? .clipboardActionDelete : .clipboardTagConfirm)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(20)
+            .frame(width: 280)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var isDeleteDialog: Bool {
+        if case .confirmDelete = state.tagDialog { return true }
+        return false
+    }
+
+    private var tagNameField: some View {
+        TextField(L(.clipboardTagNamePlaceholder), text: $state.tagDialogText)
+            .textFieldStyle(.roundedBorder)
+            .focused($tagFieldFocused)
+            .onAppear { tagFieldFocused = true }
     }
 }

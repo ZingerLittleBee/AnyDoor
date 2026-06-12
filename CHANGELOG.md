@@ -6,6 +6,91 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard wall: user-defined categories. Right-click a card → "Add to
+  Category" tags it — the submenu lists every category with a checkmark for
+  membership (an item can carry several tags) plus an inline "New Category…";
+  custom tabs appear after Favorites and are renamed or deleted from their own
+  right-click menu. Tagged items are exempt from automatic cleanup, exactly
+  like favorites; deleting a category keeps its items and only restores normal
+  retention, after a confirmation since that exemption is what's being given
+  up. Create / rename / delete-confirm run as a modal card inside the wall
+  window rather than an `NSAlert`, which would steal key status and trip the
+  wall's resign-key dismissal — while it's up, Return commits and Esc cancels
+  (both deferring to an active IME composition), the dimmer click cancels, and
+  card scrolling / right-click menus are suppressed; opening a dialog while
+  the floating text panel shows first dismisses it, routing a dirty editor
+  through its discard confirmation instead of dropping the edit. Category
+  definitions live in UserDefaults and ride along in settings backup
+  (export/import), with imports pruning tag ids that no longer resolve. On
+  the model, membership is persisted as an optional JSON string scalar rather
+  than a `[String]` transformable, so SwiftData lightweight migration leaves
+  legacy rows readable instead of crashing the first fetch after update.
+- Clipboard wall: a Favorites tab between "All" and the kind tabs shows only
+  starred entries, and favorites now survive in the timeline past the
+  retention cutoff (they were exempt from pruning but the wall's time filter
+  still hid them). The card-footer star button is gone — favoriting moved to
+  the right-click menu — and favorited cards instead show a passive star badge
+  in the header.
+- Clipboard wall: Tab / Shift-Tab cycles through the category tabs (wrapping,
+  custom tabs included), scrolling the active capsule into view when the tab
+  row overflows.
+- Clipboard wall: hold ⌘ to enter a Launchpad-style tab edit mode — the
+  category capsules jiggle (neighbors out of phase, the macOS "movable now"
+  signal) and gain a dashed outline, custom tags sprout a steady top-right ✕
+  badge that opens the existing delete confirmation (which spells out that
+  the category's items are kept, only their cleanup exemption ends), and
+  dragging a capsule reorders the row: the dragged tab lifts (scaled,
+  shadowed) and follows the pointer while the others shift aside live toward
+  the projected drop slot, committing on release. The wiggle is driven by a
+  phase state scoped to the rotation alone — hanging a repeat-forever
+  `.animation` on the capsule would also capture the drop-slide into the new
+  slot and leave a moved tab oscillating between its old and new positions —
+  and each capsule's swing direction keys off its stable category
+  id, not its current index, so a reorder can't flip a running animation's
+  target. The order persists (and rides settings backup) as a list of stable
+  category ids, so deleting a tag drops only its entry while newly created
+  tags append at the end. Everything is ⌘-gated, so plain clicks, right-click
+  tab menus, and the row's horizontal scrolling are untouched; the wall
+  footer hints the mode ("⌘ 按住编辑分类").
+- Clipboard wall: file cards gain a "Reveal in Finder" context-menu item. It
+  prefers the file's original path and falls back to the copy stored in the
+  history directory when the original is gone.
+- Clipboard wall: pressing Space on a text-bearing card (text / OCR / QR code)
+  now opens a floating read-only text preview — the "space 预览" hint in the
+  wall footer previously did nothing for text. The preview mirrors the
+  screenshot preview panel (borderless, non-activating, never key, centered at
+  60% of the screen), follows the keyboard selection like Finder Quick Look
+  (arrows and the scroll wheel move cards while the preview content swaps in
+  place; landing on a non-text card closes it), closes on Space / Esc / any
+  outside click, and shows the card's line/character count in its footer.
+  Pressing `E` — or the edit button next to the preview title, which doubles
+  as the shortcut hint — swaps the preview for the editor on the same item.
+  Image, screenshot, and file cards keep system Quick Look; color keeps none.
+- Clipboard wall: cards gain a right-click context menu — Edit (text-bearing
+  kinds only), Copy, Favorite/Unfavorite, and Delete. The menu is a native
+  NSMenu served through NSView's `menu(for:)` from a transparent overlay that
+  claims only right-/control-clicks (taps, double-click paste, and hovers pass
+  through), because SwiftUI's `.contextMenu` bridge flash-resizes item icons
+  when the menu opens on macOS 26. Copy writes the payload back to the
+  pasteboard without pasting or dismissing the wall, suppresses the watcher's
+  self-capture, and confirms with a toast. Edit opens a floating plain-text
+  editor (the hosts module's monospaced, undo-capable `PlainTextEditor`) on a
+  key-capable non-activating panel: ⌘S or the Save button persists the change
+  (whitespace-only content disables Save at both the UI and the store), and
+  Esc / Cancel with unsaved changes shows an in-panel discard confirmation
+  instead of silently dropping the edit — the wall hotkey and switching to
+  another item are guarded the same way, a stray outside click never closes
+  the editor, and a no-change save is skipped so it cannot destroy the item's
+  rich payload. Saving rewrites the card's preview title/subtitle and clears
+  the now-stale rich payload, so pasting the item afterwards produces the
+  edited plain text rather than resurrecting the original rich content, while
+  the item's timestamp is preserved so the card keeps its position. The wall
+  stays open behind both panels: its resign-key handler, outside-click
+  monitor, and scroll-wheel card navigation all exempt them, and scrolling
+  over the panel scrolls its text instead of flipping cards.
+
 ## [2.1.1] - 2026-06-12
 
 ### Fixed
