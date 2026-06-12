@@ -37,30 +37,32 @@ struct ClipboardCardView: View {
     }
 
     /// Right-click menu. Edit only appears for text-bearing kinds; Favorite
-    /// flips its label with the current state.
+    /// flips its label with the current state. Plain Label(_:systemImage:)
+    /// bridges to a native NSMenuItem; a custom view inside Label renders as an
+    /// attached SwiftUI view whose icon flash-resizes when the menu opens. The
+    /// menu is rebuilt on every open, so L(...) still follows language switches.
     @ViewBuilder
     private var contextMenuItems: some View {
         if item.historyKind?.isTextBearing == true, let onEdit {
             Button(action: onEdit) {
-                Label { LocalizedText(.clipboardActionEdit) } icon: { Image(systemName: "pencil") }
+                Label(L(.clipboardActionEdit), systemImage: "pencil")
             }
         }
         if let onCopy {
             Button(action: onCopy) {
-                Label { LocalizedText(.clipboardActionCopy) } icon: { Image(systemName: "doc.on.doc") }
+                Label(L(.clipboardActionCopy), systemImage: "doc.on.doc")
             }
         }
         Button(action: onToggleFavorite) {
-            Label {
-                LocalizedText(item.isFavorite ? .clipboardActionUnfavorite : .clipboardActionFavorite)
-            } icon: {
-                Image(systemName: item.isFavorite ? "star.slash" : "star")
-            }
+            Label(
+                L(item.isFavorite ? .clipboardActionUnfavorite : .clipboardActionFavorite),
+                systemImage: item.isFavorite ? "star.slash" : "star"
+            )
         }
         if let onDelete {
             Divider()
             Button(role: .destructive, action: onDelete) {
-                Label { LocalizedText(.clipboardActionDelete) } icon: { Image(systemName: "trash") }
+                Label(L(.clipboardActionDelete), systemImage: "trash")
             }
         }
     }
