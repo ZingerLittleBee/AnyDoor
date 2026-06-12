@@ -76,12 +76,18 @@ struct ClipboardWallView: View {
         HStack(spacing: 8) {
             // Horizontal scroll so many custom tags can't push the search
             // field out of the window.
+            ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(state.categories, id: \.self) { cat in
                         tabCapsule(cat)
+                            .id(cat)
                     }
                 }
+            }
+            .onChange(of: state.category) { _, new in
+                withAnimation { proxy.scrollTo(new) }
+            }
             }
             Spacer()
             // A real, focusable field so an IME can compose CJK search text. The
@@ -127,8 +133,10 @@ struct ClipboardWallView: View {
         .focusEffectDisabled()
         .overlay {
             // Custom tags are managed from their own tab; builtins have no menu.
+            // Return an empty menu while the dialog dimmer is up so right-clicks
+            // can't stack a second dialog behind it.
             if let id = cat.tagFilter {
-                RightClickMenu(makeMenu: { tagTabMenu(tagID: id) })
+                RightClickMenu(makeMenu: { state.tagDialog == nil ? tagTabMenu(tagID: id) : NSMenu() })
             }
         }
     }
@@ -172,7 +180,8 @@ struct ClipboardWallView: View {
                             onRevealInFinder: { state.select(index); onRevealInFinder(item) },
                             onToggleTag: { state.select(index); onToggleTag(item, $0) },
                             onNewTag: { state.select(index); onNewTag(item) },
-                            onDelete: { state.select(index); onDelete(item) }
+                            onDelete: { state.select(index); onDelete(item) },
+                            menuSuppressed: { state.tagDialog != nil }
                         )
                         // Identify by the item's stable id (matching the ForEach
                         // key). A positional `.id(index)` here conflicts with the

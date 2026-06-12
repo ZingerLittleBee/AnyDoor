@@ -18,6 +18,9 @@ struct ClipboardCardView: View {
     var onToggleTag: ((String) -> Void)? = nil
     var onNewTag: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
+    /// When true the context menu returns empty, blocking right-clicks while a
+    /// modal overlay (e.g. the tag dialog) is up above the card wall.
+    var menuSuppressed: () -> Bool = { false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -44,6 +47,8 @@ struct ClipboardCardView: View {
     /// Right-click menu, built at click time so favorite state and language
     /// are current. Edit only appears for text-bearing kinds.
     private func makeContextMenu() -> NSMenu {
+        // Return empty when the wall has a modal overlay active (e.g. tag dialog).
+        if menuSuppressed() { return NSMenu() }
         let menu = NSMenu()
         if item.historyKind?.isTextBearing == true, let onEdit {
             menu.addItem(ClosureMenuItem(

@@ -52,12 +52,16 @@ final class ClipboardTextWindow {
     /// Esc / Cancel: discard-confirm when dirty, straight close otherwise.
     func requestClose() { model?.requestClose() }
 
-    /// Steps aside for a modal flow: a read-only preview closes outright; a
-    /// live editor gets the dirty-checked close and refuses (returns false)
-    /// so the caller should not proceed.
+    /// Steps aside for a modal flow. A clean editor or read-only preview closes
+    /// outright (returns true so the caller can proceed). A dirty editor gets
+    /// the dirty-checked close prompt and returns false so the caller must wait
+    /// for the user to resolve the edit before opening the modal.
     func yieldToModal() -> Bool {
-        if isEditing { requestClose(); return false }
-        close()
+        if isEditing, model?.isDirty == true {
+            requestClose()   // dirty-checked; user resolves the edit first
+            return false
+        }
+        close()              // a clean editor or read-only preview steps aside
         return true
     }
 

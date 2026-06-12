@@ -301,7 +301,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Space / e / Esc while the user types a tag name.
         if state.tagDialog != nil {
             switch event.keyCode {
-            case 53: cancelTagDialog(); return true
+            case 53:
+                // Esc mid-composition cancels the IME marked text, not the dialog.
+                if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
+                cancelTagDialog(); return true
             case 36, 76:
                 // Let Return commit an in-flight IME composition instead of
                 // the dialog; the composed text lands in the field first.
