@@ -133,6 +133,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// `completion` runs after the window has ordered out, so paste can post ⌘V
     /// once focus has returned. No-op if already hidden or mid-animation.
     private func dismiss(restoreFocus: Bool, completion: (@Sendable () -> Void)? = nil) {
+        // The floating text panel has no life of its own once the wall goes away.
+        ClipboardTextWindow.shared.close()
         guard !isAnimating, let window, window.isVisible, let screen = NSScreen.main else {
             completion?()
             return
@@ -205,6 +207,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             MainActor.assumeIsolated {
                 guard let self else { return }
                 if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+                // Don't throw away an in-progress edit on a stray outside click.
+                if ClipboardTextWindow.shared.isEditing { return }
                 self.dismiss(restoreFocus: false)
             }
         }
@@ -245,6 +249,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// the event was consumed (a returned event keeps flowing to the field).
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        if let consumed = routeToTextWindow(event) { return consumed }
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit
@@ -266,16 +271,18 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             return true
         case 123:                                        // ←
             if inputMode { return false }                // move the text caret
-            state.moveLeft(); return true
+            state.moveLeft(); syncTextPreview(); return true
         case 124:                                        // →
             if inputMode { return false }                // field delegate may exit
-            state.moveRight(); return true
+            state.moveRight(); syncTextPreview(); return true
         case 49:                                         // space
             if inputMode { return false }                // insert a space
-            toggleQuickLook(); return true
+            togglePreview(); return true
         case 51:                                         // ⌫
             if inputMode { return false }                // delete a character
             if let item = state.selectedItem {
+                // The preview would otherwise keep showing the deleted item.
+                if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
                 Task { await ClipboardHistoryStore.shared.delete(item) }
             }
             return true
@@ -283,6 +290,32 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             if inputMode { return false }                // field inserts / composes
             return focusSearchOnType(event)
         }
+    }
+
+    /// Keys claimed by the floating text panel while it is up. Returns nil when
+    /// the event should flow to the wall's normal handling instead.
+    private func routeToTextWindow(_ event: NSEvent) -> Bool? {
+        let textWindow = ClipboardTextWindow.shared
+        if textWindow.isEditing {
+            if event.keyCode == 53 {                     // esc → dirty-checked close
+                textWindow.requestClose(); return true
+            }
+            let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "s" {
+                textWindow.saveRequested(); return true  // ⌘S → save
+            }
+            // Everything else (typing, ⌘Z, arrows…) belongs to the key editor.
+            return false
+        }
+        if textWindow.isPreviewVisible {
+            switch event.keyCode {
+            case 53, 49:                                 // esc / space close it
+                textWindow.close(); return true
+            default:
+                return nil                               // arrows etc. fall through
+            }
+        }
+        return nil
     }
 
     /// Type-to-search from card navigation: a printable keystroke focuses the
@@ -324,6 +357,34 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     }
 
     // MARK: - Quick Look (space)
+
+    /// Space: text-bearing kinds open the floating text panel; image/screenshot/
+    /// file go through system Quick Look; color has no preview (the card already
+    /// shows the value).
+    private func togglePreview() {
+        guard let item = state.selectedItem else { return }
+        if item.historyKind?.isTextBearing == true {
+            if ClipboardTextWindow.shared.isPreviewVisible {
+                ClipboardTextWindow.shared.close()
+            } else {
+                ClipboardTextWindow.shared.showPreview(item: item)
+            }
+            return
+        }
+        toggleQuickLook()
+    }
+
+    /// Keep an open text preview in step with the keyboard selection (Finder
+    /// Quick Look behavior). Closes it when the selection leaves text kinds.
+    private func syncTextPreview() {
+        guard ClipboardTextWindow.shared.isPreviewVisible else { return }
+        if let item = state.selectedItem, item.historyKind?.isTextBearing == true {
+            ClipboardTextWindow.shared.showPreview(item: item)
+        } else {
+            ClipboardTextWindow.shared.close()
+        }
+    }
+
     private func toggleQuickLook() {
         guard let panel = QLPreviewPanel.shared() else { return }
         if QLPreviewPanel.sharedPreviewPanelExists() && panel.isVisible {
@@ -365,8 +426,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         removeMonitors()
     }
     func windowDidResignKey(_ notification: Notification) {
-        // Don't close while Quick Look is the key window.
+        // Don't close while Quick Look or the floating text panel is up — the
+        // text editor takes key status while the wall stays open behind it.
         if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+        if ClipboardTextWindow.shared.isVisible { return }
         // Ignore the resign that the slide-out animation itself triggers.
         guard !isAnimating else { return }
         // A click elsewhere already moved focus; don't yank it back.
