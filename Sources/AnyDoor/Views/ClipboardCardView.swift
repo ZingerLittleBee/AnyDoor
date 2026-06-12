@@ -33,38 +33,38 @@ struct ClipboardCardView: View {
                 .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
         )
         .opacity(item.isReferenceOnly && !ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) ? 0.5 : 1)
-        .contextMenu { contextMenuItems }
+        // Native NSMenu instead of .contextMenu: SwiftUI's menu bridge
+        // flash-resizes item icons on open (macOS 26); NSMenuItem.image renders
+        // them Finder-style, stable. Left clicks pass through to the card.
+        .overlay { RightClickMenu(makeMenu: makeContextMenu) }
     }
 
-    /// Right-click menu. Edit only appears for text-bearing kinds; Favorite
-    /// flips its label with the current state. Plain Label(_:systemImage:)
-    /// bridges to a native NSMenuItem; a custom view inside Label renders as an
-    /// attached SwiftUI view whose icon flash-resizes when the menu opens. The
-    /// menu is rebuilt on every open, so L(...) still follows language switches.
-    @ViewBuilder
-    private var contextMenuItems: some View {
+    /// Right-click menu, built at click time so favorite state and language
+    /// are current. Edit only appears for text-bearing kinds.
+    private func makeContextMenu() -> NSMenu {
+        let menu = NSMenu()
         if item.historyKind?.isTextBearing == true, let onEdit {
-            Button(action: onEdit) {
-                Label(L(.clipboardActionEdit), systemImage: "pencil")
-            }
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionEdit), systemImage: "pencil", handler: onEdit
+            ))
         }
         if let onCopy {
-            Button(action: onCopy) {
-                Label(L(.clipboardActionCopy), systemImage: "doc.on.doc")
-            }
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionCopy), systemImage: "doc.on.doc", handler: onCopy
+            ))
         }
-        Button(action: onToggleFavorite) {
-            Label(
-                L(item.isFavorite ? .clipboardActionUnfavorite : .clipboardActionFavorite),
-                systemImage: item.isFavorite ? "star.slash" : "star"
-            )
-        }
+        menu.addItem(ClosureMenuItem(
+            title: L(item.isFavorite ? .clipboardActionUnfavorite : .clipboardActionFavorite),
+            systemImage: item.isFavorite ? "star.slash" : "star",
+            handler: onToggleFavorite
+        ))
         if let onDelete {
-            Divider()
-            Button(role: .destructive, action: onDelete) {
-                Label(L(.clipboardActionDelete), systemImage: "trash")
-            }
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionDelete), systemImage: "trash", handler: onDelete
+            ))
         }
+        return menu
     }
 
     private var header: some View {
