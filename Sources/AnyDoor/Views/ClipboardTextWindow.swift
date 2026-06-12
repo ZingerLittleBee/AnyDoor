@@ -17,6 +17,10 @@ final class ClipboardTextWindow {
     private var mouseMonitors: [Any] = []
     /// Invoked after the panel closes; the wall re-takes key status here.
     private var onClose: (() -> Void)?
+    /// Set by the wall controller: how to open the editor for an item. The
+    /// preview's "e" key / header button route through this so editing always
+    /// goes down the same path as the card's context menu.
+    var onEditRequest: ((ClipboardHistoryItem) -> Void)?
 
     private init() {}
 
@@ -50,6 +54,13 @@ final class ClipboardTextWindow {
 
     /// Save shortcut (the wall's key monitor routes ⌘S here while editing).
     func saveRequested() { model?.saveIfPossible() }
+
+    /// Swap a read-only preview for the editor on the same item ("e" key or
+    /// the header's edit button). No-op outside preview mode.
+    func requestEditFromPreview() {
+        guard isPreviewVisible, let item = model?.item else { return }
+        onEditRequest?(item)
+    }
 
     func close() {
         for monitor in mouseMonitors { NSEvent.removeMonitor(monitor) }
@@ -96,6 +107,7 @@ final class ClipboardTextWindow {
 
         let model = ClipboardTextPanelModel(item: item, isEditable: editable)
         model.onDismiss = { [weak self] in self?.close() }
+        model.onEditRequest = { [weak self] in self?.requestEditFromPreview() }
         self.model = model
         self.onClose = onClose
 
@@ -172,6 +184,9 @@ final class ClipboardTextPanelModel {
     private var originalText: String
     var showDiscardConfirm = false
     var onDismiss: () -> Void = {}
+    /// Asks the host to swap this read-only preview for the editor ("e" key /
+    /// the header's edit button). No-op when already editing.
+    var onEditRequest: () -> Void = {}
 
     init(item: ClipboardHistoryItem, isEditable: Bool) {
         self.item = item
@@ -220,6 +235,11 @@ final class ClipboardTextPanelModel {
         onDismiss()
     }
 
+    func requestEdit() {
+        guard !isEditable else { return }
+        onEditRequest()
+    }
+
     func discard() { onDismiss() }
 }
 
@@ -247,6 +267,24 @@ struct ClipboardTextPanelView: View {
             LocalizedText(model.isEditable ? .clipboardEditTitle : .clipboardPreviewTitle)
                 .font(.headline)
             Spacer()
+            if !model.isEditable {
+                // Doubles as the discoverability hint for the "e" shortcut.
+                Button { model.requestEdit() } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "pencil")
+                        LocalizedText(.clipboardActionEdit)
+                        Text("E")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(L(.clipboardActionEdit))
+                .padding(.trailing, 6)
+            }
             Button { model.requestClose() } label: {
                 Image(systemName: "xmark.circle.fill")
                     .symbolRenderingMode(.hierarchical)

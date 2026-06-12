@@ -74,6 +74,22 @@ final class ClipboardTextPanelModelTests: XCTestCase {
         XCTAssertTrue(dismissed)
     }
 
+    func testRequestEditFiresInPreviewMode() {
+        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: false)
+        var fired = false
+        model.onEditRequest = { fired = true }
+        model.requestEdit()
+        XCTAssertTrue(fired)
+    }
+
+    func testRequestEditIgnoredWhileEditing() {
+        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: true)
+        var fired = false
+        model.onEditRequest = { fired = true }
+        model.requestEdit()
+        XCTAssertFalse(fired)
+    }
+
     func testReplaceSwapsContentAndResetsBaseline() {
         let model = ClipboardTextPanelModel(item: makeItem(text: "first"), isEditable: false)
         model.replace(item: makeItem(text: "second"))

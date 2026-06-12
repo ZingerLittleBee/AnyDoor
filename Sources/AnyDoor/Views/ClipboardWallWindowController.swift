@@ -97,6 +97,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         Task { [weak self] in await self?.watcher?.poll() }
         installHostingView()
         installMonitors()
+        // Preview → editor handoff ("e" key / the preview header's edit
+        // button) goes down the same path as the card's context menu.
+        ClipboardTextWindow.shared.onEditRequest = { [weak self] item in self?.beginEdit(item) }
 
         guard let window, let screen = NSScreen.main else { return }
         // Remember who had focus so paste/Esc can hand it back.
@@ -327,7 +330,15 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             case 53, 49:                                 // esc / space close it
                 textWindow.close(); return true
             default:
-                return nil                               // arrows etc. fall through
+                // Plain "e" swaps the preview for the editor (the preview
+                // header shows the hint); other keys fall through so arrows
+                // and type-to-search keep working.
+                if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                   event.charactersIgnoringModifiers?.lowercased() == "e" {
+                    textWindow.requestEditFromPreview()
+                    return true
+                }
+                return nil
             }
         }
         return nil
