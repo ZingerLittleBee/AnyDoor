@@ -38,9 +38,33 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.category, .all)
         // Wrap backwards from the first tab to the last, and forward again.
         state.selectPreviousCategory()
-        XCTAssertEqual(state.category, ClipboardWallState.categoryOrder.last)
+        XCTAssertEqual(state.category, state.categories.last)
         state.selectNextCategory()
         XCTAssertEqual(state.category, .all)
+    }
+
+    func testCyclingIncludesCustomTags() {
+        let state = ClipboardWallState()
+        let tags = [ClipboardTag(id: "t1", name: "工作")]
+        state.setCategories(ClipboardWallState.order(tags: tags))
+        state.selectNextCategory()   // .all → .favorites
+        state.selectNextCategory()   // .favorites → .tag("t1")
+        XCTAssertEqual(state.category, .tag("t1"))
+    }
+
+    func testSetCategoriesFallsBackToAllWhenActiveTagRemoved() {
+        let state = ClipboardWallState()
+        state.setCategories(ClipboardWallState.order(tags: [ClipboardTag(id: "t1", name: "工作")]))
+        state.category = .tag("t1")
+        state.setCategories(ClipboardWallState.order(tags: []))
+        XCTAssertEqual(state.category, .all)
+    }
+
+    func testTagFilterAccessors() {
+        XCTAssertEqual(ClipboardWallCategory.tag("t1").tagFilter, "t1")
+        XCTAssertNil(ClipboardWallCategory.tag("t1").kindFilter)
+        XCTAssertNil(ClipboardWallCategory.all.tagFilter)
+        XCTAssertNil(ClipboardWallCategory.tag("t1").titleKey)
     }
 
     func testCategoryKindFilter() {

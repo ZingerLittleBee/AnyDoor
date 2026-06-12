@@ -63,7 +63,7 @@ struct ClipboardWallView: View {
 
     private var tabs: some View {
         HStack(spacing: 8) {
-            ForEach(Array(ClipboardWallState.categoryOrder.enumerated()), id: \.offset) { _, cat in
+            ForEach(Array(state.categories.enumerated()), id: \.offset) { _, cat in
                 let active = state.category == cat
                 Button {
                     state.category = cat
@@ -72,7 +72,7 @@ struct ClipboardWallView: View {
                         if cat == .favorites {
                             Image(systemName: "star.fill").font(.system(size: 8))
                         }
-                        LocalizedText(cat.titleKey)
+                        LocalizedText(cat.titleKey ?? .clipboardCategoryAll)
                     }
                     .font(.caption)
                     .padding(.horizontal, 10).padding(.vertical, 4)
