@@ -286,7 +286,10 @@ final class ClipboardHistoryStore {
         var descriptor = FetchDescriptor<ClipboardHistoryItem>(
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
-        descriptor.predicate = #Predicate { $0.createdAt >= cutoff }
+        // Favorites are exempt from pruning, so keep them visible past the
+        // retention cutoff too — otherwise an old favorite survives on disk
+        // but silently disappears from the timeline.
+        descriptor.predicate = #Predicate { $0.createdAt >= cutoff || $0.isFavorite }
         let rows = (try? container.mainContext.fetch(descriptor)) ?? []
         return ClipboardSearch.filter(rows, category: category, query: query)
     }
