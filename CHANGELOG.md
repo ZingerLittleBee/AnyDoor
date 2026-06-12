@@ -8,6 +8,7 @@ versioning.
 
 ### Added
 
+- Clipboard wall: user-defined categories. Right-click a card → "Add to Category" to tag it (multi-tag, checkable submenu, "New Category…" inline); custom tabs appear after Favorites and are renamed/deleted from their own right-click menu. Tagged items are exempt from automatic cleanup, like favorites; deleting a category keeps its items and only restores normal retention. Category definitions are included in settings backup.
 - Clipboard wall: pressing Space on a text-bearing card (text / OCR / QR code)
   now opens a floating read-only text preview — the "space 预览" hint in the
   wall footer previously did nothing for text. The preview mirrors the

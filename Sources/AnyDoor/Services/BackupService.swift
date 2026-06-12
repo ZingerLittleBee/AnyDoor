@@ -143,6 +143,7 @@ final class BackupService {
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()
         ScheduledShutdownService.shared.reloadFromDefaults()
+        ClipboardTagStore.shared.reload()
         PanelStore.shared.rebuild()
         PanelStore.shared.rebuildHotkeySnapshots()
     }

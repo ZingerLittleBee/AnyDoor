@@ -55,7 +55,6 @@ final class ClipboardTextWindow {
     /// Steps aside for a modal flow: a read-only preview closes outright; a
     /// live editor gets the dirty-checked close and refuses (returns false)
     /// so the caller should not proceed.
-    @discardableResult
     func yieldToModal() -> Bool {
         if isEditing { requestClose(); return false }
         close()
