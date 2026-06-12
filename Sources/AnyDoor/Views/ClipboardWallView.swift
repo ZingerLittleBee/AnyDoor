@@ -165,6 +165,16 @@ struct ClipboardWallView: View {
             Color.clear.preference(key: TabFramePreferenceKey.self,
                                    value: [cat: proxy.frame(in: .named(Self.tabRowSpace))])
         })
+        // Jiggle while ⌘ is held — the macOS "icons are movable now" signal.
+        // Alternating sign keeps neighbors out of phase; the capsule being
+        // dragged stays level under the pointer.
+        .rotationEffect(.degrees(jiggleAngle(for: cat, jiggling: jiggling)))
+        .animation(jiggling
+                   ? .easeInOut(duration: 0.13).repeatForever(autoreverses: true)
+                   : .easeOut(duration: 0.1),
+                   value: jiggling)
+        // After the rotation on purpose: the badge sits still (anchored to
+        // the layout bounds) while the capsule wiggles underneath it.
         .overlay(alignment: .topTrailing) {
             // Launchpad-style delete badge on custom tags while ⌘-mode is
             // active. Routes into the existing confirm dialog, whose copy
@@ -184,14 +194,6 @@ struct ClipboardWallView: View {
                     .offset(x: 7, y: -7)
             }
         }
-        // Jiggle while ⌘ is held — the macOS "icons are movable now" signal.
-        // Alternating sign per slot keeps neighbors out of phase; the capsule
-        // being dragged stays level under the pointer.
-        .rotationEffect(.degrees(jiggleAngle(for: cat, jiggling: jiggling)))
-        .animation(jiggling
-                   ? .easeInOut(duration: 0.13).repeatForever(autoreverses: true)
-                   : .easeOut(duration: 0.1),
-                   value: jiggling)
         .offset(x: capsuleOffset(cat))
         .scaleEffect(draggedTab == cat ? 1.08 : 1)
         .opacity(draggedTab == cat ? 0.85 : 1)
@@ -211,8 +213,12 @@ struct ClipboardWallView: View {
 
     private func jiggleAngle(for cat: ClipboardWallCategory, jiggling: Bool) -> Double {
         guard jiggling else { return 0 }
-        let index = state.categories.firstIndex(of: cat) ?? 0
-        return index.isMultiple(of: 2) ? 1.8 : -1.8
+        // Phase by a stable per-category value, NOT the current index: a
+        // reorder changes indices mid-jiggle, and flipping a capsule's
+        // rotation target while its repeatForever animation is running makes
+        // the moved tab swing wildly instead of settling.
+        let scalarSum = cat.persistentID.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return scalarSum.isMultiple(of: 2) ? 1.8 : -1.8
     }
 
     /// Named coordinate space of the tab row's scrolled content; capsule
