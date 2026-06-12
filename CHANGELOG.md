@@ -38,15 +38,22 @@ versioning.
   row overflows.
 - Clipboard wall: hold ⌘ to enter a Launchpad-style tab edit mode — the
   category capsules jiggle (neighbors out of phase, the macOS "movable now"
-  signal), custom tags sprout a top-right ✕ badge that opens the existing
-  delete confirmation (which spells out that the category's items are kept,
-  only their cleanup exemption ends), and dragging a capsule reorders the
-  row: the dragged tab lifts (scaled, shadowed) and follows the pointer while
-  the others shift aside live toward the projected drop slot, committing on
-  release. The order persists (and rides settings backup) as a list of stable
+  signal) and gain a dashed outline, custom tags sprout a steady top-right ✕
+  badge that opens the existing delete confirmation (which spells out that
+  the category's items are kept, only their cleanup exemption ends), and
+  dragging a capsule reorders the row: the dragged tab lifts (scaled,
+  shadowed) and follows the pointer while the others shift aside live toward
+  the projected drop slot, committing on release. The wiggle is driven by a
+  phase state scoped to the rotation alone — hanging a repeat-forever
+  `.animation` on the capsule would also capture the drop-slide into the new
+  slot and leave a moved tab oscillating between its old and new positions —
+  and each capsule's swing direction keys off its stable category
+  id, not its current index, so a reorder can't flip a running animation's
+  target. The order persists (and rides settings backup) as a list of stable
   category ids, so deleting a tag drops only its entry while newly created
   tags append at the end. Everything is ⌘-gated, so plain clicks, right-click
-  tab menus, and the row's horizontal scrolling are untouched.
+  tab menus, and the row's horizontal scrolling are untouched; the wall
+  footer hints the mode ("⌘ 按住编辑分类").
 - Clipboard wall: file cards gain a "Reveal in Finder" context-menu item. It
   prefers the file's original path and falls back to the copy stored in the
   history directory when the original is gone.
