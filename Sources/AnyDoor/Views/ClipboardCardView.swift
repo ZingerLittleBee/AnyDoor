@@ -2,7 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// A single clipboard entry rendered as a fixed-size card. Shows the source app
-/// icon, kind label, relative time, a kind-specific preview, and a favorite star.
+/// icon, kind label, relative time, and a kind-specific preview.
 struct ClipboardCardView: View {
     let item: ClipboardHistoryItem
     let isSelected: Bool
@@ -21,7 +21,6 @@ struct ClipboardCardView: View {
             header
             Divider()
             preview.frame(maxWidth: .infinity, maxHeight: .infinity)
-            footer
         }
         .frame(width: 190, height: 190)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -140,7 +139,7 @@ struct ClipboardCardView: View {
                let img = ClipboardThumbnail.image(at: historyDirectory.appendingPathComponent(fileName)) {
                 // Color.clear takes the offered preview frame; the image fills it
                 // as an overlay and is clipped to those bounds, so a large image
-                // can't overflow and cover the header/footer.
+                // can't overflow and cover the header.
                 Color.clear.overlay {
                     Image(nsImage: img).resizable().scaledToFill()
                 }
@@ -181,15 +180,4 @@ struct ClipboardCardView: View {
         UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
     }
 
-    private var footer: some View {
-        HStack {
-            Spacer()
-            Button(action: onToggleFavorite) {
-                Image(systemName: item.isFavorite ? "star.fill" : "star")
-                    .foregroundStyle(item.isFavorite ? .yellow : .secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal, 8).padding(.vertical, 5)
-    }
 }
