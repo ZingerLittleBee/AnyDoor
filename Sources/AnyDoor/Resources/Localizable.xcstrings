@@ -1450,6 +1450,23 @@
         }
       }
     },
+    "clipboard.category.favorites": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Favorites"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "收藏"
+          }
+        }
+      }
+    },
     "clipboard.edit.cancel": {
       "extractionState": "manual",
       "localizations": {

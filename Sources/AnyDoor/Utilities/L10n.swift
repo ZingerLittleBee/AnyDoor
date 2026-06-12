@@ -80,6 +80,7 @@ enum L10n {
         case clipboardActionFavorite = "clipboard.action.favorite"
         case clipboardActionUnfavorite = "clipboard.action.unfavorite"
         case clipboardCategoryAll = "clipboard.category.all"
+        case clipboardCategoryFavorites = "clipboard.category.favorites"
         case clipboardEditCancel = "clipboard.edit.cancel"
         case clipboardEditDiscard = "clipboard.edit.discard"
         case clipboardEditDiscardPrompt = "clipboard.edit.discardPrompt"

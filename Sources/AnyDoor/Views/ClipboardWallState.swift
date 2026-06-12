@@ -1,5 +1,27 @@
 import SwiftUI
 
+/// A clipboard-wall filter tab. `favorites` cuts across kinds (any favorited
+/// entry), so it is its own case rather than a `ClipboardHistoryKind`.
+enum ClipboardWallCategory: Equatable {
+    case all
+    case favorites
+    case kind(ClipboardHistoryKind)
+
+    var titleKey: L10n.Key {
+        switch self {
+        case .all: return .clipboardCategoryAll
+        case .favorites: return .clipboardCategoryFavorites
+        case .kind(let kind): return kind.titleKey
+        }
+    }
+
+    /// The kind to narrow by, nil for the cross-kind tabs (All / Favorites).
+    var kindFilter: ClipboardHistoryKind? {
+        if case .kind(let kind) = self { return kind }
+        return nil
+    }
+}
+
 /// Observable view state for the clipboard wall: the active category tab, the
 /// search query, the rendered items, and the keyboard selection index. The
 /// window controller pushes items in (after querying the store) and reads the
@@ -7,7 +29,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class ClipboardWallState {
-    var category: ClipboardHistoryKind?      // nil == "All"
+    var category: ClipboardWallCategory = .all
     /// The live search filter. Edited through the focusable `WallSearchField`
     /// (a real NSTextField, so an input method editor can compose CJK text) when
     /// in input mode; the controller also clears it on Esc.
@@ -20,10 +42,11 @@ final class ClipboardWallState {
     private(set) var items: [ClipboardHistoryItem] = []
     private(set) var selectedIndex: Int = 0
 
-    /// All category tabs in display order: All, then text/image/file, then the
-    /// four legacy kinds. `nil` is the leading "All" tab.
-    static let categoryOrder: [ClipboardHistoryKind?] = [
-        nil, .text, .image, .file, .screenshot, .color, .ocr, .qrcode,
+    /// All category tabs in display order: All and Favorites, then
+    /// text/image/file, then the four legacy kinds.
+    static let categoryOrder: [ClipboardWallCategory] = [
+        .all, .favorites, .kind(.text), .kind(.image), .kind(.file),
+        .kind(.screenshot), .kind(.color), .kind(.ocr), .kind(.qrcode),
     ]
 
     func setItems(_ newItems: [ClipboardHistoryItem]) {

@@ -32,7 +32,10 @@ struct ClipboardWallView: View {
 
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
-        ClipboardSearch.filter(allItems, category: state.category, query: state.query)
+        ClipboardSearch.filter(allItems,
+                               category: state.category.kindFilter,
+                               favoritesOnly: state.category == .favorites,
+                               query: state.query)
     }
 
     var body: some View {
@@ -64,12 +67,17 @@ struct ClipboardWallView: View {
                 Button {
                     state.category = cat
                 } label: {
-                    LocalizedText(cat?.titleKey ?? .clipboardCategoryAll)
-                        .font(.caption)
-                        .padding(.horizontal, 10).padding(.vertical, 4)
-                        .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
-                                    in: Capsule())
-                        .foregroundStyle(active ? Color.white : Color.primary)
+                    HStack(spacing: 3) {
+                        if cat == .favorites {
+                            Image(systemName: "star.fill").font(.system(size: 8))
+                        }
+                        LocalizedText(cat.titleKey)
+                    }
+                    .font(.caption)
+                    .padding(.horizontal, 10).padding(.vertical, 4)
+                    .background(active ? Color.accentColor : Color.secondary.opacity(0.15),
+                                in: Capsule())
+                    .foregroundStyle(active ? Color.white : Color.primary)
                 }
                 .buttonStyle(.plain)
             }

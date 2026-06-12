@@ -23,10 +23,16 @@ final class ClipboardWallStateTests: XCTestCase {
 
     func testCategoryAndSearchAreHeld() {
         let state = ClipboardWallState()
-        state.category = .image
+        state.category = .kind(.image)
         state.query = "foo"
-        XCTAssertEqual(state.category, .image)
+        XCTAssertEqual(state.category, .kind(.image))
         XCTAssertEqual(state.query, "foo")
+    }
+
+    func testCategoryKindFilter() {
+        XCTAssertNil(ClipboardWallCategory.all.kindFilter)
+        XCTAssertNil(ClipboardWallCategory.favorites.kindFilter)
+        XCTAssertEqual(ClipboardWallCategory.kind(.text).kindFilter, .text)
     }
 
     func testEmptyItemsHasNilSelection() {

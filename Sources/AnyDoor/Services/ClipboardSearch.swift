@@ -13,11 +13,15 @@ import Foundation
 /// - Preserve the input (recency) order; filtering never reorders results.
 enum ClipboardSearch {
 
-    /// Narrow `items` to the given category and query.
+    /// Narrow `items` to the given category, favorite flag, and query.
     static func filter(_ items: [ClipboardHistoryItem],
                        category: ClipboardHistoryKind?,
+                       favoritesOnly: Bool = false,
                        query: String) -> [ClipboardHistoryItem] {
         var rows = items
+        if favoritesOnly {
+            rows = rows.filter(\.isFavorite)
+        }
         if let category {
             let raw = category.rawValue
             rows = rows.filter { $0.kind == raw }

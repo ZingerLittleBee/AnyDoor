@@ -75,6 +75,12 @@ struct ClipboardCardView: View {
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
+            // Passive favorite badge; toggling lives in the context menu.
+            if item.isFavorite {
+                Image(systemName: "star.fill")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.yellow)
+            }
             // Prominent source-app logo (Paste-style), top-right of the card.
             sourceIcon.frame(width: 22, height: 22)
         }

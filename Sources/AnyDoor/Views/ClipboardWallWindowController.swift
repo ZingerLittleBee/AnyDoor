@@ -86,7 +86,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Always open on "All" with no search so a freshly copied item (of any
         // kind) is guaranteed to be visible rather than hidden behind a leftover
         // category tab or search term.
-        state.category = nil
+        state.category = .all
         state.query = ""
         // Open in card-navigation mode (search field unfocused); typing focuses
         // it. Reset here so a prior session's focus state never leaks in.

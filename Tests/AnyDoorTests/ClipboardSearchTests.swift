@@ -160,6 +160,28 @@ final class ClipboardSearchTests: XCTestCase {
         XCTAssertEqual(titles(out), ["a"])
     }
 
+    // MARK: - Favorites narrowing
+
+    func testFavoritesOnlyKeepsFavoritesAcrossKinds() {
+        let t = text("plain")
+        let fav = text("starred")
+        fav.isFavorite = true
+        let favColor = color("#FF8800")
+        favColor.isFavorite = true
+        let out = ClipboardSearch.filter([t, fav, favColor], category: nil,
+                                         favoritesOnly: true, query: "")
+        XCTAssertEqual(titles(out), ["starred", "#FF8800"])
+    }
+
+    func testFavoritesOnlyComposesWithQuery() {
+        let fav = text("starred codex")
+        fav.isFavorite = true
+        let plain = text("codex plain")
+        let out = ClipboardSearch.filter([fav, plain], category: nil,
+                                         favoritesOnly: true, query: "codex")
+        XCTAssertEqual(titles(out), ["starred codex"])
+    }
+
     // MARK: - Order preservation
 
     func testRecencyOrderIsPreserved() {
