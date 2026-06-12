@@ -6,6 +6,42 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard wall: pressing Space on a text-bearing card (text / OCR / QR code)
+  now opens a floating read-only text preview — the "space 预览" hint in the
+  wall footer previously did nothing for text. The preview mirrors the
+  screenshot preview panel (borderless, non-activating, never key, centered at
+  60% of the screen), follows the keyboard selection like Finder Quick Look
+  (arrows and the scroll wheel move cards while the preview content swaps in
+  place; landing on a non-text card closes it), closes on Space / Esc / any
+  outside click, and shows the card's line/character count in its footer.
+  Pressing `E` — or the edit button next to the preview title, which doubles
+  as the shortcut hint — swaps the preview for the editor on the same item.
+  Image, screenshot, and file cards keep system Quick Look; color keeps none.
+- Clipboard wall: cards gain a right-click context menu — Edit (text-bearing
+  kinds only), Copy, Favorite/Unfavorite, and Delete. The menu is a native
+  NSMenu served through NSView's `menu(for:)` from a transparent overlay that
+  claims only right-/control-clicks (taps, double-click paste, and hovers pass
+  through), because SwiftUI's `.contextMenu` bridge flash-resizes item icons
+  when the menu opens on macOS 26. Copy writes the payload back to the
+  pasteboard without pasting or dismissing the wall, suppresses the watcher's
+  self-capture, and confirms with a toast. Edit opens a floating plain-text
+  editor (the hosts module's monospaced, undo-capable `PlainTextEditor`) on a
+  key-capable non-activating panel: ⌘S or the Save button persists the change
+  (whitespace-only content disables Save at both the UI and the store), and
+  Esc / Cancel with unsaved changes shows an in-panel discard confirmation
+  instead of silently dropping the edit — the wall hotkey and switching to
+  another item are guarded the same way, a stray outside click never closes
+  the editor, and a no-change save is skipped so it cannot destroy the item's
+  rich payload. Saving rewrites the card's preview title/subtitle and clears
+  the now-stale rich payload, so pasting the item afterwards produces the
+  edited plain text rather than resurrecting the original rich content, while
+  the item's timestamp is preserved so the card keeps its position. The wall
+  stays open behind both panels: its resign-key handler, outside-click
+  monitor, and scroll-wheel card navigation all exempt them, and scrolling
+  over the panel scrolls its text instead of flipping cards.
+
 ## [2.1.1] - 2026-06-12
 
 ### Fixed
