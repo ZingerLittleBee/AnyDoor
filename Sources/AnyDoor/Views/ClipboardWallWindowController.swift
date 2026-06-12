@@ -331,6 +331,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
               characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
               let field = searchField
         else { return false }
+        // Focus is moving into the search field; a floating preview would now
+        // swallow Space/Esc meant for the query, so drop it (it's stale anyway —
+        // searching is about to change the selection).
+        if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
         window?.makeFirstResponder(field)
         let end = (field.stringValue as NSString).length
         field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
