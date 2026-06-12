@@ -32,6 +32,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// Accumulated scroll delta; selection advances each time it crosses a step.
     private var scrollAccum: CGFloat = 0
     private static let scrollStep: CGFloat = 40
+    /// Height of the wall's top strip (14pt top padding + tab/search row) where
+    /// scrolls belong to the tab row's own horizontal ScrollView, not card
+    /// navigation. Keep in sync with ClipboardWallView's layout.
+    private static let topStripHeight: CGFloat = 48
     private var previewURL: URL?
 
     /// The app that was frontmost when the wall opened. The wall activates
@@ -191,10 +195,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tagID) }
             },
             onNewTag: { [weak self] item in
-                self?.state.tagDialogText = ""
-                self?.state.isSearchFocused = false
-                self?.state.tagDialog = .create(item: item)
+                self?.state.presentTagDialog(.create(item: item))
             },
+            onTagDialogCommit: { [weak self] in self?.commitTagDialog() },
+            onTagDialogCancel: { [weak self] in self?.cancelTagDialog() },
             registerSearchField: { [weak self] field in self?.searchField = field }
         )
         if let modelContainer {
@@ -258,10 +262,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Scrolling over the floating text panel belongs to its text view,
         // not to card navigation.
         if ClipboardTextWindow.shared.owns(event.window) { return false }
-        // The tab row hosts its own horizontal ScrollView; let scrolls over
-        // that strip reach it instead of becoming card navigation.
+        // The top strip (tab row + search field) hosts its own horizontal
+        // ScrollView; let scrolls over that area reach it instead of becoming
+        // card navigation.
         if event.window === window,
-           event.locationInWindow.y > window.contentLayoutRect.maxY - 48 {
+           event.locationInWindow.y > window.contentLayoutRect.maxY - Self.topStripHeight {
             return false
         }
         // Ignore trackpad inertia so flicking doesn't keep advancing after the
@@ -286,6 +291,15 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
         if let consumed = routeToTextWindow(event) { return consumed }
+        // While the tag dialog overlay is up it owns the keyboard: Return
+        // commits, Esc cancels, everything else flows to its text field.
+        if state.tagDialog != nil {
+            switch event.keyCode {
+            case 53: cancelTagDialog(); return true
+            case 36, 76: commitTagDialog(); return true
+            default: return false
+            }
+        }
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit
@@ -416,6 +430,39 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     }
 
     // MARK: - Context-menu actions
+
+    // MARK: - Tag dialog
+
+    /// Commit the in-wall tag dialog. Create assigns the new (or existing
+    /// same-named) tag to the right-clicked item in one step; rename and
+    /// delete go through the registry, and delete additionally sweeps the id
+    /// off all items so they regain prunability.
+    private func commitTagDialog() {
+        guard let dialog = state.tagDialog else { return }
+        switch dialog {
+        case .create(let item):
+            // Empty name → keep the dialog open instead of silently closing.
+            guard let tag = ClipboardTagStore.shared.createTag(name: state.tagDialogText) else { return }
+            // The item may have been deleted or pruned while the dialog was
+            // up; writing to a deleted PersistentModel is undefined.
+            if !item.isDeleted, !item.tagIDs.contains(tag.id) {
+                Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tag.id) }
+            }
+        case .rename(let tagID):
+            let trimmed = state.tagDialogText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            ClipboardTagStore.shared.renameTag(id: tagID, to: trimmed)
+        case .confirmDelete(let tagID):
+            ClipboardTagStore.shared.deleteTag(id: tagID)
+            Task { await ClipboardHistoryStore.shared.removeTagFromAllItems(tagID) }
+        }
+        cancelTagDialog()
+    }
+
+    private func cancelTagDialog() {
+        state.tagDialog = nil
+        state.tagDialogText = ""
+    }
 
     /// "Edit" from a card's context menu: open the floating text editor. The
     /// wall stays open behind it (windowDidResignKey exempts the text panel);

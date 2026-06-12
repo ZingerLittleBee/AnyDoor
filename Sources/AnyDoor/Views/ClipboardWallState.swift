@@ -2,7 +2,7 @@ import SwiftUI
 
 /// A clipboard-wall filter tab. `favorites` and `tag` cut across kinds, so
 /// they are their own cases rather than a `ClipboardHistoryKind`.
-enum ClipboardWallCategory: Equatable, Hashable {
+enum ClipboardWallCategory: Hashable {
     case all
     case favorites
     case kind(ClipboardHistoryKind)
@@ -64,6 +64,14 @@ final class ClipboardWallState {
     var tagDialog: TagDialog?
     /// Backing text for the dialog's name field.
     var tagDialogText: String = ""
+
+    /// One-stop dialog presenter: seeds the name field, releases search focus
+    /// (the overlay owns the keyboard), and raises the dialog.
+    func presentTagDialog(_ dialog: TagDialog, initialText: String = "") {
+        tagDialogText = initialText
+        isSearchFocused = false
+        tagDialog = dialog
+    }
 
     /// Tab display order: All and Favorites, then the user's custom tags in
     /// registry order, then the kind tabs.

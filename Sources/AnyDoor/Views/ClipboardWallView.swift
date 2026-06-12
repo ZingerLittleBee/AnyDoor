@@ -23,6 +23,8 @@ struct ClipboardWallView: View {
     let onDelete: (ClipboardHistoryItem) -> Void
     let onToggleTag: (ClipboardHistoryItem, String) -> Void
     let onNewTag: (ClipboardHistoryItem) -> Void
+    let onTagDialogCommit: () -> Void
+    let onTagDialogCancel: () -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
     /// first responder synchronously. No-op by default for previews/tests.
     var registerSearchField: (NSTextField?) -> Void = { _ in }
@@ -32,6 +34,7 @@ struct ClipboardWallView: View {
     /// disambiguation delay.
     private struct TapRecord { let index: Int; let date: Date }
     @State private var lastTap: TapRecord?
+    @FocusState private var tagFieldFocused: Bool
 
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
@@ -66,6 +69,7 @@ struct ClipboardWallView: View {
         .onChange(of: ClipboardTagStore.shared.tags) { _, newTags in
             state.setCategories(ClipboardWallState.order(tags: newTags))
         }
+        .overlay { if state.tagDialog != nil { tagDialogOverlay } }
     }
 
     private var tabs: some View {
@@ -135,12 +139,11 @@ struct ClipboardWallView: View {
     private func tagTabMenu(tagID: String) -> NSMenu {
         let menu = NSMenu()
         menu.addItem(ClosureMenuItem(title: L(.clipboardTagRename), systemImage: "pencil") {
-            state.tagDialogText = ClipboardTagStore.shared.name(for: tagID) ?? ""
-            state.isSearchFocused = false
-            state.tagDialog = .rename(tagID: tagID)
+            state.presentTagDialog(.rename(tagID: tagID),
+                                   initialText: ClipboardTagStore.shared.name(for: tagID) ?? "")
         })
         menu.addItem(ClosureMenuItem(title: L(.clipboardTagDelete), systemImage: "trash") {
-            state.tagDialog = .confirmDelete(tagID: tagID)
+            state.presentTagDialog(.confirmDelete(tagID: tagID))
         })
         return menu
     }
@@ -216,5 +219,54 @@ struct ClipboardWallView: View {
             state.select(index)
             lastTap = TapRecord(index: index, date: now)
         }
+    }
+
+    /// Create / rename / delete-confirm card. Lives inside the wall window —
+    /// an app-modal NSAlert would steal key status and trip the wall's
+    /// resign-key dismissal.
+    private var tagDialogOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .onTapGesture { onTagDialogCancel() }
+            VStack(spacing: 12) {
+                switch state.tagDialog {
+                case .create:
+                    LocalizedText(.clipboardTagCreateTitle).font(.headline)
+                    tagNameField
+                case .rename:
+                    LocalizedText(.clipboardTagRenameTitle).font(.headline)
+                    tagNameField
+                case .confirmDelete(let tagID):
+                    Text(L(.clipboardTagDeletePrompt, ClipboardTagStore.shared.name(for: tagID) ?? ""))
+                        .font(.callout)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                case nil:
+                    EmptyView()
+                }
+                HStack(spacing: 8) {
+                    Button(action: onTagDialogCancel) { LocalizedText(.clipboardEditCancel) }
+                    Button(action: onTagDialogCommit) {
+                        LocalizedText(isDeleteDialog ? .clipboardActionDelete : .clipboardTagConfirm)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(20)
+            .frame(width: 280)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var isDeleteDialog: Bool {
+        if case .confirmDelete = state.tagDialog { return true }
+        return false
+    }
+
+    private var tagNameField: some View {
+        TextField(L(.clipboardTagNamePlaceholder), text: $state.tagDialogText)
+            .textFieldStyle(.roundedBorder)
+            .focused($tagFieldFocused)
+            .onAppear { tagFieldFocused = true }
     }
 }
