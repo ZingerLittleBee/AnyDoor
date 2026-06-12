@@ -168,11 +168,7 @@ struct ClipboardWallView: View {
         // Jiggle while ⌘ is held — the macOS "icons are movable now" signal.
         // Alternating sign keeps neighbors out of phase; the capsule being
         // dragged stays level under the pointer.
-        .rotationEffect(.degrees(jiggleAngle(for: cat, jiggling: jiggling)))
-        .animation(jiggling
-                   ? .easeInOut(duration: 0.13).repeatForever(autoreverses: true)
-                   : .easeOut(duration: 0.1),
-                   value: jiggling)
+        .modifier(JiggleEffect(active: jiggling, amplitude: jiggleAmplitude(for: cat)))
         // After the rotation on purpose: the badge sits still (anchored to
         // the layout bounds) while the capsule wiggles underneath it.
         .overlay(alignment: .topTrailing) {
@@ -211,12 +207,10 @@ struct ClipboardWallView: View {
         state.isReorderModifierHeld && state.tagDialog == nil
     }
 
-    private func jiggleAngle(for cat: ClipboardWallCategory, jiggling: Bool) -> Double {
-        guard jiggling else { return 0 }
-        // Phase by a stable per-category value, NOT the current index: a
-        // reorder changes indices mid-jiggle, and flipping a capsule's
-        // rotation target while its repeatForever animation is running makes
-        // the moved tab swing wildly instead of settling.
+    /// Swing direction by a stable per-category value, NOT the current index:
+    /// a reorder changes indices mid-jiggle, and flipping a capsule's rotation
+    /// target while its animation is running would kick the moved tab around.
+    private func jiggleAmplitude(for cat: ClipboardWallCategory) -> Double {
         let scalarSum = cat.persistentID.unicodeScalars.reduce(0) { $0 + Int($1.value) }
         return scalarSum.isMultiple(of: 2) ? 1.8 : -1.8
     }
@@ -226,6 +220,36 @@ struct ClipboardWallView: View {
     private static let tabRowSpace = "wallTabRow"
     /// The tab row's HStack spacing; slot-shift math must match the layout.
     private static let tabSpacing: CGFloat = 8
+
+    /// Launchpad-style wiggle driven by a private phase state, so the
+    /// repeating animation is scoped to the rotation alone. Attaching
+    /// `.animation(.repeatForever…, value:)` to the capsule instead would
+    /// capture every animatable change that lands in the same update — at
+    /// drag drop, the moved capsule's slide into its new slot — leaving it
+    /// oscillating between its old and new positions indefinitely.
+    private struct JiggleEffect: ViewModifier {
+        let active: Bool
+        /// Signed degrees; the sign staggers neighboring capsules' phase.
+        let amplitude: Double
+        @State private var phase = false
+
+        func body(content: Content) -> some View {
+            content
+                .rotationEffect(.degrees(phase ? amplitude : 0))
+                .onChange(of: active) { _, on in setPhase(on) }
+                .onAppear { if active { setPhase(true) } }
+        }
+
+        private func setPhase(_ on: Bool) {
+            if on {
+                withAnimation(.easeInOut(duration: 0.13).repeatForever(autoreverses: true)) {
+                    phase = true
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.1)) { phase = false }
+            }
+        }
+    }
 
     private struct TabFramePreferenceKey: PreferenceKey {
         static let defaultValue: [ClipboardWallCategory: CGRect] = [:]
