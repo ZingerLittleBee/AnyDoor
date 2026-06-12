@@ -61,6 +61,11 @@ final class ClipboardHistoryItem {
     var isFavorite: Bool = false
     var filesManifest: Data?
     var isReferenceOnly: Bool = false
+    /// IDs of user-defined categories (`ClipboardTag.id`) this item belongs
+    /// to. Inline default so SwiftData lightweight migration backfills
+    /// existing rows. Non-empty exempts the item from pruning, like
+    /// `isFavorite`.
+    var tagIDs: [String] = []
 
     init(
         id: UUID = UUID(),
@@ -77,7 +82,8 @@ final class ClipboardHistoryItem {
         sourceAppName: String? = nil,
         isFavorite: Bool = false,
         filesManifest: Data? = nil,
-        isReferenceOnly: Bool = false
+        isReferenceOnly: Bool = false,
+        tagIDs: [String] = []
     ) {
         self.id = id
         self.kind = kind.rawValue
@@ -94,6 +100,7 @@ final class ClipboardHistoryItem {
         self.isFavorite = isFavorite
         self.filesManifest = filesManifest
         self.isReferenceOnly = isReferenceOnly
+        self.tagIDs = tagIDs
     }
 
     @Transient var historyKind: ClipboardHistoryKind? {

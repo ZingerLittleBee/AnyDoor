@@ -182,6 +182,28 @@ final class ClipboardSearchTests: XCTestCase {
         XCTAssertEqual(titles(out), ["starred codex"])
     }
 
+    // MARK: - Tag narrowing
+
+    func testTagIDKeepsOnlyItemsCarryingThatTag() {
+        let tagged = text("tagged")
+        tagged.tagIDs = ["t1", "t2"]
+        let other = text("other")
+        other.tagIDs = ["t9"]
+        let plain = text("plain")
+        let out = ClipboardSearch.filter([tagged, other, plain], category: nil,
+                                         tagID: "t1", query: "")
+        XCTAssertEqual(titles(out), ["tagged"])
+    }
+
+    func testTagIDComposesWithQuery() {
+        let match = text("codex tagged")
+        match.tagIDs = ["t1"]
+        let wrongTag = text("codex other")
+        let out = ClipboardSearch.filter([match, wrongTag], category: nil,
+                                         tagID: "t1", query: "codex")
+        XCTAssertEqual(titles(out), ["codex tagged"])
+    }
+
     // MARK: - Order preservation
 
     func testRecencyOrderIsPreserved() {
