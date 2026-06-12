@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-12
+
 ### Added
 
 - Clipboard wall: user-defined categories. Right-click a card → "Add to
