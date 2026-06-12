@@ -1433,6 +1433,23 @@
         }
       }
     },
+    "clipboard.action.revealInFinder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reveal in Finder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在 Finder 中显示"
+          }
+        }
+      }
+    },
     "clipboard.category.all": {
       "extractionState": "manual",
       "localizations": {

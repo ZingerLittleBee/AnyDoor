@@ -19,6 +19,7 @@ struct ClipboardWallView: View {
     /// Context-menu actions, injected by the window controller.
     let onEdit: (ClipboardHistoryItem) -> Void
     let onCopy: (ClipboardHistoryItem) -> Void
+    let onRevealInFinder: (ClipboardHistoryItem) -> Void
     let onDelete: (ClipboardHistoryItem) -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
     /// first responder synchronously. No-op by default for previews/tests.
@@ -113,6 +114,7 @@ struct ClipboardWallView: View {
                             // action visibly applies to it.
                             onEdit: { state.select(index); onEdit(item) },
                             onCopy: { state.select(index); onCopy(item) },
+                            onRevealInFinder: { state.select(index); onRevealInFinder(item) },
                             onDelete: { state.select(index); onDelete(item) }
                         )
                         // Identify by the item's stable id (matching the ForEach

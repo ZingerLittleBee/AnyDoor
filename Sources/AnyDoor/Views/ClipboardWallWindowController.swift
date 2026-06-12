@@ -180,6 +180,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             },
             onEdit: { [weak self] item in self?.beginEdit(item) },
             onCopy: { [weak self] item in self?.copyWithoutPasting(item) },
+            onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
             onDelete: { item in
                 Task { await ClipboardHistoryStore.shared.delete(item) }
             },
@@ -410,6 +411,29 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Suppress the watcher so the re-copy isn't captured as a duplicate.
         watcher?.noteSelfWrite(changeCount: pb.changeCount)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+
+    /// "Reveal in Finder" from a file card's context menu. Prefers each entry's
+    /// original path; falls back to the stored copy when the original is gone.
+    /// Activating Finder resigns the wall's key status and dismisses it, which
+    /// is fine — the user is leaving for Finder anyway.
+    private func revealInFinder(_ item: ClipboardHistoryItem) {
+        let fm = FileManager.default
+        let urls = item.files.compactMap { entry -> URL? in
+            if fm.fileExists(atPath: entry.originalPath) {
+                return URL(fileURLWithPath: entry.originalPath)
+            }
+            if let stored = entry.storedName {
+                let copy = historyDirectory.appendingPathComponent(stored)
+                if fm.fileExists(atPath: copy.path) { return copy }
+            }
+            return nil
+        }
+        guard !urls.isEmpty else {
+            ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
     // MARK: - Quick Look (space)

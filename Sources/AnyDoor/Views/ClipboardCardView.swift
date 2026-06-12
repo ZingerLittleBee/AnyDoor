@@ -14,6 +14,7 @@ struct ClipboardCardView: View {
     /// Context-menu actions; nil hides the matching menu item (previews/tests).
     var onEdit: (() -> Void)? = nil
     var onCopy: (() -> Void)? = nil
+    var onRevealInFinder: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
 
     var body: some View {
@@ -50,6 +51,12 @@ struct ClipboardCardView: View {
         if let onCopy {
             menu.addItem(ClosureMenuItem(
                 title: L(.clipboardActionCopy), systemImage: "doc.on.doc", handler: onCopy
+            ))
+        }
+        if item.historyKind == .file, let onRevealInFinder {
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionRevealInFinder), systemImage: "folder",
+                handler: onRevealInFinder
             ))
         }
         menu.addItem(ClosureMenuItem(
