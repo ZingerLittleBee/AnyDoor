@@ -195,6 +195,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tagID) }
             },
             onNewTag: { [weak self] item in
+                // A floating text preview must not stay over the modal overlay.
+                ClipboardTextWindow.shared.close()
                 self?.state.presentTagDialog(.create(item: item))
             },
             onTagDialogCommit: { [weak self] in self?.commitTagDialog() },
@@ -259,6 +261,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// trackpad swipe flip through the cards. Negative delta advances right.
     private func handleScroll(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        // The selection must not change behind the tag dialog's modal dimmer.
+        if state.tagDialog != nil { return true }
         // Scrolling over the floating text panel belongs to its text view,
         // not to card navigation.
         if ClipboardTextWindow.shared.owns(event.window) { return false }
@@ -290,16 +294,22 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// the event was consumed (a returned event keeps flowing to the field).
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
-        if let consumed = routeToTextWindow(event) { return consumed }
         // While the tag dialog overlay is up it owns the keyboard: Return
         // commits, Esc cancels, everything else flows to its text field.
+        // Checked before routeToTextWindow so a floating preview can't eat
+        // Space / e / Esc while the user types a tag name.
         if state.tagDialog != nil {
             switch event.keyCode {
             case 53: cancelTagDialog(); return true
-            case 36, 76: commitTagDialog(); return true
+            case 36, 76:
+                // Let Return commit an in-flight IME composition instead of
+                // the dialog; the composed text lands in the field first.
+                if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
+                commitTagDialog(); return true
             default: return false
             }
         }
+        if let consumed = routeToTextWindow(event) { return consumed }
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit
@@ -431,39 +441,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     // MARK: - Context-menu actions
 
-    // MARK: - Tag dialog
-
-    /// Commit the in-wall tag dialog. Create assigns the new (or existing
-    /// same-named) tag to the right-clicked item in one step; rename and
-    /// delete go through the registry, and delete additionally sweeps the id
-    /// off all items so they regain prunability.
-    private func commitTagDialog() {
-        guard let dialog = state.tagDialog else { return }
-        switch dialog {
-        case .create(let item):
-            // Empty name → keep the dialog open instead of silently closing.
-            guard let tag = ClipboardTagStore.shared.createTag(name: state.tagDialogText) else { return }
-            // The item may have been deleted or pruned while the dialog was
-            // up; writing to a deleted PersistentModel is undefined.
-            if !item.isDeleted, !item.tagIDs.contains(tag.id) {
-                Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tag.id) }
-            }
-        case .rename(let tagID):
-            let trimmed = state.tagDialogText.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            ClipboardTagStore.shared.renameTag(id: tagID, to: trimmed)
-        case .confirmDelete(let tagID):
-            ClipboardTagStore.shared.deleteTag(id: tagID)
-            Task { await ClipboardHistoryStore.shared.removeTagFromAllItems(tagID) }
-        }
-        cancelTagDialog()
-    }
-
-    private func cancelTagDialog() {
-        state.tagDialog = nil
-        state.tagDialogText = ""
-    }
-
     /// "Edit" from a card's context menu: open the floating text editor. The
     /// wall stays open behind it (windowDidResignKey exempts the text panel);
     /// key status returns to the wall when the editor closes.
@@ -509,6 +486,39 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    // MARK: - Tag dialog
+
+    /// Commit the in-wall tag dialog. Create assigns the new (or existing
+    /// same-named) tag to the right-clicked item in one step; rename and
+    /// delete go through the registry, and delete additionally sweeps the id
+    /// off all items so they regain prunability.
+    private func commitTagDialog() {
+        guard let dialog = state.tagDialog else { return }
+        switch dialog {
+        case .create(let item):
+            // Empty name → keep the dialog open instead of silently closing.
+            guard let tag = ClipboardTagStore.shared.createTag(name: state.tagDialogText) else { return }
+            // The item may have been deleted or pruned while the dialog was
+            // up; writing to a deleted PersistentModel is undefined.
+            if !item.isDeleted, !item.tagIDs.contains(tag.id) {
+                Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tag.id) }
+            }
+        case .rename(let tagID):
+            let trimmed = state.tagDialogText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            ClipboardTagStore.shared.renameTag(id: tagID, to: trimmed)
+        case .confirmDelete(let tagID):
+            ClipboardTagStore.shared.deleteTag(id: tagID)
+            Task { await ClipboardHistoryStore.shared.removeTagFromAllItems(tagID) }
+        }
+        cancelTagDialog()
+    }
+
+    private func cancelTagDialog() {
+        state.tagDialog = nil
+        state.tagDialogText = ""
     }
 
     // MARK: - Quick Look (space)

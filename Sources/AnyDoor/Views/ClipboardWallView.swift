@@ -139,10 +139,13 @@ struct ClipboardWallView: View {
     private func tagTabMenu(tagID: String) -> NSMenu {
         let menu = NSMenu()
         menu.addItem(ClosureMenuItem(title: L(.clipboardTagRename), systemImage: "pencil") {
+            // A floating text preview must not stay over the modal overlay.
+            ClipboardTextWindow.shared.close()
             state.presentTagDialog(.rename(tagID: tagID),
                                    initialText: ClipboardTagStore.shared.name(for: tagID) ?? "")
         })
         menu.addItem(ClosureMenuItem(title: L(.clipboardTagDelete), systemImage: "trash") {
+            ClipboardTextWindow.shared.close()
             state.presentTagDialog(.confirmDelete(tagID: tagID))
         })
         return menu

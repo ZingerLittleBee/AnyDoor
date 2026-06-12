@@ -68,6 +68,9 @@ final class ClipboardWallState {
     /// One-stop dialog presenter: seeds the name field, releases search focus
     /// (the overlay owns the keyboard), and raises the dialog.
     func presentTagDialog(_ dialog: TagDialog, initialText: String = "") {
+        // A right-click tunneling through the dimmer must not swap an open
+        // dialog mid-flight.
+        guard tagDialog == nil else { return }
         tagDialogText = initialText
         isSearchFocused = false
         tagDialog = dialog
