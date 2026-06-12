@@ -195,8 +195,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tagID) }
             },
             onNewTag: { [weak self] item in
-                // A floating text preview must not stay over the modal overlay.
-                ClipboardTextWindow.shared.close()
+                // A floating text preview must not stay over the modal overlay,
+                // but a dirty editor resolves its discard prompt first.
+                guard ClipboardTextWindow.shared.yieldToModal() else { return }
                 self?.state.presentTagDialog(.create(item: item))
             },
             onTagDialogCommit: { [weak self] in self?.commitTagDialog() },

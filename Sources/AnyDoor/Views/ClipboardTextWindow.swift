@@ -52,6 +52,16 @@ final class ClipboardTextWindow {
     /// Esc / Cancel: discard-confirm when dirty, straight close otherwise.
     func requestClose() { model?.requestClose() }
 
+    /// Steps aside for a modal flow: a read-only preview closes outright; a
+    /// live editor gets the dirty-checked close and refuses (returns false)
+    /// so the caller should not proceed.
+    @discardableResult
+    func yieldToModal() -> Bool {
+        if isEditing { requestClose(); return false }
+        close()
+        return true
+    }
+
     /// Save shortcut (the wall's key monitor routes ⌘S here while editing).
     func saveRequested() { model?.saveIfPossible() }
 
