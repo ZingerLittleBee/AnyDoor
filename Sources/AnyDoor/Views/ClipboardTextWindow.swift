@@ -25,6 +25,8 @@ final class ClipboardTextWindow {
     var isPreviewVisible: Bool { isVisible && model?.isEditable == false }
 
     func showPreview(item: ClipboardHistoryItem) {
+        // Never clobber an active edit; the editor closes only explicitly.
+        guard !isEditing else { return }
         // Already previewing: swap the content in place (arrow-key follow).
         if isPreviewVisible, let model {
             model.replace(item: item)
@@ -113,8 +115,9 @@ final class ClipboardTextWindow {
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] event in
             guard let self else { return event }
-            let inside = MainActor.assumeIsolated { event.window === self.panel }
-            if !inside { MainActor.assumeIsolated { self.close() } }
+            MainActor.assumeIsolated {
+                if event.window !== self.panel { self.close() }
+            }
             return event
         }
         let global = NSEvent.addGlobalMonitorForEvents(
