@@ -393,6 +393,20 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         XCTAssertEqual(store.items(for: .text).map(\.text), ["new first line\nsecond line"])
     }
 
+    func testUpdateTextIgnoresWhitespaceOnlyText() async throws {
+        let container = try makeContainer()
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        store.bootstrap(modelContainer: container)
+        let item = ClipboardHistoryItem(kind: .text, text: "keep me", previewTitle: "keep me")
+        container.mainContext.insert(item)
+        try container.mainContext.save()
+
+        await store.updateText(item, newText: "   \n\t")
+
+        XCTAssertEqual(item.text, "keep me")
+        XCTAssertEqual(item.previewTitle, "keep me")
+    }
+
     func testTextBearingKinds() {
         XCTAssertTrue(ClipboardHistoryKind.text.isTextBearing)
         XCTAssertTrue(ClipboardHistoryKind.ocr.isTextBearing)

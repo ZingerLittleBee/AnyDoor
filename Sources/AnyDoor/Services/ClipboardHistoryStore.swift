@@ -304,6 +304,9 @@ final class ClipboardHistoryStore {
     /// otherwise win on paste. `createdAt` is preserved so the card keeps its
     /// position in the wall.
     func updateText(_ item: ClipboardHistoryItem, newText: String) async {
+        // The editor UI disables Save for whitespace-only input; guard here too
+        // so no caller can wipe an entry to an unpasteable empty payload.
+        guard !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         guard let container = modelContainer else { return }
         item.text = newText
         item.previewTitle = Self.previewTitle(for: newText)
