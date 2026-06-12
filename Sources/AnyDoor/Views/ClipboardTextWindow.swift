@@ -24,6 +24,12 @@ final class ClipboardTextWindow {
     var isEditing: Bool { isVisible && model?.isEditable == true }
     var isPreviewVisible: Bool { isVisible && model?.isEditable == false }
 
+    /// Whether `window` is the floating text panel (the wall's scroll monitor
+    /// uses this to leave scroll events over the panel alone).
+    func owns(_ window: NSWindow?) -> Bool {
+        window != nil && window === panel
+    }
+
     func showPreview(item: ClipboardHistoryItem) {
         // Never clobber an active edit; the editor closes only explicitly.
         guard !isEditing else { return }
@@ -57,6 +63,12 @@ final class ClipboardTextWindow {
     }
 
     private func present(item: ClipboardHistoryItem, editable: Bool, onClose: (() -> Void)?) {
+        // An in-progress dirty edit is never silently replaced; surface the
+        // discard confirmation instead and let the user decide.
+        if isEditing, model?.isDirty == true {
+            model?.requestClose()
+            return
+        }
         close()
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let visible = screen.visibleFrame
@@ -196,6 +208,12 @@ final class ClipboardTextPanelModel {
 
     func saveIfPossible() {
         guard isEditable, canSave else { return }
+        // No changes: closing is all the user wants; skipping the store write
+        // also preserves the item's rich payload (saving would clear it).
+        guard isDirty else {
+            onDismiss()
+            return
+        }
         let item = item
         let newText = text
         Task { await ClipboardHistoryStore.shared.updateText(item, newText: newText) }

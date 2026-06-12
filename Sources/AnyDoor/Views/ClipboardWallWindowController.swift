@@ -73,6 +73,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     func toggle() {
         guard !isAnimating else { return }
+        // The wall hotkey while the editor is up steps the editor down first
+        // (dirty-checked) instead of silently tearing the whole stack down.
+        if ClipboardTextWindow.shared.isEditing {
+            ClipboardTextWindow.shared.requestClose()
+            return
+        }
         if window?.isVisible == true { dismiss(restoreFocus: true) } else { show() }
     }
 
@@ -234,6 +240,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// trackpad swipe flip through the cards. Negative delta advances right.
     private func handleScroll(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        // Scrolling over the floating text panel belongs to its text view,
+        // not to card navigation.
+        if ClipboardTextWindow.shared.owns(event.window) { return false }
         // Ignore trackpad inertia so flicking doesn't keep advancing after the
         // fingers lift; only act on the user's active scroll.
         guard event.momentumPhase == [] else { return true }
@@ -242,6 +251,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         scrollAccum += delta
         while scrollAccum <= -Self.scrollStep { state.moveRight(); scrollAccum += Self.scrollStep }
         while scrollAccum >= Self.scrollStep { state.moveLeft(); scrollAccum -= Self.scrollStep }
+        syncTextPreview()
         return true
     }
 
