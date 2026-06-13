@@ -84,4 +84,11 @@ final class TimeZoneConversionTests: XCTestCase {
     func testUnknownPlaceProducesNoRow() {
         XCTAssertTrue(TimeZoneConversion.detect("3pm atlantis", now: Self.now, localZone: Self.utc).isEmpty)
     }
+
+    func testTwoPlaceFormWithoutTimeProducesNoRow() {
+        // Without a time the source zone is meaningless; gating it also stops
+        // "la to ny" / "london to tokyo" from polluting command/app search.
+        XCTAssertTrue(TimeZoneConversion.detect("la to ny", now: Self.now, localZone: Self.utc).isEmpty)
+        XCTAssertTrue(TimeZoneConversion.detect("london to tokyo", now: Self.now, localZone: Self.utc).isEmpty)
+    }
 }

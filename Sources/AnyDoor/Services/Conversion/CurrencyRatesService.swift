@@ -17,6 +17,10 @@ final class CurrencyRatesService {
 
     private var cached: CachedRates?
     private var inFlight = false
+    /// The day we last *attempted* a fetch (success or failure). Backs failed/
+    /// offline fetches off to one try per day, so reopening the palette while
+    /// offline doesn't spawn a fresh ~60s request each time.
+    private var lastAttemptDay: String?
 
     /// The rate table available to the converter, or nil before the first fetch.
     var rateTable: RateTable? { cached?.table }
@@ -34,8 +38,10 @@ final class CurrencyRatesService {
     /// cache is kept. `today` is injectable for deterministic tests.
     func refreshIfStale(today: String = CurrencyRatesService.todayString()) async {
         if cached?.fetchedOn == today { return }
+        if lastAttemptDay == today { return }
         guard !inFlight else { return }
         inFlight = true
+        lastAttemptDay = today
         defer { inFlight = false }
         do {
             let table = try await backend.fetchLatest(base: base)

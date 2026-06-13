@@ -8,6 +8,20 @@ versioning.
 
 ### Added
 
+- Command palette: inline unit, time-zone, and currency conversion. Typing a
+  conversion expression surfaces a Conversion section with the answer on top;
+  Return copies the value with a content-free toast. Units cover length, mass,
+  temperature, data size (decimal and binary), and speed via `"<n> <unit> to/in
+  <unit>"` (e.g. `3 ft to m`, `72 f to c`, `1 gb to mib`). Time zones handle
+  `"<time?> <place>"` and `"<time?> <a> to <b>"` (e.g. `3pm tokyo`, `9am london to
+  tokyo`, `tokyo time`) with a curated city map, a `GMT±H` label, and a day-offset
+  marker when the wall date crosses midnight. Currency converts `"<amount> <code>
+  to <code>"` (plus `$`/`€`/`£` symbols) against a rate table cached from
+  Frankfurter (ECB data, key-free) — fetched at most once per day, used offline
+  from the last cache with an "as of <date>" subtitle. Each converter is a pure,
+  total facade mirroring the calculator; detection requires a recognized
+  unit/currency/place plus a connector or time token, so ordinary command and app
+  search is untouched.
 - Command palette: inline developer tools. Typing a keyword surfaces instant,
   copy-on-Return conversions — `base64` (encode + decode), `url` (percent-encode +
   decode), `md5` / `sha1` / `sha256` hashes — plus two auto-detected tools that need

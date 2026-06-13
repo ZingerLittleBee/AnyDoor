@@ -83,6 +83,21 @@ final class CurrencyRatesServiceTests: XCTestCase {
         XCTAssertEqual(service.rateTable, Self.table)
     }
 
+    @MainActor
+    func testFailedFetchBacksOffSameDay() async {
+        let backend = MockRatesBackend(table: Self.table, error: URLError(.notConnectedToInternet))
+        let service = CurrencyRatesService(backend: backend, defaults: isolatedDefaults(), base: "USD")
+
+        await service.refreshIfStale(today: "2026-06-13")
+        await service.refreshIfStale(today: "2026-06-13")
+        let sameDay = await backend.calls
+        XCTAssertEqual(sameDay, 1, "a same-day retry after a failure must not refetch")
+
+        await service.refreshIfStale(today: "2026-06-14")
+        let nextDay = await backend.calls
+        XCTAssertEqual(nextDay, 2, "a new day should retry")
+    }
+
     private actor MockRatesBackend: RatesBackend {
         private let table: RateTable
         private let error: Error?

@@ -18,8 +18,13 @@ enum CurrencyConversion {
               let targetCode = parseCode(rhs) else { return [] }
         guard let sourceRate = rates.rate(for: sourceCode),
               let targetRate = rates.rate(for: targetCode) else { return [] }
+        // A zero/negative rate (only reachable via a corrupted cache) would divide
+        // to Infinity/NaN; decline rather than copy a nonsense value. Mirrors
+        // CalcEvaluator's `value.isFinite` guard.
+        guard sourceRate > 0, targetRate > 0 else { return [] }
 
         let value = amount * targetRate / sourceRate
+        guard value.isFinite else { return [] }
         let number = Self.format(value)
         return [ConversionResult(
             kind: .currency,
@@ -57,7 +62,10 @@ enum CurrencyConversion {
         }
         str = str.trimmingCharacters(in: .whitespaces)
 
-        let numericPrefix = str.prefix { $0.isNumber || $0 == "." || $0 == "," }
+        let numericPrefix = String(str.prefix { $0.isNumber || $0 == "." || $0 == "," })
+        // Commas are accepted only as US-style thousands grouping; an ambiguous
+        // comma-decimal like "1,5" is rejected rather than silently read as 15.
+        if numericPrefix.contains(",") && !Self.isValidGrouping(numericPrefix) { return nil }
         let amountString = numericPrefix.replacingOccurrences(of: ",", with: "")
         guard let amount = Double(amountString) else { return nil }
         let rest = str.dropFirst(numericPrefix.count).trimmingCharacters(in: .whitespaces)
@@ -75,6 +83,12 @@ enum CurrencyConversion {
         let token = side.trimmingCharacters(in: .whitespaces)
         if let symbol = symbols.first(where: { $0.0 == token }) { return symbol.1 }
         return currencyCode(token)
+    }
+
+    /// True when commas form valid US thousands grouping (e.g. "1,000",
+    /// "12,345,678", "1,000.50") — rejecting "1,5" and "1,00,000".
+    private static func isValidGrouping(_ s: String) -> Bool {
+        s.range(of: #"^\d{1,3}(,\d{3})+(\.\d+)?$"#, options: .regularExpression) != nil
     }
 
     /// A bare 3-letter alphabetic ISO code (uppercased), or nil.

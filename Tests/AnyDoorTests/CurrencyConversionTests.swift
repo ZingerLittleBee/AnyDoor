@@ -66,4 +66,23 @@ final class CurrencyConversionTests: XCTestCase {
     func testMissingAmountProducesNoRow() {
         XCTAssertTrue(CurrencyConversion.detect("usd to eur", rates: Self.table).isEmpty)
     }
+
+    // MARK: - Hardening (review findings)
+
+    func testCommaDecimalInputIsRejected() {
+        // "1,5" is comma-decimal in some locales; the US-grouping parser must not
+        // silently read it as 15. Decline rather than guess.
+        XCTAssertTrue(CurrencyConversion.detect("1,5 usd to eur", rates: Self.table).isEmpty)
+    }
+
+    func testInvalidGroupingIsRejected() {
+        XCTAssertTrue(CurrencyConversion.detect("1,00,000 usd to eur", rates: Self.table).isEmpty)
+    }
+
+    func testZeroRateProducesNoRow() {
+        let zero = RateTable(base: "USD", rates: ["EUR": 0], date: "2026-06-13")
+        // Source rate 0 would divide to Infinity; target rate 0 is nonsense too.
+        XCTAssertTrue(CurrencyConversion.detect("100 eur to usd", rates: zero).isEmpty)
+        XCTAssertTrue(CurrencyConversion.detect("100 usd to eur", rates: zero).isEmpty)
+    }
 }

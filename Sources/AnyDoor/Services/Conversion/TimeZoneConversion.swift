@@ -8,7 +8,8 @@ import Foundation
 ///   zone; the row shows that instant's wall-clock in `<place>`. The single-place
 ///   form requires an explicit time token or a trailing `time` keyword so bare
 ///   city names don't pollute command/app search.
-/// - `<time?> <a> to <b>` — `<time>` is in `<a>`'s zone, shown in `<b>`.
+/// - `<time> <a> to <b>` — `<time>` (required here) is in `<a>`'s zone, shown in
+///   `<b>`. The time is mandatory so a bare `<place> to <place>` doesn't pollute search.
 enum TimeZoneConversion {
     static func detect(_ query: String, now: Date, localZone: TimeZone) -> [ConversionResult] {
         let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -19,8 +20,12 @@ enum TimeZoneConversion {
         let rest = afterTime.trimmingCharacters(in: .whitespaces)
         guard !rest.isEmpty else { return [] }
 
-        // Two-place form when a " to " connector is present.
+        // Two-place form when a " to " connector is present. Requires an explicit
+        // time: without one the source zone is meaningless, and gating it stops
+        // "la to ny" / "london to tokyo" from polluting command/app search (the
+        // same anti-pollution rule the single-place form applies below).
         if let range = rest.range(of: " to ") {
+            guard time != nil else { return [] }
             let sourcePhrase = String(rest[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
             let targetPhrase = String(rest[range.upperBound...]).trimmingCharacters(in: .whitespaces)
             guard let source = resolve(sourcePhrase), let target = resolve(targetPhrase) else { return [] }
