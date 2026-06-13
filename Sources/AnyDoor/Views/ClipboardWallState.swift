@@ -52,6 +52,9 @@ enum ClipboardWallCategory: Hashable {
 @Observable
 final class ClipboardWallState {
     var category: ClipboardWallCategory = .all
+    /// Optional source-app filter. This is deliberately independent from the
+    /// content search query so metadata never creates surprising text matches.
+    var sourceFilterBundleID: String?
     /// The live search filter. Edited through the focusable `WallSearchField`
     /// (a real NSTextField, so an input method editor can compose CJK text) when
     /// in input mode; the controller also clears it on Esc.
@@ -127,6 +130,10 @@ final class ClipboardWallState {
     func moveLeft() { selectedIndex = max(0, selectedIndex - 1) }
     func moveRight() { selectedIndex = min(max(0, items.count - 1), selectedIndex + 1) }
     func select(_ index: Int) { if items.indices.contains(index) { selectedIndex = index } }
+
+    func clearSourceFilter() {
+        sourceFilterBundleID = nil
+    }
 
     /// Cycle the active category tab (Tab / Shift-Tab), wrapping at both ends.
     func selectNextCategory() { stepCategory(by: 1) }

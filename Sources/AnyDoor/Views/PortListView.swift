@@ -50,6 +50,7 @@ struct PortRowView: View {
         .background(rowBackground, in: .rect(cornerRadius: 6))
         .onHover { isHovered = $0 }
         .help(tooltipText)
+        .contextMenu { PortRecordContextMenu(record: record) }
     }
 
     private var rowBackground: Color {
@@ -114,6 +115,38 @@ struct PortRowView: View {
             }
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+struct PortRecordContextMenu: View {
+    let record: PortRecord
+
+    var body: some View {
+        Button {
+            PortActions.copyToPasteboard(String(record.port))
+        } label: {
+            Label(L(.portActionCopyPort), systemImage: "number")
+        }
+        Button {
+            PortActions.copyToPasteboard(String(record.pid))
+        } label: {
+            Label(L(.portActionCopyPID), systemImage: "number")
+        }
+        Button {
+            PortActions.copyToPasteboard(PortActions.commandText(for: record))
+        } label: {
+            Label(L(.portActionCopyCommand), systemImage: "terminal")
+        }
+        Button {
+            PortActions.copyToPasteboard(PortActions.localhostURLString(for: record))
+        } label: {
+            Label(L(.portActionCopyLocalhost), systemImage: "link")
+        }
+        Button {
+            PortActions.openLocalhost(for: record)
+        } label: {
+            Label(L(.portActionOpenLocalhost), systemImage: "safari")
+        }
     }
 }
 

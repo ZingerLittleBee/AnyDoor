@@ -23,6 +23,7 @@ struct ClipboardWallView: View {
     let onDelete: (ClipboardHistoryItem) -> Void
     let onToggleTag: (ClipboardHistoryItem, String) -> Void
     let onNewTag: (ClipboardHistoryItem) -> Void
+    let onIgnoreSource: (ClipboardHistoryItem) -> Void
     let onTagDialogCommit: () -> Void
     let onTagDialogCancel: () -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
@@ -55,7 +56,30 @@ struct ClipboardWallView: View {
                                category: state.category.kindFilter,
                                favoritesOnly: state.category == .favorites,
                                tagID: state.category.tagFilter,
+                               sourceBundleID: state.sourceFilterBundleID,
                                query: state.query)
+    }
+
+    private struct SourceOption: Identifiable, Equatable {
+        let bundleID: String
+        let name: String
+        let count: Int
+
+        var id: String { bundleID }
+    }
+
+    private var sourceOptions: [SourceOption] {
+        let grouped = Dictionary(grouping: allItems.compactMap { item -> (String, String)? in
+            guard let bundleID = item.sourceBundleID else { return nil }
+            return (bundleID, item.sourceAppName ?? bundleID)
+        }, by: \.0)
+
+        return grouped.map { bundleID, rows in
+            SourceOption(bundleID: bundleID, name: rows.first?.1 ?? bundleID, count: rows.count)
+        }
+        .sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -86,6 +110,11 @@ struct ClipboardWallView: View {
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: newTags)))
         }
+        .onChange(of: sourceOptions.map(\.bundleID)) { _, ids in
+            if let selected = state.sourceFilterBundleID, !ids.contains(selected) {
+                state.clearSourceFilter()
+            }
+        }
         .overlay { if state.tagDialog != nil { tagDialogOverlay } }
     }
 
@@ -94,26 +123,27 @@ struct ClipboardWallView: View {
             // Horizontal scroll so many custom tags can't push the search
             // field out of the window.
             ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Self.tabSpacing) {
-                    ForEach(state.categories, id: \.self) { cat in
-                        tabCapsule(cat)
-                            .id(cat)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: Self.tabSpacing) {
+                        ForEach(state.categories, id: \.self) { cat in
+                            tabCapsule(cat)
+                                .id(cat)
+                        }
                     }
+                    .coordinateSpace(name: Self.tabRowSpace)
                 }
-                .coordinateSpace(name: Self.tabRowSpace)
-            }
-            // The lifted (scaled, shadowed) dragged capsule and the ⌘-mode
-            // delete badges poke past the row's tight bounds; don't clip them.
-            .scrollClipDisabled()
-            .onChange(of: state.category) { _, new in
-                withAnimation { proxy.scrollTo(new) }
-            }
-            .onPreferenceChange(TabFramePreferenceKey.self) { frames in
-                MainActor.assumeIsolated { tabFrames = frames }
-            }
+                // The lifted (scaled, shadowed) dragged capsule and the ⌘-mode
+                // delete badges poke past the row's tight bounds; don't clip them.
+                .scrollClipDisabled()
+                .onChange(of: state.category) { _, new in
+                    withAnimation { proxy.scrollTo(new) }
+                }
+                .onPreferenceChange(TabFramePreferenceKey.self) { frames in
+                    MainActor.assumeIsolated { tabFrames = frames }
+                }
             }
             Spacer()
+            sourceFilterMenu
             // A real, focusable field so an IME can compose CJK search text. The
             // controller toggles focus between this field (input mode) and card
             // navigation; see ClipboardWallWindowController.handle(_:).
@@ -126,6 +156,37 @@ struct ClipboardWallView: View {
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
         }
+    }
+
+    private var sourceFilterMenu: some View {
+        Menu {
+            Button {
+                state.clearSourceFilter()
+            } label: {
+                Label(L(.clipboardSourceAll), systemImage: state.sourceFilterBundleID == nil ? "checkmark" : "app")
+            }
+            if !sourceOptions.isEmpty { Divider() }
+            ForEach(sourceOptions) { option in
+                Button {
+                    state.sourceFilterBundleID = option.bundleID
+                } label: {
+                    Label("\(option.name) (\(option.count))",
+                          systemImage: state.sourceFilterBundleID == option.bundleID ? "checkmark" : "app")
+                }
+            }
+        } label: {
+            Label(sourceFilterTitle, systemImage: "app.connected.to.app.below.fill")
+                .lineLimit(1)
+        }
+        .menuStyle(.borderlessButton)
+        .frame(maxWidth: 150)
+        .disabled(sourceOptions.isEmpty)
+        .help(L(.clipboardSourceFilterHelp))
+    }
+
+    private var sourceFilterTitle: String {
+        guard let selected = state.sourceFilterBundleID else { return L(.clipboardSourceAll) }
+        return sourceOptions.first { $0.bundleID == selected }?.name ?? selected
     }
 
     @ViewBuilder
@@ -380,6 +441,7 @@ struct ClipboardWallView: View {
                             onRevealInFinder: { state.select(index); onRevealInFinder(item) },
                             onToggleTag: { state.select(index); onToggleTag(item, $0) },
                             onNewTag: { state.select(index); onNewTag(item) },
+                            onIgnoreSource: { state.select(index); onIgnoreSource(item) },
                             onDelete: { state.select(index); onDelete(item) },
                             menuSuppressed: { state.tagDialog != nil }
                         )

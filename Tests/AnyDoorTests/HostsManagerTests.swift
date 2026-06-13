@@ -31,6 +31,25 @@ final class HostsManagerTests: XCTestCase {
         XCTAssertEqual(mock.writeCount, 0)  // inactive => no write
     }
 
+    func test_duplicateProfileCopiesContentAsInactiveProfileWithoutSystemWrite() throws {
+        let previous = LocalizationManager.shared.preference
+        LocalizationManager.shared.preference = .en
+        defer { LocalizationManager.shared.preference = previous }
+
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock)
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        mgr.profiles[0].isActive = true
+
+        let duplicate = mgr.duplicateProfile(mgr.profiles[0])
+
+        XCTAssertEqual(mgr.profiles.map(\.name), ["Dev", "Dev Copy"])
+        XCTAssertEqual(duplicate?.name, "Dev Copy")
+        XCTAssertEqual(mgr.profiles[1].content, "1.2.3.4 dev")
+        XCTAssertFalse(mgr.profiles[1].isActive)
+        XCTAssertEqual(mock.writeCount, 0)
+    }
+
     func test_activateProfile_composesAndWritesActiveContent() async throws {
         let mock = MockHostsWriter()
         let (mgr, _) = try makeManager(writer: mock)

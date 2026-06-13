@@ -28,6 +28,12 @@ struct HostsEditorView: View {
     @FocusState private var renameFieldFocused: Bool
     @State private var showRestoreConfirm = false
     @State private var showDeleteConfirm = false
+    @State private var applyingProfileIDs: Set<UUID> = []
+
+    init(manager: HostsManager, initialProfileID: UUID? = nil) {
+        self.manager = manager
+        _selection = State(initialValue: initialProfileID.map(Selection.profile) ?? .system)
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -40,8 +46,12 @@ struct HostsEditorView: View {
                         profileRow(profile)
                             .tag(Selection.profile(profile.id))
                             .contextMenu {
+                                profileActivationMenuItem(profile)
                                 Button { beginRename(profile) } label: {
                                     Label("重命名", systemImage: "pencil")
+                                }
+                                Button { duplicate(profile) } label: {
+                                    Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
                                 }
                                 Button(role: .destructive) { delete(profile) } label: {
                                     Label("删除", systemImage: "trash")
@@ -56,7 +66,8 @@ struct HostsEditorView: View {
             // newline rather than toggling.
             .onKeyPress(.return) {
                 guard renamingID == nil, let profile = selectedProfile else { return .ignored }
-                Task { await manager.setActive(profile, !profile.isActive) }
+                guard !applyingProfileIDs.contains(profile.id) else { return .handled }
+                toggleActive(profile)
                 return .handled
             }
             // Delete / Backspace removes the selected profile.
@@ -64,10 +75,6 @@ struct HostsEditorView: View {
             .toolbar {
                 ToolbarItem {
                     Button { addProfile() } label: { Image(systemName: "plus") }
-                }
-                ToolbarItem {
-                    Button { deleteSelected() } label: { Image(systemName: "trash") }
-                        .disabled(selectedProfile == nil)
                 }
             }
         } detail: {
@@ -88,10 +95,18 @@ struct HostsEditorView: View {
 
     @ViewBuilder
     private func profileRow(_ profile: HostProfile) -> some View {
+        let isApplying = applyingProfileIDs.contains(profile.id)
         HStack {
-            Image(systemName: profile.isActive ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(profile.isActive ? .green : .secondary)
-                .onTapGesture { Task { await manager.setActive(profile, !profile.isActive) } }
+            if isApplying {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 16, height: 16)
+            } else {
+                Image(systemName: profile.isActive ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(profile.isActive ? .green : .secondary)
+                    .onTapGesture { toggleActive(profile) }
+                    .frame(width: 16, height: 16)
+            }
             if renamingID == profile.id {
                 TextField("名称", text: $renameText)
                     .textFieldStyle(.plain)
@@ -99,8 +114,24 @@ struct HostsEditorView: View {
                     .onSubmit { commitRename() }
             } else {
                 Text(profile.name)
-                    .onTapGesture(count: 2) { beginRename(profile) }
             }
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func profileActivationMenuItem(_ profile: HostProfile) -> some View {
+        if profile.isActive {
+            Button(role: .destructive) { toggleActive(profile) } label: {
+                Label(L(.hostsProfileDisable), systemImage: "circle")
+            }
+            .disabled(applyingProfileIDs.contains(profile.id))
+        } else {
+            Button { toggleActive(profile) } label: {
+                Label(L(.hostsProfileEnable), systemImage: "checkmark.circle")
+            }
+            .disabled(applyingProfileIDs.contains(profile.id))
         }
     }
 
@@ -114,6 +145,11 @@ struct HostsEditorView: View {
                         await manager.updateProfile(profile, name: profile.name, content: draftContent)
                     }
                     Spacer()
+                    Button {
+                        duplicate(profile)
+                    } label: {
+                        Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
+                    }
                     Button("删除", role: .destructive) { showDeleteConfirm = true }
                         .tint(.red)
                 }
@@ -159,7 +195,8 @@ struct HostsEditorView: View {
     }
 
     /// "编辑" in view mode (enters edit mode) or "保存" in edit mode (runs the
-    /// save action, then returns to view mode).
+    /// save action, then returns to view mode). Cancel discards the draft and
+    /// returns to the current persisted content.
     @ViewBuilder
     private func modeButton(save: @escaping () async -> Void) -> some View {
         if mode == .edit {
@@ -169,9 +206,15 @@ struct HostsEditorView: View {
                     mode = .view
                 }
             }
+            Button("取消", role: .cancel) { cancelEditing() }
         } else {
             Button("编辑") { mode = .edit }
         }
+    }
+
+    private func cancelEditing() {
+        loadDraft()
+        mode = .view
     }
 
     private var selectedProfile: HostProfile? {
@@ -212,6 +255,24 @@ struct HostsEditorView: View {
     private func deleteSelected() {
         guard let profile = selectedProfile else { return }
         delete(profile)
+    }
+
+    private func duplicate(_ profile: HostProfile) {
+        guard let duplicate = manager.duplicateProfile(profile) else { return }
+        selection = .profile(duplicate.id)
+        beginRename(duplicate)
+        loadDraft()
+    }
+
+    private func toggleActive(_ profile: HostProfile) {
+        let id = profile.id
+        guard !applyingProfileIDs.contains(id) else { return }
+        let active = !profile.isActive
+        applyingProfileIDs.insert(id)
+        Task { @MainActor in
+            defer { applyingProfileIDs.remove(id) }
+            await manager.setActive(profile, active)
+        }
     }
 
     private func delete(_ profile: HostProfile) {
