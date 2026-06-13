@@ -130,6 +130,7 @@ private struct PortProcessGroupRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+        .contextMenu { PortRecordContextMenu(record: record) }
     }
 
     private func bindSummary(for record: PortRecord) -> String {
