@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-13
+
 ### Added
 
 - Clipboard history can now ignore items copied from selected source apps.
