@@ -135,6 +135,63 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionCalculator })
     }
 
+    // MARK: - Hosts profile root search (#4)
+
+    @MainActor
+    func testHostProfileSourceMakesStableID() {
+        let id = UUID()
+        XCTAssertEqual(PanelEntry.id(for: .hostProfile(id: id)), "hostProfile:\(id.uuidString)")
+    }
+
+    @MainActor
+    func testProfileNameQueryShowsMatchingHostsProfile() throws {
+        let previousLanguage = LocalizationManager.shared.preference
+        LocalizationManager.shared.preference = .en
+        defer { LocalizationManager.shared.preference = previousLanguage }
+
+        let dev = HostProfile(name: "Dev", isActive: true)
+        let prod = HostProfile(name: "Prod", isActive: false)
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            hostProfilesProvider: { [dev, prod] }
+        )
+        state.query = "Dev"
+
+        XCTAssertEqual(state.filteredSections.first?.titleKey, .commandPaletteSectionHosts)
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertEqual(entry.title, "Dev")
+        XCTAssertEqual(entry.subtitle, "Active")
+        guard case .hostProfile(let id) = entry.source else {
+            return XCTFail("Expected a host profile entry")
+        }
+        XCTAssertEqual(id, dev.id)
+    }
+
+    @MainActor
+    func testInactiveProfileHasNoActiveSubtitle() throws {
+        let prod = HostProfile(name: "Prod", isActive: false)
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            hostProfilesProvider: { [prod] }
+        )
+        state.query = "Prod"
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertNil(entry.subtitle)
+    }
+
+    @MainActor
+    func testEmptyQueryDoesNotShowHostsProfiles() {
+        let dev = HostProfile(name: "Dev", isActive: true)
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            hostProfilesProvider: { [dev] }
+        )
+        XCTAssertTrue(state.filteredSections.isEmpty)
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 

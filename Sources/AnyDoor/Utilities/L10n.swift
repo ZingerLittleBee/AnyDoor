@@ -308,6 +308,8 @@ enum L10n {
         case colorFormatHSL = "colorFormat.hsl"
         case colorFormatSwiftUI = "colorFormat.swiftUI"
         case colorFormatCSS = "colorFormat.css"
+        case commandPaletteSectionHosts = "commandPalette.section.hosts"
+        case commandPaletteHostsActive = "commandPalette.hosts.active"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

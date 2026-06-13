@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .paletteOption: return nil
+            case .builtin, .portRecord, .calcResult, .paletteOption, .hostProfile: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -102,6 +102,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     private func collectSections() -> [CommandPaletteSection] {
         let store = PanelStore.shared
         var sections: [CommandPaletteSection] = []
+
+        // Refresh hosts profiles once at palette open so the root name-search
+        // section reflects the current set without a per-keystroke fetch.
+        HostsManager.shared.reload()
 
         let hasExternalDDC = DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC)
         let commands = store.topLevelEntries.filter { entry in
@@ -317,6 +321,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             // copy path (PickColor / OCR / QRCode / Screenshot).
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
+        case .hostProfile(let id):
+            // Toggle the named profile's activation directly (same as the
+            // drill-in hosts options — no privileged-write confirmation).
+            if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
+                Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
+            }
         case .paletteOption:
             break // handled above
         }

@@ -56,6 +56,28 @@
         }
       }
     },
+    "commandPalette.hosts.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Active" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "已启用" }
+        }
+      }
+    },
+    "commandPalette.section.hosts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Hosts" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "Hosts" }
+        }
+      }
+    },
     "commandPalette.brightness.level": {
       "extractionState": "manual",
       "localizations": {

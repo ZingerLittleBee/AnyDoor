@@ -51,6 +51,7 @@ struct PanelEntry: Identifiable, Hashable {
         case portRecord(PortRecord)                    // Command-palette-only: listening TCP port process
         case calcResult(CalcResult)                    // Command-palette-only: evaluated expression
         case paletteOption(id: String)                 // Command-palette-only: a drilled-in second-level option
+        case hostProfile(id: UUID)                     // Command-palette-only: a hosts profile, toggled by name
     }
 
     let id: String
@@ -73,6 +74,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .portRecord(let record):             return "port:\(record.pid):\(record.port)"
         case .calcResult(let result):             return "calc:\(result.copyText)"
         case .paletteOption(let id):              return "option:\(id)"
+        case .hostProfile(let id):                return "hostProfile:\(id.uuidString)"
         }
     }
 
@@ -88,6 +90,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .portRecord: return title
         case .calcResult(let result): return result.display
         case .paletteOption: return title
+        case .hostProfile: return title
         }
     }
 }

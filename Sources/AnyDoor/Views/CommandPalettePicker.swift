@@ -114,15 +114,20 @@ final class CommandPaletteState {
     let hyperFlags: Int
     private let portInventory: PortInventory
     private var portRefreshTask: Task<Void, Never>?
+    /// Source of the hosts profiles searchable at the root. Injected so the
+    /// hosts section is unit-testable without the HostsManager singleton.
+    private let hostProfilesProvider: () -> [HostProfile]
 
     init(
         sections: [CommandPaletteSection],
         hyperFlags: Int,
-        portInventory: PortInventory = .shared
+        portInventory: PortInventory = .shared,
+        hostProfilesProvider: @escaping () -> [HostProfile] = { HostsManager.shared.profiles }
     ) {
         self.allSections = sections
         self.hyperFlags = hyperFlags
         self.portInventory = portInventory
+        self.hostProfilesProvider = hostProfilesProvider
     }
 
     /// Sections after applying the query filter, with empty sections dropped.
@@ -137,6 +142,9 @@ final class CommandPaletteState {
             }
             return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
         }
+        if let hosts = hostsSection(matching: trimmed) {
+            sections.insert(hosts, at: 0)
+        }
         if let ports = portSection(matching: trimmed) {
             sections.insert(ports, at: 0)
         }
@@ -144,6 +152,36 @@ final class CommandPaletteState {
             sections.insert(calc, at: 0)
         }
         return sections
+    }
+
+    /// Builds a "Hosts" section listing every profile whose name contains the
+    /// query, so a profile is reachable by name from the root. Committing a row
+    /// toggles that profile's activation.
+    private func hostsSection(matching query: String) -> CommandPaletteSection? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let entries = hostProfilesProvider()
+            .filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+            .sorted { $0.displayOrder < $1.displayOrder }
+            .map { Self.hostEntry(for: $0) }
+        guard !entries.isEmpty else { return nil }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionHosts, entries: entries)
+    }
+
+    private static func hostEntry(for profile: HostProfile) -> PanelEntry {
+        PanelEntry(
+            id: PanelEntry.id(for: .hostProfile(id: profile.id)),
+            source: .hostProfile(id: profile.id),
+            displayOrder: profile.displayOrder,
+            isVisible: true,
+            hotkey: nil,
+            title: profile.name,
+            subtitle: profile.isActive ? L(.commandPaletteHostsActive) : nil,
+            symbol: profile.isActive ? "checkmark.circle.fill" : "circle",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
     }
 
     /// Builds a one-row "Calculator" section when `query` is a calc expression.
@@ -684,7 +722,7 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .paletteOption:
+        case .builtin, .portRecord, .calcResult, .paletteOption, .hostProfile:
             return nil
         }
     }
@@ -694,7 +732,7 @@ private struct CommandPaletteRow: View {
     /// result, or the port detail line for a port option).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .paletteOption: return true
+        case .portRecord, .calcResult, .paletteOption, .hostProfile: return true
         default: return false
         }
     }
