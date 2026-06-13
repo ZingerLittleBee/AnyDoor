@@ -328,7 +328,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             // Suppress clipboard-history capture, matching every other internal
             // copy path (Calc / PickColor / OCR / QRCode / Screenshot).
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
-            ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.output)))
+            // Confirm without echoing the value — dev-tool outputs (hashes, multi-line
+            // JSON) are long and unhelpful in a toast.
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
         case .hostProfile(let id):
             // Toggle the named profile's activation directly (same as the
             // drill-in hosts options — no privileged-write confirmation).
