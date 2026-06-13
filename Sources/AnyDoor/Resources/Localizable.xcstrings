@@ -4439,6 +4439,17 @@
         }
       }
     },
+    "commandPalette.section.conversion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Conversion" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "换算" }
+        }
+      }
+    },
     "commandPalette.section.devTools": {
       "extractionState": "manual",
       "localizations": {
@@ -4470,6 +4481,17 @@
             "state": "translated",
             "value": "Base64 编码"
           }
+        }
+      }
+    },
+    "conversion.currency.asOf": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "as of %@" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "汇率截至 %@" }
         }
       }
     },

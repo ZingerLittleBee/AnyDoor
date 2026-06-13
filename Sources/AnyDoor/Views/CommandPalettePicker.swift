@@ -180,17 +180,22 @@ final class CommandPaletteState {
     /// Source of the hosts profiles searchable at the root. Injected so the
     /// hosts section is unit-testable without the HostsManager singleton.
     private let hostProfilesProvider: () -> [HostProfile]
+    /// Source of the currency rate table for inline currency conversion. Injected
+    /// (like `hostProfilesProvider`) so conversion tests stay deterministic.
+    private let currencyRatesProvider: () -> RateTable?
 
     init(
         sections: [CommandPaletteSection],
         hyperFlags: Int,
         portInventory: PortInventory = .shared,
-        hostProfilesProvider: @escaping () -> [HostProfile] = { HostsManager.shared.profiles }
+        hostProfilesProvider: @escaping () -> [HostProfile] = { HostsManager.shared.profiles },
+        currencyRatesProvider: @escaping () -> RateTable? = { CurrencyRatesService.shared.rateTable }
     ) {
         self.allSections = sections
         self.hyperFlags = hyperFlags
         self.portInventory = portInventory
         self.hostProfilesProvider = hostProfilesProvider
+        self.currencyRatesProvider = currencyRatesProvider
     }
 
     /// Sections after applying the query filter, with empty sections dropped.
@@ -212,7 +217,8 @@ final class CommandPaletteState {
             return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
         }
         // Insert special sections at index 0 in reverse priority order, so the
-        // last inserted ends up on top. Final order: calc, ports, hosts, dev tools.
+        // last inserted ends up on top. Final order: calc, conversion, ports,
+        // hosts, dev tools (with the keyword-completion hint above all).
         if let dev = devToolsSection(matching: trimmed) {
             sections.insert(dev, at: 0)
         }
@@ -221,6 +227,9 @@ final class CommandPaletteState {
         }
         if let ports = portSection(matching: trimmed) {
             sections.insert(ports, at: 0)
+        }
+        if let conversion = conversionSection(matching: trimmed) {
+            sections.insert(conversion, at: 0)
         }
         if let calc = calcSection(matching: trimmed) {
             sections.insert(calc, at: 0)
@@ -291,6 +300,44 @@ final class CommandPaletteState {
     private func devToolsSection(matching query: String) -> CommandPaletteSection? {
         let results = DevTools.detect(query: query)
         return results.isEmpty ? nil : makeDevToolsSection(from: results)
+    }
+
+    /// Builds a "Conversion" section from `Conversions.detect` (unit / time-zone /
+    /// currency). Currency rates come from the injected provider; time-zone rows
+    /// use the live clock. Committing a row copies its value.
+    private func conversionSection(matching query: String) -> CommandPaletteSection? {
+        let results = Conversions.detect(
+            query: query,
+            rates: currencyRatesProvider(),
+            now: Date(),
+            localZone: .current
+        )
+        guard !results.isEmpty else { return nil }
+        let entries = results.enumerated().map { index, result in
+            PanelEntry(
+                id: PanelEntry.id(for: .conversion(result)),
+                source: .conversion(result),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: result.display,
+                subtitle: Self.conversionSubtitle(for: result),
+                symbol: result.symbol,
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionConversion, entries: entries)
+    }
+
+    /// The row subtitle for a conversion. Currency wraps its rate date in a
+    /// localized "as of …"; unit / time-zone rows show their plain detail string.
+    static func conversionSubtitle(for result: ConversionResult) -> String {
+        switch result.kind {
+        case .currency: return L(.conversionCurrencyAsOf, result.detail)
+        case .unit, .timeZone: return result.detail
+        }
     }
 
     /// Builds a "Developer Tools" hint section while the query is still a prefix
@@ -950,18 +997,19 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .paletteOption, .hostProfile:
+        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile:
             return nil
         }
     }
 
-    /// Port records, calculator results, dev-tool conversions, host profiles, and
-    /// second-level options render their subtitle (the port detail line, the
-    /// original expression for a calc result, the tool name for a dev-tool row,
+    /// Port records, calculator results, dev-tool conversions, unit/time/currency
+    /// conversions, host profiles, and second-level options render their subtitle
+    /// (the port detail line, the original expression for a calc result, the
+    /// conversion source/rate-date for a conversion row, the tool name for a dev-tool row,
     /// the host profile's entry summary, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .paletteOption, .hostProfile: return true
+        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return true
         default: return false
         }
     }

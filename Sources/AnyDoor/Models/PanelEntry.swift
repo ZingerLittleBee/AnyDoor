@@ -52,6 +52,7 @@ struct PanelEntry: Identifiable, Hashable {
         case calcResult(CalcResult)                    // Command-palette-only: evaluated expression
         case devTool(DevToolResult)                    // Command-palette-only: developer-tool conversion
         case devToolScopeSuggestion(DevToolScope)      // Command-palette-only: keyword-prefix tool hint
+        case conversion(ConversionResult)              // Command-palette-only: unit/time-zone/currency conversion
         case paletteOption(id: String)                 // Command-palette-only: a drilled-in second-level option
         case hostProfile(id: UUID)                     // Command-palette-only: a hosts profile, toggled by name
     }
@@ -77,6 +78,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .calcResult(let result):             return "calc:\(result.copyText)"
         case .devTool(let result):                return "devTool:\(result.toolID):\(result.output)"
         case .devToolScopeSuggestion(let scope):  return "devToolScope:\(scope.rawValue)"
+        case .conversion(let result):             return "conversion:\(result.kind.rawValue):\(result.copyText):\(result.display)"
         case .paletteOption(let id):              return "option:\(id)"
         case .hostProfile(let id):                return "hostProfile:\(id.uuidString)"
         }
@@ -95,6 +97,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .calcResult(let result): return result.display
         case .devTool(let result): return result.output
         case .devToolScopeSuggestion(let scope): return scope.badgeLabel
+        case .conversion(let result): return result.display
         case .paletteOption: return title
         case .hostProfile: return title
         }

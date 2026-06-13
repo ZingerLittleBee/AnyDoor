@@ -333,6 +333,8 @@ enum L10n {
         case devToolTipMD5 = "devTool.tip.md5"
         case devToolTipSHA1 = "devTool.tip.sha1"
         case devToolTipSHA256 = "devTool.tip.sha256"
+        case commandPaletteSectionConversion = "commandPalette.section.conversion"
+        case conversionCurrencyAsOf = "conversion.currency.asOf"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

@@ -382,6 +382,79 @@ final class CommandPaletteTests: XCTestCase {
         }
     }
 
+    // MARK: - Inline conversions
+
+    @MainActor
+    func testUnitConversionSurfacesConversionSection() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        state.query = "3 ft to m"
+
+        let section = try XCTUnwrap(state.filteredSections.first)
+        XCTAssertEqual(section.titleKey, .commandPaletteSectionConversion)
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertEqual(entry.title, "0.9144 m")
+        XCTAssertEqual(entry.subtitle, "3 ft")
+        guard case .conversion(let result) = entry.source else {
+            return XCTFail("Expected a conversion entry")
+        }
+        XCTAssertEqual(result.kind, .unit)
+        XCTAssertEqual(result.copyText, "0.9144")
+    }
+
+    @MainActor
+    func testConversionSourceMakesStableID() {
+        let result = ConversionResult(
+            kind: .unit, value: 0.9144, display: "0.9144 m",
+            copyText: "0.9144", detail: "3 ft", symbol: "ruler"
+        )
+        XCTAssertEqual(PanelEntry.id(for: .conversion(result)), "conversion:unit:0.9144:0.9144 m")
+    }
+
+    @MainActor
+    func testCurrencyConversionUsesInjectedRatesAndLocalizedSubtitle() throws {
+        let previousLanguage = LocalizationManager.shared.preference
+        LocalizationManager.shared.preference = .en
+        defer { LocalizationManager.shared.preference = previousLanguage }
+
+        let table = RateTable(base: "USD", rates: ["EUR": 0.925], date: "2026-06-13")
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            hostProfilesProvider: { [] },
+            currencyRatesProvider: { table }
+        )
+        state.query = "100 usd to eur"
+
+        let entry = try XCTUnwrap(
+            state.filteredSections.first { $0.titleKey == .commandPaletteSectionConversion }?.entries.first
+        )
+        XCTAssertEqual(entry.title, "92.50 EUR")
+        XCTAssertEqual(entry.subtitle, "as of 2026-06-13")
+        guard case .conversion(let result) = entry.source else {
+            return XCTFail("Expected a conversion entry")
+        }
+        XCTAssertEqual(result.copyText, "92.50")
+    }
+
+    @MainActor
+    func testCurrencyConversionAbsentWithoutRates() {
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            hostProfilesProvider: { [] },
+            currencyRatesProvider: { nil }
+        )
+        state.query = "100 usd to eur"
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionConversion })
+    }
+
+    @MainActor
+    func testPlainSearchDoesNotShowConversionSection() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        state.query = "settings"
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionConversion })
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 

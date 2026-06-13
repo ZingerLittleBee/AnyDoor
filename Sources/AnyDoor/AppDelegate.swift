@@ -153,6 +153,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await DisplayBrightnessService.shared.refresh()
         }
 
+        // Warm the currency rate table (at most one network call per day) so the
+        // command palette's inline currency conversion has data on first use.
+        Task { await CurrencyRatesService.shared.refreshIfStale() }
+
         // Wire HotkeyService dispatcher
         HotkeyService.shared.setDispatcher { action in
             PanelStore.shared.dispatch(action)

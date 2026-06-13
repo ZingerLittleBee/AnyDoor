@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .paletteOption, .hostProfile: return nil
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -106,6 +106,11 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         // Refresh hosts profiles once at palette open so the root name-search
         // section reflects the current set without a per-keystroke fetch.
         HostsManager.shared.reload()
+
+        // Kick a currency-rates refresh (at most once per day) so inline currency
+        // conversion has a fresh table. Fire-and-forget; the cached table is used
+        // immediately and updated rows appear as the user keeps typing.
+        Task { await CurrencyRatesService.shared.refreshIfStale() }
 
         let hasExternalDDC = DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC)
         let commands = store.topLevelEntries.filter { entry in
@@ -347,6 +352,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             // Confirm without echoing the value — dev-tool outputs (hashes, multi-line
             // JSON) are long and unhelpful in a toast.
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        case .conversion(let result):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(result.copyText, forType: .string)
+            // Suppress clipboard-history capture, matching every other internal copy path.
+            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
         case .hostProfile(let id):
             // Toggle the named profile's activation directly (same as the
