@@ -96,4 +96,49 @@ final class DevToolsTests: XCTestCase {
         XCTAssertTrue(DevTools.detect(query: "8080").isEmpty)
         XCTAssertTrue(DevTools.detect(query: "42").isEmpty)
     }
+
+    // MARK: - Scope (search-bar badge) evaluation
+
+    func testScopeKeywordParsing() {
+        XCTAssertEqual(DevToolScope(keyword: "base64"), .base64)
+        XCTAssertEqual(DevToolScope(keyword: "SHA256"), .sha256)
+        XCTAssertNil(DevToolScope(keyword: "json"))
+        XCTAssertNil(DevToolScope(keyword: "xyz"))
+    }
+
+    func testScopeBadgeLabels() {
+        XCTAssertEqual(DevToolScope.base64.badgeLabel, "Base64")
+        XCTAssertEqual(DevToolScope.url.badgeLabel, "URL")
+        XCTAssertEqual(DevToolScope.sha1.badgeLabel, "SHA-1")
+        XCTAssertEqual(DevToolScope.sha256.badgeLabel, "SHA-256")
+    }
+
+    func testScopeResultsBase64BothDirections() {
+        let rows = DevTools.results(scope: .base64, body: "aGVsbG8=")
+        XCTAssertEqual(rows.first { $0.toolID == "base64.encode" }?.output, "YUdWc2JHOD0=")
+        XCTAssertEqual(rows.first { $0.toolID == "base64.decode" }?.output, "hello")
+    }
+
+    func testScopeResultsHash() {
+        XCTAssertEqual(
+            DevTools.results(scope: .md5, body: "abc").first?.output,
+            "900150983cd24fb0d6963f7d28e17f72"
+        )
+        XCTAssertEqual(
+            DevTools.results(scope: .sha256, body: "abc").first?.output,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
+    }
+
+    func testScopeResultsURL() {
+        XCTAssertEqual(
+            DevTools.results(scope: .url, body: "a b&c").first { $0.toolID == "url.encode" }?.output,
+            "a%20b%26c"
+        )
+    }
+
+    func testScopeEmptyBodyProducesNoRows() {
+        XCTAssertTrue(DevTools.results(scope: .base64, body: "   ").isEmpty)
+        XCTAssertTrue(DevTools.results(scope: .md5, body: "").isEmpty)
+    }
 }

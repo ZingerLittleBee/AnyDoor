@@ -234,7 +234,17 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 commit(entry)
             }
             return true
-        case 51: // Delete/Backspace: pop the second level only when the query is empty
+        case 48: // Tab: absorb a bare dev-tool keyword into a scope badge.
+            if state.isAtRoot {
+                state.tryAbsorbDevToolScope()
+                return true // swallow Tab either way so focus doesn't jump
+            }
+            return false
+        case 51: // Delete/Backspace: shed the scope badge / pop the second level
+            if state.activeDevToolScope != nil, state.query.isEmpty {
+                state.removeDevToolScope()
+                return true
+            }
             if !state.isAtRoot, state.query.isEmpty {
                 state.popToRoot()
                 return true

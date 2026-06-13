@@ -227,6 +227,103 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionDevTools })
     }
 
+    // MARK: - Dev-tool scope badge
+
+    @MainActor
+    func testSpaceAbsorbsKeywordIntoScope() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "base64 "
+        state.absorbDevToolScopeIfNeeded()
+        XCTAssertEqual(state.activeDevToolScope, .base64)
+        XCTAssertEqual(state.query, "")
+    }
+
+    @MainActor
+    func testPastedKeywordWithBodyAbsorbsAndKeepsBody() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "md5 hello world"
+        state.absorbDevToolScopeIfNeeded()
+        XCTAssertEqual(state.activeDevToolScope, .md5)
+        XCTAssertEqual(state.query, "hello world")
+    }
+
+    @MainActor
+    func testNonKeywordDoesNotAbsorb() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "hello world"
+        state.absorbDevToolScopeIfNeeded()
+        XCTAssertNil(state.activeDevToolScope)
+        XCTAssertEqual(state.query, "hello world")
+    }
+
+    @MainActor
+    func testTabAbsorbsBareKeyword() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "sha256"
+        XCTAssertTrue(state.tryAbsorbDevToolScope())
+        XCTAssertEqual(state.activeDevToolScope, .sha256)
+        XCTAssertEqual(state.query, "")
+    }
+
+    @MainActor
+    func testTabDoesNotAbsorbNonKeyword() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "hello"
+        XCTAssertFalse(state.tryAbsorbDevToolScope())
+        XCTAssertNil(state.activeDevToolScope)
+    }
+
+    @MainActor
+    func testScopeShowsExclusiveDeveloperToolsSection() throws {
+        let app = CommandPaletteSection(
+            titleKey: .commandPaletteSectionApplications,
+            entries: [PanelEntry(
+                id: "x", source: .installedApp(bundleID: "com.x", path: "/x"),
+                displayOrder: 0, isVisible: true, hotkey: nil, title: "Xcode",
+                subtitle: nil, symbol: "app", kind: .action, toggleState: nil, permission: .notRequired
+            )]
+        )
+        let state = CommandPaletteState(sections: [app], hyperFlags: 0)
+        state.query = "base64 "
+        state.absorbDevToolScopeIfNeeded()
+        state.query = "hello"
+
+        let sections = state.filteredSections
+        XCTAssertEqual(sections.map(\.titleKey), [.commandPaletteSectionDevTools])
+        let entry = try XCTUnwrap(sections.first?.entries.first { $0.subtitle == "Base64 Encode" || $0.subtitle == "Base64 编码" })
+        XCTAssertEqual(entry.title, "aGVsbG8=")
+    }
+
+    @MainActor
+    func testRemoveScopeClearsBadgeAndBody() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "url "
+        state.absorbDevToolScopeIfNeeded()
+        state.removeDevToolScope()
+        XCTAssertNil(state.activeDevToolScope)
+        XCTAssertEqual(state.query, "")
+    }
+
+    @MainActor
+    func testEscapeWithScopeAndBodyClearsBodyFirst() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "base64 "
+        state.absorbDevToolScopeIfNeeded()
+        state.query = "abc"
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertEqual(state.activeDevToolScope, .base64)
+        XCTAssertEqual(state.query, "")
+    }
+
+    @MainActor
+    func testEscapeWithScopeAndEmptyBodyRemovesScope() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "base64 "
+        state.absorbDevToolScopeIfNeeded()
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertNil(state.activeDevToolScope)
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 

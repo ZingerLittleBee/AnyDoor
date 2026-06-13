@@ -26,10 +26,29 @@ enum DevTools {
         return rows
     }
 
+    /// Evaluate a single scoped tool against a bare body (no keyword prefix).
+    /// Drives the Raycast-style scope badge: once a keyword is absorbed into a
+    /// badge, only that tool's rows are produced.
+    static func results(scope: DevToolScope, body: String) -> [DevToolResult] {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        switch scope {
+        case .base64: return base64Body(trimmed)
+        case .url: return urlBody(trimmed)
+        case .md5: return hashBody(trimmed, toolID: "hash.md5") { hex(Insecure.MD5.hash(data: $0)) }
+        case .sha1: return hashBody(trimmed, toolID: "hash.sha1") { hex(Insecure.SHA1.hash(data: $0)) }
+        case .sha256: return hashBody(trimmed, toolID: "hash.sha256") { hex(SHA256.hash(data: $0)) }
+        }
+    }
+
     // MARK: - Base64
 
     private static func base64Rows(_ s: String) -> [DevToolResult] {
         guard let body = keywordBody(s, keyword: "base64") else { return [] }
+        return base64Body(body)
+    }
+
+    private static func base64Body(_ body: String) -> [DevToolResult] {
         var rows: [DevToolResult] = []
         if let data = body.data(using: .utf8) {
             rows.append(DevToolResult(toolID: "base64.encode", output: data.base64EncodedString()))
@@ -51,6 +70,10 @@ enum DevTools {
 
     private static func urlRows(_ s: String) -> [DevToolResult] {
         guard let body = keywordBody(s, keyword: "url") else { return [] }
+        return urlBody(body)
+    }
+
+    private static func urlBody(_ body: String) -> [DevToolResult] {
         var rows: [DevToolResult] = []
         if let encoded = body.addingPercentEncoding(withAllowedCharacters: urlUnreserved) {
             rows.append(DevToolResult(toolID: "url.encode", output: encoded))
@@ -86,16 +109,21 @@ enum DevTools {
 
     private static func hashRows(_ s: String) -> [DevToolResult] {
         var rows: [DevToolResult] = []
-        if let body = keywordBody(s, keyword: "md5"), let data = body.data(using: .utf8) {
-            rows.append(DevToolResult(toolID: "hash.md5", output: hex(Insecure.MD5.hash(data: data))))
+        if let body = keywordBody(s, keyword: "md5") {
+            rows += hashBody(body, toolID: "hash.md5") { hex(Insecure.MD5.hash(data: $0)) }
         }
-        if let body = keywordBody(s, keyword: "sha1"), let data = body.data(using: .utf8) {
-            rows.append(DevToolResult(toolID: "hash.sha1", output: hex(Insecure.SHA1.hash(data: data))))
+        if let body = keywordBody(s, keyword: "sha1") {
+            rows += hashBody(body, toolID: "hash.sha1") { hex(Insecure.SHA1.hash(data: $0)) }
         }
-        if let body = keywordBody(s, keyword: "sha256"), let data = body.data(using: .utf8) {
-            rows.append(DevToolResult(toolID: "hash.sha256", output: hex(SHA256.hash(data: data))))
+        if let body = keywordBody(s, keyword: "sha256") {
+            rows += hashBody(body, toolID: "hash.sha256") { hex(SHA256.hash(data: $0)) }
         }
         return rows
+    }
+
+    private static func hashBody(_ body: String, toolID: String, _ digest: (Data) -> String) -> [DevToolResult] {
+        guard let data = body.data(using: .utf8) else { return [] }
+        return [DevToolResult(toolID: toolID, output: digest(data))]
     }
 
     private static func hex<D: Digest>(_ digest: D) -> String {

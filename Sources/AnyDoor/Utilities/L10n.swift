@@ -326,6 +326,7 @@ enum L10n {
         case devToolTimestampLocal = "devTool.timestamp.local"
         case devToolTimestampUTC = "devTool.timestamp.utc"
         case devToolTimestampISO = "devTool.timestamp.iso"
+        case commandPaletteDevToolScopePlaceholder = "commandPalette.devTool.scopePlaceholder"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

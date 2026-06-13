@@ -4660,6 +4660,23 @@
         }
       }
     },
+    "commandPalette.devTool.scopePlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter text to convert"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入要转换的内容"
+          }
+        }
+      }
+    },
     "toast.ocr.noText": {
       "extractionState": "manual",
       "localizations": {

@@ -44,6 +44,7 @@ final class CommandPaletteState {
             )
         }
         level = .options(parentTitle: parentTitle)
+        activeDevToolScope = nil
         query = ""
         selectedIndex = 0
     }
@@ -53,11 +54,51 @@ final class CommandPaletteState {
         level = .root
         optionsByID = [:]
         optionEntries = []
+        activeDevToolScope = nil
         query = ""
         selectedIndex = 0
     }
 
     func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
+
+    // MARK: - Dev-tool scope badge (Raycast-style)
+
+    /// The active dev-tool scope. When set, the search bar shows a badge instead
+    /// of the magnifying glass and the list is exclusive to that tool's rows.
+    private(set) var activeDevToolScope: DevToolScope?
+
+    /// Space trigger: if the query is `<keyword> …`, absorb the keyword into a
+    /// scope badge and keep only the remainder as the body. Re-entrant-safe (it
+    /// no-ops once a scope is active). Call from the query `.onChange`.
+    func absorbDevToolScopeIfNeeded() {
+        guard isAtRoot, activeDevToolScope == nil else { return }
+        guard let spaceIndex = query.firstIndex(where: \.isWhitespace) else { return }
+        let keyword = String(query[query.startIndex..<spaceIndex])
+        guard let scope = DevToolScope(keyword: keyword) else { return }
+        activeDevToolScope = scope
+        query = String(query[query.index(after: spaceIndex)...])
+        selectedIndex = 0
+    }
+
+    /// Tab trigger: when the whole query is exactly a scoped keyword, absorb it.
+    /// Returns whether a scope was absorbed.
+    @discardableResult
+    func tryAbsorbDevToolScope() -> Bool {
+        guard isAtRoot, activeDevToolScope == nil else { return false }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard let scope = DevToolScope(keyword: trimmed) else { return false }
+        activeDevToolScope = scope
+        query = ""
+        selectedIndex = 0
+        return true
+    }
+
+    /// Drop the active scope (Backspace on an empty body, or Esc).
+    func removeDevToolScope() {
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
+    }
 
     // MARK: - Destructive-action confirmation
 
@@ -94,6 +135,11 @@ final class CommandPaletteState {
             // `.onChange(of: query)`, matching popToRoot()/enterOptions().
             selectedIndex = 0
             return .clearedQuery
+        }
+        // Empty body but a dev-tool scope is active: shed the badge first.
+        if activeDevToolScope != nil {
+            removeDevToolScope()
+            return .poppedToRoot
         }
         if isAtRoot { return .dismiss }
         popToRoot()
@@ -133,6 +179,12 @@ final class CommandPaletteState {
     /// Sections after applying the query filter, with empty sections dropped.
     var filteredSections: [CommandPaletteSection] {
         guard isAtRoot else { return [] }
+        // Scope mode: the list is exclusive to the badged tool's rows; no app /
+        // command / port search leaks in. An empty body shows an empty list.
+        if let scope = activeDevToolScope {
+            let results = DevTools.results(scope: scope, body: query)
+            return results.isEmpty ? [] : [makeDevToolsSection(from: results)]
+        }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return allSections }
         var sections = allSections.compactMap { section in
@@ -216,7 +268,12 @@ final class CommandPaletteState {
     /// so the pure `DevTools` core stays free of UI/localization concerns.
     private func devToolsSection(matching query: String) -> CommandPaletteSection? {
         let results = DevTools.detect(query: query)
-        guard !results.isEmpty else { return nil }
+        return results.isEmpty ? nil : makeDevToolsSection(from: results)
+    }
+
+    /// Builds the "Developer Tools" section from already-evaluated results.
+    /// Shared by the auto-detect path (`devToolsSection`) and the scope path.
+    private func makeDevToolsSection(from results: [DevToolResult]) -> CommandPaletteSection {
         let entries = results.enumerated().map { index, result in
             PanelEntry(
                 id: PanelEntry.id(for: .devTool(result)),
@@ -390,6 +447,9 @@ struct CommandPalettePicker: View {
             }
         }
         .onChange(of: state.query) { _, _ in
+            // Space trigger for the dev-tool scope badge (Tab is handled by the
+            // window controller's key monitor). No-ops once a scope is active.
+            state.absorbDevToolScopeIfNeeded()
             state.selectedIndex = 0
             state.refreshPortsIfNeeded()
         }
@@ -481,10 +541,14 @@ struct CommandPalettePicker: View {
 
     private var searchField: some View {
         HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(.secondary)
-            TextField(L(state.isAtRoot ? .commandPaletteSearchPlaceholder : .commandPaletteOptionSearchPlaceholder), text: $state.query)
+            if let scope = state.activeDevToolScope {
+                scopeBadge(scope.badgeLabel)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(.secondary)
+            }
+            TextField(searchFieldPlaceholder, text: $state.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
                 .focused($searchFocused)
@@ -510,6 +574,30 @@ struct CommandPalettePicker: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    /// Placeholder text: prompts for the conversion body while scoped, otherwise
+    /// the usual root / second-level search hint.
+    private var searchFieldPlaceholder: String {
+        if state.activeDevToolScope != nil {
+            return L(.commandPaletteDevToolScopePlaceholder)
+        }
+        return L(state.isAtRoot ? .commandPaletteSearchPlaceholder : .commandPaletteOptionSearchPlaceholder)
+    }
+
+    /// The Raycast-style scope pill shown in place of the magnifying glass once a
+    /// dev-tool keyword has been absorbed.
+    private func scopeBadge(_ label: String) -> some View {
+        Text(label)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.18))
+            )
+            .fixedSize()
     }
 
     private var backHeader: some View {
