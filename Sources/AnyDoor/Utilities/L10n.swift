@@ -311,6 +311,7 @@ enum L10n {
         case commandPaletteSectionHosts = "commandPalette.section.hosts"
         case commandPaletteHostsActive = "commandPalette.hosts.active"
         case builtinMicrophoneMute = "builtin.microphoneMute"
+        case panelAppShortcutEmpty = "panel.appShortcut.empty"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

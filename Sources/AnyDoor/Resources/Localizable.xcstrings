@@ -643,6 +643,17 @@
         }
       }
     },
+    "panel.appShortcut.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Add app shortcuts in Settings" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "在设置中添加应用快捷键" }
+        }
+      }
+    },
     "panel.appShortcut.countSuffix": {
       "extractionState": "manual",
       "localizations": {

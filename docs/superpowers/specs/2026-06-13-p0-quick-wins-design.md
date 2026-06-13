@@ -143,15 +143,19 @@ root surfaces a "Hosts" section whose rows toggle activation on commit.
 
 The launcher infrastructure is already complete (add / delete / per-app hotkey /
 reorder / menu-bar popover with hotkey badges / installed-app search in the
-palette). The genuine low-risk increment: in **Settings → Panel**, each app
-shortcut row shows a subtle "未绑定" hint when no hotkey is bound, so the
-launcher communicates its core affordance (bind a key for instant launch).
+palette).
 
-- `PanelSettingsView` app-shortcut row: when the binding has no hotkey
-  (`keyCode == -1`), show a secondary "未绑定" caption next to the recorder.
-- L10n: `settingsPanelHotkeyUnbound` (en "No hotkey", zh "未绑定").
+**Pivot during implementation:** the originally-planned "unbound hotkey hint" is
+already covered — `HotkeyRecorder` shows a `.hotkeyRecorderPlaceholder` (tertiary)
+and a `.hotkeyRecorderTipUnbound` tooltip when no key is bound. Adding another
+hint would duplicate it. The genuine remaining gap is the **empty state** of the
+menu-bar App Shortcuts popover: with nothing configured it shows only a "(0)"
+header and no guidance.
 
-(Exact placement confirmed against the real view during implementation.)
+- `AppShortcutsPopoverView`: when `visibleEntries.isEmpty`, show a hint row
+  guiding the user to add shortcuts in Settings.
+- L10n: `panelAppShortcutEmpty` (en "Add app shortcuts in Settings",
+  zh "在设置中添加应用快捷键").
 
 ---
 
