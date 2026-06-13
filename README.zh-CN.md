@@ -1,6 +1,12 @@
 # AnyDoor
 
-[English](README.md)
+[English](README.md) | **简体中文**
+
+[![Release](https://img.shields.io/github/v/release/ZingerLittleBee/AnyDoor?style=for-the-badge&cacheSeconds=3600)](https://github.com/ZingerLittleBee/AnyDoor/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ZingerLittleBee/AnyDoor/total?style=for-the-badge&cacheSeconds=3600)](https://github.com/ZingerLittleBee/AnyDoor/releases)
+[![License](https://img.shields.io/github/license/ZingerLittleBee/AnyDoor?style=for-the-badge&cacheSeconds=3600)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS_14+-000000?logo=apple&logoColor=white&style=for-the-badge)](https://www.apple.com/macos)
+[![Built with Swift](https://img.shields.io/badge/built_with-Swift_6.2-F05138?logo=swift&logoColor=white&style=for-the-badge)](https://www.swift.org)
 
 AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把任意键位组合绑定到
 应用切换、系统开关或一次性动作，整个流程不需要离开键盘。

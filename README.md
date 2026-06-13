@@ -1,6 +1,12 @@
 # AnyDoor
 
-[中文](README.zh-CN.md)
+**English** | [简体中文](README.zh-CN.md)
+
+[![Release](https://img.shields.io/github/v/release/ZingerLittleBee/AnyDoor?style=for-the-badge&cacheSeconds=3600)](https://github.com/ZingerLittleBee/AnyDoor/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ZingerLittleBee/AnyDoor/total?style=for-the-badge&cacheSeconds=3600)](https://github.com/ZingerLittleBee/AnyDoor/releases)
+[![License](https://img.shields.io/github/license/ZingerLittleBee/AnyDoor?style=for-the-badge&cacheSeconds=3600)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS_14+-000000?logo=apple&logoColor=white&style=for-the-badge)](https://www.apple.com/macos)
+[![Built with Swift](https://img.shields.io/badge/built_with-Swift_6.2-F05138?logo=swift&logoColor=white&style=for-the-badge)](https://www.swift.org)
 
 A macOS menu bar control center driven by global hotkeys. Bind any key
 combination to launch and toggle apps, flip system settings, or run one-off
