@@ -1,0 +1,98 @@
+import Foundation
+
+/// Pure, total currency converter for the command palette. Converts
+/// `"<amount> <codeA> (to|in) <codeB>"` against an injected `RateTable`. Returns
+/// an empty array when rates are unavailable, a code is unknown, or the query
+/// does not parse. Never throws.
+///
+/// `detail` carries the bare rate date (`"2026-06-13"`); the palette wraps it in
+/// a localized `"as of …"` subtitle, keeping this core free of localization.
+enum CurrencyConversion {
+    static func detect(_ query: String, rates: RateTable?) -> [ConversionResult] {
+        guard let rates else { return [] }
+        let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowered.isEmpty else { return [] }
+
+        guard let (lhs, rhs) = split(lowered) else { return [] }
+        guard let (amount, sourceCode) = parseAmountAndCode(lhs),
+              let targetCode = parseCode(rhs) else { return [] }
+        guard let sourceRate = rates.rate(for: sourceCode),
+              let targetRate = rates.rate(for: targetCode) else { return [] }
+
+        let value = amount * targetRate / sourceRate
+        let number = Self.format(value)
+        return [ConversionResult(
+            kind: .currency,
+            value: value,
+            display: "\(number) \(targetCode)",
+            copyText: number,
+            detail: rates.date,
+            symbol: "dollarsign.circle"
+        )]
+    }
+
+    // MARK: - Parsing
+
+    private static let symbols: [(String, String)] = [("$", "USD"), ("€", "EUR"), ("£", "GBP")]
+
+    /// Splits on the first " to " (preferred) or " in " connector.
+    private static func split(_ s: String) -> (String, String)? {
+        if let range = s.range(of: " to ") {
+            return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
+        }
+        if let range = s.range(of: " in ") {
+            return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
+        }
+        return nil
+    }
+
+    /// Parses an amount with its currency: `"100 usd"`, `"100usd"`, `"$100"`,
+    /// `"100$"`, `"€50"`, `"1,000 usd"`.
+    private static func parseAmountAndCode(_ side: String) -> (Double, String)? {
+        var str = side.trimmingCharacters(in: .whitespaces)
+        var symbolCode: String?
+        for (sym, code) in symbols {
+            if str.hasPrefix(sym) { symbolCode = code; str.removeFirst(); break }
+            if str.hasSuffix(sym) { symbolCode = code; str.removeLast(); break }
+        }
+        str = str.trimmingCharacters(in: .whitespaces)
+
+        let numericPrefix = str.prefix { $0.isNumber || $0 == "." || $0 == "," }
+        let amountString = numericPrefix.replacingOccurrences(of: ",", with: "")
+        guard let amount = Double(amountString) else { return nil }
+        let rest = str.dropFirst(numericPrefix.count).trimmingCharacters(in: .whitespaces)
+
+        if let symbolCode {
+            guard rest.isEmpty else { return nil }
+            return (amount, symbolCode)
+        }
+        guard let code = currencyCode(String(rest)) else { return nil }
+        return (amount, code)
+    }
+
+    /// Parses a target currency from a code or a symbol.
+    private static func parseCode(_ side: String) -> String? {
+        let token = side.trimmingCharacters(in: .whitespaces)
+        if let symbol = symbols.first(where: { $0.0 == token }) { return symbol.1 }
+        return currencyCode(token)
+    }
+
+    /// A bare 3-letter alphabetic ISO code (uppercased), or nil.
+    private static func currencyCode(_ token: String) -> String? {
+        guard token.count == 3, token.allSatisfy(\.isLetter) else { return nil }
+        return token.uppercased()
+    }
+
+    // MARK: - Formatting
+
+    /// Fixed 2 fractional digits, no grouping, "." decimal.
+    static func format(_ value: Double) -> String {
+        let f = NumberFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.numberStyle = .decimal
+        f.usesGroupingSeparator = false
+        f.minimumFractionDigits = 2
+        f.maximumFractionDigits = 2
+        return f.string(from: NSNumber(value: value)) ?? String(value)
+    }
+}
