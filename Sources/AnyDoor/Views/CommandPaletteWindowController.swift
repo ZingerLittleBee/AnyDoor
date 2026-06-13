@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .paletteOption, .hostProfile: return nil
+            case .builtin, .portRecord, .calcResult, .devTool, .paletteOption, .hostProfile: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -321,6 +321,14 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             // copy path (PickColor / OCR / QRCode / Screenshot).
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
+        case .devTool(let result):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(result.output, forType: .string)
+            // Suppress clipboard-history capture, matching every other internal
+            // copy path (Calc / PickColor / OCR / QRCode / Screenshot).
+            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+            ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.output)))
         case .hostProfile(let id):
             // Toggle the named profile's activation directly (same as the
             // drill-in hosts options — no privileged-write confirmation).

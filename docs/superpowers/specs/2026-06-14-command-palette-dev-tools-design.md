@@ -31,7 +31,6 @@ New `Sources/AnyDoor/Services/DevTools/`:
 ```
 struct DevToolResult: Hashable, Sendable {
     let toolID: String      // stable, fine-grained: "base64.encode", "ts.utc", "hash.sha256"
-    let titleKey: L10n.Key  // tool label shown as the row subtitle (localized in the view)
     let output: String      // row title AND clipboard text — the conversion result
 }
 
@@ -39,6 +38,11 @@ enum DevTools {             // pure, total — never throws, never crashes
     static func detect(query: String, now: Date? = nil, timeZone: TimeZone = .current) -> [DevToolResult]
 }
 ```
+
+**As-built note:** `DevToolResult` carries only `toolID` + `output` — no `L10n.Key` —
+so the pure core has zero UI/localization dependency. The view layer maps `toolID` to
+a localized tool-name label via `CommandPaletteRow.devToolLabelKey(_:)` and stores the
+resolved string in the row's `subtitle`.
 
 `detect` runs every converter and concatenates their non-nil rows in a fixed order.
 Empty array ⇒ no section. Each converter is a private pure function; converters live

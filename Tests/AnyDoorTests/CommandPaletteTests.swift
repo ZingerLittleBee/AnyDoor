@@ -192,6 +192,41 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertTrue(state.filteredSections.isEmpty)
     }
 
+    // MARK: - Developer tools root search
+
+    @MainActor
+    func testDevToolSourceMakesStableID() {
+        let result = DevToolResult(toolID: "hash.md5", output: "abc")
+        XCTAssertEqual(PanelEntry.id(for: .devTool(result)), "devTool:hash.md5:abc")
+    }
+
+    @MainActor
+    func testDevToolKeywordShowsDeveloperToolsSection() throws {
+        let previousLanguage = LocalizationManager.shared.preference
+        LocalizationManager.shared.preference = .en
+        defer { LocalizationManager.shared.preference = previousLanguage }
+
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "md5 abc"
+
+        let section = try XCTUnwrap(
+            state.filteredSections.first { $0.titleKey == .commandPaletteSectionDevTools }
+        )
+        let entry = try XCTUnwrap(section.entries.first { $0.subtitle == "MD5" })
+        XCTAssertEqual(entry.title, "900150983cd24fb0d6963f7d28e17f72")
+        guard case .devTool(let result) = entry.source else {
+            return XCTFail("Expected a dev-tool entry")
+        }
+        XCTAssertEqual(result.toolID, "hash.md5")
+    }
+
+    @MainActor
+    func testPlainTextDoesNotShowDeveloperToolsSection() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "hello"
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionDevTools })
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 

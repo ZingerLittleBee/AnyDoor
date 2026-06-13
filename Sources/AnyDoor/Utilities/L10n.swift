@@ -313,6 +313,19 @@ enum L10n {
         case builtinMicrophoneMute = "builtin.microphoneMute"
         case panelAppShortcutEmpty = "panel.appShortcut.empty"
         case toastMicMuteUnsupported = "toast.micMute.unsupported"
+        case commandPaletteSectionDevTools = "commandPalette.section.devTools"
+        case devToolBase64Encode = "devTool.base64.encode"
+        case devToolBase64Decode = "devTool.base64.decode"
+        case devToolURLEncode = "devTool.url.encode"
+        case devToolURLDecode = "devTool.url.decode"
+        case devToolJSONPretty = "devTool.json.pretty"
+        case devToolJSONMinify = "devTool.json.minify"
+        case devToolHashMD5 = "devTool.hash.md5"
+        case devToolHashSHA1 = "devTool.hash.sha1"
+        case devToolHashSHA256 = "devTool.hash.sha256"
+        case devToolTimestampLocal = "devTool.timestamp.local"
+        case devToolTimestampUTC = "devTool.timestamp.utc"
+        case devToolTimestampISO = "devTool.timestamp.iso"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

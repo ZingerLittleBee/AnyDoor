@@ -142,6 +142,11 @@ final class CommandPaletteState {
             }
             return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
         }
+        // Insert special sections at index 0 in reverse priority order, so the
+        // last inserted ends up on top. Final order: calc, ports, hosts, dev tools.
+        if let dev = devToolsSection(matching: trimmed) {
+            sections.insert(dev, at: 0)
+        }
         if let hosts = hostsSection(matching: trimmed) {
             sections.insert(hosts, at: 0)
         }
@@ -203,6 +208,50 @@ final class CommandPaletteState {
             permission: .notRequired
         )
         return CommandPaletteSection(titleKey: .commandPaletteSectionCalculator, entries: [entry])
+    }
+
+    /// Builds a "Developer Tools" section from `DevTools.detect`, one row per
+    /// conversion (Base64 / URL / JSON / hash / timestamp). Committing a row
+    /// copies its output. The tool name is resolved to a localized subtitle here
+    /// so the pure `DevTools` core stays free of UI/localization concerns.
+    private func devToolsSection(matching query: String) -> CommandPaletteSection? {
+        let results = DevTools.detect(query: query)
+        guard !results.isEmpty else { return nil }
+        let entries = results.enumerated().map { index, result in
+            PanelEntry(
+                id: PanelEntry.id(for: .devTool(result)),
+                source: .devTool(result),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: result.output,
+                subtitle: L(Self.devToolLabelKey(result.toolID)),
+                symbol: "hammer",
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
+    }
+
+    /// Maps a `DevToolResult.toolID` to its localized tool-name label key.
+    static func devToolLabelKey(_ toolID: String) -> L10n.Key {
+        switch toolID {
+        case "base64.encode": return .devToolBase64Encode
+        case "base64.decode": return .devToolBase64Decode
+        case "url.encode": return .devToolURLEncode
+        case "url.decode": return .devToolURLDecode
+        case "json.pretty": return .devToolJSONPretty
+        case "json.minify": return .devToolJSONMinify
+        case "hash.md5": return .devToolHashMD5
+        case "hash.sha1": return .devToolHashSHA1
+        case "hash.sha256": return .devToolHashSHA256
+        case "ts.local": return .devToolTimestampLocal
+        case "ts.utc": return .devToolTimestampUTC
+        case "ts.iso": return .devToolTimestampISO
+        default: return .commandPaletteSectionDevTools
+        }
     }
 
     /// Refresh the listening-port inventory when the query looks like a port
@@ -722,17 +771,18 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .paletteOption, .hostProfile:
+        case .builtin, .portRecord, .calcResult, .devTool, .paletteOption, .hostProfile:
             return nil
         }
     }
 
-    /// Port records, calculator results, host profiles, and second-level options
-    /// render their subtitle (the port detail line, the original expression for a
-    /// calc result, the host profile's entry summary, or a port option's detail).
+    /// Port records, calculator results, dev-tool conversions, host profiles, and
+    /// second-level options render their subtitle (the port detail line, the
+    /// original expression for a calc result, the tool name for a dev-tool row,
+    /// the host profile's entry summary, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .paletteOption, .hostProfile: return true
+        case .portRecord, .calcResult, .devTool, .paletteOption, .hostProfile: return true
         default: return false
         }
     }
