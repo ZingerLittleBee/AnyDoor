@@ -46,14 +46,10 @@ struct HostsEditorView: View {
                         profileRow(profile)
                             .tag(Selection.profile(profile.id))
                             .contextMenu {
+                                profileActivationMenuItem(profile)
                                 Button { beginRename(profile) } label: {
                                     Label("重命名", systemImage: "pencil")
                                 }
-                                Button { toggleActive(profile) } label: {
-                                    Label(L(profile.isActive ? .hostsProfileDisable : .hostsProfileEnable),
-                                          systemImage: profile.isActive ? "circle" : "checkmark.circle")
-                                }
-                                .disabled(applyingProfileIDs.contains(profile.id))
                                 Button { duplicate(profile) } label: {
                                     Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
                                 }
@@ -126,6 +122,21 @@ struct HostsEditorView: View {
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func profileActivationMenuItem(_ profile: HostProfile) -> some View {
+        if profile.isActive {
+            Button(role: .destructive) { toggleActive(profile) } label: {
+                Label(L(.hostsProfileDisable), systemImage: "circle")
+            }
+            .disabled(applyingProfileIDs.contains(profile.id))
+        } else {
+            Button { toggleActive(profile) } label: {
+                Label(L(.hostsProfileEnable), systemImage: "checkmark.circle")
+            }
+            .disabled(applyingProfileIDs.contains(profile.id))
+        }
     }
 
     @ViewBuilder

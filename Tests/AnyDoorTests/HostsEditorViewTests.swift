@@ -28,6 +28,18 @@ final class HostsEditorViewTests: XCTestCase {
         XCTAssertTrue(editor.contains(".hostsProfileDisable"), editor)
     }
 
+    func testProfileActivationToggleIsFirstContextMenuItemAndDisableIsDestructive() throws {
+        let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
+        let contextStart = try XCTUnwrap(editor.range(of: ".contextMenu {"))
+        let context = editor[contextStart.lowerBound...]
+
+        XCTAssertLessThan(
+            try XCTUnwrap(context.range(of: "profileActivationMenuItem(profile)")?.lowerBound),
+            try XCTUnwrap(context.range(of: "beginRename(profile)")?.lowerBound)
+        )
+        XCTAssertTrue(editor.contains("Button(role: .destructive) { toggleActive(profile) }"), editor)
+    }
+
     func testActivationShowsLoadingInProfileRowAndUsesSharedTogglePath() throws {
         let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
 
