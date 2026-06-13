@@ -315,6 +315,9 @@ final class CommandPaletteState {
     /// number, so the "Ports" section reflects the live state. Coalesced so a
     /// burst of keystrokes triggers at most one in-flight scan.
     func refreshPortsIfNeeded() {
+        // In dev-tool scope mode the list is exclusive to that tool, so ports can
+        // never surface — skip the scan even if the body looks like a port number.
+        guard activeDevToolScope == nil else { return }
         guard Self.portSearchNeedle(from: query) != nil else { return }
         guard !portInventory.isRefreshing, portRefreshTask == nil else { return }
 

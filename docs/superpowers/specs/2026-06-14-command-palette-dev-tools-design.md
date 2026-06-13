@@ -169,3 +169,63 @@ option parent — no second-level menu in v1).
 2. `feat(palette): surface developer tools section in command palette` (wiring + L10n + commit path)
 
 (Or one combined `feat(palette): add inline developer tools` if the diff stays small.)
+
+---
+
+# Follow-up: Raycast-style scope badge
+
+Date: 2026-06-14
+
+When a user types a scoped dev-tool keyword, the keyword is absorbed into a search-bar
+badge (pill) that replaces the magnifying glass, and the list becomes exclusive to that
+tool's rows — matching Raycast's command-scope interaction.
+
+## Decisions (confirmed with the user)
+
+- **Triggers:** space *and* Tab. Typing `base64 ` (keyword + space), pasting
+  `base64 <body>`, or pressing Tab on a bare keyword all absorb the scope.
+- **Exclusive:** while scoped, only that tool's rows show — no app / command / port
+  search leaks in.
+- **Badge label:** canonical tool name — `Base64` / `URL` / `MD5` / `SHA-1` / `SHA-256`.
+- **Scope set:** only the explicit-keyword tools (`base64 url md5 sha1 sha256`). JSON and
+  timestamp are auto-detected (no keyword) and never badge.
+
+## Core
+
+`DevToolScope` (enum: base64/url/md5/sha1/sha256) with `keyword`, `badgeLabel`, and
+`init?(keyword:)`. `DevTools.results(scope:body:)` evaluates a single tool against a bare
+body, reusing the same body-level converters `detect()` already calls (refactored out so
+both paths share one implementation).
+
+## State (`CommandPaletteState`)
+
+- `private(set) var activeDevToolScope: DevToolScope?`
+- `absorbDevToolScopeIfNeeded()` — space trigger, called from the query `.onChange`;
+  splits on the first whitespace, absorbs when the leading token is a scoped keyword,
+  keeps the remainder as the body. Re-entrant-safe (no-ops once a scope is active).
+- `tryAbsorbDevToolScope() -> Bool` — Tab trigger; absorbs when the whole query is a
+  bare keyword.
+- `removeDevToolScope()` — sheds the badge.
+- `filteredSections` early-returns an exclusive single-tool section when scoped.
+- `handleEscape()` escalates: clear body → shed badge → dismiss.
+- `popToRoot()` / `enterOptions()` clear the scope (it is root-only).
+
+## Wiring
+
+- `searchField` renders `scopeBadge(_:)` in place of the glass when scoped, with a
+  "type to convert" placeholder (`commandPalette.devTool.scopePlaceholder`).
+- The window controller key monitor handles Tab (48 → `tryAbsorbDevToolScope`, swallowed
+  at root so focus doesn't jump) and Backspace (51 → `removeDevToolScope` when the body
+  is empty, before the existing options-level pop).
+
+## Tests
+
+`DevToolsTests`: scope keyword parsing, badge labels, `results(scope:body:)` for each
+family. `CommandPaletteTests`: space/Tab absorb, paste-with-body, non-keyword no-absorb,
+exclusive section, remove, and the two Esc-escalation outcomes.
+
+## Known trade-off
+
+`url` / `md5` etc. are real words; typing one followed by a space enters its scope. This
+is intentional (matches Raycast) and fully recoverable — Backspace on the empty body, or
+Esc, sheds the badge.
