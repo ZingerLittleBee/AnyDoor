@@ -25,8 +25,10 @@ final class ClipboardWallStateTests: XCTestCase {
         let state = ClipboardWallState()
         state.category = .kind(.image)
         state.query = "foo"
+        state.sourceFilterBundleID = "com.apple.Safari"
         XCTAssertEqual(state.category, .kind(.image))
         XCTAssertEqual(state.query, "foo")
+        XCTAssertEqual(state.sourceFilterBundleID, "com.apple.Safari")
     }
 
     func testCategoryCyclingWrapsBothWays() {
@@ -87,5 +89,12 @@ final class ClipboardWallStateTests: XCTestCase {
         state.setItems([])
         XCTAssertNil(state.selectedItem)
         XCTAssertEqual(state.selectedIndex, 0)
+    }
+
+    func testClearingSourceFilterRestoresAllSources() {
+        let state = ClipboardWallState()
+        state.sourceFilterBundleID = "com.apple.Safari"
+        state.clearSourceFilter()
+        XCTAssertNil(state.sourceFilterBundleID)
     }
 }

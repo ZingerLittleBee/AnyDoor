@@ -17,6 +17,7 @@ struct ClipboardCardView: View {
     var onRevealInFinder: (() -> Void)? = nil
     var onToggleTag: ((String) -> Void)? = nil
     var onNewTag: (() -> Void)? = nil
+    var onIgnoreSource: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
     /// When true the context menu returns empty, blocking right-clicks while a
     /// modal overlay (e.g. the tag dialog) is up above the card wall.
@@ -64,6 +65,13 @@ struct ClipboardCardView: View {
             menu.addItem(ClosureMenuItem(
                 title: L(.clipboardActionRevealInFinder), systemImage: "folder",
                 handler: onRevealInFinder
+            ))
+        }
+        if let onIgnoreSource, let bundleID = item.sourceBundleID {
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionIgnoreSource, item.sourceAppName ?? bundleID),
+                systemImage: "nosign",
+                handler: onIgnoreSource
             ))
         }
         menu.addItem(ClosureMenuItem(

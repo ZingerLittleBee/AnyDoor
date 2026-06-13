@@ -204,6 +204,20 @@ final class ClipboardSearchTests: XCTestCase {
         XCTAssertEqual(titles(out), ["codex tagged"])
     }
 
+    func testSourceBundleIDNarrowsIndependentlyFromContentQuery() {
+        let safari = text("same codex text", app: "Safari")
+        safari.sourceBundleID = "com.apple.Safari"
+        let notes = text("same codex text", app: "Notes")
+        notes.sourceBundleID = "com.apple.Notes"
+
+        let out = ClipboardSearch.filter([safari, notes], category: nil,
+                                         sourceBundleID: "com.apple.Safari",
+                                         query: "codex")
+
+        XCTAssertEqual(titles(out), ["same codex text"])
+        XCTAssertEqual(out.first?.sourceBundleID, "com.apple.Safari")
+    }
+
     // MARK: - Order preservation
 
     func testRecencyOrderIsPreserved() {

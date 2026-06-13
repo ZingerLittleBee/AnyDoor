@@ -12,9 +12,11 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case lockScreen
     case emptyTrash
     case screenshot
+    case clearClipboard
     case ocr
     case pickColor
     case clipboardWall
+    case clipboardMonitoring
     case displaySleep
     case systemSleep
     case scheduledShutdown
@@ -63,7 +65,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .appShortcuts, .portManager, .windowLayout, .hostsManager: return .submenu
         case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock, .scheduledShutdown: return .toggle
-        case .lockScreen, .emptyTrash, .screenshot, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
+        case .clipboardMonitoring: return .toggle
+        case .lockScreen, .emptyTrash, .screenshot, .clearClipboard, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
              .restartFinder, .restartDock, .restartMenuBar, .flushDNS, .clipboardWall,
              .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
              .windowTopHalf, .windowBottomHalf,
@@ -88,9 +91,11 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen:        return .builtinLockScreen
         case .emptyTrash:        return .builtinEmptyTrash
         case .screenshot:        return .builtinScreenshot
+        case .clearClipboard:    return .builtinClearClipboard
         case .ocr:               return .builtinOCR
         case .pickColor:         return .builtinPickColor
         case .clipboardWall:     return .builtinClipboardWall
+        case .clipboardMonitoring: return .builtinClipboardMonitoring
         case .displaySleep:      return .builtinDisplaySleep
         case .systemSleep:       return .builtinSystemSleep
         case .scheduledShutdown: return .builtinScheduledShutdown
@@ -139,9 +144,11 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen: return "lock.fill"
         case .emptyTrash: return "trash.fill"
         case .screenshot: return "camera.viewfinder"
+        case .clearClipboard: return "clipboard"
         case .ocr: return "text.viewfinder"
         case .pickColor: return "eyedropper"
         case .clipboardWall: return "doc.on.clipboard"
+        case .clipboardMonitoring: return "clipboard.fill"
         case .displaySleep: return "moon.zzz.fill"
         case .systemSleep: return "powersleep"
         case .scheduledShutdown: return "power"
@@ -191,9 +198,11 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen: return 700
         case .emptyTrash: return 800
         case .screenshot: return 900
+        case .clearClipboard: return 940
         case .ocr: return 950
         case .pickColor: return 975
         case .clipboardWall: return 250
+        case .clipboardMonitoring: return 260
         case .displaySleep: return 1000
         case .systemSleep: return 1100
         case .scheduledShutdown: return 1150

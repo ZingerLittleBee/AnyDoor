@@ -204,6 +204,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 guard ClipboardTextWindow.shared.yieldToModal() else { return }
                 self?.state.presentTagDialog(.create(item: item))
             },
+            onIgnoreSource: { [weak self] item in self?.ignoreSource(item) },
             onTagDialogCommit: { [weak self] in self?.commitTagDialog() },
             onTagDialogCancel: { [weak self] in self?.cancelTagDialog() },
             registerSearchField: { [weak self] field in self?.searchField = field }
@@ -502,6 +503,15 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting(urls)
+    }
+
+    /// "Ignore Source App" from a card's context menu: future captures from
+    /// that app are skipped by ClipboardWatcher. Existing history stays intact.
+    private func ignoreSource(_ item: ClipboardHistoryItem) {
+        guard let bundleID = item.sourceBundleID else { return }
+        ClipboardPreferences.addExcludedBundleID(bundleID)
+        let name = item.sourceAppName ?? bundleID
+        ToastPresenter.shared.show(.success(L(.clipboardToastSourceIgnored, name)))
     }
 
     // MARK: - Tag dialog

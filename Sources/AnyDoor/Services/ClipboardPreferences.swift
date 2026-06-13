@@ -34,7 +34,7 @@ enum ClipboardPreferences {
     // cannot be cached in a static `let` under Swift 6 strict concurrency).
     private static var defaults: UserDefaults { .standard }
 
-    static var monitoringEnabled: Bool { defaults.object(forKey: monitoringKey) as? Bool ?? true }
+    static var monitoringEnabled: Bool { monitoringEnabled(from: defaults) }
     static var copyOnly: Bool { defaults.bool(forKey: copyOnlyKey) }
     static var retention: ClipboardRetention {
         ClipboardRetention(rawValue: defaults.object(forKey: retentionKey) as? Int ?? 30) ?? .thirtyDays
@@ -43,6 +43,14 @@ enum ClipboardPreferences {
 
     static func excludedBundleIDs(from defaults: UserDefaults = .standard) -> [String] {
         defaults.stringArray(forKey: excludedKey) ?? []
+    }
+
+    static func monitoringEnabled(from defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: monitoringKey) as? Bool ?? true
+    }
+
+    static func setMonitoringEnabled(_ enabled: Bool, in defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: monitoringKey)
     }
 
     static func addExcludedBundleID(_ rawBundleID: String, to defaults: UserDefaults = .standard) {

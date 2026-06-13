@@ -18,6 +18,7 @@ enum ClipboardSearch {
                        category: ClipboardHistoryKind?,
                        favoritesOnly: Bool = false,
                        tagID: String? = nil,
+                       sourceBundleID: String? = nil,
                        query: String) -> [ClipboardHistoryItem] {
         var rows = items
         if favoritesOnly {
@@ -29,6 +30,9 @@ enum ClipboardSearch {
         if let category {
             let raw = category.rawValue
             rows = rows.filter { $0.kind == raw }
+        }
+        if let sourceBundleID {
+            rows = rows.filter { $0.sourceBundleID == sourceBundleID }
         }
         let tokens = tokenize(query)
         guard !tokens.isEmpty else { return rows }
