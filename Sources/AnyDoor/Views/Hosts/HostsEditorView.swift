@@ -84,6 +84,7 @@ struct HostsEditorView: View {
         } detail: {
             detail
         }
+        .toolbar(removing: .sidebarToggle)
         .safeAreaInset(edge: .top) { HelperApprovalBanner() }
         // Switching files always returns to the safe read-only view mode.
         .onChange(of: selection) { _, _ in
@@ -199,7 +200,8 @@ struct HostsEditorView: View {
     }
 
     /// "编辑" in view mode (enters edit mode) or "保存" in edit mode (runs the
-    /// save action, then returns to view mode).
+    /// save action, then returns to view mode). Cancel discards the draft and
+    /// returns to the current persisted content.
     @ViewBuilder
     private func modeButton(save: @escaping () async -> Void) -> some View {
         if mode == .edit {
@@ -209,9 +211,15 @@ struct HostsEditorView: View {
                     mode = .view
                 }
             }
+            Button("取消", role: .cancel) { cancelEditing() }
         } else {
             Button("编辑") { mode = .edit }
         }
+    }
+
+    private func cancelEditing() {
+        loadDraft()
+        mode = .view
     }
 
     private var selectedProfile: HostProfile? {

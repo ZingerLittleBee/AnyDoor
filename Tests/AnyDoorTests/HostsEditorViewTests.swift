@@ -40,6 +40,27 @@ final class HostsEditorViewTests: XCTestCase {
         XCTAssertTrue(editor.contains("Button(role: .destructive) { toggleActive(profile) }"), editor)
     }
 
+    func testHostsEditorRemovesAutomaticSidebarToggle() throws {
+        let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
+
+        XCTAssertTrue(editor.contains(".toolbar(removing: .sidebarToggle)"), editor)
+    }
+
+    func testEditModeOffersCancelBesideSaveAndRestoresDraft() throws {
+        let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
+        let modeButtonStart = try XCTUnwrap(editor.range(of: "private func modeButton")?.lowerBound)
+        let selectedProfileStart = try XCTUnwrap(editor.range(of: "private var selectedProfile")?.lowerBound)
+        let modeButton = editor[modeButtonStart..<selectedProfileStart]
+
+        XCTAssertLessThan(
+            try XCTUnwrap(modeButton.range(of: "Button(\"保存\")")?.lowerBound),
+            try XCTUnwrap(modeButton.range(of: "Button(\"取消\", role: .cancel) { cancelEditing() }")?.lowerBound)
+        )
+        XCTAssertTrue(editor.contains("private func cancelEditing()"), editor)
+        XCTAssertTrue(editor.contains("loadDraft()"), editor)
+        XCTAssertTrue(editor.contains("mode = .view"), editor)
+    }
+
     func testActivationShowsLoadingInProfileRowAndUsesSharedTogglePath() throws {
         let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
 
