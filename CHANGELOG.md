@@ -6,8 +6,39 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard history gains two menu-bar panel controls: a Clear Clipboard action
+  that empties the current pasteboard without recording the clear as history, and
+  a Clipboard Monitoring toggle that uses the same setting as General Settings.
+  The clipboard wall can also filter entries by source app and lets a card's
+  source app be added to the ignored-source list directly from the card menu.
+- Port Manager rows now offer a context menu for copying the port, PID, command,
+  or `localhost` URL, and can open the matching `http://localhost:<port>` address
+  directly.
+- Hosts profiles can be duplicated from the editor. Duplicates start inactive,
+  get a collision-safe copy name, are selected immediately, and enter inline
+  rename so the copy can be renamed in place.
+- Hosts profile rows now expose enable/disable in their context menu, with
+  in-row loading feedback while the profile activation write is in progress.
+
+### Changed
+
+- Hosts profile management keeps activation as the first context-menu action,
+  styles the active profile's Disable action as destructive, and keeps duplicate
+  / delete actions in the editor instead of the menu-bar popover.
+- The Hosts editor now shows Cancel next to Save while editing. Cancel discards
+  the draft and returns to the current persisted hosts content.
+
 ### Fixed
 
+- The Hosts editor no longer shows the titlebar overflow `>>` button caused by
+  an extra Delete toolbar item being collapsed into the window toolbar overflow.
+  Deletion remains available from the detail-area Delete button, profile context
+  menu, and Delete / Backspace key handling.
+- Hosts profile row selection no longer competes with double-click rename
+  gestures. Rename stays available from the profile context menu, and rows keep
+  a full-width hit target for reliable selection.
 - Relaunching AnyDoor no longer waits out Sparkle's update cadence before it
   notices a newer version. `SPUStandardUpdaterController(startingUpdater:)` only
   schedules interval-gated background checks (24h here) keyed off the persisted
