@@ -6,6 +6,15 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Settings no longer opens on login auto-launch. The reopen handler now keys on
+  the menu-bar icon: while the icon is visible the user can always open Settings
+  from it, so a reopen never auto-pops Settings. The previous launch-age window
+  was unreliable — under a busy login the reopen Apple Event can arrive seconds
+  after launch and was misread as a user relaunch. Settings still surfaces on a
+  genuine relaunch when the icon is hidden (the recovery path).
+
 ## [2.2.0] - 2026-06-12
 
 ### Added

@@ -295,25 +295,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ///
     /// macOS starts a login item by sending a reopen Apple Event, which also
     /// lands here with `flag == false` on a fresh menu-bar launch — we must NOT
-    /// pop Settings open on every login. `shouldOpenSettingsForReopen` gates on
-    /// process age so only a genuine post-launch relaunch surfaces Settings.
+    /// pop Settings open on every login. `shouldOpenSettingsForReopen` keys on
+    /// the menu-bar icon (a visible icon means the user can always reach
+    /// Settings, so a reopen never needs to open it) so a delayed login reopen
+    /// no longer surfaces Settings on startup.
     @MainActor
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows flag: Bool) -> Bool {
         let elapsed = ProcessInfo.processInfo.systemUptime - launchUptime
-        if Self.shouldOpenSettingsForReopen(hasVisibleWindows: flag, secondsSinceLaunch: elapsed) {
+        if Self.shouldOpenSettingsForReopen(hasVisibleWindows: flag,
+                                            menuBarIconVisible: MenuBarIcon.isVisible,
+                                            secondsSinceLaunch: elapsed) {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         }
         return true
     }
 
-    /// Decides whether a reopen event should surface Settings. A reopen with no
-    /// visible windows that arrives within `reopenSettingsLaunchGrace` of launch
-    /// is the system's login auto-launch and is ignored; a later one is a user
-    /// relaunch (e.g. re-enabling a hidden menu-bar icon) and opens Settings.
+    /// Decides whether a reopen event should surface Settings.
+    ///
+    /// The only reason to auto-open Settings on a reopen is recovery: the
+    /// menu-bar icon is hidden, so the user has no other entry point and
+    /// relaunched (e.g. from Finder) to get back in. When the icon is visible —
+    /// the normal case, including every login auto-launch for most users — the
+    /// user can always open Settings from the icon, so a reopen must never pop
+    /// Settings. This is what keeps Settings closed on login auto-launch
+    /// regardless of how late a busy login session delivers the reopen Apple
+    /// Event (a fixed launch-age window alone was unreliable: under load the
+    /// reopen can arrive seconds after launch and read as a user relaunch).
+    ///
+    /// In the hidden-icon recovery case, `reopenSettingsLaunchGrace` still gates
+    /// out the login auto-launch's own reopen (arriving within the grace) from a
+    /// genuine later relaunch.
     static func shouldOpenSettingsForReopen(hasVisibleWindows: Bool,
+                                            menuBarIconVisible: Bool,
                                             secondsSinceLaunch: TimeInterval) -> Bool {
         guard !hasVisibleWindows else { return false }
+        // Icon visible -> reachable from the menu bar; never auto-pop Settings.
+        guard !menuBarIconVisible else { return false }
+        // Icon hidden: only a genuine post-launch relaunch surfaces Settings.
         return secondsSinceLaunch >= reopenSettingsLaunchGrace
     }
 
