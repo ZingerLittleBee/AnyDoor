@@ -20,6 +20,24 @@ final class HostsEditorViewTests: XCTestCase {
         XCTAssertTrue(editor.contains(".contentShape(Rectangle())"), editor)
     }
 
+    func testProfileContextMenuOffersActivationToggle() throws {
+        let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
+
+        XCTAssertTrue(editor.contains("toggleActive(profile)"), editor)
+        XCTAssertTrue(editor.contains(".hostsProfileEnable"), editor)
+        XCTAssertTrue(editor.contains(".hostsProfileDisable"), editor)
+    }
+
+    func testActivationShowsLoadingInProfileRowAndUsesSharedTogglePath() throws {
+        let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
+
+        XCTAssertTrue(editor.contains("@State private var applyingProfileIDs: Set<UUID> = []"), editor)
+        XCTAssertTrue(editor.contains("ProgressView()"), editor)
+        XCTAssertTrue(editor.contains("applyingProfileIDs.contains(profile.id)"), editor)
+        XCTAssertTrue(editor.contains("private func toggleActive(_ profile: HostProfile)"), editor)
+        XCTAssertEqual(editor.components(separatedBy: "manager.setActive").count - 1, 1, editor)
+    }
+
     private func source(_ path: String) throws -> String {
         let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(path)

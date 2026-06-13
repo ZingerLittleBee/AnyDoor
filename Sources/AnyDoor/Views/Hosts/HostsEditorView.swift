@@ -28,6 +28,7 @@ struct HostsEditorView: View {
     @FocusState private var renameFieldFocused: Bool
     @State private var showRestoreConfirm = false
     @State private var showDeleteConfirm = false
+    @State private var applyingProfileIDs: Set<UUID> = []
 
     init(manager: HostsManager, initialProfileID: UUID? = nil) {
         self.manager = manager
@@ -48,6 +49,11 @@ struct HostsEditorView: View {
                                 Button { beginRename(profile) } label: {
                                     Label("重命名", systemImage: "pencil")
                                 }
+                                Button { toggleActive(profile) } label: {
+                                    Label(L(profile.isActive ? .hostsProfileDisable : .hostsProfileEnable),
+                                          systemImage: profile.isActive ? "circle" : "checkmark.circle")
+                                }
+                                .disabled(applyingProfileIDs.contains(profile.id))
                                 Button { duplicate(profile) } label: {
                                     Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
                                 }
@@ -64,7 +70,8 @@ struct HostsEditorView: View {
             // newline rather than toggling.
             .onKeyPress(.return) {
                 guard renamingID == nil, let profile = selectedProfile else { return .ignored }
-                Task { await manager.setActive(profile, !profile.isActive) }
+                guard !applyingProfileIDs.contains(profile.id) else { return .handled }
+                toggleActive(profile)
                 return .handled
             }
             // Delete / Backspace removes the selected profile.
@@ -96,10 +103,18 @@ struct HostsEditorView: View {
 
     @ViewBuilder
     private func profileRow(_ profile: HostProfile) -> some View {
+        let isApplying = applyingProfileIDs.contains(profile.id)
         HStack {
-            Image(systemName: profile.isActive ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(profile.isActive ? .green : .secondary)
-                .onTapGesture { Task { await manager.setActive(profile, !profile.isActive) } }
+            if isApplying {
+                ProgressView()
+                    .controlSize(.small)
+                    .frame(width: 16, height: 16)
+            } else {
+                Image(systemName: profile.isActive ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(profile.isActive ? .green : .secondary)
+                    .onTapGesture { toggleActive(profile) }
+                    .frame(width: 16, height: 16)
+            }
             if renamingID == profile.id {
                 TextField("名称", text: $renameText)
                     .textFieldStyle(.plain)
@@ -233,6 +248,17 @@ struct HostsEditorView: View {
         selection = .profile(duplicate.id)
         beginRename(duplicate)
         loadDraft()
+    }
+
+    private func toggleActive(_ profile: HostProfile) {
+        let id = profile.id
+        guard !applyingProfileIDs.contains(id) else { return }
+        let active = !profile.isActive
+        applyingProfileIDs.insert(id)
+        Task { @MainActor in
+            defer { applyingProfileIDs.remove(id) }
+            await manager.setActive(profile, active)
+        }
     }
 
     private func delete(_ profile: HostProfile) {

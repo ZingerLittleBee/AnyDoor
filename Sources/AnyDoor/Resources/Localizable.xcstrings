@@ -4782,6 +4782,23 @@
         }
       }
     },
+    "hosts.profile.disable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "禁用"
+          }
+        }
+      }
+    },
     "hosts.profile.duplicate": {
       "extractionState": "manual",
       "localizations": {
@@ -4795,6 +4812,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "复制配置"
+          }
+        }
+      }
+    },
+    "hosts.profile.enable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启用"
           }
         }
       }
