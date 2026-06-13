@@ -148,5 +148,6 @@ The following skills are installed and should be used proactively for relevant t
 - **All content in CLAUDE.md (and other repo-committed documentation) must be written in English.**
 - **All code comments must be written in English.**
 - **All commit messages must be written in English.**
+- **All commit messages must follow Conventional Commits** (`type(scope): summary`, for example `feat(clipboard): ignore history from selected source apps`).
 - **All PR titles and descriptions must be written in English.**
 - UI-facing strings (labels, messages shown to the user) remain in Chinese.
