@@ -294,18 +294,6 @@ h2.sec-h{
   max-width: 640px; line-height: 1.5; text-wrap: pretty;
 }
 .hero-cta{display:flex; gap:14px; margin-top: 34px; align-items:center; flex-wrap:wrap}
-.hero-stars{
-  display:inline-flex; align-items:center; gap:7px;
-  padding: 11px 16px; border-radius: 999px;
-  background: rgba(255,255,255,.05);
-  border: .5px solid var(--color-line-strong);
-  color: var(--color-text); font-size: 13.5px; font-weight: 500;
-  transition: background .15s ease;
-}
-.hero-stars:hover{background: rgba(255,255,255,.1)}
-.hero-stars .star{color: #ffd60a}
-.hero-stars .num{font-weight: 700; font-variant-numeric: tabular-nums}
-.hero-stars .lbl{color: var(--color-text-dim)}
 .hero-meta{display:flex; gap:24px; color:var(--color-text-soft); font-size:12.5px; margin-top: 22px}
 .hero-meta .check{color: var(--color-mac-green); margin-right:5px}
 .feature-pills{display:flex; flex-wrap:wrap; gap:8px; margin-top: 22px}
