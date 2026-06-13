@@ -328,6 +328,11 @@ enum L10n {
         case devToolTimestampISO = "devTool.timestamp.iso"
         case commandPaletteDevToolScopePlaceholder = "commandPalette.devTool.scopePlaceholder"
         case commandPaletteDevToolScopeSuggestionHint = "commandPalette.devTool.scopeSuggestionHint"
+        case devToolTipBase64 = "devTool.tip.base64"
+        case devToolTipURL = "devTool.tip.url"
+        case devToolTipMD5 = "devTool.tip.md5"
+        case devToolTipSHA1 = "devTool.tip.sha1"
+        case devToolTipSHA256 = "devTool.tip.sha256"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

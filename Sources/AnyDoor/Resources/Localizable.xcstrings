@@ -4694,6 +4694,91 @@
         }
       }
     },
+    "devTool.tip.base64": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to Base64-encode, or paste Base64 to decode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本编码为 Base64，或粘贴 Base64 解码"
+          }
+        }
+      }
+    },
+    "devTool.tip.url": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to percent-encode, or paste encoded text to decode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本进行 URL 编码，或粘贴编码内容解码"
+          }
+        }
+      }
+    },
+    "devTool.tip.md5": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to hash with MD5"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本计算 MD5 哈希"
+          }
+        }
+      }
+    },
+    "devTool.tip.sha1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to hash with SHA-1"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本计算 SHA-1 哈希"
+          }
+        }
+      }
+    },
+    "devTool.tip.sha256": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to hash with SHA-256"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本计算 SHA-256 哈希"
+          }
+        }
+      }
+    },
     "toast.ocr.noText": {
       "extractionState": "manual",
       "localizations": {

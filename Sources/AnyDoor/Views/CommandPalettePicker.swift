@@ -462,7 +462,11 @@ struct CommandPalettePicker: View {
             Divider().opacity(0.4)
 
             if state.flatEntries.isEmpty {
-                emptyState
+                if let scope = state.activeDevToolScope {
+                    scopeTips(for: scope)
+                } else {
+                    emptyState
+                }
             } else if state.isAtRoot {
                 entryList
             } else {
@@ -718,6 +722,45 @@ struct CommandPalettePicker: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+    }
+
+    /// Shown in place of the generic empty state while a dev-tool scope is active
+    /// but nothing has been typed yet — a usage hint plus a worked example.
+    private func scopeTips(for scope: DevToolScope) -> some View {
+        let hint = Self.scopeHint(for: scope)
+        return VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "hammer")
+                .font(.system(size: 32, weight: .regular))
+                .foregroundStyle(.tertiary)
+            Text(scope.badgeLabel)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.secondary)
+            LocalizedText(hint.key)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Text(hint.example)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+        .padding(.horizontal, 40)
+    }
+
+    /// A localized one-line usage hint and a worked example for each scope.
+    /// The example is data (not localized); the hint is a catalog key.
+    static func scopeHint(for scope: DevToolScope) -> (key: L10n.Key, example: String) {
+        switch scope {
+        case .base64: return (.devToolTipBase64, "hello → aGVsbG8=")
+        case .url: return (.devToolTipURL, "a b&c → a%20b%26c")
+        case .md5: return (.devToolTipMD5, "abc → 900150983cd24fb0…")
+        case .sha1: return (.devToolTipSHA1, "abc → a9993e364706816a…")
+        case .sha256: return (.devToolTipSHA256, "abc → ba7816bf8f01cfea…")
+        }
     }
 
     private var entryList: some View {

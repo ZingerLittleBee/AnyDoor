@@ -370,6 +370,18 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(state.query, "")
     }
 
+    @MainActor
+    func testScopeTipsResolveForEveryScope() {
+        let previous = LocalizationManager.shared.preference
+        LocalizationManager.shared.preference = .en
+        defer { LocalizationManager.shared.preference = previous }
+        for scope in DevToolScope.allCases {
+            let hint = CommandPalettePicker.scopeHint(for: scope)
+            XCTAssertFalse(hint.example.isEmpty, "\(scope) example is empty")
+            XCTAssertFalse(L(hint.key).isEmpty, "\(scope) hint is not localized")
+        }
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 
