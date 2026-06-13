@@ -236,6 +236,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UpdateService.shared.rebind(to: SparkleUpdaterAdapter(updater: controller.updater))
         updaterController = controller
         updaterBridge = bridge
+
+        // Sparkle's `startingUpdater` only schedules interval-gated checks; it does
+        // not check on every launch. Force a silent check now so a relaunch surfaces
+        // a newer version immediately instead of waiting out the 24h cadence. Per
+        // Sparkle's API contract this is only safe right after starting the updater,
+        // and only when automatic checks are enabled — results flow through the
+        // delegate into `UpdateService.availableVersion` (no extra Sparkle UI).
+        if UpdateService.shared.automaticChecksEnabled {
+            UpdateService.shared.checkForUpdatesInBackground()
+        }
     }
 
     private func shouldStartUpdater() -> Bool {

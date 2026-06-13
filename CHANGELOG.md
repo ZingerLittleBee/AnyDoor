@@ -6,6 +6,21 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Relaunching AnyDoor no longer waits out Sparkle's update cadence before it
+  notices a newer version. `SPUStandardUpdaterController(startingUpdater:)` only
+  schedules interval-gated background checks (24h here) keyed off the persisted
+  last-check time, and the app never triggered a check itself — so a version
+  published between the last scheduled check and the next one stayed invisible
+  across relaunches. `bootstrapUpdater()` now forces a single silent
+  `checkForUpdatesInBackground()` right after starting the updater (guarded on
+  automatic checks being enabled, the only point Sparkle's API sanctions a manual
+  background check), so a relaunch surfaces a newer version immediately. Results
+  still flow through the delegate into `UpdateService.availableVersion`, so the
+  existing in-panel banner shows it with no extra Sparkle UI and user-skipped
+  versions remain suppressed.
+
 ## [2.3.0] - 2026-06-13
 
 ### Added
