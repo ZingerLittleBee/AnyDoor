@@ -22,6 +22,7 @@ final class SyncSettingsRegistryTests: XCTestCase {
         XCTAssertTrue(keys.contains("menuBar.iconVisible"))
         XCTAssertTrue(keys.contains("hyperKey.trigger"))
         XCTAssertTrue(keys.contains("dev.bybee.AnyDoor.language"))
+        XCTAssertTrue(keys.contains("clipboard.excludedBundleIDs"))
     }
 
     func testReadCollectsOnlyPresentKeysWithCorrectTypes() {
@@ -29,6 +30,7 @@ final class SyncSettingsRegistryTests: XCTestCase {
         d.set(false, forKey: "menuBar.iconVisible")
         d.set(48, forKey: "commandPalette.hotkey.keyCode")
         d.set("zh", forKey: "dev.bybee.AnyDoor.language")
+        d.set(["com.apple.Safari", "com.apple.finder"], forKey: "clipboard.excludedBundleIDs")
         // hyperKey.trigger deliberately not set → absent from result
 
         let result = SyncSettingsRegistry.read(from: d)
@@ -36,6 +38,7 @@ final class SyncSettingsRegistryTests: XCTestCase {
         XCTAssertEqual(result["menuBar.iconVisible"], .bool(false))
         XCTAssertEqual(result["commandPalette.hotkey.keyCode"], .int(48))
         XCTAssertEqual(result["dev.bybee.AnyDoor.language"], .string("zh"))
+        XCTAssertEqual(result["clipboard.excludedBundleIDs"], .stringArray(["com.apple.Safari", "com.apple.finder"]))
         XCTAssertNil(result["hyperKey.trigger"])
     }
 
@@ -44,12 +47,14 @@ final class SyncSettingsRegistryTests: XCTestCase {
         SyncSettingsRegistry.write(
             ["menuBar.iconVisible": .bool(false),
              "commandPalette.hotkey.keyCode": .int(48),
-             "dev.bybee.AnyDoor.language": .string("en")],
+             "dev.bybee.AnyDoor.language": .string("en"),
+             "clipboard.excludedBundleIDs": .stringArray(["com.apple.Safari"])],
             to: d
         )
         XCTAssertEqual(d.bool(forKey: "menuBar.iconVisible"), false)
         XCTAssertEqual(d.integer(forKey: "commandPalette.hotkey.keyCode"), 48)
         XCTAssertEqual(d.string(forKey: "dev.bybee.AnyDoor.language"), "en")
+        XCTAssertEqual(d.stringArray(forKey: "clipboard.excludedBundleIDs"), ["com.apple.Safari"])
     }
 
     func testWriteIgnoresKeysOutsideWhitelist() {

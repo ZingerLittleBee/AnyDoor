@@ -6,7 +6,7 @@ import Foundation
 /// are deliberately absent.
 enum SyncSettingsRegistry {
 
-    enum ValueType { case bool, int, string }
+    enum ValueType { case bool, int, string, stringArray }
 
     struct Entry {
         let key: String
@@ -27,6 +27,7 @@ enum SyncSettingsRegistry {
         Entry(key: "scheduledShutdown.defaultMinutes", type: .int),
         Entry(key: "clipboard.customTags", type: .string),
         Entry(key: "clipboard.categoryOrder", type: .string),
+        Entry(key: "clipboard.excludedBundleIDs", type: .stringArray),
     ]
 
     private static let entriesByKey: [String: Entry] =
@@ -43,6 +44,10 @@ enum SyncSettingsRegistry {
             case .string:
                 if let s = defaults.string(forKey: entry.key) {
                     out[entry.key] = .string(s)
+                }
+            case .stringArray:
+                if let values = defaults.stringArray(forKey: entry.key) {
+                    out[entry.key] = .stringArray(values)
                 }
             }
         }
@@ -61,6 +66,7 @@ enum SyncSettingsRegistry {
             case (.bool, .bool(let v)):     defaults.set(v, forKey: key); applied += 1
             case (.int, .int(let v)):       defaults.set(v, forKey: key); applied += 1
             case (.string, .string(let v)): defaults.set(v, forKey: key); applied += 1
+            case (.stringArray, .stringArray(let v)): defaults.set(v, forKey: key); applied += 1
             default: continue
             }
         }

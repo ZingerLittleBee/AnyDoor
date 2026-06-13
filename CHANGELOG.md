@@ -12,6 +12,8 @@ versioning.
   Settings → General → Clipboard lists ignored apps, reuses the app picker for
   adding entries, and stores the exclusion list by bundle id so the watcher can
   skip matching pasteboard changes before they enter history.
+- Backup and restore now include the clipboard ignored-app list, so source-app
+  exclusions move with the rest of the portable settings.
 
 ### Fixed
 

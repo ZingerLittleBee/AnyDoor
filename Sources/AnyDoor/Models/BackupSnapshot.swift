@@ -6,6 +6,7 @@ enum SettingValue: Codable, Equatable, Sendable {
     case bool(Bool)
     case int(Int)
     case string(String)
+    case stringArray([String])
 
     private enum CodingKeys: String, CodingKey { case type, value }
 
@@ -16,6 +17,7 @@ enum SettingValue: Codable, Equatable, Sendable {
         case "bool":   self = .bool(try c.decode(Bool.self, forKey: .value))
         case "int":    self = .int(try c.decode(Int.self, forKey: .value))
         case "string": self = .string(try c.decode(String.self, forKey: .value))
+        case "stringArray": self = .stringArray(try c.decode([String].self, forKey: .value))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type, in: c,
@@ -30,6 +32,9 @@ enum SettingValue: Codable, Equatable, Sendable {
         case .bool(let v):   try c.encode("bool", forKey: .type);   try c.encode(v, forKey: .value)
         case .int(let v):    try c.encode("int", forKey: .type);    try c.encode(v, forKey: .value)
         case .string(let v): try c.encode("string", forKey: .type); try c.encode(v, forKey: .value)
+        case .stringArray(let v):
+            try c.encode("stringArray", forKey: .type)
+            try c.encode(v, forKey: .value)
         }
     }
 }
