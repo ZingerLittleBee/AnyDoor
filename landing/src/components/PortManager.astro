@@ -1,10 +1,12 @@
 ---
 import { icons } from '../lib/icons';
 import { copy } from '../lib/copy';
-import { samplePorts } from '../lib/data';
+import { samplePorts, panelItems } from '../lib/data';
+
+const enabledCount = panelItems.length;
 ---
 
-<section class="section container-x" data-screen-label="04 Ports">
+<section class="section container-x">
   <div class="eyebrow">
     <span class="dot" style="background: var(--color-mac-green); box-shadow: 0 0 12px var(--color-mac-green)" />
     <span data-i18n-zh>{copy.ports.eyebrow.zh}</span><span data-i18n-en>{copy.ports.eyebrow.en}</span>
@@ -18,11 +20,11 @@ import { samplePorts } from '../lib/data';
   </p>
 
   <div class="pm-wrap">
-    <div class="pm-side">
+    <div class="pm-side" aria-hidden="true">
       <div class="mbpanel-head">
         <div class="title">AnyDoor</div>
         <div class="meta">
-          <span data-i18n-zh>{copy.ports.enabled.zh}</span><span data-i18n-en>{copy.ports.enabled.en}</span>
+          <span data-i18n-zh>{enabledCount} 个已启用</span><span data-i18n-en>{enabledCount} enabled</span>
         </div>
       </div>
       <div class="mbrow" style="background: rgba(255,255,255,.08)">
@@ -42,7 +44,7 @@ import { samplePorts } from '../lib/data';
       <div class="mbrow" style="opacity:.55">
         <div class="ico" set:html={icons.coffee()} />
         <div class="label">Keep Awake</div>
-        <button class="toggle" aria-label="Keep Awake"></button>
+        <button class="toggle" disabled aria-label="Keep Awake"></button>
       </div>
     </div>
 

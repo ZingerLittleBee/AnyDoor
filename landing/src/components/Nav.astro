@@ -5,12 +5,13 @@ import { copy } from '../lib/copy';
 
 <nav class="nav">
   <div class="nav-brand">
-    <span class="logo" />
+    <img class="logo" src="/icon.png" alt="" width="26" height="26" />
     <span>AnyDoor</span>
   </div>
   <div class="nav-links">
-    <a href="#features"><span data-i18n-zh>{copy.nav.features.zh}</span><span data-i18n-en>{copy.nav.features.en}</span></a>
     <a href="#demo"><span data-i18n-zh>{copy.nav.demo.zh}</span><span data-i18n-en>{copy.nav.demo.en}</span></a>
+    <a href="#why"><span data-i18n-zh>{copy.nav.why.zh}</span><span data-i18n-en>{copy.nav.why.en}</span></a>
+    <a href="#features"><span data-i18n-zh>{copy.nav.features.zh}</span><span data-i18n-en>{copy.nav.features.en}</span></a>
     <a href="#faq"><span data-i18n-zh>{copy.nav.faq.zh}</span><span data-i18n-en>{copy.nav.faq.en}</span></a>
     <a href="#download"><span data-i18n-zh>{copy.nav.download.zh}</span><span data-i18n-en>{copy.nav.download.en}</span></a>
   </div>
@@ -39,7 +40,10 @@ import { copy } from '../lib/copy';
     try { localStorage.setItem(KEY, lang); } catch {}
   };
 
-  const initial = (localStorage.getItem(KEY) || document.documentElement.getAttribute('data-lang') || 'zh') as 'zh' | 'en';
+  // The <head> inline script already resolved data-lang (localStorage ||
+  // navigator.language) before paint — read it back as the source of truth and
+  // persist it so the choice sticks for return visits.
+  const initial = (document.documentElement.getAttribute('data-lang') || 'zh') as 'zh' | 'en';
   setLang(initial);
 
   document.querySelectorAll<HTMLButtonElement>('[data-lang-btn]').forEach((b) => {

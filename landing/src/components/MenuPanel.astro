@@ -1,7 +1,6 @@
 ---
 import { icons } from '../lib/icons';
 import { panelItems, defaultOnToggles, type PanelItem } from '../lib/data';
-import { copy } from '../lib/copy';
 
 interface Props {
   items?: PanelItem[];
@@ -10,13 +9,14 @@ interface Props {
 }
 
 const { items = panelItems, panelClass = '' } = Astro.props;
+const enabledCount = items.length;
 ---
 
 <div class={`mbpanel ${panelClass}`}>
   <div class="mbpanel-head">
     <div class="title">AnyDoor</div>
     <div class="meta">
-      <span data-i18n-zh>{copy.ports.enabled.zh}</span><span data-i18n-en>{copy.ports.enabled.en}</span>
+      <span data-i18n-zh>{enabledCount} 个已启用</span><span data-i18n-en>{enabledCount} enabled</span>
     </div>
   </div>
 
@@ -39,6 +39,8 @@ const { items = panelItems, panelClass = '' } = Astro.props;
         <button
           class={`toggle ${defaultOnToggles[item.key] ? 'on' : ''}`}
           data-toggle-key={item.key}
+          role="switch"
+          aria-checked={defaultOnToggles[item.key] ? 'true' : 'false'}
           aria-label={item.label.en}
         />
       )}
@@ -69,6 +71,7 @@ const { items = panelItems, panelClass = '' } = Astro.props;
     const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('.mbpanel .toggle');
     if (!btn) return;
     btn.classList.toggle('on');
+    btn.setAttribute('aria-checked', String(btn.classList.contains('on')));
     // Mirror to the row's icon
     const row = btn.closest('.mbrow');
     row?.querySelector('.ico')?.classList.toggle('on', btn.classList.contains('on'));

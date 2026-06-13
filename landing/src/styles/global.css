@@ -1,12 +1,15 @@
 /* ─────────────────────────── Tokens ─────────────────────────── */
 :root {
+  color-scheme: dark;
   --color-bg: #050507;
   --color-surface: rgba(28, 28, 32, 0.85);
   --color-line: rgba(255, 255, 255, 0.08);
   --color-line-strong: rgba(255, 255, 255, 0.14);
   --color-text: #f5f5f7;
   --color-text-dim: #a1a1aa;
-  --color-text-soft: #6e6e76;
+  /* Lightened from #6e6e76 (~4:1) to clear WCAG AA 4.5:1 on both the base
+     background and the translucent card surfaces. */
+  --color-text-soft: #909099;
   --color-accent: #0a84ff;
   --color-accent-2: #5e9bff;
   --color-mac-green: #30d158;
@@ -23,6 +26,8 @@
 /* ─────────────────────────── Base ─────────────────────────── */
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:var(--color-bg);color:var(--color-text)}
+/* Keep anchored sections clear of the fixed nav when jumped to via #links. */
+html{scroll-padding-top:76px}
 body{
   font: 16px/1.55 var(--font-sans);
   font-feature-settings: "ss01", "cv11";
@@ -541,6 +546,29 @@ h2.sec-h{
 .hkstage[data-mode="fkeys"] .hint-hyper{ display: none; }
 .hkstage[data-mode="hyper"] .hint-fkeys{ display: none; }
 
+/* ─────────────────────────── Why / comparison ─────────────────────────── */
+.why-grid{display:grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 56px}
+.why-card{
+  display:flex; flex-direction:column; gap:10px;
+  background: rgba(28,28,32,.55);
+  border: .5px solid var(--color-line);
+  border-radius: 18px;
+  padding: 26px 24px;
+  transition: border-color .2s, transform .2s;
+}
+.why-card:hover{border-color: var(--color-line-strong); transform: translateY(-2px)}
+.why-ico{width:42px; height:42px; border-radius:11px; display:grid; place-items:center; background: rgba(94,155,255,.14); color: var(--color-accent-2)}
+.why-ico svg{width:20px; height:20px}
+.why-card h3{font-size:18px; font-weight:600; letter-spacing:-.01em; margin: 6px 0 0}
+.why-card p{font-size:13.5px; color:var(--color-text-dim); line-height:1.5; margin:0; flex:1}
+.why-vs{
+  align-self:flex-start; margin-top: 4px;
+  font: 600 11px/1 var(--font-mono); letter-spacing:.03em;
+  color: var(--color-text-soft);
+  background: rgba(255,255,255,.04); border:.5px solid var(--color-line);
+  border-radius:999px; padding:6px 10px;
+}
+
 /* ─────────────────────────── Feature grid ─────────────────────────── */
 .feat-grid{display:grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 56px}
 .feat-card{
@@ -807,15 +835,8 @@ h2.sec-h{
 .nav-brand{display:flex; align-items:center; gap:10px; font-weight:600; font-size:15px; letter-spacing:-.01em}
 .nav-brand .logo{
   width:26px; height:26px; border-radius:7px;
-  background: linear-gradient(135deg, #0a84ff 0%, #bf5af2 100%);
-  position:relative;
-  box-shadow: 0 0 0 .5px rgba(255,255,255,.12), 0 6px 20px rgba(10,132,255,.35);
-}
-.nav-brand .logo::after{
-  content:""; position:absolute; inset:6px;
-  background: rgba(255,255,255,.92);
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M4 21V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v13'/><path d='M2 21h20'/><circle cx='15' cy='14' r='1'/></svg>") center/contain no-repeat;
-          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M4 21V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v13'/><path d='M2 21h20'/><circle cx='15' cy='14' r='1'/></svg>") center/contain no-repeat;
+  display:block; object-fit:cover;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.12), 0 6px 20px rgba(94,155,255,.30);
 }
 .nav-links{display:flex; align-items:center; gap:28px}
 .nav-links a{color:var(--color-text-dim); text-decoration:none; font-size:13.5px; transition: color .2s ease}
@@ -849,12 +870,17 @@ h2.sec-h{
 @media (max-width: 860px){
   .hero{grid-template-columns: 1fr; padding-top:120px}
   .hero-stage{justify-content:flex-start; margin-top: 30px}
+  .why-grid{grid-template-columns: 1fr}
   .feat-grid{grid-template-columns: 1fr}
   .toggles-grid{grid-template-columns: 1fr 1fr}
   .pm-wrap{grid-template-columns: 1fr}
   .pm-side{height: 240px}
   .actions-grid{grid-template-columns: 1fr}
   .dl-wrap{grid-template-columns: 1fr}
+  /* The fixed-width keyboard is wider than a phone; let it scroll in place
+     instead of overflowing the page (which body{overflow-x:hidden} would clip). */
+  .keyboard{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  .kbrow{justify-content:flex-start}
 }
 @media (max-width: 640px){
   .toggles-grid{grid-template-columns: 1fr}

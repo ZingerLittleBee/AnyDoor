@@ -5,15 +5,15 @@ export type Lang = 'zh' | 'en';
 export type Bi<T = string> = { zh: T; en: T };
 
 export const copy = {
-  nav: { features: { zh: '功能', en: 'Features' }, demo: { zh: '演示', en: 'Demo' }, faq: { zh: 'FAQ', en: 'FAQ' }, download: { zh: '下载', en: 'Download' } },
+  nav: { demo: { zh: '演示', en: 'Demo' }, why: { zh: '为什么', en: 'Why' }, features: { zh: '功能', en: 'Features' }, faq: { zh: 'FAQ', en: 'FAQ' }, download: { zh: '下载', en: 'Download' } },
 
   hero: {
     eyebrow: { zh: '一颗按键，一扇任意门', en: 'One key. Any door.' },
-    h1a: { zh: '菜单栏，', en: 'Your menu bar,' },
-    h1b: { zh: '全副武装。', en: 'supercharged.' },
+    h1a: { zh: '每个 App、每个系统开关，', en: 'Every app and system toggle,' },
+    h1b: { zh: '一键直达。', en: 'one keystroke away.' },
     lede: {
-      zh: 'AnyDoor 是一个由全局热键驱动的 macOS 菜单栏控制中心。绑定任意按键来唤起 App、翻转系统开关、运行一次性动作——双手永远不必离开键盘。',
-      en: 'AnyDoor is a macOS menu bar control center driven by global hotkeys. Bind any key combination to launch and toggle apps, flip system settings, or run one-off actions — all without leaving the keyboard.',
+      zh: 'AnyDoor 是为离不开键盘的开发者打造的 macOS 菜单栏控制中心。绑定任意按键来唤起 App、翻转系统开关、管理端口与 Hosts、运行内置动作——在 HID 层截获按键，快过你的肌肉记忆，双手永不离开键盘。',
+      en: 'AnyDoor is a macOS menu bar control center built for developers who live on the keyboard. Bind any key to launch and toggle apps, flip system settings, manage ports and hosts, or run built-in actions — captured at the HID level, faster than your muscle memory, without ever leaving the keyboard.',
     },
     ctaPrimary: { zh: '下载 v', en: 'Download v' },
     ctaSecondary: { zh: '在 GitHub 上查看', en: 'View on GitHub' },
@@ -26,8 +26,38 @@ export const copy = {
     },
   },
 
+  why: {
+    eyebrow: { zh: '为什么选 AnyDoor', en: 'Why AnyDoor' },
+    h2a: { zh: '启动器负责搜索，', en: 'Launchers search.' },
+    h2b: { zh: 'AnyDoor 控制整台 Mac。', en: 'AnyDoor controls your Mac.' },
+    lede: {
+      zh: '启动器把应用和命令放到了眼前；AnyDoor 把整台 Mac 也放了进来——端口、Hosts、显示器亮度、系统开关，一套热键直达。免费、开源、纯本地。',
+      en: 'Launchers bring your apps and commands within a keystroke. AnyDoor brings the rest of your Mac too — ports, hosts, display brightness, system toggles — all under one set of hotkeys. Free, open source, fully local.',
+    },
+    cards: [
+      {
+        icon: 'bolt',
+        title: { zh: '免费 & 开源', en: 'Free & open source' },
+        desc: { zh: 'MIT 协议，没有付费墙、没有 Pro 版本、没有订阅。所有功能开箱即用，源码完全可审计。', en: 'MIT-licensed — no paywall, no Pro tier, no subscription. Every feature is here from day one, and the source is yours to audit.' },
+        vs: { zh: 'MIT · 永久免费', en: 'MIT · free forever' },
+      },
+      {
+        icon: 'lock',
+        title: { zh: '纯本地，无账号', en: 'Local, no account' },
+        desc: { zh: '完全在设备上运行，没有遥测、没有统计，也不用注册账号。你的数据从不离开这台 Mac。', en: 'Runs entirely on-device — no telemetry, no analytics, no account to register. Your data never leaves this Mac.' },
+        vs: { zh: '无遥测 · 无账号', en: 'No telemetry · no account' },
+      },
+      {
+        icon: 'server',
+        title: { zh: '系统级控制', en: 'System-level control' },
+        desc: { zh: '端口管理、Hosts 编辑、外接显示器亮度（DDC）、系统开关——这些深入系统的控制，一套热键直达。', en: 'Port management, hosts editing, external-display brightness (DDC), system toggles — deep, system-level control, one hotkey away.' },
+        vs: { zh: '端口 · Hosts · 亮度', en: 'Ports · hosts · brightness' },
+      },
+    ] as { icon: string; title: Bi; desc: Bi; vs: Bi }[],
+  },
+
   features: {
-    eyebrow: { zh: '不止于此', en: 'And there is more' },
+    eyebrow: { zh: '不止于此', en: 'More in the box' },
     h2a: { zh: '一个菜单栏，', en: 'One menu bar,' },
     h2b: { zh: '一整套工具箱。', en: 'a whole toolbox.' },
     lede: {
@@ -41,12 +71,12 @@ export const copy = {
     h2a: { zh: '按一下打开，', en: 'Press to open.' },
     h2b: { zh: '再按一下隐藏。', en: 'Press again to hide.' },
     lede: {
-      zh: '为每个常用 App 绑定一个组合键。AnyDoor 在 HID 层级别截获键盘事件，再快的肌肉记忆都赶得上。试试键盘上的 F1 – F6 →',
+      zh: '为每个常用 App 绑定一个组合键。AnyDoor 在 HID 层截获键盘事件，再快的肌肉记忆都赶得上。试试键盘上的 F1 – F6 →',
       en: "Bind a key combination to any app. AnyDoor intercepts keyboard events at the HID level, so it's faster than your muscle memory. Try F1 – F6 on the keyboard below →",
     },
     hintScreen: { zh: '↓ 按 F1 – F6 启动应用', en: '↓ Press F1 – F6 to launch' },
     hint: { zh: '试试按 F1 – F6', en: 'Try F1 – F6' },
-    hintAfter: { zh: ' — 也可以试按 Esc 关闭。', en: ' — or hit Esc to dismiss.' },
+    hintAfter: { zh: '——也可以按 Esc 关闭。', en: ' — or hit Esc to dismiss.' },
     menuFile: { zh: '文件', en: 'File' },
     menuEdit: { zh: '编辑', en: 'Edit' },
     menuView: { zh: '显示', en: 'View' },
@@ -67,7 +97,7 @@ export const copy = {
     h2a: { zh: '一键翻转每一个', en: 'Flip every setting' },
     h2b: { zh: '你常翻的设置。', en: 'you keep flipping.' },
     lede: {
-      zh: '深色模式、静音、Keep Awake、隐藏 Dock、自动隐藏菜单栏…… 全部映射成简单的 Toggle。',
+      zh: '深色模式、静音、Keep Awake、隐藏 Dock、自动隐藏菜单栏……全部映射成简单的 Toggle。',
       en: 'Dark mode, mute, Keep Awake, hide Dock, auto-hide menu bar — all mapped to a single toggle, or a single key.',
     },
   },
@@ -80,18 +110,17 @@ export const copy = {
       zh: '一个子菜单列出系统上每个正在监听的端口。按端口号或进程名搜索，平铺或按进程分组查看，扫描失败自动重试。',
       en: 'A submenu listing every listening port on the system. Search by port or process name. Flat list and process-grouped tree views. Live refresh with retry on scan failure.',
     },
-    placeholder: { zh: '搜索端口或进程...', en: 'Search ports or processes...' },
+    placeholder: { zh: '搜索端口或进程…', en: 'Search ports or processes...' },
     refresh: { zh: '刷新', en: 'Refresh' },
     tree: { zh: '树状视图', en: 'Tree View' },
     noMatch: { zh: '无匹配端口', en: 'No matching ports' },
     panelTitle: { zh: '端口管理', en: 'Port Manager' },
     appShortcuts: { zh: '应用快捷键', en: 'App Shortcuts' },
-    enabled: { zh: '26 个已启用', en: '26 enabled' },
   },
 
   actions: {
     eyebrow: { zh: '内置动作', en: 'Built-in actions' },
-    h2a: { zh: 'OCR、取色、截图,', en: 'OCR, color picker, capture —' },
+    h2a: { zh: 'OCR、取色、截图，', en: 'OCR, color picker, capture —' },
     h2b: { zh: '都在一个键之内。', en: 'one key away.' },
     lede: {
       zh: '不只是 App 切换。绑定任意热键来运行 macOS 自带的内置动作——结果直接进入剪贴板。',
@@ -132,7 +161,7 @@ export const copy = {
     eyebrow: { zh: '下载', en: 'Download' },
     h2a: { zh: '准备好了', en: 'Ready when' },
     h2b: { zh: '吗？', en: 'you are.' },
-    lede: { zh: '免费、开源、本地运行，没有任何遥测。', en: 'Free, open source, runs entirely locally. No telemetry, no account.' },
+    lede: { zh: '免费、开源、纯本地运行，没有遥测，不需要账号。', en: 'Free, open source, runs entirely locally. No telemetry, no account.' },
     dmgTitle: { zh: '下载 .dmg', en: 'Download the .dmg' },
     dmgDesc: { zh: '签名 + 公证的安装包，集成 Sparkle 自动更新。', en: 'Signed + notarized installer with Sparkle auto-update built in.' },
     dmgBtn: { zh: '下载 AnyDoor v', en: 'Download AnyDoor v' },
@@ -146,20 +175,36 @@ export const copy = {
     h2: { zh: '一些常见的问题。', en: 'Some common questions.' },
     items: [
       {
+        q: { zh: 'AnyDoor 是永久免费的吗？', en: 'Is AnyDoor really free?' },
+        a: { zh: '是。AnyDoor 采用 MIT 协议，完全免费、开源，没有付费墙、订阅或 Pro 版本，所有功能开箱即用。', en: 'Yes. AnyDoor is MIT-licensed — completely free and open source, with no paywall, subscription, or Pro tier. Every feature is available from day one.' },
+      },
+      {
         q: { zh: 'AnyDoor 收集任何数据吗？', en: 'Does AnyDoor collect any data?' },
-        a: { zh: '不。AnyDoor 完全在本地运行，没有任何遥测、统计或网络回传。源码 100% 开源、可审计。', en: 'No. AnyDoor runs entirely on-device. There is no telemetry, no analytics, no network callbacks. The source is 100% open and auditable.' },
+        a: { zh: '不。AnyDoor 完全在本地运行，没有任何遥测、统计或网络回传，也不需要账号登录。源码 100% 开源、可审计。', en: 'No. AnyDoor runs entirely on-device — no telemetry, no analytics, no network callbacks, and no account to sign in to. The source is 100% open and auditable.' },
+      },
+      {
+        q: { zh: '和 Raycast、Alfred 有什么不同？', en: 'How is this different from Raycast or Alfred?' },
+        a: { zh: '启动器擅长搜索与命令；AnyDoor 走得更深，把 App 切换、系统开关、端口管理、Hosts 编辑、外接显示器亮度（DDC）、剪贴板历史都收进同一套热键——一层更贴近系统的控制。而且免费、开源、纯本地。', en: 'Launchers are great at search and commands; AnyDoor goes deeper. It folds app toggling, system switches, port management, hosts editing, external-display brightness (DDC), and clipboard history into one set of hotkeys — a layer of control closer to the system itself. And it’s free, open source, and fully local.' },
       },
       {
         q: { zh: '为什么需要辅助功能权限？', en: 'Why does it need accessibility permission?' },
-        a: { zh: 'AnyDoor 通过 CGEvent tap 在 HID 层级别截获键盘事件，这是 macOS 实现全局热键的标准方式。所有事件处理都在本地完成。', en: 'AnyDoor uses a CGEvent tap at the HID level to intercept keyboard events — the standard macOS path for global hotkeys. All event handling stays local.' },
+        a: { zh: 'AnyDoor 通过 CGEvent tap 在 HID 层截获键盘事件，这是 macOS 实现全局热键的标准方式。所有事件处理都在本地完成，不会离开你的设备。', en: 'AnyDoor uses a CGEvent tap at the HID level to intercept keyboard events — the standard macOS path for global hotkeys. All event handling stays on your device.' },
+      },
+      {
+        q: { zh: '会被 Gatekeeper 拦截吗？', en: 'Will Gatekeeper block it?' },
+        a: { zh: '不会。.dmg 经过苹果开发者证书签名并公证（notarized），双击即可打开，不会弹出"无法验证开发者"的警告。', en: 'No. The .dmg is signed with an Apple Developer certificate and notarized, so it opens with a double-click — no “unidentified developer” warning.' },
+      },
+      {
+        q: { zh: '支持 Intel Mac 吗？', en: 'Does it work on Intel Macs?' },
+        a: { zh: '支持。安装包是 Universal Binary，原生运行于 Apple Silicon 与 Intel；外接显示器亮度会按架构自动选择 DDC 后端。', en: 'Yes. The build is a Universal Binary that runs natively on both Apple Silicon and Intel; the external-display brightness backend is chosen automatically per architecture.' },
       },
       {
         q: { zh: 'Liquid Glass 在我的 macOS 上能看到吗？', en: 'Will I see Liquid Glass on my macOS?' },
-        a: { zh: 'Liquid Glass 效果在 macOS 26 (Tahoe) 上完整启用；macOS 14–25 会自动降级为标准的菜单材质，功能完全相同。', en: 'Liquid Glass effects light up on macOS 26 (Tahoe); macOS 14–25 fall back to the standard menu material — same features, same behaviour.' },
+        a: { zh: 'Liquid Glass 效果在 macOS 26（Tahoe）上完整启用；macOS 14–25 会自动降级为标准的菜单材质，功能完全相同。', en: 'Liquid Glass effects light up on macOS 26 (Tahoe); macOS 14–25 fall back to the standard menu material — same features, same behavior.' },
       },
       {
-        q: { zh: '怎么打包做开发自定义？', en: 'How do I build it myself?' },
-        a: { zh: '仓库里包含完整的 Make 流水线：make swift-release 构建二进制，make release <version> 做签名 + 公证 + 上传 GitHub Release + 更新 Sparkle appcast。', en: 'The repo ships a complete Make pipeline: `make swift-release` builds the binary, `make release <version>` signs, notarizes, ships to GitHub Releases, and refreshes the Sparkle appcast.' },
+        q: { zh: '我可以自己从源码构建吗？', en: 'Can I build it from source myself?' },
+        a: { zh: '可以。仓库里包含完整的 Make 流水线：make swift-release 构建二进制，make release <version> 做签名、公证、上传 GitHub Release 并更新 Sparkle appcast。', en: 'Yes. The repo ships a complete Make pipeline: `make swift-release` builds the binary, and `make release <version>` signs, notarizes, ships to GitHub Releases, and refreshes the Sparkle appcast.' },
       },
     ] as { q: Bi; a: Bi }[],
   },

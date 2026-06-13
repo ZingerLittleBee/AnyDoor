@@ -4,14 +4,14 @@ import { copy } from '../lib/copy';
 import { toggleCards, defaultOnToggles } from '../lib/data';
 ---
 
-<section class="section container-x" id="toggles" data-screen-label="03 Toggles">
+<section class="section container-x" id="toggles">
   <div class="eyebrow">
     <span class="dot" style="background: var(--color-accent-2); box-shadow: 0 0 12px var(--color-accent-2)" />
     <span data-i18n-zh>{copy.toggles.eyebrow.zh}</span><span data-i18n-en>{copy.toggles.eyebrow.en}</span>
   </div>
   <h2 class="sec-h">
     <span class="gradient-text"><span data-i18n-zh>{copy.toggles.h2a.zh}</span><span data-i18n-en>{copy.toggles.h2a.en}</span></span><br />
-    <span class="gradient-text"><span data-i18n-zh>{copy.toggles.h2b.zh}</span><span data-i18n-en>{copy.toggles.h2b.en}</span></span>
+    <span class="accent-text"><span data-i18n-zh>{copy.toggles.h2b.zh}</span><span data-i18n-en>{copy.toggles.h2b.en}</span></span>
   </h2>
   <p class="lede">
     <span data-i18n-zh>{copy.toggles.lede.zh}</span><span data-i18n-en>{copy.toggles.lede.en}</span>
@@ -28,7 +28,7 @@ import { toggleCards, defaultOnToggles } from '../lib/data';
         >
           <div class="head">
             <div class="ico" set:html={icons[card.icon as keyof typeof icons]?.()} />
-            <button class={`toggle ${isOn ? 'on' : ''}`} data-tcard-toggle={card.key} aria-label={card.name.en} />
+            <button class={`toggle ${isOn ? 'on' : ''}`} data-tcard-toggle={card.key} role="switch" aria-checked={isOn ? 'true' : 'false'} aria-label={card.name.en} />
           </div>
           <h3>
             <span data-i18n-zh>{card.name.zh}</span><span data-i18n-en>{card.name.en}</span>
@@ -56,6 +56,7 @@ import { toggleCards, defaultOnToggles } from '../lib/data';
     const isOn = card.classList.toggle('is-on');
     const toggle = card.querySelector<HTMLButtonElement>('[data-tcard-toggle]');
     toggle?.classList.toggle('on', isOn);
+    toggle?.setAttribute('aria-checked', String(isOn));
     card.querySelectorAll<HTMLElement>('.state-on').forEach((el) => { el.style.display = isOn ? '' : 'none'; });
     card.querySelectorAll<HTMLElement>('.state-off').forEach((el) => { el.style.display = isOn ? 'none' : ''; });
   };
