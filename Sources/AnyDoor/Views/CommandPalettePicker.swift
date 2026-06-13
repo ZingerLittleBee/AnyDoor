@@ -100,6 +100,23 @@ final class CommandPaletteState {
         selectedIndex = 0
     }
 
+    /// Scoped tools whose keyword starts with the current (unscoped) query — the
+    /// completion hints shown while the user is still typing a keyword.
+    func devToolScopeSuggestions(matching query: String) -> [DevToolScope] {
+        guard activeDevToolScope == nil else { return [] }
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return [] }
+        return DevToolScope.allCases.filter { $0.keyword.hasPrefix(needle) }
+    }
+
+    /// Enter a scope directly (committing a suggestion row), clearing the body so
+    /// the user types only the conversion input next.
+    func enterDevToolScope(_ scope: DevToolScope) {
+        activeDevToolScope = scope
+        query = ""
+        selectedIndex = 0
+    }
+
     // MARK: - Destructive-action confirmation
 
     /// A confirmation awaiting the user's decision. Held on the MainActor (like
@@ -208,6 +225,11 @@ final class CommandPaletteState {
         if let calc = calcSection(matching: trimmed) {
             sections.insert(calc, at: 0)
         }
+        // Keyword-completion hint sits on top so it is selected by default:
+        // pressing Return enters the scope while the user is still typing.
+        if let suggestions = devToolSuggestionSection(matching: trimmed) {
+            sections.insert(suggestions, at: 0)
+        }
         return sections
     }
 
@@ -269,6 +291,29 @@ final class CommandPaletteState {
     private func devToolsSection(matching query: String) -> CommandPaletteSection? {
         let results = DevTools.detect(query: query)
         return results.isEmpty ? nil : makeDevToolsSection(from: results)
+    }
+
+    /// Builds a "Developer Tools" hint section while the query is still a prefix
+    /// of one or more scoped keywords. Committing a row enters that scope.
+    private func devToolSuggestionSection(matching query: String) -> CommandPaletteSection? {
+        let scopes = devToolScopeSuggestions(matching: query)
+        guard !scopes.isEmpty else { return nil }
+        let entries = scopes.enumerated().map { index, scope in
+            PanelEntry(
+                id: PanelEntry.id(for: .devToolScopeSuggestion(scope)),
+                source: .devToolScopeSuggestion(scope),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: scope.badgeLabel,
+                subtitle: L(.commandPaletteDevToolScopeSuggestionHint),
+                symbol: "hammer",
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
     }
 
     /// Builds the "Developer Tools" section from already-evaluated results.
@@ -862,7 +907,7 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .devTool, .paletteOption, .hostProfile:
+        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .paletteOption, .hostProfile:
             return nil
         }
     }
@@ -873,7 +918,7 @@ private struct CommandPaletteRow: View {
     /// the host profile's entry summary, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .devTool, .paletteOption, .hostProfile: return true
+        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .paletteOption, .hostProfile: return true
         default: return false
         }
     }

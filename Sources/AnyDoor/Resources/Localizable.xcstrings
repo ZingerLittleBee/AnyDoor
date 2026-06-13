@@ -4677,6 +4677,23 @@
         }
       }
     },
+    "commandPalette.devTool.scopeSuggestionHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Return to use"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回车进入"
+          }
+        }
+      }
+    },
     "toast.ocr.noText": {
       "extractionState": "manual",
       "localizations": {

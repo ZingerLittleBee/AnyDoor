@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .paletteOption, .hostProfile: return nil
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .paletteOption, .hostProfile: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -305,6 +305,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             return
         }
 
+        // A keyword-completion hint enters its scope and keeps the palette open
+        // so the user types the conversion body next — like an option drill-in.
+        if case .devToolScopeSuggestion(let scope) = entry.source {
+            state?.enterDevToolScope(scope)
+            return
+        }
+
         close()
         switch entry.source {
         case .appShortcut(let id):
@@ -347,6 +354,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
                 Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
             }
+        case .devToolScopeSuggestion:
+            break // handled above (enters scope, stays open)
         case .paletteOption:
             break // handled above
         }

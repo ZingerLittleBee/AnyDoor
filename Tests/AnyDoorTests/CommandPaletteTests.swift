@@ -324,6 +324,52 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertNil(state.activeDevToolScope)
     }
 
+    // MARK: - Dev-tool keyword completion hints
+
+    @MainActor
+    func testScopeSuggestionsMatchKeywordPrefix() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        XCTAssertEqual(state.devToolScopeSuggestions(matching: "base"), [.base64])
+        XCTAssertEqual(state.devToolScopeSuggestions(matching: "sha"), [.sha1, .sha256])
+        XCTAssertEqual(state.devToolScopeSuggestions(matching: "md"), [.md5])
+    }
+
+    @MainActor
+    func testScopeSuggestionsEmptyForEmptyOrNonPrefix() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        XCTAssertTrue(state.devToolScopeSuggestions(matching: "").isEmpty)
+        XCTAssertTrue(state.devToolScopeSuggestions(matching: "zzz").isEmpty)
+    }
+
+    @MainActor
+    func testNoSuggestionsWhileAlreadyScoped() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "base64 "
+        state.absorbDevToolScopeIfNeeded()
+        XCTAssertTrue(state.devToolScopeSuggestions(matching: "base").isEmpty)
+    }
+
+    @MainActor
+    func testPrefixSurfacesSuggestionEntryAtTop() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "base"
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        guard case .devToolScopeSuggestion(let scope) = entry.source else {
+            return XCTFail("Expected a scope suggestion entry")
+        }
+        XCTAssertEqual(scope, .base64)
+        XCTAssertEqual(entry.title, "Base64")
+    }
+
+    @MainActor
+    func testCommittingSuggestionEntersScope() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "base"
+        state.enterDevToolScope(.base64)
+        XCTAssertEqual(state.activeDevToolScope, .base64)
+        XCTAssertEqual(state.query, "")
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 

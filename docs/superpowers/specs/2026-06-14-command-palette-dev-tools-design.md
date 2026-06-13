@@ -224,6 +224,18 @@ both paths share one implementation).
 family. `CommandPaletteTests`: space/Tab absorb, paste-with-body, non-keyword no-absorb,
 exclusive section, remove, and the two Esc-escalation outcomes.
 
+## Keyword-completion hint
+
+While the (unscoped) query is a prefix of one or more scoped keywords, a "Developer
+Tools" hint section surfaces a row per matching tool (`devToolScopeSuggestions(matching:)`
+→ `PanelEntry.Source.devToolScopeSuggestion(DevToolScope)`), sitting on top and selected
+by default. Committing it calls `enterDevToolScope(_:)` — entering the scope and keeping
+the palette open (handled before `close()` in `commit`, like an option drill-in) so the
+user types the body next. `subtitle` is a localized "Press Return to use" hint
+(`commandPalette.devTool.scopeSuggestionHint`). The suggestion and the auto-detect /
+scope-exclusive dev-tools sections never coexist (a bare prefix yields no `detect()`
+rows), so there is no duplicate-titleKey collision.
+
 ## Known trade-off
 
 `url` / `md5` etc. are real words; typing one followed by a space enters its scope. This
