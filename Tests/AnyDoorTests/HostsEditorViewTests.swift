@@ -40,10 +40,16 @@ final class HostsEditorViewTests: XCTestCase {
         XCTAssertTrue(editor.contains("Button(role: .destructive) { toggleActive(profile) }"), editor)
     }
 
-    func testHostsEditorRemovesAutomaticSidebarToggle() throws {
+    func testHostsEditorTitlebarToolbarDoesNotOverflowDeleteAction() throws {
         let editor = try source("Sources/AnyDoor/Views/Hosts/HostsEditorView.swift")
+        let toolbarStart = try XCTUnwrap(editor.range(of: ".toolbar {")?.lowerBound)
+        let detailStart = try XCTUnwrap(editor.range(of: "} detail: {")?.lowerBound)
+        let toolbar = editor[toolbarStart..<detailStart]
 
-        XCTAssertTrue(editor.contains(".toolbar(removing: .sidebarToggle)"), editor)
+        XCTAssertTrue(toolbar.contains("addProfile()"), editor)
+        XCTAssertFalse(toolbar.contains("deleteSelected()"), editor)
+        XCTAssertFalse(toolbar.contains("Image(systemName: \"trash\")"), editor)
+        XCTAssertTrue(editor.contains(".onDeleteCommand { deleteSelected() }"), editor)
     }
 
     func testEditModeOffersCancelBesideSaveAndRestoresDraft() throws {

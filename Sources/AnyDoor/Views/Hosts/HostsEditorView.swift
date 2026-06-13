@@ -76,15 +76,10 @@ struct HostsEditorView: View {
                 ToolbarItem {
                     Button { addProfile() } label: { Image(systemName: "plus") }
                 }
-                ToolbarItem {
-                    Button { deleteSelected() } label: { Image(systemName: "trash") }
-                        .disabled(selectedProfile == nil)
-                }
             }
         } detail: {
             detail
         }
-        .toolbar(removing: .sidebarToggle)
         .safeAreaInset(edge: .top) { HelperApprovalBanner() }
         // Switching files always returns to the safe read-only view mode.
         .onChange(of: selection) { _, _ in
