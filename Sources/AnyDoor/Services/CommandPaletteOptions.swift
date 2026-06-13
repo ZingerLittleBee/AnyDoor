@@ -58,7 +58,7 @@ enum CommandPaletteOptions {
     /// Items that drill into a second level instead of acting directly.
     static func isOptionParent(_ item: BuiltinItem) -> Bool {
         switch item {
-        case .keepAwake, .scheduledShutdown, .brightness, .hostsManager, .portManager: return true
+        case .keepAwake, .scheduledShutdown, .brightness, .hostsManager, .portManager, .pickColor: return true
         default: return false
         }
     }
@@ -91,6 +91,8 @@ enum CommandPaletteOptions {
         case .portManager:
             await PortInventory.shared.refresh()
             return portOptions(records: PortInventory.shared.records)
+        case .pickColor:
+            return colorFormatOptions(current: ColorFormat.current)
         default:
             return nil
         }
@@ -227,5 +229,33 @@ enum CommandPaletteOptions {
         let nameOrder = lhs.processName.localizedCaseInsensitiveCompare(rhs.processName)
         if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
         return lhs.pid < rhs.pid
+    }
+
+    /// One option per output format (checkmark marks the current default).
+    /// Selecting a format remembers it as the default and immediately samples a
+    /// color in that format (delegating to the existing Pick Color action).
+    static func colorFormatOptions(current: ColorFormat) -> [CommandPaletteOption] {
+        ColorFormat.allCases.map { format in
+            CommandPaletteOption(
+                id: "pickColor.\(format.rawValue)",
+                title: L(colorFormatTitleKey(format)),
+                symbol: "eyedropper",
+                isChecked: format == current,
+                perform: {
+                    ColorFormat.current = format
+                    await PanelStore.shared.run(.pickColor)
+                }
+            )
+        }
+    }
+
+    private static func colorFormatTitleKey(_ format: ColorFormat) -> L10n.Key {
+        switch format {
+        case .hex: return .colorFormatHex
+        case .rgb: return .colorFormatRGB
+        case .hsl: return .colorFormatHSL
+        case .swiftUI: return .colorFormatSwiftUI
+        case .css: return .colorFormatCSS
+        }
     }
 }

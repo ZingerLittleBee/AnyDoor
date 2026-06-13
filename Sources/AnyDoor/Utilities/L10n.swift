@@ -303,6 +303,11 @@ enum L10n {
         case commandPaletteOptionSearchPlaceholder = "commandPalette.option.searchPlaceholder"
         case commandPaletteBrightnessLevel = "commandPalette.brightness.level"
         case commandPaletteHostsEdit = "commandPalette.hosts.edit"
+        case colorFormatHex = "colorFormat.hex"
+        case colorFormatRGB = "colorFormat.rgb"
+        case colorFormatHSL = "colorFormat.hsl"
+        case colorFormatSwiftUI = "colorFormat.swiftUI"
+        case colorFormatCSS = "colorFormat.css"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

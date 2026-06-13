@@ -28,6 +28,7 @@ enum SyncSettingsRegistry {
         Entry(key: "clipboard.customTags", type: .string),
         Entry(key: "clipboard.categoryOrder", type: .string),
         Entry(key: "clipboard.excludedBundleIDs", type: .stringArray),
+        Entry(key: "pickColor.format", type: .string),
     ]
 
     private static let entriesByKey: [String: Entry] =

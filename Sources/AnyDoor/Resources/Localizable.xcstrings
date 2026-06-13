@@ -1,6 +1,61 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "colorFormat.css": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "CSS (lowercase hex)" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "CSS 小写十六进制" }
+        }
+      }
+    },
+    "colorFormat.hex": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "HEX" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "HEX 十六进制" }
+        }
+      }
+    },
+    "colorFormat.hsl": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "HSL" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "HSL" }
+        }
+      }
+    },
+    "colorFormat.rgb": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "RGB" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "RGB" }
+        }
+      }
+    },
+    "colorFormat.swiftUI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "SwiftUI Color" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "SwiftUI Color" }
+        }
+      }
+    },
     "commandPalette.brightness.level": {
       "extractionState": "manual",
       "localizations": {

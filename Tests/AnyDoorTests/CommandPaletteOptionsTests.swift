@@ -284,4 +284,22 @@ final class CommandPaletteOptionsTests: XCTestCase {
         XCTAssertEqual(state.selectedIndex, 0)
         XCTAssertNil(state.option(id: "a"))
     }
+
+    // MARK: - Color format options (#3)
+
+    @MainActor
+    func testPickColorIsOptionParent() {
+        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.pickColor))
+    }
+
+    @MainActor
+    func testColorFormatOptionsHaveStableIDsAndMarkCurrent() {
+        let options = CommandPaletteOptions.colorFormatOptions(current: .rgb)
+        XCTAssertEqual(
+            options.map(\.id),
+            ["pickColor.hex", "pickColor.rgb", "pickColor.hsl", "pickColor.swiftUI", "pickColor.css"]
+        )
+        XCTAssertEqual(options.filter(\.isChecked).map(\.id), ["pickColor.rgb"])
+        XCTAssertFalse(options.contains { $0.role == .destructive })
+    }
 }
