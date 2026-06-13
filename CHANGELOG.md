@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-06-13
+
 ### Added
 
 - Clipboard history gains two menu-bar panel controls: a Clear Clipboard action
