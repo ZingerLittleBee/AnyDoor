@@ -19,31 +19,31 @@ const keyWidth = (k: string, ri = 0) => {
 };
 ---
 
-<section class="section container-x" id="demo" data-screen-label="02 Hotkey demo">
+<section class="section container-x" id="demo">
   <div class="eyebrow">
     <span class="dot" style="background: var(--color-mac-purple); box-shadow: 0 0 12px var(--color-mac-purple)" />
     <span data-i18n-zh>{copy.demo.eyebrow.zh}</span><span data-i18n-en>{copy.demo.eyebrow.en}</span>
   </div>
   <h2 class="sec-h">
     <span class="gradient-text"><span data-i18n-zh>{copy.demo.h2a.zh}</span><span data-i18n-en>{copy.demo.h2a.en}</span></span><br />
-    <span class="gradient-text"><span data-i18n-zh>{copy.demo.h2b.zh}</span><span data-i18n-en>{copy.demo.h2b.en}</span></span>
+    <span class="accent-text"><span data-i18n-zh>{copy.demo.h2b.zh}</span><span data-i18n-en>{copy.demo.h2b.en}</span></span>
   </h2>
   <p class="lede">
     <span data-i18n-zh>{copy.demo.lede.zh}</span><span data-i18n-en>{copy.demo.lede.en}</span>
   </p>
 
   <div class="hkstage" data-mode="fkeys">
-    <div class="mode-tabs" role="tablist">
-      <button class="mode-tab is-active" data-tab="fkeys" type="button" aria-selected="true">
+    <div class="mode-tabs" role="tablist" aria-label="Hotkey demo modes">
+      <button class="mode-tab is-active" id="tab-fkeys" data-tab="fkeys" type="button" role="tab" aria-selected="true" aria-controls="hkscreen" tabindex="0">
         <span data-i18n-zh>{copy.demo.modeFkeys.zh}</span><span data-i18n-en>{copy.demo.modeFkeys.en}</span>
       </button>
-      <button class="mode-tab" data-tab="hyper" type="button" aria-selected="false">
+      <button class="mode-tab" id="tab-hyper" data-tab="hyper" type="button" role="tab" aria-selected="false" aria-controls="hkscreen" tabindex="-1">
         <span class="hyper-glyph">✦</span>
         <span data-i18n-zh>{copy.demo.modeHyper.zh}</span><span data-i18n-en>{copy.demo.modeHyper.en}</span>
       </button>
     </div>
 
-    <div class="hkscreen" id="hkscreen">
+    <div class="hkscreen" id="hkscreen" role="tabpanel" aria-labelledby="tab-fkeys" tabindex="0">
       <div class="hkscreen-menu">
         <span class="apple-mini" />
         <span class="app-name" id="hkscreen-appname"><span data-i18n-zh>访达</span><span data-i18n-en>Finder</span></span>
@@ -109,7 +109,7 @@ const keyWidth = (k: string, ri = 0) => {
           <div class="key" style="min-width:48px">⌃</div>
           <div class="key" style="min-width:48px">⌥</div>
           <div class="key" style="min-width:54px">⌘</div>
-          <div class="key wide" style="min-width:320px">&nbsp;</div>
+          <div class="key" style="min-width:320px">&nbsp;</div>
           <div class="key" style="min-width:54px">⌘</div>
           <div class="key" style="min-width:48px">⌥</div>
           <div class="key" style="min-width:48px">←</div>
@@ -140,6 +140,12 @@ const keyWidth = (k: string, ri = 0) => {
   let openApp: typeof hotkeyApps[number] | null = null;
   let pressTimer: number | undefined;
   let autoTimer: number | undefined;
+
+  // Only intercept keys / autoplay when the widget is actually on screen, and
+  // never animate when the user asked to reduce motion.
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  let demoVisible = false;
 
   const appsByKey = new Map(hotkeyApps.map((a) => [a.key, a]));
 
@@ -199,10 +205,14 @@ const keyWidth = (k: string, ri = 0) => {
     }
   };
 
-  // Keyboard
+  // Keyboard — scoped so the widget never steals keys from the rest of the page.
+  // We only handle (and preventDefault) F1–F6 when the demo is in view, and only
+  // intercept Escape when there is actually an open app to dismiss. Pressing Esc
+  // anywhere else on the page (find bar, dialogs, IME, fullscreen) is untouched.
   window.addEventListener('keydown', (e) => {
+    if (!demoVisible) return;
     if (appsByKey.has(e.key)) { pressKey(e.key, { fromUser: true }); e.preventDefault(); }
-    else if (e.key === 'Escape') { pressKey('Esc', { fromUser: true }); e.preventDefault(); }
+    else if (e.key === 'Escape' && openApp) { pressKey('Esc', { fromUser: true }); e.preventDefault(); }
   });
 
   // Click on rendered keys
@@ -210,7 +220,8 @@ const keyWidth = (k: string, ri = 0) => {
     el.addEventListener('click', () => pressKey(el.dataset.key!, { fromUser: true }));
   });
 
-  // Auto-cycle demo until user interacts
+  // Auto-cycle demo until the user interacts. Started by the IntersectionObserver
+  // below (only while visible) and skipped entirely under reduced-motion.
   const cycle = ['F1', 'F2', 'F3', 'F4'];
   let idx = 0;
   const tick = async () => {
@@ -220,8 +231,6 @@ const keyWidth = (k: string, ri = 0) => {
     pressKey(k); // hide
     idx++;
   };
-  autoTimer = window.setInterval(tick, 4600);
-  setTimeout(tick, 1500);
 
   // ─── Hyper tab autoplay ──────────────────────────────────────────
   let hyperTimer: number | undefined;
@@ -306,7 +315,7 @@ const keyWidth = (k: string, ri = 0) => {
     }, 3000));
   };
 
-  // ─── Mode tabs (start/stop autoplay per tab) ─────────────────────
+  // ─── Start / stop autoplay (skipped entirely under reduced-motion) ─
   const stopFkeys = () => {
     if (autoTimer) { window.clearInterval(autoTimer); autoTimer = undefined; }
     clearTimeout(pressTimer);
@@ -319,28 +328,74 @@ const keyWidth = (k: string, ri = 0) => {
     releaseHyperKeys();
   };
   const startFkeys = () => {
+    if (reduceMotion || autoTimer) return;
     autoTimer = window.setInterval(tick, 4600);
     window.setTimeout(tick, 800);
   };
   const startHyper = () => {
+    if (reduceMotion || hyperTimer) return;
     hyperIdx = 0;
     hyperTimer = window.setInterval(hyperTick, 3400);
     window.setTimeout(hyperTick, 800);
   };
 
-  const tabs = document.querySelectorAll<HTMLButtonElement>('.mode-tab');
-  tabs.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const next = btn.dataset.tab as 'fkeys' | 'hyper';
-      if (stage.dataset.mode === next) return;
-      tabs.forEach((t) => {
-        const active = t.dataset.tab === next;
-        t.classList.toggle('is-active', active);
-        t.setAttribute('aria-selected', String(active));
-      });
+  // ─── Tabs: pointer + full keyboard (roving tabindex + arrow keys) ──
+  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>('.mode-tab'));
+  const activateTab = (next: 'fkeys' | 'hyper', opts: { focus?: boolean } = {}) => {
+    if (stage.dataset.mode !== next) {
       stage.dataset.mode = next;
       if (next === 'hyper') { stopFkeys(); startHyper(); }
       else                  { stopHyper();  startFkeys(); }
+    }
+    tabs.forEach((t) => {
+      const active = t.dataset.tab === next;
+      t.classList.toggle('is-active', active);
+      t.setAttribute('aria-selected', String(active));
+      t.tabIndex = active ? 0 : -1;
+      if (active) {
+        screen.setAttribute('aria-labelledby', t.id);
+        if (opts.focus) t.focus();
+      }
     });
+  };
+  tabs.forEach((btn) => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab as 'fkeys' | 'hyper'));
+  });
+  document.querySelector<HTMLElement>('.mode-tabs')?.addEventListener('keydown', (e) => {
+    const order: ('fkeys' | 'hyper')[] = ['fkeys', 'hyper'];
+    let i = order.indexOf(stage.dataset.mode as 'fkeys' | 'hyper');
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') i = (i + 1) % order.length;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') i = (i - 1 + order.length) % order.length;
+    else if (e.key === 'Home') i = 0;
+    else if (e.key === 'End') i = order.length - 1;
+    else return;
+    e.preventDefault();
+    activateTab(order[i], { focus: true });
+  });
+
+  // ─── Touch: the keys are tappable, so relabel the F-key hint ───────
+  if (coarsePointer) {
+    const fk = document.querySelector('.hint-line.hint-fkeys');
+    if (fk) fk.innerHTML = '<b><span data-i18n-zh>点按下方按键</span><span data-i18n-en>Tap the keys below</span></b><span data-i18n-zh> 启动应用。</span><span data-i18n-en> to launch an app.</span>';
+    document.querySelectorAll('.hkscreen-hint.hint-fkeys').forEach((el) => {
+      el.innerHTML = '<span data-i18n-zh>↓ 点按按键启动应用</span><span data-i18n-en>↓ Tap a key to launch</span>';
+    });
+  }
+
+  // ─── Visibility gate: autoplay only while in view; pause off-screen/hidden ─
+  const io = new IntersectionObserver((entries) => {
+    for (const en of entries) {
+      demoVisible = en.isIntersecting;
+      if (en.isIntersecting) {
+        if (stage.dataset.mode === 'hyper') startHyper(); else startFkeys();
+      } else {
+        stopFkeys(); stopHyper();
+      }
+    }
+  }, { threshold: 0.2 });
+  io.observe(stage);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { stopFkeys(); stopHyper(); }
+    else if (demoVisible) { if (stage.dataset.mode === 'hyper') startHyper(); else startFkeys(); }
   });
 </script>

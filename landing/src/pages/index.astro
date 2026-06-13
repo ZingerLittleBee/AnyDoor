@@ -3,6 +3,7 @@ import '../styles/global.css';
 import Nav from '../components/Nav.astro';
 import Hero from '../components/Hero.astro';
 import HotkeyDemo from '../components/HotkeyDemo.astro';
+import Why from '../components/Why.astro';
 import MoreFeatures from '../components/MoreFeatures.astro';
 import Toggles from '../components/Toggles.astro';
 import PortManager from '../components/PortManager.astro';
@@ -18,6 +19,20 @@ import Footer from '../components/Footer.astro';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+
+    <!-- Resolve language before first paint: avoids a flash of the wrong language
+         and gives the document the correct lang for screen readers. -->
+    <script is:inline>
+      (function () {
+        try {
+          var saved = localStorage.getItem('anydoor.lang');
+          var lang = saved || ((navigator.language || 'zh').toLowerCase().indexOf('zh') === 0 ? 'zh' : 'en');
+          var el = document.documentElement;
+          el.setAttribute('data-lang', lang);
+          el.setAttribute('lang', lang === 'zh' ? 'zh-CN' : 'en');
+        } catch (e) {}
+      })();
+    </script>
     <title>AnyDoor — 一颗按键，一扇任意门 · macOS menu bar control center</title>
     <meta name="description" content="AnyDoor is a free, open-source macOS menu bar control center driven by global hotkeys: launch and toggle apps, flip system settings, manage ports and hosts, and run built-in actions — without leaving the keyboard." />
     <link rel="canonical" href="https://anydoor.app/" />
@@ -66,6 +81,7 @@ import Footer from '../components/Footer.astro';
     <main>
       <Hero />
       <HotkeyDemo />
+      <Why />
       <MoreFeatures />
       <Toggles />
       <PortManager />

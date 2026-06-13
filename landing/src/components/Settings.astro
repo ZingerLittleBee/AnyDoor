@@ -13,14 +13,14 @@ const badge = (type: string) =>
   : copy.settings.badgeToggle;
 ---
 
-<section class="section container-x" data-screen-label="06 Settings">
+<section class="section container-x">
   <div class="eyebrow">
     <span class="dot" style="background: var(--color-mac-pink); box-shadow: 0 0 12px var(--color-mac-pink)" />
     <span data-i18n-zh>{copy.settings.eyebrow.zh}</span><span data-i18n-en>{copy.settings.eyebrow.en}</span>
   </div>
   <h2 class="sec-h">
     <span class="gradient-text"><span data-i18n-zh>{copy.settings.h2a.zh}</span><span data-i18n-en>{copy.settings.h2a.en}</span></span><br />
-    <span class="gradient-text"><span data-i18n-zh>{copy.settings.h2b.zh}</span><span data-i18n-en>{copy.settings.h2b.en}</span></span>
+    <span class="accent-text"><span data-i18n-zh>{copy.settings.h2b.zh}</span><span data-i18n-en>{copy.settings.h2b.en}</span></span>
   </h2>
   <p class="lede">
     <span data-i18n-zh>{copy.settings.lede.zh}</span><span data-i18n-en>{copy.settings.lede.en}</span>
@@ -143,13 +143,14 @@ const badge = (type: string) =>
       if (def) def.style.display = 'none';
       const lbl = document.createElement('span');
       lbl.className = 'rec-recording';
-      lbl.innerHTML = `<span data-i18n-zh>请按下…</span><span data-i18n-en>Press keys…</span>`;
+      lbl.innerHTML = `<span data-i18n-zh>请按下…（Esc 取消）</span><span data-i18n-en>Press keys… (Esc to cancel)</span>`;
       btn.appendChild(lbl);
     });
   });
 
   window.addEventListener('keydown', (e) => {
     if (!recording) return;
+    if (e.key === 'Tab') { stopRec(); return; }            // let keyboard focus leave the recorder
     e.preventDefault();
     if (e.key === 'Escape') { stopRec(); return; }
     if (['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) return; // wait for non-modifier

@@ -1,0 +1,28 @@
+---
+import Bi from './Bi.astro';
+import { icons } from '../lib/icons';
+import { copy } from '../lib/copy';
+---
+
+<section class="section container-x" id="why">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-mac-red); box-shadow: 0 0 12px var(--color-mac-red)" />
+    <Bi text={copy.why.eyebrow} />
+  </div>
+  <h2 class="sec-h">
+    <span class="gradient-text"><Bi text={copy.why.h2a} /></span><br />
+    <span class="accent-text"><Bi text={copy.why.h2b} /></span>
+  </h2>
+  <p class="lede"><Bi text={copy.why.lede} /></p>
+
+  <div class="why-grid">
+    {copy.why.cards.map((c) => (
+      <div class="why-card">
+        <div class="why-ico" set:html={icons[c.icon as keyof typeof icons]?.()} aria-hidden="true" />
+        <h3><Bi text={c.title} /></h3>
+        <p><Bi text={c.desc} /></p>
+        <span class="why-vs"><Bi text={c.vs} /></span>
+      </div>
+    ))}
+  </div>
+</section>

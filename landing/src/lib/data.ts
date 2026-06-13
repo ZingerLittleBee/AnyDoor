@@ -212,7 +212,7 @@ export const moreFeatures: FeatureCard[] = [
     accent: '#ff9f0a',
     name: { zh: '外接显示器亮度', en: 'Display Brightness' },
     desc: {
-      zh: '通过 DDC/CI 控制外接显示器亮度,带原生 OSD 提示。热键调节鼠标所在的那块屏。',
+      zh: '通过 DDC/CI 控制外接显示器亮度，带原生 OSD 提示。热键调节鼠标所在的那块屏。',
       en: 'Drive external-monitor brightness over DDC/CI with the native OSD. Hotkeys nudge the display under your cursor.',
     },
     tag: { zh: 'DDC · VCP 0x10', en: 'DDC · VCP 0x10' },
@@ -234,7 +234,7 @@ export const moreFeatures: FeatureCard[] = [
     accent: '#bf5af2',
     name: { zh: 'Hosts 管理', en: 'Hosts Manager' },
     desc: {
-      zh: '在菜单栏里编辑 /etc/hosts,启用/停用 profile。写入由特权 XPC helper 完成,校验调用方代码签名。',
+      zh: '在菜单栏里编辑 /etc/hosts，启用/停用 profile。写入由特权 XPC helper 完成，校验调用方代码签名。',
       en: 'Edit /etc/hosts and flip host profiles from the menu bar. Writes go through a privileged XPC helper that verifies the caller’s code signature.',
     },
     tag: { zh: '特权 helper', en: 'XPC helper' },
@@ -245,7 +245,7 @@ export const moreFeatures: FeatureCard[] = [
     accent: '#ff375f',
     name: { zh: '命令面板', en: 'Command Palette' },
     desc: {
-      zh: '一个热键唤起的搜索框:启动已安装 App、跳转端口、跑内置动作,还内置一个科学计算器。',
+      zh: '一个热键唤起的搜索框：启动已安装 App、跳转端口、跑内置动作，还内置一个科学计算器。',
       en: 'A hotkey-summoned search box: launch installed apps, jump to ports, run built-in actions — with an inline scientific calculator.',
     },
     tag: { zh: '搜索 · 计算', en: 'Search · calc' },

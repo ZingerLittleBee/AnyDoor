@@ -3,14 +3,14 @@ import { icons } from '../lib/icons';
 import { copy } from '../lib/copy';
 ---
 
-<section class="section container-x" data-screen-label="05 Actions">
+<section class="section container-x">
   <div class="eyebrow">
     <span class="dot" style="background: var(--color-mac-orange); box-shadow: 0 0 12px var(--color-mac-orange)" />
     <span data-i18n-zh>{copy.actions.eyebrow.zh}</span><span data-i18n-en>{copy.actions.eyebrow.en}</span>
   </div>
   <h2 class="sec-h">
     <span class="gradient-text"><span data-i18n-zh>{copy.actions.h2a.zh}</span><span data-i18n-en>{copy.actions.h2a.en}</span></span><br />
-    <span class="gradient-text"><span data-i18n-zh>{copy.actions.h2b.zh}</span><span data-i18n-en>{copy.actions.h2b.en}</span></span>
+    <span class="accent-text"><span data-i18n-zh>{copy.actions.h2b.zh}</span><span data-i18n-en>{copy.actions.h2b.en}</span></span>
   </h2>
   <p class="lede">
     <span data-i18n-zh>{copy.actions.lede.zh}</span><span data-i18n-en>{copy.actions.lede.en}</span>
@@ -110,11 +110,16 @@ import { copy } from '../lib/copy';
   paint();
   new ResizeObserver(paint).observe(stage);
 
-  stage.addEventListener('mousemove', (ev) => {
-    const e = ev as MouseEvent;
+  // Pointer Events unify mouse / touch / pen so the loupe works on phones too;
+  // sampling is coalesced into one getImageData per animation frame.
+  const coarse = window.matchMedia('(pointer: coarse)').matches;
+  let rafId = 0;
+  let lastX = 0, lastY = 0;
+  const sample = () => {
+    rafId = 0;
     const r = stage.getBoundingClientRect();
-    const x = e.clientX - r.left;
-    const y = e.clientY - r.top;
+    const x = lastX - r.left;
+    const y = lastY - r.top;
     if (x < 0 || y < 0 || x > r.width || y > r.height) return;
     const px = ctx.getImageData(
       Math.max(0, Math.min(canvas.width - 1, Math.floor(x))),
@@ -129,8 +134,13 @@ import { copy } from '../lib/copy';
     l.style.left = (x - 40) + 'px';
     l.style.top = (y - 40) + 'px';
     l.style.background = hex;
-  });
-  stage.addEventListener('mouseleave', () => {
-    (loupe as HTMLElement).style.display = 'none';
-  });
+  };
+  const onMove = (ev: PointerEvent) => {
+    lastX = ev.clientX; lastY = ev.clientY;
+    if (!rafId) rafId = requestAnimationFrame(sample);
+  };
+  stage.addEventListener('pointermove', onMove, { passive: true });
+  stage.addEventListener('pointerdown', onMove, { passive: true });
+  stage.addEventListener('pointerleave', () => { (loupe as HTMLElement).style.display = 'none'; });
+  stage.addEventListener('pointerup', () => { if (coarse) (loupe as HTMLElement).style.display = 'none'; });
 </script>

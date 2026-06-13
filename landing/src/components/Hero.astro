@@ -3,9 +3,14 @@ import MenuPanel from './MenuPanel.astro';
 import { icons } from '../lib/icons';
 import { copy } from '../lib/copy';
 import { latestVersion } from '../lib/version';
+import { getStarCount, formatStars } from '../lib/github';
+
+// Resolved at build time (this page is statically prerendered). null on any
+// network/rate-limit failure, in which case the proof pill is simply omitted.
+const stars = await getStarCount();
 ---
 
-<section class="hero container-x" data-screen-label="01 Hero">
+<section class="hero container-x">
   <div>
     <div class="eyebrow">
       <span class="dot" />
@@ -28,6 +33,18 @@ import { latestVersion } from '../lib/version';
         <span set:html={icons.github()} style="width:16px;height:16px" />
         <span data-i18n-zh>{copy.hero.ctaSecondary.zh}</span><span data-i18n-en>{copy.hero.ctaSecondary.en}</span>
       </a>
+      {stars !== null && stars >= 20 ? (
+        <a class="hero-stars" href="https://github.com/ZingerLittleBee/AnyDoor/stargazers" target="_blank" rel="noreferrer" aria-label={`${stars} GitHub stars`}>
+          <span class="star" aria-hidden="true">★</span>
+          <span class="num">{formatStars(stars)}</span>
+          <span class="lbl"><span data-i18n-zh>GitHub Star</span><span data-i18n-en>on GitHub</span></span>
+        </a>
+      ) : (
+        <a class="hero-stars" href="https://github.com/ZingerLittleBee/AnyDoor" target="_blank" rel="noreferrer">
+          <span set:html={icons.github()} style="width:14px;height:14px" aria-hidden="true" />
+          <span class="lbl"><span data-i18n-zh>100% 开源 · 自己审计源码</span><span data-i18n-en>100% open source · audit it yourself</span></span>
+        </a>
+      )}
     </div>
 
     <div class="hero-meta">
