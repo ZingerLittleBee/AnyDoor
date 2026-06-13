@@ -2895,6 +2895,91 @@
         }
       }
     },
+    "settings.clipboard.excludedApps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignored source apps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "忽略来源 App"
+          }
+        }
+      }
+    },
+    "settings.clipboard.excludedApps.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add App..."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "添加 App..."
+          }
+        }
+      }
+    },
+    "settings.clipboard.excludedApps.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No ignored apps"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未添加忽略 App"
+          }
+        }
+      }
+    },
+    "settings.clipboard.excludedApps.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard changes copied from these apps are not saved to history."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从这些 App 复制的内容不会保存到剪贴板历史。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.excludedApps.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove ignored app"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除忽略 App"
+          }
+        }
+      }
+    },
     "settings.clipboard.retention": {
       "extractionState": "manual",
       "localizations": {

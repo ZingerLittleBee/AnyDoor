@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard history can now ignore items copied from selected source apps.
+  Settings → General → Clipboard lists ignored apps, reuses the app picker for
+  adding entries, and stores the exclusion list by bundle id so the watcher can
+  skip matching pasteboard changes before they enter history.
+
 ### Fixed
 
 - Settings no longer opens on login auto-launch. The reopen handler now keys on

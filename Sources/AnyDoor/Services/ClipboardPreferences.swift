@@ -39,5 +39,24 @@ enum ClipboardPreferences {
     static var retention: ClipboardRetention {
         ClipboardRetention(rawValue: defaults.object(forKey: retentionKey) as? Int ?? 30) ?? .thirtyDays
     }
-    static var excludedBundleIDs: Set<String> { Set(defaults.stringArray(forKey: excludedKey) ?? []) }
+    static var excludedBundleIDs: Set<String> { Set(excludedBundleIDs(from: defaults)) }
+
+    static func excludedBundleIDs(from defaults: UserDefaults = .standard) -> [String] {
+        defaults.stringArray(forKey: excludedKey) ?? []
+    }
+
+    static func addExcludedBundleID(_ rawBundleID: String, to defaults: UserDefaults = .standard) {
+        let bundleID = rawBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !bundleID.isEmpty else { return }
+
+        var ids = excludedBundleIDs(from: defaults)
+        guard !ids.contains(bundleID) else { return }
+        ids.append(bundleID)
+        defaults.set(ids, forKey: excludedKey)
+    }
+
+    static func removeExcludedBundleID(_ bundleID: String, from defaults: UserDefaults = .standard) {
+        let ids = excludedBundleIDs(from: defaults).filter { $0 != bundleID }
+        defaults.set(ids, forKey: excludedKey)
+    }
 }
