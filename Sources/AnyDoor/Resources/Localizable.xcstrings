@@ -1000,6 +1000,17 @@
         }
       }
     },
+    "builtin.microphoneMute": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Mute Mic" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "麦克风静音" }
+        }
+      }
+    },
     "builtin.muteAudio": {
       "extractionState": "manual",
       "localizations": {

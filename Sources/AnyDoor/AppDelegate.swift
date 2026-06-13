@@ -90,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             HideDesktopIconsProvider(),
             ShowHiddenFilesProvider(),
             MuteAudioProvider(),
+            MicrophoneMuteProvider(),
             DarkModeProvider(),
             LockScreenProvider(),
             EmptyTrashProvider(),

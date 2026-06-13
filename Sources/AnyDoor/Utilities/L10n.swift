@@ -310,6 +310,7 @@ enum L10n {
         case colorFormatCSS = "colorFormat.css"
         case commandPaletteSectionHosts = "commandPalette.section.hosts"
         case commandPaletteHostsActive = "commandPalette.hosts.active"
+        case builtinMicrophoneMute = "builtin.microphoneMute"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
