@@ -39,6 +39,18 @@ versioning.
 - Hosts profile row selection no longer competes with double-click rename
   gestures. Rename stays available from the profile context menu, and rows keep
   a full-width hit target for reliable selection.
+- Scheduled Shutdown no longer flashes a red "missed" toast at seemingly random
+  times. A shutdown timer only fires while AnyDoor is running, so a deadline that
+  lapses while the app is not running was never going to run — yet `bootstrapOnLaunch`
+  still surfaced it as a `.failure` toast on the next launch. Because the app
+  relaunches for reasons the user doesn't notice (silent Sparkle auto-update
+  relaunch, login auto-start), this flashed a "Scheduled … failed"-looking toast
+  even after the app appeared to be quit or untouched. `applicationWillTerminate`
+  now records a `scheduledShutdown.cleanExit` marker (consumed unconditionally on
+  the next launch), so a deadline missed across a clean Quit / update relaunch /
+  restart is cleared silently; only a genuine crash-induced miss shows a toast,
+  now informational (`.info`, not `.failure`) and held long enough to read. Future
+  deadlines still survive relaunch as before.
 - Relaunching AnyDoor no longer waits out Sparkle's update cadence before it
   notices a newer version. `SPUStandardUpdaterController(startingUpdater:)` only
   schedules interval-gated background checks (24h here) keyed off the persisted

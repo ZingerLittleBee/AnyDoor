@@ -262,6 +262,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyService.shared.stop()
         clipboardWatcher?.stop()
+        // Mark a clean exit so a scheduled-shutdown deadline that lapses while
+        // the app is not running (Quit / silent update relaunch / restart) is
+        // not re-surfaced as a "missed" toast on the next launch.
+        ScheduledShutdownService.shared.markCleanExit()
     }
 
     // MARK: - State restoration
