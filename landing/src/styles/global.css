@@ -847,15 +847,8 @@ h2.sec-h{
 .nav-brand{display:flex; align-items:center; gap:10px; font-weight:600; font-size:15px; letter-spacing:-.01em}
 .nav-brand .logo{
   width:26px; height:26px; border-radius:7px;
-  background: linear-gradient(135deg, #0a84ff 0%, #bf5af2 100%);
-  position:relative;
-  box-shadow: 0 0 0 .5px rgba(255,255,255,.12), 0 6px 20px rgba(10,132,255,.35);
-}
-.nav-brand .logo::after{
-  content:""; position:absolute; inset:6px;
-  background: rgba(255,255,255,.92);
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M4 21V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v13'/><path d='M2 21h20'/><circle cx='15' cy='14' r='1'/></svg>") center/contain no-repeat;
-          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='M4 21V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v13'/><path d='M2 21h20'/><circle cx='15' cy='14' r='1'/></svg>") center/contain no-repeat;
+  display:block; object-fit:cover;
+  box-shadow: 0 0 0 .5px rgba(255,255,255,.12), 0 6px 20px rgba(94,155,255,.30);
 }
 .nav-links{display:flex; align-items:center; gap:28px}
 .nav-links a{color:var(--color-text-dim); text-decoration:none; font-size:13.5px; transition: color .2s ease}
