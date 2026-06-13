@@ -1,5 +1,4 @@
 ---
-import { icons } from '../lib/icons';
 import { copy } from '../lib/copy';
 import { hotkeyApps } from '../lib/data';
 
@@ -51,7 +50,7 @@ const keyWidth = (k: string, ri = 0) => {
         <span class="menu-item"><span data-i18n-zh>{copy.demo.menuEdit.zh}</span><span data-i18n-en>{copy.demo.menuEdit.en}</span></span>
         <span class="menu-item"><span data-i18n-zh>{copy.demo.menuView.zh}</span><span data-i18n-en>{copy.demo.menuView.en}</span></span>
         <span class="right">
-          <span class="door" set:html={icons.door()} />
+          <img class="door" src="/menubar-icon.png" alt="" />
           <span>9:41</span>
         </span>
       </div>

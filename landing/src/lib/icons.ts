@@ -38,9 +38,6 @@ export const icons = {
   github:     () => wrap(`<path d="M9 19c-4.5 1.5-4.5-2.5-6-3M16 22v-3.8c0-1 .1-1.4-.5-2 2.8-.3 5.5-1.4 5.5-6a4.6 4.6 0 0 0-1.3-3.2 4.2 4.2 0 0 0-.1-3.2s-1-.3-3.6 1.3a12.4 12.4 0 0 0-6 0C7.5 3.7 6.5 4 6.5 4a4.2 4.2 0 0 0-.1 3.2A4.6 4.6 0 0 0 5 10.4c0 4.6 2.7 5.7 5.5 6-.6.6-.6 1.2-.5 2V22"/>`),
   bolt:       () => wrap(`<path d="M13 2L3 14h7l-1 8 10-12h-7z"/>`),
   clipboard:  () => wrap(`<rect x="6" y="4" width="12" height="18" rx="2"/><path d="M9 4V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1"/>`),
-  // Monochrome door glyph standing in for the app's menu-bar status icon
-  // (the SF Symbol `door.left.hand.open`) in the mock menu bars.
-  door:       () => wrap(`<path d="M4 21V8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v13"/><path d="M2 21h20"/><circle cx="15" cy="14" r="1" fill="currentColor"/>`, 1.8),
   sun:        () => wrap(`<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>`),
   layout:     () => wrap(`<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/>`),
   server:     () => wrap(`<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>`),
