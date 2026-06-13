@@ -29,35 +29,35 @@ export const copy = {
   why: {
     eyebrow: { zh: '为什么选 AnyDoor', en: 'Why AnyDoor' },
     h2a: { zh: '启动器负责搜索，', en: 'Launchers search.' },
-    h2b: { zh: 'AnyDoor 控制系统。', en: 'AnyDoor controls your Mac.' },
+    h2b: { zh: 'AnyDoor 控制整台 Mac。', en: 'AnyDoor controls your Mac.' },
     lede: {
-      zh: '你大概已经在用 Raycast、Alfred 或 BetterTouchTool。AnyDoor 不替代它们的搜索，而是补上它们不碰、或要付费才有的那一层——系统级控制，免费、开源、纯本地。',
-      en: 'You probably already use Raycast, Alfred, or BetterTouchTool. AnyDoor doesn’t replace their search — it adds the layer they leave out or charge for: system-level control, free, open source, and fully local.',
+      zh: '启动器把应用和命令放到了眼前；AnyDoor 把整台 Mac 也放了进来——端口、Hosts、显示器亮度、系统开关，一套热键直达。免费、开源、纯本地。',
+      en: 'Launchers bring your apps and commands within a keystroke. AnyDoor brings the rest of your Mac too — ports, hosts, display brightness, system toggles — all under one set of hotkeys. Free, open source, fully local.',
     },
     cards: [
       {
         icon: 'bolt',
         title: { zh: '免费 & 开源', en: 'Free & open source' },
-        desc: { zh: 'MIT 协议，没有付费墙、没有 Pro 版本。Powerpack、BetterTouchTool、Raycast Pro 要收费的能力，这里全都免费，而且源码可审计。', en: 'MIT-licensed — no paywall, no Pro tier. What Powerpack, BetterTouchTool, and Raycast Pro charge for is free here, with source you can audit.' },
-        vs: { zh: '对比：付费解锁', en: 'vs. paid unlocks' },
+        desc: { zh: 'MIT 协议，没有付费墙、没有 Pro 版本、没有订阅。所有功能开箱即用，源码完全可审计。', en: 'MIT-licensed — no paywall, no Pro tier, no subscription. Every feature is here from day one, and the source is yours to audit.' },
+        vs: { zh: 'MIT · 永久免费', en: 'MIT · free forever' },
       },
       {
         icon: 'lock',
         title: { zh: '纯本地，无账号', en: 'Local, no account' },
-        desc: { zh: '完全在设备上运行，没有遥测、统计，也不需要登录账号——不像云端启动器要联网注册。', en: 'Runs entirely on-device — no telemetry, no analytics, no sign-in to fumble through. Unlike cloud-account launchers.' },
-        vs: { zh: '对比：云端登录', en: 'vs. cloud sign-in' },
+        desc: { zh: '完全在设备上运行，没有遥测、没有统计，也不用注册账号。你的数据从不离开这台 Mac。', en: 'Runs entirely on-device — no telemetry, no analytics, no account to register. Your data never leaves this Mac.' },
+        vs: { zh: '无遥测 · 无账号', en: 'No telemetry · no account' },
       },
       {
         icon: 'server',
         title: { zh: '系统级控制', en: 'System-level control' },
-        desc: { zh: '端口管理、Hosts 编辑、外接显示器亮度（DDC）、系统开关——启动器大多不碰的深度能力，一套热键直达。', en: 'Port management, hosts editing, external-display brightness (DDC), system toggles — the deep control launchers mostly don’t touch, one hotkey away.' },
-        vs: { zh: '对比：仅搜索/命令', en: 'vs. search-only' },
+        desc: { zh: '端口管理、Hosts 编辑、外接显示器亮度（DDC）、系统开关——这些深入系统的控制，一套热键直达。', en: 'Port management, hosts editing, external-display brightness (DDC), system toggles — deep, system-level control, one hotkey away.' },
+        vs: { zh: '端口 · Hosts · 亮度', en: 'Ports · hosts · brightness' },
       },
     ] as { icon: string; title: Bi; desc: Bi; vs: Bi }[],
   },
 
   features: {
-    eyebrow: { zh: '不止于此', en: 'And there is more' },
+    eyebrow: { zh: '不止于此', en: 'More in the box' },
     h2a: { zh: '一个菜单栏，', en: 'One menu bar,' },
     h2b: { zh: '一整套工具箱。', en: 'a whole toolbox.' },
     lede: {
@@ -71,12 +71,12 @@ export const copy = {
     h2a: { zh: '按一下打开，', en: 'Press to open.' },
     h2b: { zh: '再按一下隐藏。', en: 'Press again to hide.' },
     lede: {
-      zh: '为每个常用 App 绑定一个组合键。AnyDoor 在 HID 层级别截获键盘事件，再快的肌肉记忆都赶得上。试试键盘上的 F1 – F6 →',
+      zh: '为每个常用 App 绑定一个组合键。AnyDoor 在 HID 层截获键盘事件，再快的肌肉记忆都赶得上。试试键盘上的 F1 – F6 →',
       en: "Bind a key combination to any app. AnyDoor intercepts keyboard events at the HID level, so it's faster than your muscle memory. Try F1 – F6 on the keyboard below →",
     },
     hintScreen: { zh: '↓ 按 F1 – F6 启动应用', en: '↓ Press F1 – F6 to launch' },
     hint: { zh: '试试按 F1 – F6', en: 'Try F1 – F6' },
-    hintAfter: { zh: ' — 也可以试按 Esc 关闭。', en: ' — or hit Esc to dismiss.' },
+    hintAfter: { zh: '——也可以按 Esc 关闭。', en: ' — or hit Esc to dismiss.' },
     menuFile: { zh: '文件', en: 'File' },
     menuEdit: { zh: '编辑', en: 'Edit' },
     menuView: { zh: '显示', en: 'View' },
@@ -161,7 +161,7 @@ export const copy = {
     eyebrow: { zh: '下载', en: 'Download' },
     h2a: { zh: '准备好了', en: 'Ready when' },
     h2b: { zh: '吗？', en: 'you are.' },
-    lede: { zh: '免费、开源、本地运行，没有任何遥测。', en: 'Free, open source, runs entirely locally. No telemetry, no account.' },
+    lede: { zh: '免费、开源、纯本地运行，没有遥测，不需要账号。', en: 'Free, open source, runs entirely locally. No telemetry, no account.' },
     dmgTitle: { zh: '下载 .dmg', en: 'Download the .dmg' },
     dmgDesc: { zh: '签名 + 公证的安装包，集成 Sparkle 自动更新。', en: 'Signed + notarized installer with Sparkle auto-update built in.' },
     dmgBtn: { zh: '下载 AnyDoor v', en: 'Download AnyDoor v' },
@@ -176,7 +176,7 @@ export const copy = {
     items: [
       {
         q: { zh: 'AnyDoor 是永久免费的吗？', en: 'Is AnyDoor really free?' },
-        a: { zh: '是。AnyDoor 采用 MIT 协议，完全免费、开源，没有付费墙、订阅或 Pro 版本——Raycast Pro、Alfred Powerpack、BetterTouchTool 要收费的能力，这里全都免费。', en: 'Yes. AnyDoor is MIT-licensed — completely free and open source, with no paywall, subscription, or Pro tier. The kind of power Raycast Pro, Alfred Powerpack, and BetterTouchTool charge for is free here.' },
+        a: { zh: '是。AnyDoor 采用 MIT 协议，完全免费、开源，没有付费墙、订阅或 Pro 版本，所有功能开箱即用。', en: 'Yes. AnyDoor is MIT-licensed — completely free and open source, with no paywall, subscription, or Pro tier. Every feature is available from day one.' },
       },
       {
         q: { zh: 'AnyDoor 收集任何数据吗？', en: 'Does AnyDoor collect any data?' },
@@ -184,7 +184,7 @@ export const copy = {
       },
       {
         q: { zh: '和 Raycast、Alfred 有什么不同？', en: 'How is this different from Raycast or Alfred?' },
-        a: { zh: '启动器擅长搜索与命令，AnyDoor 走得更深：它把 App 切换、系统开关、端口管理、Hosts 编辑、外接显示器亮度（DDC）、剪贴板历史收进同一套热键——这些大多是启动器不碰、或要付费才有的系统级控制。而且免费、开源、纯本地。', en: 'Launchers are great at search and commands; AnyDoor goes deeper. It folds app toggling, system switches, port management, hosts editing, external-display brightness (DDC), and clipboard history into one set of hotkeys — system-level control launchers mostly don’t touch, or charge for. And it’s free, open source, and fully local.' },
+        a: { zh: '启动器擅长搜索与命令；AnyDoor 走得更深，把 App 切换、系统开关、端口管理、Hosts 编辑、外接显示器亮度（DDC）、剪贴板历史都收进同一套热键——一层更贴近系统的控制。而且免费、开源、纯本地。', en: 'Launchers are great at search and commands; AnyDoor goes deeper. It folds app toggling, system switches, port management, hosts editing, external-display brightness (DDC), and clipboard history into one set of hotkeys — a layer of control closer to the system itself. And it’s free, open source, and fully local.' },
       },
       {
         q: { zh: '为什么需要辅助功能权限？', en: 'Why does it need accessibility permission?' },
@@ -200,7 +200,7 @@ export const copy = {
       },
       {
         q: { zh: 'Liquid Glass 在我的 macOS 上能看到吗？', en: 'Will I see Liquid Glass on my macOS?' },
-        a: { zh: 'Liquid Glass 效果在 macOS 26（Tahoe）上完整启用；macOS 14–25 会自动降级为标准的菜单材质，功能完全相同。', en: 'Liquid Glass effects light up on macOS 26 (Tahoe); macOS 14–25 fall back to the standard menu material — same features, same behaviour.' },
+        a: { zh: 'Liquid Glass 效果在 macOS 26（Tahoe）上完整启用；macOS 14–25 会自动降级为标准的菜单材质，功能完全相同。', en: 'Liquid Glass effects light up on macOS 26 (Tahoe); macOS 14–25 fall back to the standard menu material — same features, same behavior.' },
       },
       {
         q: { zh: '我可以自己从源码构建吗？', en: 'Can I build it from source myself?' },

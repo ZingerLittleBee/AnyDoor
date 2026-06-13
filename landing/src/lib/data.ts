@@ -202,7 +202,7 @@ export const moreFeatures: FeatureCard[] = [
     name: { zh: '剪贴板历史墙', en: 'Clipboard Wall' },
     desc: {
       zh: '持久化剪贴板历史——文本、图片、文件，外加截图、取色、OCR、二维码的结果，按类别分页、可搜索、可收藏。',
-      en: 'A persistent clipboard history — text, images, files, plus screenshot / color / OCR / QR results — paged by category, searchable, favoritable.',
+      en: 'A persistent clipboard history — text, images, files, plus screenshot / color / OCR / QR results — paged by category, searchable, with favorites.',
     },
     tag: { zh: '⌘ ⇧ V', en: '⌘ ⇧ V' },
   },
