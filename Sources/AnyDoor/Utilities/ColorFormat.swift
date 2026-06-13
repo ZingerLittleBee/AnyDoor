@@ -48,7 +48,10 @@ enum ColorFormat: String, CaseIterable, Sendable {
     private static func components(from hex: String) -> (Int, Int, Int)? {
         guard hex.hasPrefix("#") else { return nil }
         let digits = hex.dropFirst()
-        guard digits.count == 6, let value = Int(digits, radix: 16) else { return nil }
+        // `allSatisfy(\.isHexDigit)` rejects a leading +/- (which `Int(_:radix:)`
+        // would otherwise accept) and any other non-hex character.
+        guard digits.count == 6, digits.allSatisfy(\.isHexDigit),
+              let value = Int(digits, radix: 16) else { return nil }
         return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
     }
 

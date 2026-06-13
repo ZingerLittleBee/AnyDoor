@@ -4422,6 +4422,23 @@
         }
       }
     },
+    "toast.micMute.unsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This input device can't be muted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前输入设备不支持静音"
+          }
+        }
+      }
+    },
     "toast.ocr.noText": {
       "extractionState": "manual",
       "localizations": {

@@ -727,9 +727,9 @@ private struct CommandPaletteRow: View {
         }
     }
 
-    /// Port records, calculator results, and second-level options render their
-    /// subtitle (the port detail line, the original expression for a calc
-    /// result, or the port detail line for a port option).
+    /// Port records, calculator results, host profiles, and second-level options
+    /// render their subtitle (the port detail line, the original expression for a
+    /// calc result, the host profile's entry summary, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
         case .portRecord, .calcResult, .paletteOption, .hostProfile: return true

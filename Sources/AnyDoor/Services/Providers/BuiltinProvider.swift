@@ -20,4 +20,7 @@ enum BuiltinError: Error, Sendable {
     case shellFailed(code: Int32, output: String)
     case audioDeviceUnavailable
     case ioKitFailed(Int32)
+    /// The current audio device exposes no settable mute property (common for
+    /// built-in mics / AirPods in the input scope).
+    case muteUnsupported
 }

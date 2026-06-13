@@ -38,4 +38,11 @@ final class ColorFormatTests: XCTestCase {
         XCTAssertNil(ColorFormat.rgb.format(hex: "#FFF"))
         XCTAssertNil(ColorFormat.hsl.format(hex: ""))
     }
+
+    func testSignedHexIsRejected() {
+        // Int(_:radix:) accepts a leading +/-; the parser must reject it so a
+        // 6-char string like "#-F5733" doesn't yield a bogus color.
+        XCTAssertNil(ColorFormat.hex.format(hex: "#-F5733"))
+        XCTAssertNil(ColorFormat.rgb.format(hex: "#+F5733"))
+    }
 }
