@@ -29,6 +29,11 @@ struct HostsEditorView: View {
     @State private var showRestoreConfirm = false
     @State private var showDeleteConfirm = false
 
+    init(manager: HostsManager, initialProfileID: UUID? = nil) {
+        self.manager = manager
+        _selection = State(initialValue: initialProfileID.map(Selection.profile) ?? .system)
+    }
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
@@ -42,6 +47,9 @@ struct HostsEditorView: View {
                             .contextMenu {
                                 Button { beginRename(profile) } label: {
                                     Label("重命名", systemImage: "pencil")
+                                }
+                                Button { duplicate(profile) } label: {
+                                    Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
                                 }
                                 Button(role: .destructive) { delete(profile) } label: {
                                     Label("删除", systemImage: "trash")
@@ -99,9 +107,10 @@ struct HostsEditorView: View {
                     .onSubmit { commitRename() }
             } else {
                 Text(profile.name)
-                    .onTapGesture(count: 2) { beginRename(profile) }
             }
+            Spacer(minLength: 0)
         }
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -114,6 +123,11 @@ struct HostsEditorView: View {
                         await manager.updateProfile(profile, name: profile.name, content: draftContent)
                     }
                     Spacer()
+                    Button {
+                        duplicate(profile)
+                    } label: {
+                        Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
+                    }
                     Button("删除", role: .destructive) { showDeleteConfirm = true }
                         .tint(.red)
                 }
@@ -212,6 +226,13 @@ struct HostsEditorView: View {
     private func deleteSelected() {
         guard let profile = selectedProfile else { return }
         delete(profile)
+    }
+
+    private func duplicate(_ profile: HostProfile) {
+        guard let duplicate = manager.duplicateProfile(profile) else { return }
+        selection = .profile(duplicate.id)
+        beginRename(duplicate)
+        loadDraft()
     }
 
     private func delete(_ profile: HostProfile) {

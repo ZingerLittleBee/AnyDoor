@@ -91,6 +91,22 @@ final class HostsManager {
         reload()
     }
 
+    @discardableResult
+    func duplicateProfile(_ profile: HostProfile) -> HostProfile? {
+        guard let context = modelContainer?.mainContext else { return nil }
+        let nextOrder = (profiles.map(\.displayOrder).max() ?? 0) + 100
+        let duplicate = HostProfile(
+            name: copyName(for: profile.name),
+            content: profile.content,
+            isActive: false,
+            displayOrder: nextOrder
+        )
+        context.insert(duplicate)
+        try? context.save()
+        reload()
+        return profiles.first { $0.id == duplicate.id }
+    }
+
     func deleteProfile(_ profile: HostProfile) async {
         guard let context = modelContainer?.mainContext else { return }
         let wasActive = profile.isActive
@@ -98,6 +114,17 @@ final class HostsManager {
         try? context.save()
         reload()
         if wasActive { await scheduleApply() }
+    }
+
+    private func copyName(for name: String) -> String {
+        let base = L(.hostsProfileCopyName, name)
+        let existing = Set(profiles.map(\.name))
+        guard existing.contains(base) else { return base }
+        var index = 2
+        while existing.contains("\(base) \(index)") {
+            index += 1
+        }
+        return "\(base) \(index)"
     }
 
     /// Edit a profile. Persists immediately; re-applies only if active.
