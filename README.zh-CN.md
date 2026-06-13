@@ -6,7 +6,8 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 应用切换、系统开关或一次性动作，整个流程不需要离开键盘。
 
 按一次快捷键打开或激活应用，再按一次隐藏。同样的肌肉记忆也可以用来静音、锁屏、
-取色、对屏幕区域 OCR 等等。
+取色、对屏幕区域 OCR——需要时还有剪贴板历史、窗口布局、`/etc/hosts` 配置、
+外接显示器亮度、Hyper Key，以及 Spotlight 风格的命令面板。
 
 ## 功能
 
@@ -36,7 +37,40 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 - 重启 Finder / Dock / SystemUIServer + ControlCenter
 - 截图到剪贴板（交互式区域截图）
 - 屏幕区域 OCR —— 通过 Vision 框架识别文字并写入剪贴板
+- 扫描二维码 / 条形码 —— 识别屏幕上的码并把内容写入剪贴板
 - 取色器 —— 调用系统取色器并把 HEX 写入剪贴板
+
+### 剪贴板历史
+
+- 后台监听记录复制到剪贴板的文字、图片和文件，并提供可搜索的 Liquid Glass「墙」浏览与重新粘贴。
+- 对捕获的图片识别文字（OCR）、条形码和颜色。
+- 按来源排除 —— 跳过密码管理器等指定应用的历史，排除项会随备份一起携带。
+
+### 窗口布局
+
+- 把当前窗口平铺为二分之一、三分之一、三分之二、四分之一、居中或最大化，每种都可单独绑定快捷键。
+- 把当前窗口移动到下一个 / 上一个显示器。
+- 面板里的「窗口布局」子菜单列出所有排列方式。
+
+### 外接显示器亮度
+
+- 通过 VCP `0x10` 对外接显示器做 DDC/CI 亮度控制，并显示屏幕 OSD。
+- 按架构选择后端（Apple Silicon / Intel），提供全局亮度增减快捷键。
+
+### Hosts 管理
+
+- 用内置编辑器修改 `/etc/hosts`，支持多套命名配置和一键切换。
+- 写入通过特权 XPC 助手（`SMAppService` 守护进程）完成；未安装助手时回退到管理员授权的 AppleScript。
+
+### Hyper Key
+
+- 通过 `hidutil` 把 Caps Lock（或其他触发键）重映射为 Hyper 修饰键（Control + Option + Command，可选 Shift）。
+- 轻点一下可触发独立动作（无 / Escape / 原始按键）；watchdog 会重新应用映射，并在关机时清除。
+
+### 定时关机
+
+- 设定一次性延时关机，重启后仍然生效，Mac 唤醒后会重新校验。
+- 触发前弹出可取消的警告面板；执行方式可为优雅关机（System Events）或强制关机（特权助手）。
 
 ### 端口管理
 
@@ -62,13 +96,18 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 ### 设置
 
 - **面板** 标签页：拖拽排序、单项可见性、内联快捷键录入、类型徽章（开关 / 动作 / 子菜单）。
-- **通用** 标签页：开机自启、菜单栏图标样式、辅助功能与自动化权限状态及一键申请、自动更新配置。
+- **通用** 标签页：开机自启、菜单栏图标样式、辅助功能与自动化权限状态及一键申请、自动更新配置、配置备份与恢复。
 
 ### 自动更新
 
 - 集成 Sparkle，使用 EdDSA 签名的 appcast。
 - 可配置检查频率（每天 / 每周 / 关闭），支持手动检查。
 - 更新横幅直接出现在菜单栏面板里。
+
+### 备份与恢复
+
+- 把应用快捷键、内置项偏好和白名单内的通用设置导出为带版本号的快照，并在另一台 Mac 上导入。
+- 剪贴板历史和机器相关的键不会导出；导入时按 bundle ID 重新解析应用路径，改动无需重启即可生效。
 
 ### 安全与权限
 
@@ -265,21 +304,25 @@ codesign，提交 Apple 公证，打包 DMG 和 zip，重新生成 Sparkle appca
 
 - **CGEvent tap**：使用 HID 级别的 `.cghidEventTap`，在应用收到按键前拦截键盘事件。
 - **SwiftData**：持久化快捷键绑定。
-- **MenuBarExtra**：使用 `.window` 样式提供菜单栏面板。
+- **AppKit 菜单栏**：由 `NSStatusItem` 加一个浮动 `NSPanel` 实现（`MenuBarController` 管理），而非 SwiftUI 的 `MenuBarExtra`。
+- **特权 XPC 助手**：在校验调用方代码签名后写入 `/etc/hosts`。
 - 应用以 accessory 模式运行，不显示 Dock 图标。
 
 ## 技术栈
 
-- SwiftUI (`MenuBarExtra` + `Settings`)
+- SwiftUI `Settings` 场景 + AppKit 菜单栏（`NSStatusItem` + `NSPanel`）
 - SwiftData
-- CGEvent tap
+- CGEvent tap（`.cghidEventTap`）
+- 写入 `/etc/hosts` 的特权 XPC 助手
 - Swift Package Manager
 
 ## 致谢
 
-- [DDC.swift](https://github.com/reitermarkus/DDC.swift) (MIT) — Intel Mac 上外置显示器的 DDC/CI 亮度控制。
-- [AskForPermission](https://github.com/riko2chen/AskForPermission) — macOS 辅助功能权限助手。
-- [Sparkle](https://sparkle-project.org/) — 应用自动更新。
+捆绑的第三方代码，完整许可证文本见 [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)。
+
+- [MonitorControl](https://github.com/MonitorControl/MonitorControl)（MIT）—— 其 `IntelDDC` 被内置用于 Intel Mac 上外接显示器的 DDC/CI 亮度控制（本身改编自 [@reitermarkus](https://github.com/reitermarkus) 的工作）。
+- [Sparkle](https://sparkle-project.org/)（MIT）—— 应用自动更新。
+- [AskForPermission](https://github.com/riko2chen/AskForPermission)（MIT）—— macOS 辅助功能权限助手。
 
 ## 许可证
 

@@ -7,8 +7,10 @@ combination to launch and toggle apps, flip system settings, or run one-off
 actions — all without leaving the keyboard.
 
 Press a shortcut to open an app. Press it again to hide it. Use the same
-muscle memory to mute audio, lock the screen, sample a color, OCR a screen
-region, and more.
+muscle memory to mute audio, lock the screen, sample a color, or OCR a screen
+region — and reach for clipboard history, window layouts, `/etc/hosts`
+profiles, external-display brightness, a Hyper Key, and a Spotlight-style
+command palette when you need them.
 
 ## Features
 
@@ -39,7 +41,52 @@ region, and more.
 - Restart Finder / Dock / SystemUIServer + ControlCenter
 - Screenshot to clipboard (interactive region capture)
 - OCR a screen region — Vision framework recognizes text and copies it
+- Scan QR / barcode — decode a code on screen and copy its payload
 - Pick Color — system color sampler captures HEX into the clipboard
+
+### Clipboard history
+
+- Background watcher records text, images, and files copied to the
+  pasteboard, with a searchable Liquid Glass "wall" to browse and re-paste.
+- Recognizes text (OCR), barcodes, and colors inside captured images.
+- Per-source exclusions — skip history from password managers and other
+  chosen apps; excluded sources travel with backups.
+
+### Window layout
+
+- Tile the focused window to halves, thirds, two-thirds, quarters, center,
+  or maximize — each on its own optional hotkey.
+- Move the focused window to the next / previous display.
+- A Window Layout submenu in the panel exposes every arrangement.
+
+### External display brightness
+
+- DDC/CI brightness control for external monitors over VCP `0x10`, with an
+  on-screen OSD.
+- Architecture-aware backend (Apple Silicon vs. Intel) and global
+  brightness up / down hotkeys.
+
+### Hosts management
+
+- Edit `/etc/hosts` from a built-in editor with multiple named profiles and
+  one-click switching.
+- Writes go through a privileged XPC helper (an `SMAppService` daemon),
+  falling back to an administrator-authorized AppleScript when the helper
+  is not installed.
+
+### Hyper Key
+
+- Remap Caps Lock (or another trigger) to a Hyper modifier
+  (Control + Option + Command, optionally Shift) via `hidutil`.
+- A quick tap can emit its own action (none / Escape / the original key),
+  with a watchdog that re-applies the mapping and clears it on shutdown.
+
+### Scheduled shutdown
+
+- Arm a one-shot shutdown after a chosen delay; it survives relaunch and is
+  re-validated after the Mac wakes from sleep.
+- A cancelable warning panel appears before it fires; execution is graceful
+  (System Events) or forced (privileged helper).
 
 ### Port Manager
 
@@ -72,13 +119,20 @@ region, and more.
   recorder, type badges (toggle / action / submenu).
 - **General** tab: launch at login, menu bar icon style, accessibility
   and automation permission status with one-click request, auto-update
-  controls.
+  controls, and configuration backup / restore.
 
 ### Auto-update
 
 - Sparkle integration with EdDSA-signed appcast.
 - Configurable check frequency (daily / weekly / off) and manual check.
 - Update banner surfaces new versions inside the menu bar panel.
+
+### Backup & restore
+
+- Export app shortcuts, built-in preferences, and whitelisted general
+  settings into a versioned snapshot, and import it on another Mac.
+- Clipboard history and machine-specific keys are excluded; app paths are
+  re-resolved from bundle IDs on import, and changes apply without a relaunch.
 
 ### Security & permissions
 
@@ -278,14 +332,17 @@ publishes it.
 
 - **CGEvent tap** at HID level (`.cghidEventTap`) intercepts keyboard events before any app
 - **SwiftData** persists key bindings across launches
-- **MenuBarExtra** with `.window` style provides the menu bar popup
+- **AppKit menu bar** — an `NSStatusItem` plus a floating `NSPanel` (managed by
+  `MenuBarController`), not SwiftUI's `MenuBarExtra`
+- **Privileged XPC helper** writes `/etc/hosts` after verifying the caller's code signature
 - App runs as an accessory (no Dock icon)
 
 ## Tech Stack
 
-- SwiftUI (MenuBarExtra + Settings)
+- SwiftUI `Settings` scene + AppKit menu bar (`NSStatusItem` + `NSPanel`)
 - SwiftData
-- CGEvent tap
+- CGEvent tap (`.cghidEventTap`)
+- Privileged XPC helper for `/etc/hosts`
 - Swift Package Manager
 
 ## Acknowledgements
