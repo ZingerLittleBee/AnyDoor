@@ -86,8 +86,8 @@ Sources/AnyDoor/
     ├── Clipboard    ClipboardWall* / ClipboardHistory* / ClipboardCardView
     ├── Cmd Palette  CommandPalettePicker / SpotlightAppPicker (+ WindowController)
     ├── Hosts/       HostsEditorView / PlainTextEditor / HelperApprovalBanner
-    ├── Settings     SettingsView (TabView: Panel + General only) / PanelSettingsView /
-    │                GeneralSettingsView (embeds SyncSettingsView as a section)
+    ├── Settings     SettingsView (TabView: Panel + Capture + General) / PanelSettingsView /
+    │                CaptureSettingsView / GeneralSettingsView (embeds SyncSettingsView as a section)
     └── Common       Toast* / UpdateBannerView / LiquidGlassCompatibility / ScreenshotPreviewWindow
 ```
 
