@@ -24,6 +24,8 @@ final class CaptureOverlayWindow {
 
     private static let overlaySize = CGSize(width: 280, height: 96)
 
+    private init() {}
+
     func present(image: NSImage, fileURL: URL?, anchor: CGRect?, timeout: Int, actions: CaptureOverlayActions) {
         close()
         let screen = NSScreen.screenUnderMouse ?? NSScreen.main ?? NSScreen.screens.first
