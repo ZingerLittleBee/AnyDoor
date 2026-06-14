@@ -9,6 +9,10 @@ final class PinnedImageWindow {
 
     private var panel: NSPanel?
     private var clickThrough = false
+    // While click-through is enabled the panel ignores mouse events, so the hover
+    // controls can never reappear; an Escape monitor lets the user disable it.
+    nonisolated(unsafe) private var escapeMonitorLocal: Any?
+    nonisolated(unsafe) private var escapeMonitorGlobal: Any?
 
     static func show(image: NSImage, at screenFrame: CGRect) {
         let win = PinnedImageWindow()
@@ -57,9 +61,42 @@ final class PinnedImageWindow {
     private func toggleClickThrough() {
         clickThrough.toggle()
         panel?.ignoresMouseEvents = clickThrough
+        if clickThrough {
+            installEscapeMonitors()
+        } else {
+            removeEscapeMonitors()
+        }
+    }
+
+    /// While click-through is on, Escape disables it so interactivity and the
+    /// hover controls (toggle/close) come back — otherwise the pin is a dead end.
+    private func installEscapeMonitors() {
+        guard escapeMonitorLocal == nil, escapeMonitorGlobal == nil else { return }
+        escapeMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 /* Esc */ else { return event }
+            MainActor.assumeIsolated { self?.disableClickThrough() }
+            return nil
+        }
+        // Global monitors can't consume the event; observing Escape is enough.
+        escapeMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 /* Esc */ else { return }
+            MainActor.assumeIsolated { self?.disableClickThrough() }
+        }
+    }
+
+    private func removeEscapeMonitors() {
+        if let m = escapeMonitorLocal { NSEvent.removeMonitor(m); escapeMonitorLocal = nil }
+        if let m = escapeMonitorGlobal { NSEvent.removeMonitor(m); escapeMonitorGlobal = nil }
+    }
+
+    private func disableClickThrough() {
+        clickThrough = false
+        panel?.ignoresMouseEvents = false
+        removeEscapeMonitors()
     }
 
     private func close() {
+        removeEscapeMonitors()
         panel?.orderOut(nil)
         panel = nil
         PinnedImageWindow.windows.removeAll { $0 === self }
