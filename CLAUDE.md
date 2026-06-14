@@ -73,6 +73,15 @@ Sources/AnyDoor/
 │   │                DDCBackend (Arm64 / Intel) + OSDBridge
 │   ├── Calculator/  Inline calculator for the command palette (Calculator entry point → CalcResult /
 │   │                CalcTokenizer / CalcEvaluator / CalcFunctions / CalcToken)
+│   ├── Capture/      Screenshot suite: CaptureCoordinator (@MainActor orchestrator) / LegacyScreenCapture
+│   │                (synchronous CGDisplayCreateImage/CGWindowListCreateImage via dlsym — NOT SCK, see
+│   │                crash note) / CaptureSettings / SelectionGeometry / OverlayPlacement / CaptureFilename /
+│   │                WindowEnumerator / ScreenCapturePermission. Views/Capture: SelectionOverlayWindow /
+│   │                CaptureModeBarWindow / CaptureOverlayWindow / PinnedImageWindow
+│   ├── Annotation/   Annotation editor (Phase 1): AnnotationModel / AnnotationDocument (elements +
+│   │                crop + snapshot undo/redo) / AnnotationGeometry / AnnotationRenderer (flipped
+│   │                NSGraphicsContext composite; blur=CIGaussianBlur, pixelate=CIPixellate). UI:
+│   │                AnnotationEditorWindow / AnnotationEditorView / AnnotationCanvasView (AppKit canvas)
 │   ├── Hyper Key    HyperKeyService / HyperKeyController / QuickPressEmitter
 │   ├── Cmd Palette  CommandPaletteService / InstalledAppsScanner / PortInventory / PortScanner
 │   ├── Win Layout   WindowLayoutService

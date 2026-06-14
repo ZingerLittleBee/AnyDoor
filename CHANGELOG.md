@@ -20,6 +20,11 @@ versioning.
   always-on-top floating references.
 - Screenshot settings tab: save location, filename template, auto-save /
   auto-copy, timer-delay preset (3 / 5 / 10s), and quick-access overlay timeout.
+- Annotation editor (reached from the capture overlay's edit button): arrow,
+  line, rectangle, ellipse, freehand, highlighter, text, blur, pixelate,
+  redaction bar, numbered step counters, select/move, and non-destructive crop,
+  with per-tool color / stroke width / fill / text size, undo/redo, and export to
+  copy / save / pin.
 
 ### Fixed
 
