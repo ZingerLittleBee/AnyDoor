@@ -139,7 +139,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             ctx.timingFunction = CAMediaTimingFunction(name: .linear)
             window.animator().setFrame(onScreen, display: true)
         }, completionHandler: { [weak self] in
-            MainActor.assumeIsolated { self?.isAnimating = false }
+            MainThreadIsolation.run { self?.isAnimating = false }
         })
 
         // Enforce retention off the critical path; the @Query view reflects any
@@ -170,7 +170,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             ctx.timingFunction = CAMediaTimingFunction(name: .linear)
             window.animator().setFrame(offScreen, display: true)
         }, completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
+            MainThreadIsolation.run {
                 self?.isAnimating = false
                 self?.close()
                 completion?()
@@ -228,18 +228,18 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     private func installMonitors() {
         removeMonitors()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let consumed = MainActor.assumeIsolated { self?.handle(event) ?? false }
+            let consumed = MainThreadIsolation.run { self?.handle(event) ?? false }
             return consumed ? nil : event
         }
         // Translate the scroll wheel / trackpad swipe into card navigation; the
         // horizontal ScrollView otherwise ignores a plain vertical mouse wheel.
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            let consumed = MainActor.assumeIsolated { self?.handleScroll(event) ?? false }
+            let consumed = MainThreadIsolation.run { self?.handleScroll(event) ?? false }
             return consumed ? nil : event
         }
         // Track ⌘ so the view can enable tab drag-to-reorder reactively.
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            MainActor.assumeIsolated {
+            MainThreadIsolation.run {
                 self?.state.isReorderModifierHeld = event.modifierFlags.contains(.command)
             }
             return event
@@ -249,7 +249,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
+            MainThreadIsolation.run {
                 guard let self else { return }
                 if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
                 // Don't throw away an in-progress edit on a stray outside click.
@@ -607,10 +607,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     // invokes these on the main thread. Mark them nonisolated and hop back onto
     // the main actor to read the main-actor-isolated previewURL.
     nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        MainActor.assumeIsolated { previewURL == nil ? 0 : 1 }
+        MainThreadIsolation.run { previewURL == nil ? 0 : 1 }
     }
     nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
-        MainActor.assumeIsolated { previewURL as NSURL? }
+        MainThreadIsolation.run { previewURL as NSURL? }
     }
 
     func windowWillClose(_ notification: Notification) {

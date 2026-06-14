@@ -72,15 +72,20 @@ final class PinnedImageWindow {
     /// hover controls (toggle/close) come back — otherwise the pin is a dead end.
     private func installEscapeMonitors() {
         guard escapeMonitorLocal == nil, escapeMonitorGlobal == nil else { return }
+        // Run the MainActor-isolated side effect synchronously via
+        // MainThreadIsolation rather than MainActor.assumeIsolated: asserting the
+        // current executor from an event-monitor callback can fault inside the
+        // concurrency runtime after a ScreenCaptureKit capture (see
+        // MainThreadIsolation).
         escapeMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 /* Esc */ else { return event }
-            MainActor.assumeIsolated { self?.disableClickThrough() }
+            MainThreadIsolation.run { self?.disableClickThrough() }
             return nil
         }
         // Global monitors can't consume the event; observing Escape is enough.
         escapeMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 /* Esc */ else { return }
-            MainActor.assumeIsolated { self?.disableClickThrough() }
+            MainThreadIsolation.run { self?.disableClickThrough() }
         }
     }
 
@@ -137,6 +142,6 @@ private struct PinnedImageView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
-        .onHover { hovering = $0 }
+        .onHoverSafe { hovering = $0 }
     }
 }

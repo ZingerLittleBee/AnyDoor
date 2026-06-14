@@ -22,12 +22,16 @@ struct CaptureRequest: Sendable, Equatable {
     }
 }
 
-/// A resolved capture source handed to `ScreenCaptureService`.
-enum CaptureTarget: Sendable, Equatable {
-    case display(CGDirectDisplayID)
-    case window(CGWindowID)
-    /// A sub-rectangle of a display, in that display's local top-left points.
-    case rect(CGRect, display: CGDirectDisplayID)
+/// A resolved capture display: which screen to grab and the geometry needed to
+/// size the selection overlay and convert selection points to pixels.
+struct TargetDisplay: Sendable, Equatable {
+    let id: CGDirectDisplayID
+    /// The display's global AppKit frame (bottom-left origin), used to size and
+    /// place the selection overlay.
+    let frame: CGRect
+    /// Pixels per point, for converting selection points into the frozen still's
+    /// pixel space.
+    let backingScale: CGFloat
 }
 
 /// What the selection overlay returns to the coordinator.
@@ -36,7 +40,7 @@ enum SelectionResult: Sendable {
     /// the image is returned directly (no second capture needed). `rect` is in
     /// global AppKit screen coordinates (bottom-left origin) for overlay placement.
     case region(image: CGImage, rect: CGRect)
-    /// A window was picked; the coordinator captures it crisply via ScreenCaptureKit.
+    /// A window was picked; the coordinator grabs it crisply via `LegacyScreenCapture`.
     /// `frame` is the window's global AppKit screen frame for overlay placement.
     case window(id: CGWindowID, frame: CGRect)
     case cancelled

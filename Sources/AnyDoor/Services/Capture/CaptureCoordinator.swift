@@ -3,6 +3,15 @@ import Foundation
 
 /// Orchestrates a single capture: resolve mode -> (selection / countdown / direct
 /// grab) -> output policy (auto-save + auto-copy + history) -> quick-access overlay.
+///
+/// The capture engine is `LegacyScreenCapture` (synchronous CoreGraphics), **not**
+/// ScreenCaptureKit. A successful SCK capture corrupts the main thread's
+/// Swift-concurrency executor tracking on macOS 26, after which unrelated
+/// main-actor isolation checks (e.g. SwiftUI hover handlers) crash with
+/// EXC_BAD_ACCESS — see `LegacyScreenCapture`. To stay clear of that, this whole
+/// flow is callback-based and never `await`s a cross-isolation async: the grabs
+/// are synchronous, selection completes via a callback, and the self-timer uses a
+/// plain `Task.sleep` (which resumes on the main actor).
 @MainActor
 final class CaptureCoordinator {
     static let shared = CaptureCoordinator()
@@ -19,10 +28,16 @@ final class CaptureCoordinator {
     /// Entry point used by every provider. Guards against re-entrancy.
     func capture(_ request: CaptureRequest) {
         guard !inFlight else { return }
+        guard ScreenCapturePermission.ensureGranted() else {
+            ToastPresenter.shared.show(.failure(L(.toastScreenCapturePermissionDenied)))
+            return
+        }
         inFlight = true
-        Task { [weak self] in
-            await self?.run(request)
-            self?.inFlight = false
+        lastRegionRequest = request
+        switch request.mode {
+        case .region:     captureRegion(delay: request.delay)
+        case .window:     captureWindow(delay: request.delay)
+        case .fullscreen: captureFullscreen(delay: request.delay)
         }
     }
 
@@ -37,71 +52,77 @@ final class CaptureCoordinator {
         )
     }
 
-    private func run(_ request: CaptureRequest) async {
-        guard ScreenCapturePermission.isGranted || ScreenCapturePermission.request() else {
-            ToastPresenter.shared.show(.failure(L(.toastScreenCapturePermissionDenied)))
-            return
-        }
-        let captured: (image: NSImage, anchor: CGRect?)?
-        switch request.mode {
-        case .region:     captured = await captureRegion(delay: request.delay)
-        case .window:     captured = await captureWindow(delay: request.delay)
-        case .fullscreen: captured = await captureFullscreen(delay: request.delay)
-        }
-        guard let captured else { return }
-        lastRegionRequest = request
-        await present(image: captured.image, anchor: captured.anchor)
-    }
+    // MARK: - Capture flows (all on the main actor, callback-based)
 
-    private func captureRegion(delay: Int) async -> (NSImage, CGRect?)? {
-        let result = await withSelection(mode: .region)
-        guard case let .region(cgImage, rect) = result else { return nil }
-        await countdown(delay)
-        return (NSImage(cgImage: cgImage, size: .zero), rect)
-    }
-
-    private func captureWindow(delay: Int) async -> (NSImage, CGRect?)? {
-        let result = await withSelection(mode: .window)
-        guard case let .window(id, frame) = result else { return nil }
-        await countdown(delay)
-        do {
-            let cg = try await ScreenCaptureService.shared.captureWindow(id)
-            return (NSImage(cgImage: cg, size: .zero), frame)
-        } catch {
-            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
-            return nil
-        }
-    }
-
-    private func captureFullscreen(delay: Int) async -> (NSImage, CGRect?)? {
-        await countdown(delay)
-        let screen = NSScreen.screenUnderMouse ?? NSScreen.main
-        guard let displayID = screen?.displayID else { return nil }
-        do {
-            let cg = try await ScreenCaptureService.shared.captureDisplay(displayID)
-            return (NSImage(cgImage: cg, size: .zero), nil)
-        } catch {
-            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
-            return nil
-        }
-    }
-
-    private func withSelection(mode: CaptureMode) async -> SelectionResult {
-        await withCheckedContinuation { continuation in
-            Task {
-                await selectionOverlay.present(mode: mode) { result in
-                    continuation.resume(returning: result)
-                }
+    private func captureRegion(delay: Int) {
+        guard let target = Self.resolveTargetUnderMouse(),
+              let frozen = LegacyScreenCapture.display(target.id) else { finish(); return }
+        selectionOverlay.present(target: target, mode: .region, frozen: frozen) { [weak self] result in
+            guard let self else { return }
+            guard case let .region(cgImage, rect) = result else { self.finish(); return }
+            self.afterCountdown(delay) { [weak self] in
+                self?.present(image: cgImage, anchor: rect)
+                self?.finish()
             }
         }
     }
 
-    private func countdown(_ seconds: Int) async {
-        guard seconds > 0 else { return }
-        try? await Task.sleep(for: .seconds(seconds))
+    private func captureWindow(delay: Int) {
+        guard let target = Self.resolveTargetUnderMouse(),
+              let frozen = LegacyScreenCapture.display(target.id) else { finish(); return }
+        selectionOverlay.present(target: target, mode: .window, frozen: frozen) { [weak self] result in
+            guard let self else { return }
+            guard case let .window(id, frame) = result else { self.finish(); return }
+            self.afterCountdown(delay) { [weak self] in
+                guard let self else { return }
+                guard let cg = LegacyScreenCapture.window(id) else {
+                    ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+                    self.finish(); return
+                }
+                self.present(image: cg, anchor: frame)
+                self.finish()
+            }
+        }
     }
 
-    private func present(image: NSImage, anchor: CGRect?) async {
+    private func captureFullscreen(delay: Int) {
+        afterCountdown(delay) { [weak self] in
+            guard let self else { return }
+            guard let target = Self.resolveTargetUnderMouse(),
+                  let cg = LegacyScreenCapture.display(target.id) else {
+                ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+                self.finish(); return
+            }
+            self.present(image: cg, anchor: nil)
+            self.finish()
+        }
+    }
+
+    /// Run `body` on the main actor after `seconds`. Uses `Task.sleep` (which
+    /// resumes on the main actor) — no cross-isolation await, so it is safe with
+    /// respect to the executor-tracking bug described in `LegacyScreenCapture`.
+    private func afterCountdown(_ seconds: Int, _ body: @escaping @MainActor () -> Void) {
+        guard seconds > 0 else { body(); return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            body()
+        }
+    }
+
+    private func finish() { inFlight = false }
+
+    @MainActor private static func resolveTargetUnderMouse() -> TargetDisplay? {
+        let screen = NSScreen.screenUnderMouse ?? NSScreen.main
+        guard let screen, let id = screen.displayID else { return nil }
+        return TargetDisplay(id: id, frame: screen.frame, backingScale: screen.backingScaleFactor)
+    }
+
+    // MARK: - Output
+
+    /// Apply output policy and show the quick-access overlay. Synchronous —
+    /// history recording is fire-and-forget so this never awaits.
+    private func present(image cg: CGImage, anchor: CGRect?) {
+        let image = NSImage(cgImage: cg, size: .zero)
         guard let png = image.pngData() else {
             ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
             return
@@ -114,7 +135,7 @@ final class CaptureCoordinator {
             pb.writeObjects([image])
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pb.changeCount)
         }
-        await ClipboardHistoryStore.shared.recordScreenshot(pngData: png)
+        Task { await ClipboardHistoryStore.shared.recordScreenshot(pngData: png) }
 
         let actions = CaptureOverlayActions(
             copy: { [weak self] in self?.copyToPasteboard(image) },
@@ -175,22 +196,25 @@ final class CaptureCoordinator {
 
     private func runOCR(_ image: NSImage) {
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-        Task {
+        // Run Vision off the main actor and hop back only with the result.
+        Task.detached {
             do {
                 let lines = try await TextRecognizer.recognize(cg)
                 let text = lines.joined(separator: "\n")
-                guard !text.isEmpty else {
-                    ToastPresenter.shared.show(.failure(L(.toastOcrNoText)))
-                    return
+                await MainActor.run {
+                    guard !text.isEmpty else {
+                        ToastPresenter.shared.show(.failure(L(.toastOcrNoText)))
+                        return
+                    }
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    pb.setString(text, forType: .string)
+                    ClipboardWatcher.shared?.noteSelfWrite(changeCount: pb.changeCount)
+                    Task { await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text) }
+                    ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
                 }
-                let pb = NSPasteboard.general
-                pb.clearContents()
-                pb.setString(text, forType: .string)
-                ClipboardWatcher.shared?.noteSelfWrite(changeCount: pb.changeCount)
-                await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text)
-                ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
             } catch {
-                ToastPresenter.shared.show(.failure(L(.toastRecognitionFailed)))
+                await MainActor.run { ToastPresenter.shared.show(.failure(L(.toastRecognitionFailed))) }
             }
         }
     }

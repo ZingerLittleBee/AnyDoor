@@ -25,7 +25,11 @@ final class RegularWindowCoordinator {
         observers[id] = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: window, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.untrack(id) }
+            // Run synchronously on the main thread via MainThreadIsolation rather
+            // than MainActor.assumeIsolated, whose swift_task_isCurrentExecutor
+            // check can fault on the main thread after a ScreenCaptureKit capture
+            // (see MainThreadIsolation).
+            MainThreadIsolation.run { self?.untrack(id) }
         }
         apply()
     }

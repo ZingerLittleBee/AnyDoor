@@ -49,7 +49,10 @@ final class CaptureOverlayWindow {
         p.hasShadow = true
         p.hidesOnDeactivate = false
         p.isReleasedWhenClosed = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .moveToActiveSpace]
+        // `.canJoinAllSpaces` and `.moveToActiveSpace` are mutually exclusive
+        // (both set the space-membership policy); combining them makes macOS 26's
+        // `_validateCollectionBehavior` throw an NSException. Keep one space option.
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let hosting = NSHostingView(rootView: CaptureOverlayView(
             image: image,
@@ -94,7 +97,7 @@ private struct CaptureOverlayView: View {
     let image: NSImage
     let fileURL: URL?
     let actions: CaptureOverlayActions
-    let onHoverChange: (Bool) -> Void
+    let onHoverChange: @MainActor (Bool) -> Void
     let onAction: () -> Void
 
     var body: some View {
@@ -119,7 +122,7 @@ private struct CaptureOverlayView: View {
         .frame(width: 280, height: 96)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .onHover { onHoverChange($0) }
+        .onHoverSafe { onHoverChange($0) }
     }
 
     private var thumbnail: some View {

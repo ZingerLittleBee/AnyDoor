@@ -49,7 +49,7 @@ final class ScreenshotPreviewWindow {
         p.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
 
         let hosting = NSHostingView(rootView: ScreenshotPreviewContent(image: image) { [weak self] in
-            MainActor.assumeIsolated { self?.close() }
+            MainThreadIsolation.run { self?.close() }
         })
         hosting.frame = NSRect(origin: .zero, size: rect.size)
         hosting.autoresizingMask = [.width, .height]
@@ -61,7 +61,7 @@ final class ScreenshotPreviewWindow {
         // Esc anywhere in this app closes the preview.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53 /* Esc */ else { return event }
-            MainActor.assumeIsolated { self?.close() }
+            MainThreadIsolation.run { self?.close() }
             return nil
         }
 
@@ -71,9 +71,9 @@ final class ScreenshotPreviewWindow {
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] event in
             guard let self else { return event }
-            let inside = MainActor.assumeIsolated { event.window === self.panel }
+            let inside = MainThreadIsolation.run { event.window === self.panel }
             if inside { return event }
-            MainActor.assumeIsolated { self.close() }
+            MainThreadIsolation.run { self.close() }
             return event
         }
 
@@ -81,7 +81,7 @@ final class ScreenshotPreviewWindow {
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            MainThreadIsolation.run { self?.close() }
         }
     }
 

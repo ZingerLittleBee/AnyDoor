@@ -41,7 +41,9 @@ final class CaptureModeBarWindow {
         p.hasShadow = true
         p.hidesOnDeactivate = false
         p.isReleasedWhenClosed = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .moveToActiveSpace]
+        // `.canJoinAllSpaces` and `.moveToActiveSpace` are mutually exclusive; both
+        // together make macOS 26's `_validateCollectionBehavior` throw. Keep one.
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         let hosting = NSHostingView(rootView: CaptureModeBarView(
             onRegion: { [weak self] in self?.pick(.region) },
@@ -55,22 +57,24 @@ final class CaptureModeBarWindow {
         p.orderFrontRegardless()
 
         // Local key monitor: Esc closes, digits 1–4 trigger modes/timer.
-        // The closure is non-isolated; wrap body in MainActor.assumeIsolated so
-        // we can safely access self's MainActor-isolated state — this mirrors the
-        // pattern in ScreenshotPreviewWindow.swift.
+        // The closure is non-isolated and runs on the main thread; run the
+        // MainActor-isolated side effect synchronously via MainThreadIsolation
+        // rather than MainActor.assumeIsolated: asserting the current executor
+        // from an event-monitor callback can fault inside the concurrency runtime
+        // after a ScreenCaptureKit capture (see MainThreadIsolation).
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self else { return event }
             if event.keyCode == 53 { // Esc
-                MainActor.assumeIsolated { self.close() }
+                MainThreadIsolation.run { self.close() }
                 return nil
             }
             if let digit = Int(event.charactersIgnoringModifiers ?? "") {
                 if CaptureModeBarPolicy.isTimerDigit(digit) {
-                    MainActor.assumeIsolated { self.timer() }
+                    MainThreadIsolation.run { self.timer() }
                     return nil
                 }
                 if let mode = CaptureModeBarPolicy.mode(forDigit: digit) {
-                    MainActor.assumeIsolated { self.pick(mode) }
+                    MainThreadIsolation.run { self.pick(mode) }
                     return nil
                 }
             }

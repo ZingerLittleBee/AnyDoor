@@ -198,12 +198,18 @@ final class HotkeyService {
     private func startWatchdog() {
         watchdogTimer?.invalidate()
         watchdogTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            guard let tap = self.eventTap else { return }
-            let suspended = MainActor.assumeIsolated { self.isSuspended }
-            if !suspended && !CGEvent.tapIsEnabled(tap: tap) {
-                print("AnyDoor: Watchdog detected disabled tap, restarting")
-                MainActor.assumeIsolated { self.restart() }
+            // Run synchronously on the main thread via MainThreadIsolation rather
+            // than MainActor.assumeIsolated. assumeIsolated performs a
+            // swift_task_isCurrentExecutor identity check that can fault on the
+            // main thread after certain system async operations (observed after a
+            // ScreenCaptureKit capture leaves the thread's executor tracking
+            // dangling). The helper skips that check, so it is safe here.
+            MainThreadIsolation.run {
+                guard let self, let tap = self.eventTap else { return }
+                if !self.isSuspended && !CGEvent.tapIsEnabled(tap: tap) {
+                    print("AnyDoor: Watchdog detected disabled tap, restarting")
+                    self.restart()
+                }
             }
         }
     }

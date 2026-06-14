@@ -48,7 +48,7 @@ struct PortRowView: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .background(rowBackground, in: .rect(cornerRadius: 6))
-        .onHover { isHovered = $0 }
+        .onHoverSafe { isHovered = $0 }
         .help(tooltipText)
         .contextMenu { PortRecordContextMenu(record: record) }
     }

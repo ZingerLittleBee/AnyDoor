@@ -255,30 +255,33 @@ final class MenuBarController {
 
     private func installClickMonitors() {
         globalClickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.hidePanel() }
-        }
-        localClickMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] event in
-            // `windowNumber` is Sendable; `NSEvent`/`NSWindow` are not, so the
-            // clicked window is reduced to an Int before hopping to the actor.
-            let clickWindowNumber = event.window?.windowNumber
-            MainActor.assumeIsolated {
+            matching: [.leftMouseDown, .rightMouseDown],
+            handler: MainThreadEventMonitor.global { [weak self] in
                 guard let self else { return }
-                // Keep the panel open for clicks inside it, inside a hover
-                // side-popover, or on the status item (its action toggles).
-                if clickWindowNumber == self.panel?.windowNumber { return }
-                if clickWindowNumber == self.statusItem?.button?.window?.windowNumber { return }
-                if let n = clickWindowNumber,
-                   NSApp.windows.contains(where: { $0.windowNumber == n && $0 is KeyableHoverPanel }) {
-                    return
-                }
-                self.hidePanel()
+                let decision = MenuBarEventMonitorPolicy.globalClickDecision(
+                    mouseLocation: NSEvent.mouseLocation,
+                    panelFrame: self.panel?.frame,
+                    statusItemFrame: self.statusItemFrame(),
+                    hoverPanelFrames: self.hoverPanelFrames()
+                )
+                if decision == .close { self.hidePanel() }
             }
-            return event
-        }
+        )
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown],
+            handler: MainThreadEventMonitor.localMouse { [weak self] clickWindowNumber in
+                guard let self else { return }
+                let decision = MenuBarEventMonitorPolicy.clickDecision(
+                    clickWindowNumber: clickWindowNumber,
+                    panelWindowNumber: self.panel?.windowNumber,
+                    statusWindowNumber: self.statusItem?.button?.window?.windowNumber,
+                    hoverPanelWindowNumbers: self.hoverPanelWindowNumbers()
+                )
+                if decision == .close {
+                    self.hidePanel()
+                }
+            }
+        )
     }
 
     private func removeClickMonitors() {
@@ -297,18 +300,20 @@ final class MenuBarController {
     /// rare case where our own app is active (e.g. Settings window open).
     private func installKeyMonitors() {
         globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: .keyDown
-        ) { [weak self] event in
-            guard event.keyCode == 53 else { return }
-            MainActor.assumeIsolated { self?.hidePanel() }
-        }
+            matching: .keyDown,
+            handler: MainThreadEventMonitor.globalKey { [weak self] keyCode in
+                guard MenuBarEventMonitorPolicy.escapeDecision(keyCode: keyCode) == .closeAndConsume else { return }
+                self?.hidePanel()
+            }
+        )
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: .keyDown
-        ) { [weak self] event in
-            guard event.keyCode == 53 else { return event }
-            MainActor.assumeIsolated { self?.hidePanel() }
-            return nil
-        }
+            matching: .keyDown,
+            handler: MainThreadEventMonitor.localKey { [weak self] keyCode in
+                guard MenuBarEventMonitorPolicy.escapeDecision(keyCode: keyCode) == .closeAndConsume else { return false }
+                self?.hidePanel()
+                return true
+            }
+        )
     }
 
     private func removeKeyMonitors() {
@@ -316,6 +321,24 @@ final class MenuBarController {
         if let localKeyMonitor { NSEvent.removeMonitor(localKeyMonitor) }
         globalKeyMonitor = nil
         localKeyMonitor = nil
+    }
+
+    private func statusItemFrame() -> NSRect? {
+        guard let button = statusItem?.button,
+              let window = button.window else { return nil }
+        return window.convertToScreen(button.convert(button.bounds, to: nil))
+    }
+
+    private func hoverPanelWindowNumbers() -> Set<Int> {
+        Set(NSApp.windows.compactMap { window in
+            window is KeyableHoverPanel ? window.windowNumber : nil
+        })
+    }
+
+    private func hoverPanelFrames() -> [NSRect] {
+        NSApp.windows.compactMap { window in
+            window is KeyableHoverPanel && window.isVisible ? window.frame : nil
+        }
     }
 
     // MARK: - Icon image

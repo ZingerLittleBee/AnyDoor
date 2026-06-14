@@ -152,7 +152,7 @@ final class ClipboardTextWindow {
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] event in
             guard let self else { return event }
-            MainActor.assumeIsolated {
+            MainThreadIsolation.run {
                 if event.window !== self.panel { self.close() }
             }
             return event
@@ -160,7 +160,7 @@ final class ClipboardTextWindow {
         let global = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.close() }
+            MainThreadIsolation.run { self?.close() }
         }
         mouseMonitors = [local, global].compactMap { $0 }
     }

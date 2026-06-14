@@ -1,26 +1,31 @@
 import AppKit
 import CoreGraphics
 
-/// Presents a full-screen, non-activating selection overlay over the display under
-/// the mouse. On show it captures a single frozen still of that display (freeze
-/// screen) and lets the user pick either a region (drag a rectangle, cropped from
-/// the frozen still) or a window (highlight + click). Calls `completion` exactly
-/// once with a `SelectionResult`, then tears the panel down.
+/// Presents a full-screen, non-activating selection overlay over a pre-captured
+/// display, letting the user pick either a region (drag a rectangle, cropped from
+/// the supplied frozen still) or a window (highlight + click). Calls `completion`
+/// exactly once with a `SelectionResult`, then tears the panel down.
+///
+/// `present` is deliberately **synchronous** and takes the frozen still as a
+/// parameter: the ScreenCaptureKit grab is performed by `CaptureCoordinator` in a
+/// nonisolated frame *before* this runs, so no `@MainActor` frame ever awaits the
+/// SCK call (which would corrupt the main thread's executor tracking on Swift 6.3
+/// — see `CaptureCoordinator.capture(_:)` and swiftlang/swift#89214).
 @MainActor
 final class SelectionOverlayWindow {
     private var panel: NSPanel?
     private var completion: ((SelectionResult) -> Void)?
 
-    func present(mode: CaptureMode, completion: @escaping (SelectionResult) -> Void) async {
+    func present(
+        target: TargetDisplay,
+        mode: CaptureMode,
+        frozen: CGImage,
+        completion: @escaping (SelectionResult) -> Void
+    ) {
         self.completion = completion
-        let screen = NSScreen.screenUnderMouse ?? NSScreen.main ?? NSScreen.screens.first
-        guard let screen, let displayID = screen.displayID else { finish(.cancelled); return }
-        let frozen: CGImage
-        do { frozen = try await ScreenCaptureService.shared.captureDisplay(displayID) }
-        catch { finish(.cancelled); return }
 
         let p = NSPanel(
-            contentRect: screen.frame,
+            contentRect: target.frame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -35,8 +40,8 @@ final class SelectionOverlayWindow {
 
         let view = SelectionOverlayView(
             mode: mode,
-            screenFrame: screen.frame,
-            backingScale: screen.backingScaleFactor,
+            screenFrame: target.frame,
+            backingScale: target.backingScale,
             frozen: frozen
         )
         view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
