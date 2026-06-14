@@ -63,11 +63,11 @@ final class CaptureCoordinator {
     // MARK: - Capture flows (all on the main actor, callback-based)
 
     private func captureRegion(delay: Int) {
-        guard let target = Self.resolveTargetUnderMouse(),
-              let frozen = LegacyScreenCapture.display(target.id) else { finish(); return }
+        let (targets, frozen) = Self.resolveAllDisplays()
+        guard !targets.isEmpty else { finish(); return }
         let initialRect = reuseLastRect ? lastRegionRect : .zero
         reuseLastRect = false
-        selectionOverlay.present(target: target, mode: .region, frozen: frozen, initialRect: initialRect) { [weak self] result in
+        selectionOverlay.present(targets: targets, mode: .region, frozen: frozen, initialRect: initialRect) { [weak self] result in
             guard let self else { return }
             guard case let .region(cgImage, rect) = result else { self.finish(); return }
             self.lastRegionRect = rect
@@ -79,9 +79,9 @@ final class CaptureCoordinator {
     }
 
     private func captureWindow(delay: Int) {
-        guard let target = Self.resolveTargetUnderMouse(),
-              let frozen = LegacyScreenCapture.display(target.id) else { finish(); return }
-        selectionOverlay.present(target: target, mode: .window, frozen: frozen) { [weak self] result in
+        let (targets, frozen) = Self.resolveAllDisplays()
+        guard !targets.isEmpty else { finish(); return }
+        selectionOverlay.present(targets: targets, mode: .window, frozen: frozen) { [weak self] result in
             guard let self else { return }
             guard case let .window(id, frame) = result else { self.finish(); return }
             self.afterCountdown(delay) { [weak self] in
@@ -126,6 +126,19 @@ final class CaptureCoordinator {
         let screen = NSScreen.screenUnderMouse ?? NSScreen.main
         guard let screen, let id = screen.displayID else { return nil }
         return TargetDisplay(id: id, frame: screen.frame, backingScale: screen.backingScaleFactor)
+    }
+
+    /// Every connected display plus its frozen still, for the all-screens
+    /// selection overlay. Displays whose grab fails are dropped.
+    @MainActor private static func resolveAllDisplays() -> ([TargetDisplay], [CGDirectDisplayID: CGImage]) {
+        var targets: [TargetDisplay] = []
+        var frozen: [CGDirectDisplayID: CGImage] = [:]
+        for screen in NSScreen.screens {
+            guard let id = screen.displayID, let image = LegacyScreenCapture.display(id) else { continue }
+            targets.append(TargetDisplay(id: id, frame: screen.frame, backingScale: screen.backingScaleFactor))
+            frozen[id] = image
+        }
+        return (targets, frozen)
     }
 
     // MARK: - Output

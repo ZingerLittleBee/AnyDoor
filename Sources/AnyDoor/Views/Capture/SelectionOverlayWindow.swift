@@ -13,65 +13,87 @@ import CoreGraphics
 /// — see `CaptureCoordinator.capture(_:)` and swiftlang/swift#89214).
 @MainActor
 final class SelectionOverlayWindow {
-    private var panel: NSPanel?
+    private var panels: [NSPanel] = []
     private var completion: ((SelectionResult) -> Void)?
 
+    /// Presents a selection overlay on every supplied display (each backed by its
+    /// own frozen still), so the user can select on any screen — not just the one
+    /// under the cursor at trigger time. The first view to commit/cancel tears the
+    /// whole set down. A cross-display rectangle is not supported: each overlay
+    /// clamps its selection to its own screen.
     func present(
-        target: TargetDisplay,
+        targets: [TargetDisplay],
         mode: CaptureMode,
-        frozen: CGImage,
+        frozen: [CGDirectDisplayID: CGImage],
         initialRect: CGRect = .zero,
         completion: @escaping (SelectionResult) -> Void
     ) {
         self.completion = completion
+        let mouse = NSEvent.mouseLocation
 
-        let p = NSPanel(
-            contentRect: target.frame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-        p.isOpaque = false
-        p.backgroundColor = .clear
-        p.level = .screenSaver
-        p.hasShadow = false
-        p.hidesOnDeactivate = false
-        p.isReleasedWhenClosed = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        for target in targets {
+            guard let frozenImage = frozen[target.id] else { continue }
 
-        // The reused rect arrives in global AppKit coordinates; convert it into
-        // this display's local (bottom-left) space so the overlay can pre-draw it.
-        let localInitial = initialRect.isEmpty
-            ? .zero
-            : CGRect(
-                x: initialRect.minX - target.frame.minX,
-                y: initialRect.minY - target.frame.minY,
-                width: initialRect.width,
-                height: initialRect.height
+            let p = SelectionPanel(
+                contentRect: target.frame,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
             )
-        let view = SelectionOverlayView(
-            mode: mode,
-            screenFrame: target.frame,
-            backingScale: target.backingScale,
-            frozen: frozen,
-            initialRect: localInitial
-        )
-        view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
-        view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
-        view.onCancel = { [weak self] in self?.finish(.cancelled) }
-        p.contentView = view
-        panel = p
-        p.orderFrontRegardless()
-        p.makeFirstResponder(view)
+            p.isOpaque = false
+            p.backgroundColor = .clear
+            p.level = .screenSaver
+            p.hasShadow = false
+            p.hidesOnDeactivate = false
+            p.isReleasedWhenClosed = false
+            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+            // The reused rect arrives in global AppKit coordinates; pre-draw it
+            // only on the display that actually contains it.
+            let localInitial: CGRect = (!initialRect.isEmpty && target.frame.contains(CGPoint(x: initialRect.midX, y: initialRect.midY)))
+                ? CGRect(x: initialRect.minX - target.frame.minX,
+                         y: initialRect.minY - target.frame.minY,
+                         width: initialRect.width, height: initialRect.height)
+                : .zero
+            let view = SelectionOverlayView(
+                mode: mode,
+                screenFrame: target.frame,
+                backingScale: target.backingScale,
+                frozen: frozenImage,
+                initialRect: localInitial
+            )
+            view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
+            view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
+            view.onCancel = { [weak self] in self?.finish(.cancelled) }
+            p.contentView = view
+            p.orderFrontRegardless()
+            // Make the panel under the cursor key so it receives Esc / arrow keys.
+            if target.frame.contains(mouse) {
+                p.makeKeyAndOrderFront(nil)
+                p.makeFirstResponder(view)
+            }
+            panels.append(p)
+        }
+        // Fall back to keying the first panel if the cursor was off all displays.
+        if !panels.contains(where: { $0.isKeyWindow }), let first = panels.first {
+            first.makeKeyAndOrderFront(nil)
+            first.makeFirstResponder(first.contentView)
+        }
     }
 
     private func finish(_ result: SelectionResult) {
-        panel?.orderOut(nil)
-        panel = nil
+        for p in panels { p.orderOut(nil) }
+        panels.removeAll()
         let c = completion
         completion = nil
         c?(result)
     }
+}
+
+/// Borderless panel that may become key, so the selection overlay can receive
+/// Esc / arrow-key events without activating the app.
+private final class SelectionPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
 
 private final class SelectionOverlayView: NSView {
