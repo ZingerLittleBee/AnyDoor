@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-14
+
 ### Added
 
 - Command palette: inline unit, time-zone, and currency conversion. Typing a

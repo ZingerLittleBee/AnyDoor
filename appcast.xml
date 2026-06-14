@@ -3,72 +3,89 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>2.4.0</title>
+            <pubDate>Sun, 14 Jun 2026 16:33:26 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>2.4.0</sparkle:version>
+            <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Command palette: inline unit, time-zone, and currency conversion. Typing a
+  conversion expression surfaces a Conversion section with the answer on top;
+  Return copies the value with a content-free toast. Units cover length, mass,
+  temperature, data size (decimal and binary), and speed via `"<n> <unit> to/in
+  <unit>"` (e.g. `3 ft to m`, `72 f to c`, `1 gb to mib`). Time zones handle
+  `"<time?> <place>"` and `"<time?> <a> to <b>"` (e.g. `3pm tokyo`, `9am london to
+  tokyo`, `tokyo time`) with a curated city map, a `GMT±H` label, and a day-offset
+  marker when the wall date crosses midnight. Currency converts `"<amount> <code>
+  to <code>"` (plus `$`/`€`/`£` symbols) against a rate table cached from
+  Frankfurter (ECB data, key-free) — fetched at most once per day, used offline
+  from the last cache with an "as of <date>" subtitle. Each converter is a pure,
+  total facade mirroring the calculator; detection requires a recognized
+  unit/currency/place plus a connector or time token, so ordinary command and app
+  search is untouched. The connector can be `to`, `in`, or `=` (e.g. `100 usd =
+  rmb`). Currency also accepts common colloquial names (`rmb`/`yuan`
+  → CNY, `euro`, `pound`, `yen`, `dollar`, …) in addition to ISO codes. The
+  command palette gains a Raycast-style footer — shown only in a currency context
+  (a currency row, or a currency-shaped query with no rates yet) — with the
+  selected row's primary action on the left and an "更新汇率" button on the right
+  that force-refreshes the rate table on demand.
+- Command palette: inline developer tools. Typing a keyword surfaces instant,
+  copy-on-Return conversions — `base64` (encode + decode), `url` (percent-encode +
+  decode), `md5` / `sha1` / `sha256` hashes — plus two auto-detected tools that need
+  no keyword: paste a JSON object or array for pretty / minified output (keys sorted),
+  or a 10-digit (seconds) or 13-digit (milliseconds) Unix epoch for local / UTC /
+  ISO 8601 renderings. The core is a pure, total `DevTools` facade mirroring the
+  calculator; explicit keywords plus strong-signal auto-detection keep bare words and
+  short numbers in normal app/command/port search. Pressing Return copies the result
+  and confirms with a content-free toast, since hashes and multi-line JSON make poor
+  toast bodies. A Raycast-style scope badge makes the keyword tools first-class:
+  typing a keyword + space, or Tab on a bare keyword, absorbs it into a search-bar
+  pill (Base64 / URL / MD5 / SHA-1 / SHA-256), drops the keyword from the field, and
+  makes the list exclusive to that tool; Backspace on an empty body sheds the badge,
+  and Esc escalates (clear body → shed badge → dismiss). While a keyword prefix is
+  still being typed the palette suggests the matching tool(s) on top, selected by
+  default so Return enters the scope; once inside a tool with nothing typed yet, the
+  panel shows a usage hint and a worked example instead of the generic "no matches"
+  state.
+- Command palette: hosts profiles are reachable by name from the root. Typing a
+  profile name surfaces a Hosts section whose rows toggle that profile's activation
+  on Return, mirroring the existing port direct-search. Activation goes through the
+  same path as the drill-in toggle (it may still prompt for the privileged write),
+  and no per-profile global hotkey is introduced, so a stray keystroke can't trigger
+  an admin prompt.
+- Color picker output format: the picked color can be copied as HEX, RGB, HSL,
+  SwiftUI `Color`, or lowercase CSS hex. The format is chosen from the command
+  palette's Pick Color second-level menu, persists as the default for every pick path
+  (menu-bar row and global hotkey), and rides settings backup. A pure `ColorFormat`
+  renders the sampled `#RRGGBB` value into each representation; color history still
+  stores the raw hex.
+- System microphone mute: a new panel toggle mutes / unmutes the default input device
+  via CoreAudio, giving a conferencing-app-independent mic switch with the usual
+  panel row, global hotkey, command-palette entry, and backup wiring. Devices that
+  expose no settable mute (some built-in mics, AirPods in the input scope) surface a
+  toast and leave the row state unchanged instead of failing silently.
+- App Shortcuts menu-bar popover now shows a hint guiding the user to add shortcuts in
+  Settings when none are configured, instead of an empty list.
+
+### Changed
+
+- Command palette list now uses overlay scrollbars (auto-hiding and reserving no
+  width), matching the Raycast-style chrome, regardless of the system "Show scroll
+  bars: Always" preference that SwiftUI would otherwise honor.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.4.0/AnyDoor-2.4.0.zip" length="7484291" type="application/octet-stream" sparkle:edSignature="hR7u/bkbVXro0UiHBhsJlRS8MrN3+/VUz9yXlpmXWkM2jYJQYIaWJQ8jpvldYcXYoEojqyF+TUeGgA314/sgBQ=="/>
+        </item>
+        <item>
             <title>2.3.1</title>
             <pubDate>Sat, 13 Jun 2026 23:01:37 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>2.3.1</sparkle:version>
             <sparkle:shortVersionString>2.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Clipboard history gains two menu-bar panel controls: a Clear Clipboard action
-  that empties the current pasteboard without recording the clear as history, and
-  a Clipboard Monitoring toggle that uses the same setting as General Settings.
-  The clipboard wall can also filter entries by source app and lets a card's
-  source app be added to the ignored-source list directly from the card menu.
-- Port Manager rows now offer a context menu for copying the port, PID, command,
-  or `localhost` URL, and can open the matching `http://localhost:<port>` address
-  directly.
-- Hosts profiles can be duplicated from the editor. Duplicates start inactive,
-  get a collision-safe copy name, are selected immediately, and enter inline
-  rename so the copy can be renamed in place.
-- Hosts profile rows now expose enable/disable in their context menu, with
-  in-row loading feedback while the profile activation write is in progress.
-
-### Changed
-
-- Hosts profile management keeps activation as the first context-menu action,
-  styles the active profile's Disable action as destructive, and keeps duplicate
-  / delete actions in the editor instead of the menu-bar popover.
-- The Hosts editor now shows Cancel next to Save while editing. Cancel discards
-  the draft and returns to the current persisted hosts content.
-
-### Fixed
-
-- The Hosts editor no longer shows the titlebar overflow `>>` button caused by
-  an extra Delete toolbar item being collapsed into the window toolbar overflow.
-  Deletion remains available from the detail-area Delete button, profile context
-  menu, and Delete / Backspace key handling.
-- Hosts profile row selection no longer competes with double-click rename
-  gestures. Rename stays available from the profile context menu, and rows keep
-  a full-width hit target for reliable selection.
-- Scheduled Shutdown no longer flashes a red "missed" toast at seemingly random
-  times. A shutdown timer only fires while AnyDoor is running, so a deadline that
-  lapses while the app is not running was never going to run — yet `bootstrapOnLaunch`
-  still surfaced it as a `.failure` toast on the next launch. Because the app
-  relaunches for reasons the user doesn't notice (silent Sparkle auto-update
-  relaunch, login auto-start), this flashed a "Scheduled … failed"-looking toast
-  even after the app appeared to be quit or untouched. `applicationWillTerminate`
-  now records a `scheduledShutdown.cleanExit` marker (consumed unconditionally on
-  the next launch), so a deadline missed across a clean Quit / update relaunch /
-  restart is cleared silently; only a genuine crash-induced miss shows a toast,
-  now informational (`.info`, not `.failure`) and held long enough to read. Future
-  deadlines still survive relaunch as before.
-- Relaunching AnyDoor no longer waits out Sparkle's update cadence before it
-  notices a newer version. `SPUStandardUpdaterController(startingUpdater:)` only
-  schedules interval-gated background checks (24h here) keyed off the persisted
-  last-check time, and the app never triggered a check itself — so a version
-  published between the last scheduled check and the next one stayed invisible
-  across relaunches. `bootstrapUpdater()` now forces a single silent
-  `checkForUpdatesInBackground()` right after starting the updater (guarded on
-  automatic checks being enabled, the only point Sparkle's API sanctions a manual
-  background check), so a relaunch surfaces a newer version immediately. Results
-  still flow through the delegate into `UpdateService.availableVersion`, so the
-  existing in-panel banner shows it with no extra Sparkle UI and user-skipped
-  versions remain suppressed.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.3.1/AnyDoor-2.3.1.zip" length="7236561" type="application/octet-stream" sparkle:edSignature="bUu9PzoyhKOYzpxk0LdNoNTCCO0wyCd4o09bAb+amDNpdV3Cz6/Xqfumn+ZBrTxIpSPkrgQi6/7sQo3q1QaxAQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.3.1/AnyDoor-2.3.1.zip" length="7236561" type="application/octet-stream" sparkle:edSignature="bUu9PzoyhKOYzpxk0LdNoNTCCO0wyCd4o09bAb+amDNpdV3Cz6/Xqfumn+ZBrTxIpSPkrgQi6/7sQo3q1QaxAQ=="/>
         </item>
         <item>
             <title>2.3.0</title>
@@ -78,15 +95,6 @@
             <sparkle:shortVersionString>2.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.3.0/AnyDoor-2.3.0.zip" length="7155792" type="application/octet-stream" sparkle:edSignature="mnEza/J+nu5ghMExJXTOSLuD0xF4pR5AkCuEnA7U+2SzHUXshmeNiGiS6JAlTMoWNSGDujC9+YylkF1mqy6LAg=="/>
-        </item>
-        <item>
-            <title>2.2.0</title>
-            <pubDate>Fri, 12 Jun 2026 22:41:35 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>2.2.0</sparkle:version>
-            <sparkle:shortVersionString>2.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.2.0/AnyDoor-2.2.0.zip" length="7172097" type="application/octet-stream" sparkle:edSignature="LOlmnEw7oD6pfovv/URJMndA5OadfhSucMAo+Xz0Y/BlrnvEYs1VO5bbVsi6af+dc6l3aCGG9MYMdmgJdqTkDA=="/>
         </item>
         <item>
             <title>1.2.0</title>
