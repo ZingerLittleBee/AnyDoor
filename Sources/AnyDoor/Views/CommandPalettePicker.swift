@@ -109,6 +109,19 @@ final class CommandPaletteState {
         return DevToolScope.allCases.filter { $0.keyword.hasPrefix(needle) }
     }
 
+    /// Whether the bottom toolbar (the "更新汇率" footer) should show — only in a
+    /// currency context: a currency conversion row is visible, or the query is a
+    /// currency-shaped expression with no rate table yet (so the user can refresh
+    /// to recover). Unit / time-zone / plain search keep the toolbar hidden.
+    var isCurrencyContext: Bool {
+        let hasCurrencyRow = flatEntries.contains { entry in
+            if case .conversion(let result) = entry.source { return result.kind == .currency }
+            return false
+        }
+        if hasCurrencyRow { return true }
+        return currencyRatesProvider() == nil && CurrencyConversion.isCurrencyQuery(query)
+    }
+
     /// Enter a scope directly (committing a suggestion row), clearing the body so
     /// the user types only the conversion input next.
     func enterDevToolScope(_ scope: DevToolScope) {
@@ -521,8 +534,10 @@ struct CommandPalettePicker: View {
                 optionList
             }
 
-            Divider().opacity(0.4)
-            footerBar
+            if state.isCurrencyContext {
+                Divider().opacity(0.4)
+                footerBar
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Liquid Glass on macOS 26+; .thickMaterial on earlier systems.

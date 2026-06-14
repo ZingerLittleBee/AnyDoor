@@ -10,12 +10,8 @@ import Foundation
 enum CurrencyConversion {
     static func detect(_ query: String, rates: RateTable?) -> [ConversionResult] {
         guard let rates else { return [] }
-        let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !lowered.isEmpty else { return [] }
-
-        guard let (lhs, rhs) = split(lowered) else { return [] }
-        guard let (amount, sourceCode) = parseAmountAndCode(lhs),
-              let targetCode = parseCode(rhs) else { return [] }
+        guard let parsed = parse(query) else { return [] }
+        let sourceCode = parsed.source, targetCode = parsed.target, amount = parsed.amount
         guard let sourceRate = rates.rate(for: sourceCode),
               let targetRate = rates.rate(for: targetCode) else { return [] }
         // A zero/negative rate (only reachable via a corrupted cache) would divide
@@ -36,9 +32,25 @@ enum CurrencyConversion {
         )]
     }
 
+    /// True when the query is structurally a currency conversion (amount + two
+    /// codes/symbols + connector), regardless of whether rates are available. Used
+    /// to decide whether the palette's currency toolbar should show.
+    static func isCurrencyQuery(_ query: String) -> Bool { parse(query) != nil }
+
     // MARK: - Parsing
 
     private static let symbols: [(String, String)] = [("$", "USD"), ("€", "EUR"), ("£", "GBP")]
+
+    /// Parses a query into `(amount, sourceCode, targetCode)` without consulting
+    /// any rate table, or nil when it is not a currency expression.
+    private static func parse(_ query: String) -> (amount: Double, source: String, target: String)? {
+        let lowered = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !lowered.isEmpty else { return nil }
+        guard let (lhs, rhs) = split(lowered) else { return nil }
+        guard let (amount, sourceCode) = parseAmountAndCode(lhs),
+              let targetCode = parseCode(rhs) else { return nil }
+        return (amount, sourceCode, targetCode)
+    }
 
     /// Splits on a connector: " to " (preferred), " in ", or "=" (with or without
     /// surrounding spaces, so "100 usd = rmb" and "100 usd=rmb" both work).

@@ -455,6 +455,52 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionConversion })
     }
 
+    // MARK: - Currency toolbar visibility
+
+    @MainActor
+    func testCurrencyContextTrueForCurrencyRow() {
+        let table = RateTable(base: "USD", rates: ["EUR": 0.925], date: "2026-06-13")
+        let state = CommandPaletteState(
+            sections: [], hyperFlags: 0, hostProfilesProvider: { [] }, currencyRatesProvider: { table }
+        )
+        state.query = "100 usd to eur"
+        XCTAssertTrue(state.isCurrencyContext)
+    }
+
+    @MainActor
+    func testCurrencyContextTrueForCurrencyQueryWithoutRates() {
+        // No rates yet: still show the toolbar so the user can refresh to recover.
+        let state = CommandPaletteState(
+            sections: [], hyperFlags: 0, hostProfilesProvider: { [] }, currencyRatesProvider: { nil }
+        )
+        state.query = "100 usd to eur"
+        XCTAssertTrue(state.isCurrencyContext)
+    }
+
+    @MainActor
+    func testCurrencyContextFalseForUnitConversion() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        state.query = "3 ft to m"
+        XCTAssertFalse(state.isCurrencyContext)
+    }
+
+    @MainActor
+    func testCurrencyContextFalseForPlainSearch() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        state.query = "settings"
+        XCTAssertFalse(state.isCurrencyContext)
+    }
+
+    @MainActor
+    func testCurrencyContextFalseForUnknownCodesWhenRatesPresent() {
+        let table = RateTable(base: "USD", rates: ["EUR": 0.925], date: "2026-06-13")
+        let state = CommandPaletteState(
+            sections: [], hyperFlags: 0, hostProfilesProvider: { [] }, currencyRatesProvider: { table }
+        )
+        state.query = "100 abc to xyz"
+        XCTAssertFalse(state.isCurrencyContext)
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 
