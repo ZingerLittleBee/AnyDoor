@@ -100,6 +100,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CaptureTimerProvider(),
             CaptureModeBarProvider(),
             RecordScreenProvider(),
+            CaptureScrollingProvider(),
             ClearClipboardProvider(),
             DisplaySleepProvider(),
             SystemSleepProvider(),

@@ -74,3 +74,14 @@ actor RecordScreenProvider: ActionProvider {
         await MainActor.run { RecordingCoordinator.shared.toggle() }
     }
 }
+
+/// Capture a scrollable area taller than the screen by auto-scrolling + stitching.
+actor CaptureScrollingProvider: ActionProvider {
+    let itemKey: BuiltinItem = .captureScrolling
+
+    var permission: PermissionStatus { .notRequired }
+
+    func run() async {
+        await MainActor.run { ScrollCaptureCoordinator.shared.capture() }
+    }
+}

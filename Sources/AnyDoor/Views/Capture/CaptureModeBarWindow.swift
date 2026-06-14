@@ -1,10 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// All-In-One floating mode bar. Shows region/window/fullscreen/timer (enabled)
-/// and recording/scrolling (disabled placeholders). Selecting a mode dismisses
-/// the bar and calls back. Digit keys 1–4 and Esc are handled via a local key
-/// monitor.
+/// All-In-One floating mode bar. Shows region/window/fullscreen/timer/recording/
+/// scrolling (all enabled). Selecting a mode dismisses the bar and calls back.
+/// Digit keys 1–4 and Esc are handled via a local key monitor.
 @MainActor
 final class CaptureModeBarWindow {
     static let shared = CaptureModeBarWindow()
@@ -14,18 +13,21 @@ final class CaptureModeBarWindow {
     private var onPick: ((CaptureMode) -> Void)?
     private var onTimer: (() -> Void)?
     private var onRecord: (() -> Void)?
+    private var onScroll: (() -> Void)?
 
     private init() {}
 
     func present(
         onPick: @escaping (CaptureMode) -> Void,
         onTimer: @escaping () -> Void,
-        onRecord: @escaping () -> Void
+        onRecord: @escaping () -> Void,
+        onScroll: @escaping () -> Void
     ) {
         close()
         self.onPick = onPick
         self.onTimer = onTimer
         self.onRecord = onRecord
+        self.onScroll = onScroll
 
         let screen = NSScreen.screenUnderMouse ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
@@ -56,7 +58,8 @@ final class CaptureModeBarWindow {
             onWindow: { [weak self] in self?.pick(.window) },
             onFullscreen: { [weak self] in self?.pick(.fullscreen) },
             onTimer: { [weak self] in self?.timer() },
-            onRecord: { [weak self] in self?.record() }
+            onRecord: { [weak self] in self?.record() },
+            onScroll: { [weak self] in self?.scroll() }
         ))
         hosting.frame = CGRect(origin: .zero, size: size)
         p.contentView = hosting
@@ -107,12 +110,20 @@ final class CaptureModeBarWindow {
         cb?()
     }
 
+    private func scroll() {
+        let cb = onScroll
+        close()
+        cb?()
+    }
+
     func close() {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         panel?.orderOut(nil)
         panel = nil
         onPick = nil
         onTimer = nil
+        onRecord = nil
+        onScroll = nil
     }
 }
 
@@ -124,6 +135,7 @@ private struct CaptureModeBarView: View {
     let onFullscreen: () -> Void
     let onTimer: () -> Void
     let onRecord: () -> Void
+    let onScroll: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -133,7 +145,7 @@ private struct CaptureModeBarView: View {
             modeItem("timer", L(.captureModeBarTimer), onTimer)
             Divider().frame(height: 40)
             modeItem("record.circle", L(.captureModeBarRecording), onRecord)
-            disabledItem("arrow.down.to.line", L(.captureModeBarScrolling))
+            modeItem("arrow.down.to.line", L(.captureModeBarScrolling), onScroll)
         }
         .padding(16)
         .background(.regularMaterial)
@@ -149,14 +161,5 @@ private struct CaptureModeBarView: View {
             .frame(width: 56)
         }
         .buttonStyle(.plain)
-    }
-
-    private func disabledItem(_ symbol: String, _ title: String) -> some View {
-        VStack(spacing: 4) {
-            Image(systemName: symbol).font(.system(size: 20))
-            Text(title).font(.caption2)
-        }
-        .frame(width: 56)
-        .foregroundStyle(.tertiary)
     }
 }

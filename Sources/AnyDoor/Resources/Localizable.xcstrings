@@ -18,6 +18,23 @@
         }
       }
     },
+    "builtin.captureScrolling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scrolling Capture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "滚动截图"
+          }
+        }
+      }
+    },
     "recording.toast.saved": {
       "extractionState": "manual",
       "localizations": {
@@ -1683,13 +1700,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Scrolling (soon)"
+            "value": "Scrolling"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "滚动(即将推出)"
+            "value": "滚动截图"
           }
         }
       }

@@ -57,8 +57,16 @@ final class CaptureCoordinator {
                 guard let self else { return }
                 self.capture(CaptureRequest(mode: .region, delay: self.settings.delaySeconds))
             },
-            onRecord: { RecordingCoordinator.shared.record(region: true) }
+            onRecord: { RecordingCoordinator.shared.record(region: true) },
+            onScroll: { ScrollCaptureCoordinator.shared.capture() }
         )
+    }
+
+    /// Delivers an externally produced capture (e.g. a stitched scrolling
+    /// capture) through the standard output policy: auto-save / auto-copy /
+    /// history / quick-access overlay.
+    func deliverCapturedImage(_ image: CGImage, anchor: CGRect?) {
+        present(image: image, anchor: anchor)
     }
 
     // MARK: - Capture flows (all on the main actor, callback-based)

@@ -18,6 +18,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case captureTimer
     case captureModeBar
     case recordScreen
+    case captureScrolling
     case clearClipboard
     case ocr
     case pickColor
@@ -81,7 +82,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
              .windowLeftThird, .windowCenterThird, .windowRightThird,
              .windowLeftTwoThirds, .windowRightTwoThirds,
              .windowMoveNextDisplay, .windowMovePreviousDisplay,
-             .captureWindow, .captureFullscreen, .captureTimer, .captureModeBar, .recordScreen: return .action
+             .captureWindow, .captureFullscreen, .captureTimer, .captureModeBar, .recordScreen,
+             .captureScrolling: return .action
         case .brightness: return .brightnessControl
         case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
@@ -104,6 +106,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .captureTimer:      return .builtinCaptureTimer
         case .captureModeBar:    return .builtinCaptureModeBar
         case .recordScreen:      return .builtinRecordScreen
+        case .captureScrolling:  return .builtinCaptureScrolling
         case .clearClipboard:    return .builtinClearClipboard
         case .ocr:               return .builtinOCR
         case .pickColor:         return .builtinPickColor
@@ -163,6 +166,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .captureTimer:      return "timer"
         case .captureModeBar:    return "camera.on.rectangle"
         case .recordScreen:      return "record.circle"
+        case .captureScrolling:  return "arrow.down.to.line"
         case .clearClipboard: return "clipboard"
         case .ocr: return "text.viewfinder"
         case .pickColor: return "eyedropper"
@@ -223,6 +227,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .captureTimer:      return 915
         case .captureModeBar:    return 920
         case .recordScreen:      return 925
+        case .captureScrolling:  return 930
         case .clearClipboard: return 940
         case .ocr: return 950
         case .pickColor: return 975
