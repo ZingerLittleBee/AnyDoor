@@ -14,10 +14,14 @@ versioning.
   reuse). The selection overlay spans every connected display. After a capture a
   quick-access overlay appears next to the selection with copy, save, edit, pin,
   text extraction (OCR), re-capture, and delete (delete also removes the entry
-  from clipboard history). An All-In-One capture menu (with a placeholder for
-  upcoming scrolling capture) provides a single entry point alongside per-mode
-  hotkeys, and captures can be pinned on-screen as always-on-top floating
-  references.
+  from clipboard history). An All-In-One capture menu provides a single entry
+  point alongside per-mode hotkeys, and captures can be pinned on-screen as
+  always-on-top floating references.
+- Scrolling capture: capture content taller than the screen. Select a viewport
+  over a scrollable area and AnyDoor auto-scrolls it, losslessly stitching the
+  frames (overlap-aligned, pixel-exact) into one tall image that flows through
+  the same save / copy / edit / pin / history output as any capture. Reachable
+  from the All-In-One menu, a dedicated builtin, and a hotkey.
 - Screen recording: record the full display or a selected region to MOV, MP4, or
   animated GIF via AVFoundation, with a configurable frame rate, optional cursor
   capture, microphone audio, a draggable webcam overlay, and an on-screen
