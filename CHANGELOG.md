@@ -9,12 +9,25 @@ versioning.
 ### Added
 
 - Screenshot capture suite: region, window, fullscreen, and timed capture with a
-  freeze-screen selection overlay (crosshair, live dimensions, magnifier source).
-  After a capture a quick-access overlay appears next to the selection with copy,
-  save, edit, pin, text extraction (OCR), re-capture, and delete. An All-In-One
-  capture menu (with placeholders for upcoming recording and scrolling capture)
-  provides a single entry point alongside per-mode hotkeys, and captures can be
-  pinned on-screen as always-on-top floating references.
+  freeze-screen selection overlay (crosshair, live dimensions, magnifier loupe
+  with a pixel-coordinate readout, arrow-key nudge/resize, and last-selection
+  reuse). The selection overlay spans every connected display. After a capture a
+  quick-access overlay appears next to the selection with copy, save, edit, pin,
+  text extraction (OCR), re-capture, and delete (delete also removes the entry
+  from clipboard history). An All-In-One capture menu (with placeholders for
+  upcoming recording and scrolling capture) provides a single entry point
+  alongside per-mode hotkeys, and captures can be pinned on-screen as
+  always-on-top floating references.
+- Screenshot settings tab: save location, filename template, auto-save /
+  auto-copy, timer-delay preset (3 / 5 / 10s), and quick-access overlay timeout.
+
+### Fixed
+
+- Screen capture no longer crashes on macOS 26: a still capture corrupted the
+  main thread's Swift-concurrency executor tracking, after which hovering a
+  menu-bar row (or any other dynamic main-actor check) faulted. The capture
+  engine now uses synchronous CoreGraphics and hover handling avoids the broken
+  runtime check.
 
 ## [2.4.0] - 2026-06-14
 
