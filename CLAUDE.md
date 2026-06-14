@@ -82,6 +82,11 @@ Sources/AnyDoor/
 │   │                crop + snapshot undo/redo) / AnnotationGeometry / AnnotationRenderer (flipped
 │   │                NSGraphicsContext composite; blur=CIGaussianBlur, pixelate=CIPixellate). UI:
 │   │                AnnotationEditorWindow / AnnotationEditorView / AnnotationCanvasView (AppKit canvas)
+│   ├── Recording/    Screen recording (Phase 2): RecordingCoordinator (@MainActor orchestrator) /
+│   │                ScreenRecordingEngine (AVCaptureScreenInput + AVCaptureMovieFileOutput — NOT SCK,
+│   │                see crash note) / RecordingExporter (mov passthrough / mp4 transcode / gif) /
+│   │                RecordingModel + RecordingPolicy / RecordingSettings / KeystrokeFormatter. Views/
+│   │                Recording: RecordingControlsWindow / CameraOverlayWindow / KeystrokeOverlayWindow
 │   ├── Hyper Key    HyperKeyService / HyperKeyController / QuickPressEmitter
 │   ├── Cmd Palette  CommandPaletteService / InstalledAppsScanner / PortInventory / PortScanner
 │   ├── Win Layout   WindowLayoutService

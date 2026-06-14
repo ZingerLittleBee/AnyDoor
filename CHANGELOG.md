@@ -14,10 +14,17 @@ versioning.
   reuse). The selection overlay spans every connected display. After a capture a
   quick-access overlay appears next to the selection with copy, save, edit, pin,
   text extraction (OCR), re-capture, and delete (delete also removes the entry
-  from clipboard history). An All-In-One capture menu (with placeholders for
-  upcoming recording and scrolling capture) provides a single entry point
-  alongside per-mode hotkeys, and captures can be pinned on-screen as
-  always-on-top floating references.
+  from clipboard history). An All-In-One capture menu (with a placeholder for
+  upcoming scrolling capture) provides a single entry point alongside per-mode
+  hotkeys, and captures can be pinned on-screen as always-on-top floating
+  references.
+- Screen recording: record the full display or a selected region to MOV, MP4, or
+  animated GIF via AVFoundation, with a configurable frame rate, optional cursor
+  capture, microphone audio, a draggable webcam overlay, and an on-screen
+  keystroke display. A floating control bar shows elapsed time with pause/resume
+  and stop; the finished file is exported in the chosen format and revealed in
+  Finder. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey
+  (the hotkey toggles a fullscreen recording on and off).
 - Screenshot settings tab: save location, filename template, auto-save /
   auto-copy, timer-delay preset (3 / 5 / 10s), and quick-access overlay timeout.
 - Annotation editor (reached from the capture overlay's edit button): arrow,
