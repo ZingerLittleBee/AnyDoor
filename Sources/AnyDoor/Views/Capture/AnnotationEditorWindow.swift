@@ -12,6 +12,7 @@ import SwiftUI
 final class AnnotationEditorWindow {
     static let shared = AnnotationEditorWindow()
     private var window: NSWindow?
+    private var closeRelay: WindowCloseRelay?
 
     private init() {}
 
@@ -34,8 +35,13 @@ final class AnnotationEditorWindow {
         w.isRestorable = false
         w.center()
         w.contentView = NSHostingView(rootView: AnnotationEditorPlaceholderView(image: image))
-        w.delegate = WindowCloseRelay.shared
-        WindowCloseRelay.shared.onClose = { [weak self] in self?.window = nil }
+        let relay = WindowCloseRelay()
+        relay.onClose = { [weak self] in
+            self?.window = nil
+            self?.closeRelay = nil
+        }
+        w.delegate = relay
+        closeRelay = relay
         window = w
         RegularWindowCoordinator.shared.track(w)
         w.makeKeyAndOrderFront(nil)
@@ -47,7 +53,6 @@ final class AnnotationEditorWindow {
 /// future `show(image:)` call.
 @MainActor
 private final class WindowCloseRelay: NSObject, NSWindowDelegate {
-    static let shared = WindowCloseRelay()
     var onClose: (() -> Void)?
 
     func windowWillClose(_ notification: Notification) {
