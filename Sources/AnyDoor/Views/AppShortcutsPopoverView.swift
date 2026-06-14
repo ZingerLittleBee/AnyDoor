@@ -40,6 +40,16 @@ struct AppShortcutsPopoverView: View {
                     }
                 }
                 .padding(.horizontal, 6).padding(.vertical, 4)
+            } else {
+                // First-run guidance: with nothing configured, point the user at
+                // the Settings window where shortcuts are added and bound.
+                HStack(spacing: 6) {
+                    Image(systemName: "plus.app").foregroundStyle(.tertiary)
+                    LocalizedText(.panelAppShortcutEmpty)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 12).padding(.bottom, 10)
             }
         }
         .frame(minWidth: 240, maxWidth: 320)

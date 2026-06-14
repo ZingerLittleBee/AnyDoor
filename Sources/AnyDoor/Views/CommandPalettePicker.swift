@@ -44,6 +44,7 @@ final class CommandPaletteState {
             )
         }
         level = .options(parentTitle: parentTitle)
+        activeDevToolScope = nil
         query = ""
         selectedIndex = 0
     }
@@ -53,11 +54,81 @@ final class CommandPaletteState {
         level = .root
         optionsByID = [:]
         optionEntries = []
+        activeDevToolScope = nil
         query = ""
         selectedIndex = 0
     }
 
     func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
+
+    // MARK: - Dev-tool scope badge (Raycast-style)
+
+    /// The active dev-tool scope. When set, the search bar shows a badge instead
+    /// of the magnifying glass and the list is exclusive to that tool's rows.
+    private(set) var activeDevToolScope: DevToolScope?
+
+    /// Space trigger: if the query is `<keyword> …`, absorb the keyword into a
+    /// scope badge and keep only the remainder as the body. Re-entrant-safe (it
+    /// no-ops once a scope is active). Call from the query `.onChange`.
+    func absorbDevToolScopeIfNeeded() {
+        guard isAtRoot, activeDevToolScope == nil else { return }
+        guard let spaceIndex = query.firstIndex(where: \.isWhitespace) else { return }
+        let keyword = String(query[query.startIndex..<spaceIndex])
+        guard let scope = DevToolScope(keyword: keyword) else { return }
+        activeDevToolScope = scope
+        query = String(query[query.index(after: spaceIndex)...])
+        selectedIndex = 0
+    }
+
+    /// Tab trigger: when the whole query is exactly a scoped keyword, absorb it.
+    /// Returns whether a scope was absorbed.
+    @discardableResult
+    func tryAbsorbDevToolScope() -> Bool {
+        guard isAtRoot, activeDevToolScope == nil else { return false }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard let scope = DevToolScope(keyword: trimmed) else { return false }
+        activeDevToolScope = scope
+        query = ""
+        selectedIndex = 0
+        return true
+    }
+
+    /// Drop the active scope (Backspace on an empty body, or Esc).
+    func removeDevToolScope() {
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
+    }
+
+    /// Scoped tools whose keyword starts with the current (unscoped) query — the
+    /// completion hints shown while the user is still typing a keyword.
+    func devToolScopeSuggestions(matching query: String) -> [DevToolScope] {
+        guard activeDevToolScope == nil else { return [] }
+        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !needle.isEmpty else { return [] }
+        return DevToolScope.allCases.filter { $0.keyword.hasPrefix(needle) }
+    }
+
+    /// Whether the bottom toolbar (the "更新汇率" footer) should show — only in a
+    /// currency context: a currency conversion row is visible, or the query is a
+    /// currency-shaped expression with no rate table yet (so the user can refresh
+    /// to recover). Unit / time-zone / plain search keep the toolbar hidden.
+    var isCurrencyContext: Bool {
+        let hasCurrencyRow = flatEntries.contains { entry in
+            if case .conversion(let result) = entry.source { return result.kind == .currency }
+            return false
+        }
+        if hasCurrencyRow { return true }
+        return currencyRatesProvider() == nil && CurrencyConversion.isCurrencyQuery(query)
+    }
+
+    /// Enter a scope directly (committing a suggestion row), clearing the body so
+    /// the user types only the conversion input next.
+    func enterDevToolScope(_ scope: DevToolScope) {
+        activeDevToolScope = scope
+        query = ""
+        selectedIndex = 0
+    }
 
     // MARK: - Destructive-action confirmation
 
@@ -95,6 +166,11 @@ final class CommandPaletteState {
             selectedIndex = 0
             return .clearedQuery
         }
+        // Empty body but a dev-tool scope is active: shed the badge first.
+        if activeDevToolScope != nil {
+            removeDevToolScope()
+            return .poppedToRoot
+        }
         if isAtRoot { return .dismiss }
         popToRoot()
         return .poppedToRoot
@@ -114,20 +190,36 @@ final class CommandPaletteState {
     let hyperFlags: Int
     private let portInventory: PortInventory
     private var portRefreshTask: Task<Void, Never>?
+    /// Source of the hosts profiles searchable at the root. Injected so the
+    /// hosts section is unit-testable without the HostsManager singleton.
+    private let hostProfilesProvider: () -> [HostProfile]
+    /// Source of the currency rate table for inline currency conversion. Injected
+    /// (like `hostProfilesProvider`) so conversion tests stay deterministic.
+    private let currencyRatesProvider: () -> RateTable?
 
     init(
         sections: [CommandPaletteSection],
         hyperFlags: Int,
-        portInventory: PortInventory = .shared
+        portInventory: PortInventory = .shared,
+        hostProfilesProvider: @escaping () -> [HostProfile] = { HostsManager.shared.profiles },
+        currencyRatesProvider: @escaping () -> RateTable? = { CurrencyRatesService.shared.rateTable }
     ) {
         self.allSections = sections
         self.hyperFlags = hyperFlags
         self.portInventory = portInventory
+        self.hostProfilesProvider = hostProfilesProvider
+        self.currencyRatesProvider = currencyRatesProvider
     }
 
     /// Sections after applying the query filter, with empty sections dropped.
     var filteredSections: [CommandPaletteSection] {
         guard isAtRoot else { return [] }
+        // Scope mode: the list is exclusive to the badged tool's rows; no app /
+        // command / port search leaks in. An empty body shows an empty list.
+        if let scope = activeDevToolScope {
+            let results = DevTools.results(scope: scope, body: query)
+            return results.isEmpty ? [] : [makeDevToolsSection(from: results)]
+        }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return allSections }
         var sections = allSections.compactMap { section in
@@ -137,13 +229,60 @@ final class CommandPaletteState {
             }
             return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
         }
+        // Insert special sections at index 0 in reverse priority order, so the
+        // last inserted ends up on top. Final order: calc, conversion, ports,
+        // hosts, dev tools (with the keyword-completion hint above all).
+        if let dev = devToolsSection(matching: trimmed) {
+            sections.insert(dev, at: 0)
+        }
+        if let hosts = hostsSection(matching: trimmed) {
+            sections.insert(hosts, at: 0)
+        }
         if let ports = portSection(matching: trimmed) {
             sections.insert(ports, at: 0)
+        }
+        if let conversion = conversionSection(matching: trimmed) {
+            sections.insert(conversion, at: 0)
         }
         if let calc = calcSection(matching: trimmed) {
             sections.insert(calc, at: 0)
         }
+        // Keyword-completion hint sits on top so it is selected by default:
+        // pressing Return enters the scope while the user is still typing.
+        if let suggestions = devToolSuggestionSection(matching: trimmed) {
+            sections.insert(suggestions, at: 0)
+        }
         return sections
+    }
+
+    /// Builds a "Hosts" section listing every profile whose name contains the
+    /// query, so a profile is reachable by name from the root. Committing a row
+    /// toggles that profile's activation.
+    private func hostsSection(matching query: String) -> CommandPaletteSection? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let entries = hostProfilesProvider()
+            .filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
+            .sorted { $0.displayOrder < $1.displayOrder }
+            .map { Self.hostEntry(for: $0) }
+        guard !entries.isEmpty else { return nil }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionHosts, entries: entries)
+    }
+
+    private static func hostEntry(for profile: HostProfile) -> PanelEntry {
+        PanelEntry(
+            id: PanelEntry.id(for: .hostProfile(id: profile.id)),
+            source: .hostProfile(id: profile.id),
+            displayOrder: profile.displayOrder,
+            isVisible: true,
+            hotkey: nil,
+            title: profile.name,
+            subtitle: profile.isActive ? L(.commandPaletteHostsActive) : nil,
+            symbol: profile.isActive ? "checkmark.circle.fill" : "circle",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
     }
 
     /// Builds a one-row "Calculator" section when `query` is a calc expression.
@@ -167,10 +306,123 @@ final class CommandPaletteState {
         return CommandPaletteSection(titleKey: .commandPaletteSectionCalculator, entries: [entry])
     }
 
+    /// Builds a "Developer Tools" section from `DevTools.detect`, one row per
+    /// conversion (Base64 / URL / JSON / hash / timestamp). Committing a row
+    /// copies its output. The tool name is resolved to a localized subtitle here
+    /// so the pure `DevTools` core stays free of UI/localization concerns.
+    private func devToolsSection(matching query: String) -> CommandPaletteSection? {
+        let results = DevTools.detect(query: query)
+        return results.isEmpty ? nil : makeDevToolsSection(from: results)
+    }
+
+    /// Builds a "Conversion" section from `Conversions.detect` (unit / time-zone /
+    /// currency). Currency rates come from the injected provider; time-zone rows
+    /// use the live clock. Committing a row copies its value.
+    private func conversionSection(matching query: String) -> CommandPaletteSection? {
+        let results = Conversions.detect(
+            query: query,
+            rates: currencyRatesProvider(),
+            now: Date(),
+            localZone: .current
+        )
+        guard !results.isEmpty else { return nil }
+        let entries = results.enumerated().map { index, result in
+            PanelEntry(
+                id: PanelEntry.id(for: .conversion(result)),
+                source: .conversion(result),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: result.display,
+                subtitle: Self.conversionSubtitle(for: result),
+                symbol: result.symbol,
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionConversion, entries: entries)
+    }
+
+    /// The row subtitle for a conversion. Currency wraps its rate date in a
+    /// localized "as of …"; unit / time-zone rows show their plain detail string.
+    static func conversionSubtitle(for result: ConversionResult) -> String {
+        switch result.kind {
+        case .currency: return L(.conversionCurrencyAsOf, result.detail)
+        case .unit, .timeZone: return result.detail
+        }
+    }
+
+    /// Builds a "Developer Tools" hint section while the query is still a prefix
+    /// of one or more scoped keywords. Committing a row enters that scope.
+    private func devToolSuggestionSection(matching query: String) -> CommandPaletteSection? {
+        let scopes = devToolScopeSuggestions(matching: query)
+        guard !scopes.isEmpty else { return nil }
+        let entries = scopes.enumerated().map { index, scope in
+            PanelEntry(
+                id: PanelEntry.id(for: .devToolScopeSuggestion(scope)),
+                source: .devToolScopeSuggestion(scope),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: scope.badgeLabel,
+                subtitle: L(.commandPaletteDevToolScopeSuggestionHint),
+                symbol: "hammer",
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
+    }
+
+    /// Builds the "Developer Tools" section from already-evaluated results.
+    /// Shared by the auto-detect path (`devToolsSection`) and the scope path.
+    private func makeDevToolsSection(from results: [DevToolResult]) -> CommandPaletteSection {
+        let entries = results.enumerated().map { index, result in
+            PanelEntry(
+                id: PanelEntry.id(for: .devTool(result)),
+                source: .devTool(result),
+                displayOrder: Double(index),
+                isVisible: true,
+                hotkey: nil,
+                title: result.output,
+                subtitle: L(Self.devToolLabelKey(result.toolID)),
+                symbol: "hammer",
+                kind: .action,
+                toggleState: nil,
+                permission: .notRequired
+            )
+        }
+        return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
+    }
+
+    /// Maps a `DevToolResult.toolID` to its localized tool-name label key.
+    static func devToolLabelKey(_ toolID: String) -> L10n.Key {
+        switch toolID {
+        case "base64.encode": return .devToolBase64Encode
+        case "base64.decode": return .devToolBase64Decode
+        case "url.encode": return .devToolURLEncode
+        case "url.decode": return .devToolURLDecode
+        case "json.pretty": return .devToolJSONPretty
+        case "json.minify": return .devToolJSONMinify
+        case "hash.md5": return .devToolHashMD5
+        case "hash.sha1": return .devToolHashSHA1
+        case "hash.sha256": return .devToolHashSHA256
+        case "ts.local": return .devToolTimestampLocal
+        case "ts.utc": return .devToolTimestampUTC
+        case "ts.iso": return .devToolTimestampISO
+        default: return .commandPaletteSectionDevTools
+        }
+    }
+
     /// Refresh the listening-port inventory when the query looks like a port
     /// number, so the "Ports" section reflects the live state. Coalesced so a
     /// burst of keystrokes triggers at most one in-flight scan.
     func refreshPortsIfNeeded() {
+        // In dev-tool scope mode the list is exclusive to that tool, so ports can
+        // never surface — skip the scan even if the body looks like a port number.
+        guard activeDevToolScope == nil else { return }
         guard Self.portSearchNeedle(from: query) != nil else { return }
         guard !portInventory.isRefreshing, portRefreshTask == nil else { return }
 
@@ -258,6 +510,7 @@ struct CommandPalettePicker: View {
     let onSelect: (PanelEntry) -> Void
     let onCancel: () -> Void
     let onConfirm: () -> Void
+    let onRefreshRates: () -> Void
 
     @FocusState private var searchFocused: Bool
 
@@ -270,11 +523,20 @@ struct CommandPalettePicker: View {
             Divider().opacity(0.4)
 
             if state.flatEntries.isEmpty {
-                emptyState
+                if let scope = state.activeDevToolScope {
+                    scopeTips(for: scope)
+                } else {
+                    emptyState
+                }
             } else if state.isAtRoot {
                 entryList
             } else {
                 optionList
+            }
+
+            if state.isCurrencyContext {
+                Divider().opacity(0.4)
+                footerBar
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -303,6 +565,9 @@ struct CommandPalettePicker: View {
             }
         }
         .onChange(of: state.query) { _, _ in
+            // Space trigger for the dev-tool scope badge (Tab is handled by the
+            // window controller's key monitor). No-ops once a scope is active.
+            state.absorbDevToolScopeIfNeeded()
             state.selectedIndex = 0
             state.refreshPortsIfNeeded()
         }
@@ -394,10 +659,14 @@ struct CommandPalettePicker: View {
 
     private var searchField: some View {
         HStack(spacing: 12) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 22, weight: .regular))
-                .foregroundStyle(.secondary)
-            TextField(L(state.isAtRoot ? .commandPaletteSearchPlaceholder : .commandPaletteOptionSearchPlaceholder), text: $state.query)
+            if let scope = state.activeDevToolScope {
+                scopeBadge(scope.badgeLabel)
+            } else {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 22, weight: .regular))
+                    .foregroundStyle(.secondary)
+            }
+            TextField(searchFieldPlaceholder, text: $state.query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, weight: .regular))
                 .focused($searchFocused)
@@ -423,6 +692,106 @@ struct CommandPalettePicker: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
+    }
+
+    /// Placeholder text: prompts for the conversion body while scoped, otherwise
+    /// the usual root / second-level search hint.
+    private var searchFieldPlaceholder: String {
+        if state.activeDevToolScope != nil {
+            return L(.commandPaletteDevToolScopePlaceholder)
+        }
+        return L(state.isAtRoot ? .commandPaletteSearchPlaceholder : .commandPaletteOptionSearchPlaceholder)
+    }
+
+    /// The Raycast-style scope pill shown in place of the magnifying glass once a
+    /// dev-tool keyword has been absorbed.
+    private func scopeBadge(_ label: String) -> some View {
+        Text(label)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(Color.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.18))
+            )
+            .fixedSize()
+    }
+
+    /// Raycast-style bottom chrome: the selected row's primary action on the left
+    /// ("the footer title"), and an "更新汇率" refresh button on the right.
+    private var footerBar: some View {
+        HStack(spacing: 8) {
+            if let entry = selectedEntry {
+                // Clickable, like Raycast: running it performs the selected row's
+                // primary action (copy / open / toggle / …), same as pressing Return.
+                Button { onSelect(entry) } label: {
+                    HStack(spacing: 6) {
+                        Text(primaryActionTitle(for: entry))
+                            .font(.system(size: 12, weight: .medium))
+                        keyHint(text: nil, symbol: "return")
+                    }
+                    .foregroundStyle(.secondary)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+            Button(action: onRefreshRates) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                    LocalizedText(.commandPaletteFooterRefreshRates)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L(.commandPaletteFooterRefreshRates))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+    }
+
+    /// The currently selected row, or nil when there is no selection.
+    private var selectedEntry: PanelEntry? {
+        let entries = state.flatEntries
+        guard entries.indices.contains(state.selectedIndex) else { return nil }
+        return entries[state.selectedIndex]
+    }
+
+    /// The primary action of `entry`, shown as the footer title (mirrors Raycast's
+    /// "Open Command").
+    private func primaryActionTitle(for entry: PanelEntry) -> String {
+        switch entry.source {
+        case .appShortcut, .installedApp:
+            return L(.commandPaletteActionOpen)
+        case .portRecord:
+            return L(.commandPaletteActionQuit)
+        case .calcResult, .devTool, .conversion:
+            return L(.commandPaletteActionCopy)
+        case .devToolScopeSuggestion:
+            return L(.commandPaletteActionEnter)
+        case .hostProfile:
+            return L(.commandPaletteActionToggle)
+        case .paletteOption(let id):
+            if state.option(id: id)?.role == .destructive { return L(.commandPaletteActionQuit) }
+            return L(.commandPaletteActionSelect)
+        case .builtin(let item):
+            switch item.kind {
+            case .toggle: return L(.commandPaletteActionToggle)
+            case .action: return L(.commandPaletteActionRun)
+            case .submenu, .brightnessControl: return L(.commandPaletteActionEnter)
+            case .hiddenHotkey: return L(.commandPaletteActionSelect)
+            }
+        }
     }
 
     private var backHeader: some View {
@@ -469,6 +838,7 @@ struct CommandPalettePicker: View {
                         .legacyMaterialBackground()
                     }
                 }
+                .overlayScrollers()
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
             .frame(minHeight: 320, maxHeight: .infinity)
@@ -495,6 +865,45 @@ struct CommandPalettePicker: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+    }
+
+    /// Shown in place of the generic empty state while a dev-tool scope is active
+    /// but nothing has been typed yet — a usage hint plus a worked example.
+    private func scopeTips(for scope: DevToolScope) -> some View {
+        let hint = Self.scopeHint(for: scope)
+        return VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "hammer")
+                .font(.system(size: 32, weight: .regular))
+                .foregroundStyle(.tertiary)
+            Text(scope.badgeLabel)
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(.secondary)
+            LocalizedText(hint.key)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Text(hint.example)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+        .padding(.horizontal, 40)
+    }
+
+    /// A localized one-line usage hint and a worked example for each scope.
+    /// The example is data (not localized); the hint is a catalog key.
+    static func scopeHint(for scope: DevToolScope) -> (key: L10n.Key, example: String) {
+        switch scope {
+        case .base64: return (.devToolTipBase64, "hello → aGVsbG8=")
+        case .url: return (.devToolTipURL, "a b&c → a%20b%26c")
+        case .md5: return (.devToolTipMD5, "abc → 900150983cd24fb0…")
+        case .sha1: return (.devToolTipSHA1, "abc → a9993e364706816a…")
+        case .sha256: return (.devToolTipSHA256, "abc → ba7816bf8f01cfea…")
+        }
     }
 
     private var entryList: some View {
@@ -535,6 +944,7 @@ struct CommandPalettePicker: View {
                         }
                     }
                 }
+                .overlayScrollers()
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
             .frame(minHeight: 320, maxHeight: .infinity)
@@ -684,17 +1094,19 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .paletteOption:
+        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile:
             return nil
         }
     }
 
-    /// Port records, calculator results, and second-level options render their
-    /// subtitle (the port detail line, the original expression for a calc
-    /// result, or the port detail line for a port option).
+    /// Port records, calculator results, dev-tool conversions, unit/time/currency
+    /// conversions, host profiles, and second-level options render their subtitle
+    /// (the port detail line, the original expression for a calc result, the
+    /// conversion source/rate-date for a conversion row, the tool name for a dev-tool row,
+    /// the host profile's entry summary, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .paletteOption: return true
+        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return true
         default: return false
         }
     }

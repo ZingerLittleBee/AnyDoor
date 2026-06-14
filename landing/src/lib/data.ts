@@ -245,9 +245,9 @@ export const moreFeatures: FeatureCard[] = [
     accent: '#ff375f',
     name: { zh: '命令面板', en: 'Command Palette' },
     desc: {
-      zh: '一个热键唤起的搜索框：启动已安装 App、跳转端口、跑内置动作，还内置一个科学计算器。',
-      en: 'A hotkey-summoned search box: launch installed apps, jump to ports, run built-in actions — with an inline scientific calculator.',
+      zh: '一个热键唤起的搜索框：启动已安装 App、跳转端口、跑内置动作，内置科学计算器，还能内联换算单位 / 时区 / 汇率，以及 base64 / URL / 哈希 / JSON 等开发者工具。',
+      en: 'A hotkey-summoned search box: launch installed apps, jump to ports, run built-in actions — with an inline scientific calculator, unit / time-zone / currency conversions, and dev tools (base64 / URL / hash / JSON).',
     },
-    tag: { zh: '搜索 · 计算', en: 'Search · calc' },
+    tag: { zh: '搜索 · 计算 · 换算', en: 'Search · calc · convert' },
   },
 ];

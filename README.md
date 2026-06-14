@@ -110,6 +110,17 @@ command palette when you need them.
   percentage literals (`1234 * 8%`), the constants `pi` / `e`, and scientific
   functions (`sqrt`, `sin`, `log`, `pow`, …; trig in radians). Bare numbers
   stay a port search; prefix with `=` to force calculation (e.g. `=8080`).
+- Inline conversions: type a conversion and the answer appears on top — Return
+  copies it. Units (length, mass, temperature, data size, speed) via `3 ft to m`
+  / `72 f to c` / `1 gb to mib`; time zones via `3pm tokyo` / `9am london to
+  tokyo`; currency via `100 usd to eur` (also `$` / `€` / `£`, colloquial names
+  like `rmb` / `yuan` / `euro`, and `=` as a connector), converted against ECB
+  rates cached daily from Frankfurter and usable offline. A currency-only footer
+  can force-refresh the rate table on demand.
+- Inline developer tools: `base64`, `url`, and `md5` / `sha1` / `sha256` encode
+  or hash the rest of the query; pasting JSON pretty-prints / minifies it and a
+  Unix epoch renders local / UTC / ISO 8601. A Raycast-style scope badge turns a
+  keyword into a search-bar pill so the list stays exclusive to that tool.
 
 ### Menu bar panel
 

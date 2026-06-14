@@ -1,6 +1,171 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "colorFormat.css": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "CSS (lowercase hex)" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "CSS 小写十六进制" }
+        }
+      }
+    },
+    "colorFormat.hex": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "HEX" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "HEX 十六进制" }
+        }
+      }
+    },
+    "colorFormat.hsl": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "HSL" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "HSL" }
+        }
+      }
+    },
+    "colorFormat.rgb": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "RGB" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "RGB" }
+        }
+      }
+    },
+    "colorFormat.swiftUI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "SwiftUI Color" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "SwiftUI Color" }
+        }
+      }
+    },
+    "commandPalette.footer.refreshRates": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Update Rates" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "更新汇率" }
+        }
+      }
+    },
+    "commandPalette.hosts.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Active" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "已启用" }
+        }
+      }
+    },
+    "commandPalette.section.hosts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Hosts" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "Hosts" }
+        }
+      }
+    },
+    "commandPalette.action.copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Copy" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "复制" }
+        }
+      }
+    },
+    "commandPalette.action.enter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Enter" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "进入" }
+        }
+      }
+    },
+    "commandPalette.action.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Open" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "打开" }
+        }
+      }
+    },
+    "commandPalette.action.quit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Quit" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "结束进程" }
+        }
+      }
+    },
+    "commandPalette.action.run": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Run" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "执行" }
+        }
+      }
+    },
+    "commandPalette.action.select": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Select" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "选择" }
+        }
+      }
+    },
+    "commandPalette.action.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Toggle" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "切换" }
+        }
+      }
+    },
     "commandPalette.brightness.level": {
       "extractionState": "manual",
       "localizations": {
@@ -566,6 +731,17 @@
         }
       }
     },
+    "panel.appShortcut.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Add app shortcuts in Settings" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "在设置中添加应用快捷键" }
+        }
+      }
+    },
     "panel.appShortcut.countSuffix": {
       "extractionState": "manual",
       "localizations": {
@@ -920,6 +1096,17 @@
             "state": "translated",
             "value": "锁定屏幕"
           }
+        }
+      }
+    },
+    "builtin.microphoneMute": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Mute Mic" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "麦克风静音" }
         }
       }
     },
@@ -4323,6 +4510,385 @@
         }
       }
     },
+    "toast.micMute.unsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This input device can't be muted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前输入设备不支持静音"
+          }
+        }
+      }
+    },
+    "commandPalette.section.conversion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Conversion" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "换算" }
+        }
+      }
+    },
+    "commandPalette.section.devTools": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Developer Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开发者工具"
+          }
+        }
+      }
+    },
+    "devTool.base64.encode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base64 Encode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base64 编码"
+          }
+        }
+      }
+    },
+    "conversion.currency.asOf": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "as of %@" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "汇率截至 %@" }
+        }
+      }
+    },
+    "devTool.base64.decode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base64 Decode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Base64 解码"
+          }
+        }
+      }
+    },
+    "devTool.url.encode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL Encode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL 编码"
+          }
+        }
+      }
+    },
+    "devTool.url.decode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL Decode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "URL 解码"
+          }
+        }
+      }
+    },
+    "devTool.json.pretty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JSON Pretty"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JSON 美化"
+          }
+        }
+      }
+    },
+    "devTool.json.minify": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JSON Minify"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "JSON 压缩"
+          }
+        }
+      }
+    },
+    "devTool.hash.md5": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MD5"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "MD5"
+          }
+        }
+      }
+    },
+    "devTool.hash.sha1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SHA-1"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SHA-1"
+          }
+        }
+      }
+    },
+    "devTool.hash.sha256": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SHA-256"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "SHA-256"
+          }
+        }
+      }
+    },
+    "devTool.timestamp.local": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Local Time"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "本地时间"
+          }
+        }
+      }
+    },
+    "devTool.timestamp.utc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UTC"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "UTC"
+          }
+        }
+      }
+    },
+    "devTool.timestamp.iso": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ISO 8601"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ISO 8601"
+          }
+        }
+      }
+    },
+    "commandPalette.devTool.scopePlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter text to convert"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入要转换的内容"
+          }
+        }
+      }
+    },
+    "commandPalette.devTool.scopeSuggestionHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Return to use"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回车进入"
+          }
+        }
+      }
+    },
+    "devTool.tip.base64": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to Base64-encode, or paste Base64 to decode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本编码为 Base64，或粘贴 Base64 解码"
+          }
+        }
+      }
+    },
+    "devTool.tip.url": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to percent-encode, or paste encoded text to decode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本进行 URL 编码，或粘贴编码内容解码"
+          }
+        }
+      }
+    },
+    "devTool.tip.md5": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to hash with MD5"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本计算 MD5 哈希"
+          }
+        }
+      }
+    },
+    "devTool.tip.sha1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to hash with SHA-1"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本计算 SHA-1 哈希"
+          }
+        }
+      }
+    },
+    "devTool.tip.sha256": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type text to hash with SHA-256"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文本计算 SHA-256 哈希"
+          }
+        }
+      }
+    },
     "toast.ocr.noText": {
       "extractionState": "manual",
       "localizations": {
@@ -4439,6 +5005,28 @@
             "state": "translated",
             "value": "未识别到二维码"
           }
+        }
+      }
+    },
+    "toast.rates.updateFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Couldn’t update rates" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "汇率更新失败" }
+        }
+      }
+    },
+    "toast.rates.updated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Rates updated (as of %@)" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "汇率已更新（截至 %@）" }
         }
       }
     },

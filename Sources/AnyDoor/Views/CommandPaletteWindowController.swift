@@ -58,7 +58,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .paletteOption: return nil
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return nil
             }
         })
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -75,6 +75,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             },
             onConfirm: { [weak self] in
                 self?.confirmPending()
+            },
+            onRefreshRates: { [weak self] in
+                self?.refreshRates()
             }
         )
 
@@ -102,6 +105,15 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     private func collectSections() -> [CommandPaletteSection] {
         let store = PanelStore.shared
         var sections: [CommandPaletteSection] = []
+
+        // Refresh hosts profiles once at palette open so the root name-search
+        // section reflects the current set without a per-keystroke fetch.
+        HostsManager.shared.reload()
+
+        // Kick a currency-rates refresh (at most once per day) so inline currency
+        // conversion has a fresh table. Fire-and-forget; the cached table is used
+        // immediately and updated rows appear as the user keeps typing.
+        Task { await CurrencyRatesService.shared.refreshIfStale() }
 
         let hasExternalDDC = DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC)
         let commands = store.topLevelEntries.filter { entry in
@@ -230,7 +242,17 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 commit(entry)
             }
             return true
-        case 51: // Delete/Backspace: pop the second level only when the query is empty
+        case 48: // Tab: absorb a bare dev-tool keyword into a scope badge.
+            if state.isAtRoot {
+                state.tryAbsorbDevToolScope()
+                return true // swallow Tab either way so focus doesn't jump
+            }
+            return false
+        case 51: // Delete/Backspace: shed the scope badge / pop the second level
+            if state.activeDevToolScope != nil, state.query.isEmpty {
+                state.removeDevToolScope()
+                return true
+            }
             if !state.isAtRoot, state.query.isEmpty {
                 state.popToRoot()
                 return true
@@ -291,6 +313,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             return
         }
 
+        // A keyword-completion hint enters its scope and keeps the palette open
+        // so the user types the conversion body next — like an option drill-in.
+        if case .devToolScopeSuggestion(let scope) = entry.source {
+            state?.enterDevToolScope(scope)
+            return
+        }
+
         close()
         switch entry.source {
         case .appShortcut(let id):
@@ -317,6 +346,31 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             // copy path (PickColor / OCR / QRCode / Screenshot).
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
             ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
+        case .devTool(let result):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(result.output, forType: .string)
+            // Suppress clipboard-history capture, matching every other internal
+            // copy path (Calc / PickColor / OCR / QRCode / Screenshot).
+            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+            // Confirm without echoing the value — dev-tool outputs (hashes, multi-line
+            // JSON) are long and unhelpful in a toast.
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        case .conversion(let result):
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(result.copyText, forType: .string)
+            // Suppress clipboard-history capture, matching every other internal copy path.
+            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        case .hostProfile(let id):
+            // Toggle the named profile's activation directly (same as the
+            // drill-in hosts options — no privileged-write confirmation).
+            if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
+                Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
+            }
+        case .devToolScopeSuggestion:
+            break // handled above (enters scope, stays open)
         case .paletteOption:
             break // handled above
         }
@@ -332,6 +386,20 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
     private func cancel() {
         close()
+    }
+
+    /// Force a currency-rates refresh from the footer button and confirm with a
+    /// toast. The palette stays open (the toast panel can't become key), so an
+    /// updated conversion row re-renders in place.
+    private func refreshRates() {
+        Task { @MainActor in
+            let updated = await CurrencyRatesService.shared.forceRefresh()
+            if updated, let date = CurrencyRatesService.shared.rateTable?.date {
+                ToastPresenter.shared.show(.success(L(.toastRatesUpdated, date)))
+            } else {
+                ToastPresenter.shared.show(.failure(L(.toastRatesUpdateFailed)))
+            }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {

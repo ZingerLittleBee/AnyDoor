@@ -6,6 +6,72 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Command palette: inline unit, time-zone, and currency conversion. Typing a
+  conversion expression surfaces a Conversion section with the answer on top;
+  Return copies the value with a content-free toast. Units cover length, mass,
+  temperature, data size (decimal and binary), and speed via `"<n> <unit> to/in
+  <unit>"` (e.g. `3 ft to m`, `72 f to c`, `1 gb to mib`). Time zones handle
+  `"<time?> <place>"` and `"<time?> <a> to <b>"` (e.g. `3pm tokyo`, `9am london to
+  tokyo`, `tokyo time`) with a curated city map, a `GMT±H` label, and a day-offset
+  marker when the wall date crosses midnight. Currency converts `"<amount> <code>
+  to <code>"` (plus `$`/`€`/`£` symbols) against a rate table cached from
+  Frankfurter (ECB data, key-free) — fetched at most once per day, used offline
+  from the last cache with an "as of <date>" subtitle. Each converter is a pure,
+  total facade mirroring the calculator; detection requires a recognized
+  unit/currency/place plus a connector or time token, so ordinary command and app
+  search is untouched. The connector can be `to`, `in`, or `=` (e.g. `100 usd =
+  rmb`). Currency also accepts common colloquial names (`rmb`/`yuan`
+  → CNY, `euro`, `pound`, `yen`, `dollar`, …) in addition to ISO codes. The
+  command palette gains a Raycast-style footer — shown only in a currency context
+  (a currency row, or a currency-shaped query with no rates yet) — with the
+  selected row's primary action on the left and an "更新汇率" button on the right
+  that force-refreshes the rate table on demand.
+- Command palette: inline developer tools. Typing a keyword surfaces instant,
+  copy-on-Return conversions — `base64` (encode + decode), `url` (percent-encode +
+  decode), `md5` / `sha1` / `sha256` hashes — plus two auto-detected tools that need
+  no keyword: paste a JSON object or array for pretty / minified output (keys sorted),
+  or a 10-digit (seconds) or 13-digit (milliseconds) Unix epoch for local / UTC /
+  ISO 8601 renderings. The core is a pure, total `DevTools` facade mirroring the
+  calculator; explicit keywords plus strong-signal auto-detection keep bare words and
+  short numbers in normal app/command/port search. Pressing Return copies the result
+  and confirms with a content-free toast, since hashes and multi-line JSON make poor
+  toast bodies. A Raycast-style scope badge makes the keyword tools first-class:
+  typing a keyword + space, or Tab on a bare keyword, absorbs it into a search-bar
+  pill (Base64 / URL / MD5 / SHA-1 / SHA-256), drops the keyword from the field, and
+  makes the list exclusive to that tool; Backspace on an empty body sheds the badge,
+  and Esc escalates (clear body → shed badge → dismiss). While a keyword prefix is
+  still being typed the palette suggests the matching tool(s) on top, selected by
+  default so Return enters the scope; once inside a tool with nothing typed yet, the
+  panel shows a usage hint and a worked example instead of the generic "no matches"
+  state.
+- Command palette: hosts profiles are reachable by name from the root. Typing a
+  profile name surfaces a Hosts section whose rows toggle that profile's activation
+  on Return, mirroring the existing port direct-search. Activation goes through the
+  same path as the drill-in toggle (it may still prompt for the privileged write),
+  and no per-profile global hotkey is introduced, so a stray keystroke can't trigger
+  an admin prompt.
+- Color picker output format: the picked color can be copied as HEX, RGB, HSL,
+  SwiftUI `Color`, or lowercase CSS hex. The format is chosen from the command
+  palette's Pick Color second-level menu, persists as the default for every pick path
+  (menu-bar row and global hotkey), and rides settings backup. A pure `ColorFormat`
+  renders the sampled `#RRGGBB` value into each representation; color history still
+  stores the raw hex.
+- System microphone mute: a new panel toggle mutes / unmutes the default input device
+  via CoreAudio, giving a conferencing-app-independent mic switch with the usual
+  panel row, global hotkey, command-palette entry, and backup wiring. Devices that
+  expose no settable mute (some built-in mics, AirPods in the input scope) surface a
+  toast and leave the row state unchanged instead of failing silently.
+- App Shortcuts menu-bar popover now shows a hint guiding the user to add shortcuts in
+  Settings when none are configured, instead of an empty list.
+
+### Changed
+
+- Command palette list now uses overlay scrollbars (auto-hiding and reserving no
+  width), matching the Raycast-style chrome, regardless of the system "Show scroll
+  bars: Always" preference that SwiftUI would otherwise honor.
+
 ## [2.3.1] - 2026-06-13
 
 ### Added

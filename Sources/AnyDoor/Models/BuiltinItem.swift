@@ -6,6 +6,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case appShortcuts
     case keepAwake
     case muteAudio
+    case microphoneMute
     case hideDesktopIcons
     case showHiddenFiles
     case darkMode
@@ -63,7 +64,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     var kind: Kind {
         switch self {
         case .appShortcuts, .portManager, .windowLayout, .hostsManager: return .submenu
-        case .keepAwake, .muteAudio, .hideDesktopIcons, .showHiddenFiles, .darkMode,
+        case .keepAwake, .muteAudio, .microphoneMute, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock, .scheduledShutdown: return .toggle
         case .clipboardMonitoring: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .clearClipboard, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
@@ -85,6 +86,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .appShortcuts:      return .builtinAppShortcuts
         case .keepAwake:         return .builtinKeepAwake
         case .muteAudio:         return .builtinMuteAudio
+        case .microphoneMute:    return .builtinMicrophoneMute
         case .hideDesktopIcons:  return .builtinHideDesktopIcons
         case .showHiddenFiles:   return .builtinShowHiddenFiles
         case .darkMode:          return .builtinDarkMode
@@ -138,6 +140,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .appShortcuts: return "keyboard"
         case .keepAwake: return "cup.and.saucer.fill"
         case .muteAudio: return "speaker.slash.fill"
+        case .microphoneMute: return "mic.slash.fill"
         case .hideDesktopIcons: return "rectangle.on.rectangle.slash"
         case .showHiddenFiles: return "eye.fill"
         case .darkMode: return "moon.fill"
@@ -192,6 +195,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .keepAwake: return 100
         case .appShortcuts: return 200
         case .muteAudio: return 300
+        case .microphoneMute: return 310
         case .hideDesktopIcons: return 400
         case .showHiddenFiles: return 500
         case .darkMode: return 600
