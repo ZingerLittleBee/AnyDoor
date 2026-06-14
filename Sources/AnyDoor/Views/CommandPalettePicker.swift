@@ -707,11 +707,19 @@ struct CommandPalettePicker: View {
     /// ("the footer title"), and an "更新汇率" refresh button on the right.
     private var footerBar: some View {
         HStack(spacing: 8) {
-            if let title = primaryActionTitle {
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
+            if let entry = selectedEntry {
+                // Clickable, like Raycast: running it performs the selected row's
+                // primary action (copy / open / toggle / …), same as pressing Return.
+                Button { onSelect(entry) } label: {
+                    HStack(spacing: 6) {
+                        Text(primaryActionTitle(for: entry))
+                            .font(.system(size: 12, weight: .medium))
+                        keyHint(text: nil, symbol: "return")
+                    }
                     .foregroundStyle(.secondary)
-                keyHint(text: nil, symbol: "return")
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             Spacer()
             Button(action: onRefreshRates) {
@@ -737,12 +745,17 @@ struct CommandPalettePicker: View {
         .padding(.vertical, 7)
     }
 
-    /// The primary action of the currently selected row, shown as the footer title
-    /// (mirrors Raycast's "Open Command"). Nil when nothing is selected.
-    private var primaryActionTitle: String? {
+    /// The currently selected row, or nil when there is no selection.
+    private var selectedEntry: PanelEntry? {
         let entries = state.flatEntries
         guard entries.indices.contains(state.selectedIndex) else { return nil }
-        switch entries[state.selectedIndex].source {
+        return entries[state.selectedIndex]
+    }
+
+    /// The primary action of `entry`, shown as the footer title (mirrors Raycast's
+    /// "Open Command").
+    private func primaryActionTitle(for entry: PanelEntry) -> String {
+        switch entry.source {
         case .appShortcut, .installedApp:
             return L(.commandPaletteActionOpen)
         case .portRecord:
