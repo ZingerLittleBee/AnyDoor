@@ -838,6 +838,7 @@ struct CommandPalettePicker: View {
                         .legacyMaterialBackground()
                     }
                 }
+                .overlayScrollers()
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
             .frame(minHeight: 320, maxHeight: .infinity)
@@ -943,6 +944,7 @@ struct CommandPalettePicker: View {
                         }
                     }
                 }
+                .overlayScrollers()
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
             .frame(minHeight: 320, maxHeight: .infinity)

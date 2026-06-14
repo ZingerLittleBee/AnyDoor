@@ -66,6 +66,12 @@ versioning.
 - App Shortcuts menu-bar popover now shows a hint guiding the user to add shortcuts in
   Settings when none are configured, instead of an empty list.
 
+### Changed
+
+- Command palette list now uses overlay scrollbars (auto-hiding and reserving no
+  width), matching the Raycast-style chrome, regardless of the system "Show scroll
+  bars: Always" preference that SwiftUI would otherwise honor.
+
 ## [2.3.1] - 2026-06-13
 
 ### Added
