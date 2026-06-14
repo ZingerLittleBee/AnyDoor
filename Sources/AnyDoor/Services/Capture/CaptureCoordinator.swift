@@ -252,6 +252,26 @@ final class CaptureCoordinator {
         }
     }
 
+    // MARK: - Annotation editor export
+
+    /// Copies an edited image to the clipboard (annotation editor "copy"/"done").
+    func editorCopy(_ image: NSImage) { copyToPasteboard(image) }
+
+    /// Saves an edited image via a save panel (annotation editor "save").
+    func editorSave(_ image: NSImage) {
+        guard let png = image.pngData() else {
+            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+            return
+        }
+        saveInteractive(png: png, existing: nil)
+    }
+
+    /// Pins an edited image on screen (annotation editor "pin").
+    func editorPin(_ image: NSImage) {
+        let screen = NSScreen.screenUnderMouse ?? NSScreen.main
+        PinnedImageWindow.show(image: image, at: screen?.frame ?? .zero)
+    }
+
     private func recapture() {
         // Reuse the previous region rect when re-capturing a region.
         let request = lastRegionRequest ?? CaptureRequest(mode: .region)

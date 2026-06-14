@@ -20,9 +20,11 @@ enum AnnotationRenderer {
     /// canvas re-renders on every drag frame).
     private static let ciContext = CIContext(options: nil)
 
-    /// Renders the document to a `CGImage`, applying the crop if set. Returns nil
-    /// only if a bitmap context cannot be created.
-    static func render(_ doc: AnnotationDocument) -> CGImage? {
+    /// Renders the document to a `CGImage`. When `applyCrop` is true (the default,
+    /// used for export) the crop is applied; the canvas passes false so it can show
+    /// the full image with a separate crop overlay while editing. Returns nil only
+    /// if a bitmap context cannot be created.
+    static func render(_ doc: AnnotationDocument, applyCrop: Bool = true) -> CGImage? {
         let w = doc.baseImage.width
         let h = doc.baseImage.height
         guard w > 0, h > 0,
@@ -46,7 +48,7 @@ enum AnnotationRenderer {
         }
 
         guard let full = ctx.makeImage() else { return nil }
-        if let crop = doc.cropRect, crop.width >= 1, crop.height >= 1 {
+        if applyCrop, let crop = doc.cropRect, crop.width >= 1, crop.height >= 1 {
             return full.cropping(to: crop) ?? full
         }
         return full

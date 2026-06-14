@@ -21,9 +21,10 @@ final class AnnotationEditorWindow {
             window.makeKeyAndOrderFront(nil)
             return
         }
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
         let size = CGSize(
-            width: min(image.size.width, 900),
-            height: min(image.size.height, 700) + 44
+            width: min(max(image.size.width, 640), 1100),
+            height: min(max(image.size.height, 460), 800) + 92
         )
         let w = NSWindow(
             contentRect: CGRect(origin: .zero, size: size),
@@ -34,7 +35,10 @@ final class AnnotationEditorWindow {
         w.title = L(.builtinScreenshot)
         w.isRestorable = false
         w.center()
-        w.contentView = NSHostingView(rootView: AnnotationEditorPlaceholderView(image: image))
+        let model = AnnotationEditorModel(image: cg)
+        w.contentView = NSHostingView(rootView: AnnotationEditorView(model: model) { [weak self] in
+            self?.window?.close()
+        })
         let relay = WindowCloseRelay()
         relay.onClose = { [weak self] in
             self?.window = nil
@@ -57,25 +61,5 @@ private final class WindowCloseRelay: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         onClose?()
-    }
-}
-
-private struct AnnotationEditorPlaceholderView: View {
-    let image: NSImage
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Text(L(.captureEditorPlaceholder))
-                .font(.callout)
-                .padding(8)
-                .frame(maxWidth: .infinity)
-                .background(.yellow.opacity(0.25))
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(12)
-        }
     }
 }

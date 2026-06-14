@@ -83,4 +83,32 @@ enum AnnotationGeometry {
     static func counterRadius(for style: AnnotationStyle) -> CGFloat {
         max(14, style.fontSize)
     }
+
+    /// The aspect-fit rect for an image of `imageSize` centered in a view of
+    /// `viewSize` (both top-left origin, as the canvas NSView is `isFlipped`).
+    static func fittedRect(imageSize: CGSize, in viewSize: CGSize) -> CGRect {
+        guard imageSize.width > 0, imageSize.height > 0, viewSize.width > 0, viewSize.height > 0 else { return .zero }
+        let scale = min(viewSize.width / imageSize.width, viewSize.height / imageSize.height)
+        let w = imageSize.width * scale
+        let h = imageSize.height * scale
+        return CGRect(x: (viewSize.width - w) / 2, y: (viewSize.height - h) / 2, width: w, height: h)
+    }
+
+    /// Converts a point in the (flipped) canvas view into image pixel space.
+    static func viewToImage(_ p: CGPoint, fitted: CGRect, imageSize: CGSize) -> CGPoint {
+        guard fitted.width > 0, fitted.height > 0 else { return .zero }
+        return CGPoint(
+            x: (p.x - fitted.minX) / fitted.width * imageSize.width,
+            y: (p.y - fitted.minY) / fitted.height * imageSize.height
+        )
+    }
+
+    /// Converts a point in image pixel space into the (flipped) canvas view.
+    static func imageToView(_ p: CGPoint, fitted: CGRect, imageSize: CGSize) -> CGPoint {
+        guard imageSize.width > 0, imageSize.height > 0 else { return .zero }
+        return CGPoint(
+            x: fitted.minX + p.x / imageSize.width * fitted.width,
+            y: fitted.minY + p.y / imageSize.height * fitted.height
+        )
+    }
 }

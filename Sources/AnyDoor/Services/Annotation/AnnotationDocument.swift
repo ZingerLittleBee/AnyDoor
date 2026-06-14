@@ -75,6 +75,30 @@ final class AnnotationDocument {
         elements[i].kind = kind
     }
 
+    /// Replaces an element by id **without** a new undo checkpoint — for streaming
+    /// updates during a gesture started with `beginEdit()`.
+    func updateNoCheckpoint(id: UUID, kind: AnnotationElement.Kind) {
+        guard let i = elements.firstIndex(where: { $0.id == id }) else { return }
+        elements[i].kind = kind
+    }
+
+    /// Pushes an undo checkpoint to open a multi-step gesture (drag-move, crop).
+    /// Pair with no-checkpoint updates and `rollback()` to cancel.
+    func beginEdit() { checkpoint() }
+
+    /// Updates the crop preview without a new checkpoint (during a crop drag begun
+    /// with `setCrop`).
+    func updateCropPreview(_ rect: CGRect) {
+        cropRect = AnnotationGeometry.clampCrop(rect, to: imageBounds)
+    }
+
+    /// Discards the most recent checkpoint and restores its state, cancelling an
+    /// in-progress gesture (e.g. a zero-size drag) without leaving a redo entry.
+    func rollback() {
+        guard let s = undoStack.popLast() else { return }
+        apply(s)
+    }
+
     /// Removes an element by id (no-op if absent).
     func remove(id: UUID) {
         guard elements.contains(where: { $0.id == id }) else { return }
