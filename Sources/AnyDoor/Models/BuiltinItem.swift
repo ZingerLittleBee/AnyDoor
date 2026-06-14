@@ -13,6 +13,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case lockScreen
     case emptyTrash
     case screenshot
+    case captureWindow
+    case captureFullscreen
+    case captureTimer
+    case captureModeBar
     case clearClipboard
     case ocr
     case pickColor
@@ -75,7 +79,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
              .windowBottomLeftQuarter, .windowBottomRightQuarter,
              .windowLeftThird, .windowCenterThird, .windowRightThird,
              .windowLeftTwoThirds, .windowRightTwoThirds,
-             .windowMoveNextDisplay, .windowMovePreviousDisplay: return .action
+             .windowMoveNextDisplay, .windowMovePreviousDisplay,
+             .captureWindow, .captureFullscreen, .captureTimer, .captureModeBar: return .action
         case .brightness: return .brightnessControl
         case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
@@ -93,6 +98,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen:        return .builtinLockScreen
         case .emptyTrash:        return .builtinEmptyTrash
         case .screenshot:        return .builtinScreenshot
+        case .captureWindow:     return .builtinCaptureWindow
+        case .captureFullscreen: return .builtinCaptureFullscreen
+        case .captureTimer:      return .builtinCaptureTimer
+        case .captureModeBar:    return .builtinCaptureModeBar
         case .clearClipboard:    return .builtinClearClipboard
         case .ocr:               return .builtinOCR
         case .pickColor:         return .builtinPickColor
@@ -147,6 +156,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen: return "lock.fill"
         case .emptyTrash: return "trash.fill"
         case .screenshot: return "camera.viewfinder"
+        case .captureWindow:     return "macwindow"
+        case .captureFullscreen: return "rectangle.dashed"
+        case .captureTimer:      return "timer"
+        case .captureModeBar:    return "camera.on.rectangle"
         case .clearClipboard: return "clipboard"
         case .ocr: return "text.viewfinder"
         case .pickColor: return "eyedropper"
@@ -202,6 +215,10 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .lockScreen: return 700
         case .emptyTrash: return 800
         case .screenshot: return 900
+        case .captureWindow:     return 905
+        case .captureFullscreen: return 910
+        case .captureTimer:      return 915
+        case .captureModeBar:    return 920
         case .clearClipboard: return 940
         case .ocr: return 950
         case .pickColor: return 975
@@ -252,6 +269,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .pickColor: return .color
         case .qrcode: return .qrcode
         case .screenshot: return .screenshot
+        case .captureWindow, .captureFullscreen, .captureTimer: return .screenshot
         default: return nil
         }
     }
