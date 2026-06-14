@@ -485,6 +485,38 @@ final class ClipboardHistoryStore {
         }
     }
 
+    /// Records a screenshot from in-memory PNG bytes (the capture pipeline already
+    /// holds the image, so it does not round-trip through the pasteboard). Mirrors
+    /// `recordScreenshotFromPasteboard()`.
+    func recordScreenshot(pngData: Data) async {
+        guard let container = modelContainer else { return }
+        do {
+            let id = UUID()
+            let directory = historyDirectoryProvider()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileName = "\(id.uuidString).png"
+            try pngData.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+
+            let item = ClipboardHistoryItem(
+                id: id,
+                kind: .screenshot,
+                fileName: fileName,
+                // Stored empty so ClipboardHistoryRow can resolve the title via
+                // L(...) at render time. Persisting a localized string here
+                // would freeze it in the language active at capture time.
+                previewTitle: "",
+                previewSubtitle: nil,
+                createdAt: now()
+            )
+            container.mainContext.insert(item)
+            try container.mainContext.save()
+            await pruneExpiredAndOverflow(force: true)
+            await reload(kind: .screenshot)
+        } catch {
+            historyLogger.error("Failed to record screenshot history: \(error)")
+        }
+    }
+
     func copyToPasteboard(_ item: ClipboardHistoryItem) async throws {
         guard let kind = item.historyKind else { throw ClipboardHistoryError.missingText }
         let pasteboard = NSPasteboard.general
