@@ -18,6 +18,24 @@ final class CurrencyRatesServiceTests: XCTestCase {
         XCTAssertEqual(decoded, Self.table)
     }
 
+    func testFrankfurterResponseDecodes() throws {
+        // Captured from api.frankfurter.dev/v1/latest?base=USD — the `amount`
+        // field must be ignored and base/date/rates mapped into the RateTable.
+        let json = #"""
+        {"amount":1.0,"base":"USD","date":"2026-06-12","rates":{"EUR":0.86453,"GBP":0.74613,"JPY":160.2}}
+        """#
+        let table = try FrankfurterRatesBackend.decode(Data(json.utf8))
+        XCTAssertEqual(table.base, "USD")
+        XCTAssertEqual(table.date, "2026-06-12")
+        XCTAssertEqual(table.rate(for: "EUR"), 0.86453)
+        XCTAssertEqual(table.rate(for: "USD"), 1)
+    }
+
+    func testFrankfurterEndpointIsV1() {
+        // Guards against the /v2 path regression that returned 404.
+        XCTAssertEqual(FrankfurterRatesBackend.endpoint, "https://api.frankfurter.dev/v1/latest")
+    }
+
     @MainActor
     func testFetchesAndCachesWhenEmpty() async {
         let backend = MockRatesBackend(table: Self.table)
