@@ -19,7 +19,12 @@ final class CaptureCoordinator {
     private let settings: CaptureSettings
     private let selectionOverlay = SelectionOverlayWindow()
     private var lastRegionRequest: CaptureRequest?
+    /// The last committed region rect (global AppKit coordinates), pre-filled into
+    /// the selection overlay on re-capture so the previous selection can be reused.
+    private var lastRegionRect: CGRect = .zero
     private var inFlight = false
+    /// Set for the next capture only, to reuse the previous selection rect.
+    private var reuseLastRect = false
 
     init(settings: CaptureSettings = .shared) {
         self.settings = settings
@@ -29,7 +34,10 @@ final class CaptureCoordinator {
     func capture(_ request: CaptureRequest) {
         guard !inFlight else { return }
         guard ScreenCapturePermission.ensureGranted() else {
+            // The toast is non-interactive, so deep-link straight to the
+            // Screen Recording settings pane where the user can grant access.
             ToastPresenter.shared.show(.failure(L(.toastScreenCapturePermissionDenied)))
+            ScreenCapturePermission.openSettings()
             return
         }
         inFlight = true
@@ -57,9 +65,12 @@ final class CaptureCoordinator {
     private func captureRegion(delay: Int) {
         guard let target = Self.resolveTargetUnderMouse(),
               let frozen = LegacyScreenCapture.display(target.id) else { finish(); return }
-        selectionOverlay.present(target: target, mode: .region, frozen: frozen) { [weak self] result in
+        let initialRect = reuseLastRect ? lastRegionRect : .zero
+        reuseLastRect = false
+        selectionOverlay.present(target: target, mode: .region, frozen: frozen, initialRect: initialRect) { [weak self] result in
             guard let self else { return }
             guard case let .region(cgImage, rect) = result else { self.finish(); return }
+            self.lastRegionRect = rect
             self.afterCountdown(delay) { [weak self] in
                 self?.present(image: cgImage, anchor: rect)
                 self?.finish()
@@ -135,7 +146,10 @@ final class CaptureCoordinator {
             pb.writeObjects([image])
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pb.changeCount)
         }
-        Task { await ClipboardHistoryStore.shared.recordScreenshot(pngData: png) }
+        // Shared box so the delete action can remove the exact history entry once
+        // the async record completes (both hops run on the main actor — no race).
+        let recordedID = HistoryIDBox()
+        Task { recordedID.value = await ClipboardHistoryStore.shared.recordScreenshot(pngData: png) }
 
         let actions = CaptureOverlayActions(
             copy: { [weak self] in self?.copyToPasteboard(image) },
@@ -147,7 +161,13 @@ final class CaptureCoordinator {
             },
             ocr: { [weak self] in self?.runOCR(image) },
             recapture: { [weak self] in self?.recapture() },
-            delete: { savedURL.map { try? FileManager.default.removeItem(at: $0) } }
+            delete: {
+                savedURL.map { try? FileManager.default.removeItem(at: $0) }
+                if let id = recordedID.value {
+                    Task { await ClipboardHistoryStore.shared.deleteScreenshot(id: id) }
+                }
+                ToastPresenter.shared.show(.success(L(.captureToastDeleted)))
+            }
         )
         CaptureOverlayWindow.shared.present(
             image: image, fileURL: savedURL, anchor: anchor,
@@ -220,9 +240,18 @@ final class CaptureCoordinator {
     }
 
     private func recapture() {
-        if let last = lastRegionRequest { capture(last) }
-        else { capture(CaptureRequest(mode: .region)) }
+        // Reuse the previous region rect when re-capturing a region.
+        let request = lastRegionRequest ?? CaptureRequest(mode: .region)
+        if request.mode == .region, !lastRegionRect.isEmpty { reuseLastRect = true }
+        capture(request)
     }
+}
+
+/// Mutable holder for the recorded history id, shared between the async record
+/// task and the overlay's delete action. Main-actor confined, so the two hops
+/// never race.
+@MainActor private final class HistoryIDBox {
+    var value: UUID?
 }
 
 /// PNG encoding for an NSImage via its CGImage.

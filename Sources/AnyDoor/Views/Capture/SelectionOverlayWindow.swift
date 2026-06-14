@@ -20,6 +20,7 @@ final class SelectionOverlayWindow {
         target: TargetDisplay,
         mode: CaptureMode,
         frozen: CGImage,
+        initialRect: CGRect = .zero,
         completion: @escaping (SelectionResult) -> Void
     ) {
         self.completion = completion
@@ -38,11 +39,22 @@ final class SelectionOverlayWindow {
         p.isReleasedWhenClosed = false
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
+        // The reused rect arrives in global AppKit coordinates; convert it into
+        // this display's local (bottom-left) space so the overlay can pre-draw it.
+        let localInitial = initialRect.isEmpty
+            ? .zero
+            : CGRect(
+                x: initialRect.minX - target.frame.minX,
+                y: initialRect.minY - target.frame.minY,
+                width: initialRect.width,
+                height: initialRect.height
+            )
         let view = SelectionOverlayView(
             mode: mode,
             screenFrame: target.frame,
             backingScale: target.backingScale,
-            frozen: frozen
+            frozen: frozen,
+            initialRect: localInitial
         )
         view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
         view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
@@ -76,13 +88,21 @@ private final class SelectionOverlayView: NSView {
     private var dragStart: CGPoint?
     private var currentRect: CGRect = .zero
     private var hoveredWindow: CapturableWindow?
+    private var mouseLocation: CGPoint
+    private var isDragging = false
 
-    init(mode: CaptureMode, screenFrame: CGRect, backingScale: CGFloat, frozen: CGImage) {
+    /// Magnifier loupe dimensions, in points.
+    private static let loupeSize: CGFloat = 120
+    private static let loupeSourcePoints: CGFloat = 24
+
+    init(mode: CaptureMode, screenFrame: CGRect, backingScale: CGFloat, frozen: CGImage, initialRect: CGRect = .zero) {
         self.mode = mode
         self.screenFrame = screenFrame
         self.backingScale = backingScale
         self.frozen = frozen
         self.windows = mode == .window ? WindowEnumerator.onScreenWindows() : []
+        self.currentRect = (mode == .region) ? initialRect : .zero
+        self.mouseLocation = CGPoint(x: screenFrame.width / 2, y: screenFrame.height / 2)
         super.init(frame: NSRect(origin: .zero, size: screenFrame.size))
         let area = NSTrackingArea(
             rect: bounds,
@@ -94,6 +114,12 @@ private final class SelectionOverlayView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     override var acceptsFirstResponder: Bool { true }
+
+    // Keep the crosshair cursor while the pointer is over the overlay; AppKit
+    // otherwise resets it to the arrow as the mouse moves.
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
 
     // MARK: - Coordinate conversions
 
@@ -158,6 +184,10 @@ private final class SelectionOverlayView: NSView {
                 ctx.restoreGState()
                 drawSelectionChrome(currentRect, ctx: ctx)
             }
+            // Crosshair + magnifier loupe guide the cursor during selection. The
+            // full-screen crosshair is redundant with the selection rect mid-drag.
+            if !isDragging { drawCrosshair(at: mouseLocation, ctx: ctx) }
+            drawLoupe(at: mouseLocation, ctx: ctx)
         case .window:
             if let win = hoveredWindow {
                 let local = localRect(forCGWindow: win.frame)
@@ -188,16 +218,92 @@ private final class SelectionOverlayView: NSView {
         label.draw(at: NSPoint(x: bg.minX + 4, y: bg.minY + 2), withAttributes: attrs)
     }
 
+    /// Thin full-width/height guide lines through the cursor.
+    private func drawCrosshair(at point: CGPoint, ctx: CGContext) {
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.55).cgColor)
+        ctx.setLineWidth(1)
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: bounds.minX, y: point.y))
+        ctx.addLine(to: CGPoint(x: bounds.maxX, y: point.y))
+        ctx.move(to: CGPoint(x: point.x, y: bounds.minY))
+        ctx.addLine(to: CGPoint(x: point.x, y: bounds.maxY))
+        ctx.strokePath()
+    }
+
+    /// A magnified square of the frozen pixels around the cursor, with a center
+    /// crosshair and the cursor's pixel coordinate readout.
+    private func drawLoupe(at point: CGPoint, ctx: CGContext) {
+        let frame = SelectionGeometry.loupeFrame(
+            near: point, loupeSize: Self.loupeSize, gap: 16, in: bounds
+        )
+        let scale = backingScale
+        let srcPts = Self.loupeSourcePoints
+        let half = srcPts / 2
+        // Source rect in the frozen image's pixel space (top-left origin).
+        let srcRect = CGRect(
+            x: (point.x - half) * scale,
+            y: (bounds.height - point.y - half) * scale,
+            width: srcPts * scale,
+            height: srcPts * scale
+        )
+        ctx.saveGState()
+        let clip = CGPath(roundedRect: frame, cornerWidth: 8, cornerHeight: 8, transform: nil)
+        ctx.addPath(clip)
+        ctx.clip()
+        ctx.setFillColor(NSColor.black.cgColor)
+        ctx.fill(frame)
+        if let crop = frozen.cropping(to: srcRect) {
+            ctx.interpolationQuality = .none
+            ctx.draw(crop, in: frame)
+        }
+        // Center crosshair inside the loupe.
+        ctx.setStrokeColor(NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor)
+        ctx.setLineWidth(1)
+        ctx.stroke(CGRect(x: frame.midX - half, y: frame.midY - half, width: srcPts, height: srcPts))
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: frame.midX, y: frame.minY))
+        ctx.addLine(to: CGPoint(x: frame.midX, y: frame.maxY))
+        ctx.move(to: CGPoint(x: frame.minX, y: frame.midY))
+        ctx.addLine(to: CGPoint(x: frame.maxX, y: frame.midY))
+        ctx.strokePath()
+        ctx.restoreGState()
+        // Border.
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.8).cgColor)
+        ctx.setLineWidth(1)
+        ctx.addPath(clip)
+        ctx.strokePath()
+        // Pixel coordinate readout under the loupe.
+        let px = Int((point.x * scale).rounded())
+        let py = Int(((bounds.height - point.y) * scale).rounded())
+        let label = "\(px), \(py)" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let lsize = label.size(withAttributes: attrs)
+        let bg = CGRect(x: frame.midX - lsize.width / 2 - 4, y: frame.minY - lsize.height - 6,
+                        width: lsize.width + 8, height: lsize.height + 4)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.7).cgColor)
+        ctx.fill(bg)
+        label.draw(at: NSPoint(x: bg.minX + 4, y: bg.minY + 2), withAttributes: attrs)
+    }
+
     // MARK: - Mouse / keyboard
 
     override func mouseDown(with event: NSEvent) {
         guard mode == .region else { return }
-        dragStart = convert(event.locationInWindow, from: nil)
+        let p = convert(event.locationInWindow, from: nil)
+        dragStart = p
+        mouseLocation = p
+        isDragging = true
+        currentRect = .zero
+        needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard mode == .region, let start = dragStart else { return }
         let p = convert(event.locationInWindow, from: nil)
+        mouseLocation = p
         currentRect = SelectionGeometry.clamped(
             SelectionGeometry.normalizedRect(from: start, to: p),
             to: bounds
@@ -206,6 +312,7 @@ private final class SelectionOverlayView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        isDragging = false
         switch mode {
         case .region:
             guard !SelectionGeometry.isTooSmall(currentRect) else { onCancel?(); return }
@@ -219,14 +326,48 @@ private final class SelectionOverlayView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) {
-        guard mode == .window else { return }
         let local = convert(event.locationInWindow, from: nil)
-        hoveredWindow = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
+        mouseLocation = local
+        if mode == .window {
+            hoveredWindow = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
+        }
         needsDisplay = true
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { onCancel?() } // Esc
+        switch event.keyCode {
+        case 53: // Esc
+            onCancel?()
+        case 36, 76: // Return / keypad Enter — commit a reused or nudged selection
+            guard mode == .region, !SelectionGeometry.isTooSmall(currentRect) else { return }
+            commitRegion(currentRect)
+        case 123, 124, 125, 126: // arrow keys nudge/resize an existing selection
+            handleArrowKey(event)
+        default:
+            break
+        }
+    }
+
+    /// Arrow keys move the selection (Shift = 10pt steps); holding Option resizes
+    /// it from the origin instead. No-op until a selection exists.
+    private func handleArrowKey(_ event: NSEvent) {
+        guard mode == .region, !currentRect.isEmpty else { return }
+        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
+        let resize = event.modifierFlags.contains(.option)
+        var dx: CGFloat = 0, dy: CGFloat = 0
+        switch event.keyCode {
+        case 123: dx = -step // left
+        case 124: dx = step  // right
+        case 125: dy = -step // down
+        case 126: dy = step  // up
+        default: break
+        }
+        if resize {
+            currentRect = SelectionGeometry.resized(currentRect, dw: dx, dh: dy, in: bounds)
+        } else {
+            currentRect = SelectionGeometry.moved(currentRect, dx: dx, dy: dy, in: bounds)
+        }
+        needsDisplay = true
     }
 
     // MARK: - Commit

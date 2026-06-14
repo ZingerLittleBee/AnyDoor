@@ -1201,6 +1201,23 @@
         }
       }
     },
+    "capture.toast.deleted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deleted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已删除"
+          }
+        }
+      }
+    },
     "capture.toast.failed": {
       "extractionState": "manual",
       "localizations": {

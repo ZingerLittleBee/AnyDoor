@@ -30,4 +30,38 @@ enum SelectionGeometry {
     static func isTooSmall(_ rect: CGRect) -> Bool {
         rect.width < minimumEdge || rect.height < minimumEdge
     }
+
+    /// Moves `rect` by (dx, dy), clamping so it stays fully inside `bounds`.
+    /// Used by arrow-key nudging of an existing selection.
+    static func moved(_ rect: CGRect, dx: CGFloat, dy: CGFloat, in bounds: CGRect) -> CGRect {
+        var x = rect.minX + dx
+        var y = rect.minY + dy
+        x = min(max(x, bounds.minX), max(bounds.minX, bounds.maxX - rect.width))
+        y = min(max(y, bounds.minY), max(bounds.minY, bounds.maxY - rect.height))
+        return CGRect(x: x, y: y, width: rect.width, height: rect.height)
+    }
+
+    /// Grows/shrinks `rect` from its origin by (dw, dh), keeping at least
+    /// `minimumEdge` per side and never exceeding `bounds`. Used by
+    /// option-arrow resizing of an existing selection.
+    static func resized(_ rect: CGRect, dw: CGFloat, dh: CGFloat, in bounds: CGRect) -> CGRect {
+        let maxW = max(minimumEdge, bounds.maxX - rect.minX)
+        let maxH = max(minimumEdge, bounds.maxY - rect.minY)
+        let w = min(max(minimumEdge, rect.width + dw), maxW)
+        let h = min(max(minimumEdge, rect.height + dh), maxH)
+        return CGRect(x: rect.minX, y: rect.minY, width: w, height: h)
+    }
+
+    /// Places a magnifier loupe of `loupeSize` near `point` (the cursor), offset
+    /// to the lower-right by `gap`, flipping to the opposite side when it would
+    /// leave `bounds`. Keeps the loupe fully on-screen.
+    static func loupeFrame(near point: CGPoint, loupeSize: CGFloat, gap: CGFloat, in bounds: CGRect) -> CGRect {
+        var x = point.x + gap
+        var y = point.y - gap - loupeSize
+        if x + loupeSize > bounds.maxX { x = point.x - gap - loupeSize }
+        if y < bounds.minY { y = point.y + gap }
+        x = min(max(x, bounds.minX), bounds.maxX - loupeSize)
+        y = min(max(y, bounds.minY), bounds.maxY - loupeSize)
+        return CGRect(x: x, y: y, width: loupeSize, height: loupeSize)
+    }
 }
