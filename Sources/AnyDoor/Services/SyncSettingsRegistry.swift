@@ -29,6 +29,12 @@ enum SyncSettingsRegistry {
         Entry(key: "clipboard.categoryOrder", type: .string),
         Entry(key: "clipboard.excludedBundleIDs", type: .stringArray),
         Entry(key: "pickColor.format", type: .string),
+        Entry(key: "capture.saveDirectory", type: .string),
+        Entry(key: "capture.namingTemplate", type: .string),
+        Entry(key: "capture.autoCopy", type: .bool),
+        Entry(key: "capture.autoSave", type: .bool),
+        Entry(key: "capture.delaySeconds", type: .int),
+        Entry(key: "capture.overlayTimeout", type: .int),
     ]
 
     private static let entriesByKey: [String: Entry] =
