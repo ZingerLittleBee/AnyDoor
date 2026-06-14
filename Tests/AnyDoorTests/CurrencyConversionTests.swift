@@ -67,6 +67,11 @@ final class CurrencyConversionTests: XCTestCase {
         XCTAssertTrue(CurrencyConversion.detect("usd to eur", rates: Self.table).isEmpty)
     }
 
+    func testEqualsConnector() {
+        XCTAssertEqual(first("100 usd = rmb")?.display, "710.00 CNY")
+        XCTAssertEqual(first("100 usd=eur")?.display, "92.50 EUR")
+    }
+
     // MARK: - Common currency aliases (RMB, yuan, euro, …)
 
     func testRMBAliasMapsToCNY() {

@@ -31,13 +31,13 @@ enum UnitConversion {
 
     // MARK: - Parsing
 
-    /// Splits on the first " to " (preferred) or " in " connector.
+    /// Splits on a connector: " to " (preferred), " in ", or "=" (with or without
+    /// surrounding spaces). " to " wins so "in" (inch) survives as a unit.
     private static func split(_ s: String) -> (String, String)? {
-        if let range = s.range(of: " to ") {
-            return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
-        }
-        if let range = s.range(of: " in ") {
-            return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
+        for separator in [" to ", " in ", "="] {
+            if let range = s.range(of: separator) {
+                return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
+            }
         }
         return nil
     }

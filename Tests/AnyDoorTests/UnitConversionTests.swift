@@ -56,6 +56,10 @@ final class UnitConversionTests: XCTestCase {
         XCTAssertEqual(first("100 km/h to mph")?.display, "62.1371 mph")
     }
 
+    func testEqualsConnector() {
+        XCTAssertEqual(first("3 ft = m")?.display, "0.9144 m")
+    }
+
     // MARK: - Guards
 
     func testCrossCategoryProducesNoRow() {

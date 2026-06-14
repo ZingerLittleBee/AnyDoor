@@ -67,6 +67,12 @@ final class TimeZoneConversionTests: XCTestCase {
         XCTAssertTrue(first("3pm tokyo")?.display.contains("GMT+9") ?? false, "got \(first("3pm tokyo")?.display ?? "nil")")
     }
 
+    func testEqualsConnectorTwoPlace() {
+        let r = first("9am london = tokyo")
+        XCTAssertTrue(r?.display.hasPrefix("5:00 PM") ?? false, "got \(r?.display ?? "nil")")
+        XCTAssertEqual(r?.detail, "London → Tokyo")
+    }
+
     // MARK: - Guards
 
     func testBareCityWithoutTimeKeywordProducesNoRow() {

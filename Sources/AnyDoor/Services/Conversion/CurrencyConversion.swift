@@ -40,13 +40,13 @@ enum CurrencyConversion {
 
     private static let symbols: [(String, String)] = [("$", "USD"), ("€", "EUR"), ("£", "GBP")]
 
-    /// Splits on the first " to " (preferred) or " in " connector.
+    /// Splits on a connector: " to " (preferred), " in ", or "=" (with or without
+    /// surrounding spaces, so "100 usd = rmb" and "100 usd=rmb" both work).
     private static func split(_ s: String) -> (String, String)? {
-        if let range = s.range(of: " to ") {
-            return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
-        }
-        if let range = s.range(of: " in ") {
-            return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
+        for separator in [" to ", " in ", "="] {
+            if let range = s.range(of: separator) {
+                return (String(s[..<range.lowerBound]), String(s[range.upperBound...]))
+            }
         }
         return nil
     }

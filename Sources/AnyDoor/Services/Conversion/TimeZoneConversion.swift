@@ -20,11 +20,11 @@ enum TimeZoneConversion {
         let rest = afterTime.trimmingCharacters(in: .whitespaces)
         guard !rest.isEmpty else { return [] }
 
-        // Two-place form when a " to " connector is present. Requires an explicit
-        // time: without one the source zone is meaningless, and gating it stops
-        // "la to ny" / "london to tokyo" from polluting command/app search (the
-        // same anti-pollution rule the single-place form applies below).
-        if let range = rest.range(of: " to ") {
+        // Two-place form when a " to " or "=" connector is present. Requires an
+        // explicit time: without one the source zone is meaningless, and gating it
+        // stops "la to ny" / "london to tokyo" from polluting command/app search
+        // (the same anti-pollution rule the single-place form applies below).
+        if let range = rest.range(of: " to ") ?? rest.range(of: "=") {
             guard time != nil else { return [] }
             let sourcePhrase = String(rest[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
             let targetPhrase = String(rest[range.upperBound...]).trimmingCharacters(in: .whitespaces)
