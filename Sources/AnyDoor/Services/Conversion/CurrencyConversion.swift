@@ -91,8 +91,24 @@ enum CurrencyConversion {
         s.range(of: #"^\d{1,3}(,\d{3})+(\.\d+)?$"#, options: .regularExpression) != nil
     }
 
-    /// A bare 3-letter alphabetic ISO code (uppercased), or nil.
+    /// Common colloquial currency names → ISO code (the query is already
+    /// lowercased upstream). Lets people type "rmb"/"yuan"/"euro" instead of the
+    /// ISO code. Only unambiguous names are included; "dollar" defaults to USD.
+    private static let nameAliases: [String: String] = [
+        "rmb": "CNY", "yuan": "CNY",
+        "yen": "JPY",
+        "euro": "EUR", "euros": "EUR",
+        "pound": "GBP", "pounds": "GBP", "quid": "GBP", "sterling": "GBP",
+        "dollar": "USD", "dollars": "USD", "buck": "USD", "bucks": "USD",
+        "won": "KRW",
+        "franc": "CHF", "francs": "CHF",
+        "rupee": "INR", "rupees": "INR",
+    ]
+
+    /// A colloquial currency name or a bare 3-letter alphabetic ISO code
+    /// (uppercased), or nil. Aliases win so "rmb" maps to CNY, not the literal "RMB".
     private static func currencyCode(_ token: String) -> String? {
+        if let alias = nameAliases[token] { return alias }
         guard token.count == 3, token.allSatisfy(\.isLetter) else { return nil }
         return token.uppercased()
     }

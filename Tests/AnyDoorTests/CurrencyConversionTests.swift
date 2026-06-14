@@ -67,6 +67,22 @@ final class CurrencyConversionTests: XCTestCase {
         XCTAssertTrue(CurrencyConversion.detect("usd to eur", rates: Self.table).isEmpty)
     }
 
+    // MARK: - Common currency aliases (RMB, yuan, euro, …)
+
+    func testRMBAliasMapsToCNY() {
+        XCTAssertEqual(first("100 usd to rmb")?.display, "710.00 CNY")
+        XCTAssertEqual(first("100 usd to yuan")?.display, "710.00 CNY")
+    }
+
+    func testWordAliasesOnEitherSide() {
+        XCTAssertEqual(first("100 usd to euro")?.display, "92.50 EUR")
+        XCTAssertEqual(first("100 yuan to usd")?.display, "14.08 USD")
+    }
+
+    func testAliasIsCaseInsensitive() {
+        XCTAssertEqual(first("100 USD to RMB")?.display, "710.00 CNY")
+    }
+
     // MARK: - Hardening (review findings)
 
     func testCommaDecimalInputIsRejected() {
