@@ -24,10 +24,23 @@ actor ScreenCaptureService {
         }
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let config = SCStreamConfiguration()
-        config.width = display.width
-        config.height = display.height
+        // SCDisplay width/height are in points; SCStreamConfiguration width/height
+        // are in pixels. Multiply by the display's backing scale so the still is at
+        // native pixel resolution (sharp fullscreen, and a correct Retina region crop).
+        let scale = Self.backingScale(for: displayID)
+        config.width = Int(CGFloat(display.width) * scale)
+        config.height = Int(CGFloat(display.height) * scale)
         config.showsCursor = false
         return try await capture(filter: filter, config: config)
+    }
+
+    /// Backing scale (pixels per point) for a display, via its current mode.
+    private static func backingScale(for displayID: CGDirectDisplayID) -> CGFloat {
+        guard let mode = CGDisplayCopyDisplayMode(displayID) else { return 1 }
+        let points = mode.width
+        let pixels = mode.pixelWidth
+        guard points > 0 else { return 1 }
+        return CGFloat(pixels) / CGFloat(points)
     }
 
     /// Crisp capture of a single window, preserving transparency and shadow.
