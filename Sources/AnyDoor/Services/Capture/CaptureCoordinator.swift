@@ -56,7 +56,8 @@ final class CaptureCoordinator {
             onTimer: { [weak self] in
                 guard let self else { return }
                 self.capture(CaptureRequest(mode: .region, delay: self.settings.delaySeconds))
-            }
+            },
+            onRecord: { RecordingCoordinator.shared.record(region: true) }
         )
     }
 

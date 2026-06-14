@@ -63,3 +63,14 @@ actor CaptureModeBarProvider: ActionProvider {
         await MainActor.run { CaptureCoordinator.shared.presentModeBar() }
     }
 }
+
+/// Toggle screen recording on/off (fullscreen of the display under the cursor).
+actor RecordScreenProvider: ActionProvider {
+    let itemKey: BuiltinItem = .recordScreen
+
+    var permission: PermissionStatus { .notRequired }
+
+    func run() async {
+        await MainActor.run { RecordingCoordinator.shared.toggle() }
+    }
+}

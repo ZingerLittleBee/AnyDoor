@@ -13,13 +13,19 @@ final class CaptureModeBarWindow {
     private var keyMonitor: Any?
     private var onPick: ((CaptureMode) -> Void)?
     private var onTimer: (() -> Void)?
+    private var onRecord: (() -> Void)?
 
     private init() {}
 
-    func present(onPick: @escaping (CaptureMode) -> Void, onTimer: @escaping () -> Void) {
+    func present(
+        onPick: @escaping (CaptureMode) -> Void,
+        onTimer: @escaping () -> Void,
+        onRecord: @escaping () -> Void
+    ) {
         close()
         self.onPick = onPick
         self.onTimer = onTimer
+        self.onRecord = onRecord
 
         let screen = NSScreen.screenUnderMouse ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
@@ -49,7 +55,8 @@ final class CaptureModeBarWindow {
             onRegion: { [weak self] in self?.pick(.region) },
             onWindow: { [weak self] in self?.pick(.window) },
             onFullscreen: { [weak self] in self?.pick(.fullscreen) },
-            onTimer: { [weak self] in self?.timer() }
+            onTimer: { [weak self] in self?.timer() },
+            onRecord: { [weak self] in self?.record() }
         ))
         hosting.frame = CGRect(origin: .zero, size: size)
         p.contentView = hosting
@@ -94,6 +101,12 @@ final class CaptureModeBarWindow {
         cb?()
     }
 
+    private func record() {
+        let cb = onRecord
+        close()
+        cb?()
+    }
+
     func close() {
         if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         panel?.orderOut(nil)
@@ -110,6 +123,7 @@ private struct CaptureModeBarView: View {
     let onWindow: () -> Void
     let onFullscreen: () -> Void
     let onTimer: () -> Void
+    let onRecord: () -> Void
 
     var body: some View {
         HStack(spacing: 14) {
@@ -118,7 +132,7 @@ private struct CaptureModeBarView: View {
             modeItem("rectangle.inset.filled", L(.captureModeBarFullscreen), onFullscreen)
             modeItem("timer", L(.captureModeBarTimer), onTimer)
             Divider().frame(height: 40)
-            disabledItem("record.circle", L(.captureModeBarRecording))
+            modeItem("record.circle", L(.captureModeBarRecording), onRecord)
             disabledItem("arrow.down.to.line", L(.captureModeBarScrolling))
         }
         .padding(16)

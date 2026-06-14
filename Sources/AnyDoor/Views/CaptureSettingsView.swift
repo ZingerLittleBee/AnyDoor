@@ -7,6 +7,7 @@ import AppKit
 @MainActor
 struct CaptureSettingsView: View {
     @State private var settings = CaptureSettings.shared
+    @State private var recording = RecordingSettings.shared
 
     var body: some View {
         Form {
@@ -56,6 +57,28 @@ struct CaptureSettingsView: View {
             } header: {
                 LocalizedText(.settingsCaptureBehaviorSection)
             }
+
+            Section {
+                Picker(selection: recordingFormat) {
+                    ForEach(RecordingFormat.allCases, id: \.self) { f in
+                        Text(f.rawValue.uppercased()).tag(f)
+                    }
+                } label: {
+                    LocalizedText(.settingsRecordingFormat)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+
+                Stepper(value: frameRate, in: 10...60, step: 5) {
+                    Text(L(.settingsRecordingFrameRate) + ": \(recording.frameRate)")
+                }
+                Toggle(isOn: showCursor) { LocalizedText(.settingsRecordingShowCursor) }
+                Toggle(isOn: includeMicrophone) { LocalizedText(.settingsRecordingMicrophone) }
+                Toggle(isOn: includeCamera) { LocalizedText(.settingsRecordingCamera) }
+                Toggle(isOn: showKeystrokes) { LocalizedText(.settingsRecordingKeystrokes) }
+            } header: {
+                LocalizedText(.settingsRecordingSection)
+            }
         }
         .formStyle(.grouped)
     }
@@ -76,6 +99,24 @@ struct CaptureSettingsView: View {
     }
     private var overlayTimeout: Binding<Int> {
         Binding(get: { settings.overlayTimeout }, set: { settings.setOverlayTimeout($0) })
+    }
+    private var recordingFormat: Binding<RecordingFormat> {
+        Binding(get: { recording.format }, set: { recording.setFormat($0) })
+    }
+    private var frameRate: Binding<Int> {
+        Binding(get: { recording.frameRate }, set: { recording.setFrameRate($0) })
+    }
+    private var showCursor: Binding<Bool> {
+        Binding(get: { recording.showCursor }, set: { recording.setShowCursor($0) })
+    }
+    private var includeMicrophone: Binding<Bool> {
+        Binding(get: { recording.includeMicrophone }, set: { recording.setIncludeMicrophone($0) })
+    }
+    private var includeCamera: Binding<Bool> {
+        Binding(get: { recording.includeCamera }, set: { recording.setIncludeCamera($0) })
+    }
+    private var showKeystrokes: Binding<Bool> {
+        Binding(get: { recording.showKeystrokes }, set: { recording.setShowKeystrokes($0) })
     }
 
     private func chooseDirectory() {
