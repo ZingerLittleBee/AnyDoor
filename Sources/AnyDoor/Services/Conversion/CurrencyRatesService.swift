@@ -53,6 +53,27 @@ final class CurrencyRatesService {
         }
     }
 
+    /// Force a fetch regardless of staleness (the "更新汇率" footer button).
+    /// Returns whether fresh rates were fetched; on failure the last good cache is
+    /// kept. Still honors the in-flight guard so a double-tap can't stack requests.
+    @discardableResult
+    func forceRefresh() async -> Bool {
+        guard !inFlight else { return false }
+        inFlight = true
+        let today = Self.todayString()
+        lastAttemptDay = today
+        defer { inFlight = false }
+        do {
+            let table = try await backend.fetchLatest(base: base)
+            let entry = CachedRates(table: table, fetchedOn: today)
+            cached = entry
+            writeCache(entry)
+            return true
+        } catch {
+            return false
+        }
+    }
+
     static func todayString() -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

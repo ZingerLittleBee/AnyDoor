@@ -335,6 +335,16 @@ enum L10n {
         case devToolTipSHA256 = "devTool.tip.sha256"
         case commandPaletteSectionConversion = "commandPalette.section.conversion"
         case conversionCurrencyAsOf = "conversion.currency.asOf"
+        case commandPaletteActionOpen = "commandPalette.action.open"
+        case commandPaletteActionToggle = "commandPalette.action.toggle"
+        case commandPaletteActionRun = "commandPalette.action.run"
+        case commandPaletteActionCopy = "commandPalette.action.copy"
+        case commandPaletteActionEnter = "commandPalette.action.enter"
+        case commandPaletteActionSelect = "commandPalette.action.select"
+        case commandPaletteActionQuit = "commandPalette.action.quit"
+        case commandPaletteFooterRefreshRates = "commandPalette.footer.refreshRates"
+        case toastRatesUpdated = "toast.rates.updated"
+        case toastRatesUpdateFailed = "toast.rates.updateFailed"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

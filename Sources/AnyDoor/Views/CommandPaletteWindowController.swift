@@ -75,6 +75,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             },
             onConfirm: { [weak self] in
                 self?.confirmPending()
+            },
+            onRefreshRates: { [weak self] in
+                self?.refreshRates()
             }
         )
 
@@ -383,6 +386,20 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
     private func cancel() {
         close()
+    }
+
+    /// Force a currency-rates refresh from the footer button and confirm with a
+    /// toast. The palette stays open (the toast panel can't become key), so an
+    /// updated conversion row re-renders in place.
+    private func refreshRates() {
+        Task { @MainActor in
+            let updated = await CurrencyRatesService.shared.forceRefresh()
+            if updated, let date = CurrencyRatesService.shared.rateTable?.date {
+                ToastPresenter.shared.show(.success(L(.toastRatesUpdated, date)))
+            } else {
+                ToastPresenter.shared.show(.failure(L(.toastRatesUpdateFailed)))
+            }
+        }
     }
 
     func windowWillClose(_ notification: Notification) {

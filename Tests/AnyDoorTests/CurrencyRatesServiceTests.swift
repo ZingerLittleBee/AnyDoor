@@ -116,6 +116,32 @@ final class CurrencyRatesServiceTests: XCTestCase {
         XCTAssertEqual(nextDay, 2, "a new day should retry")
     }
 
+    @MainActor
+    func testForceRefreshFetchesEvenWhenFreshAndReportsSuccess() async {
+        let backend = MockRatesBackend(table: Self.table)
+        let service = CurrencyRatesService(backend: backend, defaults: isolatedDefaults(), base: "USD")
+
+        await service.refreshIfStale(today: "2026-06-13")          // 1 fetch
+        let forced = await service.forceRefresh()                   // forces a 2nd fetch despite being fresh
+        XCTAssertTrue(forced)
+        let calls = await backend.calls
+        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(service.rateTable, Self.table)
+    }
+
+    @MainActor
+    func testForceRefreshReportsFailureAndKeepsCache() async {
+        let defaults = isolatedDefaults()
+        let seed = CurrencyRatesService(backend: MockRatesBackend(table: Self.table), defaults: defaults, base: "USD")
+        await seed.refreshIfStale(today: "2026-06-13")
+
+        let failing = MockRatesBackend(table: Self.table, error: URLError(.notConnectedToInternet))
+        let service = CurrencyRatesService(backend: failing, defaults: defaults, base: "USD")
+        let forced = await service.forceRefresh()
+        XCTAssertFalse(forced)
+        XCTAssertEqual(service.rateTable, Self.table) // last good cache survives
+    }
+
     private actor MockRatesBackend: RatesBackend {
         private let table: RateTable
         private let error: Error?

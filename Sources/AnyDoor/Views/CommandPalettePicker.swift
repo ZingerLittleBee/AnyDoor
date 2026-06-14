@@ -497,6 +497,7 @@ struct CommandPalettePicker: View {
     let onSelect: (PanelEntry) -> Void
     let onCancel: () -> Void
     let onConfirm: () -> Void
+    let onRefreshRates: () -> Void
 
     @FocusState private var searchFocused: Bool
 
@@ -519,6 +520,9 @@ struct CommandPalettePicker: View {
             } else {
                 optionList
             }
+
+            Divider().opacity(0.4)
+            footerBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Liquid Glass on macOS 26+; .thickMaterial on earlier systems.
@@ -697,6 +701,69 @@ struct CommandPalettePicker: View {
                     .fill(Color.accentColor.opacity(0.18))
             )
             .fixedSize()
+    }
+
+    /// Raycast-style bottom chrome: the selected row's primary action on the left
+    /// ("the footer title"), and an "更新汇率" refresh button on the right.
+    private var footerBar: some View {
+        HStack(spacing: 8) {
+            if let title = primaryActionTitle {
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+                keyHint(text: nil, symbol: "return")
+            }
+            Spacer()
+            Button(action: onRefreshRates) {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11, weight: .medium))
+                    LocalizedText(.commandPaletteFooterRefreshRates)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(L(.commandPaletteFooterRefreshRates))
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+    }
+
+    /// The primary action of the currently selected row, shown as the footer title
+    /// (mirrors Raycast's "Open Command"). Nil when nothing is selected.
+    private var primaryActionTitle: String? {
+        let entries = state.flatEntries
+        guard entries.indices.contains(state.selectedIndex) else { return nil }
+        switch entries[state.selectedIndex].source {
+        case .appShortcut, .installedApp:
+            return L(.commandPaletteActionOpen)
+        case .portRecord:
+            return L(.commandPaletteActionQuit)
+        case .calcResult, .devTool, .conversion:
+            return L(.commandPaletteActionCopy)
+        case .devToolScopeSuggestion:
+            return L(.commandPaletteActionEnter)
+        case .hostProfile:
+            return L(.commandPaletteActionToggle)
+        case .paletteOption(let id):
+            if state.option(id: id)?.role == .destructive { return L(.commandPaletteActionQuit) }
+            return L(.commandPaletteActionSelect)
+        case .builtin(let item):
+            switch item.kind {
+            case .toggle: return L(.commandPaletteActionToggle)
+            case .action: return L(.commandPaletteActionRun)
+            case .submenu, .brightnessControl: return L(.commandPaletteActionEnter)
+            case .hiddenHotkey: return L(.commandPaletteActionSelect)
+            }
+        }
     }
 
     private var backHeader: some View {

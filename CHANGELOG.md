@@ -21,7 +21,11 @@ versioning.
   from the last cache with an "as of <date>" subtitle. Each converter is a pure,
   total facade mirroring the calculator; detection requires a recognized
   unit/currency/place plus a connector or time token, so ordinary command and app
-  search is untouched.
+  search is untouched. Currency also accepts common colloquial names (`rmb`/`yuan`
+  → CNY, `euro`, `pound`, `yen`, `dollar`, …) in addition to ISO codes. The
+  command palette gains a Raycast-style footer showing the selected row's primary
+  action on the left and an "更新汇率" button on the right that force-refreshes the
+  rate table on demand.
 - Command palette: inline developer tools. Typing a keyword surfaces instant,
   copy-on-Return conversions — `base64` (encode + decode), `url` (percent-encode +
   decode), `md5` / `sha1` / `sha256` hashes — plus two auto-detected tools that need

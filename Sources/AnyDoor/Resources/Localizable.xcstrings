@@ -56,6 +56,17 @@
         }
       }
     },
+    "commandPalette.footer.refreshRates": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Update Rates" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "更新汇率" }
+        }
+      }
+    },
     "commandPalette.hosts.active": {
       "extractionState": "manual",
       "localizations": {
@@ -75,6 +86,83 @@
         },
         "zh-Hans": {
           "stringUnit": { "state": "translated", "value": "Hosts" }
+        }
+      }
+    },
+    "commandPalette.action.copy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Copy" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "复制" }
+        }
+      }
+    },
+    "commandPalette.action.enter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Enter" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "进入" }
+        }
+      }
+    },
+    "commandPalette.action.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Open" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "打开" }
+        }
+      }
+    },
+    "commandPalette.action.quit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Quit" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "结束进程" }
+        }
+      }
+    },
+    "commandPalette.action.run": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Run" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "执行" }
+        }
+      }
+    },
+    "commandPalette.action.select": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Select" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "选择" }
+        }
+      }
+    },
+    "commandPalette.action.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Toggle" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "切换" }
         }
       }
     },
@@ -4917,6 +5005,28 @@
             "state": "translated",
             "value": "未识别到二维码"
           }
+        }
+      }
+    },
+    "toast.rates.updateFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Couldn’t update rates" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "汇率更新失败" }
+        }
+      }
+    },
+    "toast.rates.updated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": { "state": "translated", "value": "Rates updated (as of %@)" }
+        },
+        "zh-Hans": {
+          "stringUnit": { "state": "translated", "value": "汇率已更新（截至 %@）" }
         }
       }
     },
