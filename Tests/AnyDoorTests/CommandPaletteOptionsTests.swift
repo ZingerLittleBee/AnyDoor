@@ -104,8 +104,15 @@ final class CommandPaletteOptionsTests: XCTestCase {
         XCTAssertTrue(CommandPaletteOptions.isOptionParent(.scheduledShutdown))
         XCTAssertTrue(CommandPaletteOptions.isOptionParent(.brightness))
         XCTAssertTrue(CommandPaletteOptions.isOptionParent(.hostsManager))
+        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.captureTimer))
         XCTAssertFalse(CommandPaletteOptions.isOptionParent(.muteAudio))
         XCTAssertFalse(CommandPaletteOptions.isOptionParent(.windowLayout))
+    }
+
+    @MainActor
+    func testCaptureTimerOptions() {
+        let options = CommandPaletteOptions.captureTimerOptions()
+        XCTAssertEqual(options.map(\.id), ["captureTimer.delay3", "captureTimer.delay5", "captureTimer.delay10"])
     }
 
     @MainActor

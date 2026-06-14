@@ -6,6 +6,16 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Screenshot capture suite: region, window, fullscreen, and timed capture with a
+  freeze-screen selection overlay (crosshair, live dimensions, magnifier source).
+  After a capture a quick-access overlay appears next to the selection with copy,
+  save, edit, pin, text extraction (OCR), re-capture, and delete. An All-In-One
+  capture menu (with placeholders for upcoming recording and scrolling capture)
+  provides a single entry point alongside per-mode hotkeys, and captures can be
+  pinned on-screen as always-on-top floating references.
+
 ## [2.4.0] - 2026-06-14
 
 ### Added
