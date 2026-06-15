@@ -75,8 +75,9 @@ Sources/AnyDoor/
 │   │                CalcTokenizer / CalcEvaluator / CalcFunctions / CalcToken)
 │   ├── Capture/      Screenshot suite: CaptureCoordinator (@MainActor orchestrator) / LegacyScreenCapture
 │   │                (synchronous CGDisplayCreateImage/CGWindowListCreateImage via dlsym — NOT SCK, see
-│   │                crash note) / CaptureSettings / SelectionGeometry / OverlayPlacement / CaptureFilename /
-│   │                WindowEnumerator / ScreenCapturePermission. Scrolling capture (Phase 3):
+│   │                crash note) / CaptureSettings / CaptureTypes / SelectionGeometry / OverlayPlacement /
+│   │                CaptureFilename / CaptureModeBarPolicy / WindowEnumerator (ScreenCapturePermission
+│   │                lives one level up at Services/). Scrolling capture (Phase 3):
 │   │                ScrollCaptureCoordinator + ScrollCaptureEngine (warp+scroll+grab loop) + ScrollStitcher
 │   │                (pure: ScrollStitch.detectOverlap row-signature alignment + ScrollCapturePolicy).
 │   │                Views/Capture: SelectionOverlayWindow / CaptureModeBarWindow / CaptureOverlayWindow /

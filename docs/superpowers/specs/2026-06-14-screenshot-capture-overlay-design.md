@@ -19,9 +19,19 @@ independent sub-projects, each with its own spec → plan → implementation cyc
 
 - **Phase 0 (this spec):** unified capture engine + quick access overlay
 - Phase 1: annotation editor (arrows / shapes / text / blur-pixelate / crop / counter…)
-- Phase 2: screen recording (MP4/GIF + mic / system audio / camera / keystrokes)
+- Phase 2: screen recording (MP4/GIF + mic / camera / keystrokes)
 - Phase 3: scrolling capture (auto-scroll + lossless stitching)
-- Later / nice-to-have: cloud upload + short links / team features
+- Later / nice-to-have: system audio capture, cloud upload + short links / team
+  features
+
+> **Phase 2 delivery note (2026-06-15):** System audio was originally listed
+> alongside mic/camera/keystrokes but is deferred to "Later / nice-to-have."
+> `AVCaptureScreenInput` (the recording backend) cannot capture system audio, the
+> ScreenCaptureKit path that can is banned project-wide because it triggers the
+> macOS 26 executor-corruption crash, and the remaining option — a Core Audio
+> process tap + aggregate device with an `AVAssetWriter` rewrite (macOS 14.4+) —
+> is a separate subsystem with its own TCC requirements. Mic, camera, and
+> keystroke overlays all shipped in Phase 2.
 
 Phase 0 is the spine: window/timer capture and every "what happens after capture"
 flow hang off it.

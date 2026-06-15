@@ -28,7 +28,10 @@ versioning.
   keystroke display. A floating control bar shows elapsed time with pause/resume
   and stop; the finished file is exported in the chosen format and revealed in
   Finder. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey
-  (the hotkey toggles a fullscreen recording on and off).
+  (the hotkey toggles a fullscreen recording on and off). System (application)
+  audio is not captured — `AVCaptureScreenInput` cannot, ScreenCaptureKit is
+  avoided to dodge a macOS 26 crash, and a Core Audio tap is deferred; only the
+  microphone is recorded.
 - Screenshot settings tab: save location, filename template, auto-save /
   auto-copy, timer-delay preset (3 / 5 / 10s), and quick-access overlay timeout.
 - Annotation editor (reached from the capture overlay's edit button): arrow,

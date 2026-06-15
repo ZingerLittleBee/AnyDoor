@@ -6,6 +6,16 @@ import AppKit
 /// that SCK's async capture caused (see `LegacyScreenCapture`). Records the chosen
 /// display (optionally cropped, optionally with the microphone) to a `.mov`, then
 /// reports the URL via `onFinish`.
+///
+/// System (application) audio is intentionally NOT captured. `AVCaptureScreenInput`
+/// cannot record system audio at all — only a microphone, added below as a separate
+/// `AVCaptureDeviceInput`. The two APIs that can capture system audio are both ruled
+/// out here: ScreenCaptureKit is banned project-wide (it triggers the macOS 26
+/// executor crash noted above), and a Core Audio process tap + aggregate device
+/// (`AudioHardwareCreateProcessTap` / `CATapDescription`, macOS 14.4+) would require
+/// replacing this `AVCaptureMovieFileOutput` pipeline with a manual `AVAssetWriter`
+/// sample pump plus its own TCC entitlement. System audio therefore stays a deferred
+/// "Later / nice-to-have" item; mic / camera / keystrokes ship.
 @MainActor
 final class ScreenRecordingEngine: NSObject {
     /// Configuration for a single recording.
@@ -46,6 +56,7 @@ final class ScreenRecordingEngine: NSObject {
         }
         if session.canAddInput(screen) { session.addInput(screen) }
 
+        // Microphone only — see the type doc for why system audio is not captured.
         if config.includeMicrophone,
            let mic = AVCaptureDevice.default(for: .audio),
            let micInput = try? AVCaptureDeviceInput(device: mic),
