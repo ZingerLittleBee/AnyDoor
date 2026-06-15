@@ -48,6 +48,21 @@ final class RecordingCoordinator {
         }
     }
 
+    /// Record a pre-selected region (global AppKit coords) — used by the unified
+    /// capture toolbar. Gates the same permissions as `record(region:)`, then starts
+    /// recording without presenting its own selection.
+    func record(rect: CGRect) {
+        guard state == .idle else { return }
+        guard ScreenCapturePermission.ensureGranted() else {
+            ToastPresenter.shared.show(.failure(L(.toastScreenCapturePermissionDenied)))
+            ScreenCapturePermission.openSettings()
+            return
+        }
+        ensureMediaPermissions(mic: settings.includeMicrophone, camera: settings.includeCamera) { [weak self] in
+            self?.beginRecording(globalRect: rect)
+        }
+    }
+
     func stop() {
         guard RecordingPolicy.canStop(state) else { return }
         state = .finalizing
@@ -86,14 +101,20 @@ final class RecordingCoordinator {
         selectionOverlay.present(targets: targets, mode: .region, frozen: frozen) { [weak self] result in
             guard let self else { return }
             guard case let .region(_, rect) = result else { self.finishIdle(); return }
-            guard let screen = NSScreen.screens.first(where: { $0.frame.contains(CGPoint(x: rect.midX, y: rect.midY)) }) ?? NSScreen.main,
-                  let id = screen.displayID else { self.finishIdle(); return }
-            // AVCaptureScreenInput.cropRect is in the display's coordinate space
-            // (points, lower-left origin) -> rect relative to the display origin.
-            let crop = CGRect(x: rect.minX - screen.frame.minX, y: rect.minY - screen.frame.minY,
-                              width: rect.width, height: rect.height)
-            self.beginRecording(displayID: id, cropRect: crop)
+            self.beginRecording(globalRect: rect)
         }
+    }
+
+    /// Map a global AppKit rect to its display + `AVCaptureScreenInput.cropRect`
+    /// (the display's coordinate space, lower-left origin, points) and begin.
+    private func beginRecording(globalRect rect: CGRect) {
+        guard let screen = NSScreen.screens.first(where: {
+                  $0.frame.contains(CGPoint(x: rect.midX, y: rect.midY))
+              }) ?? NSScreen.main,
+              let id = screen.displayID else { finishIdle(); return }
+        let crop = CGRect(x: rect.minX - screen.frame.minX, y: rect.minY - screen.frame.minY,
+                          width: rect.width, height: rect.height)
+        beginRecording(displayID: id, cropRect: crop)
     }
 
     // MARK: - Recording lifecycle
