@@ -67,14 +67,16 @@ final class SelectionOverlayWindow {
             view.onCancel = { [weak self] in self?.finish(.cancelled) }
             p.contentView = view
             p.orderFrontRegardless()
-            // Make the panel under the cursor key so it receives Esc / arrow keys.
-            if target.frame.contains(mouse) {
+            // Key the panel that shows the initial selection (so Enter/Esc/arrows
+            // reach it); fall back to the panel under the cursor.
+            let keyAnchor = initialRect.isEmpty ? mouse : CGPoint(x: initialRect.midX, y: initialRect.midY)
+            if target.frame.contains(keyAnchor) {
                 p.makeKeyAndOrderFront(nil)
                 p.makeFirstResponder(view)
             }
             panels.append(p)
         }
-        // Fall back to keying the first panel if the cursor was off all displays.
+        // Fall back to keying the first panel if the anchor was off all displays.
         if !panels.contains(where: { $0.isKeyWindow }), let first = panels.first {
             first.makeKeyAndOrderFront(nil)
             first.makeFirstResponder(first.contentView)
