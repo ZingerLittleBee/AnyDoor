@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import AnyDoor
 
 @MainActor
@@ -27,5 +28,14 @@ final class CaptureSettingsTests: XCTestCase {
         let reloaded = CaptureSettings(defaults: d)
         XCTAssertFalse(reloaded.autoCopy)
         XCTAssertEqual(reloaded.delaySeconds, 10)
+    }
+
+    func testLastRegionRectRoundTrip() {
+        let d = makeDefaults()
+        let s = CaptureSettings(defaults: d)
+        XCTAssertNil(s.lastRegionRect)
+        s.setLastRegionRect(CGRect(x: -120.5, y: 40, width: 300, height: 200))
+        let reloaded = CaptureSettings(defaults: d)
+        XCTAssertEqual(reloaded.lastRegionRect, CGRect(x: -120.5, y: 40, width: 300, height: 200))
     }
 }
