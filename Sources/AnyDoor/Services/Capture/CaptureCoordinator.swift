@@ -87,7 +87,11 @@ final class CaptureCoordinator {
     @MainActor private static func initialSelectionRect(targets: [TargetDisplay], settings: CaptureSettings) -> CGRect {
         let displays = targets.map(\.frame)
         if let restored = SelectionGeometry.restoredRect(last: settings.lastRegionRect, displays: displays) {
-            return restored
+            // Clamp to the display holding its center so a rect saved at a larger
+            // resolution cannot pre-show off-screen edges after a display change.
+            let center = CGPoint(x: restored.midX, y: restored.midY)
+            let display = displays.first(where: { $0.contains(center) }) ?? displays[0]
+            return SelectionGeometry.clamped(restored, to: display)
         }
         let mouse = NSEvent.mouseLocation
         let screen = targets.first(where: { $0.frame.contains(mouse) })?.frame ?? targets[0].frame
