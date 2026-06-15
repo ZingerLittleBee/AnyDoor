@@ -3,80 +3,79 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>2.5.0</title>
+            <pubDate>Tue, 16 Jun 2026 01:31:06 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>2.5.0</sparkle:version>
+            <sparkle:shortVersionString>2.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Screenshot capture suite: region, window, fullscreen, and timed capture with a
+  freeze-screen selection overlay (crosshair, live dimensions, magnifier loupe
+  with a pixel-coordinate readout, arrow-key nudge/resize, and last-selection
+  reuse). The selection overlay spans every connected display. After a capture a
+  quick-access overlay appears next to the selection with copy, save, edit, pin,
+  text extraction (OCR), re-capture, and delete (delete also removes the entry
+  from clipboard history). An All-In-One capture menu provides a single entry
+  point alongside per-mode hotkeys, and captures can be pinned on-screen as
+  always-on-top floating references.
+- Scrolling capture: capture content taller than the screen. Select a viewport
+  over a scrollable area, then scroll the target yourself in an interactive
+  session (CleanShot X style) with a live preview and Done/Cancel while AnyDoor
+  stitches the frames (overlap-aligned, pixel-exact) into one tall image that
+  flows through the same save / copy / edit / pin / history output as any
+  capture. The session's own preview and outline windows are excluded from the
+  shot. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey.
+- Screen recording: record the full display or a selected region to MOV, MP4, or
+  animated GIF via AVFoundation, with a configurable frame rate, optional cursor
+  capture, microphone audio, a draggable webcam overlay, and an on-screen
+  keystroke display. A floating control bar shows elapsed time with pause/resume
+  and stop; the finished file is exported in the chosen format and revealed in
+  Finder. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey
+  (the hotkey toggles a fullscreen recording on and off). System (application)
+  audio is not captured — `AVCaptureScreenInput` cannot, ScreenCaptureKit is
+  avoided to dodge a macOS 26 crash, and a Core Audio tap is deferred; only the
+  microphone is recorded.
+- Screenshot settings tab: save location, filename template, auto-save /
+  auto-copy, timer-delay preset (3 / 5 / 10s), and quick-access overlay timeout.
+- Annotation editor (reached from the capture overlay's edit button): arrow,
+  line, rectangle, ellipse, freehand, highlighter, text, blur, pixelate,
+  redaction bar, numbered step counters, select/move, and non-destructive crop,
+  with per-tool color / stroke width / fill / text size, undo/redo, and export to
+  copy / save / pin.
+- Region screenshot now opens with a pre-shown, mouse-adjustable selection
+  (resize handles + move + new-drag), restored from the last selection across
+  launches or centered by default.
+
+### Changed
+
+- The capture-menu entry now opens the pre-shown selection directly with an attached
+  toolbar (region / window / fullscreen) instead of a separate type-picker bar; the
+  standalone floating mode bar was removed.
+- The capture toolbar now also offers scrolling and recording, acting on the current
+  selection — scrolling stitches the selected viewport and recording captures the
+  selected region, instead of each starting its own separate selection.
+
+### Fixed
+
+- Screen capture no longer crashes on macOS 26: a still capture corrupted the
+  main thread's Swift-concurrency executor tracking, after which hovering a
+  menu-bar row (or any other dynamic main-actor check) faulted. The capture
+  engine now uses synchronous CoreGraphics and hover handling avoids the broken
+  runtime check.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.5.0/AnyDoor-2.5.0.zip" length="8031238" type="application/octet-stream" sparkle:edSignature="DCjY8UeT0TcPjFWWlxApyjNtQ2CA5M2FHn2P7Onzy/vxXZua6NGKUp4KahLDGDHBXXRDDuqCy8TKbAVCOaHlCQ=="/>
+        </item>
+        <item>
             <title>2.4.0</title>
             <pubDate>Sun, 14 Jun 2026 16:33:26 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>2.4.0</sparkle:version>
             <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Command palette: inline unit, time-zone, and currency conversion. Typing a
-  conversion expression surfaces a Conversion section with the answer on top;
-  Return copies the value with a content-free toast. Units cover length, mass,
-  temperature, data size (decimal and binary), and speed via `"<n> <unit> to/in
-  <unit>"` (e.g. `3 ft to m`, `72 f to c`, `1 gb to mib`). Time zones handle
-  `"<time?> <place>"` and `"<time?> <a> to <b>"` (e.g. `3pm tokyo`, `9am london to
-  tokyo`, `tokyo time`) with a curated city map, a `GMT±H` label, and a day-offset
-  marker when the wall date crosses midnight. Currency converts `"<amount> <code>
-  to <code>"` (plus `$`/`€`/`£` symbols) against a rate table cached from
-  Frankfurter (ECB data, key-free) — fetched at most once per day, used offline
-  from the last cache with an "as of <date>" subtitle. Each converter is a pure,
-  total facade mirroring the calculator; detection requires a recognized
-  unit/currency/place plus a connector or time token, so ordinary command and app
-  search is untouched. The connector can be `to`, `in`, or `=` (e.g. `100 usd =
-  rmb`). Currency also accepts common colloquial names (`rmb`/`yuan`
-  → CNY, `euro`, `pound`, `yen`, `dollar`, …) in addition to ISO codes. The
-  command palette gains a Raycast-style footer — shown only in a currency context
-  (a currency row, or a currency-shaped query with no rates yet) — with the
-  selected row's primary action on the left and an "更新汇率" button on the right
-  that force-refreshes the rate table on demand.
-- Command palette: inline developer tools. Typing a keyword surfaces instant,
-  copy-on-Return conversions — `base64` (encode + decode), `url` (percent-encode +
-  decode), `md5` / `sha1` / `sha256` hashes — plus two auto-detected tools that need
-  no keyword: paste a JSON object or array for pretty / minified output (keys sorted),
-  or a 10-digit (seconds) or 13-digit (milliseconds) Unix epoch for local / UTC /
-  ISO 8601 renderings. The core is a pure, total `DevTools` facade mirroring the
-  calculator; explicit keywords plus strong-signal auto-detection keep bare words and
-  short numbers in normal app/command/port search. Pressing Return copies the result
-  and confirms with a content-free toast, since hashes and multi-line JSON make poor
-  toast bodies. A Raycast-style scope badge makes the keyword tools first-class:
-  typing a keyword + space, or Tab on a bare keyword, absorbs it into a search-bar
-  pill (Base64 / URL / MD5 / SHA-1 / SHA-256), drops the keyword from the field, and
-  makes the list exclusive to that tool; Backspace on an empty body sheds the badge,
-  and Esc escalates (clear body → shed badge → dismiss). While a keyword prefix is
-  still being typed the palette suggests the matching tool(s) on top, selected by
-  default so Return enters the scope; once inside a tool with nothing typed yet, the
-  panel shows a usage hint and a worked example instead of the generic "no matches"
-  state.
-- Command palette: hosts profiles are reachable by name from the root. Typing a
-  profile name surfaces a Hosts section whose rows toggle that profile's activation
-  on Return, mirroring the existing port direct-search. Activation goes through the
-  same path as the drill-in toggle (it may still prompt for the privileged write),
-  and no per-profile global hotkey is introduced, so a stray keystroke can't trigger
-  an admin prompt.
-- Color picker output format: the picked color can be copied as HEX, RGB, HSL,
-  SwiftUI `Color`, or lowercase CSS hex. The format is chosen from the command
-  palette's Pick Color second-level menu, persists as the default for every pick path
-  (menu-bar row and global hotkey), and rides settings backup. A pure `ColorFormat`
-  renders the sampled `#RRGGBB` value into each representation; color history still
-  stores the raw hex.
-- System microphone mute: a new panel toggle mutes / unmutes the default input device
-  via CoreAudio, giving a conferencing-app-independent mic switch with the usual
-  panel row, global hotkey, command-palette entry, and backup wiring. Devices that
-  expose no settable mute (some built-in mics, AirPods in the input scope) surface a
-  toast and leave the row state unchanged instead of failing silently.
-- App Shortcuts menu-bar popover now shows a hint guiding the user to add shortcuts in
-  Settings when none are configured, instead of an empty list.
-
-### Changed
-
-- Command palette list now uses overlay scrollbars (auto-hiding and reserving no
-  width), matching the Raycast-style chrome, regardless of the system "Show scroll
-  bars: Always" preference that SwiftUI would otherwise honor.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.4.0/AnyDoor-2.4.0.zip" length="7484291" type="application/octet-stream" sparkle:edSignature="hR7u/bkbVXro0UiHBhsJlRS8MrN3+/VUz9yXlpmXWkM2jYJQYIaWJQ8jpvldYcXYoEojqyF+TUeGgA314/sgBQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.4.0/AnyDoor-2.4.0.zip" length="7484291" type="application/octet-stream" sparkle:edSignature="hR7u/bkbVXro0UiHBhsJlRS8MrN3+/VUz9yXlpmXWkM2jYJQYIaWJQ8jpvldYcXYoEojqyF+TUeGgA314/sgBQ=="/>
         </item>
         <item>
             <title>2.3.1</title>
@@ -86,15 +85,6 @@
             <sparkle:shortVersionString>2.3.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.3.1/AnyDoor-2.3.1.zip" length="7236561" type="application/octet-stream" sparkle:edSignature="bUu9PzoyhKOYzpxk0LdNoNTCCO0wyCd4o09bAb+amDNpdV3Cz6/Xqfumn+ZBrTxIpSPkrgQi6/7sQo3q1QaxAQ=="/>
-        </item>
-        <item>
-            <title>2.3.0</title>
-            <pubDate>Sat, 13 Jun 2026 18:17:46 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>2.3.0</sparkle:version>
-            <sparkle:shortVersionString>2.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.3.0/AnyDoor-2.3.0.zip" length="7155792" type="application/octet-stream" sparkle:edSignature="mnEza/J+nu5ghMExJXTOSLuD0xF4pR5AkCuEnA7U+2SzHUXshmeNiGiS6JAlTMoWNSGDujC9+YylkF1mqy6LAg=="/>
         </item>
         <item>
             <title>1.2.0</title>

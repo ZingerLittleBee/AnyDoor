@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-06-16
+
 ### Added
 
 - Screenshot capture suite: region, window, fullscreen, and timed capture with a
