@@ -115,6 +115,26 @@ private final class SelectionOverlayView: NSView {
     private var mouseLocation: CGPoint
     private var isDragging = false
 
+    /// Active mouse interaction for region mode.
+    private enum DragMode: Equatable { case none, creating, moving, resizing(SelectionHandle) }
+    private var dragMode: DragMode = .none
+    /// Mouse point and rect captured at mouse-down, for move/resize math.
+    private var dragOrigin: CGPoint = .zero
+    private var rectAtDragStart: CGRect = .zero
+
+    /// Handle sizes: a small drawn square, a larger invisible grab area.
+    private static let handleVisualSize: CGFloat = 8
+    private static let handleHitSize: CGFloat = 16
+
+    private var isCreatingDrag: Bool { dragMode == .creating }
+    private var showsLoupe: Bool {
+        switch dragMode {
+        case .creating: return true
+        case .resizing: return true
+        case .none, .moving: return false
+        }
+    }
+
     /// Magnifier loupe dimensions, in points.
     private static let loupeSize: CGFloat = 120
     private static let loupeSourcePoints: CGFloat = 24
@@ -317,30 +337,57 @@ private final class SelectionOverlayView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard mode == .region else { return }
         let p = convert(event.locationInWindow, from: nil)
-        dragStart = p
         mouseLocation = p
-        isDragging = true
-        currentRect = .zero
+        dragOrigin = p
+        rectAtDragStart = currentRect
+
+        if currentRect.isEmpty {
+            beginCreating(at: p)
+        } else {
+            switch SelectionGeometry.hitTest(p, in: currentRect, handleSize: Self.handleHitSize) {
+            case .handle(let h): dragMode = .resizing(h)
+            case .inside: dragMode = .moving
+            case .outside: beginCreating(at: p)
+            }
+        }
+        isDragging = isCreatingDrag
         needsDisplay = true
     }
 
+    private func beginCreating(at p: CGPoint) {
+        dragMode = .creating
+        dragStart = p
+        currentRect = .zero
+    }
+
     override func mouseDragged(with event: NSEvent) {
-        guard mode == .region, let start = dragStart else { return }
+        guard mode == .region else { return }
         let p = convert(event.locationInWindow, from: nil)
         mouseLocation = p
-        currentRect = SelectionGeometry.clamped(
-            SelectionGeometry.normalizedRect(from: start, to: p),
-            to: bounds
-        )
+        switch dragMode {
+        case .creating:
+            guard let start = dragStart else { return }
+            currentRect = SelectionGeometry.clamped(SelectionGeometry.normalizedRect(from: start, to: p), to: bounds)
+        case .moving:
+            currentRect = SelectionGeometry.moved(rectAtDragStart, dx: p.x - dragOrigin.x, dy: p.y - dragOrigin.y, in: bounds)
+        case .resizing(let h):
+            currentRect = SelectionGeometry.resizing(rectAtDragStart, handle: h, to: p, in: bounds, minSize: SelectionGeometry.minimumEdge)
+        case .none:
+            break
+        }
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        isDragging = false
         switch mode {
         case .region:
-            guard !SelectionGeometry.isTooSmall(currentRect) else { onCancel?(); return }
-            commitRegion(currentRect)
+            let wasCreating = isCreatingDrag
+            dragMode = .none
+            isDragging = false
+            // A too-small fresh drag resets to empty so the user can retry; an
+            // adjusted pre-shown rect is kept. Commit happens on Enter (Phase 1).
+            if wasCreating, SelectionGeometry.isTooSmall(currentRect) { currentRect = .zero }
+            needsDisplay = true
         case .window:
             guard let win = hoveredWindow else { onCancel?(); return }
             onWindow?(win.id, globalScreenFrame(forCGWindow: win.frame))
