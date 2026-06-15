@@ -1,23 +1,19 @@
 import AppKit
 import CoreGraphics
 
-/// Orchestrates a scrolling capture: permission check -> region selection (the
-/// scroll viewport) -> `ScrollCaptureEngine` -> the shared capture output policy.
-/// `@MainActor`, callback-based, mirroring `RecordingCoordinator`.
+/// Orchestrates a scrolling capture: permission check -> resolve the viewport
+/// (region handoff from the toolbar, or the built-in selection overlay) ->
+/// hand off to the interactive `ScrollCaptureSession`. `@MainActor`, callback-based.
 @MainActor
 final class ScrollCaptureCoordinator {
     static let shared = ScrollCaptureCoordinator()
-
-    private let engine = ScrollCaptureEngine()
     private let selectionOverlay = SelectionOverlayWindow()
     private var inFlight = false
-
     private init() {}
 
     /// Entry point. `region` (global AppKit coords) skips the built-in viewport
-    /// selection — used by the unified capture toolbar, which already has a
-    /// selection. `nil` keeps the standalone flow: freeze displays, let the user
-    /// pick a viewport, then scroll+stitch.
+    /// selection (used by the unified capture toolbar). `nil` presents the overlay
+    /// to let the user pick a viewport.
     func capture(region: CGRect? = nil) {
         guard !inFlight else { return }
         guard ScreenCapturePermission.ensureGranted() else {
@@ -27,10 +23,7 @@ final class ScrollCaptureCoordinator {
         }
         inFlight = true
 
-        if let region {
-            runEngine(viewport: region)
-            return
-        }
+        if let region { startSession(viewport: region); return }
 
         var frozen: [CGDirectDisplayID: CGImage] = [:]
         var targets: [TargetDisplay] = []
@@ -44,30 +37,15 @@ final class ScrollCaptureCoordinator {
         selectionOverlay.present(targets: targets, mode: .region, frozen: frozen) { [weak self] result in
             guard let self else { return }
             guard case let .region(_, rect) = result else { self.finish(); return }
-            self.runEngine(viewport: rect)
+            self.startSession(viewport: rect)
         }
     }
 
-    /// Derive the display under the viewport, let the screen clear, then scroll+stitch.
-    private func runEngine(viewport rect: CGRect) {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let display = NSScreen.screens.first(where: { $0.frame.contains(center) })
-            ?? NSScreen.screenUnderMouse ?? NSScreen.main
-        guard let display, let id = display.displayID else { finish(); return }
-        let target = TargetDisplay(id: id, frame: display.frame, backingScale: display.backingScaleFactor)
-        // Let the overlay (built-in or the unified toolbar's) fully clear before the
-        // first grab, so the stitched image never includes overlay chrome.
+    private func startSession(viewport: CGRect) {
+        // Let any selection overlay fully clear before the session's first grab.
         Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(140))
-            self.engine.capture(viewport: rect, display: target) { [weak self] image in
-                guard let self else { return }
-                if let image {
-                    CaptureCoordinator.shared.deliverCapturedImage(image, anchor: rect)
-                } else {
-                    ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
-                }
-                self.finish()
-            }
+            ScrollCaptureSession.shared.start(viewport: viewport) { [weak self] in self?.finish() }
         }
     }
 
