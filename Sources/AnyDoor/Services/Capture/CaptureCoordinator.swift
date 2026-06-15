@@ -19,12 +19,7 @@ final class CaptureCoordinator {
     private let settings: CaptureSettings
     private let selectionOverlay = SelectionOverlayWindow()
     private var lastRegionRequest: CaptureRequest?
-    /// The last committed region rect (global AppKit coordinates), pre-filled into
-    /// the selection overlay on re-capture so the previous selection can be reused.
-    private var lastRegionRect: CGRect = .zero
     private var inFlight = false
-    /// Set for the next capture only, to reuse the previous selection rect.
-    private var reuseLastRect = false
 
     init(settings: CaptureSettings = .shared) {
         self.settings = settings
@@ -74,17 +69,29 @@ final class CaptureCoordinator {
     private func captureRegion(delay: Int) {
         let (targets, frozen) = Self.resolveAllDisplays()
         guard !targets.isEmpty else { finish(); return }
-        let initialRect = reuseLastRect ? lastRegionRect : .zero
-        reuseLastRect = false
+        let initialRect = Self.initialSelectionRect(targets: targets, settings: settings)
         selectionOverlay.present(targets: targets, mode: .region, frozen: frozen, initialRect: initialRect) { [weak self] result in
             guard let self else { return }
             guard case let .region(cgImage, rect) = result else { self.finish(); return }
-            self.lastRegionRect = rect
+            self.settings.setLastRegionRect(rect)
             self.afterCountdown(delay) { [weak self] in
                 self?.present(image: cgImage, anchor: rect)
                 self?.finish()
             }
         }
+    }
+
+    /// The pre-shown selection rect (global AppKit coords): the persisted last
+    /// rect when its center lies on a connected display, else a default rect
+    /// centered on the display under the cursor (or the first display).
+    @MainActor private static func initialSelectionRect(targets: [TargetDisplay], settings: CaptureSettings) -> CGRect {
+        let displays = targets.map(\.frame)
+        if let restored = SelectionGeometry.restoredRect(last: settings.lastRegionRect, displays: displays) {
+            return restored
+        }
+        let mouse = NSEvent.mouseLocation
+        let screen = targets.first(where: { $0.frame.contains(mouse) })?.frame ?? targets[0].frame
+        return SelectionGeometry.defaultCenteredRect(in: screen, fraction: 0.5)
     }
 
     private func captureWindow(delay: Int) {
@@ -282,10 +289,8 @@ final class CaptureCoordinator {
     }
 
     private func recapture() {
-        // Reuse the previous region rect when re-capturing a region.
-        let request = lastRegionRequest ?? CaptureRequest(mode: .region)
-        if request.mode == .region, !lastRegionRect.isEmpty { reuseLastRect = true }
-        capture(request)
+        // The previous region rect is restored automatically from settings.
+        capture(lastRegionRequest ?? CaptureRequest(mode: .region))
     }
 }
 
