@@ -96,4 +96,11 @@ final class SelectionGeometryTests: XCTestCase {
         XCTAssertEqual(SelectionGeometry.hitTest(CGPoint(x: 200, y: 150), in: rect, handleSize: 16), .inside)
         XCTAssertEqual(SelectionGeometry.hitTest(CGPoint(x: 10, y: 10), in: rect, handleSize: 16), .outside)
     }
+
+    func testHitTestDeterministicWhenHandlesOverlap() {
+        // Rect smaller than the handle size makes opposite handles overlap; the
+        // fixed allCases order must resolve the center to topLeft deterministically.
+        let rect = CGRect(x: 0, y: 0, width: 4, height: 4)
+        XCTAssertEqual(SelectionGeometry.hitTest(CGPoint(x: 2, y: 2), in: rect, handleSize: 16), .handle(.topLeft))
+    }
 }
