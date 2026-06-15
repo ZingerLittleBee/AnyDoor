@@ -106,11 +106,12 @@ private final class SelectionOverlayView: NSView {
     var onFullscreen: ((CGImage, CGRect) -> Void)?
     var onCancel: (() -> Void)?
 
-    private let mode: CaptureMode
+    private var mode: CaptureMode
+    private let initialMode: CaptureMode
     private let screenFrame: CGRect
     private let backingScale: CGFloat
     private let frozen: CGImage
-    private let windows: [CapturableWindow]
+    private var windows: [CapturableWindow]
 
     private var dragStart: CGPoint?
     private var currentRect: CGRect = .zero
@@ -150,6 +151,7 @@ private final class SelectionOverlayView: NSView {
 
     init(mode: CaptureMode, screenFrame: CGRect, backingScale: CGFloat, frozen: CGImage, initialRect: CGRect = .zero) {
         self.mode = mode
+        self.initialMode = mode
         self.screenFrame = screenFrame
         self.backingScale = backingScale
         self.frozen = frozen
@@ -457,7 +459,11 @@ private final class SelectionOverlayView: NSView {
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53: // Esc
-            onCancel?()
+            if mode == .window && initialMode == .region {
+                exitToRegionMode()   // return to region instead of cancelling
+            } else {
+                onCancel?()
+            }
         case 36, 76: // Return / keypad Enter — commit a reused or nudged selection
             guard mode == .region, !SelectionGeometry.isTooSmall(currentRect) else { return }
             commitRegion(currentRect)
@@ -533,13 +539,28 @@ private final class SelectionOverlayView: NSView {
             // The frozen still is the clean full display; return it directly.
             onFullscreen?(frozen, CGRect(origin: globalPoint(.zero), size: bounds.size))
         case .window:
-            enterWindowSubMode()   // implemented in Task 5
+            enterWindowSubMode()
         }
     }
 
-    /// Toolbar "window" → switch the live overlay into window-pick. Fleshed out
-    /// in Task 5; stubbed here so the toolbar dispatch compiles.
-    private func enterWindowSubMode() {}
+    /// Toolbar "window" → switch the live overlay into window-pick: hide the rect +
+    /// toolbar, enumerate windows, highlight on hover, commit on click.
+    private func enterWindowSubMode() {
+        windows = WindowEnumerator.onScreenWindows()
+        mode = .window
+        hoveredWindow = nil
+        layoutToolbar()     // hides the toolbar (mode != .region)
+        NSCursor.crosshair.set()
+        needsDisplay = true
+    }
+
+    /// Esc from a toolbar-entered window sub-mode returns to region selection.
+    private func exitToRegionMode() {
+        mode = .region
+        hoveredWindow = nil
+        layoutToolbar()     // re-shows the toolbar
+        needsDisplay = true
+    }
 
     override func layout() {
         super.layout()
