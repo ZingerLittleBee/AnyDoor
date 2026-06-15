@@ -53,14 +53,14 @@ actor CaptureTimerProvider: ActionProvider {
     }
 }
 
-/// Present the floating capture mode bar.
+/// Open the unified capture overlay (pre-shown selection + attached type toolbar).
 actor CaptureModeBarProvider: ActionProvider {
     let itemKey: BuiltinItem = .captureModeBar
 
     var permission: PermissionStatus { .notRequired }
 
     func run() async {
-        await MainActor.run { CaptureCoordinator.shared.presentModeBar() }
+        await MainActor.run { CaptureCoordinator.shared.capture(CaptureRequest(mode: .region)) }
     }
 }
 

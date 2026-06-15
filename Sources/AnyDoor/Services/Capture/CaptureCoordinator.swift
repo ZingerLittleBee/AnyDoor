@@ -44,19 +44,6 @@ final class CaptureCoordinator {
         }
     }
 
-    /// Opens the All-In-One mode bar; the chosen mode starts a capture.
-    func presentModeBar() {
-        CaptureModeBarWindow.shared.present(
-            onPick: { [weak self] mode in self?.capture(CaptureRequest(mode: mode)) },
-            onTimer: { [weak self] in
-                guard let self else { return }
-                self.capture(CaptureRequest(mode: .region, delay: self.settings.delaySeconds))
-            },
-            onRecord: { RecordingCoordinator.shared.record(region: true) },
-            onScroll: { ScrollCaptureCoordinator.shared.capture() }
-        )
-    }
-
     /// Delivers an externally produced capture (e.g. a stitched scrolling
     /// capture) through the standard output policy: auto-save / auto-copy /
     /// history / quick-access overlay.
