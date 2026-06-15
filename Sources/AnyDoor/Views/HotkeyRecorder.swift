@@ -162,7 +162,7 @@ struct HotkeyRecorder: View {
         // recording can't accidentally fire an existing binding.
         HotkeyService.shared.beginRecording { held in
             // Already on main; observer is dispatched via DispatchQueue.main.async.
-            hyperHeld = held
+            MainThreadIsolation.run { hyperHeld = held }
         }
 
         let modMask: UInt64 = CGEventFlags.maskCommand.rawValue

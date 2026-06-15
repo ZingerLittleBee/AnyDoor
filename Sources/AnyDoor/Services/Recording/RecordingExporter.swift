@@ -30,8 +30,12 @@ enum RecordingExporter {
         try? FileManager.default.removeItem(at: out)
         export.outputURL = out
         export.outputFileType = .mp4
-        export.exportAsynchronously {
-            let ok = export.status == .completed
+        // `AVAssetExportSession` is non-Sendable, but the completion handler runs
+        // once after the export finishes and only reads `status`; mark the capture
+        // unsafe to satisfy strict concurrency without a behavior change.
+        nonisolated(unsafe) let session = export
+        session.exportAsynchronously {
+            let ok = session.status == .completed
             Task { @MainActor in
                 if ok { try? FileManager.default.removeItem(at: mov) }
                 completion(ok ? out : nil)

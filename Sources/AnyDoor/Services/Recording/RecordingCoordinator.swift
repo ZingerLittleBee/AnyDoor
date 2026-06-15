@@ -189,21 +189,18 @@ final class RecordingCoordinator {
     }
 
     private func ensureMediaPermissions(mic: Bool, camera: Bool, completion: @escaping @MainActor () -> Void) {
-        func requestCameraThenFinish() {
+        // Request the (independent) mic/camera permissions in sequence, then hop
+        // back to the main actor for `completion`. Using async/await avoids the
+        // @Sendable capture dance the nested-callback form required under strict
+        // concurrency, and matches the original "ask, then finish on main" flow.
+        Task {
+            if mic, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+                _ = await AVCaptureDevice.requestAccess(for: .audio)
+            }
             if camera, AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
-                AVCaptureDevice.requestAccess(for: .video) { _ in
-                    DispatchQueue.main.async { MainThreadIsolation.run { completion() } }
-                }
-            } else {
-                completion()
+                _ = await AVCaptureDevice.requestAccess(for: .video)
             }
-        }
-        if mic, AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
-            AVCaptureDevice.requestAccess(for: .audio) { _ in
-                DispatchQueue.main.async { MainThreadIsolation.run { requestCameraThenFinish() } }
-            }
-        } else {
-            requestCameraThenFinish()
+            await MainActor.run { completion() }
         }
     }
 }
