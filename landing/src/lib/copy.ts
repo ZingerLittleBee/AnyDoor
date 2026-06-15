@@ -5,7 +5,7 @@ export type Lang = 'zh' | 'en';
 export type Bi<T = string> = { zh: T; en: T };
 
 export const copy = {
-  nav: { demo: { zh: '演示', en: 'Demo' }, why: { zh: '为什么', en: 'Why' }, features: { zh: '功能', en: 'Features' }, faq: { zh: 'FAQ', en: 'FAQ' }, download: { zh: '下载', en: 'Download' } },
+  nav: { demo: { zh: '演示', en: 'Demo' }, why: { zh: '为什么', en: 'Why' }, features: { zh: '功能', en: 'Features' }, capture: { zh: '截图', en: 'Capture' }, faq: { zh: 'FAQ', en: 'FAQ' }, download: { zh: '下载', en: 'Download' } },
 
   hero: {
     eyebrow: { zh: '一颗按键，一扇任意门', en: 'One key. Any door.' },
@@ -133,6 +133,41 @@ export const copy = {
     colorDesc: { zh: '系统取色器把任意像素的 HEX 写入剪贴板。', en: 'System color sampler captures HEX into the clipboard.' },
     shotName: { zh: '区域截图', en: 'Region Screenshot' },
     shotDesc: { zh: '交互式区域截图，直接到剪贴板。', en: 'Interactive region capture, straight to the clipboard.' },
+  },
+
+  capture: {
+    eyebrow: { zh: '截图套件', en: 'Capture suite' },
+    h2a: { zh: '框选、滚动、录制，', en: 'Select, scroll, record —' },
+    h2b: { zh: '一个工具栏全包。', en: 'one toolbar does it all.' },
+    lede: {
+      zh: '一个热键冻结屏幕，弹出可拖拽的选区与贴附工具栏：区域、窗口、全屏、滚动长截图、屏幕录制，随手切换。滚动截图是 CleanShot X 式的交互会话——你来滚，它实时抓帧拼接、预览随之增长。截图落地，浮层就在选区旁：复制、保存、编辑、钉屏、OCR 取词。',
+      en: 'One hotkey freezes the screen and brings up a draggable selection with an attached toolbar — region, window, fullscreen, scrolling long-shot, and screen recording, switched on the fly. Scrolling capture is an interactive CleanShot X-style session: you scroll, it grabs and stitches frames live as the preview grows. The instant a shot lands, a quick-access overlay sits beside the selection — copy, save, edit, pin, OCR.',
+    },
+    // Attached selection toolbar — the five capture tools.
+    toolRegion: { zh: '区域', en: 'Region' },
+    toolWindow: { zh: '窗口', en: 'Window' },
+    toolFull: { zh: '全屏', en: 'Fullscreen' },
+    toolScroll: { zh: '滚动', en: 'Scrolling' },
+    toolRecord: { zh: '录制', en: 'Record' },
+    badge: { zh: '冻屏选区', en: 'Frozen selection' },
+    // Interactive scrolling capture card.
+    scrollTitle: { zh: '交互式滚动截图', en: 'Interactive scrolling' },
+    scrollDesc: { zh: '你自己滚动目标，AnyDoor 实时抓帧、重叠对齐、像素级拼接，预览随之增长。', en: 'You scroll the target; AnyDoor grabs frames live, overlap-aligned and pixel-exact, as the preview grows.' },
+    scrollCaptured: { zh: '已捕获', en: 'Captured' },
+    scrollDone: { zh: '完成', en: 'Done' },
+    scrollCancel: { zh: '取消', en: 'Cancel' },
+    // Quick-access overlay card.
+    overlayTitle: { zh: '快捷操作浮层', en: 'Quick-access overlay' },
+    overlayDesc: { zh: '复制、保存、编辑、钉在屏幕上、OCR、重拍、删除——截图落地即触手可及。', en: 'Copy, save, edit, pin on screen, OCR, re-capture, delete — within reach the instant a shot lands.' },
+    overlayCopy: { zh: '复制', en: 'Copy' },
+    overlaySave: { zh: '保存', en: 'Save' },
+    overlayEdit: { zh: '编辑', en: 'Edit' },
+    overlayPin: { zh: '钉住', en: 'Pin' },
+    // Screen recording card.
+    recTitle: { zh: '屏幕录制', en: 'Screen recording' },
+    recDesc: { zh: '全屏或选区录制为 MOV / MP4 / GIF，可选光标、麦克风、摄像头浮层与按键显示。', en: 'Record full screen or a region to MOV / MP4 / GIF, with optional cursor, mic, webcam overlay, and keystroke display.' },
+    recState: { zh: '录制中', en: 'Recording' },
+    recStop: { zh: '停止', en: 'Stop' },
   },
 
   settings: {

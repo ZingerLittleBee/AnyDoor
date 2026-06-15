@@ -782,6 +782,174 @@ h2.sec-h{
 .sm-row .rec.is-recording{background: rgba(255,69,58,.18); border-color: rgba(255,69,58,.4); color:#fff; animation: rec 1s linear infinite}
 @keyframes rec{50%{background: rgba(255,69,58,.06)}}
 
+/* ─────────────────────────── Capture suite ─────────────────────────── */
+/* Hero: a frozen desktop with a draggable spotlight selection + toolbar. */
+.cap-hero{margin-top: 56px}
+.cap-screen{
+  position: relative; max-width: 1000px; margin: 0 auto;
+  aspect-ratio: 16 / 9;
+  border-radius: 16px; overflow: hidden;
+  border: .5px solid var(--color-line-strong);
+  background:
+    radial-gradient(120% 100% at 20% 0%, rgba(94,155,255,.22), transparent 55%),
+    radial-gradient(120% 120% at 90% 100%, rgba(191,90,242,.20), transparent 55%),
+    linear-gradient(160deg, #1d2230, #0c0d12 70%);
+  box-shadow: 0 40px 100px rgba(0,0,0,.5);
+}
+/* Faux menu bar */
+.cap-menubar{
+  position:absolute; inset: 0 0 auto 0; height: 26px; z-index:1;
+  display:flex; align-items:center; gap: 14px; padding: 0 14px;
+  background: rgba(0,0,0,.28); backdrop-filter: blur(8px);
+  border-bottom: .5px solid rgba(255,255,255,.08);
+}
+.cap-mb-apple{display:grid; place-items:center; color:#fff; opacity:.85}
+.cap-mb-apple svg{width:13px; height:13px}
+.cap-mb-i{height: 6px; border-radius: 3px; background: rgba(255,255,255,.30)}
+.cap-mb-sp{flex:1}
+/* Faux windows */
+.cap-win{position:absolute; border-radius: 10px; overflow:hidden; border:.5px solid rgba(255,255,255,.10);
+  background: linear-gradient(180deg, rgba(40,40,46,.92), rgba(22,22,27,.92)); box-shadow: 0 18px 40px rgba(0,0,0,.4)}
+.cap-win-a{left: 6%; top: 30%; width: 32%; height: 46%}
+.cap-win-b{right: 6%; top: 20%; width: 30%; height: 40%}
+.cap-win-bar{display:flex; gap:5px; padding: 8px 10px; border-bottom:.5px solid rgba(255,255,255,.06)}
+.cap-win-bar .tl{width:8px; height:8px; border-radius:50%}
+.cap-win-bar .tl.r{background:#ff5f57} .cap-win-bar .tl.y{background:#febc2e} .cap-win-bar .tl.g{background:#28c840}
+.cap-win-body{padding: 14px; display:flex; flex-direction:column; gap: 9px}
+.cap-win-body .ln{height: 7px; border-radius: 3px; background: rgba(255,255,255,.12)}
+.cap-win-grid{padding: 12px; display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px}
+.cap-win-grid span{aspect-ratio: 1; border-radius: 6px; background: rgba(255,255,255,.07)}
+/* Faux dock */
+.cap-dock{position:absolute; left:50%; bottom: 10px; transform: translateX(-50%); z-index:1;
+  display:flex; gap: 8px; padding: 6px 10px; border-radius: 14px;
+  background: rgba(255,255,255,.10); border:.5px solid rgba(255,255,255,.14); backdrop-filter: blur(10px)}
+.cap-dock span{width: 26px; height: 26px; border-radius: 7px;
+  background: linear-gradient(135deg, rgba(255,255,255,.5), rgba(255,255,255,.18))}
+.cap-dock span:nth-child(2){background:linear-gradient(135deg,#5e9bff,#1873e8)}
+.cap-dock span:nth-child(4){background:linear-gradient(135deg,#30d158,#15a13e)}
+.cap-dock span:nth-child(6){background:linear-gradient(135deg,#ff9f0a,#ff7a00)}
+/* Spotlight selection — the box-shadow darkens everything outside it */
+.cap-selection{
+  position:absolute; left: 13%; top: 17%; width: 47%; height: 45%; z-index: 2;
+  border: 1.5px solid #5e9bff; border-radius: 3px;
+  box-shadow: 0 0 0 9999px rgba(5,5,7,.62), 0 0 18px rgba(94,155,255,.4);
+  animation: capPulse 3.2s ease-in-out infinite;
+}
+@keyframes capPulse{50%{box-shadow: 0 0 0 9999px rgba(5,5,7,.62), 0 0 28px rgba(94,155,255,.65)}}
+.cap-dimbadge{
+  position:absolute; left: 0; top: -28px;
+  font: 600 11px/1 var(--font-mono); color:#fff;
+  background: rgba(10,132,255,.92); padding: 5px 9px; border-radius: 6px; white-space:nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+}
+.cap-selection .hd{position:absolute; width: 9px; height: 9px; background:#fff; border: 1px solid #1873e8; border-radius: 2px; transform: translate(-50%,-50%)}
+.cap-selection .hd.tl{left:0; top:0} .cap-selection .hd.tc{left:50%; top:0} .cap-selection .hd.tr{left:100%; top:0}
+.cap-selection .hd.ml{left:0; top:50%} .cap-selection .hd.mr{left:100%; top:50%}
+.cap-selection .hd.bl{left:0; top:100%} .cap-selection .hd.bc{left:50%; top:100%} .cap-selection .hd.br{left:100%; top:100%}
+/* Attached toolbar */
+.cap-toolbar{
+  position:absolute; left: 50%; top: 100%; transform: translate(-50%, 12px);
+  display:flex; gap: 4px; padding: 6px;
+  background: rgba(22,22,26,.92); border:.5px solid var(--color-line-strong);
+  border-radius: 14px; backdrop-filter: blur(16px);
+  box-shadow: 0 16px 40px rgba(0,0,0,.55);
+}
+.cap-tool{
+  display:flex; flex-direction:column; align-items:center; gap: 3px;
+  padding: 8px 11px; border-radius: 9px; position:relative;
+  color: var(--color-text-dim); cursor: default;
+}
+.cap-tool .cap-hl{position:absolute; inset:0; border-radius: 9px; opacity: 0;
+  background: rgba(10,132,255,.24); box-shadow: inset 0 0 0 1px rgba(94,155,255,.55)}
+.cap-tool.is-on{color:#fff}
+.cap-tool.is-on .cap-hl{opacity: 1}
+.cap-tool-ico{position:relative; display:grid; place-items:center}
+.cap-tool-ico svg{width: 18px; height: 18px}
+.cap-tool-lbl{position:relative; font-size: 10.5px; letter-spacing: .02em; white-space:nowrap}
+
+/* Supporting mock cards */
+.cap-grid{display:grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 20px; margin-top: 24px}
+.cap-card{min-height: 320px}
+.cap-card-head{display:flex; align-items:center; gap: 10px; margin-bottom: 12px}
+.cap-card-head h3{margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.015em}
+
+/* Card: interactive scrolling capture */
+.sc-stage{background: linear-gradient(180deg, #16161a, #0b0b0e); border:.5px solid var(--color-line)}
+.sc-readout{
+  position:absolute; left: 12px; top: 12px; z-index: 2;
+  display:flex; align-items:center; gap: 6px;
+  font: 600 11px/1 var(--font-mono); color:#fff;
+  background: rgba(0,0,0,.7); border:.5px solid var(--color-line-strong);
+  padding: 6px 10px; border-radius: 999px;
+}
+.sc-readout .sc-rec-dot{width: 7px; height: 7px; border-radius:50%; background: var(--color-mac-green); box-shadow: 0 0 8px var(--color-mac-green)}
+.sc-readout .sc-num{color: var(--color-accent-2)}
+.sc-viewport{position:absolute; left: 14px; right: 14px; top: 44px; bottom: 56px;
+  border-radius: 8px; overflow:hidden; background:#0d0d10; border:.5px solid var(--color-line)}
+.sc-strip{display:flex; flex-direction:column; gap: 10px; padding: 12px; animation: scGrow 7s linear infinite}
+@keyframes scGrow{0%{transform: translateY(0)} 100%{transform: translateY(-50%)}}
+.sc-block{display:flex; flex-direction:column; gap: 6px}
+.sc-block .b1{height: 8px; width: var(--w); border-radius: 3px; background: rgba(255,255,255,.14)}
+.sc-block .b2{height: 6px; width: calc(var(--w) * .7); border-radius: 3px; background: rgba(255,255,255,.07)}
+.sc-scanline{position:absolute; left:0; right:0; top: 6%; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  box-shadow: 0 0 14px rgba(10,132,255,.7); animation: scScan 2.4s ease-in-out infinite}
+@keyframes scScan{0%{top:4%; opacity:0} 12%{opacity:1} 88%{opacity:1} 100%{top:96%; opacity:0}}
+.sc-bar{position:absolute; left: 14px; right: 14px; bottom: 14px; display:flex; gap: 8px; justify-content:flex-end}
+.sc-btn{padding: 7px 16px; border-radius: 8px; font-size: 12.5px; font-weight: 600; cursor: default}
+.sc-btn.ghost{background: rgba(255,255,255,.06); border:.5px solid var(--color-line); color: var(--color-text-dim)}
+.sc-btn.prime{background: var(--color-accent); color:#fff; box-shadow: 0 6px 16px rgba(10,132,255,.35)}
+
+/* Card: quick-access overlay */
+.qa-stage{background: linear-gradient(135deg, #1a1a1e, #0b0b0e);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 16px; padding: 18px}
+.qa-shot{width: 80%; border-radius: 10px; overflow:hidden; border:.5px solid var(--color-line-strong);
+  background: linear-gradient(135deg, #2c2c30, #18181b); box-shadow: 0 18px 44px rgba(0,0,0,.55); transform: rotate(-1.4deg)}
+.qa-shot-bar{display:flex; gap: 5px; padding: 8px 10px; background: rgba(255,255,255,.05)}
+.qa-shot-bar i{width: 8px; height: 8px; border-radius:50%; background: rgba(255,255,255,.25)}
+.qa-shot-bar i:first-child{background:#ff5f57} .qa-shot-bar i:nth-child(2){background:#febc2e} .qa-shot-bar i:nth-child(3){background:#28c840}
+.qa-shot-body{padding: 16px; display:flex; flex-direction:column; gap: 9px}
+.qa-shot-body .ln{height: 8px; border-radius: 3px; background: rgba(255,255,255,.13)}
+.qa-overlay{display:flex; align-items:center; gap: 2px; padding: 6px;
+  background: rgba(8,8,10,.82); border:.5px solid var(--color-line-strong); border-radius: 12px;
+  backdrop-filter: blur(12px); box-shadow: 0 14px 34px rgba(0,0,0,.5)}
+.qa-act{display:flex; flex-direction:column; align-items:center; gap: 3px;
+  padding: 7px 9px; border-radius: 8px; color: var(--color-text-dim); cursor: default; transition: background .15s, color .15s}
+.qa-act svg{width: 17px; height: 17px}
+.qa-act em{font-style: normal; font-size: 9.5px; letter-spacing: .02em}
+.qa-act:hover{background: rgba(255,255,255,.09); color:#fff}
+.qa-act.danger{padding: 7px}
+.qa-act.danger:hover{background: rgba(255,69,58,.18); color:#ff6961}
+.qa-sep{width: .5px; height: 26px; background: var(--color-line-strong); margin: 0 3px}
+
+/* Card: screen recording */
+.rc-stage{background: linear-gradient(135deg, #1c1416, #0b0b0e); position:relative; overflow:hidden;
+  display:flex; align-items:center; justify-content:center}
+.rc-stage::before{content:""; position:absolute; inset:0;
+  background: radial-gradient(circle at 50% 120%, rgba(255,69,58,.22), transparent 60%)}
+.rc-cam{position:absolute; right: 16px; top: 16px; width: 58px; height: 58px; border-radius:50%;
+  display:grid; place-items:center; color:#fff;
+  background: linear-gradient(135deg, #3a3a40, #1a1a1d); border: 1.5px solid rgba(255,255,255,.25);
+  box-shadow: 0 8px 22px rgba(0,0,0,.5)}
+.rc-cam svg{width: 22px; height: 22px; opacity: .85}
+.rc-keys{position:absolute; left: 16px; top: 16px; display:flex; gap: 4px}
+.rc-keys kbd{font: 600 11px/1 var(--font-mono); color:#fff;
+  background: rgba(255,255,255,.10); border:.5px solid var(--color-line-strong);
+  border-radius: 5px; padding: 5px 7px; box-shadow: 0 2px 0 rgba(0,0,0,.3)}
+.rc-controls{position:relative; z-index:1; display:flex; align-items:center; gap: 9px;
+  padding: 9px 14px; border-radius: 999px;
+  background: rgba(8,8,10,.82); border:.5px solid var(--color-line-strong); backdrop-filter: blur(12px);
+  box-shadow: 0 14px 34px rgba(0,0,0,.5)}
+.rc-dot{width: 10px; height: 10px; border-radius:50%; background:#ff453a; box-shadow: 0 0 10px #ff453a; animation: rcPulse 1.4s ease-in-out infinite}
+@keyframes rcPulse{50%{opacity:.3}}
+.rc-time{font: 600 13px/1 var(--font-mono); color:#fff; min-width: 40px}
+.rc-div{width:.5px; height: 18px; background: var(--color-line-strong)}
+.rc-fmt{font: 600 11px/1 var(--font-mono); color: var(--color-text-soft); padding: 4px 7px; border-radius: 6px}
+.rc-fmt.active{background: rgba(255,255,255,.12); color:#fff}
+.rc-stop{display:flex; align-items:center; gap: 5px; padding: 6px 12px; border-radius: 999px;
+  background:#ff453a; color:#fff; font-size: 12px; font-weight: 600; cursor: default}
+.rc-stop svg{width: 13px; height: 13px}
+
 /* ─────────────────────────── Download ─────────────────────────── */
 .dl-wrap{display:grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 56px}
 .dl-card{
@@ -876,6 +1044,7 @@ h2.sec-h{
   .pm-wrap{grid-template-columns: 1fr}
   .pm-side{height: 240px}
   .actions-grid{grid-template-columns: 1fr}
+  .cap-grid{grid-template-columns: 1fr}
   .dl-wrap{grid-template-columns: 1fr}
   /* The fixed-width keyboard is wider than a phone; let it scroll in place
      instead of overflowing the page (which body{overflow-x:hidden} would clip). */
