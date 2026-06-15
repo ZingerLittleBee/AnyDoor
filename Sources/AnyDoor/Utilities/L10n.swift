@@ -388,7 +388,6 @@ enum L10n {
         case captureModeBarTimer = "capture.modeBar.timer"
         case captureModeBarRecording = "capture.modeBar.recording"
         case captureModeBarScrolling = "capture.modeBar.scrolling"
-        case captureEditorPlaceholder = "capture.editor.placeholder"
         case captureEditorUndo = "capture.editor.undo"
         case captureEditorRedo = "capture.editor.redo"
         case captureEditorDone = "capture.editor.done"

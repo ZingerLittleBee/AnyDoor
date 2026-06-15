@@ -1626,23 +1626,6 @@
         }
       }
     },
-    "capture.editor.placeholder": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The annotation editor is coming soon."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "标注编辑器即将推出。"
-          }
-        }
-      }
-    },
     "capture.modeBar.fullscreen": {
       "extractionState": "manual",
       "localizations": {
@@ -1666,13 +1649,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Record (soon)"
+            "value": "Record"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "录屏(即将推出)"
+            "value": "录屏"
           }
         }
       }

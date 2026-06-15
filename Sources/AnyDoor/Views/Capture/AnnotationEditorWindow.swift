@@ -1,9 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// Phase 0 placeholder. Opens a real (non-panel) titled window showing the
-/// captured image with a "coming soon" banner. Phase 1 replaces the body with
-/// the real annotation editor.
+/// Hosts the annotation editor (Phase 1). Opens a real (non-panel) titled window
+/// presenting `AnnotationEditorView` over the captured image — arrows, shapes,
+/// text, blur/pixelate, crop, and the rest of the tool set.
 ///
 /// Registered with `RegularWindowCoordinator` so the Dock icon appears while
 /// the window is open. Single-instance: a second call to `show(image:)` brings
