@@ -71,13 +71,7 @@ final class CaptureCoordinator {
         guard !targets.isEmpty else { finish(); return }
         let initialRect = Self.initialSelectionRect(targets: targets, settings: settings)
         selectionOverlay.present(targets: targets, mode: .region, frozen: frozen, initialRect: initialRect) { [weak self] result in
-            guard let self else { return }
-            guard case let .region(cgImage, rect) = result else { self.finish(); return }
-            self.settings.setLastRegionRect(rect)
-            self.afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage, anchor: rect)
-                self?.finish()
-            }
+            self?.handle(result, delay: delay)
         }
     }
 
@@ -102,9 +96,23 @@ final class CaptureCoordinator {
         let (targets, frozen) = Self.resolveAllDisplays()
         guard !targets.isEmpty else { finish(); return }
         selectionOverlay.present(targets: targets, mode: .window, frozen: frozen) { [weak self] result in
-            guard let self else { return }
-            guard case let .window(id, frame) = result else { self.finish(); return }
-            self.afterCountdown(delay) { [weak self] in
+            self?.handle(result, delay: delay)
+        }
+    }
+
+    /// Routes a selection overlay result through the output policy. Shared by the
+    /// unified region overlay (which can return region/window/fullscreen via the
+    /// toolbar) and the standalone window overlay.
+    private func handle(_ result: SelectionResult, delay: Int) {
+        switch result {
+        case let .region(cgImage, rect):
+            settings.setLastRegionRect(rect)
+            afterCountdown(delay) { [weak self] in
+                self?.present(image: cgImage, anchor: rect)
+                self?.finish()
+            }
+        case let .window(id, frame):
+            afterCountdown(delay) { [weak self] in
                 guard let self else { return }
                 guard let cg = LegacyScreenCapture.window(id) else {
                     ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
@@ -113,6 +121,13 @@ final class CaptureCoordinator {
                 self.present(image: cg, anchor: frame)
                 self.finish()
             }
+        case let .fullscreen(cgImage, _):
+            afterCountdown(delay) { [weak self] in
+                self?.present(image: cgImage, anchor: nil)
+                self?.finish()
+            }
+        case .cancelled:
+            finish()
         }
     }
 

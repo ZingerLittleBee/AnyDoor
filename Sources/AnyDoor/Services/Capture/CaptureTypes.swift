@@ -43,5 +43,9 @@ enum SelectionResult: Sendable {
     /// A window was picked; the coordinator grabs it crisply via `LegacyScreenCapture`.
     /// `frame` is the window's global AppKit screen frame for overlay placement.
     case window(id: CGWindowID, frame: CGRect)
+    /// Whole-display capture chosen from the toolbar. The overlay returns its
+    /// clean frozen still directly (no re-grab); `frame` is the display's global
+    /// AppKit frame (for symmetry — the output overlay uses no anchor here).
+    case fullscreen(image: CGImage, frame: CGRect)
     case cancelled
 }
