@@ -113,7 +113,6 @@ private final class SelectionOverlayView: NSView {
     private var currentRect: CGRect = .zero
     private var hoveredWindow: CapturableWindow?
     private var mouseLocation: CGPoint
-    private var isDragging = false
 
     /// Active mouse interaction for region mode.
     private enum DragMode: Equatable { case none, creating, moving, resizing(SelectionHandle) }
@@ -363,7 +362,6 @@ private final class SelectionOverlayView: NSView {
             case .outside: beginCreating(at: p)
             }
         }
-        isDragging = isCreatingDrag
         needsDisplay = true
     }
 
@@ -382,6 +380,7 @@ private final class SelectionOverlayView: NSView {
             guard let start = dragStart else { return }
             currentRect = SelectionGeometry.clamped(SelectionGeometry.normalizedRect(from: start, to: p), to: bounds)
         case .moving:
+            NSCursor.closedHand.set()
             currentRect = SelectionGeometry.moved(rectAtDragStart, dx: p.x - dragOrigin.x, dy: p.y - dragOrigin.y, in: bounds)
         case .resizing(let h):
             currentRect = SelectionGeometry.resizing(rectAtDragStart, handle: h, to: p, in: bounds, minSize: SelectionGeometry.minimumEdge)
@@ -396,7 +395,6 @@ private final class SelectionOverlayView: NSView {
         case .region:
             let wasCreating = isCreatingDrag
             dragMode = .none
-            isDragging = false
             // A too-small fresh drag resets to empty so the user can retry; an
             // adjusted pre-shown rect is kept. Commit happens on Enter (Phase 1).
             if wasCreating, SelectionGeometry.isTooSmall(currentRect) { currentRect = .zero }
