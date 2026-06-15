@@ -47,6 +47,9 @@ final class SelectionOverlayWindow {
             p.hasShadow = false
             p.hidesOnDeactivate = false
             p.isReleasedWhenClosed = false
+            // No appear/disappear animation: a full-screen frozen still otherwise
+            // scale-fades in, which reads as the whole screen briefly zooming.
+            p.animationBehavior = .none
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
             // The reused rect arrives in global AppKit coordinates; pre-draw it
@@ -440,7 +443,12 @@ private final class SelectionOverlayView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
         mouseLocation = local
-        if mode == .window {
+        // The toolbar is a SwiftUI subview, but this view's full-bounds tracking
+        // area still fires here, so it would otherwise force the selection
+        // crosshair over the buttons. Show a pointer cursor over the toolbar.
+        if let host = toolbarHost, !host.isHidden, host.frame.contains(local) {
+            NSCursor.pointingHand.set()
+        } else if mode == .window {
             hoveredWindow = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
         } else if mode == .region, !currentRect.isEmpty {
             updateCursor(for: SelectionGeometry.hitTest(local, in: currentRect, handleSize: Self.handleHitSize))
