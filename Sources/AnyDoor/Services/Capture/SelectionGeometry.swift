@@ -96,7 +96,9 @@ enum SelectionGeometry {
 
     /// Resizes `rect` by dragging `handle` to `point`, keeping the opposite
     /// edge/corner anchored, enforcing `minSize` per axis, and clamping the
-    /// moving edges inside `bounds` (y-up).
+    /// moving edges inside `bounds` (y-up). When the anchor edge sits within
+    /// `minSize` of the bounds edge, the result may be smaller than `minSize`
+    /// on that axis (bounds win over minSize).
     static func resizing(_ rect: CGRect, handle: SelectionHandle, to point: CGPoint, in bounds: CGRect, minSize: CGFloat) -> CGRect {
         var minX = rect.minX, maxX = rect.maxX
         var minY = rect.minY, maxY = rect.maxY

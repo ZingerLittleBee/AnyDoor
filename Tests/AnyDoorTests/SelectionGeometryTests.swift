@@ -127,6 +127,15 @@ final class SelectionGeometryTests: XCTestCase {
         XCTAssertEqual(r, CGRect(x: 100, y: 100, width: 150, height: 150))
     }
 
+    func testResizingTopEdgeKeepsXFixed() {
+        let rect = CGRect(x: 100, y: 100, width: 200, height: 100)
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+        // A `.top` drag moves only maxY; x and width must stay put even though the
+        // drag point's x is far away.
+        let r = SelectionGeometry.resizing(rect, handle: .top, to: CGPoint(x: 999, y: 260), in: bounds, minSize: 10)
+        XCTAssertEqual(r, CGRect(x: 100, y: 100, width: 200, height: 160))
+    }
+
     // MARK: - Default + restore
 
     func testDefaultCenteredRectHalfSize() {
