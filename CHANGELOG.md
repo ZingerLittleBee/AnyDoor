@@ -51,6 +51,10 @@ versioning.
 - The capture toolbar now also offers scrolling and recording, acting on the current
   selection — scrolling stitches the selected viewport and recording captures the
   selected region, instead of each starting its own separate selection.
+- Scrolling capture is now interactive (CleanShot X style): after selecting the
+  region, a floating preview with Done/Cancel appears and you scroll the target
+  yourself while the long image is stitched live, instead of an unreliable
+  automatic scroll. The session's own windows are excluded from the capture.
 
 ### Fixed
 
