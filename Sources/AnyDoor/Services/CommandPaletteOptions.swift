@@ -58,7 +58,7 @@ enum CommandPaletteOptions {
     /// Items that drill into a second level instead of acting directly.
     static func isOptionParent(_ item: BuiltinItem) -> Bool {
         switch item {
-        case .keepAwake, .scheduledShutdown, .brightness, .hostsManager, .portManager, .pickColor: return true
+        case .keepAwake, .scheduledShutdown, .brightness, .hostsManager, .portManager, .pickColor, .captureTimer: return true
         default: return false
         }
     }
@@ -93,6 +93,8 @@ enum CommandPaletteOptions {
             return portOptions(records: PortInventory.shared.records)
         case .pickColor:
             return colorFormatOptions(current: ColorFormat.current)
+        case .captureTimer:
+            return captureTimerOptions()
         default:
             return nil
         }
@@ -244,6 +246,22 @@ enum CommandPaletteOptions {
                 perform: {
                     ColorFormat.current = format
                     await PanelStore.shared.run(.pickColor)
+                }
+            )
+        }
+    }
+
+    /// One option per delay duration (3 s / 5 s / 10 s). Selecting a delay
+    /// persists it as the default and immediately starts a timed region capture.
+    static func captureTimerOptions() -> [CommandPaletteOption] {
+        [3, 5, 10].map { seconds in
+            CommandPaletteOption(
+                id: "captureTimer.delay\(seconds)",
+                title: L(.captureDelaySeconds, seconds),
+                symbol: "timer",
+                perform: {
+                    CaptureSettings.shared.setDelaySeconds(seconds)
+                    CaptureCoordinator.shared.capture(CaptureRequest(mode: .region, delay: seconds))
                 }
             )
         }

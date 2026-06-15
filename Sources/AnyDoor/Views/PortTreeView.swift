@@ -73,7 +73,7 @@ private struct PortProcessGroupRow: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .background(headerBackground, in: .rect(cornerRadius: 6))
-        .onHover { isHeaderHovered = $0 }
+        .onHoverSafe { isHeaderHovered = $0 }
     }
 
     private var headerBackground: Color {

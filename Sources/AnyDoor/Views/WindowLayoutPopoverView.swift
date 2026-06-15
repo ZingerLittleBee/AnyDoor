@@ -6,7 +6,7 @@ import AppKit
 /// dispatches the matching action via `PanelStore.run`.
 struct WindowLayoutPopoverView: View {
     let entries: [PanelEntry]
-    var onHoverChange: (Bool) -> Void
+    var onHoverChange: @MainActor (Bool) -> Void
     var onSelect: (BuiltinItem) -> Void
 
     var body: some View {
@@ -40,7 +40,7 @@ struct WindowLayoutPopoverView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .onHover(perform: onHoverChange)
+        .onHoverSafe(perform: onHoverChange)
     }
 }
 
@@ -65,7 +65,7 @@ private struct WindowLayoutRow: View {
         .adaptiveInteractiveSurface(cornerRadius: 6)
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
-        .onHover { hovering in
+        .onHoverSafe { hovering in
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }

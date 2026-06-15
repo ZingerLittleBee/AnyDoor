@@ -3,7 +3,7 @@ import CoreGraphics
 
 struct BrightnessPopoverView: View {
     @State private var service = DisplayBrightnessService.shared
-    var onHoverChange: (Bool) -> Void = { _ in }
+    var onHoverChange: @MainActor (Bool) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -27,7 +27,7 @@ struct BrightnessPopoverView: View {
         .onAppear {
             Task { await service.refresh() }
         }
-        .onHover { onHoverChange($0) }
+        .onHoverSafe { onHoverChange($0) }
     }
 
     private func emptyState(text: String, symbol: String) -> some View {

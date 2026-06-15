@@ -42,7 +42,9 @@ final class ShutdownWarningWindowController: ShutdownWarningPresenting {
         p.hasShadow = true
         p.hidesOnDeactivate = false
         p.isReleasedWhenClosed = false
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .moveToActiveSpace]
+        // `.canJoinAllSpaces` and `.moveToActiveSpace` are mutually exclusive; both
+        // together make macOS 26's `_validateCollectionBehavior` throw. Keep one.
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel = p
         return p
     }

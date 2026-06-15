@@ -13,7 +13,7 @@ struct PortManagerPopoverView: View {
     private static let popoverHeight: CGFloat = 560
 
     @Bindable var inventory: PortInventory
-    var onHoverChange: (Bool) -> Void
+    var onHoverChange: @MainActor (Bool) -> Void
     var onClose: () -> Void
     @FocusState private var searchFocused: Bool
 
@@ -39,7 +39,7 @@ struct PortManagerPopoverView: View {
         .onAppear {
             searchFocused = true
         }
-        .onHover(perform: onHoverChange)
+        .onHoverSafe(perform: onHoverChange)
         .background(KeyboardMonitor(inventory: inventory, onClose: onClose))
     }
 
@@ -181,7 +181,7 @@ private struct PortScanErrorBanner: View {
 /// Installs a local NSEvent key-down monitor while mounted. Handles ⌘R, ⌘T, ESC.
 ///
 /// `NSEvent.addLocalMonitorForEvents` delivers its handler on the main thread,
-/// so the closure body uses `MainActor.assumeIsolated` to access the
+/// so the closure body uses `MainThreadIsolation.run` to access the
 /// `@MainActor`-isolated `PortInventory` directly without a `Task` hop. The
 /// Coordinator itself is `@MainActor`-isolated to satisfy Swift 6 strict
 /// concurrency when its properties are captured by the handler closure.
@@ -228,13 +228,13 @@ private struct KeyboardMonitor: NSViewRepresentable {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 // addLocalMonitorForEvents dispatches on the main thread, so we
                 // can safely access @MainActor-isolated state via
-                // `MainActor.assumeIsolated`. We avoid carrying `event` across
+                // `MainThreadIsolation.run`. We avoid carrying `event` across
                 // the isolation boundary (NSEvent isn't Sendable) by extracting
                 // only the bits we need and computing a bool result.
                 let cmd = event.modifierFlags.contains(.command)
                 let chars = event.charactersIgnoringModifiers?.lowercased() ?? ""
                 let keyCode = event.keyCode
-                let consumed: Bool = MainActor.assumeIsolated {
+                let consumed: Bool = MainThreadIsolation.run {
                     guard let self else { return false }
                     if cmd && chars == "r" {
                         Task { await self.inventory.refresh(force: true) }

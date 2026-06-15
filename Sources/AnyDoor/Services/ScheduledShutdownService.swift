@@ -169,7 +169,11 @@ final class ScheduledShutdownService {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleWake() }
+            // Run synchronously on the main thread via MainThreadIsolation rather
+            // than MainActor.assumeIsolated, whose swift_task_isCurrentExecutor
+            // check can fault on the main thread after a ScreenCaptureKit capture
+            // (see MainThreadIsolation).
+            MainThreadIsolation.run { self?.handleWake() }
         }
     }
 
@@ -185,7 +189,7 @@ final class ScheduledShutdownService {
         let warningDate = max(now(), fireDate.addingTimeInterval(-lead))
         let interval = max(0, warningDate.timeIntervalSince(now()))
         warningTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated { self?.beginWarning() }
+            MainThreadIsolation.run { self?.beginWarning() }
         }
     }
 
@@ -200,7 +204,7 @@ final class ScheduledShutdownService {
         warning.present(totalSeconds: remaining, onCancel: { [weak self] in self?.cancel() })
         countdownTimer?.invalidate()
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tickCountdown() }
+            MainThreadIsolation.run { self?.tickCountdown() }
         }
     }
 

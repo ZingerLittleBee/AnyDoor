@@ -67,12 +67,12 @@ final class HoverPopover {
         keyObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.isHoldingFocus = true }
+            MainThreadIsolation.run { self?.isHoldingFocus = true }
         }
         resignObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didResignKeyNotification, object: panel, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.isHoldingFocus = false }
+            MainThreadIsolation.run { self?.isHoldingFocus = false }
         }
     }
 

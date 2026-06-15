@@ -38,7 +38,12 @@ final class PortInventory {
 
     // MARK: - Lifecycle
 
-    static let shared: PortInventory = MainActor.assumeIsolated { PortInventory() }
+    // This lazy initializer is first touched from main-actor UI code. Use
+    // MainThreadIsolation rather than MainActor.assumeIsolated so that a first
+    // access occurring after a ScreenCaptureKit capture (which can leave the main
+    // thread's executor tracking dangling) does not fault the
+    // swift_task_isCurrentExecutor check. See MainThreadIsolation.
+    static let shared: PortInventory = MainThreadIsolation.run { PortInventory() }
 
     init(
         scanner: any PortScanning = PortScanner(),

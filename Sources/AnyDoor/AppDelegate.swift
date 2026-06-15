@@ -94,7 +94,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DarkModeProvider(),
             LockScreenProvider(),
             EmptyTrashProvider(),
-            ScreenshotProvider(),
+            CaptureRegionProvider(),
+            CaptureWindowProvider(),
+            CaptureFullscreenProvider(),
+            CaptureTimerProvider(),
+            CaptureModeBarProvider(),
+            RecordScreenProvider(),
+            CaptureScrollingProvider(),
             ClearClipboardProvider(),
             DisplaySleepProvider(),
             SystemSleepProvider(),
@@ -199,7 +205,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             object: UserDefaults.standard,
             queue: .main
         ) { [weak menuBar] _ in
-            MainActor.assumeIsolated { menuBar?.syncFromPreferences() }
+            // Run synchronously on the main thread via MainThreadIsolation rather
+            // than MainActor.assumeIsolated, whose swift_task_isCurrentExecutor
+            // check can fault on the main thread after a ScreenCaptureKit capture
+            // (see ClipboardWatcher / MainThreadIsolation).
+            MainThreadIsolation.run { menuBar?.syncFromPreferences() }
         }
         bootstrapUpdater()
         installSettingsOpenerCapture()

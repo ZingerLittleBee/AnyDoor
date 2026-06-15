@@ -1028,7 +1028,7 @@ private struct CommandPaletteRow: View {
         )
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
+        .onHoverSafe { isHovering = $0 }
         .onTapGesture(perform: onSelect)
         .task(id: entry.id) {
             // Resolve the Finder icon via the shared cache. A warm path

@@ -49,7 +49,7 @@ struct PlainTextEditor: NSViewRepresentable {
         // MainActor context and read from the retained text view (not the
         // non-Sendable notification) to write back the SwiftUI binding.
         nonisolated func textDidChange(_ notification: Notification) {
-            MainActor.assumeIsolated {
+            MainThreadIsolation.run {
                 guard let textView else { return }
                 text.wrappedValue = textView.string
             }

@@ -139,7 +139,7 @@ struct ClipboardWallView: View {
                     withAnimation { proxy.scrollTo(new) }
                 }
                 .onPreferenceChange(TabFramePreferenceKey.self) { frames in
-                    MainActor.assumeIsolated { tabFrames = frames }
+                    MainThreadIsolation.run { tabFrames = frames }
                 }
             }
             Spacer()

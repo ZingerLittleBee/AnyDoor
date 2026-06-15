@@ -95,7 +95,7 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
         // NSEvent itself isn't Sendable under Swift 6 strict concurrency.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = event.keyCode
-            let consumed = MainActor.assumeIsolated {
+            let consumed = MainThreadIsolation.run {
                 self?.handle(keyCode: keyCode) ?? false
             }
             return consumed ? nil : event

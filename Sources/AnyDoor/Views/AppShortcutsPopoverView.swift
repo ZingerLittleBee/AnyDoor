@@ -7,7 +7,7 @@ import AppKit
 /// editing happens in the Settings window.
 struct AppShortcutsPopoverView: View {
     let entries: [PanelEntry]
-    var onHoverChange: (Bool) -> Void
+    var onHoverChange: @MainActor (Bool) -> Void
     var onSelect: (PanelEntry) -> Void
     /// Resolves the on-disk app path for an entry so the row can render a Finder app icon.
     /// Returns nil when the entry isn't an app shortcut or its KeyBinding is missing.
@@ -56,7 +56,7 @@ struct AppShortcutsPopoverView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .onHover(perform: onHoverChange)
+        .onHoverSafe(perform: onHoverChange)
     }
 }
 
@@ -81,7 +81,7 @@ private struct AppShortcutRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
         .help(L(.panelAppShortcutToggleHelp, entry.localizedTitle()))
-        .onHover { hovering in
+        .onHoverSafe { hovering in
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }

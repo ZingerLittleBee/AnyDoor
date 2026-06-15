@@ -6,7 +6,7 @@ import SwiftUI
 /// action, and quick activation toggles for each profile.
 struct HostsManagerPopoverView: View {
     @Bindable var manager: HostsManager
-    let onHoverChange: (Bool) -> Void
+    let onHoverChange: @MainActor (Bool) -> Void
     let onEdit: () -> Void
     let onClose: () -> Void
 
@@ -39,7 +39,7 @@ struct HostsManagerPopoverView: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .onHover { onHoverChange($0) }
+        .onHoverSafe { onHoverChange($0) }
     }
 
     // MARK: - Header

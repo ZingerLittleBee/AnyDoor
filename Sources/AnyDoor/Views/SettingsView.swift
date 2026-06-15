@@ -8,6 +8,11 @@ struct SettingsView: View {
                     Label { LocalizedText(.settingsTabPanel) } icon: { Image(systemName: "rectangle.stack") }
                 }
 
+            CaptureSettingsView()
+                .tabItem {
+                    Label { LocalizedText(.settingsTabCapture) } icon: { Image(systemName: "camera.viewfinder") }
+                }
+
             GeneralSettingsView()
                 .tabItem {
                     Label { LocalizedText(.settingsTabGeneral) } icon: { Image(systemName: "gear") }

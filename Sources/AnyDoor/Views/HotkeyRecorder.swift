@@ -91,7 +91,7 @@ struct HotkeyRecorder: View {
                 )
         )
         .help(L(hotkey == nil ? .hotkeyRecorderTipUnbound : .hotkeyRecorderTipBound))
-        .onHover { fieldHovered = $0 }
+        .onHoverSafe { fieldHovered = $0 }
         .onDisappear { stopRecording() }
     }
 

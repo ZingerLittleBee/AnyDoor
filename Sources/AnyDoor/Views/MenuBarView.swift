@@ -109,7 +109,7 @@ struct MenuBarView: View {
                     triggerFrames[target] = frame
                 }
             )
-            .onHover { hovered in
+            .onHoverSafe { hovered in
                 triggerHover(hovered, target: target)
             }
         } else if case let .builtin(item) = entry.source, item.kind == .brightnessControl {
@@ -126,7 +126,7 @@ struct MenuBarView: View {
                     triggerFrames[target] = frame
                 }
             )
-            .onHover { hovered in
+            .onHoverSafe { hovered in
                 triggerHover(hovered, target: target)
             }
         } else if case let .builtin(item) = entry.source,
@@ -147,7 +147,7 @@ struct MenuBarView: View {
                     triggerFrames[target] = frame
                 }
             )
-            .onHover { hovered in
+            .onHoverSafe { hovered in
                 triggerHover(hovered, target: target)
             }
         } else {
@@ -477,13 +477,15 @@ private struct ScreenFrameReader: NSViewRepresentable {
         private var lastFrame: NSRect = .zero
         private var scrollObserver: NSObjectProtocol?
 
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            // Fires on both attach and detach; on detach `enclosingScrollView`
-            // is nil, so this also tears the observer down (no deinit needed,
-            // which Swift 6 forbids for this non-Sendable token anyway).
-            observeEnclosingScroll()
-            reportFrame()
+        nonisolated override func viewDidMoveToWindow() {
+            MainThreadIsolation.run {
+                super.viewDidMoveToWindow()
+                // Fires on both attach and detach; on detach `enclosingScrollView`
+                // is nil, so this also tears the observer down (no deinit needed,
+                // which Swift 6 forbids for this non-Sendable token anyway).
+                observeEnclosingScroll()
+                reportFrame()
+            }
         }
 
         /// When the panel content scrolls (tall feature lists), the row's
@@ -502,23 +504,29 @@ private struct ScreenFrameReader: NSViewRepresentable {
                 object: clipView,
                 queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.reportFrame() }
+                MainThreadIsolation.run { self?.reportFrame() }
             }
         }
 
-        override func setFrameSize(_ newSize: NSSize) {
-            super.setFrameSize(newSize)
-            reportFrame()
+        nonisolated override func setFrameSize(_ newSize: NSSize) {
+            MainThreadIsolation.run {
+                super.setFrameSize(newSize)
+                reportFrame()
+            }
         }
 
-        override func setFrameOrigin(_ newOrigin: NSPoint) {
-            super.setFrameOrigin(newOrigin)
-            reportFrame()
+        nonisolated override func setFrameOrigin(_ newOrigin: NSPoint) {
+            MainThreadIsolation.run {
+                super.setFrameOrigin(newOrigin)
+                reportFrame()
+            }
         }
 
-        override func layout() {
-            super.layout()
-            reportFrame()
+        nonisolated override func layout() {
+            MainThreadIsolation.run {
+                super.layout()
+                reportFrame()
+            }
         }
 
         private func reportFrame() {
@@ -526,9 +534,7 @@ private struct ScreenFrameReader: NSViewRepresentable {
             let frame = window.convertToScreen(convert(bounds, to: nil))
             guard frame != lastFrame else { return }
             lastFrame = frame
-            Task { @MainActor [weak self] in
-                self?.onChange?(frame)
-            }
+            onChange?(frame)
         }
     }
 }

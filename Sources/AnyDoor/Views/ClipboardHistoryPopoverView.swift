@@ -14,7 +14,7 @@ struct ClipboardHistoryPopoverView: View {
 
     let store: ClipboardHistoryStore
     let kind: ClipboardHistoryKind
-    let onHoverChange: (Bool) -> Void
+    let onHoverChange: @MainActor (Bool) -> Void
     let onDismissPopover: () -> Void
     let onCopyAndClosePanel: () -> Void
 
@@ -40,7 +40,7 @@ struct ClipboardHistoryPopoverView: View {
         .frame(width: Self.popoverWidth, height: Self.popoverHeight)
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        .onHover(perform: onHoverChange)
+        .onHoverSafe(perform: onHoverChange)
         .onAppear {
             selection.replaceItems(items.map(\.id))
         }
@@ -125,7 +125,7 @@ struct ClipboardHistoryPopoverView: View {
                             isSelected: selection.selectedID == item.id,
                             store: store
                         )
-                        .onHover { hovering in
+                        .onHoverSafe { hovering in
                             if hovering { selection.select(item.id) }
                         }
                         .onTapGesture {

@@ -73,6 +73,24 @@ Sources/AnyDoor/
 │   │                DDCBackend (Arm64 / Intel) + OSDBridge
 │   ├── Calculator/  Inline calculator for the command palette (Calculator entry point → CalcResult /
 │   │                CalcTokenizer / CalcEvaluator / CalcFunctions / CalcToken)
+│   ├── Capture/      Screenshot suite: CaptureCoordinator (@MainActor orchestrator) / LegacyScreenCapture
+│   │                (synchronous CGDisplayCreateImage/CGWindowListCreateImage via dlsym — NOT SCK, see
+│   │                crash note) / CaptureSettings / CaptureTypes / SelectionGeometry / OverlayPlacement /
+│   │                CaptureFilename / CaptureModeBarPolicy / WindowEnumerator (ScreenCapturePermission
+│   │                lives one level up at Services/). Scrolling capture (Phase 3):
+│   │                ScrollCaptureCoordinator + ScrollCaptureEngine (warp+scroll+grab loop) + ScrollStitcher
+│   │                (pure: ScrollStitch.detectOverlap row-signature alignment + ScrollCapturePolicy).
+│   │                Views/Capture: SelectionOverlayWindow / CaptureModeBarWindow / CaptureOverlayWindow /
+│   │                PinnedImageWindow
+│   ├── Annotation/   Annotation editor (Phase 1): AnnotationModel / AnnotationDocument (elements +
+│   │                crop + snapshot undo/redo) / AnnotationGeometry / AnnotationRenderer (flipped
+│   │                NSGraphicsContext composite; blur=CIGaussianBlur, pixelate=CIPixellate). UI:
+│   │                AnnotationEditorWindow / AnnotationEditorView / AnnotationCanvasView (AppKit canvas)
+│   ├── Recording/    Screen recording (Phase 2): RecordingCoordinator (@MainActor orchestrator) /
+│   │                ScreenRecordingEngine (AVCaptureScreenInput + AVCaptureMovieFileOutput — NOT SCK,
+│   │                see crash note) / RecordingExporter (mov passthrough / mp4 transcode / gif) /
+│   │                RecordingModel + RecordingPolicy / RecordingSettings / KeystrokeFormatter. Views/
+│   │                Recording: RecordingControlsWindow / CameraOverlayWindow / KeystrokeOverlayWindow
 │   ├── Hyper Key    HyperKeyService / HyperKeyController / QuickPressEmitter
 │   ├── Cmd Palette  CommandPaletteService / InstalledAppsScanner / PortInventory / PortScanner
 │   ├── Win Layout   WindowLayoutService
@@ -86,8 +104,8 @@ Sources/AnyDoor/
     ├── Clipboard    ClipboardWall* / ClipboardHistory* / ClipboardCardView
     ├── Cmd Palette  CommandPalettePicker / SpotlightAppPicker (+ WindowController)
     ├── Hosts/       HostsEditorView / PlainTextEditor / HelperApprovalBanner
-    ├── Settings     SettingsView (TabView: Panel + General only) / PanelSettingsView /
-    │                GeneralSettingsView (embeds SyncSettingsView as a section)
+    ├── Settings     SettingsView (TabView: Panel + Capture + General) / PanelSettingsView /
+    │                CaptureSettingsView / GeneralSettingsView (embeds SyncSettingsView as a section)
     └── Common       Toast* / UpdateBannerView / LiquidGlassCompatibility / ScreenshotPreviewWindow
 ```
 

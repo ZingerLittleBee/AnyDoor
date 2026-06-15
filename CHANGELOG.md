@@ -6,6 +6,48 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Screenshot capture suite: region, window, fullscreen, and timed capture with a
+  freeze-screen selection overlay (crosshair, live dimensions, magnifier loupe
+  with a pixel-coordinate readout, arrow-key nudge/resize, and last-selection
+  reuse). The selection overlay spans every connected display. After a capture a
+  quick-access overlay appears next to the selection with copy, save, edit, pin,
+  text extraction (OCR), re-capture, and delete (delete also removes the entry
+  from clipboard history). An All-In-One capture menu provides a single entry
+  point alongside per-mode hotkeys, and captures can be pinned on-screen as
+  always-on-top floating references.
+- Scrolling capture: capture content taller than the screen. Select a viewport
+  over a scrollable area and AnyDoor auto-scrolls it, losslessly stitching the
+  frames (overlap-aligned, pixel-exact) into one tall image that flows through
+  the same save / copy / edit / pin / history output as any capture. Reachable
+  from the All-In-One menu, a dedicated builtin, and a hotkey.
+- Screen recording: record the full display or a selected region to MOV, MP4, or
+  animated GIF via AVFoundation, with a configurable frame rate, optional cursor
+  capture, microphone audio, a draggable webcam overlay, and an on-screen
+  keystroke display. A floating control bar shows elapsed time with pause/resume
+  and stop; the finished file is exported in the chosen format and revealed in
+  Finder. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey
+  (the hotkey toggles a fullscreen recording on and off). System (application)
+  audio is not captured — `AVCaptureScreenInput` cannot, ScreenCaptureKit is
+  avoided to dodge a macOS 26 crash, and a Core Audio tap is deferred; only the
+  microphone is recorded.
+- Screenshot settings tab: save location, filename template, auto-save /
+  auto-copy, timer-delay preset (3 / 5 / 10s), and quick-access overlay timeout.
+- Annotation editor (reached from the capture overlay's edit button): arrow,
+  line, rectangle, ellipse, freehand, highlighter, text, blur, pixelate,
+  redaction bar, numbered step counters, select/move, and non-destructive crop,
+  with per-tool color / stroke width / fill / text size, undo/redo, and export to
+  copy / save / pin.
+
+### Fixed
+
+- Screen capture no longer crashes on macOS 26: a still capture corrupted the
+  main thread's Swift-concurrency executor tracking, after which hovering a
+  menu-bar row (or any other dynamic main-actor check) faulted. The capture
+  engine now uses synchronous CoreGraphics and hover handling avoids the broken
+  runtime check.
+
 ## [2.4.0] - 2026-06-14
 
 ### Added

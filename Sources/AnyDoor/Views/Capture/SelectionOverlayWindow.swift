@@ -1,0 +1,421 @@
+import AppKit
+import CoreGraphics
+
+/// Presents a full-screen, non-activating selection overlay over a pre-captured
+/// display, letting the user pick either a region (drag a rectangle, cropped from
+/// the supplied frozen still) or a window (highlight + click). Calls `completion`
+/// exactly once with a `SelectionResult`, then tears the panel down.
+///
+/// `present` is deliberately **synchronous** and takes the frozen still as a
+/// parameter: the ScreenCaptureKit grab is performed by `CaptureCoordinator` in a
+/// nonisolated frame *before* this runs, so no `@MainActor` frame ever awaits the
+/// SCK call (which would corrupt the main thread's executor tracking on Swift 6.3
+/// — see `CaptureCoordinator.capture(_:)` and swiftlang/swift#89214).
+@MainActor
+final class SelectionOverlayWindow {
+    private var panels: [NSPanel] = []
+    private var completion: ((SelectionResult) -> Void)?
+
+    /// Presents a selection overlay on every supplied display (each backed by its
+    /// own frozen still), so the user can select on any screen — not just the one
+    /// under the cursor at trigger time. The first view to commit/cancel tears the
+    /// whole set down. A cross-display rectangle is not supported: each overlay
+    /// clamps its selection to its own screen.
+    func present(
+        targets: [TargetDisplay],
+        mode: CaptureMode,
+        frozen: [CGDirectDisplayID: CGImage],
+        initialRect: CGRect = .zero,
+        completion: @escaping (SelectionResult) -> Void
+    ) {
+        self.completion = completion
+        let mouse = NSEvent.mouseLocation
+
+        for target in targets {
+            guard let frozenImage = frozen[target.id] else { continue }
+
+            let p = SelectionPanel(
+                contentRect: target.frame,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            p.isOpaque = false
+            p.backgroundColor = .clear
+            p.level = .screenSaver
+            p.hasShadow = false
+            p.hidesOnDeactivate = false
+            p.isReleasedWhenClosed = false
+            p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+
+            // The reused rect arrives in global AppKit coordinates; pre-draw it
+            // only on the display that actually contains it.
+            let localInitial: CGRect = (!initialRect.isEmpty && target.frame.contains(CGPoint(x: initialRect.midX, y: initialRect.midY)))
+                ? CGRect(x: initialRect.minX - target.frame.minX,
+                         y: initialRect.minY - target.frame.minY,
+                         width: initialRect.width, height: initialRect.height)
+                : .zero
+            let view = SelectionOverlayView(
+                mode: mode,
+                screenFrame: target.frame,
+                backingScale: target.backingScale,
+                frozen: frozenImage,
+                initialRect: localInitial
+            )
+            view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
+            view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
+            view.onCancel = { [weak self] in self?.finish(.cancelled) }
+            p.contentView = view
+            p.orderFrontRegardless()
+            // Make the panel under the cursor key so it receives Esc / arrow keys.
+            if target.frame.contains(mouse) {
+                p.makeKeyAndOrderFront(nil)
+                p.makeFirstResponder(view)
+            }
+            panels.append(p)
+        }
+        // Fall back to keying the first panel if the cursor was off all displays.
+        if !panels.contains(where: { $0.isKeyWindow }), let first = panels.first {
+            first.makeKeyAndOrderFront(nil)
+            first.makeFirstResponder(first.contentView)
+        }
+    }
+
+    private func finish(_ result: SelectionResult) {
+        for p in panels { p.orderOut(nil) }
+        panels.removeAll()
+        let c = completion
+        completion = nil
+        c?(result)
+    }
+}
+
+/// Borderless panel that may become key, so the selection overlay can receive
+/// Esc / arrow-key events without activating the app.
+private final class SelectionPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
+private final class SelectionOverlayView: NSView {
+    var onRegion: ((CGImage, CGRect) -> Void)?
+    var onWindow: ((CGWindowID, CGRect) -> Void)?
+    var onCancel: (() -> Void)?
+
+    private let mode: CaptureMode
+    private let screenFrame: CGRect
+    private let backingScale: CGFloat
+    private let frozen: CGImage
+    private let windows: [CapturableWindow]
+
+    private var dragStart: CGPoint?
+    private var currentRect: CGRect = .zero
+    private var hoveredWindow: CapturableWindow?
+    private var mouseLocation: CGPoint
+    private var isDragging = false
+
+    /// Magnifier loupe dimensions, in points.
+    private static let loupeSize: CGFloat = 120
+    private static let loupeSourcePoints: CGFloat = 24
+
+    init(mode: CaptureMode, screenFrame: CGRect, backingScale: CGFloat, frozen: CGImage, initialRect: CGRect = .zero) {
+        self.mode = mode
+        self.screenFrame = screenFrame
+        self.backingScale = backingScale
+        self.frozen = frozen
+        self.windows = mode == .window ? WindowEnumerator.onScreenWindows() : []
+        self.currentRect = (mode == .region) ? initialRect : .zero
+        self.mouseLocation = CGPoint(x: screenFrame.width / 2, y: screenFrame.height / 2)
+        super.init(frame: NSRect(origin: .zero, size: screenFrame.size))
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeAlways, .mouseMoved, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        NSCursor.crosshair.set()
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    override var acceptsFirstResponder: Bool { true }
+
+    // Keep the crosshair cursor while the pointer is over the overlay; AppKit
+    // otherwise resets it to the arrow as the mouse moves.
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    // MARK: - Coordinate conversions
+
+    /// Local view point (bottom-left origin, relative to this screen's content view)
+    /// -> global AppKit screen point (bottom-left origin, spanning all displays).
+    private func globalPoint(_ local: NSPoint) -> CGPoint {
+        CGPoint(x: screenFrame.minX + local.x, y: screenFrame.minY + local.y)
+    }
+
+    /// Global AppKit point (bottom-left origin) -> global CoreGraphics point
+    /// (top-left origin) used by CGWindowList frames.
+    private func cgGlobalPoint(_ p: CGPoint) -> CGPoint {
+        CGPoint(x: p.x, y: totalHeightFlip() - p.y)
+    }
+
+    /// The Y value that flips between AppKit (bottom-left) and CoreGraphics
+    /// (top-left) global coordinate spaces: the union of all screens' max-Y.
+    private func totalHeightFlip() -> CGFloat {
+        NSScreen.screens.map { $0.frame.maxY }.max() ?? screenFrame.maxY
+    }
+
+    /// CGWindow global frame (top-left origin) -> this view's local rect
+    /// (bottom-left origin). Used to highlight a hovered window.
+    private func localRect(forCGWindow frame: CGRect) -> CGRect {
+        let flip = totalHeightFlip()
+        let globalBottomLeftY = flip - frame.maxY
+        return CGRect(
+            x: frame.minX - screenFrame.minX,
+            y: globalBottomLeftY - screenFrame.minY,
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
+    /// CGWindow global frame (top-left origin) -> global AppKit screen frame
+    /// (bottom-left origin) returned to the coordinator for overlay placement.
+    private func globalScreenFrame(forCGWindow frame: CGRect) -> CGRect {
+        let flip = totalHeightFlip()
+        return CGRect(x: frame.minX, y: flip - frame.maxY, width: frame.width, height: frame.height)
+    }
+
+    // MARK: - Drawing
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        // The frozen still is the whole display in pixels; `bounds` is the screen
+        // size in points. Drawing into `bounds` scales the pixel image down to
+        // points, which is correct.
+        ctx.draw(frozen, in: bounds)
+        // Dim everything.
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.35).cgColor)
+        ctx.fill(bounds)
+
+        switch mode {
+        case .region:
+            if !currentRect.isEmpty {
+                // Punch the selection back to full brightness by re-drawing the
+                // bright frozen image clipped to the selection only.
+                ctx.saveGState()
+                ctx.clip(to: currentRect)
+                ctx.draw(frozen, in: bounds)
+                ctx.restoreGState()
+                drawSelectionChrome(currentRect, ctx: ctx)
+            }
+            // Crosshair + magnifier loupe guide the cursor during selection. The
+            // full-screen crosshair is redundant with the selection rect mid-drag.
+            if !isDragging { drawCrosshair(at: mouseLocation, ctx: ctx) }
+            drawLoupe(at: mouseLocation, ctx: ctx)
+        case .window:
+            if let win = hoveredWindow {
+                let local = localRect(forCGWindow: win.frame)
+                ctx.saveGState()
+                ctx.clip(to: local)
+                ctx.draw(frozen, in: bounds)
+                ctx.restoreGState()
+                drawSelectionChrome(local, ctx: ctx)
+            }
+        case .fullscreen:
+            break
+        }
+    }
+
+    private func drawSelectionChrome(_ rect: CGRect, ctx: CGContext) {
+        ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        ctx.setLineWidth(1.5)
+        ctx.stroke(rect)
+        let label = SelectionGeometry.formatDimensions(rect.size) as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let size = label.size(withAttributes: attrs)
+        let bg = CGRect(x: rect.minX, y: rect.maxY + 4, width: size.width + 8, height: size.height + 4)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.7).cgColor)
+        ctx.fill(bg)
+        label.draw(at: NSPoint(x: bg.minX + 4, y: bg.minY + 2), withAttributes: attrs)
+    }
+
+    /// Thin full-width/height guide lines through the cursor.
+    private func drawCrosshair(at point: CGPoint, ctx: CGContext) {
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.55).cgColor)
+        ctx.setLineWidth(1)
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: bounds.minX, y: point.y))
+        ctx.addLine(to: CGPoint(x: bounds.maxX, y: point.y))
+        ctx.move(to: CGPoint(x: point.x, y: bounds.minY))
+        ctx.addLine(to: CGPoint(x: point.x, y: bounds.maxY))
+        ctx.strokePath()
+    }
+
+    /// A magnified square of the frozen pixels around the cursor, with a center
+    /// crosshair and the cursor's pixel coordinate readout.
+    private func drawLoupe(at point: CGPoint, ctx: CGContext) {
+        let frame = SelectionGeometry.loupeFrame(
+            near: point, loupeSize: Self.loupeSize, gap: 16, in: bounds
+        )
+        let scale = backingScale
+        let srcPts = Self.loupeSourcePoints
+        let half = srcPts / 2
+        // Source rect in the frozen image's pixel space (top-left origin).
+        let srcRect = CGRect(
+            x: (point.x - half) * scale,
+            y: (bounds.height - point.y - half) * scale,
+            width: srcPts * scale,
+            height: srcPts * scale
+        )
+        ctx.saveGState()
+        let clip = CGPath(roundedRect: frame, cornerWidth: 8, cornerHeight: 8, transform: nil)
+        ctx.addPath(clip)
+        ctx.clip()
+        ctx.setFillColor(NSColor.black.cgColor)
+        ctx.fill(frame)
+        if let crop = frozen.cropping(to: srcRect) {
+            ctx.interpolationQuality = .none
+            ctx.draw(crop, in: frame)
+        }
+        // Center crosshair inside the loupe.
+        ctx.setStrokeColor(NSColor.controlAccentColor.withAlphaComponent(0.9).cgColor)
+        ctx.setLineWidth(1)
+        ctx.stroke(CGRect(x: frame.midX - half, y: frame.midY - half, width: srcPts, height: srcPts))
+        ctx.beginPath()
+        ctx.move(to: CGPoint(x: frame.midX, y: frame.minY))
+        ctx.addLine(to: CGPoint(x: frame.midX, y: frame.maxY))
+        ctx.move(to: CGPoint(x: frame.minX, y: frame.midY))
+        ctx.addLine(to: CGPoint(x: frame.maxX, y: frame.midY))
+        ctx.strokePath()
+        ctx.restoreGState()
+        // Border.
+        ctx.setStrokeColor(NSColor.white.withAlphaComponent(0.8).cgColor)
+        ctx.setLineWidth(1)
+        ctx.addPath(clip)
+        ctx.strokePath()
+        // Pixel coordinate readout under the loupe.
+        let px = Int((point.x * scale).rounded())
+        let py = Int(((bounds.height - point.y) * scale).rounded())
+        let label = "\(px), \(py)" as NSString
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: NSColor.white,
+        ]
+        let lsize = label.size(withAttributes: attrs)
+        let bg = CGRect(x: frame.midX - lsize.width / 2 - 4, y: frame.minY - lsize.height - 6,
+                        width: lsize.width + 8, height: lsize.height + 4)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.7).cgColor)
+        ctx.fill(bg)
+        label.draw(at: NSPoint(x: bg.minX + 4, y: bg.minY + 2), withAttributes: attrs)
+    }
+
+    // MARK: - Mouse / keyboard
+
+    override func mouseDown(with event: NSEvent) {
+        guard mode == .region else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        dragStart = p
+        mouseLocation = p
+        isDragging = true
+        currentRect = .zero
+        needsDisplay = true
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard mode == .region, let start = dragStart else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        mouseLocation = p
+        currentRect = SelectionGeometry.clamped(
+            SelectionGeometry.normalizedRect(from: start, to: p),
+            to: bounds
+        )
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        isDragging = false
+        switch mode {
+        case .region:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { onCancel?(); return }
+            commitRegion(currentRect)
+        case .window:
+            guard let win = hoveredWindow else { onCancel?(); return }
+            onWindow?(win.id, globalScreenFrame(forCGWindow: win.frame))
+        case .fullscreen:
+            onCancel?()
+        }
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        mouseLocation = local
+        if mode == .window {
+            hoveredWindow = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
+        }
+        needsDisplay = true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 53: // Esc
+            onCancel?()
+        case 36, 76: // Return / keypad Enter — commit a reused or nudged selection
+            guard mode == .region, !SelectionGeometry.isTooSmall(currentRect) else { return }
+            commitRegion(currentRect)
+        case 123, 124, 125, 126: // arrow keys nudge/resize an existing selection
+            handleArrowKey(event)
+        default:
+            break
+        }
+    }
+
+    /// Arrow keys move the selection (Shift = 10pt steps); holding Option resizes
+    /// it from the origin instead. No-op until a selection exists.
+    private func handleArrowKey(_ event: NSEvent) {
+        guard mode == .region, !currentRect.isEmpty else { return }
+        let step: CGFloat = event.modifierFlags.contains(.shift) ? 10 : 1
+        let resize = event.modifierFlags.contains(.option)
+        var dx: CGFloat = 0, dy: CGFloat = 0
+        switch event.keyCode {
+        case 123: dx = -step // left
+        case 124: dx = step  // right
+        case 125: dy = -step // down
+        case 126: dy = step  // up
+        default: break
+        }
+        if resize {
+            currentRect = SelectionGeometry.resized(currentRect, dw: dx, dh: dy, in: bounds)
+        } else {
+            currentRect = SelectionGeometry.moved(currentRect, dx: dx, dy: dy, in: bounds)
+        }
+        needsDisplay = true
+    }
+
+    // MARK: - Commit
+
+    private func commitRegion(_ rect: CGRect) {
+        // Convert the selection from view points (bottom-left) into the frozen
+        // image's pixel space (top-left) using the display's backing scale.
+        let scale = backingScale
+        let pixelRect = CGRect(
+            x: rect.minX * scale,
+            y: (bounds.height - rect.maxY) * scale,
+            width: rect.width * scale,
+            height: rect.height * scale
+        )
+        guard let cropped = frozen.cropping(to: pixelRect) else { onCancel?(); return }
+        onRegion?(cropped, CGRect(origin: globalPoint(rect.origin), size: rect.size))
+    }
+}
+
+extension NSScreen {
+    static var screenUnderMouse: NSScreen? {
+        let loc = NSEvent.mouseLocation
+        return screens.first { $0.frame.contains(loc) }
+    }
+
+    var displayID: CGDirectDisplayID? {
+        (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+    }
+}

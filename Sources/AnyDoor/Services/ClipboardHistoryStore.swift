@@ -485,6 +485,56 @@ final class ClipboardHistoryStore {
         }
     }
 
+    /// Records a screenshot from in-memory PNG bytes (the capture pipeline already
+    /// holds the image, so it does not round-trip through the pasteboard). Mirrors
+    /// `recordScreenshotFromPasteboard()`.
+    /// Records a captured screenshot into history. Returns the new item's id so
+    /// callers (e.g. the capture overlay's delete action) can remove this exact
+    /// entry later; returns nil if no container is configured or the write fails.
+    @discardableResult
+    func recordScreenshot(pngData: Data) async -> UUID? {
+        guard let container = modelContainer else { return nil }
+        do {
+            let id = UUID()
+            let directory = historyDirectoryProvider()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let fileName = "\(id.uuidString).png"
+            try pngData.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+
+            let item = ClipboardHistoryItem(
+                id: id,
+                kind: .screenshot,
+                fileName: fileName,
+                // Stored empty so ClipboardHistoryRow can resolve the title via
+                // L(...) at render time. Persisting a localized string here
+                // would freeze it in the language active at capture time.
+                previewTitle: "",
+                previewSubtitle: nil,
+                createdAt: now()
+            )
+            container.mainContext.insert(item)
+            try container.mainContext.save()
+            await pruneExpiredAndOverflow(force: true)
+            await reload(kind: .screenshot)
+            return id
+        } catch {
+            historyLogger.error("Failed to record screenshot history: \(error)")
+            return nil
+        }
+    }
+
+    /// Deletes a screenshot history entry by id (and its on-disk PNG). Used by the
+    /// capture overlay's delete action so removing a just-taken screenshot also
+    /// clears it from history.
+    func deleteScreenshot(id: UUID) async {
+        guard let container = modelContainer else { return }
+        let descriptor = FetchDescriptor<ClipboardHistoryItem>(
+            predicate: #Predicate { $0.id == id }
+        )
+        guard let item = try? container.mainContext.fetch(descriptor).first else { return }
+        await delete(item)
+    }
+
     func copyToPasteboard(_ item: ClipboardHistoryItem) async throws {
         guard let kind = item.historyKind else { throw ClipboardHistoryError.missingText }
         let pasteboard = NSPasteboard.general

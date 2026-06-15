@@ -201,7 +201,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         removeKeyMonitor()
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = event.keyCode
-            let consumed = MainActor.assumeIsolated {
+            let consumed = MainThreadIsolation.run {
                 self?.handle(keyCode: keyCode) ?? false
             }
             return consumed ? nil : event

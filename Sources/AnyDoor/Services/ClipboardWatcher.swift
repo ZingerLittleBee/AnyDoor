@@ -41,10 +41,14 @@ final class ClipboardWatcher {
     func start() {
         guard timer == nil else { return }
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                let task: Task<Void, Never> = Task { await self?.poll() }
-                _ = task
-            }
+            // Hop to the main actor by enqueuing a task rather than
+            // MainActor.assumeIsolated. assumeIsolated's
+            // swift_task_isCurrentExecutor check can fault on the main thread
+            // after a ScreenCaptureKit capture leaves the thread's executor
+            // tracking dangling (see MainThreadIsolation). `poll()` is async, so
+            // a Task hop is the natural form here; synchronous callbacks use
+            // MainThreadIsolation.run instead.
+            Task { @MainActor in await self?.poll() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
