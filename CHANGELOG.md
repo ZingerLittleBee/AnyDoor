@@ -48,6 +48,9 @@ versioning.
 - The capture-menu entry now opens the pre-shown selection directly with an attached
   toolbar (region / window / fullscreen) instead of a separate type-picker bar; the
   standalone floating mode bar was removed.
+- The capture toolbar now also offers scrolling and recording, acting on the current
+  selection — scrolling stitches the selected viewport and recording captures the
+  selected region, instead of each starting its own separate selection.
 
 ### Fixed
 
