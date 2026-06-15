@@ -43,6 +43,12 @@ versioning.
   (resize handles + move + new-drag), restored from the last selection across
   launches or centered by default.
 
+### Changed
+
+- The capture-menu entry now opens the pre-shown selection directly with an attached
+  toolbar (region / window / fullscreen) instead of a separate type-picker bar; the
+  standalone floating mode bar was removed.
+
 ### Fixed
 
 - Screen capture no longer crashes on macOS 26: a still capture corrupted the
