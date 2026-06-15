@@ -113,6 +113,12 @@ final class CaptureCoordinator {
                 self?.present(image: cgImage, anchor: nil)
                 self?.finish()
             }
+        case let .scrolling(rect):
+            finish()
+            ScrollCaptureCoordinator.shared.capture(region: rect)
+        case let .recording(rect):
+            finish()
+            RecordingCoordinator.shared.record(rect: rect)
         case .cancelled:
             finish()
         }

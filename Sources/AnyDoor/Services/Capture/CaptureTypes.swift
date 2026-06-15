@@ -47,5 +47,10 @@ enum SelectionResult: Sendable {
     /// clean frozen still directly (no re-grab); `frame` is the display's global
     /// AppKit frame (for symmetry — the output overlay uses no anchor here).
     case fullscreen(image: CGImage, frame: CGRect)
+    /// Scrolling capture requested on the current selection; `rect` is global
+    /// AppKit coords. No image — the live scroll engine grabs after the overlay clears.
+    case scrolling(rect: CGRect)
+    /// Screen recording requested on the current selection; `rect` is global AppKit coords.
+    case recording(rect: CGRect)
     case cancelled
 }
