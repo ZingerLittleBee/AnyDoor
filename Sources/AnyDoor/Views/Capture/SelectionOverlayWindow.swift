@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import SwiftUI
 
 /// Presents a full-screen, non-activating selection overlay over a pre-captured
 /// display, letting the user pick either a region (drag a rectangle, cropped from
@@ -64,6 +65,7 @@ final class SelectionOverlayWindow {
             )
             view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
             view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
+            view.onFullscreen = { [weak self] image, frame in self?.finish(.fullscreen(image: image, frame: frame)) }
             view.onCancel = { [weak self] in self?.finish(.cancelled) }
             p.contentView = view
             p.orderFrontRegardless()
@@ -101,6 +103,7 @@ private final class SelectionPanel: NSPanel {
 private final class SelectionOverlayView: NSView {
     var onRegion: ((CGImage, CGRect) -> Void)?
     var onWindow: ((CGWindowID, CGRect) -> Void)?
+    var onFullscreen: ((CGImage, CGRect) -> Void)?
     var onCancel: (() -> Void)?
 
     private let mode: CaptureMode
@@ -113,6 +116,13 @@ private final class SelectionOverlayView: NSView {
     private var currentRect: CGRect = .zero
     private var hoveredWindow: CapturableWindow?
     private var mouseLocation: CGPoint
+
+    /// The attached toolbar (region/window/fullscreen), hosted as a subview and
+    /// repositioned below the selection on every change. Only built for an overlay
+    /// whose initial mode is `.region` (the unified entry); the standalone window
+    /// overlay has no toolbar.
+    private var toolbarHost: NSHostingView<CaptureSelectionToolbar>?
+    private static let toolbarGap: CGFloat = 10
 
     /// Active mouse interaction for region mode.
     private enum DragMode: Equatable { case none, creating, moving, resizing(SelectionHandle) }
@@ -154,6 +164,17 @@ private final class SelectionOverlayView: NSView {
         )
         addTrackingArea(area)
         NSCursor.crosshair.set()
+        // Build the attached toolbar only for the unified region entry; the
+        // standalone window overlay has no toolbar.
+        if mode == .region {
+            let host = NSHostingView(rootView: CaptureSelectionToolbar(active: .region) { [weak self] picked in
+                self?.toolbarPicked(picked)
+            })
+            host.translatesAutoresizingMaskIntoConstraints = true   // we set .frame manually
+            addSubview(host)
+            toolbarHost = host
+        }
+        layoutToolbar()
     }
     required init?(coder: NSCoder) { fatalError() }
     override var acceptsFirstResponder: Bool { true }
@@ -363,6 +384,7 @@ private final class SelectionOverlayView: NSView {
             }
         }
         needsDisplay = true
+        layoutToolbar()
     }
 
     private func beginCreating(at p: CGPoint) {
@@ -388,6 +410,7 @@ private final class SelectionOverlayView: NSView {
             break
         }
         needsDisplay = true
+        layoutToolbar()
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -399,6 +422,7 @@ private final class SelectionOverlayView: NSView {
             // adjusted pre-shown rect is kept. Commit happens on Enter (Phase 1).
             if wasCreating, SelectionGeometry.isTooSmall(currentRect) { currentRect = .zero }
             needsDisplay = true
+            layoutToolbar()
         case .window:
             guard let win = hoveredWindow else { onCancel?(); return }
             onWindow?(win.id, globalScreenFrame(forCGWindow: win.frame))
@@ -464,6 +488,7 @@ private final class SelectionOverlayView: NSView {
             currentRect = SelectionGeometry.moved(currentRect, dx: dx, dy: dy, in: bounds)
         }
         needsDisplay = true
+        layoutToolbar()
     }
 
     // MARK: - Commit
@@ -480,6 +505,45 @@ private final class SelectionOverlayView: NSView {
         )
         guard let cropped = frozen.cropping(to: pixelRect) else { onCancel?(); return }
         onRegion?(cropped, CGRect(origin: globalPoint(rect.origin), size: rect.size))
+    }
+
+    // MARK: - Attached toolbar
+
+    /// Position the toolbar below the current selection (flipping above near the
+    /// screen bottom) and hide it unless a region selection is being shown.
+    private func layoutToolbar() {
+        guard let host = toolbarHost else { return }
+        let show = (mode == .region) && !currentRect.isEmpty
+        host.isHidden = !show
+        guard show else { return }
+        let size = host.fittingSize
+        host.frame = OverlayPlacement.frame(
+            forRegion: currentRect, overlaySize: size, onScreen: bounds, gap: Self.toolbarGap
+        )
+    }
+
+    /// Dispatch a toolbar button: commit the current region, return the frozen
+    /// still for fullscreen, or switch the live overlay into window-pick.
+    private func toolbarPicked(_ mode: CaptureMode) {
+        switch mode {
+        case .region:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { return }
+            commitRegion(currentRect)
+        case .fullscreen:
+            // The frozen still is the clean full display; return it directly.
+            onFullscreen?(frozen, CGRect(origin: globalPoint(.zero), size: bounds.size))
+        case .window:
+            enterWindowSubMode()   // implemented in Task 5
+        }
+    }
+
+    /// Toolbar "window" → switch the live overlay into window-pick. Fleshed out
+    /// in Task 5; stubbed here so the toolbar dispatch compiles.
+    private func enterWindowSubMode() {}
+
+    override func layout() {
+        super.layout()
+        layoutToolbar()
     }
 }
 
