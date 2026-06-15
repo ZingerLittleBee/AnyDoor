@@ -162,7 +162,7 @@ private final class SelectionOverlayView: NSView {
     // Keep the crosshair cursor while the pointer is over the overlay; AppKit
     // otherwise resets it to the arrow as the mouse moves.
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
+        // Cursor is managed in `mouseMoved` (crosshair vs. resize vs. move).
     }
 
     // MARK: - Coordinate conversions
@@ -227,11 +227,12 @@ private final class SelectionOverlayView: NSView {
                 ctx.draw(frozen, in: bounds)
                 ctx.restoreGState()
                 drawSelectionChrome(currentRect, ctx: ctx)
+                drawHandles(currentRect, ctx: ctx)
             }
-            // Crosshair + magnifier loupe guide the cursor during selection. The
-            // full-screen crosshair is redundant with the selection rect mid-drag.
-            if !isDragging { drawCrosshair(at: mouseLocation, ctx: ctx) }
-            drawLoupe(at: mouseLocation, ctx: ctx)
+            // The crosshair guides a fresh drag; the loupe aids precise creating
+            // and resizing. Neither shows while idle or moving a pre-shown rect.
+            if isCreatingDrag { drawCrosshair(at: mouseLocation, ctx: ctx) }
+            if showsLoupe { drawLoupe(at: mouseLocation, ctx: ctx) }
         case .window:
             if let win = hoveredWindow {
                 let local = localRect(forCGWindow: win.frame)
@@ -243,6 +244,18 @@ private final class SelectionOverlayView: NSView {
             }
         case .fullscreen:
             break
+        }
+    }
+
+    private func drawHandles(_ rect: CGRect, ctx: CGContext) {
+        let rects = SelectionGeometry.handleRects(for: rect, handleSize: Self.handleVisualSize)
+        for handle in SelectionHandle.allCases {
+            guard let hr = rects[handle] else { continue }
+            ctx.setFillColor(NSColor.white.cgColor)
+            ctx.fill(hr)
+            ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+            ctx.setLineWidth(1)
+            ctx.stroke(hr)
         }
     }
 
@@ -401,8 +414,22 @@ private final class SelectionOverlayView: NSView {
         mouseLocation = local
         if mode == .window {
             hoveredWindow = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
+        } else if mode == .region, !currentRect.isEmpty {
+            updateCursor(for: SelectionGeometry.hitTest(local, in: currentRect, handleSize: Self.handleHitSize))
         }
         needsDisplay = true
+    }
+
+    /// Best-effort resize/move cursors. AppKit has no public diagonal resize
+    /// cursor, so corners fall back to the crosshair.
+    private func updateCursor(for hit: SelectionHit) {
+        switch hit {
+        case .handle(.left), .handle(.right): NSCursor.resizeLeftRight.set()
+        case .handle(.top), .handle(.bottom): NSCursor.resizeUpDown.set()
+        case .handle: NSCursor.crosshair.set()
+        case .inside: NSCursor.openHand.set()
+        case .outside: NSCursor.crosshair.set()
+        }
     }
 
     override func keyDown(with event: NSEvent) {
