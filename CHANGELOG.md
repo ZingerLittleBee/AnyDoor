@@ -39,6 +39,9 @@ versioning.
   redaction bar, numbered step counters, select/move, and non-destructive crop,
   with per-tool color / stroke width / fill / text size, undo/redo, and export to
   copy / save / pin.
+- Region screenshot now opens with a pre-shown, mouse-adjustable selection
+  (resize handles + move + new-drag), restored from the last selection across
+  launches or centered by default.
 
 ### Fixed
 
