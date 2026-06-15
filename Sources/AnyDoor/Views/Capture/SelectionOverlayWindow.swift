@@ -66,6 +66,8 @@ final class SelectionOverlayWindow {
             view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
             view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
             view.onFullscreen = { [weak self] image, frame in self?.finish(.fullscreen(image: image, frame: frame)) }
+            view.onScrolling = { [weak self] rect in self?.finish(.scrolling(rect: rect)) }
+            view.onRecording = { [weak self] rect in self?.finish(.recording(rect: rect)) }
             view.onCancel = { [weak self] in self?.finish(.cancelled) }
             p.contentView = view
             p.orderFrontRegardless()
@@ -104,6 +106,8 @@ private final class SelectionOverlayView: NSView {
     var onRegion: ((CGImage, CGRect) -> Void)?
     var onWindow: ((CGWindowID, CGRect) -> Void)?
     var onFullscreen: ((CGImage, CGRect) -> Void)?
+    var onScrolling: ((CGRect) -> Void)?
+    var onRecording: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
 
     private var mode: CaptureMode
@@ -529,9 +533,10 @@ private final class SelectionOverlayView: NSView {
     }
 
     /// Dispatch a toolbar button: commit the current region, return the frozen
-    /// still for fullscreen, or switch the live overlay into window-pick.
-    private func toolbarPicked(_ mode: CaptureMode) {
-        switch mode {
+    /// still for fullscreen, switch the live overlay into window-pick, or hand the
+    /// current rect (global AppKit coords) to the scrolling/recording coordinators.
+    private func toolbarPicked(_ tool: CaptureToolType) {
+        switch tool {
         case .region:
             guard !SelectionGeometry.isTooSmall(currentRect) else { return }
             commitRegion(currentRect)
@@ -540,6 +545,12 @@ private final class SelectionOverlayView: NSView {
             onFullscreen?(frozen, CGRect(origin: globalPoint(.zero), size: bounds.size))
         case .window:
             enterWindowSubMode()
+        case .scrolling:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { return }
+            onScrolling?(CGRect(origin: globalPoint(currentRect.origin), size: currentRect.size))
+        case .recording:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { return }
+            onRecording?(CGRect(origin: globalPoint(currentRect.origin), size: currentRect.size))
         }
     }
 

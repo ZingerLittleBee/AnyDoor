@@ -2,16 +2,16 @@ import XCTest
 @testable import AnyDoor
 
 final class CaptureToolbarPolicyTests: XCTestCase {
-    func testPhase2ModesAreRegionWindowFullscreenInOrder() {
-        XCTAssertEqual(CaptureToolbarPolicy.modes, [.region, .window, .fullscreen])
+    func testToolsAreTheFiveCaptureTypesInOrder() {
+        XCTAssertEqual(CaptureToolbarPolicy.tools,
+                       [.region, .window, .fullscreen, .scrolling, .recording])
     }
 
     @MainActor
-    func testEveryModeHasASymbolAndLabelKey() {
-        for mode in CaptureToolbarPolicy.modes {
-            XCTAssertFalse(CaptureToolbarPolicy.symbol(for: mode).isEmpty)
-            // label key resolves to a non-empty localized string
-            XCTAssertFalse(L(CaptureToolbarPolicy.labelKey(for: mode)).isEmpty)
+    func testEveryToolHasASymbolAndLabelKey() {
+        for tool in CaptureToolbarPolicy.tools {
+            XCTAssertFalse(CaptureToolbarPolicy.symbol(for: tool).isEmpty)
+            XCTAssertFalse(L(CaptureToolbarPolicy.labelKey(for: tool)).isEmpty)
         }
     }
 }

@@ -9,6 +9,13 @@ enum CaptureMode: String, Sendable, CaseIterable {
     case fullscreen
 }
 
+/// The capture types offered by the attached selection toolbar. A superset of
+/// `CaptureMode`: region/window/fullscreen are still-capture modes, while
+/// scrolling/recording hand the current rect to their own live coordinators.
+enum CaptureToolType: String, CaseIterable, Sendable {
+    case region, window, fullscreen, scrolling, recording
+}
+
 /// A capture the coordinator should perform. `delay` is the self-timer countdown
 /// in seconds (0 = immediate). For `region`/`window`, selection happens first,
 /// then the countdown, then the grab — so the user can arrange transient UI.
