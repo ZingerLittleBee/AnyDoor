@@ -64,4 +64,46 @@ enum SelectionGeometry {
         y = min(max(y, bounds.minY), bounds.maxY - loupeSize)
         return CGRect(x: x, y: y, width: loupeSize, height: loupeSize)
     }
+
+    /// The eight `handleSize`-square handle frames centered on the rect's
+    /// corners and edge midpoints (y-up).
+    static func handleRects(for rect: CGRect, handleSize: CGFloat) -> [SelectionHandle: CGRect] {
+        let half = handleSize / 2
+        func square(_ cx: CGFloat, _ cy: CGFloat) -> CGRect {
+            CGRect(x: cx - half, y: cy - half, width: handleSize, height: handleSize)
+        }
+        return [
+            .topLeft: square(rect.minX, rect.maxY),
+            .top: square(rect.midX, rect.maxY),
+            .topRight: square(rect.maxX, rect.maxY),
+            .right: square(rect.maxX, rect.midY),
+            .bottomRight: square(rect.maxX, rect.minY),
+            .bottom: square(rect.midX, rect.minY),
+            .bottomLeft: square(rect.minX, rect.minY),
+            .left: square(rect.minX, rect.midY),
+        ]
+    }
+
+    /// Classifies `p` against the selection: a handle (checked first, in a fixed
+    /// order so overlaps are deterministic), the interior, or outside.
+    static func hitTest(_ p: CGPoint, in rect: CGRect, handleSize: CGFloat) -> SelectionHit {
+        let rects = handleRects(for: rect, handleSize: handleSize)
+        for handle in SelectionHandle.allCases where rects[handle]?.contains(p) == true {
+            return .handle(handle)
+        }
+        return rect.contains(p) ? .inside : .outside
+    }
+}
+
+/// The eight resize anchors of a selection rectangle (y-up: `top` = maxY).
+enum SelectionHandle: Equatable, CaseIterable {
+    case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
+}
+
+/// The part of a selection a point lands on, used to route a mouse-down to
+/// resize / move / create-new.
+enum SelectionHit: Equatable {
+    case handle(SelectionHandle)
+    case inside
+    case outside
 }

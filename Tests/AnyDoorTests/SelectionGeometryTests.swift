@@ -77,4 +77,23 @@ final class SelectionGeometryTests: XCTestCase {
         XCTAssertLessThanOrEqual(r.maxY, bounds.maxY)
         XCTAssertLessThan(r.minX, 590) // placed to the left of the cursor
     }
+
+    // MARK: - Handles
+
+    func testHandleRectsCenteredOnCornersAndEdges() {
+        let rect = CGRect(x: 100, y: 100, width: 200, height: 100) // maxX 300, maxY 200, mid (200,150)
+        let h = SelectionGeometry.handleRects(for: rect, handleSize: 10)
+        XCTAssertEqual(h.count, 8)
+        XCTAssertEqual(h[.topLeft], CGRect(x: 95, y: 195, width: 10, height: 10))
+        XCTAssertEqual(h[.bottomRight], CGRect(x: 295, y: 95, width: 10, height: 10))
+        XCTAssertEqual(h[.right], CGRect(x: 295, y: 145, width: 10, height: 10))
+        XCTAssertEqual(h[.top], CGRect(x: 195, y: 195, width: 10, height: 10))
+    }
+
+    func testHitTestPrioritizesHandlesThenInsideThenOutside() {
+        let rect = CGRect(x: 100, y: 100, width: 200, height: 100)
+        XCTAssertEqual(SelectionGeometry.hitTest(CGPoint(x: 100, y: 200), in: rect, handleSize: 16), .handle(.topLeft))
+        XCTAssertEqual(SelectionGeometry.hitTest(CGPoint(x: 200, y: 150), in: rect, handleSize: 16), .inside)
+        XCTAssertEqual(SelectionGeometry.hitTest(CGPoint(x: 10, y: 10), in: rect, handleSize: 16), .outside)
+    }
 }
