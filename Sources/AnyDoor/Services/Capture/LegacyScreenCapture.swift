@@ -28,6 +28,7 @@ enum LegacyScreenCapture {
     // alongside the functions, so use the documented bit values directly).
     private static let kOptionIncludingWindow: UInt32 = 1 << 3   // .optionIncludingWindow
     private static let kImageBestResolution: UInt32 = 1 << 3     // .bestResolution (shadow kept)
+    private static let kOptionOnScreenBelowWindow: UInt32 = 1 << 2  // .optionOnScreenBelowWindow
 
     private static let frameworkPath =
         "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
@@ -53,5 +54,12 @@ enum LegacyScreenCapture {
     /// `CGRect.null` makes CoreGraphics use the window's own bounds.
     static func window(_ windowID: CGWindowID) -> CGImage? {
         windowFn?(.null, kOptionIncludingWindow, windowID, kImageBestResolution)?.takeRetainedValue()
+    }
+
+    /// A still of everything on screen *below* `windowID`, clipped to `bounds`
+    /// (CG global coordinates, top-left origin). Scrolling capture uses this to grab
+    /// the viewport without the session's own preview/outline windows in the shot.
+    static func belowWindow(_ windowID: CGWindowID, bounds: CGRect) -> CGImage? {
+        windowFn?(bounds, kOptionOnScreenBelowWindow, windowID, kImageBestResolution)?.takeRetainedValue()
     }
 }

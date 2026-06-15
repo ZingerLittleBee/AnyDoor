@@ -9,6 +9,13 @@ enum CaptureMode: String, Sendable, CaseIterable {
     case fullscreen
 }
 
+/// The capture types offered by the attached selection toolbar. A superset of
+/// `CaptureMode`: region/window/fullscreen are still-capture modes, while
+/// scrolling/recording hand the current rect to their own live coordinators.
+enum CaptureToolType: String, CaseIterable, Sendable {
+    case region, window, fullscreen, scrolling, recording
+}
+
 /// A capture the coordinator should perform. `delay` is the self-timer countdown
 /// in seconds (0 = immediate). For `region`/`window`, selection happens first,
 /// then the countdown, then the grab — so the user can arrange transient UI.
@@ -43,5 +50,14 @@ enum SelectionResult: Sendable {
     /// A window was picked; the coordinator grabs it crisply via `LegacyScreenCapture`.
     /// `frame` is the window's global AppKit screen frame for overlay placement.
     case window(id: CGWindowID, frame: CGRect)
+    /// Whole-display capture chosen from the toolbar. The overlay returns its
+    /// clean frozen still directly (no re-grab); `frame` is the display's global
+    /// AppKit frame (for symmetry — the output overlay uses no anchor here).
+    case fullscreen(image: CGImage, frame: CGRect)
+    /// Scrolling capture requested on the current selection; `rect` is global
+    /// AppKit coords. No image — the live scroll engine grabs after the overlay clears.
+    case scrolling(rect: CGRect)
+    /// Screen recording requested on the current selection; `rect` is global AppKit coords.
+    case recording(rect: CGRect)
     case cancelled
 }

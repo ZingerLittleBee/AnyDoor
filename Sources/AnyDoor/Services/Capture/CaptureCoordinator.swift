@@ -19,12 +19,7 @@ final class CaptureCoordinator {
     private let settings: CaptureSettings
     private let selectionOverlay = SelectionOverlayWindow()
     private var lastRegionRequest: CaptureRequest?
-    /// The last committed region rect (global AppKit coordinates), pre-filled into
-    /// the selection overlay on re-capture so the previous selection can be reused.
-    private var lastRegionRect: CGRect = .zero
     private var inFlight = false
-    /// Set for the next capture only, to reuse the previous selection rect.
-    private var reuseLastRect = false
 
     init(settings: CaptureSettings = .shared) {
         self.settings = settings
@@ -49,19 +44,6 @@ final class CaptureCoordinator {
         }
     }
 
-    /// Opens the All-In-One mode bar; the chosen mode starts a capture.
-    func presentModeBar() {
-        CaptureModeBarWindow.shared.present(
-            onPick: { [weak self] mode in self?.capture(CaptureRequest(mode: mode)) },
-            onTimer: { [weak self] in
-                guard let self else { return }
-                self.capture(CaptureRequest(mode: .region, delay: self.settings.delaySeconds))
-            },
-            onRecord: { RecordingCoordinator.shared.record(region: true) },
-            onScroll: { ScrollCaptureCoordinator.shared.capture() }
-        )
-    }
-
     /// Delivers an externally produced capture (e.g. a stitched scrolling
     /// capture) through the standard output policy: auto-save / auto-copy /
     /// history / quick-access overlay.
@@ -74,26 +56,50 @@ final class CaptureCoordinator {
     private func captureRegion(delay: Int) {
         let (targets, frozen) = Self.resolveAllDisplays()
         guard !targets.isEmpty else { finish(); return }
-        let initialRect = reuseLastRect ? lastRegionRect : .zero
-        reuseLastRect = false
+        let initialRect = Self.initialSelectionRect(targets: targets, settings: settings)
         selectionOverlay.present(targets: targets, mode: .region, frozen: frozen, initialRect: initialRect) { [weak self] result in
-            guard let self else { return }
-            guard case let .region(cgImage, rect) = result else { self.finish(); return }
-            self.lastRegionRect = rect
-            self.afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage, anchor: rect)
-                self?.finish()
-            }
+            self?.handle(result, delay: delay)
         }
+    }
+
+    /// The pre-shown selection rect (global AppKit coords): the persisted last
+    /// rect when its center lies on a connected display, else a default rect
+    /// centered on the display under the cursor (or the first display).
+    @MainActor private static func initialSelectionRect(targets: [TargetDisplay], settings: CaptureSettings) -> CGRect {
+        let displays = targets.map(\.frame)
+        if let restored = SelectionGeometry.restoredRect(last: settings.lastRegionRect, displays: displays) {
+            // Clamp to the display holding its center so a rect saved at a larger
+            // resolution cannot pre-show off-screen edges after a display change.
+            let center = CGPoint(x: restored.midX, y: restored.midY)
+            let display = displays.first(where: { $0.contains(center) }) ?? displays[0]
+            return SelectionGeometry.clamped(restored, to: display)
+        }
+        let mouse = NSEvent.mouseLocation
+        let screen = targets.first(where: { $0.frame.contains(mouse) })?.frame ?? targets[0].frame
+        return SelectionGeometry.defaultCenteredRect(in: screen, fraction: 0.5)
     }
 
     private func captureWindow(delay: Int) {
         let (targets, frozen) = Self.resolveAllDisplays()
         guard !targets.isEmpty else { finish(); return }
         selectionOverlay.present(targets: targets, mode: .window, frozen: frozen) { [weak self] result in
-            guard let self else { return }
-            guard case let .window(id, frame) = result else { self.finish(); return }
-            self.afterCountdown(delay) { [weak self] in
+            self?.handle(result, delay: delay)
+        }
+    }
+
+    /// Routes a selection overlay result through the output policy. Shared by the
+    /// unified region overlay (which can return region/window/fullscreen via the
+    /// toolbar) and the standalone window overlay.
+    private func handle(_ result: SelectionResult, delay: Int) {
+        switch result {
+        case let .region(cgImage, rect):
+            settings.setLastRegionRect(rect)
+            afterCountdown(delay) { [weak self] in
+                self?.present(image: cgImage, anchor: rect)
+                self?.finish()
+            }
+        case let .window(id, frame):
+            afterCountdown(delay) { [weak self] in
                 guard let self else { return }
                 guard let cg = LegacyScreenCapture.window(id) else {
                     ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
@@ -102,6 +108,19 @@ final class CaptureCoordinator {
                 self.present(image: cg, anchor: frame)
                 self.finish()
             }
+        case let .fullscreen(cgImage, _):
+            afterCountdown(delay) { [weak self] in
+                self?.present(image: cgImage, anchor: nil)
+                self?.finish()
+            }
+        case let .scrolling(rect):
+            finish()
+            ScrollCaptureCoordinator.shared.capture(region: rect)
+        case let .recording(rect):
+            finish()
+            RecordingCoordinator.shared.record(rect: rect)
+        case .cancelled:
+            finish()
         }
     }
 
@@ -282,10 +301,8 @@ final class CaptureCoordinator {
     }
 
     private func recapture() {
-        // Reuse the previous region rect when re-capturing a region.
-        let request = lastRegionRequest ?? CaptureRequest(mode: .region)
-        if request.mode == .region, !lastRegionRect.isEmpty { reuseLastRect = true }
-        capture(request)
+        // The previous region rect is restored automatically from settings.
+        capture(lastRegionRequest ?? CaptureRequest(mode: .region))
     }
 }
 

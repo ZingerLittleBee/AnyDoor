@@ -64,4 +64,89 @@ enum SelectionGeometry {
         y = min(max(y, bounds.minY), bounds.maxY - loupeSize)
         return CGRect(x: x, y: y, width: loupeSize, height: loupeSize)
     }
+
+    /// The eight `handleSize`-square handle frames centered on the rect's
+    /// corners and edge midpoints (y-up).
+    static func handleRects(for rect: CGRect, handleSize: CGFloat) -> [SelectionHandle: CGRect] {
+        let half = handleSize / 2
+        func square(_ cx: CGFloat, _ cy: CGFloat) -> CGRect {
+            CGRect(x: cx - half, y: cy - half, width: handleSize, height: handleSize)
+        }
+        return [
+            .topLeft: square(rect.minX, rect.maxY),
+            .top: square(rect.midX, rect.maxY),
+            .topRight: square(rect.maxX, rect.maxY),
+            .right: square(rect.maxX, rect.midY),
+            .bottomRight: square(rect.maxX, rect.minY),
+            .bottom: square(rect.midX, rect.minY),
+            .bottomLeft: square(rect.minX, rect.minY),
+            .left: square(rect.minX, rect.midY),
+        ]
+    }
+
+    /// Classifies `p` against the selection: a handle (checked first, in a fixed
+    /// order so overlaps are deterministic), the interior, or outside.
+    static func hitTest(_ p: CGPoint, in rect: CGRect, handleSize: CGFloat) -> SelectionHit {
+        let rects = handleRects(for: rect, handleSize: handleSize)
+        for handle in SelectionHandle.allCases where rects[handle]?.contains(p) == true {
+            return .handle(handle)
+        }
+        return rect.contains(p) ? .inside : .outside
+    }
+
+    /// Resizes `rect` by dragging `handle` to `point`, keeping the opposite
+    /// edge/corner anchored, enforcing `minSize` per axis, and clamping the
+    /// moving edges inside `bounds` (y-up). When the anchor edge sits within
+    /// `minSize` of the bounds edge, the result may be smaller than `minSize`
+    /// on that axis (bounds win over minSize).
+    static func resizing(_ rect: CGRect, handle: SelectionHandle, to point: CGPoint, in bounds: CGRect, minSize: CGFloat) -> CGRect {
+        var minX = rect.minX, maxX = rect.maxX
+        var minY = rect.minY, maxY = rect.maxY
+
+        let movesLeft = handle == .topLeft || handle == .left || handle == .bottomLeft
+        let movesRight = handle == .topRight || handle == .right || handle == .bottomRight
+        let movesTop = handle == .topLeft || handle == .top || handle == .topRight
+        let movesBottom = handle == .bottomLeft || handle == .bottom || handle == .bottomRight
+
+        if movesLeft { minX = min(point.x, maxX - minSize) }
+        if movesRight { maxX = max(point.x, minX + minSize) }
+        if movesBottom { minY = min(point.y, maxY - minSize) }
+        if movesTop { maxY = max(point.y, minY + minSize) }
+
+        minX = max(minX, bounds.minX)
+        maxX = min(maxX, bounds.maxX)
+        minY = max(minY, bounds.minY)
+        maxY = min(maxY, bounds.maxY)
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// A rectangle centered in `bounds`, each edge `fraction` of the
+    /// corresponding bounds edge (fraction 0.5 = half width and half height).
+    static func defaultCenteredRect(in bounds: CGRect, fraction: CGFloat) -> CGRect {
+        let w = bounds.width * fraction
+        let h = bounds.height * fraction
+        return CGRect(x: bounds.midX - w / 2, y: bounds.midY - h / 2, width: w, height: h)
+    }
+
+    /// Returns `last` when its center lies within one of `displays`, else nil —
+    /// used to decide whether a persisted selection can be restored.
+    static func restoredRect(last: CGRect?, displays: [CGRect]) -> CGRect? {
+        guard let last, !last.isEmpty else { return nil }
+        let center = CGPoint(x: last.midX, y: last.midY)
+        return displays.contains(where: { $0.contains(center) }) ? last : nil
+    }
+}
+
+/// The eight resize anchors of a selection rectangle (y-up: `top` = maxY).
+enum SelectionHandle: Equatable, CaseIterable {
+    case topLeft, top, topRight, right, bottomRight, bottom, bottomLeft, left
+}
+
+/// The part of a selection a point lands on, used to route a mouse-down to
+/// resize / move / create-new.
+enum SelectionHit: Equatable {
+    case handle(SelectionHandle)
+    case inside
+    case outside
 }

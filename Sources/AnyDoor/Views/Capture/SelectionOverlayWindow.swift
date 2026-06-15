@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import SwiftUI
 
 /// Presents a full-screen, non-activating selection overlay over a pre-captured
 /// display, letting the user pick either a region (drag a rectangle, cropped from
@@ -46,6 +47,9 @@ final class SelectionOverlayWindow {
             p.hasShadow = false
             p.hidesOnDeactivate = false
             p.isReleasedWhenClosed = false
+            // No appear/disappear animation: a full-screen frozen still otherwise
+            // scale-fades in, which reads as the whole screen briefly zooming.
+            p.animationBehavior = .none
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
 
             // The reused rect arrives in global AppKit coordinates; pre-draw it
@@ -64,17 +68,22 @@ final class SelectionOverlayWindow {
             )
             view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
             view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
+            view.onFullscreen = { [weak self] image, frame in self?.finish(.fullscreen(image: image, frame: frame)) }
+            view.onScrolling = { [weak self] rect in self?.finish(.scrolling(rect: rect)) }
+            view.onRecording = { [weak self] rect in self?.finish(.recording(rect: rect)) }
             view.onCancel = { [weak self] in self?.finish(.cancelled) }
             p.contentView = view
             p.orderFrontRegardless()
-            // Make the panel under the cursor key so it receives Esc / arrow keys.
-            if target.frame.contains(mouse) {
+            // Key the panel that shows the initial selection (so Enter/Esc/arrows
+            // reach it); fall back to the panel under the cursor.
+            let keyAnchor = initialRect.isEmpty ? mouse : CGPoint(x: initialRect.midX, y: initialRect.midY)
+            if target.frame.contains(keyAnchor) {
                 p.makeKeyAndOrderFront(nil)
                 p.makeFirstResponder(view)
             }
             panels.append(p)
         }
-        // Fall back to keying the first panel if the cursor was off all displays.
+        // Fall back to keying the first panel if the anchor was off all displays.
         if !panels.contains(where: { $0.isKeyWindow }), let first = panels.first {
             first.makeKeyAndOrderFront(nil)
             first.makeFirstResponder(first.contentView)
@@ -99,19 +108,49 @@ private final class SelectionPanel: NSPanel {
 private final class SelectionOverlayView: NSView {
     var onRegion: ((CGImage, CGRect) -> Void)?
     var onWindow: ((CGWindowID, CGRect) -> Void)?
+    var onFullscreen: ((CGImage, CGRect) -> Void)?
+    var onScrolling: ((CGRect) -> Void)?
+    var onRecording: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
 
-    private let mode: CaptureMode
+    private var mode: CaptureMode
+    private let initialMode: CaptureMode
     private let screenFrame: CGRect
     private let backingScale: CGFloat
     private let frozen: CGImage
-    private let windows: [CapturableWindow]
+    private var windows: [CapturableWindow]
 
     private var dragStart: CGPoint?
     private var currentRect: CGRect = .zero
     private var hoveredWindow: CapturableWindow?
     private var mouseLocation: CGPoint
-    private var isDragging = false
+
+    /// The attached toolbar (region/window/fullscreen), hosted as a subview and
+    /// repositioned below the selection on every change. Only built for an overlay
+    /// whose initial mode is `.region` (the unified entry); the standalone window
+    /// overlay has no toolbar.
+    private var toolbarHost: NSHostingView<CaptureSelectionToolbar>?
+    private static let toolbarGap: CGFloat = 10
+
+    /// Active mouse interaction for region mode.
+    private enum DragMode: Equatable { case none, creating, moving, resizing(SelectionHandle) }
+    private var dragMode: DragMode = .none
+    /// Mouse point and rect captured at mouse-down, for move/resize math.
+    private var dragOrigin: CGPoint = .zero
+    private var rectAtDragStart: CGRect = .zero
+
+    /// Handle sizes: a small drawn square, a larger invisible grab area.
+    private static let handleVisualSize: CGFloat = 8
+    private static let handleHitSize: CGFloat = 16
+
+    private var isCreatingDrag: Bool { dragMode == .creating }
+    private var showsLoupe: Bool {
+        switch dragMode {
+        case .creating: return true
+        case .resizing: return true
+        case .none, .moving: return false
+        }
+    }
 
     /// Magnifier loupe dimensions, in points.
     private static let loupeSize: CGFloat = 120
@@ -119,6 +158,7 @@ private final class SelectionOverlayView: NSView {
 
     init(mode: CaptureMode, screenFrame: CGRect, backingScale: CGFloat, frozen: CGImage, initialRect: CGRect = .zero) {
         self.mode = mode
+        self.initialMode = mode
         self.screenFrame = screenFrame
         self.backingScale = backingScale
         self.frozen = frozen
@@ -133,6 +173,17 @@ private final class SelectionOverlayView: NSView {
         )
         addTrackingArea(area)
         NSCursor.crosshair.set()
+        // Build the attached toolbar only for the unified region entry; the
+        // standalone window overlay has no toolbar.
+        if mode == .region {
+            let host = NSHostingView(rootView: CaptureSelectionToolbar(active: .region) { [weak self] picked in
+                self?.toolbarPicked(picked)
+            })
+            host.translatesAutoresizingMaskIntoConstraints = true   // we set .frame manually
+            addSubview(host)
+            toolbarHost = host
+        }
+        layoutToolbar()
     }
     required init?(coder: NSCoder) { fatalError() }
     override var acceptsFirstResponder: Bool { true }
@@ -140,7 +191,7 @@ private final class SelectionOverlayView: NSView {
     // Keep the crosshair cursor while the pointer is over the overlay; AppKit
     // otherwise resets it to the arrow as the mouse moves.
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
+        // Cursor is managed in `mouseMoved` (crosshair vs. resize vs. move).
     }
 
     // MARK: - Coordinate conversions
@@ -205,11 +256,12 @@ private final class SelectionOverlayView: NSView {
                 ctx.draw(frozen, in: bounds)
                 ctx.restoreGState()
                 drawSelectionChrome(currentRect, ctx: ctx)
+                drawHandles(currentRect, ctx: ctx)
             }
-            // Crosshair + magnifier loupe guide the cursor during selection. The
-            // full-screen crosshair is redundant with the selection rect mid-drag.
-            if !isDragging { drawCrosshair(at: mouseLocation, ctx: ctx) }
-            drawLoupe(at: mouseLocation, ctx: ctx)
+            // The crosshair guides a fresh drag; the loupe aids precise creating
+            // and resizing. Neither shows while idle or moving a pre-shown rect.
+            if isCreatingDrag { drawCrosshair(at: mouseLocation, ctx: ctx) }
+            if showsLoupe { drawLoupe(at: mouseLocation, ctx: ctx) }
         case .window:
             if let win = hoveredWindow {
                 let local = localRect(forCGWindow: win.frame)
@@ -221,6 +273,18 @@ private final class SelectionOverlayView: NSView {
             }
         case .fullscreen:
             break
+        }
+    }
+
+    private func drawHandles(_ rect: CGRect, ctx: CGContext) {
+        let rects = SelectionGeometry.handleRects(for: rect, handleSize: Self.handleVisualSize)
+        for handle in SelectionHandle.allCases {
+            guard let hr = rects[handle] else { continue }
+            ctx.setFillColor(NSColor.white.cgColor)
+            ctx.fill(hr)
+            ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+            ctx.setLineWidth(1)
+            ctx.stroke(hr)
         }
     }
 
@@ -315,30 +379,59 @@ private final class SelectionOverlayView: NSView {
     override func mouseDown(with event: NSEvent) {
         guard mode == .region else { return }
         let p = convert(event.locationInWindow, from: nil)
-        dragStart = p
         mouseLocation = p
-        isDragging = true
-        currentRect = .zero
+        dragOrigin = p
+        rectAtDragStart = currentRect
+
+        if currentRect.isEmpty {
+            beginCreating(at: p)
+        } else {
+            switch SelectionGeometry.hitTest(p, in: currentRect, handleSize: Self.handleHitSize) {
+            case .handle(let h): dragMode = .resizing(h)
+            case .inside: dragMode = .moving
+            case .outside: beginCreating(at: p)
+            }
+        }
         needsDisplay = true
+        layoutToolbar()
+    }
+
+    private func beginCreating(at p: CGPoint) {
+        dragMode = .creating
+        dragStart = p
+        currentRect = .zero
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard mode == .region, let start = dragStart else { return }
+        guard mode == .region else { return }
         let p = convert(event.locationInWindow, from: nil)
         mouseLocation = p
-        currentRect = SelectionGeometry.clamped(
-            SelectionGeometry.normalizedRect(from: start, to: p),
-            to: bounds
-        )
+        switch dragMode {
+        case .creating:
+            guard let start = dragStart else { return }
+            currentRect = SelectionGeometry.clamped(SelectionGeometry.normalizedRect(from: start, to: p), to: bounds)
+        case .moving:
+            NSCursor.closedHand.set()
+            currentRect = SelectionGeometry.moved(rectAtDragStart, dx: p.x - dragOrigin.x, dy: p.y - dragOrigin.y, in: bounds)
+        case .resizing(let h):
+            currentRect = SelectionGeometry.resizing(rectAtDragStart, handle: h, to: p, in: bounds, minSize: SelectionGeometry.minimumEdge)
+        case .none:
+            break
+        }
         needsDisplay = true
+        layoutToolbar()
     }
 
     override func mouseUp(with event: NSEvent) {
-        isDragging = false
         switch mode {
         case .region:
-            guard !SelectionGeometry.isTooSmall(currentRect) else { onCancel?(); return }
-            commitRegion(currentRect)
+            let wasCreating = isCreatingDrag
+            dragMode = .none
+            // A too-small fresh drag resets to empty so the user can retry; an
+            // adjusted pre-shown rect is kept. Commit happens on Enter (Phase 1).
+            if wasCreating, SelectionGeometry.isTooSmall(currentRect) { currentRect = .zero }
+            needsDisplay = true
+            layoutToolbar()
         case .window:
             guard let win = hoveredWindow else { onCancel?(); return }
             onWindow?(win.id, globalScreenFrame(forCGWindow: win.frame))
@@ -350,16 +443,39 @@ private final class SelectionOverlayView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let local = convert(event.locationInWindow, from: nil)
         mouseLocation = local
-        if mode == .window {
+        // The toolbar is a SwiftUI subview, but this view's full-bounds tracking
+        // area still fires here, so it would otherwise force the selection
+        // crosshair over the buttons. Show a pointer cursor over the toolbar.
+        if let host = toolbarHost, !host.isHidden, host.frame.contains(local) {
+            NSCursor.pointingHand.set()
+        } else if mode == .window {
             hoveredWindow = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
+        } else if mode == .region, !currentRect.isEmpty {
+            updateCursor(for: SelectionGeometry.hitTest(local, in: currentRect, handleSize: Self.handleHitSize))
         }
         needsDisplay = true
+    }
+
+    /// Best-effort resize/move cursors. AppKit has no public diagonal resize
+    /// cursor, so corners fall back to the crosshair.
+    private func updateCursor(for hit: SelectionHit) {
+        switch hit {
+        case .handle(.left), .handle(.right): NSCursor.resizeLeftRight.set()
+        case .handle(.top), .handle(.bottom): NSCursor.resizeUpDown.set()
+        case .handle: NSCursor.crosshair.set()
+        case .inside: NSCursor.openHand.set()
+        case .outside: NSCursor.crosshair.set()
+        }
     }
 
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 53: // Esc
-            onCancel?()
+            if mode == .window && initialMode == .region {
+                exitToRegionMode()   // return to region instead of cancelling
+            } else {
+                onCancel?()
+            }
         case 36, 76: // Return / keypad Enter — commit a reused or nudged selection
             guard mode == .region, !SelectionGeometry.isTooSmall(currentRect) else { return }
             commitRegion(currentRect)
@@ -390,6 +506,7 @@ private final class SelectionOverlayView: NSView {
             currentRect = SelectionGeometry.moved(currentRect, dx: dx, dy: dy, in: bounds)
         }
         needsDisplay = true
+        layoutToolbar()
     }
 
     // MARK: - Commit
@@ -406,6 +523,67 @@ private final class SelectionOverlayView: NSView {
         )
         guard let cropped = frozen.cropping(to: pixelRect) else { onCancel?(); return }
         onRegion?(cropped, CGRect(origin: globalPoint(rect.origin), size: rect.size))
+    }
+
+    // MARK: - Attached toolbar
+
+    /// Position the toolbar below the current selection (flipping above near the
+    /// screen bottom) and hide it unless a region selection is being shown.
+    private func layoutToolbar() {
+        guard let host = toolbarHost else { return }
+        let show = (mode == .region) && !currentRect.isEmpty
+        host.isHidden = !show
+        guard show else { return }
+        let size = host.fittingSize
+        host.frame = OverlayPlacement.frame(
+            forRegion: currentRect, overlaySize: size, onScreen: bounds, gap: Self.toolbarGap
+        )
+    }
+
+    /// Dispatch a toolbar button: commit the current region, return the frozen
+    /// still for fullscreen, switch the live overlay into window-pick, or hand the
+    /// current rect (global AppKit coords) to the scrolling/recording coordinators.
+    private func toolbarPicked(_ tool: CaptureToolType) {
+        switch tool {
+        case .region:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { return }
+            commitRegion(currentRect)
+        case .fullscreen:
+            // The frozen still is the clean full display; return it directly.
+            onFullscreen?(frozen, CGRect(origin: globalPoint(.zero), size: bounds.size))
+        case .window:
+            enterWindowSubMode()
+        case .scrolling:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { return }
+            onScrolling?(CGRect(origin: globalPoint(currentRect.origin), size: currentRect.size))
+        case .recording:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { return }
+            onRecording?(CGRect(origin: globalPoint(currentRect.origin), size: currentRect.size))
+        }
+    }
+
+    /// Toolbar "window" → switch the live overlay into window-pick: hide the rect +
+    /// toolbar, enumerate windows, highlight on hover, commit on click.
+    private func enterWindowSubMode() {
+        windows = WindowEnumerator.onScreenWindows()
+        mode = .window
+        hoveredWindow = nil
+        layoutToolbar()     // hides the toolbar (mode != .region)
+        NSCursor.crosshair.set()
+        needsDisplay = true
+    }
+
+    /// Esc from a toolbar-entered window sub-mode returns to region selection.
+    private func exitToRegionMode() {
+        mode = .region
+        hoveredWindow = nil
+        layoutToolbar()     // re-shows the toolbar
+        needsDisplay = true
+    }
+
+    override func layout() {
+        super.layout()
+        layoutToolbar()
     }
 }
 

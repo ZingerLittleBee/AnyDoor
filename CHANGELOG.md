@@ -18,10 +18,12 @@ versioning.
   point alongside per-mode hotkeys, and captures can be pinned on-screen as
   always-on-top floating references.
 - Scrolling capture: capture content taller than the screen. Select a viewport
-  over a scrollable area and AnyDoor auto-scrolls it, losslessly stitching the
-  frames (overlap-aligned, pixel-exact) into one tall image that flows through
-  the same save / copy / edit / pin / history output as any capture. Reachable
-  from the All-In-One menu, a dedicated builtin, and a hotkey.
+  over a scrollable area, then scroll the target yourself in an interactive
+  session (CleanShot X style) with a live preview and Done/Cancel while AnyDoor
+  stitches the frames (overlap-aligned, pixel-exact) into one tall image that
+  flows through the same save / copy / edit / pin / history output as any
+  capture. The session's own preview and outline windows are excluded from the
+  shot. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey.
 - Screen recording: record the full display or a selected region to MOV, MP4, or
   animated GIF via AVFoundation, with a configurable frame rate, optional cursor
   capture, microphone audio, a draggable webcam overlay, and an on-screen
@@ -39,6 +41,18 @@ versioning.
   redaction bar, numbered step counters, select/move, and non-destructive crop,
   with per-tool color / stroke width / fill / text size, undo/redo, and export to
   copy / save / pin.
+- Region screenshot now opens with a pre-shown, mouse-adjustable selection
+  (resize handles + move + new-drag), restored from the last selection across
+  launches or centered by default.
+
+### Changed
+
+- The capture-menu entry now opens the pre-shown selection directly with an attached
+  toolbar (region / window / fullscreen) instead of a separate type-picker bar; the
+  standalone floating mode bar was removed.
+- The capture toolbar now also offers scrolling and recording, acting on the current
+  selection — scrolling stitches the selected viewport and recording captures the
+  selected region, instead of each starting its own separate selection.
 
 ### Fixed
 

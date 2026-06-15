@@ -57,8 +57,15 @@ enum MainThreadEventMonitor {
 
     nonisolated static func localMouse(_ action: @escaping @MainActor (Int?) -> Void) -> (NSEvent) -> NSEvent? {
         { event in
-            let windowNumber = event.window?.windowNumber
-            MainThreadIsolation.run { action(windowNumber) }
+            // `NSWindow.windowNumber` is @MainActor under the macOS 26 SDK, so the
+            // read must happen in the main-actor block (the monitor already fires on
+            // the main thread). `event` is non-Sendable and gets returned below, so
+            // alias it nonisolated(unsafe) to hand it into that block without a
+            // spurious "sending" data-race diagnostic.
+            nonisolated(unsafe) let sendableEvent = event
+            MainThreadIsolation.run {
+                action(sendableEvent.window?.windowNumber)
+            }
             return event
         }
     }

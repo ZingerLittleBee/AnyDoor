@@ -408,6 +408,10 @@ enum L10n {
         case captureEditorToolRedaction = "capture.editor.tool.redaction"
         case captureEditorToolCrop = "capture.editor.tool.crop"
         case captureWindowPickHint = "capture.window.pickHint"
+        case captureScrollTitle = "capture.scroll.title"
+        case captureScrollDone = "capture.scroll.done"
+        case captureScrollCancel = "capture.scroll.cancel"
+        case captureScrollCaptured = "capture.scroll.captured"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
