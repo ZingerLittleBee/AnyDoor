@@ -13,10 +13,10 @@ combination to launch and toggle apps, flip system settings, or run one-off
 actions — all without leaving the keyboard.
 
 Press a shortcut to open an app. Press it again to hide it. Use the same
-muscle memory to mute audio, lock the screen, sample a color, or OCR a screen
-region — and reach for clipboard history, window layouts, `/etc/hosts`
-profiles, external-display brightness, a Hyper Key, and a Spotlight-style
-command palette when you need them.
+muscle memory to mute audio, lock the screen, sample a color, OCR a screen
+region, or capture and record the screen — and reach for clipboard history,
+window layouts, `/etc/hosts` profiles, external-display brightness, a Hyper
+Key, and a Spotlight-style command palette when you need them.
 
 ## Features
 
@@ -45,10 +45,43 @@ command palette when you need them.
 - Lock Screen, Display Sleep, System Sleep
 - Empty Trash, Flush DNS cache
 - Restart Finder / Dock / SystemUIServer + ControlCenter
-- Screenshot to clipboard (interactive region capture)
 - OCR a screen region — Vision framework recognizes text and copies it
 - Scan QR / barcode — decode a code on screen and copy its payload
 - Pick Color — system color sampler captures HEX into the clipboard
+
+### Screen capture
+
+- One capture menu, one selection: a hotkey freezes the screen and shows a
+  pre-adjustable selection (resize handles, move, re-drag; restored from the
+  last selection) with an attached toolbar that switches tool on the fly —
+  **region**, **window**, **fullscreen**, **scrolling**, and **recording**.
+- Region, window, fullscreen, and timed capture — each also bindable to its
+  own hotkey — over a freeze-screen overlay with a crosshair, live dimensions,
+  a magnifier loupe, and arrow-key nudge/resize across every connected display.
+- **Scrolling capture** for content taller than the screen: an interactive,
+  CleanShot X-style session. You scroll the target while AnyDoor grabs and
+  stitches frames live (overlap-aligned, pixel-exact) behind a growing preview
+  with a Done / Cancel bar; the session's own windows never enter the shot.
+- **Quick-access overlay** beside the selection after a shot: copy, save, edit,
+  pin on screen, OCR, re-capture, and delete (delete also drops it from
+  clipboard history).
+- **Annotation editor**: arrow, line, rectangle, ellipse, freehand,
+  highlighter, text, blur, pixelate, redaction bar, numbered step counters, and
+  non-destructive crop — with per-tool color / stroke / fill, undo/redo, and
+  export to copy / save / pin.
+- Pin any capture on screen as an always-on-top floating reference.
+- Capture settings: save location, filename template, auto-save / auto-copy,
+  timer-delay presets (3 / 5 / 10s), and quick-access overlay timeout.
+
+### Screen recording
+
+- Record the full display or a selected region to **MOV**, **MP4**, or animated
+  **GIF** via AVFoundation, with a configurable frame rate and optional cursor
+  capture, microphone audio, a draggable webcam overlay, and an on-screen
+  keystroke display.
+- A floating control bar shows elapsed time with pause / resume and stop; the
+  finished file is exported in the chosen format and revealed in Finder.
+- System (application) audio is not captured — only the microphone.
 
 ### Clipboard history
 
