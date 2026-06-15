@@ -103,4 +103,48 @@ final class SelectionGeometryTests: XCTestCase {
         let rect = CGRect(x: 0, y: 0, width: 4, height: 4)
         XCTAssertEqual(SelectionGeometry.hitTest(CGPoint(x: 2, y: 2), in: rect, handleSize: 16), .handle(.topLeft))
     }
+
+    // MARK: - Handle resize
+
+    func testResizingCornerKeepsOppositeAnchored() {
+        let rect = CGRect(x: 100, y: 100, width: 200, height: 100) // maxX 300, maxY 200
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+        let r = SelectionGeometry.resizing(rect, handle: .bottomLeft, to: CGPoint(x: 150, y: 120), in: bounds, minSize: 10)
+        XCTAssertEqual(r, CGRect(x: 150, y: 120, width: 150, height: 80))
+    }
+
+    func testResizingEnforcesMinSizeAgainstOppositeEdge() {
+        let rect = CGRect(x: 100, y: 100, width: 200, height: 100)
+        let bounds = CGRect(x: 0, y: 0, width: 1000, height: 1000)
+        let r = SelectionGeometry.resizing(rect, handle: .right, to: CGPoint(x: 50, y: 150), in: bounds, minSize: 20)
+        XCTAssertEqual(r, CGRect(x: 100, y: 100, width: 20, height: 100))
+    }
+
+    func testResizingClampsToBounds() {
+        let rect = CGRect(x: 100, y: 100, width: 200, height: 100)
+        let bounds = CGRect(x: 0, y: 0, width: 250, height: 250)
+        let r = SelectionGeometry.resizing(rect, handle: .topRight, to: CGPoint(x: 400, y: 400), in: bounds, minSize: 10)
+        XCTAssertEqual(r, CGRect(x: 100, y: 100, width: 150, height: 150))
+    }
+
+    // MARK: - Default + restore
+
+    func testDefaultCenteredRectHalfSize() {
+        let r = SelectionGeometry.defaultCenteredRect(in: CGRect(x: 0, y: 0, width: 1000, height: 800), fraction: 0.5)
+        XCTAssertEqual(r, CGRect(x: 250, y: 200, width: 500, height: 400))
+    }
+
+    func testDefaultCenteredRectWithNegativeOrigin() {
+        let r = SelectionGeometry.defaultCenteredRect(in: CGRect(x: -1000, y: 100, width: 800, height: 600), fraction: 0.5)
+        XCTAssertEqual(r, CGRect(x: -800, y: 250, width: 400, height: 300))
+    }
+
+    func testRestoredRectOnlyWhenCenterOnADisplay() {
+        let d1 = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let d2 = CGRect(x: 1000, y: 0, width: 1000, height: 800)
+        let onD2 = CGRect(x: 1200, y: 100, width: 200, height: 100)
+        XCTAssertEqual(SelectionGeometry.restoredRect(last: onD2, displays: [d1, d2]), onD2)
+        XCTAssertNil(SelectionGeometry.restoredRect(last: CGRect(x: 5000, y: 100, width: 200, height: 100), displays: [d1, d2]))
+        XCTAssertNil(SelectionGeometry.restoredRect(last: nil, displays: [d1, d2]))
+    }
 }

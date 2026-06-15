@@ -93,6 +93,47 @@ enum SelectionGeometry {
         }
         return rect.contains(p) ? .inside : .outside
     }
+
+    /// Resizes `rect` by dragging `handle` to `point`, keeping the opposite
+    /// edge/corner anchored, enforcing `minSize` per axis, and clamping the
+    /// moving edges inside `bounds` (y-up).
+    static func resizing(_ rect: CGRect, handle: SelectionHandle, to point: CGPoint, in bounds: CGRect, minSize: CGFloat) -> CGRect {
+        var minX = rect.minX, maxX = rect.maxX
+        var minY = rect.minY, maxY = rect.maxY
+
+        let movesLeft = handle == .topLeft || handle == .left || handle == .bottomLeft
+        let movesRight = handle == .topRight || handle == .right || handle == .bottomRight
+        let movesTop = handle == .topLeft || handle == .top || handle == .topRight
+        let movesBottom = handle == .bottomLeft || handle == .bottom || handle == .bottomRight
+
+        if movesLeft { minX = min(point.x, maxX - minSize) }
+        if movesRight { maxX = max(point.x, minX + minSize) }
+        if movesBottom { minY = min(point.y, maxY - minSize) }
+        if movesTop { maxY = max(point.y, minY + minSize) }
+
+        minX = max(minX, bounds.minX)
+        maxX = min(maxX, bounds.maxX)
+        minY = max(minY, bounds.minY)
+        maxY = min(maxY, bounds.maxY)
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    /// A rectangle centered in `bounds`, each edge `fraction` of the
+    /// corresponding bounds edge (fraction 0.5 = half width and half height).
+    static func defaultCenteredRect(in bounds: CGRect, fraction: CGFloat) -> CGRect {
+        let w = bounds.width * fraction
+        let h = bounds.height * fraction
+        return CGRect(x: bounds.midX - w / 2, y: bounds.midY - h / 2, width: w, height: h)
+    }
+
+    /// Returns `last` when its center lies within one of `displays`, else nil —
+    /// used to decide whether a persisted selection can be restored.
+    static func restoredRect(last: CGRect?, displays: [CGRect]) -> CGRect? {
+        guard let last, !last.isEmpty else { return nil }
+        let center = CGPoint(x: last.midX, y: last.midY)
+        return displays.contains(where: { $0.contains(center) }) ? last : nil
+    }
 }
 
 /// The eight resize anchors of a selection rectangle (y-up: `top` = maxY).
