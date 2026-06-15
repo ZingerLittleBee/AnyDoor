@@ -30,7 +30,8 @@ final class CaptureSettings {
     private(set) var lastRegionRect: CGRect?
 
     private static func readRect(_ defaults: UserDefaults, _ key: String) -> CGRect? {
-        guard let a = defaults.array(forKey: key) as? [Double], a.count == 4 else { return nil }
+        guard let a = defaults.array(forKey: key) as? [Double], a.count == 4,
+              a.allSatisfy({ $0.isFinite }) else { return nil }
         return CGRect(x: a[0], y: a[1], width: a[2], height: a[3])
     }
 
