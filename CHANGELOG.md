@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-06-16
+
 ### Changed
 
 - The post-capture quick-access overlay no longer floats beside the selection;

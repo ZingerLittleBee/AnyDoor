@@ -3,70 +3,65 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>2.6.0</title>
+            <pubDate>Tue, 16 Jun 2026 21:55:37 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>2.6.0</sparkle:version>
+            <sparkle:shortVersionString>2.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Changed
+
+- The post-capture quick-access overlay no longer floats beside the selection;
+  it now docks in the bottom-left of the active screen, reworked into a
+  drag-to-share thumbnail plus a grid of quick actions (copy / save / edit /
+  pin / OCR / re-capture / delete). Placement no longer depends on the captured
+  region.
+- The annotation editor is reorganized into a CleanShot X-style layout: a single
+  top toolbar (undo/redo, grouped drawing tools, and the export actions) with a
+  contextual style bar beneath it — color swatches, a custom color picker, stroke
+  width, and tool-specific font-size / fill controls — and the image floating on a
+  neutral backdrop. The editor window now sizes to the screenshot's aspect ratio
+  and comes to the front on open (the capture overlay is a non-activating panel,
+  so the editor previously opened behind the captured app).
+- The annotation crop tool now applies live: the canvas crops and zooms to fit the
+  chosen region as you drag, instead of only dimming a preview and cropping on
+  export. The crop commits on mouse-up and is undoable, and annotations drawn
+  after a crop stay aligned.
+
+### Fixed
+
+- Annotated images no longer export upside-down. The renderer's coordinate space
+  did not match its flipped drawing context, so the composited image — and every
+  annotation drawn on it — came out vertically mirrored.
+- Closing the annotation editor window no longer crashes. The window over-released
+  itself because `isReleasedWhenClosed` was left at its default; it now matches the
+  other window controllers in the app.
+- Undo / redo in the annotation editor take effect immediately. The toolbar chrome
+  did not observe document mutations, so the buttons stayed stale and the canvas
+  did not redraw after an undo/redo; the canvas now also handles the standard
+  Cmd-Z / Shift-Cmd-Z keys.
+- The capture mode bar's buttons are fully clickable. A plain SwiftUI button only
+  hit-tests its opaque glyph, leaving the label text and surrounding padding as
+  dead zones; the entire padded icon + label area is now the hit target, with a
+  hover highlight for affordance.
+- Scrolling capture now stitches in both scroll directions. The stitcher only
+  detected downward scrolling (content moving up, new rows revealed at the bottom),
+  so scrolling up matched no overlap and nothing was appended past the seed frame;
+  it now prepends the new top rows when scrolling up.
+- Scrolling capture remembers and pre-shows the last selection like regular region
+  capture, instead of opening an empty selection every time.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.6.0/AnyDoor-2.6.0.zip" length="8195273" type="application/octet-stream" sparkle:edSignature="54wxR9btWekwE9uDOPQtxyRcyk+MsQ6hYcZ3BOPbqsoJr7sFZ0sWLueCKSTjG5rnXVOJeJBFVGyM2x5q5DGsCQ=="/>
+        </item>
+        <item>
             <title>2.5.0</title>
             <pubDate>Tue, 16 Jun 2026 01:31:06 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>2.5.0</sparkle:version>
             <sparkle:shortVersionString>2.5.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Screenshot capture suite: region, window, fullscreen, and timed capture with a
-  freeze-screen selection overlay (crosshair, live dimensions, magnifier loupe
-  with a pixel-coordinate readout, arrow-key nudge/resize, and last-selection
-  reuse). The selection overlay spans every connected display. After a capture a
-  quick-access overlay appears next to the selection with copy, save, edit, pin,
-  text extraction (OCR), re-capture, and delete (delete also removes the entry
-  from clipboard history). An All-In-One capture menu provides a single entry
-  point alongside per-mode hotkeys, and captures can be pinned on-screen as
-  always-on-top floating references.
-- Scrolling capture: capture content taller than the screen. Select a viewport
-  over a scrollable area, then scroll the target yourself in an interactive
-  session (CleanShot X style) with a live preview and Done/Cancel while AnyDoor
-  stitches the frames (overlap-aligned, pixel-exact) into one tall image that
-  flows through the same save / copy / edit / pin / history output as any
-  capture. The session's own preview and outline windows are excluded from the
-  shot. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey.
-- Screen recording: record the full display or a selected region to MOV, MP4, or
-  animated GIF via AVFoundation, with a configurable frame rate, optional cursor
-  capture, microphone audio, a draggable webcam overlay, and an on-screen
-  keystroke display. A floating control bar shows elapsed time with pause/resume
-  and stop; the finished file is exported in the chosen format and revealed in
-  Finder. Reachable from the All-In-One menu, a dedicated builtin, and a hotkey
-  (the hotkey toggles a fullscreen recording on and off). System (application)
-  audio is not captured — `AVCaptureScreenInput` cannot, ScreenCaptureKit is
-  avoided to dodge a macOS 26 crash, and a Core Audio tap is deferred; only the
-  microphone is recorded.
-- Screenshot settings tab: save location, filename template, auto-save /
-  auto-copy, timer-delay preset (3 / 5 / 10s), and quick-access overlay timeout.
-- Annotation editor (reached from the capture overlay's edit button): arrow,
-  line, rectangle, ellipse, freehand, highlighter, text, blur, pixelate,
-  redaction bar, numbered step counters, select/move, and non-destructive crop,
-  with per-tool color / stroke width / fill / text size, undo/redo, and export to
-  copy / save / pin.
-- Region screenshot now opens with a pre-shown, mouse-adjustable selection
-  (resize handles + move + new-drag), restored from the last selection across
-  launches or centered by default.
-
-### Changed
-
-- The capture-menu entry now opens the pre-shown selection directly with an attached
-  toolbar (region / window / fullscreen) instead of a separate type-picker bar; the
-  standalone floating mode bar was removed.
-- The capture toolbar now also offers scrolling and recording, acting on the current
-  selection — scrolling stitches the selected viewport and recording captures the
-  selected region, instead of each starting its own separate selection.
-
-### Fixed
-
-- Screen capture no longer crashes on macOS 26: a still capture corrupted the
-  main thread's Swift-concurrency executor tracking, after which hovering a
-  menu-bar row (or any other dynamic main-actor check) faulted. The capture
-  engine now uses synchronous CoreGraphics and hover handling avoids the broken
-  runtime check.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.5.0/AnyDoor-2.5.0.zip" length="8031238" type="application/octet-stream" sparkle:edSignature="DCjY8UeT0TcPjFWWlxApyjNtQ2CA5M2FHn2P7Onzy/vxXZua6NGKUp4KahLDGDHBXXRDDuqCy8TKbAVCOaHlCQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.5.0/AnyDoor-2.5.0.zip" length="8031238" type="application/octet-stream" sparkle:edSignature="DCjY8UeT0TcPjFWWlxApyjNtQ2CA5M2FHn2P7Onzy/vxXZua6NGKUp4KahLDGDHBXXRDDuqCy8TKbAVCOaHlCQ=="/>
         </item>
         <item>
             <title>2.4.0</title>
@@ -76,15 +71,6 @@
             <sparkle:shortVersionString>2.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.4.0/AnyDoor-2.4.0.zip" length="7484291" type="application/octet-stream" sparkle:edSignature="hR7u/bkbVXro0UiHBhsJlRS8MrN3+/VUz9yXlpmXWkM2jYJQYIaWJQ8jpvldYcXYoEojqyF+TUeGgA314/sgBQ=="/>
-        </item>
-        <item>
-            <title>2.3.1</title>
-            <pubDate>Sat, 13 Jun 2026 23:01:37 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>2.3.1</sparkle:version>
-            <sparkle:shortVersionString>2.3.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.3.1/AnyDoor-2.3.1.zip" length="7236561" type="application/octet-stream" sparkle:edSignature="bUu9PzoyhKOYzpxk0LdNoNTCCO0wyCd4o09bAb+amDNpdV3Cz6/Xqfumn+ZBrTxIpSPkrgQi6/7sQo3q1QaxAQ=="/>
         </item>
         <item>
             <title>1.2.0</title>
