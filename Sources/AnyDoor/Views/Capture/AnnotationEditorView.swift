@@ -117,9 +117,11 @@ struct AnnotationEditorView: View {
                 ForEach(Array(RGBAColor.palette.enumerated()), id: \.offset) { _, color in
                     swatch(color)
                 }
-                ColorPicker("", selection: customColor, supportsOpacity: false)
-                    .labelsHidden()
-                    .frame(width: 28)
+                CustomColorButton(
+                    isCustomActive: !RGBAColor.palette.contains(model.style.strokeColor),
+                    currentColor: model.style.strokeColor,
+                    onPick: { model.style.strokeColor = $0 }
+                )
             }
 
             Divider().frame(height: 22)
@@ -186,20 +188,6 @@ struct AnnotationEditorView: View {
             set: { model.style.fillColor = $0 ? model.style.strokeColor.withAlpha(0.25) : nil }
         )
     }
-    /// Two-way bridge between the model's pure `RGBAColor` and SwiftUI's `Color`
-    /// so the native picker can set an arbitrary custom stroke color.
-    private var customColor: Binding<Color> {
-        Binding(
-            get: { Color(nsColor: model.style.strokeColor.nsColor) },
-            set: { newValue in
-                guard let ns = NSColor(newValue).usingColorSpace(.sRGB) else { return }
-                model.style.strokeColor = RGBAColor(
-                    r: Double(ns.redComponent), g: Double(ns.greenComponent),
-                    b: Double(ns.blueComponent), a: Double(ns.alphaComponent)
-                )
-            }
-        )
-    }
 
     // MARK: - Export
 
@@ -256,5 +244,71 @@ struct AnnotationEditorView: View {
         case .redaction: return .captureEditorToolRedaction
         case .crop: return .captureEditorToolCrop
         }
+    }
+}
+
+/// A circular swatch — same shape, size, and spacing as the preset color dots —
+/// that opens the system color panel and applies the chosen color as the stroke
+/// color. Used instead of the native `ColorPicker`, which renders as a wide pill,
+/// keeps its own (unsuppressable) focus ring, and applied changes unreliably.
+/// Shows a rainbow until a non-preset color is active, then shows that color.
+private struct CustomColorButton: View {
+    let isCustomActive: Bool
+    let currentColor: RGBAColor
+    let onPick: (RGBAColor) -> Void
+    @State private var coordinator = ColorPanelCoordinator()
+
+    private static let rainbow = Gradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red])
+
+    var body: some View {
+        Button {
+            coordinator.present(initial: currentColor.nsColor, onChange: onPick)
+        } label: {
+            ZStack {
+                Group {
+                    if isCustomActive {
+                        Circle().fill(Color(nsColor: currentColor.nsColor))
+                    } else {
+                        Circle().fill(AngularGradient(gradient: Self.rainbow, center: .center))
+                    }
+                }
+                .frame(width: 18, height: 18)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+
+                Circle()
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .frame(width: 26, height: 26)
+                    .opacity(isCustomActive ? 1 : 0)
+            }
+            .frame(width: 26, height: 26)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Bridges the shared `NSColorPanel` to a SwiftUI button: presents the panel and
+/// forwards every color change to `onChange` in sRGB. Lives on the main actor
+/// since it touches AppKit and the editor model.
+@MainActor
+private final class ColorPanelCoordinator: NSObject {
+    private var onChange: ((RGBAColor) -> Void)?
+
+    func present(initial: NSColor, onChange: @escaping (RGBAColor) -> Void) {
+        self.onChange = onChange
+        let panel = NSColorPanel.shared
+        panel.showsAlpha = false
+        panel.color = initial
+        panel.setTarget(self)
+        panel.setAction(#selector(colorChanged(_:)))
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    @objc private func colorChanged(_ sender: NSColorPanel) {
+        guard let srgb = sender.color.usingColorSpace(.sRGB) else { return }
+        onChange?(RGBAColor(
+            r: Double(srgb.redComponent), g: Double(srgb.greenComponent),
+            b: Double(srgb.blueComponent), a: Double(srgb.alphaComponent)
+        ))
     }
 }
