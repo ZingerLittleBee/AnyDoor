@@ -43,6 +43,19 @@ final class ScrollCaptureEngineTests: XCTestCase {
         XCTAssertEqual(Set(sigs ?? []).count, 20) // every row distinct
     }
 
+    func testWideRowSignaturesStayDistinctAndIdentical() {
+        // Width far larger than the per-row sample budget forces the subsampling
+        // path (column stride > 1). Distinct rows must still fingerprint distinctly
+        // and identical rows must still collide.
+        let width = 1024
+        let distinct = ScrollCaptureEngine.rowSignatures(of: image(width: width, colors: distinctColors(40)))
+        XCTAssertEqual(distinct?.count, 40)
+        XCTAssertEqual(Set(distinct ?? []).count, 40) // every distinct row → distinct sig
+        let solid = ScrollCaptureEngine.rowSignatures(of: image(width: width, colors:
+            [(UInt8, UInt8, UInt8)](repeating: (5, 6, 7), count: 12)))
+        XCTAssertEqual(Set(solid ?? [1, 2]).count, 1)  // identical rows → one sig
+    }
+
     func testIdenticalRowsShareSignature() {
         let solid = [(UInt8, UInt8, UInt8)](repeating: (10, 20, 30), count: 8)
         let sigs = ScrollCaptureEngine.rowSignatures(of: image(width: 4, colors: solid))
