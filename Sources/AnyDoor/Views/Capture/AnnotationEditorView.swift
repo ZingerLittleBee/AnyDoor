@@ -37,6 +37,9 @@ struct AnnotationEditorView: View {
                 .background(Color(nsColor: .underPageBackgroundColor))
         }
         .frame(minWidth: 760, minHeight: 520)
+        // Suppress the blue keyboard-focus ring on the toolbar buttons and color
+        // picker; selection (filled tool, ringed swatch) and hover styling stay.
+        .focusEffectDisabled()
     }
 
     // MARK: - Top toolbar (undo/redo · tools · export)
