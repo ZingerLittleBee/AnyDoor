@@ -156,19 +156,23 @@ struct AnnotationEditorView: View {
 
     private func swatch(_ color: RGBAColor) -> some View {
         let selected = model.style.strokeColor == color
-        // Only near-black / near-white need an outline to separate from the dark bar;
-        // the vivid colors read cleanly without one. Selection is a concentric outer
-        // ring: the fill is padded symmetrically, so the ring shares its exact center
-        // and the dot stays the same size whether selected or not.
+        // Only near-black / near-white need a hairline to separate from the dark bar;
+        // the vivid colors read cleanly. The dot is a constant 18pt circle in both
+        // states, centered with the plate in one fixed 28pt frame, so they share a
+        // single origin and never drift relative to each other.
         let needsEdge = color == .black || color == .white
-        return Circle()
-            .fill(Color(nsColor: color.nsColor))
-            .frame(width: 18, height: 18)
-            .overlay(Circle().strokeBorder(Color.gray.opacity(needsEdge ? 0.5 : 0), lineWidth: 1))
-            .padding(4)
-            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2).opacity(selected ? 1 : 0))
-            .contentShape(Circle())
-            .onTapGesture { model.style.strokeColor = color }
+        return Button { model.style.strokeColor = color } label: {
+            ZStack {
+                SwatchSelectionPlate(active: selected)
+                Circle()
+                    .fill(Color(nsColor: color.nsColor))
+                    .frame(width: 18, height: 18)
+                    .overlay(Circle().strokeBorder(Color.gray.opacity(needsEdge ? 0.5 : 0), lineWidth: 1))
+            }
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Bindings
@@ -244,6 +248,27 @@ struct AnnotationEditorView: View {
     }
 }
 
+/// Selection indicator for color swatches (tldraw-style): a solid rounded-rect
+/// "plate" that lights up behind the dot — not a thin concentric ring with a gap.
+/// A filled shape has no edge that must stay equidistant from the round dot, so it
+/// can't look off-center or "shift" relative to the dot at sub-pixel layout offsets
+/// the way two independently-framed concentric circles do. It's always laid out;
+/// only its opacity toggles, so selecting never reflows the row.
+private struct SwatchSelectionPlate: View {
+    let active: Bool
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color.white.opacity(0.16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 1)
+            )
+            .frame(width: 24, height: 24)
+            .opacity(active ? 1 : 0)
+            .animation(.easeInOut(duration: 0.12), value: active)
+    }
+}
+
 /// A circular swatch — same shape, size, and spacing as the preset color dots —
 /// that opens the system color panel and applies the chosen color as the stroke
 /// color. Used instead of the native `ColorPicker`, which renders as a wide pill,
@@ -261,18 +286,20 @@ private struct CustomColorButton: View {
         Button {
             coordinator.present(initial: currentColor.nsColor, onChange: onPick)
         } label: {
-            Group {
-                if isCustomActive {
-                    Circle().fill(Color(nsColor: currentColor.nsColor))
-                } else {
-                    Circle().fill(AngularGradient(gradient: Self.rainbow, center: .center))
+            ZStack {
+                SwatchSelectionPlate(active: isCustomActive)
+                Group {
+                    if isCustomActive {
+                        Circle().fill(Color(nsColor: currentColor.nsColor))
+                    } else {
+                        Circle().fill(AngularGradient(gradient: Self.rainbow, center: .center))
+                    }
                 }
+                .frame(width: 18, height: 18)
+                .overlay(Circle().strokeBorder(Color.gray.opacity(0.3), lineWidth: 1))
             }
-            .frame(width: 18, height: 18)
-            .overlay(Circle().strokeBorder(Color.gray.opacity(0.3), lineWidth: 1))
-            .padding(4)
-            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2).opacity(isCustomActive ? 1 : 0))
-            .contentShape(Circle())
+            .frame(width: 28, height: 28)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
