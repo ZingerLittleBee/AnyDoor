@@ -35,6 +35,13 @@ enum AnnotationRenderer {
               )
         else { return nil }
 
+        // Flip the CTM to a top-left origin so it matches the `flipped: true` hint
+        // below — like drawing into a flipped NSView. The hint alone does NOT flip
+        // the CTM, so without this the base image renders upside down and elements
+        // (authored in top-left pixel space) land in bottom-left space.
+        ctx.translateBy(x: 0, y: CGFloat(h))
+        ctx.scaleBy(x: 1, y: -1)
+
         let ns = NSGraphicsContext(cgContext: ctx, flipped: true)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = ns
