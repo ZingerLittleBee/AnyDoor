@@ -20,7 +20,13 @@ struct AnnotationEditorView: View {
     ]
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Observe `revision` so the chrome re-evaluates on every document mutation:
+        // this keeps the undo/redo buttons' enabled state current AND re-runs the
+        // canvas's `updateNSView` (-> redraw) after a toolbar-triggered undo/redo.
+        // `canUndo`/`canRedo` read the non-Observable AnnotationDocument, so without
+        // this dependency SwiftUI never refreshes when only the document changes.
+        let _ = model.revision
+        return VStack(spacing: 0) {
             toolbar
             Divider()
             styleBar

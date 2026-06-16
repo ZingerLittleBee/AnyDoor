@@ -230,7 +230,14 @@ final class CanvasNSView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Delete removes the selected/last element; Cmd-Z / Cmd-Shift-Z undo/redo.
+        // Cmd-Z / Cmd-Shift-Z undo/redo (the canvas owns the keyboard while editing).
+        if event.modifierFlags.contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "z" {
+            if event.modifierFlags.contains(.shift) { model.redo() } else { model.undo() }
+            needsDisplay = true
+            return
+        }
+        // Delete removes the selected / last element.
         if event.keyCode == 51 || event.keyCode == 117 { // delete / forward-delete
             model.document.removeLast()
             model.noteMutation()
