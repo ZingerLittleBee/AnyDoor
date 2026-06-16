@@ -59,12 +59,13 @@ Key, and a Spotlight-style command palette when you need them.
   own hotkey — over a freeze-screen overlay with a crosshair, live dimensions,
   a magnifier loupe, and arrow-key nudge/resize across every connected display.
 - **Scrolling capture** for content taller than the screen: an interactive,
-  CleanShot X-style session. You scroll the target while AnyDoor grabs and
-  stitches frames live (overlap-aligned, pixel-exact) behind a growing preview
-  with a Done / Cancel bar; the session's own windows never enter the shot.
-- **Quick-access overlay** beside the selection after a shot: copy, save, edit,
-  pin on screen, OCR, re-capture, and delete (delete also drops it from
-  clipboard history).
+  CleanShot X-style session. You scroll the target — up or down — while AnyDoor
+  grabs and stitches frames live (overlap-aligned, pixel-exact) behind a growing
+  preview with a Done / Cancel bar; the session's own windows never enter the
+  shot, and it reuses your last selection.
+- **Quick-access overlay** docked in the bottom-left of the screen after a shot:
+  a drag-to-share thumbnail plus copy, save, edit, pin on screen, OCR,
+  re-capture, and delete (delete also drops it from clipboard history).
 - **Annotation editor**: arrow, line, rectangle, ellipse, freehand,
   highlighter, text, blur, pixelate, redaction bar, numbered step counters, and
   non-destructive crop — with per-tool color / stroke / fill, undo/redo, and

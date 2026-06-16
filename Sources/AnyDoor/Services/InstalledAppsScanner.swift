@@ -10,7 +10,11 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     var isSystemApp: Bool { path.hasPrefix("/System/") }
 }
 
-@MainActor
+/// Stateless filesystem scan for installed `.app` bundles. Deliberately
+/// `nonisolated`: it only touches `FileManager`/`Bundle` and returns a Sendable
+/// `[InstalledApp]`, so callers can (and the command palette does) run it off
+/// the main actor via `Task.detached` to keep summoning the palette from
+/// blocking on a `/Applications` walk + per-app Info.plist read.
 enum InstalledAppsScanner {
     /// Roots scanned for `.app` bundles (direct children only).
     private static let scanRoots: [String] = [

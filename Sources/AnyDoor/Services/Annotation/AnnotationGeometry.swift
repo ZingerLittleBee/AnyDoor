@@ -111,4 +111,24 @@ enum AnnotationGeometry {
             y: fitted.minY + p.y / imageSize.height * fitted.height
         )
     }
+
+    /// Converts a (flipped) canvas point into full-image pixel space when the canvas
+    /// is zoomed to show only `shownRect` of the image (the committed crop, or the
+    /// whole image). The result is in full-image coordinates so element geometry
+    /// stays in a single space regardless of the active crop.
+    static func viewToImage(_ p: CGPoint, fitted: CGRect, shownRect: CGRect) -> CGPoint {
+        let local = viewToImage(p, fitted: fitted, imageSize: shownRect.size)
+        return CGPoint(x: shownRect.minX + local.x, y: shownRect.minY + local.y)
+    }
+
+    /// Converts a full-image pixel rect into a view rect for a canvas zoomed to show
+    /// `shownRect`. Inverse of `viewToImage(_:fitted:shownRect:)` for rects.
+    static func imageToViewRect(_ rect: CGRect, fitted: CGRect, shownRect: CGRect) -> CGRect {
+        guard shownRect.width > 0, shownRect.height > 0 else { return .zero }
+        let local = CGPoint(x: rect.minX - shownRect.minX, y: rect.minY - shownRect.minY)
+        let origin = imageToView(local, fitted: fitted, imageSize: shownRect.size)
+        let scaleX = fitted.width / shownRect.width
+        let scaleY = fitted.height / shownRect.height
+        return CGRect(x: origin.x, y: origin.y, width: rect.width * scaleX, height: rect.height * scaleY)
+    }
 }

@@ -18,14 +18,27 @@ final class AnnotationEditorWindow {
 
     func show(image: NSImage) {
         if let window {
+            NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             return
         }
         guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
-        let size = CGSize(
-            width: min(max(image.size.width, 640), 1100),
-            height: min(max(image.size.height, 460), 800) + 92
-        )
+        // Size the window to the screenshot's aspect ratio so it opens matching the
+        // capture's shape, clamped to a comfortable editor range. `image.size` can be
+        // zero for cg-backed NSImages, so derive everything from the pixel dimensions.
+        let aspect: CGFloat = (cg.width > 0 && cg.height > 0)
+            ? CGFloat(cg.width) / CGFloat(cg.height)
+            : 1.6
+        let chromeHeight: CGFloat = 96  // top toolbar + style bar + dividers
+        var canvasWidth = min(1200, max(760, CGFloat(1000)))
+        var canvasHeight = canvasWidth / aspect
+        if canvasHeight > 760 {
+            canvasHeight = 760
+            canvasWidth = min(1200, max(760, canvasHeight * aspect))
+        } else if canvasHeight < 460 {
+            canvasHeight = 460
+        }
+        let size = CGSize(width: canvasWidth, height: canvasHeight + chromeHeight)
         let w = NSWindow(
             contentRect: CGRect(origin: .zero, size: size),
             styleMask: [.titled, .closable, .resizable],
@@ -34,6 +47,11 @@ final class AnnotationEditorWindow {
         )
         w.title = L(.builtinScreenshot)
         w.isRestorable = false
+        // We retain the window in `self.window` and release it on close, so AppKit
+        // must not also auto-release it — otherwise the window is over-released and
+        // crashes in objc_release during the autorelease-pool pop. Matches every
+        // other window/panel controller in the app.
+        w.isReleasedWhenClosed = false
         w.center()
         let model = AnnotationEditorModel(image: cg)
         w.contentView = NSHostingView(rootView: AnnotationEditorView(model: model) { [weak self] in
@@ -48,6 +66,11 @@ final class AnnotationEditorWindow {
         closeRelay = relay
         window = w
         RegularWindowCoordinator.shared.track(w)
+        // The capture overlay is a non-activating panel, so AnyDoor isn't frontmost
+        // when "edit" is tapped. Activate (now that the policy is `.regular`) and
+        // front the window, mirroring HostsEditorWindowController / SettingsOpener —
+        // otherwise the editor opens behind the app that was captured.
+        NSApp.activate(ignoringOtherApps: true)
         w.makeKeyAndOrderFront(nil)
     }
 }

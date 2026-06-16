@@ -7,6 +7,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
     private var state: CommandPaletteState?
     private var keyMonitor: Any?
+    /// Last installed-apps scan, refreshed off the main actor on every open. Seeds
+    /// the Applications section instantly so summoning the palette never blocks on
+    /// a fresh `/Applications` walk; empty only before the very first scan returns.
+    private var cachedApps: [InstalledApp] = []
 
     private init() {
         let panel = NSPanel(
@@ -50,17 +54,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func show() {
-        let sections = collectSections()
-        // Warm the icon cache for every app-backed row off the main thread, so
-        // the first scroll into the Applications section finds resolved icons
-        // instead of cold-cache disk hits. Mirrors CommandPaletteRow.iconPath.
-        AppIconCache.prewarm(sections.flatMap(\.entries).compactMap { entry in
-            switch entry.source {
-            case .installedApp(_, let path): return path
-            case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return nil
-            }
-        })
+        let sections = collectSections(installedApps: cachedApps)
+        prewarmIcons(for: sections)
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
         let pickerState = CommandPaletteState(sections: sections, hyperFlags: hyperFlags)
         self.state = pickerState
@@ -98,11 +93,43 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         // deferred focus assignment land on an already-key window.
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+
+        // Refresh the installed-apps list OFF the main actor: the window is
+        // already on screen, so the `/Applications` scan can never delay
+        // summoning the palette. When it resolves, repopulate the Applications
+        // section in place (the @Observable state re-renders) and warm the new
+        // icons. Subsequent opens render instantly from the cache above.
+        Task { [weak self, weak pickerState] in
+            let apps = await Task.detached(priority: .userInitiated) {
+                InstalledAppsScanner.scan()
+            }.value
+            guard let self else { return }
+            self.cachedApps = apps
+            guard let pickerState, self.state === pickerState, self.window?.isVisible == true else { return }
+            let refreshed = self.collectSections(installedApps: apps)
+            pickerState.updateSections(refreshed)
+            self.prewarmIcons(for: refreshed)
+        }
+    }
+
+    /// Warm the icon cache for every app-backed row off the main thread, so the
+    /// first scroll into the Applications section finds resolved icons instead of
+    /// cold-cache disk hits. Mirrors CommandPaletteRow.iconPath.
+    private func prewarmIcons(for sections: [CommandPaletteSection]) {
+        AppIconCache.prewarm(sections.flatMap(\.entries).compactMap { entry in
+            switch entry.source {
+            case .installedApp(_, let path): return path
+            case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return nil
+            }
+        })
     }
 
     /// Build the section groups shown in the palette. Sections with no
-    /// matching entries are dropped before they reach the view.
-    private func collectSections() -> [CommandPaletteSection] {
+    /// matching entries are dropped before they reach the view. `installedApps`
+    /// is supplied by the caller (cached / off-main scanned) so this stays a
+    /// cheap, synchronous main-actor assembly with no filesystem work.
+    private func collectSections(installedApps: [InstalledApp]) -> [CommandPaletteSection] {
         let store = PanelStore.shared
         var sections: [CommandPaletteSection] = []
 
@@ -155,9 +182,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         // Apps installed on the system but not bound to a hotkey are listed
         // after the bound rows in the same section so they're searchable from
         // the palette without polluting the menu-bar panel itself.
-        let scanned = InstalledAppsScanner.scan()
         let unboundOrder = Double(appShortcuts.count) * 100 + 1_000_000
-        let installedExtras: [PanelEntry] = scanned
+        let installedExtras: [PanelEntry] = installedApps
             .filter { !boundBundleIDs.contains($0.bundleID) }
             .enumerated()
             .map { offset, app in

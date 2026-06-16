@@ -19,8 +19,14 @@ final class ScrollCaptureSession {
     private var keyMonitor: Any?
     private var trailingTimer: Timer?
     private var lastGrab = Date.distantPast
+    private var lastPreviewComposite = Date.distantPast
     private var onEnd: (() -> Void)?
     private var active = false
+
+    /// Min interval between live-preview recomposites. Rebuilding the full
+    /// stitched bitmap gets costly as the page grows, and the preview doesn't
+    /// need every ~0.06s grab; the final composite at finishSession is full.
+    private static let previewComposeInterval: TimeInterval = 0.15
 
     private init() {}
 
@@ -32,6 +38,7 @@ final class ScrollCaptureSession {
         self.viewport = viewport
         self.onEnd = onEnd
         self.accumulator = ScrollStitchAccumulator()
+        self.lastPreviewComposite = .distantPast
         self.primaryMaxY = NSScreen.screens.first?.frame.maxY ?? viewport.maxY
 
         // Preview first, then outline ordered above it, so the below-preview grab
@@ -68,8 +75,22 @@ final class ScrollCaptureSession {
         let cg = CGRect(x: viewport.minX, y: primaryMaxY - viewport.maxY,
                         width: viewport.width, height: viewport.height)
         guard let frame = LegacyScreenCapture.belowWindow(CGWindowID(previewWindow.windowNumber), bounds: cg) else { return }
-        if acc.ingest(frame), let img = acc.composite() {
+        guard acc.ingest(frame) else { return }
+
+        // Throttle the live-preview recomposite (the full-bitmap rebuild is the
+        // hot per-frame cost); the resting trailing grab is >0.15s after a scroll
+        // stops, so the settled preview is always current.
+        let now = Date()
+        if now.timeIntervalSince(lastPreviewComposite) >= Self.previewComposeInterval, let img = acc.composite() {
+            lastPreviewComposite = now
             previewWindow.updatePreview(NSImage(cgImage: img, size: .zero), heightPx: acc.totalHeight)
+        }
+
+        // Stop accumulating once the runaway memory guards trip; deliver what we
+        // have (finishSession does a final full composite) rather than growing
+        // the slice array / stitched image without bound.
+        if acc.hasReachedCaptureLimit() {
+            finishSession(deliver: true)
         }
     }
 
@@ -88,7 +109,7 @@ final class ScrollCaptureSession {
 
         if deliver {
             if let image {
-                CaptureCoordinator.shared.deliverCapturedImage(image, anchor: viewport)
+                CaptureCoordinator.shared.deliverCapturedImage(image)
             } else {
                 ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
             }

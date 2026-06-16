@@ -61,6 +61,13 @@ final class CommandPaletteState {
 
     func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
 
+    /// Replace the root sections after the off-main installed-apps scan resolves.
+    /// `@Observable` re-renders the picker; `query`/`selectedIndex`/drill-in state
+    /// are intentionally left untouched so a typing/drilling user isn't disturbed.
+    func updateSections(_ sections: [CommandPaletteSection]) {
+        allSections = sections
+    }
+
     // MARK: - Dev-tool scope badge (Raycast-style)
 
     /// The active dev-tool scope. When set, the search bar shows a badge instead
@@ -186,7 +193,7 @@ final class CommandPaletteState {
         }
     }
 
-    let allSections: [CommandPaletteSection]
+    private(set) var allSections: [CommandPaletteSection]
     let hyperFlags: Int
     private let portInventory: PortInventory
     private var portRefreshTask: Task<Void, Never>?

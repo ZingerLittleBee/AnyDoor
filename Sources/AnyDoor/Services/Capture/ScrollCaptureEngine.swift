@@ -21,26 +21,33 @@ enum ScrollCaptureEngine {
             return true
         }
         guard drew else { return nil }
+        // Fingerprint each row from a fixed budget of evenly-spaced pixels rather
+        // than every byte. Hashing a full Retina-width row (~3000 px × 4 B) per
+        // frame is needlessly expensive — and pathologically slow in unoptimized
+        // debug builds — while ~`maxSamples` columns spread across the width still
+        // fingerprint a row reliably for stitch alignment. The stride is derived
+        // from the width, so identical rows always hash identically and the sampled
+        // columns line up across frames.
+        let maxSamples = 256
+        let step = max(1, w / maxSamples)
         var sigs = [ScrollStitch.RowSig](repeating: 0, count: h)
         data.withUnsafeBytes { raw in
             let base = raw.baseAddress!
             // A CGBitmapContext stores its rows top-to-bottom in memory, so buffer
             // row `r` is already the image's top-to-bottom row `r`.
             for r in 0..<h {
-                sigs[r] = fnv1a(base + r * bpr, bpr)
+                let rowBase = base + r * bpr
+                var hash: UInt64 = 0xcbf2_9ce4_8422_2325   // FNV-1a, folded per RGBA pixel.
+                var x = 0
+                while x < w {
+                    hash ^= UInt64(rowBase.loadUnaligned(fromByteOffset: x * 4, as: UInt32.self))
+                    hash = hash &* 0x0000_0100_0000_01b3
+                    x += step
+                }
+                sigs[r] = hash
             }
         }
         return sigs
-    }
-
-    nonisolated private static func fnv1a(_ ptr: UnsafeRawPointer, _ count: Int) -> ScrollStitch.RowSig {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        let p = ptr.assumingMemoryBound(to: UInt8.self)
-        for i in 0..<count {
-            hash ^= UInt64(p[i])
-            hash = hash &* 0x0000_0100_0000_01b3
-        }
-        return hash
     }
 
     /// Stacks pixel slices top-to-bottom into one tall image.

@@ -182,40 +182,88 @@ final class ClipboardHistoryStore {
 
     private func recordCapturedImage(png: Data, source: ClipboardSource?) async {
         guard let container = modelContainer else { return }
-        do {
-            let id = UUID()
-            let directory = historyDirectoryProvider()
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let fileName = "\(id.uuidString).png"
-            try png.write(to: directory.appendingPathComponent(fileName), options: .atomic)
-            let item = ClipboardHistoryItem(
-                id: id,
-                kind: .image,
-                fileName: fileName,
-                previewTitle: "",
-                createdAt: now(),
-                sourceBundleID: source?.bundleID,
-                sourceAppName: source?.appName
-            )
-            container.mainContext.insert(item)
-            await saveAndRefresh(kind: .image, container: container)
-        } catch {
-            historyLogger.error("Failed to record image history: \(error)")
+        let id = UUID()
+        let directory = historyDirectoryProvider()
+        let fileName = "\(id.uuidString).png"
+        // Write the PNG off the main actor (a multi-MB image atomic write would
+        // otherwise stall the UI); only the SwiftData insert needs the main context.
+        let wrote = await Task.detached(priority: .utility) {
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try png.write(to: directory.appendingPathComponent(fileName), options: .atomic)
+                return true
+            } catch {
+                return false
+            }
+        }.value
+        guard wrote else {
+            historyLogger.error("Failed to record image history: disk write failed")
+            return
         }
+        let item = ClipboardHistoryItem(
+            id: id,
+            kind: .image,
+            fileName: fileName,
+            previewTitle: "",
+            createdAt: now(),
+            sourceBundleID: source?.bundleID,
+            sourceAppName: source?.appName
+        )
+        container.mainContext.insert(item)
+        await saveAndRefresh(kind: .image, container: container)
     }
 
     private func recordCapturedFiles(urls: [URL], source: ClipboardSource?) async {
         guard let container = modelContainer, !urls.isEmpty else { return }
+        let directory = historyDirectoryProvider()
+        let ceiling = maxCopiedFileBytes
+        // Copy each file (up to maxCopiedFileBytes) into storage and JSON-encode
+        // the manifest off the main actor; only the SwiftData insert touches the
+        // main context.
+        let captured = await Task.detached(priority: .utility) {
+            Self.copyCapturedFiles(urls: urls, into: directory, ceiling: ceiling)
+        }.value
+        guard let captured else {
+            historyLogger.error("Failed to record file history: disk copy failed")
+            return
+        }
+        let title = captured.entries.count == 1
+            ? captured.entries[0].originalName
+            : L(.clipboardFileCount, captured.entries.count)
+        let item = ClipboardHistoryItem(
+            kind: .file,
+            previewTitle: title,
+            createdAt: now(),
+            sourceBundleID: source?.bundleID,
+            sourceAppName: source?.appName,
+            filesManifest: captured.manifest,
+            isReferenceOnly: captured.referenceOnly
+        )
+        container.mainContext.insert(item)
+        await saveAndRefresh(kind: .file, container: container)
+    }
+
+    /// Result of copying captured files into history storage, carried back from
+    /// the off-main copy to the main-actor SwiftData insert.
+    private struct CapturedFiles: Sendable {
+        let entries: [ClipboardFileEntry]
+        let referenceOnly: Bool
+        let manifest: Data
+    }
+
+    /// Copy captured files into `directory` (files over `ceiling`, and
+    /// directories, are kept reference-only) and encode the manifest. Pure file
+    /// I/O — safe to run off the main actor. Returns nil on failure.
+    private nonisolated static func copyCapturedFiles(urls: [URL], into directory: URL, ceiling: Int) -> CapturedFiles? {
         do {
-            let directory = historyDirectoryProvider()
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let fm = FileManager.default
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
             var entries: [ClipboardFileEntry] = []
             var referenceOnly = false
             for url in urls {
                 let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
-                if isDirectory || size > maxCopiedFileBytes {
+                if isDirectory || size > ceiling {
                     referenceOnly = true
                     entries.append(ClipboardFileEntry(storedName: nil, originalName: url.lastPathComponent, originalPath: url.path))
                 } else {
@@ -225,20 +273,9 @@ final class ClipboardHistoryStore {
                 }
             }
             let manifest = try JSONEncoder().encode(entries)
-            let title = entries.count == 1 ? entries[0].originalName : L(.clipboardFileCount, entries.count)
-            let item = ClipboardHistoryItem(
-                kind: .file,
-                previewTitle: title,
-                createdAt: now(),
-                sourceBundleID: source?.bundleID,
-                sourceAppName: source?.appName,
-                filesManifest: manifest,
-                isReferenceOnly: referenceOnly
-            )
-            container.mainContext.insert(item)
-            await saveAndRefresh(kind: .file, container: container)
+            return CapturedFiles(entries: entries, referenceOnly: referenceOnly, manifest: manifest)
         } catch {
-            historyLogger.error("Failed to record file history: \(error)")
+            return nil
         }
     }
 

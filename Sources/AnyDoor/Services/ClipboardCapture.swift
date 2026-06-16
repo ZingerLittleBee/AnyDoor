@@ -18,9 +18,21 @@ enum ClipboardCapture {
     /// Rich text representations we try to preserve, richest first.
     private static let richTextTypes: [NSPasteboard.PasteboardType] = [.rtf, .html]
 
-    /// Classify a pasteboard's current contents. Returns nil when the content
-    /// should not be recorded (concealed/transient/empty/unsupported).
-    static func classify(_ pasteboard: NSPasteboard) -> CapturedClipboard? {
+    /// A classification whose costly image PNG encode is still pending.
+    /// `NSPasteboard` is main-thread affine, so `classifyDeferred` runs on the
+    /// main actor and only captures the (Sendable) `CGImage`; `finalize` performs
+    /// the encode and can run off the main actor.
+    enum Deferred: Sendable {
+        case text(plain: String, rich: Data?, richType: String?)
+        case image(CGImage)
+        case files(urls: [URL])
+    }
+
+    /// Cheap, main-actor classification of a pasteboard's current contents.
+    /// Returns nil when the content should not be recorded
+    /// (concealed/transient/empty/unsupported). The image case defers its PNG
+    /// encode to `finalize`.
+    static func classifyDeferred(_ pasteboard: NSPasteboard) -> Deferred? {
         let types = pasteboard.types ?? []
         if types.contains(concealedType) || types.contains(transientType) { return nil }
 
@@ -30,9 +42,11 @@ enum ClipboardCapture {
             return .files(urls: urls)
         }
 
-        // Images (excluding the file case handled above).
-        if let image = NSImage(pasteboard: pasteboard), let png = pngData(from: image) {
-            return .image(png: png)
+        // Images (excluding the file case handled above). Extract the CGImage
+        // here (cheap) and defer the TIFF-materialise + PNG-compress to finalize.
+        if let image = NSImage(pasteboard: pasteboard),
+           let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
+            return .image(cg)
         }
 
         // Text, preserving the richest available styled representation.
@@ -50,10 +64,35 @@ enum ClipboardCapture {
         return nil
     }
 
+    /// Finish a deferred classification. For images this performs the costly PNG
+    /// encode, so prefer calling it OFF the main actor. Returns nil if the image
+    /// cannot be encoded.
+    static func finalize(_ deferred: Deferred) -> CapturedClipboard? {
+        switch deferred {
+        case let .text(plain, rich, richType):
+            return .text(plain: plain, rich: rich, richType: richType)
+        case let .image(cg):
+            guard let png = pngData(from: cg) else { return nil }
+            return .image(png: png)
+        case let .files(urls):
+            return .files(urls: urls)
+        }
+    }
+
+    /// Synchronous classify (tests + non-hot paths): classify then finalize.
+    static func classify(_ pasteboard: NSPasteboard) -> CapturedClipboard? {
+        guard let deferred = classifyDeferred(pasteboard) else { return nil }
+        return finalize(deferred)
+    }
+
     static func pngData(from image: NSImage) -> Data? {
         guard let tiff = image.tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
         return png
+    }
+
+    static func pngData(from cgImage: CGImage) -> Data? {
+        NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
     }
 }

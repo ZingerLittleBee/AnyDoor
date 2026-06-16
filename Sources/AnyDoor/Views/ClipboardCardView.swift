@@ -145,11 +145,8 @@ struct ClipboardCardView: View {
     /// the header stays clean rather than showing a generic placeholder.
     @ViewBuilder
     private var sourceIcon: some View {
-        if let bundleID = item.sourceBundleID,
-           let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                .resizable().scaledToFit()
-                .help(item.sourceAppName ?? "")
+        if let bundleID = item.sourceBundleID {
+            SourceAppIcon(bundleID: bundleID, appName: item.sourceAppName)
         }
     }
 
@@ -183,26 +180,16 @@ struct ClipboardCardView: View {
                         .padding(8)
                 }
         case .image, .screenshot:
-            if let fileName = item.fileName,
-               let img = ClipboardThumbnail.image(at: historyDirectory.appendingPathComponent(fileName)) {
-                // Color.clear takes the offered preview frame; the image fills it
-                // as an overlay and is clipped to those bounds, so a large image
-                // can't overflow and cover the header.
-                Color.clear.overlay {
-                    Image(nsImage: img).resizable().scaledToFill()
-                }
-                .clipped()
+            if let fileName = item.fileName {
+                ThumbnailView(url: historyDirectory.appendingPathComponent(fileName))
             } else {
                 Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
             }
         case .file:
             // An image file gets a thumbnail like the image card; anything else
             // falls back to a document glyph plus its name.
-            if let url = firstFileURL, isImageFile(url), let img = ClipboardThumbnail.image(at: url) {
-                Color.clear.overlay {
-                    Image(nsImage: img).resizable().scaledToFill()
-                }
-                .clipped()
+            if let url = firstFileURL, isImageFile(url) {
+                ThumbnailView(url: url)
             } else {
                 VStack(spacing: 6) {
                     Image(systemName: "doc.fill").imageScale(.large)
@@ -226,6 +213,62 @@ struct ClipboardCardView: View {
 
     private func isImageFile(_ url: URL) -> Bool {
         UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
+    }
+
+    /// Source-app icon resolved off the main thread via `AppIconCache`. Reads the
+    /// cache synchronously in `body` first (so a warm icon renders with no flash),
+    /// and only kicks off the async bundle-ID resolution on a cache miss — keeping
+    /// the disk/`NSWorkspace` lookup off the scrolling card's render path. Renders
+    /// nothing when the bundle ID maps to no installed app.
+    private struct SourceAppIcon: View {
+        let bundleID: String
+        let appName: String?
+        @State private var loaded: NSImage?
+
+        var body: some View {
+            Group {
+                if let icon = loaded ?? AppIconCache.cachedForBundle(bundleID) {
+                    Image(nsImage: icon)
+                        .resizable().scaledToFit()
+                        .help(appName ?? "")
+                }
+            }
+            .task(id: bundleID) {
+                if loaded == nil, AppIconCache.cachedForBundle(bundleID) == nil {
+                    loaded = await AppIconCache.icon(forBundleID: bundleID)
+                }
+            }
+        }
+    }
+
+    /// Image/file-card thumbnail decoded off the main thread via `ClipboardThumbnail`.
+    /// Same warm-path-synchronous / cold-path-async contract as `SourceAppIcon`, so
+    /// many image cards sliding in no longer each run a full-resolution decode on the
+    /// main thread. Shows a `photo` placeholder while the first decode is in flight.
+    private struct ThumbnailView: View {
+        let url: URL
+        @State private var loaded: NSImage?
+
+        var body: some View {
+            Group {
+                if let image = loaded ?? ClipboardThumbnail.cached(at: url) {
+                    // Color.clear takes the offered preview frame; the image fills it
+                    // as an overlay and is clipped to those bounds, so a large image
+                    // can't overflow and cover the header.
+                    Color.clear.overlay {
+                        Image(nsImage: image).resizable().scaledToFill()
+                    }
+                    .clipped()
+                } else {
+                    Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
+                }
+            }
+            .task(id: url) {
+                if loaded == nil, ClipboardThumbnail.cached(at: url) == nil {
+                    loaded = await ClipboardThumbnail.thumbnail(at: url)
+                }
+            }
+        }
     }
 
 }

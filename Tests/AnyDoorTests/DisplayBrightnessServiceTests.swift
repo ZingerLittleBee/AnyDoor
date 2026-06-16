@@ -38,6 +38,28 @@ final class DisplayBrightnessServiceTests: XCTestCase {
         XCTAssertEqual(backend.writeCalls.last?.value, 30) // 0.3 * 100
     }
 
+    func testBumpCoalescesRapidWrites() async throws {
+        let displayID: CGDirectDisplayID = 1
+        let backend = MockDDCBackend(transportSupported: [displayID])
+        let controller = BrightnessController(backend: backend)
+        let service = DisplayBrightnessService()
+        service.bootstrap(controller: controller)
+        service.injectDisplaysForTesting([
+            DisplayInfo(id: displayID, name: "Test", supportsDDC: true)
+        ])
+        service.setLevelForTesting(0.5, for: displayID)
+
+        // Simulate key-repeat: three bumps in quick succession.
+        service.bumpForTesting(+0.0625, displayID: displayID)
+        service.bumpForTesting(+0.0625, displayID: displayID)
+        service.bumpForTesting(+0.0625, displayID: displayID)
+        // wait for debounce window (30 ms) + execution slack
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(backend.writeCalls.count, 1, "rapid bumps must collapse to one write")
+        XCTAssertEqual(backend.writeCalls.last?.value, 69) // 0.6875 * 100, rounded
+    }
+
     func testBumpUsesFallbackBaselineWhenNil() async throws {
         let displayID: CGDirectDisplayID = 1
         let backend = MockDDCBackend(transportSupported: [displayID])

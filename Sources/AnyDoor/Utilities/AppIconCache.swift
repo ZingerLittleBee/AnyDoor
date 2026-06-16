@@ -16,6 +16,13 @@ import AppKit
 enum AppIconCache {
     private static var cache: [String: NSImage] = [:]
     private static var inflight: [String: Task<SendableImage, Never>] = [:]
+    // A second cache keyed by bundle identifier. Clipboard cards know only the
+    // source app's bundle ID; resolving its on-disk URL via
+    // `urlForApplication(withBundleIdentifier:)` is itself a (cheap) lookup that
+    // still shouldn't run inline in a scrolling card's body, so it's offloaded
+    // and memoized too.
+    private static var bundleCache: [String: NSImage] = [:]
+    private static var bundleInflight: [String: Task<SendableImage?, Never>] = [:]
 
     /// Carries the non-Sendable `NSImage` produced off-main back to the main
     /// actor. `@unchecked` is sound because the image is freshly created by
@@ -63,5 +70,36 @@ enum AppIconCache {
         for path in paths where cache[path] == nil && inflight[path] == nil {
             Task { _ = await icon(for: path) }
         }
+    }
+
+    /// Synchronous, cache-only lookup by bundle identifier. Mirrors `cached(_:)`
+    /// so a clipboard card can render a warm source-app icon with no async hop.
+    static func cachedForBundle(_ bundleID: String) -> NSImage? {
+        bundleCache[bundleID]
+    }
+
+    /// Returns the icon for the app with `bundleID`, resolving its URL and icon on
+    /// a background task on a cache miss. Returns nil when the bundle ID maps to no
+    /// installed app. Concurrent requests for the same ID share one resolution.
+    static func icon(forBundleID bundleID: String) async -> NSImage? {
+        if let hit = bundleCache[bundleID] { return hit }
+
+        let task: Task<SendableImage?, Never>
+        if let existing = bundleInflight[bundleID] {
+            task = existing
+        } else {
+            task = Task.detached(priority: .userInitiated) {
+                guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+                    return nil
+                }
+                return SendableImage(image: NSWorkspace.shared.icon(forFile: url.path))
+            }
+            bundleInflight[bundleID] = task
+        }
+
+        let image = await task.value?.image
+        bundleInflight[bundleID] = nil
+        if let image { bundleCache[bundleID] = image }
+        return image
     }
 }

@@ -78,7 +78,20 @@ final class ClipboardWatcher {
 
         let source = sourceProvider()
         if let bundleID = source?.bundleID, isExcluded(bundleID) { return }
-        guard let captured = ClipboardCapture.classify(pasteboard) else { return }
+        guard let deferred = ClipboardCapture.classifyDeferred(pasteboard) else { return }
+        // Pasteboard reads above are main-thread affine, but the image PNG encode
+        // (TIFF materialise + compress) is CPU-heavy for large images — copying a
+        // 4K/Retina screenshot would beachball this poll tick. Hop it off the main
+        // actor; text/file classifications are cheap and finalize inline.
+        let captured: CapturedClipboard?
+        if case .image = deferred {
+            captured = await Task.detached(priority: .userInitiated) {
+                ClipboardCapture.finalize(deferred)
+            }.value
+        } else {
+            captured = ClipboardCapture.finalize(deferred)
+        }
+        guard let captured else { return }
         await store.record(captured, source: source)
     }
 

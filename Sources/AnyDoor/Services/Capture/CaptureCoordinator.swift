@@ -47,8 +47,8 @@ final class CaptureCoordinator {
     /// Delivers an externally produced capture (e.g. a stitched scrolling
     /// capture) through the standard output policy: auto-save / auto-copy /
     /// history / quick-access overlay.
-    func deliverCapturedImage(_ image: CGImage, anchor: CGRect?) {
-        present(image: image, anchor: anchor)
+    func deliverCapturedImage(_ image: CGImage) {
+        present(image: image)
     }
 
     // MARK: - Capture flows (all on the main actor, callback-based)
@@ -66,17 +66,9 @@ final class CaptureCoordinator {
     /// rect when its center lies on a connected display, else a default rect
     /// centered on the display under the cursor (or the first display).
     @MainActor private static func initialSelectionRect(targets: [TargetDisplay], settings: CaptureSettings) -> CGRect {
-        let displays = targets.map(\.frame)
-        if let restored = SelectionGeometry.restoredRect(last: settings.lastRegionRect, displays: displays) {
-            // Clamp to the display holding its center so a rect saved at a larger
-            // resolution cannot pre-show off-screen edges after a display change.
-            let center = CGPoint(x: restored.midX, y: restored.midY)
-            let display = displays.first(where: { $0.contains(center) }) ?? displays[0]
-            return SelectionGeometry.clamped(restored, to: display)
-        }
-        let mouse = NSEvent.mouseLocation
-        let screen = targets.first(where: { $0.frame.contains(mouse) })?.frame ?? targets[0].frame
-        return SelectionGeometry.defaultCenteredRect(in: screen, fraction: 0.5)
+        SelectionGeometry.initialSelectionRect(
+            last: settings.lastRegionRect, displays: targets.map(\.frame), mouse: NSEvent.mouseLocation
+        )
     }
 
     private func captureWindow(delay: Int) {
@@ -95,7 +87,7 @@ final class CaptureCoordinator {
         case let .region(cgImage, rect):
             settings.setLastRegionRect(rect)
             afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage, anchor: rect)
+                self?.present(image: cgImage)
                 self?.finish()
             }
         case let .window(id, frame):
@@ -105,12 +97,12 @@ final class CaptureCoordinator {
                     ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
                     self.finish(); return
                 }
-                self.present(image: cg, anchor: frame)
+                self.present(image: cg)
                 self.finish()
             }
         case let .fullscreen(cgImage, _):
             afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage, anchor: nil)
+                self?.present(image: cgImage)
                 self?.finish()
             }
         case let .scrolling(rect):
@@ -132,7 +124,7 @@ final class CaptureCoordinator {
                 ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
                 self.finish(); return
             }
-            self.present(image: cg, anchor: nil)
+            self.present(image: cg)
             self.finish()
         }
     }
@@ -171,65 +163,102 @@ final class CaptureCoordinator {
 
     // MARK: - Output
 
-    /// Apply output policy and show the quick-access overlay. Synchronous —
-    /// history recording is fire-and-forget so this never awaits.
-    private func present(image cg: CGImage, anchor: CGRect?) {
+    /// Apply output policy and show the quick-access overlay. The PNG encode and
+    /// auto-save disk write run OFF the main actor (a fullscreen Retina/5K grab
+    /// is tens of MB; doing them inline beachballed the menu bar / all UI until
+    /// the shot landed). The clipboard copy stays inline so it is ready instantly;
+    /// the overlay + toast resume on the main actor once the heavy work finishes.
+    ///
+    /// Safe w.r.t. the SCK executor-tracking bug documented on the type: the
+    /// capture grab is already complete and synchronous, and this mirrors the
+    /// existing off-main OCR / history paths below.
+    private func present(image cg: CGImage) {
         let image = NSImage(cgImage: cg, size: .zero)
-        guard let png = image.pngData() else {
-            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
-            return
-        }
-        var savedURL: URL?
-        if settings.autoSave { savedURL = saveToDefaultDirectory(png: png) }
+
+        // Cheap and latency-sensitive: copy to the pasteboard right away (AppKit
+        // encodes the bitmap lazily) so the clipboard is ready the instant the
+        // shot lands, before the PNG encode below.
         if settings.autoCopy {
             let pb = NSPasteboard.general
             pb.clearContents()
             pb.writeObjects([image])
             ClipboardWatcher.shared?.noteSelfWrite(changeCount: pb.changeCount)
         }
-        // Shared box so the delete action can remove the exact history entry once
-        // the async record completes (both hops run on the main actor — no race).
-        let recordedID = HistoryIDBox()
-        Task { recordedID.value = await ClipboardHistoryStore.shared.recordScreenshot(pngData: png) }
 
-        let actions = CaptureOverlayActions(
-            copy: { [weak self] in self?.copyToPasteboard(image) },
-            save: { [weak self] in self?.saveInteractive(png: png, existing: savedURL) },
-            edit: { AnnotationEditorWindow.shared.show(image: image) },
-            pin: {
-                let screen = NSScreen.screenUnderMouse ?? NSScreen.main
-                PinnedImageWindow.show(image: image, at: screen?.frame ?? .zero)
-            },
-            ocr: { [weak self] in self?.runOCR(image) },
-            recapture: { [weak self] in self?.recapture() },
-            delete: {
-                savedURL.map { try? FileManager.default.removeItem(at: $0) }
-                if let id = recordedID.value {
-                    Task { await ClipboardHistoryStore.shared.deleteScreenshot(id: id) }
-                }
-                ToastPresenter.shared.show(.success(L(.captureToastDeleted)))
+        // Snapshot the main-actor settings the off-main save needs (all Sendable).
+        let autoSave = settings.autoSave
+        let saveDir = settings.saveDirectory
+        let template = settings.namingTemplate
+        let overlayTimeout = settings.overlayTimeout
+
+        // A Task from a @MainActor method inherits MainActor isolation, so the
+        // overlay/toast code after each `await` resumes on the main actor; only
+        // the encode/write hop to a detached executor.
+        Task { [weak self] in
+            let png: Data? = await Task.detached(priority: .userInitiated) {
+                NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])
+            }.value
+            guard let self else { return }
+            guard let png else {
+                ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+                return
             }
-        )
-        CaptureOverlayWindow.shared.present(
-            image: image, fileURL: savedURL, anchor: anchor,
-            timeout: settings.overlayTimeout, actions: actions
-        )
+
+            var savedURL: URL?
+            if autoSave {
+                savedURL = await Task.detached(priority: .userInitiated) {
+                    Self.writePNG(png, to: saveDir, namingTemplate: template)
+                }.value
+                if savedURL != nil {
+                    ToastPresenter.shared.show(.success(L(.captureToastSaved, saveDir.lastPathComponent)))
+                } else {
+                    ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+                }
+            }
+
+            // Shared box so the delete action can remove the exact history entry
+            // once the async record completes (both hops run on the main actor).
+            let recordedID = HistoryIDBox()
+            Task { recordedID.value = await ClipboardHistoryStore.shared.recordScreenshot(pngData: png) }
+
+            let actions = CaptureOverlayActions(
+                copy: { [weak self] in self?.copyToPasteboard(image) },
+                save: { [weak self] in self?.saveInteractive(png: png, existing: savedURL) },
+                edit: { AnnotationEditorWindow.shared.show(image: image) },
+                pin: {
+                    let screen = NSScreen.screenUnderMouse ?? NSScreen.main
+                    PinnedImageWindow.show(image: image, at: screen?.frame ?? .zero)
+                },
+                ocr: { [weak self] in self?.runOCR(image) },
+                recapture: { [weak self] in self?.recapture() },
+                delete: {
+                    savedURL.map { try? FileManager.default.removeItem(at: $0) }
+                    if let id = recordedID.value {
+                        Task { await ClipboardHistoryStore.shared.deleteScreenshot(id: id) }
+                    }
+                    ToastPresenter.shared.show(.success(L(.captureToastDeleted)))
+                }
+            )
+            CaptureOverlayWindow.shared.present(
+                image: image, fileURL: savedURL,
+                timeout: overlayTimeout, actions: actions
+            )
+        }
     }
 
-    private func saveToDefaultDirectory(png: Data) -> URL? {
-        let dir = settings.saveDirectory
+    /// Pure, off-main PNG file write for auto-save. Returns the written URL, or
+    /// nil on failure (the caller shows the toast on the main actor).
+    private nonisolated static func writePNG(_ png: Data, to directory: URL, namingTemplate: String) -> URL? {
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            let base = CaptureFilename.make(template: settings.namingTemplate, date: Date(), calendar: .current)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let base = CaptureFilename.make(template: namingTemplate, date: Date(), calendar: .current)
             let name = CaptureFilename.resolve(base: base, ext: "png") {
-                FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
+                FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
             }
-            let url = dir.appendingPathComponent(name)
+            let url = directory.appendingPathComponent(name)
             try png.write(to: url, options: .atomic)
-            ToastPresenter.shared.show(.success(L(.captureToastSaved, dir.lastPathComponent)))
             return url
         } catch {
-            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
             return nil
         }
     }
