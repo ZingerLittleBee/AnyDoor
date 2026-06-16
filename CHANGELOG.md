@@ -6,6 +6,48 @@ versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- The post-capture quick-access overlay no longer floats beside the selection;
+  it now docks in the bottom-left of the active screen, reworked into a
+  drag-to-share thumbnail plus a grid of quick actions (copy / save / edit /
+  pin / OCR / re-capture / delete). Placement no longer depends on the captured
+  region.
+- The annotation editor is reorganized into a CleanShot X-style layout: a single
+  top toolbar (undo/redo, grouped drawing tools, and the export actions) with a
+  contextual style bar beneath it — color swatches, a custom color picker, stroke
+  width, and tool-specific font-size / fill controls — and the image floating on a
+  neutral backdrop. The editor window now sizes to the screenshot's aspect ratio
+  and comes to the front on open (the capture overlay is a non-activating panel,
+  so the editor previously opened behind the captured app).
+- The annotation crop tool now applies live: the canvas crops and zooms to fit the
+  chosen region as you drag, instead of only dimming a preview and cropping on
+  export. The crop commits on mouse-up and is undoable, and annotations drawn
+  after a crop stay aligned.
+
+### Fixed
+
+- Annotated images no longer export upside-down. The renderer's coordinate space
+  did not match its flipped drawing context, so the composited image — and every
+  annotation drawn on it — came out vertically mirrored.
+- Closing the annotation editor window no longer crashes. The window over-released
+  itself because `isReleasedWhenClosed` was left at its default; it now matches the
+  other window controllers in the app.
+- Undo / redo in the annotation editor take effect immediately. The toolbar chrome
+  did not observe document mutations, so the buttons stayed stale and the canvas
+  did not redraw after an undo/redo; the canvas now also handles the standard
+  Cmd-Z / Shift-Cmd-Z keys.
+- The capture mode bar's buttons are fully clickable. A plain SwiftUI button only
+  hit-tests its opaque glyph, leaving the label text and surrounding padding as
+  dead zones; the entire padded icon + label area is now the hit target, with a
+  hover highlight for affordance.
+- Scrolling capture now stitches in both scroll directions. The stitcher only
+  detected downward scrolling (content moving up, new rows revealed at the bottom),
+  so scrolling up matched no overlap and nothing was appended past the seed frame;
+  it now prepends the new top rows when scrolling up.
+- Scrolling capture remembers and pre-shows the last selection like regular region
+  capture, instead of opening an empty selection every time.
+
 ## [2.5.0] - 2026-06-16
 
 ### Added
