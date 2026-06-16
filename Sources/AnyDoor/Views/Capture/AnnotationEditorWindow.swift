@@ -47,6 +47,11 @@ final class AnnotationEditorWindow {
         )
         w.title = L(.builtinScreenshot)
         w.isRestorable = false
+        // We retain the window in `self.window` and release it on close, so AppKit
+        // must not also auto-release it — otherwise the window is over-released and
+        // crashes in objc_release during the autorelease-pool pop. Matches every
+        // other window/panel controller in the app.
+        w.isReleasedWhenClosed = false
         w.center()
         let model = AnnotationEditorModel(image: cg)
         w.contentView = NSHostingView(rootView: AnnotationEditorView(model: model) { [weak self] in
