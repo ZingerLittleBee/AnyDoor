@@ -151,17 +151,22 @@ struct AnnotationEditorView: View {
 
     private func swatch(_ color: RGBAColor) -> some View {
         let selected = model.style.strokeColor == color
-        return Circle()
-            .fill(Color(nsColor: color.nsColor))
-            .frame(width: 20, height: 20)
-            .overlay(
-                Circle().strokeBorder(
-                    selected ? Color.accentColor : Color.primary.opacity(0.18),
-                    lineWidth: selected ? 2.5 : 1
-                )
-            )
-            .contentShape(Circle())
-            .onTapGesture { model.style.strokeColor = color }
+        // The colored fill is the same size for every swatch; selection is shown as
+        // an outer ring that's always in the layout (transparent when unselected), so
+        // the dot never changes size between selected and unselected states.
+        return ZStack {
+            Circle()
+                .fill(Color(nsColor: color.nsColor))
+                .frame(width: 18, height: 18)
+                .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+            Circle()
+                .strokeBorder(Color.accentColor, lineWidth: 2)
+                .frame(width: 26, height: 26)
+                .opacity(selected ? 1 : 0)
+        }
+        .frame(width: 26, height: 26)
+        .contentShape(Circle())
+        .onTapGesture { model.style.strokeColor = color }
     }
 
     // MARK: - Bindings
