@@ -156,20 +156,12 @@ struct AnnotationEditorView: View {
 
     private func swatch(_ color: RGBAColor) -> some View {
         let selected = model.style.strokeColor == color
-        // Only near-black / near-white need a hairline to separate from the dark bar;
-        // the vivid colors read cleanly. The dot is a constant 18pt circle in both
-        // states, centered with the plate in one fixed 28pt frame, so they share a
-        // single origin and never drift relative to each other.
-        let needsEdge = color == .black || color == .white
         return Button { model.style.strokeColor = color } label: {
-            ZStack {
-                SwatchSelectionPlate(active: selected)
-                Circle()
-                    .fill(Color(nsColor: color.nsColor))
-                    .frame(width: 18, height: 18)
-                    .overlay(Circle().strokeBorder(Color.gray.opacity(needsEdge ? 0.5 : 0), lineWidth: 1))
-            }
-            .frame(width: 28, height: 28)
+            SwatchDot(
+                fill: .solid(Color(nsColor: color.nsColor)),
+                selected: selected,
+                needsEdge: color == .black || color == .white
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -248,24 +240,41 @@ struct AnnotationEditorView: View {
     }
 }
 
-/// Selection indicator for color swatches (tldraw-style): a solid rounded-rect
-/// "plate" that lights up behind the dot — not a thin concentric ring with a gap.
-/// A filled shape has no edge that must stay equidistant from the round dot, so it
-/// can't look off-center or "shift" relative to the dot at sub-pixel layout offsets
-/// the way two independently-framed concentric circles do. It's always laid out;
-/// only its opacity toggles, so selecting never reflows the row.
-private struct SwatchSelectionPlate: View {
-    let active: Bool
+/// One color swatch dot drawn entirely in a single `Canvas`: the dot and the
+/// selection ring are rasterized from one shared center, so they can never drift
+/// apart at sub-pixel layout offsets — which is what made two independently-framed
+/// concentric circles look off-center. A fixed 28pt footprint keeps the row from
+/// reflowing when selection moves. The result is the standard "ring + gap" look,
+/// done pixel-perfectly.
+private struct SwatchDot: View {
+    enum Fill { case solid(Color), rainbow }
+    let fill: Fill
+    let selected: Bool
+    var needsEdge: Bool = false
+
+    private static let rainbow = Gradient(colors: [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .red])
+
     var body: some View {
-        RoundedRectangle(cornerRadius: 8, style: .continuous)
-            .fill(Color.white.opacity(0.16))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(Color.accentColor, lineWidth: 1)
-            )
-            .frame(width: 24, height: 24)
-            .opacity(active ? 1 : 0)
-            .animation(.easeInOut(duration: 0.12), value: active)
+        Canvas { ctx, size in
+            let c = CGPoint(x: size.width / 2, y: size.height / 2)
+            let dot = Path(ellipseIn: CGRect(x: c.x - 9, y: c.y - 9, width: 18, height: 18))
+            switch fill {
+            case let .solid(color):
+                ctx.fill(dot, with: .color(color))
+            case .rainbow:
+                ctx.fill(dot, with: .conicGradient(Self.rainbow, center: c))
+            }
+            // Hairline so near-black / near-white dots read on the dark bar.
+            if needsEdge {
+                ctx.stroke(dot, with: .color(.gray.opacity(0.5)), lineWidth: 1)
+            }
+            // Concentric selection ring with a 2pt gap, sharing the dot's center.
+            if selected {
+                let ring = Path(ellipseIn: CGRect(x: c.x - 12, y: c.y - 12, width: 24, height: 24))
+                ctx.stroke(ring, with: .color(.accentColor), lineWidth: 2)
+            }
+        }
+        .frame(width: 28, height: 28)
     }
 }
 
@@ -280,25 +289,14 @@ private struct CustomColorButton: View {
     let onPick: (RGBAColor) -> Void
     @State private var coordinator = ColorPanelCoordinator()
 
-    private static let rainbow = Gradient(colors: [.red, .orange, .yellow, .green, .blue, .purple, .red])
-
     var body: some View {
         Button {
             coordinator.present(initial: currentColor.nsColor, onChange: onPick)
         } label: {
-            ZStack {
-                SwatchSelectionPlate(active: isCustomActive)
-                Group {
-                    if isCustomActive {
-                        Circle().fill(Color(nsColor: currentColor.nsColor))
-                    } else {
-                        Circle().fill(AngularGradient(gradient: Self.rainbow, center: .center))
-                    }
-                }
-                .frame(width: 18, height: 18)
-                .overlay(Circle().strokeBorder(Color.gray.opacity(0.3), lineWidth: 1))
-            }
-            .frame(width: 28, height: 28)
+            SwatchDot(
+                fill: isCustomActive ? .solid(Color(nsColor: currentColor.nsColor)) : .rainbow,
+                selected: isCustomActive
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
