@@ -131,17 +131,28 @@ final class DisplayBrightnessService {
             OSDBridge.showBrightness(newValue, on: displayID)
         }
 
-        // Task started from a @MainActor method in Swift 6 inherits MainActor
-        // isolation. The actor `await controller.write/read` hops away and back
-        // automatically, so direct `self.levelGeneration[...]` checks are
-        // MainActor-safe without explicit MainActor.run wrappers.
-        Task { [weak self] in
+        // Coalesce rapid bumps (brightness-key autorepeat) into a single
+        // debounced write per display, sharing the slider's pendingWrites slot:
+        // each bump updates levels/OSD immediately and reschedules, so only the
+        // latest accumulated target reaches the bus once input settles. Without
+        // this, every key-repeat event spawned an independent write Task and they
+        // piled up as overlapping DDC transactions (now serialised by
+        // BrightnessController, but still wasteful and laggy). Mirrors
+        // setBrightness. A Task from a @MainActor method inherits MainActor
+        // isolation, so the `self.levels/levelGeneration` touches are safe.
+        pendingWrites[displayID]?.cancel()
+        pendingWrites[displayID] = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.writeDebounceNanos)
+            if Task.isCancelled { return }
             do {
                 try await controller.write(displayID: displayID, value: newValue)
             } catch {
                 return
             }
             guard let self else { return }
+            self.pendingWrites[displayID] = nil
+            // First touch of an unknown display: read back the true hardware
+            // level, unless a newer bump has already superseded this one.
             guard usedFallback else { return }
             guard self.levelGeneration[displayID] == gen else { return }
             guard let real = await controller.read(displayID: displayID) else { return }
