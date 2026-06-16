@@ -22,20 +22,20 @@ final class CaptureOverlayWindow {
     private var panel: NSPanel?
     private var dismissTask: Task<Void, Never>?
 
-    private static let overlaySize = CGSize(width: 280, height: 96)
+    private static let overlaySize = CGSize(width: 394, height: 136)
 
     private init() {}
 
-    func present(image: NSImage, fileURL: URL?, anchor: CGRect?, timeout: Int, actions: CaptureOverlayActions) {
+    func present(image: NSImage, fileURL: URL?, timeout: Int, actions: CaptureOverlayActions) {
         close()
         let screen = NSScreen.screenUnderMouse ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
-        let frame: CGRect
-        if let anchor {
-            frame = OverlayPlacement.frame(forRegion: anchor, overlaySize: Self.overlaySize, onScreen: screen.frame, gap: 12)
-        } else {
-            frame = OverlayPlacement.fallbackFrame(overlaySize: Self.overlaySize, onScreen: screen.frame, margin: 16)
-        }
+        // The quick-access overlay always docks at the bottom-left of the screen
+        // under the cursor, regardless of where the capture was taken. The visible
+        // frame keeps it clear of the Dock and menu bar.
+        let frame = OverlayPlacement.bottomLeftFrame(
+            overlaySize: Self.overlaySize, onScreen: screen.visibleFrame, margin: 16
+        )
 
         let p = NSPanel(
             contentRect: frame,
@@ -100,39 +100,48 @@ private struct CaptureOverlayView: View {
     let onHoverChange: @MainActor (Bool) -> Void
     let onAction: () -> Void
 
+    private let columns = Array(repeating: GridItem(.fixed(54), spacing: 6), count: 4)
+
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 16) {
             thumbnail
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 10) {
-                    button("doc.on.doc", L(.captureOverlayCopy), actions.copy)
-                    button("square.and.arrow.down", L(.captureOverlaySave), actions.save)
-                    button("pencil.tip.crop.circle", L(.captureOverlayEdit), actions.edit)
-                    button("pin", L(.captureOverlayPin), actions.pin)
-                }
-                HStack(spacing: 10) {
-                    button("text.viewfinder", L(.captureOverlayOCR), actions.ocr)
-                    button("arrow.clockwise", L(.captureOverlayRecapture), actions.recapture)
-                    button("trash", L(.captureOverlayDelete), actions.delete)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 6) {
+                ForEach(actionItems, id: \.symbol) { item in
+                    OverlayActionTile(symbol: item.symbol, label: item.label, role: item.role) {
+                        item.run()
+                        onAction()
+                    }
                 }
             }
-            Spacer(minLength: 0)
         }
-        .padding(12)
-        .frame(width: 280, height: 96)
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(16)
+        .frame(width: 394, height: 136)
+        .adaptivePanelSurface(cornerRadius: 18)
         .onHoverSafe { onHoverChange($0) }
     }
 
+    // MARK: Thumbnail (drag source)
+
     private var thumbnail: some View {
-        Image(nsImage: image)
-            .resizable()
-            .interpolation(.high)
-            .aspectRatio(contentMode: .fill)
-            .frame(width: 72, height: 54)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .onDrag { dragProvider() }
+        VStack(spacing: 5) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 112, height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(.primary.opacity(0.12), lineWidth: 1)
+                )
+                .onDrag { dragProvider() }
+            Label(L(.captureOverlayDragHint), systemImage: "hand.draw")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+        .frame(width: 112)
     }
 
     private func dragProvider() -> NSItemProvider {
@@ -140,14 +149,62 @@ private struct CaptureOverlayView: View {
         return NSItemProvider(object: image)
     }
 
-    private func button(_ symbol: String, _ help: String, _ run: @escaping () -> Void) -> some View {
-        Button {
-            run()
-            onAction()
-        } label: {
-            Image(systemName: symbol).font(.system(size: 14))
+    // MARK: Action model
+
+    private struct ActionItem {
+        let symbol: String
+        let label: String
+        let role: OverlayActionTile.Role
+        let run: () -> Void
+    }
+
+    private var actionItems: [ActionItem] {
+        [
+            ActionItem(symbol: "doc.on.doc", label: L(.captureOverlayCopy), role: .standard, run: actions.copy),
+            ActionItem(symbol: "square.and.arrow.down", label: L(.captureOverlaySave), role: .standard, run: actions.save),
+            ActionItem(symbol: "pencil.tip.crop.circle", label: L(.captureOverlayEdit), role: .standard, run: actions.edit),
+            ActionItem(symbol: "pin", label: L(.captureOverlayPin), role: .standard, run: actions.pin),
+            ActionItem(symbol: "text.viewfinder", label: L(.captureOverlayOCR), role: .standard, run: actions.ocr),
+            ActionItem(symbol: "arrow.clockwise", label: L(.captureOverlayRecapture), role: .standard, run: actions.recapture),
+            ActionItem(symbol: "trash", label: L(.captureOverlayDelete), role: .destructive, run: actions.delete),
+        ]
+    }
+}
+
+/// A single icon-above-label action tile with a hover highlight. Mirrors the
+/// capture selection toolbar's button language so the capture surfaces stay
+/// consistent, and surfaces a label under every icon so each action is legible
+/// at a glance.
+private struct OverlayActionTile: View {
+    enum Role { case standard, destructive }
+
+    let symbol: String
+    let label: String
+    let role: Role
+    let run: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: run) {
+            VStack(spacing: 4) {
+                Image(systemName: symbol)
+                    .font(.system(size: 17))
+                    .frame(height: 20)
+                Text(label)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            .frame(width: 54, height: 44)
+            .foregroundStyle(role == .destructive ? Color.red : Color.primary)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(.primary.opacity(isHovered ? 0.1 : 0))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(help)
+        .onHoverSafe { isHovered = $0 }
     }
 }

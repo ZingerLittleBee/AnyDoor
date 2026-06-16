@@ -47,8 +47,8 @@ final class CaptureCoordinator {
     /// Delivers an externally produced capture (e.g. a stitched scrolling
     /// capture) through the standard output policy: auto-save / auto-copy /
     /// history / quick-access overlay.
-    func deliverCapturedImage(_ image: CGImage, anchor: CGRect?) {
-        present(image: image, anchor: anchor)
+    func deliverCapturedImage(_ image: CGImage) {
+        present(image: image)
     }
 
     // MARK: - Capture flows (all on the main actor, callback-based)
@@ -87,7 +87,7 @@ final class CaptureCoordinator {
         case let .region(cgImage, rect):
             settings.setLastRegionRect(rect)
             afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage, anchor: rect)
+                self?.present(image: cgImage)
                 self?.finish()
             }
         case let .window(id, frame):
@@ -97,12 +97,12 @@ final class CaptureCoordinator {
                     ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
                     self.finish(); return
                 }
-                self.present(image: cg, anchor: frame)
+                self.present(image: cg)
                 self.finish()
             }
         case let .fullscreen(cgImage, _):
             afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage, anchor: nil)
+                self?.present(image: cgImage)
                 self?.finish()
             }
         case let .scrolling(rect):
@@ -124,7 +124,7 @@ final class CaptureCoordinator {
                 ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
                 self.finish(); return
             }
-            self.present(image: cg, anchor: nil)
+            self.present(image: cg)
             self.finish()
         }
     }
@@ -165,7 +165,7 @@ final class CaptureCoordinator {
 
     /// Apply output policy and show the quick-access overlay. Synchronous —
     /// history recording is fire-and-forget so this never awaits.
-    private func present(image cg: CGImage, anchor: CGRect?) {
+    private func present(image cg: CGImage) {
         let image = NSImage(cgImage: cg, size: .zero)
         guard let png = image.pngData() else {
             ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
@@ -203,7 +203,7 @@ final class CaptureCoordinator {
             }
         )
         CaptureOverlayWindow.shared.present(
-            image: image, fileURL: savedURL, anchor: anchor,
+            image: image, fileURL: savedURL,
             timeout: settings.overlayTimeout, actions: actions
         )
     }

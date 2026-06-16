@@ -88,7 +88,7 @@ final class ScrollCaptureSession {
 
         if deliver {
             if let image {
-                CaptureCoordinator.shared.deliverCapturedImage(image, anchor: viewport)
+                CaptureCoordinator.shared.deliverCapturedImage(image)
             } else {
                 ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
             }

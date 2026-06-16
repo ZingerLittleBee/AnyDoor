@@ -22,9 +22,9 @@ final class OverlayPlacementTests: XCTestCase {
         XCTAssertTrue(screen.contains(frame))
     }
 
-    func testFallbackBottomRightWhenNoRegion() {
-        let frame = OverlayPlacement.fallbackFrame(overlaySize: size, onScreen: screen, margin: 16)
-        XCTAssertEqual(frame.maxX, screen.maxX - 16, accuracy: 0.001)
+    func testBottomLeftFrameDocksAtVisibleBottomLeft() {
+        let frame = OverlayPlacement.bottomLeftFrame(overlaySize: size, onScreen: screen, margin: 16)
+        XCTAssertEqual(frame.minX, screen.minX + 16, accuracy: 0.001)
         XCTAssertEqual(frame.minY, screen.minY + 16, accuracy: 0.001)
     }
 

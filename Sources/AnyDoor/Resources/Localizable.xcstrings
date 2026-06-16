@@ -1762,6 +1762,23 @@
         }
       }
     },
+    "capture.overlay.dragHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag to share"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拖拽分享"
+          }
+        }
+      }
+    },
     "capture.overlay.edit": {
       "extractionState": "manual",
       "localizations": {

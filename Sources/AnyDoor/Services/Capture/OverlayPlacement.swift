@@ -17,12 +17,12 @@ enum OverlayPlacement {
         return clampInside(proposed, screen: screen)
     }
 
-    /// Bottom-right of the screen — used for fullscreen/window captures with no
-    /// meaningful region anchor.
-    static func fallbackFrame(overlaySize: CGSize, onScreen screen: CGRect, margin: CGFloat) -> CGRect {
+    /// Bottom-left of the screen — the fixed home of the quick-access overlay.
+    /// Pass the screen's *visible* frame so the overlay clears the Dock and menu bar.
+    static func bottomLeftFrame(overlaySize: CGSize, onScreen visible: CGRect, margin: CGFloat) -> CGRect {
         CGRect(
-            x: screen.maxX - margin - overlaySize.width,
-            y: screen.minY + margin,
+            x: visible.minX + margin,
+            y: visible.minY + margin,
             width: overlaySize.width,
             height: overlaySize.height
         )

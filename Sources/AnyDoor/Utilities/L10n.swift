@@ -382,6 +382,7 @@ enum L10n {
         case captureOverlayOCR = "capture.overlay.ocr"
         case captureOverlayRecapture = "capture.overlay.recapture"
         case captureOverlayDelete = "capture.overlay.delete"
+        case captureOverlayDragHint = "capture.overlay.dragHint"
         case captureModeBarRegion = "capture.modeBar.region"
         case captureModeBarWindow = "capture.modeBar.window"
         case captureModeBarFullscreen = "capture.modeBar.fullscreen"
