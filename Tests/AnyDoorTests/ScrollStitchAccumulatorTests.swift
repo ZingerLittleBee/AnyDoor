@@ -61,4 +61,24 @@ final class ScrollStitchAccumulatorTests: XCTestCase {
         XCTAssertFalse(acc.ingest(image(width: 4, colors: frame)))
         XCTAssertEqual(acc.totalHeight, 60)
     }
+
+    @MainActor func testReachesCaptureLimitOnFrameCap() {
+        let acc = ScrollStitchAccumulator(policy: ScrollCapturePolicy(maxFrames: 2))
+        let tall = distinctColors(120)
+        XCTAssertFalse(acc.hasReachedCaptureLimit())
+        _ = acc.ingest(image(width: 4, colors: Array(tall[0..<60])))   // slice 1 (seed)
+        XCTAssertFalse(acc.hasReachedCaptureLimit())
+        _ = acc.ingest(image(width: 4, colors: Array(tall[20..<80])))  // slice 2 → hits maxFrames
+        XCTAssertEqual(acc.sliceCount, 2)
+        XCTAssertTrue(acc.hasReachedCaptureLimit())
+    }
+
+    @MainActor func testReachesCaptureLimitOnHeightCap() {
+        // viewport 60px, factor 1 → cap at 60px, so the seed frame alone trips it.
+        let acc = ScrollStitchAccumulator(policy: ScrollCapturePolicy(maxTotalHeightFactor: 1))
+        XCTAssertFalse(acc.hasReachedCaptureLimit())
+        _ = acc.ingest(image(width: 4, colors: distinctColors(60)))
+        XCTAssertEqual(acc.totalHeight, 60)
+        XCTAssertTrue(acc.hasReachedCaptureLimit())
+    }
 }

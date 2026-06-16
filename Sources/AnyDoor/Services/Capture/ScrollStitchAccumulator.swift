@@ -79,4 +79,16 @@ final class ScrollStitchAccumulator {
 
     /// The stitched image so far (nil before the first frame).
     func composite() -> CGImage? { ScrollCaptureEngine.composite(slices: slices) }
+
+    /// True once the stitch has hit the runaway memory guards (captured-frame
+    /// count or total-height cap from `ScrollCapturePolicy`). The interactive
+    /// session stops grabbing and delivers what it has, bounding the stitched
+    /// CGImage / slice array that were otherwise unbounded. The policy's
+    /// no-progress stop is intentionally NOT applied here: in interactive capture
+    /// the user may pause scrolling without meaning to end the session.
+    func hasReachedCaptureLimit() -> Bool {
+        if sliceCount >= policy.maxFrames { return true }
+        if viewportPx > 0, totalHeight >= viewportPx * policy.maxTotalHeightFactor { return true }
+        return false
+    }
 }
