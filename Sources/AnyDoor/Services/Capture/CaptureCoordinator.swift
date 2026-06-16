@@ -66,17 +66,9 @@ final class CaptureCoordinator {
     /// rect when its center lies on a connected display, else a default rect
     /// centered on the display under the cursor (or the first display).
     @MainActor private static func initialSelectionRect(targets: [TargetDisplay], settings: CaptureSettings) -> CGRect {
-        let displays = targets.map(\.frame)
-        if let restored = SelectionGeometry.restoredRect(last: settings.lastRegionRect, displays: displays) {
-            // Clamp to the display holding its center so a rect saved at a larger
-            // resolution cannot pre-show off-screen edges after a display change.
-            let center = CGPoint(x: restored.midX, y: restored.midY)
-            let display = displays.first(where: { $0.contains(center) }) ?? displays[0]
-            return SelectionGeometry.clamped(restored, to: display)
-        }
-        let mouse = NSEvent.mouseLocation
-        let screen = targets.first(where: { $0.frame.contains(mouse) })?.frame ?? targets[0].frame
-        return SelectionGeometry.defaultCenteredRect(in: screen, fraction: 0.5)
+        SelectionGeometry.initialSelectionRect(
+            last: settings.lastRegionRect, displays: targets.map(\.frame), mouse: NSEvent.mouseLocation
+        )
     }
 
     private func captureWindow(delay: Int) {

@@ -136,6 +136,25 @@ enum SelectionGeometry {
         let center = CGPoint(x: last.midX, y: last.midY)
         return displays.contains(where: { $0.contains(center) }) ? last : nil
     }
+
+    /// The selection rect to pre-show when opening the overlay (global AppKit
+    /// coords): the persisted `last` rect clamped to the display holding its
+    /// center, or — when there is no restorable rect — a half-size rect centered
+    /// on the display under `mouse` (falling back to the first display). Returns
+    /// `.zero` only when `displays` is empty. Shared by the region and scrolling
+    /// capture coordinators so both remember the last selected viewport.
+    static func initialSelectionRect(last: CGRect?, displays: [CGRect], mouse: CGPoint) -> CGRect {
+        guard let first = displays.first else { return .zero }
+        if let restored = restoredRect(last: last, displays: displays) {
+            // Clamp to the display holding its center so a rect saved at a larger
+            // resolution cannot pre-show off-screen edges after a display change.
+            let center = CGPoint(x: restored.midX, y: restored.midY)
+            let display = displays.first(where: { $0.contains(center) }) ?? first
+            return clamped(restored, to: display)
+        }
+        let screen = displays.first(where: { $0.contains(mouse) }) ?? first
+        return defaultCenteredRect(in: screen, fraction: 0.5)
+    }
 }
 
 /// The eight resize anchors of a selection rectangle (y-up: `top` = maxY).

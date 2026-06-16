@@ -156,4 +156,33 @@ final class SelectionGeometryTests: XCTestCase {
         XCTAssertNil(SelectionGeometry.restoredRect(last: CGRect(x: 5000, y: 100, width: 200, height: 100), displays: [d1, d2]))
         XCTAssertNil(SelectionGeometry.restoredRect(last: nil, displays: [d1, d2]))
     }
+
+    // MARK: - initialSelectionRect (shared restore for region + scrolling capture)
+
+    func testInitialSelectionRestoresLastWhenOnDisplay() {
+        let d1 = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let last = CGRect(x: 100, y: 100, width: 300, height: 200)
+        let r = SelectionGeometry.initialSelectionRect(last: last, displays: [d1], mouse: CGPoint(x: 10, y: 10))
+        XCTAssertEqual(r, last)
+    }
+
+    func testInitialSelectionClampsRestoredToItsDisplay() {
+        let d1 = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        // Center (800, 200) lies on d1 but the rect overflows the right edge.
+        let last = CGRect(x: 400, y: 100, width: 800, height: 200)
+        let r = SelectionGeometry.initialSelectionRect(last: last, displays: [d1], mouse: .zero)
+        XCTAssertEqual(r, last.intersection(d1))
+        XCTAssertLessThanOrEqual(r.maxX, d1.maxX)
+    }
+
+    func testInitialSelectionDefaultsCenteredUnderMouseWhenNoValidLast() {
+        let d1 = CGRect(x: 0, y: 0, width: 1000, height: 800)
+        let d2 = CGRect(x: 1000, y: 0, width: 1000, height: 800)
+        let r = SelectionGeometry.initialSelectionRect(last: nil, displays: [d1, d2], mouse: CGPoint(x: 1500, y: 400))
+        XCTAssertEqual(r, SelectionGeometry.defaultCenteredRect(in: d2, fraction: 0.5))
+    }
+
+    func testInitialSelectionEmptyDisplaysReturnsZero() {
+        XCTAssertEqual(SelectionGeometry.initialSelectionRect(last: nil, displays: [], mouse: .zero), .zero)
+    }
 }
