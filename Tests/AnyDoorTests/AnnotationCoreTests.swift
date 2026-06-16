@@ -55,6 +55,31 @@ final class AnnotationCoreTests: XCTestCase {
         XCTAssertEqual(d, 10, accuracy: 0.001)
     }
 
+    func testViewToImageWithFullRegionIsIdentity() {
+        let shown = CGRect(x: 0, y: 0, width: 100, height: 80)
+        let fitted = CGRect(x: 0, y: 0, width: 100, height: 80)
+        XCTAssertEqual(AnnotationGeometry.viewToImage(CGPoint(x: 25, y: 40), fitted: fitted, shownRect: shown),
+                       CGPoint(x: 25, y: 40))
+    }
+
+    func testViewToImageWithCroppedRegionOffsetsAndScales() {
+        // Canvas zoomed 2x to show the (20,10,40,30) region of the full image.
+        let shown = CGRect(x: 20, y: 10, width: 40, height: 30)
+        let fitted = CGRect(x: 0, y: 0, width: 80, height: 60)
+        XCTAssertEqual(AnnotationGeometry.viewToImage(CGPoint(x: 0, y: 0), fitted: fitted, shownRect: shown),
+                       CGPoint(x: 20, y: 10))
+        XCTAssertEqual(AnnotationGeometry.viewToImage(CGPoint(x: 80, y: 60), fitted: fitted, shownRect: shown),
+                       CGPoint(x: 60, y: 40))
+    }
+
+    func testImageToViewRectWithCroppedRegion() {
+        let shown = CGRect(x: 20, y: 10, width: 40, height: 30)
+        let fitted = CGRect(x: 0, y: 0, width: 80, height: 60)
+        let r = AnnotationGeometry.imageToViewRect(CGRect(x: 30, y: 20, width: 10, height: 5),
+                                                   fitted: fitted, shownRect: shown)
+        XCTAssertEqual(r, CGRect(x: 20, y: 20, width: 20, height: 10))
+    }
+
     func testHitTestLineAndRect() {
         let line = AnnotationElement(kind: .line(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 100, y: 0)))
         XCTAssertTrue(AnnotationGeometry.hitTest(CGPoint(x: 50, y: 4), element: line, tolerance: 8))
@@ -115,6 +140,17 @@ final class AnnotationCoreTests: XCTestCase {
         XCTAssertNil(doc.cropRect)
         doc.undo() // restores the crop
         XCTAssertEqual(doc.cropRect, CGRect(x: 10, y: 10, width: 90, height: 50))
+    }
+
+    @MainActor
+    func testCropUndoRestoresUncropped() {
+        let doc = makeDoc(100, 100)
+        XCTAssertNil(doc.cropRect)
+        doc.setCrop(CGRect(x: 10, y: 10, width: 40, height: 30))
+        XCTAssertEqual(doc.cropRect, CGRect(x: 10, y: 10, width: 40, height: 30))
+        XCTAssertTrue(doc.canUndo)
+        doc.undo() // undoing the first crop returns to the full, uncropped image
+        XCTAssertNil(doc.cropRect)
     }
 
     @MainActor

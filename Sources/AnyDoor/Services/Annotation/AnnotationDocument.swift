@@ -86,12 +86,6 @@ final class AnnotationDocument {
     /// Pair with no-checkpoint updates and `rollback()` to cancel.
     func beginEdit() { checkpoint() }
 
-    /// Updates the crop preview without a new checkpoint (during a crop drag begun
-    /// with `setCrop`).
-    func updateCropPreview(_ rect: CGRect) {
-        cropRect = AnnotationGeometry.clampCrop(rect, to: imageBounds)
-    }
-
     /// Discards the most recent checkpoint and restores its state, cancelling an
     /// in-progress gesture (e.g. a zero-size drag) without leaving a redo entry.
     func rollback() {

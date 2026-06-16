@@ -51,6 +51,7 @@ final class CanvasNSView: NSView {
     private var selectMoveLastPoint: CGPoint? // in image space
     private var selectDidMove = false
     private var pathPoints: [CGPoint] = []
+    private var pendingCrop: CGRect?          // in full-image space, during a crop drag
     private var activeTextField: NSTextField?
     private var lastRevision = -1
 
@@ -82,12 +83,19 @@ final class CanvasNSView: NSView {
         CGSize(width: model.document.baseImage.width, height: model.document.baseImage.height)
     }
 
+    /// The full-image-space region currently displayed: the committed crop, or the
+    /// whole image. The canvas zooms to fit this region, so a crop "takes effect"
+    /// live instead of only on export. Undo clears the crop and restores the view.
+    private var shownRect: CGRect {
+        model.document.cropRect ?? CGRect(origin: .zero, size: imageSize)
+    }
+
     private var fittedRect: CGRect {
-        AnnotationGeometry.fittedRect(imageSize: imageSize, in: bounds.size)
+        AnnotationGeometry.fittedRect(imageSize: shownRect.size, in: bounds.size)
     }
 
     private func toImage(_ p: NSPoint) -> CGPoint {
-        AnnotationGeometry.viewToImage(p, fitted: fittedRect, imageSize: imageSize)
+        AnnotationGeometry.viewToImage(p, fitted: fittedRect, shownRect: shownRect)
     }
 
     // MARK: - Drawing
@@ -95,11 +103,15 @@ final class CanvasNSView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let fitted = fittedRect
         guard fitted.width > 0 else { return }
-        if let cg = AnnotationRenderer.render(model.document, applyCrop: false) {
-            NSImage(cgImage: cg, size: imageSize).draw(in: fitted)
+        // Render with the crop applied so the committed crop shows live (zoomed to
+        // fit). `shownRect` already accounts for the crop, so the rendered image maps
+        // 1:1 onto `fitted`.
+        if let cg = AnnotationRenderer.render(model.document, applyCrop: true) {
+            NSImage(cgImage: cg, size: shownRect.size).draw(in: fitted)
         }
-        // Crop overlay: dim outside the crop rect.
-        if let crop = model.document.cropRect, crop.width >= 1, crop.height >= 1 {
+        // While dragging the crop tool, dim outside the pending selection to preview
+        // what will remain. The crop commits (the canvas zooms) on mouse-up.
+        if let crop = pendingCrop, crop.width >= 1, crop.height >= 1 {
             let cropView = imageRectToView(crop, fitted: fitted)
             NSColor.black.withAlphaComponent(0.45).setFill()
             let outside = NSBezierPath(rect: fitted)
@@ -113,10 +125,7 @@ final class CanvasNSView: NSView {
     }
 
     private func imageRectToView(_ rect: CGRect, fitted: CGRect) -> CGRect {
-        let o = AnnotationGeometry.imageToView(rect.origin, fitted: fitted, imageSize: imageSize)
-        let scaleX = fitted.width / imageSize.width
-        let scaleY = fitted.height / imageSize.height
-        return CGRect(x: o.x, y: o.y, width: rect.width * scaleX, height: rect.height * scaleY)
+        AnnotationGeometry.imageToViewRect(rect, fitted: fitted, shownRect: shownRect)
     }
 
     // MARK: - Mouse
@@ -156,9 +165,10 @@ final class CanvasNSView: NSView {
             model.document.add(AnnotationElement(kind: rectKind(tool, CGRect(origin: p, size: .zero)), style: style))
             model.noteMutation()
         case .crop:
+            // Hold the in-progress selection locally so the committed crop (what the
+            // canvas shows) doesn't zoom mid-drag; it commits on mouse-up.
             dragOrigin = p
-            model.document.setCrop(CGRect(origin: p, size: .zero))
-            model.noteMutation()
+            pendingCrop = CGRect(origin: p, size: .zero)
             needsDisplay = true
         }
     }
@@ -176,7 +186,7 @@ final class CanvasNSView: NSView {
         case .rectangle, .ellipse, .blur, .pixelate, .redaction:
             if let o = dragOrigin { model.document.updateLastKind(rectKind(model.tool, normRect(o, p))) }
         case .crop:
-            if let o = dragOrigin { model.document.updateCropPreview(normRect(o, p)) }
+            if let o = dragOrigin { pendingCrop = AnnotationGeometry.clampCrop(normRect(o, p), to: shownRect) }
         case .select:
             if let id = draggingElementID, let last = selectMoveLastPoint {
                 let dx = p.x - last.x, dy = p.y - last.y
@@ -198,9 +208,9 @@ final class CanvasNSView: NSView {
                 model.document.rollback()
             }
         case .crop:
-            // Discard a zero-size crop: rollback to before the crop began.
-            if let crop = model.document.cropRect, crop.width < 3 || crop.height < 3 {
-                model.document.rollback()
+            // Commit a meaningful selection; ignore a stray click. Undo reverts it.
+            if let pc = pendingCrop, pc.width >= 3, pc.height >= 3 {
+                model.document.setCrop(pc)
             }
         case .select:
             // A grab that never moved rolls back its (empty) checkpoint.
@@ -214,6 +224,7 @@ final class CanvasNSView: NSView {
         draggingElementID = nil
         selectMoveLastPoint = nil
         pathPoints = []
+        pendingCrop = nil
         model.noteMutation()
         needsDisplay = true
     }
@@ -267,7 +278,7 @@ final class CanvasNSView: NSView {
 
     private func beginTextEntry(atViewPoint viewPoint: NSPoint, imagePoint: CGPoint) {
         let field = NSTextField(frame: NSRect(x: viewPoint.x, y: viewPoint.y, width: 200, height: 28))
-        field.font = NSFont.boldSystemFont(ofSize: model.style.fontSize * (fittedRect.width / imageSize.width))
+        field.font = NSFont.boldSystemFont(ofSize: model.style.fontSize * (fittedRect.width / shownRect.width))
         field.textColor = model.style.strokeColor.nsColor
         field.backgroundColor = NSColor.white.withAlphaComponent(0.85)
         field.isBordered = true
