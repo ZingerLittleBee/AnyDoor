@@ -156,22 +156,19 @@ struct AnnotationEditorView: View {
 
     private func swatch(_ color: RGBAColor) -> some View {
         let selected = model.style.strokeColor == color
-        // The colored fill is the same size for every swatch; selection is shown as
-        // an outer ring that's always in the layout (transparent when unselected), so
-        // the dot never changes size between selected and unselected states.
-        return ZStack {
-            Circle()
-                .fill(Color(nsColor: color.nsColor))
-                .frame(width: 18, height: 18)
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
-            Circle()
-                .strokeBorder(Color.accentColor, lineWidth: 2)
-                .frame(width: 26, height: 26)
-                .opacity(selected ? 1 : 0)
-        }
-        .frame(width: 26, height: 26)
-        .contentShape(Circle())
-        .onTapGesture { model.style.strokeColor = color }
+        // Only near-black / near-white need an outline to separate from the dark bar;
+        // the vivid colors read cleanly without one. Selection is a concentric outer
+        // ring: the fill is padded symmetrically, so the ring shares its exact center
+        // and the dot stays the same size whether selected or not.
+        let needsEdge = color == .black || color == .white
+        return Circle()
+            .fill(Color(nsColor: color.nsColor))
+            .frame(width: 18, height: 18)
+            .overlay(Circle().strokeBorder(Color.gray.opacity(needsEdge ? 0.5 : 0), lineWidth: 1))
+            .padding(4)
+            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2).opacity(selected ? 1 : 0))
+            .contentShape(Circle())
+            .onTapGesture { model.style.strokeColor = color }
     }
 
     // MARK: - Bindings
@@ -264,23 +261,17 @@ private struct CustomColorButton: View {
         Button {
             coordinator.present(initial: currentColor.nsColor, onChange: onPick)
         } label: {
-            ZStack {
-                Group {
-                    if isCustomActive {
-                        Circle().fill(Color(nsColor: currentColor.nsColor))
-                    } else {
-                        Circle().fill(AngularGradient(gradient: Self.rainbow, center: .center))
-                    }
+            Group {
+                if isCustomActive {
+                    Circle().fill(Color(nsColor: currentColor.nsColor))
+                } else {
+                    Circle().fill(AngularGradient(gradient: Self.rainbow, center: .center))
                 }
-                .frame(width: 18, height: 18)
-                .overlay(Circle().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
-
-                Circle()
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                    .frame(width: 26, height: 26)
-                    .opacity(isCustomActive ? 1 : 0)
             }
-            .frame(width: 26, height: 26)
+            .frame(width: 18, height: 18)
+            .overlay(Circle().strokeBorder(Color.gray.opacity(0.3), lineWidth: 1))
+            .padding(4)
+            .overlay(Circle().strokeBorder(Color.accentColor, lineWidth: 2).opacity(isCustomActive ? 1 : 0))
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
