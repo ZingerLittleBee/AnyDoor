@@ -42,6 +42,18 @@ final class ScrollStitchAccumulatorTests: XCTestCase {
         XCTAssertEqual(acc.composite()?.height, 80)
     }
 
+    @MainActor func testUpwardScrollPrependsNewRows() {
+        // Viewport starts on page rows 40..<100, then the user scrolls UP so it moves
+        // to rows 20..<80 (content shifts down, 20 new rows revealed at the TOP).
+        let tall = distinctColors(120)
+        let acc = ScrollStitchAccumulator()
+        _ = acc.ingest(image(width: 4, colors: Array(tall[40..<100])))
+        XCTAssertTrue(acc.ingest(image(width: 4, colors: Array(tall[20..<80])))) // scrolled up 20
+        XCTAssertEqual(acc.sliceCount, 2)
+        XCTAssertEqual(acc.totalHeight, 80)        // 60 + 20 new rows prepended at the top
+        XCTAssertEqual(acc.composite()?.height, 80)
+    }
+
     @MainActor func testIdenticalFrameAppendsNothing() {
         let frame = distinctColors(60)
         let acc = ScrollStitchAccumulator()
