@@ -1,117 +1,161 @@
 import SwiftUI
 import AppKit
 
-/// The annotation editor UI: a tool palette, the AppKit drawing canvas, a style
-/// inspector, and a toolbar with undo/redo and export actions.
+/// The annotation editor UI, styled after CleanShot X: a single top toolbar of
+/// drawing tools, a contextual style bar beneath it, and the captured image
+/// floating on a neutral backdrop. Export actions (copy / save / pin / done) sit
+/// on the toolbar's trailing edge. The drawing surface, model, and renderer are
+/// unchanged — this view is purely the chrome.
 struct AnnotationEditorView: View {
     @Bindable var model: AnnotationEditorModel
     let onClose: () -> Void
 
-    private static let toolOrder: [AnnotationTool] = [
-        .select, .arrow, .line, .rectangle, .ellipse, .text,
-        .freehand, .highlighter, .counter, .blur, .pixelate, .redaction, .crop,
+    /// Tools grouped for the toolbar; a thin divider separates each group.
+    private static let toolGroups: [[AnnotationTool]] = [
+        [.select],
+        [.arrow, .line, .rectangle, .ellipse],
+        [.freehand, .highlighter, .text, .counter],
+        [.blur, .pixelate, .redaction],
+        [.crop],
     ]
 
     var body: some View {
         VStack(spacing: 0) {
             toolbar
             Divider()
-            HStack(spacing: 0) {
-                toolPalette
-                Divider()
-                AnnotationCanvasView(model: model)
-                    .frame(minWidth: 320, minHeight: 240)
-                    .background(Color(nsColor: .underPageBackgroundColor))
-            }
+            styleBar
             Divider()
-            inspector
+            AnnotationCanvasView(model: model)
+                .frame(minWidth: 360, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
+                .padding(16)
+                .background(Color(nsColor: .underPageBackgroundColor))
         }
-        .frame(minWidth: 640, minHeight: 460)
+        .frame(minWidth: 760, minHeight: 520)
     }
 
-    // MARK: - Toolbar
+    // MARK: - Top toolbar (undo/redo · tools · export)
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            Button { model.undo() } label: { Image(systemName: "arrow.uturn.backward") }
-                .disabled(!model.canUndo)
-                .help(L(.captureEditorUndo))
-            Button { model.redo() } label: { Image(systemName: "arrow.uturn.forward") }
-                .disabled(!model.canRedo)
-                .help(L(.captureEditorRedo))
-            Spacer()
-            Button { export(.copy) } label: { Label(L(.captureOverlayCopy), systemImage: "doc.on.doc") }
-            Button { export(.save) } label: { Label(L(.captureOverlaySave), systemImage: "square.and.arrow.down") }
-            Button { export(.pin) } label: { Label(L(.captureOverlayPin), systemImage: "pin") }
-            Button { export(.done) } label: { Text(L(.captureEditorDone)).bold() }
+            HStack(spacing: 4) {
+                iconButton("arrow.uturn.backward", help: L(.captureEditorUndo), enabled: model.canUndo) { model.undo() }
+                iconButton("arrow.uturn.forward", help: L(.captureEditorRedo), enabled: model.canRedo) { model.redo() }
+            }
+
+            Divider().frame(height: 22)
+
+            HStack(spacing: 6) {
+                ForEach(Array(Self.toolGroups.enumerated()), id: \.offset) { index, group in
+                    if index > 0 { Divider().frame(height: 18) }
+                    ForEach(group, id: \.self) { tool in
+                        toolButton(tool)
+                    }
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: 6) {
+                iconButton("doc.on.doc", help: L(.captureOverlayCopy)) { export(.copy) }
+                iconButton("square.and.arrow.down", help: L(.captureOverlaySave)) { export(.save) }
+                iconButton("pin", help: L(.captureOverlayPin)) { export(.pin) }
+                Button { export(.done) } label: {
+                    Text(L(.captureEditorDone)).fontWeight(.semibold).padding(.horizontal, 4)
+                }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
     }
 
-    // MARK: - Tool palette
-
-    private var toolPalette: some View {
-        ScrollView {
-            VStack(spacing: 4) {
-                ForEach(Self.toolOrder, id: \.self) { tool in
-                    Button { model.tool = tool } label: {
-                        Image(systemName: symbol(for: tool))
-                            .frame(width: 30, height: 26)
-                    }
-                    .buttonStyle(.plain)
-                    .background(model.tool == tool ? Color.accentColor.opacity(0.25) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                    .help(L(helpKey(for: tool)))
-                }
-            }
-            .padding(6)
+    private func toolButton(_ tool: AnnotationTool) -> some View {
+        let selected = model.tool == tool
+        return Button { model.tool = tool } label: {
+            Image(systemName: symbol(for: tool))
+                .font(.system(size: 15))
+                .frame(width: 30, height: 28)
+                .foregroundStyle(selected ? Color.white : Color.primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(selected ? Color.accentColor : Color.clear)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
-        .frame(width: 48)
+        .buttonStyle(.plain)
+        .help(L(helpKey(for: tool)))
     }
 
-    // MARK: - Inspector
+    private func iconButton(_ symbol: String, help: String, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 14))
+                .frame(width: 28, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.35)
+        .help(help)
+    }
 
-    private var inspector: some View {
-        HStack(spacing: 16) {
+    // MARK: - Contextual style bar
+
+    private var styleBar: some View {
+        HStack(spacing: 14) {
             HStack(spacing: 6) {
                 ForEach(Array(RGBAColor.palette.enumerated()), id: \.offset) { _, color in
-                    Circle()
-                        .fill(Color(nsColor: color.nsColor))
-                        .frame(width: 18, height: 18)
-                        .overlay(
-                            Circle().stroke(Color.primary, lineWidth: model.style.strokeColor == color ? 2 : 0)
-                        )
-                        .onTapGesture { model.style.strokeColor = color }
+                    swatch(color)
                 }
+                ColorPicker("", selection: customColor, supportsOpacity: false)
+                    .labelsHidden()
+                    .frame(width: 28)
             }
 
-            Divider().frame(height: 20)
+            Divider().frame(height: 22)
 
             HStack(spacing: 6) {
-                Image(systemName: "lineweight")
-                Slider(value: strokeWidth, in: 1...24).frame(width: 100)
+                Image(systemName: "lineweight").foregroundStyle(.secondary)
+                Slider(value: strokeWidth, in: 1...24).frame(width: 110)
             }
             .help(L(.captureEditorStrokeWidth))
 
             if model.tool == .text || model.tool == .counter {
+                Divider().frame(height: 22)
                 HStack(spacing: 6) {
-                    Image(systemName: "textformat.size")
-                    Slider(value: fontSize, in: 12...96).frame(width: 100)
+                    Image(systemName: "textformat.size").foregroundStyle(.secondary)
+                    Slider(value: fontSize, in: 12...96).frame(width: 110)
                 }
                 .help(L(.captureEditorTextSize))
             }
 
             if model.tool == .rectangle || model.tool == .ellipse {
+                Divider().frame(height: 22)
                 Toggle(isOn: fillEnabled) { Text(L(.captureEditorFill)) }
                     .toggleStyle(.checkbox)
             }
 
-            Spacer()
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func swatch(_ color: RGBAColor) -> some View {
+        let selected = model.style.strokeColor == color
+        return Circle()
+            .fill(Color(nsColor: color.nsColor))
+            .frame(width: 20, height: 20)
+            .overlay(
+                Circle().strokeBorder(
+                    selected ? Color.accentColor : Color.primary.opacity(0.18),
+                    lineWidth: selected ? 2.5 : 1
+                )
+            )
+            .contentShape(Circle())
+            .onTapGesture { model.style.strokeColor = color }
     }
 
     // MARK: - Bindings
@@ -126,6 +170,20 @@ struct AnnotationEditorView: View {
         Binding(
             get: { model.style.fillColor != nil },
             set: { model.style.fillColor = $0 ? model.style.strokeColor.withAlpha(0.25) : nil }
+        )
+    }
+    /// Two-way bridge between the model's pure `RGBAColor` and SwiftUI's `Color`
+    /// so the native picker can set an arbitrary custom stroke color.
+    private var customColor: Binding<Color> {
+        Binding(
+            get: { Color(nsColor: model.style.strokeColor.nsColor) },
+            set: { newValue in
+                guard let ns = NSColor(newValue).usingColorSpace(.sRGB) else { return }
+                model.style.strokeColor = RGBAColor(
+                    r: Double(ns.redComponent), g: Double(ns.greenComponent),
+                    b: Double(ns.blueComponent), a: Double(ns.alphaComponent)
+                )
+            }
         )
     }
 
