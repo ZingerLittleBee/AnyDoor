@@ -20,6 +20,15 @@ enum AnnotationRenderer {
     /// canvas re-renders on every drag frame).
     private static let ciContext = CIContext(options: nil)
 
+    /// Cache of processed blur/pixelate region images, keyed by kind + base image
+    /// + region. The canvas re-renders every drag frame, so without this a blur
+    /// element re-runs CoreImage over the base on each frame (even when the user
+    /// is dragging a *different* element). Pruned to the keys touched by the most
+    /// recent render, so it stays bounded: transient drag regions evict next
+    /// frame while stable elements stay warm.
+    private static var processCache: [ProcessKey: CGImage] = [:]
+    private static var touchedProcessKeys: Set<ProcessKey> = []
+
     /// Renders the document to a `CGImage`. When `applyCrop` is true (the default,
     /// used for export) the crop is applied; the canvas passes false so it can show
     /// the full image with a separate crop overlay while editing. Returns nil only
@@ -50,9 +59,13 @@ enum AnnotationRenderer {
         let imageRect = CGRect(x: 0, y: 0, width: w, height: h)
         NSImage(cgImage: doc.baseImage, size: imageRect.size).draw(in: imageRect)
 
+        touchedProcessKeys.removeAll(keepingCapacity: true)
         for element in doc.elements {
             draw(element, baseImage: doc.baseImage, imageHeight: h)
         }
+        // Drop cache entries not used this render so the cache can't grow without
+        // bound across drag frames (each frame's transient blur region is a new key).
+        processCache = processCache.filter { touchedProcessKeys.contains($0.key) }
 
         guard let full = ctx.makeImage() else { return nil }
         if applyCrop, let crop = doc.cropRect, crop.width >= 1, crop.height >= 1 {
@@ -165,10 +178,45 @@ enum AnnotationRenderer {
         text.draw(at: CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2), withAttributes: attrs)
     }
 
-    private enum ProcessKind { case blur, pixelate }
+    private enum ProcessKind: Hashable { case blur, pixelate }
+
+    /// Cache key: a processed region is fully determined by the filter kind, the
+    /// base image, and the region (pixelate's scale derives from the region size).
+    private struct ProcessKey: Hashable {
+        let kind: ProcessKind
+        let baseID: UInt
+        let baseW: Int
+        let baseH: Int
+        let x: Int, y: Int, w: Int, h: Int
+    }
 
     private static func drawProcessed(_ kind: ProcessKind, base: CGImage, region: CGRect, imageHeight h: Int) {
         guard region.width >= 1, region.height >= 1 else { return }
+        let key = ProcessKey(
+            kind: kind,
+            baseID: UInt(bitPattern: Unmanaged.passUnretained(base).toOpaque()),
+            baseW: base.width, baseH: base.height,
+            x: Int(region.minX.rounded()), y: Int(region.minY.rounded()),
+            w: Int(region.width.rounded()), h: Int(region.height.rounded())
+        )
+        touchedProcessKeys.insert(key)
+
+        let processed: CGImage
+        if let cached = processCache[key] {
+            processed = cached
+        } else if let made = makeProcessed(kind, base: base, region: region, imageHeight: h) {
+            processCache[key] = made
+            processed = made
+        } else {
+            return
+        }
+        NSImage(cgImage: processed, size: region.size).draw(in: region)
+    }
+
+    /// Run the CoreImage filter and materialise the region (the costly step).
+    /// CoreImage applies a region-of-interest, so only the cropped region is
+    /// rendered despite the filter being expressed over the full base.
+    private static func makeProcessed(_ kind: ProcessKind, base: CGImage, region: CGRect, imageHeight h: Int) -> CGImage? {
         let ci = CIImage(cgImage: base)
         let filtered: CIImage
         switch kind {
@@ -186,7 +234,6 @@ enum AnnotationRenderer {
         }
         // Region in CoreImage's bottom-left space.
         let ciRect = CGRect(x: region.minX, y: CGFloat(h) - region.maxY, width: region.width, height: region.height)
-        guard let cg = ciContext.createCGImage(filtered, from: ciRect) else { return }
-        NSImage(cgImage: cg, size: region.size).draw(in: region)
+        return ciContext.createCGImage(filtered, from: ciRect)
     }
 }
