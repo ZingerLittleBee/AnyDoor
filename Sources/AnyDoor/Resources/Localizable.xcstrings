@@ -855,10 +855,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "CSS (lowercase hex)" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "CSS (lowercase hex)"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "CSS 小写十六进制" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "CSS 小写十六进制"
+          }
         }
       }
     },
@@ -866,10 +872,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "HEX" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "HEX"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "HEX 十六进制" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "HEX 十六进制"
+          }
         }
       }
     },
@@ -877,10 +889,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "HSL" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "HSL"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "HSL" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "HSL"
+          }
         }
       }
     },
@@ -888,10 +906,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "RGB" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "RGB"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "RGB" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "RGB"
+          }
         }
       }
     },
@@ -899,10 +923,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "SwiftUI Color" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "SwiftUI Color"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "SwiftUI Color" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "SwiftUI Color"
+          }
         }
       }
     },
@@ -910,10 +940,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Update Rates" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Update Rates"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "更新汇率" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "更新汇率"
+          }
         }
       }
     },
@@ -921,10 +957,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Active" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "已启用" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "已启用"
+          }
         }
       }
     },
@@ -932,10 +974,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Hosts" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hosts"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "Hosts" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hosts"
+          }
         }
       }
     },
@@ -943,10 +991,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Copy" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "复制" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制"
+          }
         }
       }
     },
@@ -954,10 +1008,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Enter" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "进入" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "进入"
+          }
         }
       }
     },
@@ -965,10 +1025,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Open" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "打开" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开"
+          }
         }
       }
     },
@@ -976,10 +1042,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Quit" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quit"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "结束进程" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "结束进程"
+          }
         }
       }
     },
@@ -987,10 +1059,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Run" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Run"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "执行" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "执行"
+          }
         }
       }
     },
@@ -998,10 +1076,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Select" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "选择" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择"
+          }
         }
       }
     },
@@ -1009,10 +1093,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Toggle" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Toggle"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "切换" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换"
+          }
         }
       }
     },
@@ -1020,10 +1110,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "%d%%" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d%%"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "%d%%" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d%%"
+          }
         }
       }
     },
@@ -1031,10 +1127,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Edit hosts…" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit hosts…"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "编辑 hosts…" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "编辑 hosts…"
+          }
         }
       }
     },
@@ -1042,10 +1144,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Back" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "返回" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "返回"
+          }
         }
       }
     },
@@ -1053,10 +1161,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Filter options" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter options"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "筛选选项" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "筛选选项"
+          }
         }
       }
     },
@@ -1064,10 +1178,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Scheduled Shutdown" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled Shutdown"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "定时关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时关机"
+          }
         }
       }
     },
@@ -1075,10 +1195,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Shut down at %@" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shut down at %@"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "将于 %@ 关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "将于 %@ 关机"
+          }
         }
       }
     },
@@ -1086,10 +1212,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "In 15 minutes" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "In 15 minutes"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "15 分钟后" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "15 分钟后"
+          }
         }
       }
     },
@@ -1097,10 +1229,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "In 30 minutes" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "In 30 minutes"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "30 分钟后" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 分钟后"
+          }
         }
       }
     },
@@ -1108,10 +1246,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "In 1 hour" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "In 1 hour"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "1 小时后" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 小时后"
+          }
         }
       }
     },
@@ -1119,10 +1263,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "In 2 hours" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "In 2 hours"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "2 小时后" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "2 小时后"
+          }
         }
       }
     },
@@ -1130,10 +1280,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Cancel Shutdown" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel Shutdown"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "取消定时关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消定时关机"
+          }
         }
       }
     },
@@ -1141,10 +1297,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Schedule a shutdown" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Schedule a shutdown"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "设置定时关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置定时关机"
+          }
         }
       }
     },
@@ -1152,10 +1314,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Scheduled shutdown expired and was not run" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled shutdown expired and was not run"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "定时关机计划已过期，未执行" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时关机计划已过期，未执行"
+          }
         }
       }
     },
@@ -1163,10 +1331,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Scheduled shutdown failed" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled shutdown failed"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "定时关机失败" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时关机失败"
+          }
         }
       }
     },
@@ -1174,10 +1348,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Scheduled Shutdown" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled Shutdown"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "定时关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时关机"
+          }
         }
       }
     },
@@ -1185,10 +1365,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Shutting down in %lld seconds" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shutting down in %lld seconds"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "将在 %lld 秒后关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "将在 %lld 秒后关机"
+          }
         }
       }
     },
@@ -1196,10 +1382,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Cancel" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "取消" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
         }
       }
     },
@@ -1207,10 +1399,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Scheduled Shutdown" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scheduled Shutdown"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "定时关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "定时关机"
+          }
         }
       }
     },
@@ -1218,10 +1416,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Force shutdown" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Force shutdown"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "强制关机" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "强制关机"
+          }
         }
       }
     },
@@ -1229,10 +1433,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Skip unsaved-work prompts. Requires the privileged helper." }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip unsaved-work prompts. Requires the privileged helper."
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "跳过未保存内容提示，需要启用特权助手。" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳过未保存内容提示，需要启用特权助手。"
+          }
         }
       }
     },
@@ -1240,10 +1450,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Warning before shutdown (seconds)" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warning before shutdown (seconds)"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "关机前提醒（秒）" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "关机前提醒（秒）"
+          }
         }
       }
     },
@@ -1251,10 +1467,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Hotkey default duration (minutes)" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hotkey default duration (minutes)"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "热键默认时长（分钟）" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "热键默认时长（分钟）"
+          }
         }
       }
     },
@@ -1585,10 +1807,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Add app shortcuts in Settings" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add app shortcuts in Settings"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "在设置中添加应用快捷键" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "在设置中添加应用快捷键"
+          }
         }
       }
     },
@@ -2429,10 +2657,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Mute Mic" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mute Mic"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "麦克风静音" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "麦克风静音"
+          }
         }
       }
     },
@@ -5857,10 +6091,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Conversion" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversion"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "换算" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "换算"
+          }
         }
       }
     },
@@ -5902,10 +6142,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "as of %@" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "as of %@"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "汇率截至 %@" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "汇率截至 %@"
+          }
         }
       }
     },
@@ -6338,10 +6584,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Couldn’t update rates" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t update rates"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "汇率更新失败" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "汇率更新失败"
+          }
         }
       }
     },
@@ -6349,10 +6601,16 @@
       "extractionState": "manual",
       "localizations": {
         "en": {
-          "stringUnit": { "state": "translated", "value": "Rates updated (as of %@)" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rates updated (as of %@)"
+          }
         },
         "zh-Hans": {
-          "stringUnit": { "state": "translated", "value": "汇率已更新（截至 %@）" }
+          "stringUnit": {
+            "state": "translated",
+            "value": "汇率已更新（截至 %@）"
+          }
         }
       }
     },
@@ -6845,6 +7103,890 @@
           "stringUnit": {
             "state": "translated",
             "value": "剪贴板已清空"
+          }
+        }
+      }
+    },
+    "onboarding.window.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting Started"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新手引导"
+          }
+        }
+      }
+    },
+    "onboarding.nav.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上一步"
+          }
+        }
+      }
+    },
+    "onboarding.nav.continue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续"
+          }
+        }
+      }
+    },
+    "onboarding.nav.skip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "跳过"
+          }
+        }
+      }
+    },
+    "onboarding.nav.done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Done"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完成"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.menuBar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Menu Bar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "菜单栏面板"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.permissions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Permissions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "权限"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.hyperKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.capture": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Capture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图捕获"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.clipboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard & Palette"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板与命令"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.customize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Customize"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "个性化"
+          }
+        }
+      }
+    },
+    "onboarding.menuBar.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AnyDoor lives in your menu bar"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AnyDoor 在菜单栏等你"
+          }
+        }
+      }
+    },
+    "onboarding.menuBar.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click the icon up top to open the panel — every action is one click or one hotkey away."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击顶部的图标即可打开面板,每个动作都只差一次点击或一个热键。"
+          }
+        }
+      }
+    },
+    "onboarding.menuBar.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Dock icon — AnyDoor stays out of your way."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有 Dock 图标,AnyDoor 始终不打扰你。"
+          }
+        }
+      }
+    },
+    "onboarding.permissions.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn on a few permissions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "先打开必要权限"
+          }
+        }
+      }
+    },
+    "onboarding.permissions.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These let AnyDoor do its job. Grant them now or later — none are required to keep going."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这些权限让 AnyDoor 正常工作。现在或稍后授权都行,跳过也不影响继续。"
+          }
+        }
+      }
+    },
+    "onboarding.permissions.optional": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can finish this later in Settings › General › Permissions."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "也可以稍后在「设置 › 通用 › 权限」里完成。"
+          }
+        }
+      }
+    },
+    "onboarding.permission.accessibility.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Global hotkeys, window layout, and Hyper Key."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用于全局热键、窗口布局和 Hyper Key。"
+          }
+        }
+      }
+    },
+    "onboarding.permission.screenRecording.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Screenshots, OCR, and screen recording."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用于截图、OCR 取字和录屏。"
+          }
+        }
+      }
+    },
+    "onboarding.permission.automation.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System actions like Dark Mode, Empty Trash, and scheduled shutdown."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用于深色模式、清空废纸篓、定时关机等系统动作。"
+          }
+        }
+      }
+    },
+    "onboarding.permission.needsAction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs setup"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待设置"
+          }
+        }
+      }
+    },
+    "onboarding.hyperKey.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make Caps Lock your Hyper Key"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "把 Caps Lock 变成 Hyper Key"
+          }
+        }
+      }
+    },
+    "onboarding.hyperKey.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One key adds ⌃⌥⌘ (plus ⇧ if you want) to anything, so your shortcuts never collide."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一个键给任意按键加上 ⌃⌥⌘(可选再加 ⇧),让你的快捷键永不冲突。"
+          }
+        }
+      }
+    },
+    "onboarding.hyperKey.triggerLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Trigger key"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "触发键"
+          }
+        }
+      }
+    },
+    "onboarding.hyperKey.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It maps to F19 underneath, never overrides third-party mappings, and is cleaned up when you quit."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "它在底层映射到 F19,不会覆盖第三方映射,退出时会自动清理。"
+          }
+        }
+      }
+    },
+    "onboarding.hyperKey.recommended": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recommended"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "推荐"
+          }
+        }
+      }
+    },
+    "onboarding.hyperKey.enabledNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key is on."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key 已开启。"
+          }
+        }
+      }
+    },
+    "onboarding.hyperKey.exampleCaption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For example"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例如"
+          }
+        }
+      }
+    },
+    "onboarding.capture.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Handle screenshots on the spot"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图后立刻处理"
+          }
+        }
+      }
+    },
+    "onboarding.capture.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grab a region, window, full screen, a timed shot, or a scrolling page — then act right from the thumbnail."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可截区域、窗口、全屏、计时或滚动长图,然后直接在缩略图上处理。"
+          }
+        }
+      }
+    },
+    "onboarding.capture.overlayHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy, save, annotate, or pin — no digging through your desktop."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制、保存、标注或贴图,无需再去桌面翻找。"
+          }
+        }
+      }
+    },
+    "onboarding.capture.demoCaption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preview only — real capture runs from the panel or your hotkey."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅为预览,真正的截图由面板或你的热键触发。"
+          }
+        }
+      }
+    },
+    "onboarding.capture.autoFeatures": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto-copy, auto-save, and history are built in."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动复制、自动保存和历史记录都已内置。"
+          }
+        }
+      }
+    },
+    "onboarding.clipboard.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard wall & command palette"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板墙和命令面板"
+          }
+        }
+      }
+    },
+    "onboarding.clipboard.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bring back anything you copied, and run any command from one search box."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "找回你复制过的一切,并用一个搜索框执行任何命令。"
+          }
+        }
+      }
+    },
+    "onboarding.clipboard.wallCaption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard · ⌘⇧V"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板墙 · ⌘⇧V"
+          }
+        }
+      }
+    },
+    "onboarding.clipboard.paletteCaption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command Palette"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令面板"
+          }
+        }
+      }
+    },
+    "onboarding.clipboard.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Text, images, files, screenshots, OCR, QR codes, and picked colors."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文本、图片、文件、截图、OCR、二维码和取色,全都记得住。"
+          }
+        }
+      }
+    },
+    "onboarding.palette.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apps, actions, math, conversions, ports, hosts, brightness, and more."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用、动作、计算、换算、端口、hosts、亮度等等。"
+          }
+        }
+      }
+    },
+    "onboarding.demo.currencyResult": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "300 USD ≈ ¥2,148"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "300 美元 ≈ ¥2,148"
+          }
+        }
+      }
+    },
+    "onboarding.demo.portResult": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "node · :3000 · PID 91234"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "node · :3000 · PID 91234"
+          }
+        }
+      }
+    },
+    "onboarding.demo.hostsResult": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "staging · hosts profile"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "staging · hosts 配置"
+          }
+        }
+      }
+    },
+    "onboarding.customize.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tune it to your workflow"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按你的工作流定制"
+          }
+        }
+      }
+    },
+    "onboarding.customize.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reorder rows, toggle what shows, and record hotkeys — all in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在设置里拖拽排序、开关显示、录制热键,一切随你。"
+          }
+        }
+      }
+    },
+    "onboarding.customize.dragHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag to reorder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拖拽排序"
+          }
+        }
+      }
+    },
+    "onboarding.customize.recordHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click a field to record a hotkey"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击字段即可录制热键"
+          }
+        }
+      }
+    },
+    "onboarding.customize.recordingState": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "录制中…"
+          }
+        }
+      }
+    },
+    "onboarding.customize.openSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Settings to customize"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开设置继续配置"
+          }
+        }
+      }
+    },
+    "onboarding.customize.menuBarHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find the AnyDoor icon in your menu bar — that's home base."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在菜单栏找到 AnyDoor 图标,那就是它的家。"
+          }
+        }
+      }
+    },
+    "onboarding.settings.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Getting Started"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新手引导"
+          }
+        }
+      }
+    },
+    "onboarding.settings.reopen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reopen Getting Started"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新打开新手引导"
+          }
+        }
+      }
+    },
+    "onboarding.settings.reopen.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Walk through the welcome guide again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重新浏览一遍新手引导。"
           }
         }
       }

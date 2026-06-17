@@ -213,6 +213,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         bootstrapUpdater()
         installSettingsOpenerCapture()
+
+        // First-run onboarding. Shows once on a clean install; afterwards it is
+        // only reachable from Settings (the window opts out of state restoration
+        // and reverts the app to `.accessory` when closed).
+        if !OnboardingState.hasCompleted() {
+            OnboardingWindowController.shared.show()
+        }
     }
 
     /// Mount an off-screen SwiftUI view that resolves `\.openSettings` and

@@ -6,6 +6,21 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- An interactive first-run onboarding: a six-step window (left progress rail,
+  right content) where each step teaches through a hand-drawn, animated SwiftUI
+  mock rather than walls of text — the menu-bar panel dropping into place, three
+  live permission cards (Accessibility / Screen Recording / Automation) wired to
+  the real requests, a Hyper Key keyboard demo whose controls drive the real
+  Hyper Key settings, a looping capture Quick Access overlay, an auto-typing
+  command palette (`300 usd`, `:3000`, `hosts`) beside the clipboard wall, and a
+  Panel-settings customize demo. Back / Continue / Skip / Done are fixed at the
+  bottom (Esc skips, Return continues), Reduce Motion is honored, and every
+  destructive action is mock-only. It shows once on a clean install, never
+  participates in window state restoration, and can be reopened from
+  Settings › General › Getting Started.
+
 ## [2.7.0] - 2026-06-17
 
 ### Added

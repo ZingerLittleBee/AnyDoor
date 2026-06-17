@@ -221,6 +221,19 @@ struct GeneralSettingsView: View {
             SyncSettingsView()
 
             Section {
+                Button {
+                    OnboardingWindowController.shared.show()
+                } label: {
+                    Label { LocalizedText(.onboardingSettingsReopen) } icon: { Image(systemName: "sparkles") }
+                }
+                LocalizedText(.onboardingSettingsReopenHelp)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                LocalizedText(.onboardingSettingsSection)
+            }
+
+            Section {
                 @Bindable var updateService = updateService
 
                 LabeledContent { Text(Bundle.main.shortVersionString ?? "—")
