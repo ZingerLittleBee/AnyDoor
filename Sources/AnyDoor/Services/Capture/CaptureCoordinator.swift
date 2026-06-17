@@ -89,7 +89,7 @@ final class CaptureCoordinator {
             if delay > 0 {
                 // Timed region: re-grab the live screen after the countdown so UI
                 // arranged during it is captured — the frozen crop is now stale.
-                afterCountdown(delay) { [weak self] in
+                afterCountdown(delay, anchor: rect, outline: rect) { [weak self] in
                     self?.captureLiveRegion(rect: rect)
                     self?.finish()
                 }
@@ -102,12 +102,12 @@ final class CaptureCoordinator {
             // Clamp to >=1s: `delaySeconds` is portable via SyncSettingsRegistry and
             // unclamped, so an imported/edited 0 would skip the countdown's overlay
             // teardown and could re-grab the selection overlay into the shot.
-            afterCountdown(max(1, settings.delaySeconds)) { [weak self] in
+            afterCountdown(max(1, settings.delaySeconds), anchor: rect, outline: rect) { [weak self] in
                 self?.captureLiveRegion(rect: rect)
                 self?.finish()
             }
         case let .window(id, frame):
-            afterCountdown(delay) { [weak self] in
+            afterCountdown(delay, anchor: frame) { [weak self] in
                 guard let self else { return }
                 guard let cg = LegacyScreenCapture.window(id) else {
                     ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
@@ -120,7 +120,7 @@ final class CaptureCoordinator {
             if delay > 0 {
                 // Timed fullscreen: re-grab the live display after the countdown,
                 // like region/window, so the frozen still is not stale.
-                afterCountdown(delay) { [weak self] in
+                afterCountdown(delay, anchor: frame) { [weak self] in
                     self?.captureLiveFullscreen(frame: frame)
                     self?.finish()
                 }
@@ -194,15 +194,26 @@ final class CaptureCoordinator {
     }
 
     /// Run `body` on the main actor after `seconds`, showing a visible per-second
-    /// countdown overlay. Uses `Task.sleep` (which resumes on the main actor) — no
-    /// cross-isolation await, so it is safe with respect to the executor-tracking
-    /// bug described in `LegacyScreenCapture`. The overlay is removed and given a
-    /// brief beat to leave the screen before `body` runs, so a live re-grab never
-    /// captures the countdown itself.
-    private func afterCountdown(_ seconds: Int, _ body: @escaping @MainActor () -> Void) {
+    /// countdown overlay (placed in the lower-middle of the `anchor`'s display, or
+    /// the display under the cursor) and, when `outline` is set, an accent border
+    /// around the region being captured so the user can arrange UI inside it.
+    ///
+    /// Uses `Task.sleep` (which resumes on the main actor) — no cross-isolation
+    /// await, so it is safe with respect to the executor-tracking bug described in
+    /// `LegacyScreenCapture`. Both overlays are removed and given a brief beat to
+    /// leave the screen before `body` runs, so a live re-grab never captures them.
+    private func afterCountdown(_ seconds: Int, anchor: CGRect? = nil, outline: CGRect? = nil, _ body: @escaping @MainActor () -> Void) {
         guard seconds > 0 else { body(); return }
         let countdown = CaptureCountdownWindow()
-        countdown.present(seconds: seconds)
+        countdown.present(seconds: seconds, on: Self.countdownScreenFrame(anchor: anchor))
+        let outlineWindow: CaptureRegionOutlineWindow?
+        if let outline {
+            let window = CaptureRegionOutlineWindow()
+            window.present(frame: outline)
+            outlineWindow = window
+        } else {
+            outlineWindow = nil
+        }
         Task { @MainActor in
             var remaining = seconds
             while remaining > 0 {
@@ -211,13 +222,26 @@ final class CaptureCoordinator {
                 remaining -= 1
             }
             countdown.dismiss()
-            // Let the panel fully leave the screen before a live re-grab so it is
-            // never in the shot. 140ms matches ScrollCaptureCoordinator's vetted
-            // overlay-clear delay for the same teardown-then-live-grab problem
-            // (orderOut only enqueues a compositor transaction).
+            outlineWindow?.dismiss()
+            // Let the panels fully leave the screen before a live re-grab so they
+            // are never in the shot. 140ms matches ScrollCaptureCoordinator's
+            // vetted overlay-clear delay for the same teardown-then-live-grab
+            // problem (orderOut only enqueues a compositor transaction).
             try? await Task.sleep(for: .milliseconds(140))
             body()
         }
+    }
+
+    /// The display frame to anchor the countdown on: the display containing
+    /// `anchor`'s center, else the display under the cursor (or main).
+    @MainActor private static func countdownScreenFrame(anchor: CGRect?) -> CGRect {
+        if let anchor {
+            let center = CGPoint(x: anchor.midX, y: anchor.midY)
+            if let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) {
+                return screen.frame
+            }
+        }
+        return (NSScreen.screenUnderMouse ?? NSScreen.main)?.frame ?? .zero
     }
 
     private func finish() { inFlight = false }

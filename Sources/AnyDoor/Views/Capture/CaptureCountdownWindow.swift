@@ -2,8 +2,9 @@ import AppKit
 import SwiftUI
 
 /// A floating, click-through countdown shown during a self-timer capture. It sits
-/// at the center of the display under the cursor and ticks a large number down to
-/// 1; the caller dismisses it just before grabbing so it never lands in the shot.
+/// horizontally centered in the lower portion of the target display and ticks a
+/// large number down to 1; the caller dismisses it just before grabbing so it
+/// never lands in the shot.
 @MainActor
 final class CaptureCountdownWindow {
     private var panel: NSPanel?
@@ -11,16 +12,19 @@ final class CaptureCountdownWindow {
 
     fileprivate static let side: CGFloat = 140
 
-    /// Shows the overlay seeded at `seconds`. No-op for non-positive values.
-    func present(seconds: Int) {
+    /// Shows the overlay seeded at `seconds`, horizontally centered and placed in
+    /// the lower-middle of `screenFrame`. No-op for non-positive values.
+    func present(seconds: Int, on screenFrame: CGRect) {
         guard seconds > 0 else { return }
         model.remaining = seconds
 
-        let screen = NSScreen.screenUnderMouse ?? NSScreen.main
-        let frame = screen?.frame ?? .zero
         let side = Self.side
+        let origin = NSPoint(
+            x: screenFrame.midX - side / 2,
+            y: screenFrame.minY + screenFrame.height * 0.18
+        )
         let panel = NSPanel(
-            contentRect: NSRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side),
+            contentRect: NSRect(origin: origin, size: NSSize(width: side, height: side)),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -49,6 +53,51 @@ final class CaptureCountdownWindow {
     func dismiss() {
         panel?.orderOut(nil)
         panel = nil
+    }
+}
+
+/// A click-through accent border drawn around the selection while a self-timer
+/// counts down, so the user can see what region will be captured. Click-through
+/// so transient UI can be arranged inside it, and removed before the grab so it
+/// never lands in the shot.
+@MainActor
+final class CaptureRegionOutlineWindow {
+    private var panel: NSPanel?
+
+    /// Outlines `frame` (global AppKit coords, bottom-left origin).
+    func present(frame: CGRect) {
+        dismiss()
+        let p = NSPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        p.isOpaque = false
+        p.backgroundColor = .clear
+        p.level = .statusBar
+        p.hasShadow = false
+        p.ignoresMouseEvents = true
+        p.isReleasedWhenClosed = false
+        p.animationBehavior = .none
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        p.contentView = RegionOutlineView(frame: NSRect(origin: .zero, size: frame.size))
+        p.orderFrontRegardless()
+        panel = p
+    }
+
+    func dismiss() {
+        panel?.orderOut(nil)
+        panel = nil
+    }
+}
+
+private final class RegionOutlineView: NSView {
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        ctx.setLineWidth(2)
+        ctx.stroke(bounds.insetBy(dx: 1, dy: 1))
     }
 }
 
