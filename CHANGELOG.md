@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-06-17
+
 ### Added
 
 - A self-timer button on the capture selection toolbar. It captures the current
