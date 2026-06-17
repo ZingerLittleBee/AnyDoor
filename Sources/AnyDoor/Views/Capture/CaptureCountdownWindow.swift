@@ -9,6 +9,11 @@ import SwiftUI
 final class CaptureCountdownWindow {
     private var panel: NSPanel?
     private let model = CountdownModel()
+    private var keyMonitorLocal: Any?
+    private var keyMonitorGlobal: Any?
+
+    /// Invoked when the user presses Esc to abort the countdown.
+    var onCancel: (() -> Void)?
 
     fileprivate static let side: CGFloat = 140
 
@@ -44,13 +49,29 @@ final class CaptureCountdownWindow {
         panel.contentView = host
         panel.orderFrontRegardless()
         self.panel = panel
+
+        // Esc aborts the countdown. A global monitor is required because the user
+        // is typically arranging UI in another app while the timer runs (AnyDoor
+        // is not key); the local monitor covers AnyDoor being frontmost. Both fire
+        // on the main thread (see MainThreadIsolation).
+        keyMonitorGlobal = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 /* Esc */ else { return }
+            MainThreadIsolation.run { self?.onCancel?() }
+        }
+        keyMonitorLocal = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard event.keyCode == 53 /* Esc */ else { return event }
+            MainThreadIsolation.run { self?.onCancel?() }
+            return nil
+        }
     }
 
     /// Updates the displayed number.
     func update(remaining: Int) { model.remaining = remaining }
 
-    /// Removes the overlay from screen.
+    /// Removes the overlay from screen and tears down the key monitors.
     func dismiss() {
+        if let m = keyMonitorLocal { NSEvent.removeMonitor(m); keyMonitorLocal = nil }
+        if let m = keyMonitorGlobal { NSEvent.removeMonitor(m); keyMonitorGlobal = nil }
         panel?.orderOut(nil)
         panel = nil
     }

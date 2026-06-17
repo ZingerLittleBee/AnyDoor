@@ -20,6 +20,8 @@ final class CaptureCoordinator {
     private let selectionOverlay = SelectionOverlayWindow()
     private var lastRegionRequest: CaptureRequest?
     private var inFlight = false
+    /// The running self-timer countdown, retained so Esc can cancel it.
+    private var countdownTask: Task<Void, Never>?
 
     init(settings: CaptureSettings = .shared) {
         self.settings = settings
@@ -214,15 +216,20 @@ final class CaptureCoordinator {
         } else {
             outlineWindow = nil
         }
-        Task { @MainActor in
+        countdownTask = Task { @MainActor in
+            defer { self.countdownTask = nil }
             var remaining = seconds
             while remaining > 0 {
+                if Task.isCancelled { break }
                 countdown.update(remaining: remaining)
                 try? await Task.sleep(for: .seconds(1))
                 remaining -= 1
             }
             countdown.dismiss()
             outlineWindow?.dismiss()
+            // Esc aborts the capture entirely: overlays are already torn down, so
+            // just release the in-flight guard without grabbing.
+            if Task.isCancelled { self.finish(); return }
             // Let the panels fully leave the screen before a live re-grab so they
             // are never in the shot. 140ms matches ScrollCaptureCoordinator's
             // vetted overlay-clear delay for the same teardown-then-live-grab
@@ -230,6 +237,7 @@ final class CaptureCoordinator {
             try? await Task.sleep(for: .milliseconds(140))
             body()
         }
+        countdown.onCancel = { [weak self] in self?.countdownTask?.cancel() }
     }
 
     /// The display frame to anchor the countdown on: the display containing
