@@ -335,7 +335,9 @@ final class CaptureCoordinator {
 
             let actions = CaptureOverlayActions(
                 copy: { [weak self] in self?.copyToPasteboard(image) },
-                save: { [weak self] in self?.saveInteractive(png: png, existing: savedURL) },
+                save: { [weak self] in self?.saveAs(png: png) },
+                // Only offered when auto-save already wrote the file to disk.
+                reveal: savedURL.map { url in { NSWorkspace.shared.activateFileViewerSelecting([url]) } },
                 edit: { AnnotationEditorWindow.shared.show(image: image) },
                 pin: {
                     let screen = NSScreen.screenUnderMouse ?? NSScreen.main
@@ -375,11 +377,8 @@ final class CaptureCoordinator {
         }
     }
 
-    private func saveInteractive(png: Data, existing: URL?) {
-        if let existing {
-            NSWorkspace.shared.activateFileViewerSelecting([existing])
-            return
-        }
+    /// "Save As": always prompt for a destination via a save panel.
+    private func saveAs(png: Data) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = CaptureFilename.make(template: settings.namingTemplate, date: Date(), calendar: .current) + ".png"
         panel.allowedContentTypes = [.png]
@@ -432,7 +431,7 @@ final class CaptureCoordinator {
             ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
             return
         }
-        saveInteractive(png: png, existing: nil)
+        saveAs(png: png)
     }
 
     /// Pins an edited image on screen (annotation editor "pin").
