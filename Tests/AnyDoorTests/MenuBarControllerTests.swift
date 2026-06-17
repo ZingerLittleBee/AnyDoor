@@ -122,4 +122,26 @@ final class MenuBarControllerTests: XCTestCase {
         XCTAssertEqual(MenuBarEventMonitorPolicy.escapeDecision(keyCode: 53), .closeAndConsume)
         XCTAssertEqual(MenuBarEventMonitorPolicy.escapeDecision(keyCode: 36), .ignore)
     }
+
+    @MainActor
+    func testPanelScrollViewHidesScrollers() {
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 260, height: 400))
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.scrollerStyle = .legacy
+        scrollView.autohidesScrollers = false
+        scrollView.drawsBackground = true
+        scrollView.automaticallyAdjustsContentInsets = true
+        scrollView.verticalScroller?.scrollerStyle = .legacy
+
+        MenuBarController.configurePanelScrollView(scrollView)
+
+        XCTAssertFalse(scrollView.hasVerticalScroller)
+        XCTAssertFalse(scrollView.hasHorizontalScroller)
+        XCTAssertTrue(scrollView.autohidesScrollers)
+        XCTAssertFalse(scrollView.drawsBackground)
+        XCTAssertFalse(scrollView.automaticallyAdjustsContentInsets)
+        XCTAssertNil(scrollView.verticalScroller)
+        XCTAssertNil(scrollView.horizontalScroller)
+    }
 }

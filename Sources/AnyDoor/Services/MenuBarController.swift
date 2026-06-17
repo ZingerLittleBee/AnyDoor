@@ -161,11 +161,7 @@ final class MenuBarController {
             hostingView.autoresizingMask = [.width]
             let scrollView = NSScrollView(frame: NSRect(origin: .zero, size: panelSize))
             scrollView.documentView = hostingView
-            scrollView.hasVerticalScroller = true
-            scrollView.scrollerStyle = .overlay
-            scrollView.autohidesScrollers = true
-            scrollView.drawsBackground = false
-            scrollView.automaticallyAdjustsContentInsets = false
+            Self.configurePanelScrollView(scrollView)
             // Round the viewport so the panel keeps its corner radius even when
             // the SwiftUI content's own rounded background has scrolled off.
             scrollView.wantsLayer = true
@@ -249,6 +245,16 @@ final class MenuBarController {
             origin.y = max(origin.y, visible.minY + 4)
         }
         return origin
+    }
+
+    static func configurePanelScrollView(_ scrollView: NSScrollView) {
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.verticalScroller = nil
+        scrollView.horizontalScroller = nil
+        scrollView.autohidesScrollers = true
+        scrollView.drawsBackground = false
+        scrollView.automaticallyAdjustsContentInsets = false
     }
 
     // MARK: - Outside-click dismissal
