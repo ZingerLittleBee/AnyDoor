@@ -265,6 +265,7 @@ enum L10n {
         case settingsSyncSection = "settings.sync.section"
         case settingsTabGeneral = "settings.tab.general"
         case settingsTabPanel = "settings.tab.panel"
+        case settingsTabClipboard = "settings.tab.clipboard"
         case clipboardTextChars = "clipboard.text.chars"
         case clipboardTextLines = "clipboard.text.lines"
         case clipboardFileCount = "clipboard.file.count"

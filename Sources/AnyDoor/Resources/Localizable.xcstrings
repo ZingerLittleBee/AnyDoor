@@ -851,6 +851,23 @@
         }
       }
     },
+    "settings.tab.clipboard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板"
+          }
+        }
+      }
+    },
     "colorFormat.css": {
       "extractionState": "manual",
       "localizations": {
