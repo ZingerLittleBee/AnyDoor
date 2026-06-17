@@ -308,7 +308,6 @@ enum L10n {
         case scheduledShutdownDuration2Hour = "scheduledShutdown.duration.2hour"
         case scheduledShutdownDurationCancel = "scheduledShutdown.duration.cancel"
         case scheduledShutdownDurationMenuHelp = "scheduledShutdown.duration.menuHelp"
-        case shutdownToastMissed = "shutdown.toast.missed"
         case shutdownToastFailed = "shutdown.toast.failed"
         case shutdownWarningTitle = "shutdown.warning.title"
         case shutdownWarningMessage = "shutdown.warning.message"

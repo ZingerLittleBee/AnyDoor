@@ -1327,23 +1327,6 @@
         }
       }
     },
-    "shutdown.toast.missed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Scheduled shutdown expired and was not run"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "定时关机计划已过期，未执行"
-          }
-        }
-      }
-    },
     "shutdown.toast.failed": {
       "extractionState": "manual",
       "localizations": {

@@ -6,12 +6,11 @@ import SwiftUI
 enum ToastStyle: Sendable {
     case success(String)
     case failure(String)
-    case info(String)
     case color(message: String, swatch: Color)
 
     var message: String {
         switch self {
-        case .success(let text), .failure(let text), .info(let text):
+        case .success(let text), .failure(let text):
             return text
         case .color(let message, _):
             return message
@@ -44,8 +43,6 @@ struct ToastView: View {
             symbol("checkmark.circle.fill", color: .green)
         case .failure:
             symbol("xmark.circle.fill", color: .red)
-        case .info:
-            symbol("info.circle.fill", color: .accentColor)
         case .color(_, let swatch):
             RoundedRectangle(cornerRadius: 4)
                 .fill(swatch)

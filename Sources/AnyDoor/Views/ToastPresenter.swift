@@ -43,8 +43,7 @@ final class ToastPresenter {
     }
 
     /// Show a toast. A new call replaces the current toast in place and resets the timer.
-    /// `duration` is how long the pill is held before it fades (default ~1s).
-    func show(_ style: ToastStyle, duration: TimeInterval = 1.0) {
+    func show(_ style: ToastStyle) {
         dismissTask?.cancel()
 
         let toastView = ToastView(style: style)
@@ -60,7 +59,7 @@ final class ToastPresenter {
         }
 
         dismissTask = Task {
-            try? await Task.sleep(nanoseconds: UInt64(max(0, duration) * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
             self.dismiss()
         }
