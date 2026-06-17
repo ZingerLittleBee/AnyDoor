@@ -5,7 +5,7 @@ import Foundation
 /// recording join in Phase 3 via a richer tool-type enum.
 enum CaptureToolbarPolicy {
     /// Buttons rendered, left to right.
-    static let tools: [CaptureToolType] = [.region, .window, .fullscreen, .scrolling, .recording]
+    static let tools: [CaptureToolType] = [.region, .window, .fullscreen, .timer, .scrolling, .recording]
 
     /// SF Symbol for each toolbar button.
     static func symbol(for tool: CaptureToolType) -> String {
@@ -13,6 +13,7 @@ enum CaptureToolbarPolicy {
         case .region:     return "rectangle.dashed"
         case .window:     return "macwindow"
         case .fullscreen: return "rectangle.inset.filled"
+        case .timer:      return "timer"
         case .scrolling:  return "arrow.down.to.line"
         case .recording:  return "record.circle"
         }
@@ -24,6 +25,7 @@ enum CaptureToolbarPolicy {
         case .region:     return .captureModeBarRegion
         case .window:     return .captureModeBarWindow
         case .fullscreen: return .captureModeBarFullscreen
+        case .timer:      return .captureModeBarTimer
         case .scrolling:  return .captureModeBarScrolling
         case .recording:  return .captureModeBarRecording
         }

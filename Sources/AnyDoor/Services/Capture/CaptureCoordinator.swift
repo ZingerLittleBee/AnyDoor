@@ -86,8 +86,24 @@ final class CaptureCoordinator {
         switch result {
         case let .region(cgImage, rect):
             settings.setLastRegionRect(rect)
-            afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage)
+            if delay > 0 {
+                // Timed region: re-grab the live screen after the countdown so UI
+                // arranged during it is captured — the frozen crop is now stale.
+                afterCountdown(delay) { [weak self] in
+                    self?.captureLiveRegion(rect: rect)
+                    self?.finish()
+                }
+            } else {
+                self.present(image: cgImage)
+                self.finish()
+            }
+        case let .regionTimer(rect):
+            settings.setLastRegionRect(rect)
+            // Clamp to >=1s: `delaySeconds` is portable via SyncSettingsRegistry and
+            // unclamped, so an imported/edited 0 would skip the countdown's overlay
+            // teardown and could re-grab the selection overlay into the shot.
+            afterCountdown(max(1, settings.delaySeconds)) { [weak self] in
+                self?.captureLiveRegion(rect: rect)
                 self?.finish()
             }
         case let .window(id, frame):
@@ -100,10 +116,17 @@ final class CaptureCoordinator {
                 self.present(image: cg)
                 self.finish()
             }
-        case let .fullscreen(cgImage, _):
-            afterCountdown(delay) { [weak self] in
-                self?.present(image: cgImage)
-                self?.finish()
+        case let .fullscreen(cgImage, frame):
+            if delay > 0 {
+                // Timed fullscreen: re-grab the live display after the countdown,
+                // like region/window, so the frozen still is not stale.
+                afterCountdown(delay) { [weak self] in
+                    self?.captureLiveFullscreen(frame: frame)
+                    self?.finish()
+                }
+            } else {
+                present(image: cgImage)
+                finish()
             }
         case let .scrolling(rect):
             finish()
@@ -129,13 +152,70 @@ final class CaptureCoordinator {
         }
     }
 
-    /// Run `body` on the main actor after `seconds`. Uses `Task.sleep` (which
-    /// resumes on the main actor) — no cross-isolation await, so it is safe with
-    /// respect to the executor-tracking bug described in `LegacyScreenCapture`.
+    /// Grabs the live screen and crops it to `rect` (global AppKit coords,
+    /// bottom-left origin), then runs it through the output policy. Used by the
+    /// self-timer so the capture reflects the screen at countdown end, not the
+    /// frozen still taken when the selection was made.
+    private func captureLiveRegion(rect: CGRect) {
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main,
+              let id = screen.displayID,
+              let full = LegacyScreenCapture.display(id) else {
+            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+            return
+        }
+        let scale = screen.backingScaleFactor
+        // Global AppKit rect (bottom-left) -> display-local pixel rect (top-left).
+        let pixelRect = CGRect(
+            x: (rect.minX - screen.frame.minX) * scale,
+            y: (screen.frame.maxY - rect.maxY) * scale,
+            width: rect.width * scale,
+            height: rect.height * scale
+        ).integral
+        guard let crop = full.cropping(to: pixelRect) else {
+            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+            return
+        }
+        present(image: crop)
+    }
+
+    /// Re-grabs the live display containing `frame` (global AppKit coords) and runs
+    /// it through the output policy. The timed fullscreen path uses this so the
+    /// shot reflects the screen at countdown end, mirroring `captureLiveRegion`.
+    private func captureLiveFullscreen(frame: CGRect) {
+        let center = CGPoint(x: frame.midX, y: frame.midY)
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) }) ?? NSScreen.main,
+              let id = screen.displayID,
+              let full = LegacyScreenCapture.display(id) else {
+            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+            return
+        }
+        present(image: full)
+    }
+
+    /// Run `body` on the main actor after `seconds`, showing a visible per-second
+    /// countdown overlay. Uses `Task.sleep` (which resumes on the main actor) — no
+    /// cross-isolation await, so it is safe with respect to the executor-tracking
+    /// bug described in `LegacyScreenCapture`. The overlay is removed and given a
+    /// brief beat to leave the screen before `body` runs, so a live re-grab never
+    /// captures the countdown itself.
     private func afterCountdown(_ seconds: Int, _ body: @escaping @MainActor () -> Void) {
         guard seconds > 0 else { body(); return }
+        let countdown = CaptureCountdownWindow()
+        countdown.present(seconds: seconds)
         Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
+            var remaining = seconds
+            while remaining > 0 {
+                countdown.update(remaining: remaining)
+                try? await Task.sleep(for: .seconds(1))
+                remaining -= 1
+            }
+            countdown.dismiss()
+            // Let the panel fully leave the screen before a live re-grab so it is
+            // never in the shot. 140ms matches ScrollCaptureCoordinator's vetted
+            // overlay-clear delay for the same teardown-then-live-grab problem
+            // (orderOut only enqueues a compositor transaction).
+            try? await Task.sleep(for: .milliseconds(140))
             body()
         }
     }
