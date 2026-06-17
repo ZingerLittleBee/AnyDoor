@@ -7776,13 +7776,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "300 USD ≈ ¥2,148"
+            "value": "2,148.00 CNY"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "300 美元 ≈ ¥2,148"
+            "value": "2,148.00 CNY"
           }
         }
       }

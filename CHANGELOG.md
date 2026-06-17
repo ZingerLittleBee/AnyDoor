@@ -14,7 +14,7 @@ versioning.
   live permission cards (Accessibility / Screen Recording / Automation) wired to
   the real requests, a Hyper Key keyboard demo whose controls drive the real
   Hyper Key settings, a looping capture Quick Access overlay, an auto-typing
-  command palette (`300 usd`, `:3000`, `hosts`) beside the clipboard wall, and a
+  command palette (`300 usd = rmb`, `:3000`, `hosts`) beside the clipboard wall, and a
   Panel-settings customize demo. Back / Continue / Skip / Done are fixed at the
   bottom (Esc skips, Return continues), Reduce Motion is honored, and every
   destructive action is mock-only. It shows once on a clean install, never

@@ -17,7 +17,7 @@ struct OnboardingClipboardPaletteStep: View {
     }
 
     private let examples: [PaletteExample] = [
-        PaletteExample(query: "300 usd", symbol: "dollarsign.arrow.circlepath",
+        PaletteExample(query: "300 usd = rmb", symbol: "dollarsign.arrow.circlepath",
                        resultKey: .onboardingDemoCurrencyResult, sectionKey: .commandPaletteSectionConversion, tint: .green),
         PaletteExample(query: ":3000", symbol: "network",
                        resultKey: .onboardingDemoPortResult, sectionKey: .commandPaletteSectionPorts, tint: .blue),
