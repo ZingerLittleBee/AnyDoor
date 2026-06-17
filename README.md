@@ -166,11 +166,18 @@ Key, and a Spotlight-style command palette when you need them.
 
 ### Settings
 
-- **Panel** tab: drag-to-reorder, per-item visibility, inline hotkey
+- **Panel** tab: drag-to-reorder (top-level items and app-shortcut /
+  window-layout children alike), per-item visibility, inline hotkey
   recorder, type badges (toggle / action / submenu).
-- **General** tab: launch at login, menu bar icon style, accessibility
-  and automation permission status with one-click request, auto-update
-  controls, and configuration backup / restore.
+- **Clipboard** tab: history monitoring, copy-only capture, retention
+  window, per-source app exclusions, and clear-all history.
+- **Screenshot** tab: save location, filename template, auto-save /
+  auto-copy, timer-delay presets, quick-access overlay timeout, and
+  recording options.
+- **General** tab: launch at login, language, menu bar icon style, Hyper
+  Key, command palette hotkey, scheduled shutdown, accessibility /
+  automation / screen-recording permission status with one-click request,
+  configuration backup / restore, and auto-update controls.
 
 ### Auto-update
 
