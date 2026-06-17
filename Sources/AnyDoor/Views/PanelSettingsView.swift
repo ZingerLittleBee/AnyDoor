@@ -9,10 +9,18 @@ struct PanelSettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
-                ForEach(panel.topLevelEntries) { entry in
-                    row(for: entry)
+                // Render every parent, child, and adornment as a flat list row so
+                // children become real, individually draggable rows. A nested
+                // `ForEach.onMove` inside a composed parent row never wires into
+                // the List's reordering machinery, so children could not be
+                // dragged. `move(from:to:)` routes each drag back to the group it
+                // belongs to (see PanelReorder).
+                ForEach(displayRows) { row in
+                    rowView(row)
+                        .opacity(row.opacity)
+                        .moveDisabled(row.group == .fixed)
                 }
-                .onMove(perform: moveTopLevel)
+                .onMove(perform: move)
             }
             .listStyle(.inset)
 
@@ -42,22 +50,95 @@ struct PanelSettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func row(for entry: PanelEntry) -> some View {
-        VStack(spacing: 0) {
-            mainRow(entry)
-            if case .builtin(.appShortcuts) = entry.source {
-                appShortcutChildren()
-                addAppButton()
-            }
-            if case .builtin(.brightness) = entry.source {
-                brightnessHotkeyRecorders()
-            }
-            if case .builtin(.windowLayout) = entry.source {
-                windowLayoutChildrenList()
+    /// A single flat row in the Panel settings list: a top-level entry, an app
+    /// shortcut / window-layout child, or a non-draggable adornment.
+    private struct PanelListRow: Identifiable {
+        enum Content {
+            case entry(PanelEntry)
+            case addApp
+            case brightnessRecorders
+        }
+        let id: String
+        let content: Content
+        let group: PanelDragGroup
+        let opacity: Double
+    }
+
+    /// Flatten `topLevelEntries` and their children/adornments into one ordered
+    /// list. Children render directly beneath their parent, but as their own
+    /// list rows so each is individually draggable.
+    private var displayRows: [PanelListRow] {
+        var rows: [PanelListRow] = []
+        let appShortcutsVisible = builtinVisible(.appShortcuts)
+        let brightnessVisible = builtinVisible(.brightness)
+        let windowLayoutVisible = builtinVisible(.windowLayout)
+
+        for entry in panel.topLevelEntries {
+            rows.append(PanelListRow(
+                id: "top:\(entry.id)",
+                content: .entry(entry),
+                group: .topLevel,
+                opacity: entry.isVisible ? 1.0 : 0.5
+            ))
+
+            switch entry.source {
+            case .builtin(.appShortcuts):
+                for child in panel.appShortcutChildren {
+                    let visible = appShortcutsVisible && child.isVisible
+                    rows.append(PanelListRow(
+                        id: "appChild:\(child.id)",
+                        content: .entry(child),
+                        group: .appChild,
+                        opacity: visible ? 1.0 : 0.5
+                    ))
+                }
+                rows.append(PanelListRow(
+                    id: "addApp",
+                    content: .addApp,
+                    group: .fixed,
+                    opacity: appShortcutsVisible ? 1.0 : 0.5
+                ))
+            case .builtin(.brightness):
+                rows.append(PanelListRow(
+                    id: "brightnessRecorders",
+                    content: .brightnessRecorders,
+                    group: .fixed,
+                    opacity: brightnessVisible ? 1.0 : 0.5
+                ))
+            case .builtin(.windowLayout):
+                for child in panel.windowLayoutChildren {
+                    rows.append(PanelListRow(
+                        id: "windowChild:\(child.id)",
+                        content: .entry(child),
+                        group: .windowChild,
+                        opacity: windowLayoutVisible ? 1.0 : 0.5
+                    ))
+                }
+            default:
+                break
             }
         }
-        .opacity(entry.isVisible ? 1.0 : 0.5)
+        return rows
+    }
+
+    private func builtinVisible(_ item: BuiltinItem) -> Bool {
+        panel.topLevelEntries.first { $0.source == .builtin(item) }?.isVisible ?? true
+    }
+
+    @ViewBuilder
+    private func rowView(_ row: PanelListRow) -> some View {
+        switch row.content {
+        case let .entry(entry):
+            switch row.group {
+            case .appChild:    appChildRow(entry)
+            case .windowChild: windowChildRow(entry)
+            default:           mainRow(entry)
+            }
+        case .addApp:
+            addAppButton()
+        case .brightnessRecorders:
+            brightnessHotkeyRecorders()
+        }
     }
 
     @ViewBuilder
@@ -213,44 +294,67 @@ struct PanelSettingsView: View {
         }
     }
 
-    private func moveTopLevel(from source: IndexSet, to destination: Int) {
-        var items = panel.topLevelEntries.compactMap { entry -> BuiltinItem? in
-            if case let .builtin(item) = entry.source { return item } else { return nil }
+    /// Unified `onMove` for the flattened list. Routes a drag back to the group
+    /// the dragged row belongs to (top-level / app child / window child) and
+    /// calls the matching reorder method; a drop outside the group is clamped to
+    /// stay within it. Children re-render under their parent after `rebuild()`.
+    private func move(from source: IndexSet, to destination: Int) {
+        let rows = displayRows
+        guard let decision = PanelReorder.localMove(
+            groups: rows.map(\.group), from: source, to: destination
+        ) else { return }
+
+        switch decision.group {
+        case .topLevel:
+            var items = rows.compactMap { row -> BuiltinItem? in
+                guard row.group == .topLevel, case let .entry(entry) = row.content,
+                      case let .builtin(item) = entry.source else { return nil }
+                return item
+            }
+            items.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
+            panel.reorderTopLevel(by: items)
+        case .appChild:
+            var ids = panel.appShortcutChildren.compactMap { entry -> UUID? in
+                if case let .appShortcut(id) = entry.source { return id } else { return nil }
+            }
+            ids.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
+            panel.reorderAppShortcuts(by: ids)
+        case .windowChild:
+            var items = panel.windowLayoutChildren.compactMap { entry -> BuiltinItem? in
+                if case let .builtin(item) = entry.source { return item } else { return nil }
+            }
+            items.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
+            panel.reorderWindowChildren(by: items)
+        case .fixed:
+            break
         }
-        items.move(fromOffsets: source, toOffset: destination)
-        panel.reorderTopLevel(by: items)
     }
 
-    @ViewBuilder
-    private func appShortcutChildren() -> some View {
-        ForEach(panel.appShortcutChildren) { child in
-            HStack(spacing: 8) {
-                Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
-                Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-                Toggle("", isOn: Binding(
-                    get: { child.isVisible },
-                    set: { newValue in
-                        if case let .appShortcut(id) = child.source {
-                            panel.updateAppShortcut(id: id, isVisible: newValue)
-                        }
+    private func appChildRow(_ child: PanelEntry) -> some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
+            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+            Toggle("", isOn: Binding(
+                get: { child.isVisible },
+                set: { newValue in
+                    if case let .appShortcut(id) = child.source {
+                        panel.updateAppShortcut(id: id, isVisible: newValue)
                     }
-                ))
-                .toggleStyle(.checkbox).labelsHidden()
-                appIcon(for: child)
-                Text(child.localizedTitle()).font(.body)
-                Spacer()
-                HotkeyRecorder(
-                    hotkey: .constant(child.hotkey),
-                    onChange: { newValue in handleHotkeyChange(entry: child, newValue: newValue) },
-                    allowsClear: false
-                )
-                .frame(width: 150, alignment: .trailing)
-                deleteButton(for: child)
-            }
-            .padding(.vertical, 3)
-            .opacity(child.isVisible ? 1.0 : 0.5)
+                }
+            ))
+            .toggleStyle(.checkbox).labelsHidden()
+            appIcon(for: child)
+            Text(child.localizedTitle()).font(.body)
+            Spacer()
+            HotkeyRecorder(
+                hotkey: .constant(child.hotkey),
+                onChange: { newValue in handleHotkeyChange(entry: child, newValue: newValue) },
+                allowsClear: false
+            )
+            .frame(width: 150, alignment: .trailing)
+            deleteButton(for: child)
         }
-        .onMove(perform: moveChildren)
+        .padding(.vertical, 3)
     }
 
     /// Renders the real Finder app icon for an app shortcut row, falling back to
@@ -268,40 +372,20 @@ struct PanelSettingsView: View {
         }
     }
 
-    private func moveChildren(from source: IndexSet, to destination: Int) {
-        var ids = panel.appShortcutChildren.compactMap { entry -> UUID? in
-            if case let .appShortcut(id) = entry.source { return id } else { return nil }
-        }
-        ids.move(fromOffsets: source, toOffset: destination)
-        panel.reorderAppShortcuts(by: ids)
-    }
-
-    @ViewBuilder
-    private func windowLayoutChildrenList() -> some View {
-        ForEach(panel.windowLayoutChildren) { child in
-            HStack(spacing: 8) {
-                Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
-                Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-                Image(systemName: child.symbol).frame(width: 18)
-                Text(child.localizedTitle()).font(.body)
-                Spacer()
-                HotkeyRecorder(hotkey: .constant(child.hotkey)) { newValue in
-                    handleHotkeyChange(entry: child, newValue: newValue)
-                }
-                .frame(width: 150, alignment: .trailing)
-                Color.clear.frame(width: 20)
+    private func windowChildRow(_ child: PanelEntry) -> some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
+            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+            Image(systemName: child.symbol).frame(width: 18)
+            Text(child.localizedTitle()).font(.body)
+            Spacer()
+            HotkeyRecorder(hotkey: .constant(child.hotkey)) { newValue in
+                handleHotkeyChange(entry: child, newValue: newValue)
             }
-            .padding(.vertical, 3)
+            .frame(width: 150, alignment: .trailing)
+            Color.clear.frame(width: 20)
         }
-        .onMove(perform: moveWindowChildren)
-    }
-
-    private func moveWindowChildren(from source: IndexSet, to destination: Int) {
-        var items = panel.windowLayoutChildren.compactMap { entry -> BuiltinItem? in
-            if case let .builtin(item) = entry.source { return item } else { return nil }
-        }
-        items.move(fromOffsets: source, toOffset: destination)
-        panel.reorderWindowChildren(by: items)
+        .padding(.vertical, 3)
     }
 
     private func addAppButton() -> some View {
