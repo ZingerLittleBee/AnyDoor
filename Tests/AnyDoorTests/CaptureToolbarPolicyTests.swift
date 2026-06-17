@@ -2,9 +2,9 @@ import XCTest
 @testable import AnyDoor
 
 final class CaptureToolbarPolicyTests: XCTestCase {
-    func testToolsAreTheFiveCaptureTypesInOrder() {
+    func testToolsAreTheSixCaptureTypesInOrder() {
         XCTAssertEqual(CaptureToolbarPolicy.tools,
-                       [.region, .window, .fullscreen, .scrolling, .recording])
+                       [.region, .window, .fullscreen, .timer, .scrolling, .recording])
     }
 
     @MainActor

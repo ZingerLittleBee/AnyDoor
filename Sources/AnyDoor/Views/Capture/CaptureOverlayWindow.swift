@@ -5,7 +5,10 @@ import SwiftUI
 @MainActor
 struct CaptureOverlayActions {
     var copy: () -> Void
+    /// "Save As": always opens a save panel to pick a destination.
     var save: () -> Void
+    /// Reveal the auto-saved file in Finder. `nil` unless auto-save wrote a file.
+    var reveal: (() -> Void)?
     var edit: () -> Void
     var pin: () -> Void
     var ocr: () -> Void
@@ -159,15 +162,22 @@ private struct CaptureOverlayView: View {
     }
 
     private var actionItems: [ActionItem] {
-        [
+        var items = [
             ActionItem(symbol: "doc.on.doc", label: L(.captureOverlayCopy), role: .standard, run: actions.copy),
-            ActionItem(symbol: "square.and.arrow.down", label: L(.captureOverlaySave), role: .standard, run: actions.save),
+            ActionItem(symbol: "square.and.arrow.down", label: L(.captureOverlaySaveAs), role: .standard, run: actions.save),
+        ]
+        // Only when auto-save wrote a file: reveal it in Finder.
+        if let reveal = actions.reveal {
+            items.append(ActionItem(symbol: "folder", label: L(.captureOverlayReveal), role: .standard, run: reveal))
+        }
+        items += [
             ActionItem(symbol: "pencil.tip.crop.circle", label: L(.captureOverlayEdit), role: .standard, run: actions.edit),
             ActionItem(symbol: "pin", label: L(.captureOverlayPin), role: .standard, run: actions.pin),
             ActionItem(symbol: "text.viewfinder", label: L(.captureOverlayOCR), role: .standard, run: actions.ocr),
             ActionItem(symbol: "arrow.clockwise", label: L(.captureOverlayRecapture), role: .standard, run: actions.recapture),
             ActionItem(symbol: "trash", label: L(.captureOverlayDelete), role: .destructive, run: actions.delete),
         ]
+        return items
     }
 }
 

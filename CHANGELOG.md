@@ -6,6 +6,32 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- A self-timer button on the capture selection toolbar. It captures the current
+  region after a configurable countdown, showing a large countdown in the
+  lower-middle of the display and an outline of the region being captured so
+  transient UI can be arranged during it; press Esc to cancel.
+- A "Show in Finder" action in the post-capture overlay, shown when "auto-save
+  after capture" has already written the screenshot to disk.
+- Tooltips for the annotation editor's preset color swatches and custom-color
+  button.
+
+### Changed
+
+- The selection rectangle's corner handles now use the native macOS diagonal
+  resize cursors instead of falling back to the crosshair.
+- The post-capture overlay's save action is now "Save As" and always opens a
+  save panel to choose a destination; use the new Show in Finder action to
+  reveal an auto-saved file instead.
+
+### Fixed
+
+- The self-timer now captures the live screen at the end of the countdown. The
+  region timer previously presented the still frozen when the selection was
+  made, so anything arranged during the countdown was missed; timed region,
+  window, and fullscreen captures now re-grab after the countdown.
+
 ## [2.6.0] - 2026-06-16
 
 ### Changed

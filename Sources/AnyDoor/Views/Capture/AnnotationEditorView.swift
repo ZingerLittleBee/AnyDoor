@@ -165,6 +165,7 @@ struct AnnotationEditorView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(L(colorHelpKey(for: color)))
     }
 
     // MARK: - Bindings
@@ -238,6 +239,18 @@ struct AnnotationEditorView: View {
         case .crop: return .captureEditorToolCrop
         }
     }
+
+    /// Tooltip key for a preset swatch; non-palette colors fall back to "custom".
+    private func colorHelpKey(for color: RGBAColor) -> L10n.Key {
+        if color == .red { return .captureEditorColorRed }
+        if color == .orange { return .captureEditorColorOrange }
+        if color == .yellow { return .captureEditorColorYellow }
+        if color == .green { return .captureEditorColorGreen }
+        if color == .blue { return .captureEditorColorBlue }
+        if color == .black { return .captureEditorColorBlack }
+        if color == .white { return .captureEditorColorWhite }
+        return .captureEditorColorCustom
+    }
 }
 
 /// One color swatch dot drawn entirely in a single `Canvas`: the dot and the
@@ -300,6 +313,7 @@ private struct CustomColorButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(L(.captureEditorColorCustom))
     }
 }
 

@@ -69,6 +69,7 @@ final class SelectionOverlayWindow {
             view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
             view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
             view.onFullscreen = { [weak self] image, frame in self?.finish(.fullscreen(image: image, frame: frame)) }
+            view.onRegionTimer = { [weak self] rect in self?.finish(.regionTimer(rect: rect)) }
             view.onScrolling = { [weak self] rect in self?.finish(.scrolling(rect: rect)) }
             view.onRecording = { [weak self] rect in self?.finish(.recording(rect: rect)) }
             view.onCancel = { [weak self] in self?.finish(.cancelled) }
@@ -109,6 +110,7 @@ private final class SelectionOverlayView: NSView {
     var onRegion: ((CGImage, CGRect) -> Void)?
     var onWindow: ((CGWindowID, CGRect) -> Void)?
     var onFullscreen: ((CGImage, CGRect) -> Void)?
+    var onRegionTimer: ((CGRect) -> Void)?
     var onScrolling: ((CGRect) -> Void)?
     var onRecording: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
@@ -414,6 +416,9 @@ private final class SelectionOverlayView: NSView {
             NSCursor.closedHand.set()
             currentRect = SelectionGeometry.moved(rectAtDragStart, dx: p.x - dragOrigin.x, dy: p.y - dragOrigin.y, in: bounds)
         case .resizing(let h):
+            // Keep the matching resize cursor while dragging (mouseMoved is not
+            // delivered during a drag, so it would otherwise reset).
+            cursor(for: .handle(h)).set()
             currentRect = SelectionGeometry.resizing(rectAtDragStart, handle: h, to: p, in: bounds, minSize: SelectionGeometry.minimumEdge)
         case .none:
             break
@@ -456,16 +461,95 @@ private final class SelectionOverlayView: NSView {
         needsDisplay = true
     }
 
-    /// Best-effort resize/move cursors. AppKit has no public diagonal resize
-    /// cursor, so corners fall back to the crosshair.
     private func updateCursor(for hit: SelectionHit) {
+        cursor(for: hit).set()
+    }
+
+    /// Resize/move cursor for a hit. AppKit exposes no public diagonal resize
+    /// cursor, so corner handles use a custom-drawn diagonal double-headed arrow
+    /// (`makeDiagonalResizeCursor`); edges and the interior use system cursors.
+    private func cursor(for hit: SelectionHit) -> NSCursor {
         switch hit {
-        case .handle(.left), .handle(.right): NSCursor.resizeLeftRight.set()
-        case .handle(.top), .handle(.bottom): NSCursor.resizeUpDown.set()
-        case .handle: NSCursor.crosshair.set()
-        case .inside: NSCursor.openHand.set()
-        case .outside: NSCursor.crosshair.set()
+        case .handle(.left), .handle(.right): return .resizeLeftRight
+        case .handle(.top), .handle(.bottom): return .resizeUpDown
+        case .handle(.topLeft), .handle(.bottomRight): return Self.resizeDiagonalNWSE
+        case .handle(.topRight), .handle(.bottomLeft): return Self.resizeDiagonalNESW
+        case .inside: return .openHand
+        case .outside: return .crosshair
         }
+    }
+
+    /// Diagonal resize cursors, resolved once and reused. `nwse` points at the
+    /// top-left / bottom-right corners (↖↘); `nesw` points at the top-right /
+    /// bottom-left corners (↗↙). Prefers the native macOS cursor.
+    private static let resizeDiagonalNWSE = systemDiagonalResizeCursor(.nwse)
+    private static let resizeDiagonalNESW = systemDiagonalResizeCursor(.nesw)
+
+    private enum DiagonalResize { case nwse, nesw }
+
+    /// macOS's native diagonal resize cursor for `orientation`, obtained through
+    /// the long-stable private `NSCursor` class accessors (the app ships
+    /// notarized outside the App Store, so private-API use is permitted). Falls
+    /// back to a custom-drawn arrow only if the accessor is ever unavailable.
+    private static func systemDiagonalResizeCursor(_ orientation: DiagonalResize) -> NSCursor {
+        let name = orientation == .nwse
+            ? "_windowResizeNorthWestSouthEastCursor"
+            : "_windowResizeNorthEastSouthWestCursor"
+        let selector = NSSelectorFromString(name)
+        if NSCursor.responds(to: selector),
+           let cursor = NSCursor.perform(selector)?.takeUnretainedValue() as? NSCursor {
+            return cursor
+        }
+        return makeDiagonalResizeCursor(orientation)
+    }
+
+    /// Draws a diagonal double-headed resize arrow as an `NSCursor`. The arrow is
+    /// a thin black stroke under a white halo — matching the system edge resize
+    /// cursors — so it stays visible over both the bright selection and the dim
+    /// surrounding overlay. The hot spot is the image center.
+    private static func makeDiagonalResizeCursor(_ orientation: DiagonalResize) -> NSCursor {
+        let side: CGFloat = 24
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { _ in
+            let inset: CGFloat = 4
+            // Shaft endpoints (y-up).
+            let a: NSPoint, b: NSPoint
+            switch orientation {
+            case .nwse:
+                a = NSPoint(x: inset, y: side - inset)        // top-left
+                b = NSPoint(x: side - inset, y: inset)        // bottom-right
+            case .nesw:
+                a = NSPoint(x: side - inset, y: side - inset) // top-right
+                b = NSPoint(x: inset, y: inset)               // bottom-left
+            }
+            let path = NSBezierPath()
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.move(to: a)
+            path.line(to: b)
+            // Open chevron arrowhead at each tip, pointing outward.
+            let head: CGFloat = 7
+            let theta: CGFloat = 35 * .pi / 180
+            for (tip, toward) in [(a, b), (b, a)] {
+                let len = max(1, hypot(tip.x - toward.x, tip.y - toward.y))
+                let ux = (tip.x - toward.x) / len, uy = (tip.y - toward.y) / len // outward
+                for sign: CGFloat in [1, -1] {
+                    let c = cos(sign * theta), s = sin(sign * theta)
+                    // Reverse the outward direction, then rotate by ±theta.
+                    let wx = -ux * c + uy * s
+                    let wy = -ux * s - uy * c
+                    path.move(to: tip)
+                    path.line(to: NSPoint(x: tip.x + wx * head, y: tip.y + wy * head))
+                }
+            }
+            NSColor.white.setStroke()
+            path.lineWidth = 3.5
+            path.stroke()
+            NSColor.black.setStroke()
+            path.lineWidth = 1.5
+            path.stroke()
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: side / 2, y: side / 2))
     }
 
     override func keyDown(with event: NSEvent) {
@@ -542,7 +626,7 @@ private final class SelectionOverlayView: NSView {
 
     /// Dispatch a toolbar button: commit the current region, return the frozen
     /// still for fullscreen, switch the live overlay into window-pick, or hand the
-    /// current rect (global AppKit coords) to the scrolling/recording coordinators.
+    /// current rect (global AppKit coords) to the timer/scrolling/recording coordinators.
     private func toolbarPicked(_ tool: CaptureToolType) {
         switch tool {
         case .region:
@@ -553,6 +637,9 @@ private final class SelectionOverlayView: NSView {
             onFullscreen?(frozen, CGRect(origin: globalPoint(.zero), size: bounds.size))
         case .window:
             enterWindowSubMode()
+        case .timer:
+            guard !SelectionGeometry.isTooSmall(currentRect) else { return }
+            onRegionTimer?(CGRect(origin: globalPoint(currentRect.origin), size: currentRect.size))
         case .scrolling:
             guard !SelectionGeometry.isTooSmall(currentRect) else { return }
             onScrolling?(CGRect(origin: globalPoint(currentRect.origin), size: currentRect.size))
