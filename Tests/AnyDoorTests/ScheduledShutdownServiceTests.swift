@@ -43,14 +43,6 @@ final class MockShutdownWarning: ShutdownWarningPresenting {
     func dismiss() { dismissCount += 1 }
 }
 
-/// Counts how many times the service surfaces a "missed deadline" notice, so the
-/// clean-exit suppression logic is observable without a real ToastPresenter.
-@MainActor
-final class MissedNotifierSpy {
-    var count = 0
-    func notify() { count += 1 }
-}
-
 @MainActor
 private func makeService(
     now: Date,
@@ -151,76 +143,6 @@ extension ScheduledShutdownServiceTests {
         XCTAssertEqual(service.state, .off)
         XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
         XCTAssertEqual(executor.calls, [])  // did NOT shut down retroactively
-    }
-
-    @MainActor
-    func testMissedDeadlineAfterCleanExitStaysSilent() {
-        // Previous run ended cleanly (Quit / silent update relaunch / restart),
-        // so a deadline that passed while the app was not running is expected —
-        // no scary toast.
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
-        suite.set(now.timeIntervalSince1970 - 600, forKey: "scheduledShutdown.fireDate") // past
-        suite.set(true, forKey: "scheduledShutdown.cleanExit")
-        let spy = MissedNotifierSpy()
-        let service = ScheduledShutdownService(
-            executor: MockShutdownExecutor(), warning: MockShutdownWarning(),
-            defaults: suite, now: { now }, notifyMissed: { spy.notify() }
-        )
-
-        service.bootstrapOnLaunch()
-
-        XCTAssertEqual(service.state, .off)
-        XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
-        XCTAssertEqual(spy.count, 0)
-        XCTAssertNil(suite.object(forKey: "scheduledShutdown.cleanExit")) // flag consumed
-    }
-
-    @MainActor
-    func testMissedDeadlineAfterUncleanExitNotifies() {
-        // No clean-exit marker → the previous run crashed/was force-killed, so
-        // the missed deadline is genuinely surprising and worth surfacing.
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
-        suite.set(now.timeIntervalSince1970 - 600, forKey: "scheduledShutdown.fireDate") // past
-        let spy = MissedNotifierSpy()
-        let service = ScheduledShutdownService(
-            executor: MockShutdownExecutor(), warning: MockShutdownWarning(),
-            defaults: suite, now: { now }, notifyMissed: { spy.notify() }
-        )
-
-        service.bootstrapOnLaunch()
-
-        XCTAssertEqual(service.state, .off)
-        XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
-        XCTAssertEqual(spy.count, 1)
-    }
-
-    @MainActor
-    func testMarkCleanExitSetsFlag() {
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        let (service, _, _, suite) = makeService(now: now)
-
-        service.markCleanExit()
-
-        XCTAssertTrue(suite.bool(forKey: "scheduledShutdown.cleanExit"))
-    }
-
-    @MainActor
-    func testBootstrapConsumesCleanExitFlagEvenWithoutSchedule() {
-        // The flag must be cleared on every launch (regardless of an armed
-        // schedule) so a crash in THIS session is later detected as unclean.
-        let now = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
-        suite.set(true, forKey: "scheduledShutdown.cleanExit")
-        let service = ScheduledShutdownService(
-            executor: MockShutdownExecutor(), warning: MockShutdownWarning(),
-            defaults: suite, now: { now }
-        )
-
-        service.bootstrapOnLaunch()
-
-        XCTAssertNil(suite.object(forKey: "scheduledShutdown.cleanExit"))
     }
 
     @MainActor

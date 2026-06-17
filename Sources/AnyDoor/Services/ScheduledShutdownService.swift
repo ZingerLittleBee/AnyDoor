@@ -22,17 +22,11 @@ final class ScheduledShutdownService {
     static let forcedKey = "scheduledShutdown.forced"
     static let warningLeadKey = "scheduledShutdown.warningLeadSeconds"
     static let defaultMinutesKey = "scheduledShutdown.defaultMinutes"
-    /// Set on clean termination, consumed on the next launch. Distinguishes a
-    /// deadline missed because the app was cleanly not running (Quit / silent
-    /// update relaunch / system restart — expected, stay quiet) from one missed
-    /// because the app crashed (worth surfacing).
-    static let cleanExitKey = "scheduledShutdown.cleanExit"
 
     private let executor: any ShutdownExecuting
     private let warning: any ShutdownWarningPresenting
     private let defaults: UserDefaults
     private let now: () -> Date
-    private let notifyMissed: @MainActor () -> Void
 
     private(set) var state: ScheduledShutdownState = .off
 
@@ -51,19 +45,12 @@ final class ScheduledShutdownService {
         executor: any ShutdownExecuting,
         warning: any ShutdownWarningPresenting,
         defaults: UserDefaults = .standard,
-        now: @escaping () -> Date = { Date() },
-        notifyMissed: @escaping @MainActor () -> Void = {
-            // Informational (not error) styling, held longer than the default so
-            // it is actually readable — the previous red 1s flash was the source
-            // of the "Scheduled … failed" confusion.
-            ToastPresenter.shared.show(.info(L(.shutdownToastMissed)), duration: 4.0)
-        }
+        now: @escaping () -> Date = { Date() }
     ) {
         self.executor = executor
         self.warning = warning
         self.defaults = defaults
         self.now = now
-        self.notifyMissed = notifyMissed
     }
 
     // MARK: - Config (read fresh, like ClipboardPreferences)
@@ -108,12 +95,6 @@ final class ScheduledShutdownService {
     /// cancelled (never fired retroactively).
     func bootstrapOnLaunch() {
         registerWakeObserver()
-        // Consume the clean-exit marker first, unconditionally: clearing it on
-        // every launch means a crash in THIS session (which never reaches
-        // `markCleanExit`) is detected as unclean next time.
-        let wasCleanExit = defaults.bool(forKey: Self.cleanExitKey)
-        defaults.removeObject(forKey: Self.cleanExitKey)
-
         guard let fireDate = persistedFireDate() else { return }
         if fireDate.timeIntervalSince(now()) > 0 {
             armAt(fireDate: fireDate, persist: false)
@@ -121,20 +102,7 @@ final class ScheduledShutdownService {
             defaults.removeObject(forKey: Self.fireDateKey)
             state = .off
             notify()
-            // A deadline missed while the app was cleanly not running is
-            // expected (the timer only fires while alive) — only surface the
-            // genuinely surprising crash-induced miss.
-            if !wasCleanExit {
-                notifyMissed()
-            }
         }
-    }
-
-    /// Record that the app is terminating cleanly. Called from
-    /// `applicationWillTerminate`; skipped on crash/force-quit so the next launch
-    /// can tell the two apart.
-    func markCleanExit() {
-        defaults.set(true, forKey: Self.cleanExitKey)
     }
 
     /// Re-read live state after a backup import. Config getters read fresh, so
