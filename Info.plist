@@ -24,9 +24,13 @@
 	<string>AnyDoor 通过自动化控制"系统事件"与"访达"，以切换系统外观、清空废纸篓等系统操作。</string>
 	<key>SUEnableSystemProfiling</key>
 	<false/>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
 	<key>SUFeedURL</key>
 	<string>https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/appcast.xml</string>
 	<key>SUPublicEDKey</key>
 	<string>hbLSRwztl+EyMPefu7uNJHn7FjWQEREtC5Nx0MzM+Xk=</string>
+	<key>SUScheduledCheckInterval</key>
+	<real>86400</real>
 </dict>
 </plist>

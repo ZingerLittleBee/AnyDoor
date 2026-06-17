@@ -341,12 +341,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication,
                                        hasVisibleWindows flag: Bool) -> Bool {
         let elapsed = ProcessInfo.processInfo.systemUptime - launchUptime
-        if Self.shouldOpenSettingsForReopen(hasVisibleWindows: flag,
-                                            menuBarIconVisible: MenuBarIcon.isVisible,
-                                            secondsSinceLaunch: elapsed) {
+        let decision = Self.reopenHandlingDecision(
+            hasVisibleWindows: flag,
+            menuBarIconVisible: MenuBarIcon.isVisible,
+            secondsSinceLaunch: elapsed
+        )
+        if decision.shouldOpenSettings {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         }
-        return true
+        return decision.allowDefaultHandling
+    }
+
+    struct ReopenHandlingDecision: Equatable {
+        let shouldOpenSettings: Bool
+        let allowDefaultHandling: Bool
+    }
+
+    static func reopenHandlingDecision(hasVisibleWindows: Bool,
+                                       menuBarIconVisible: Bool,
+                                       secondsSinceLaunch: TimeInterval) -> ReopenHandlingDecision {
+        ReopenHandlingDecision(
+            shouldOpenSettings: shouldOpenSettingsForReopen(
+                hasVisibleWindows: hasVisibleWindows,
+                menuBarIconVisible: menuBarIconVisible,
+                secondsSinceLaunch: secondsSinceLaunch
+            ),
+            // AnyDoor owns every intentional Settings-opening path. Returning true
+            // lets AppKit/SwiftUI apply default reopen behavior, which can surface
+            // Settings during login even when the delegate suppressed its explicit
+            // open request.
+            allowDefaultHandling: false
+        )
     }
 
     /// Decides whether a reopen event should surface Settings.

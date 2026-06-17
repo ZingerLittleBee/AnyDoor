@@ -43,6 +43,24 @@ final class UpdateServiceTests: XCTestCase {
         XCTAssertEqual(fake.checkForUpdatesCallCount, 1)
     }
 
+    func testCheckForUpdatesInBackgroundForwardsToAdapter() {
+        let fake = FakeUpdater()
+        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+
+        service.checkForUpdatesInBackground()
+        XCTAssertEqual(fake.checkForUpdatesInBackgroundCallCount, 1)
+    }
+
+    func testInfoPlistEnablesAutomaticSparkleChecksByDefault() throws {
+        let plist = try loadAppInfoPlist()
+        let scheduledCheckInterval = try XCTUnwrap(plist["SUScheduledCheckInterval"] as? TimeInterval)
+
+        XCTAssertEqual(plist["SUEnableAutomaticChecks"] as? Bool, true)
+        XCTAssertEqual(scheduledCheckInterval,
+                       UpdateService.defaultCheckInterval,
+                       accuracy: 0.5)
+    }
+
     func testFoundUpdatePopulatesAvailableVersion() {
         let fake = FakeUpdater()
         let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
@@ -118,4 +136,16 @@ private final class FakeUpdater: UpdaterAdapter {
 
     func checkForUpdates() { checkForUpdatesCallCount += 1 }
     func checkForUpdatesInBackground() { checkForUpdatesInBackgroundCallCount += 1 }
+}
+
+private func loadAppInfoPlist() throws -> [String: Any] {
+    let testFile = URL(fileURLWithPath: #filePath)
+    let repositoryRoot = testFile
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+    let plistURL = repositoryRoot.appendingPathComponent("Info.plist")
+    let data = try Data(contentsOf: plistURL)
+    let object = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+    return try XCTUnwrap(object as? [String: Any])
 }
