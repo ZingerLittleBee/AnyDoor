@@ -393,6 +393,16 @@ struct MenuBarView: View {
                 )
             }
             popover.show(anchoredTo: convertedTriggerFrame(for: target))
+        case .submenu(.bluetoothBattery):
+            popover.needsKeyFocus = false
+            popover.updateContent {
+                BluetoothBatteryPopoverView(
+                    service: BluetoothBatteryService.shared,
+                    onHoverChange: { gate.popoverHover($0) }
+                )
+            }
+            Task { await BluetoothBatteryService.shared.refresh() }
+            popover.show(anchoredTo: convertedTriggerFrame(for: target))
         case .submenu:
             // Other builtin submenu items (none today) — nothing to mount.
             break

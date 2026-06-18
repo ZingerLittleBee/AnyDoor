@@ -285,6 +285,10 @@ final class CaptureCoordinator {
     /// capture grab is already complete and synchronous, and this mirrors the
     /// existing off-main OCR / history paths below.
     private func present(image cg: CGImage) {
+        // Shutter feedback at the capture's commit moment, matching native
+        // screenshots. NSSound plays asynchronously, so this never blocks.
+        if settings.playSound { SystemSound.screenCapture.play() }
+
         let image = NSImage(cgImage: cg, size: .zero)
 
         // Cheap and latency-sensitive: copy to the pasteboard right away (AppKit

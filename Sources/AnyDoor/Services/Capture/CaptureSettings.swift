@@ -13,6 +13,7 @@ final class CaptureSettings {
     static let namingTemplateKey = "capture.namingTemplate"
     static let autoCopyKey = "capture.autoCopy"
     static let autoSaveKey = "capture.autoSave"
+    static let playSoundKey = "capture.playSound"
     static let delaySecondsKey = "capture.delaySeconds"
     static let overlayTimeoutKey = "capture.overlayTimeout"
     static let lastRegionRectKey = "capture.lastRegionRect"
@@ -25,6 +26,7 @@ final class CaptureSettings {
     private(set) var namingTemplate: String
     private(set) var autoCopy: Bool
     private(set) var autoSave: Bool
+    private(set) var playSound: Bool
     private(set) var delaySeconds: Int
     private(set) var overlayTimeout: Int
     private(set) var lastRegionRect: CGRect?
@@ -47,6 +49,7 @@ final class CaptureSettings {
         self.namingTemplate = defaults.string(forKey: Self.namingTemplateKey) ?? Self.defaultNamingTemplate
         self.autoCopy = defaults.object(forKey: Self.autoCopyKey) as? Bool ?? true
         self.autoSave = defaults.object(forKey: Self.autoSaveKey) as? Bool ?? true
+        self.playSound = defaults.object(forKey: Self.playSoundKey) as? Bool ?? true
         self.delaySeconds = defaults.object(forKey: Self.delaySecondsKey) as? Int ?? 5
         self.overlayTimeout = defaults.object(forKey: Self.overlayTimeoutKey) as? Int ?? 8
         self.lastRegionRect = Self.readRect(defaults, Self.lastRegionRectKey)
@@ -70,6 +73,11 @@ final class CaptureSettings {
     func setAutoSave(_ value: Bool) {
         autoSave = value
         defaults.set(value, forKey: Self.autoSaveKey)
+    }
+
+    func setPlaySound(_ value: Bool) {
+        playSound = value
+        defaults.set(value, forKey: Self.playSoundKey)
     }
 
     func setDelaySeconds(_ value: Int) {
@@ -100,6 +108,7 @@ final class CaptureSettings {
         namingTemplate = defaults.string(forKey: Self.namingTemplateKey) ?? Self.defaultNamingTemplate
         autoCopy = defaults.object(forKey: Self.autoCopyKey) as? Bool ?? true
         autoSave = defaults.object(forKey: Self.autoSaveKey) as? Bool ?? true
+        playSound = defaults.object(forKey: Self.playSoundKey) as? Bool ?? true
         delaySeconds = defaults.object(forKey: Self.delaySecondsKey) as? Int ?? 5
         overlayTimeout = defaults.object(forKey: Self.overlayTimeoutKey) as? Int ?? 8
         lastRegionRect = Self.readRect(defaults, Self.lastRegionRectKey)

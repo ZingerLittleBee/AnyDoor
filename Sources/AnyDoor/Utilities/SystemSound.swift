@@ -2,11 +2,13 @@ import AppKit
 
 /// Lightweight wrapper over NSSound for system feedback effects.
 ///
-/// Uses macOS's own Finder sound files where possible so the UX matches
-/// what users hear when interacting with Finder directly. Falls back to a
-/// named system sound if the bundled asset has moved.
+/// Uses macOS's own sound files where possible so the UX matches what users hear
+/// when the system performs the same action directly. Falls back through a chain
+/// of equivalent assets if a bundled file has moved.
 enum SystemSound {
     case emptyTrash
+    /// The shutter sound macOS plays for native screenshots (⌘⇧3/4/5).
+    case screenCapture
 
     /// Plays asynchronously. Safe to call from any actor; NSSound dispatches internally.
     func play() {
@@ -17,12 +19,32 @@ enum SystemSound {
     private func makeSound() -> NSSound? {
         switch self {
         case .emptyTrash:
-            let path = "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/finder/empty trash.aif"
-            if FileManager.default.fileExists(atPath: path),
-               let sound = NSSound(contentsOfFile: path, byReference: true) {
+            return Self.firstExistingSound(
+                paths: ["\(Self.finderDir)/empty trash.aif"]
+            ) ?? NSSound(named: NSSound.Name("Bottle"))
+        case .screenCapture:
+            // Prefer the exact native screenshot sound; fall back to the classic
+            // Grab / generic camera shutter shipped alongside it.
+            return Self.firstExistingSound(paths: [
+                "\(Self.systemDir)/Screen Capture.aif",
+                "\(Self.systemDir)/Shutter.aif",
+                "\(Self.systemDir)/Grab.aif",
+            ])
+        }
+    }
+
+    private static let soundsRoot =
+        "/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds"
+    private static let systemDir = "\(soundsRoot)/system"
+    private static let finderDir = "\(soundsRoot)/finder"
+
+    /// Returns the first readable sound from `paths`, or nil if none exist.
+    private static func firstExistingSound(paths: [String]) -> NSSound? {
+        for path in paths where FileManager.default.fileExists(atPath: path) {
+            if let sound = NSSound(contentsOfFile: path, byReference: true) {
                 return sound
             }
-            return NSSound(named: NSSound.Name("Bottle"))
         }
+        return nil
     }
 }

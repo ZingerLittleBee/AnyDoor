@@ -58,6 +58,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case windowMovePreviousDisplay
     case windowLayout
     case hostsManager
+    case bluetoothBattery
 
     enum Kind: Sendable {
         case toggle
@@ -69,7 +70,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
 
     var kind: Kind {
         switch self {
-        case .appShortcuts, .portManager, .windowLayout, .hostsManager: return .submenu
+        case .appShortcuts, .portManager, .windowLayout, .hostsManager, .bluetoothBattery: return .submenu
         case .keepAwake, .muteAudio, .microphoneMute, .hideDesktopIcons, .showHiddenFiles, .darkMode,
              .hideDock, .autoHideMenuBar, .keyboardLock, .scheduledShutdown: return .toggle
         case .clipboardMonitoring: return .toggle
@@ -146,6 +147,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowMovePreviousDisplay: return .builtinWindowMovePreviousDisplay
         case .windowLayout:      return .builtinWindowLayout
         case .hostsManager:      return .builtinHostsManager
+        case .bluetoothBattery:  return .builtinBluetoothBattery
         }
     }
 
@@ -206,6 +208,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowMovePreviousDisplay: return "rectangle.on.rectangle"
         case .windowLayout: return "macwindow"
         case .hostsManager: return "list.bullet.rectangle"
+        case .bluetoothBattery: return "battery.100"
         }
     }
 
@@ -267,6 +270,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowMovePreviousDisplay: return 2190
         case .windowLayout:    return 2000
         case .hostsManager:    return 1950
+        case .bluetoothBattery: return 1980
         }
     }
 

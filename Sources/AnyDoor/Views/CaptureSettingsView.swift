@@ -40,6 +40,7 @@ struct CaptureSettingsView: View {
             Section {
                 Toggle(isOn: autoSave) { LocalizedText(.settingsCaptureAutoSave) }
                 Toggle(isOn: autoCopy) { LocalizedText(.settingsCaptureAutoCopy) }
+                Toggle(isOn: playSound) { LocalizedText(.settingsCapturePlaySound) }
 
                 Picker(selection: timerDelay) {
                     ForEach([3, 5, 10], id: \.self) { seconds in
@@ -93,6 +94,9 @@ struct CaptureSettingsView: View {
     }
     private var autoCopy: Binding<Bool> {
         Binding(get: { settings.autoCopy }, set: { settings.setAutoCopy($0) })
+    }
+    private var playSound: Binding<Bool> {
+        Binding(get: { settings.playSound }, set: { settings.setPlaySound($0) })
     }
     private var timerDelay: Binding<Int> {
         Binding(get: { settings.delaySeconds }, set: { settings.setDelaySeconds($0) })
