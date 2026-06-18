@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-06-18
+
 ### Added
 
 - An interactive first-run onboarding: a six-step window (left progress rail,

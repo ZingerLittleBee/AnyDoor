@@ -3,40 +3,38 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.0.0</title>
+            <pubDate>Thu, 18 Jun 2026 14:58:10 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.0.0</sparkle:version>
+            <sparkle:shortVersionString>3.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- An interactive first-run onboarding: a six-step window (left progress rail,
+  right content) where each step teaches through a hand-drawn, animated SwiftUI
+  mock rather than walls of text — the menu-bar panel dropping into place, three
+  live permission cards (Accessibility / Screen Recording / Automation) wired to
+  the real requests, a Hyper Key keyboard demo whose controls drive the real
+  Hyper Key settings, a looping capture Quick Access overlay, an auto-typing
+  command palette (`300 usd = rmb`, `:3000`, `hosts`) beside the clipboard wall, and a
+  Panel-settings customize demo. Back / Continue / Skip / Done are fixed at the
+  bottom (Esc skips, Return continues), Reduce Motion is honored, and every
+  destructive action is mock-only. It shows once on a clean install, never
+  participates in window state restoration, and can be reopened from
+  Settings › General › Getting Started.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.0.0/AnyDoor-3.0.0.zip" length="8837284" type="application/octet-stream" sparkle:edSignature="Kk8JLufIRwWDxEX9OUspiCo8RPD94aDx6O1vjnIc8w1RhDlAUvm2w2H/WODmqcjI8PkQIGS3MpYIVlZUB3+rCA=="/>
+        </item>
+        <item>
             <title>2.7.0</title>
             <pubDate>Wed, 17 Jun 2026 22:12:15 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>2.7.0</sparkle:version>
             <sparkle:shortVersionString>2.7.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- A self-timer button on the capture selection toolbar. It captures the current
-  region after a configurable countdown, showing a large countdown in the
-  lower-middle of the display and an outline of the region being captured so
-  transient UI can be arranged during it; press Esc to cancel.
-- A "Show in Finder" action in the post-capture overlay, shown when "auto-save
-  after capture" has already written the screenshot to disk.
-- Tooltips for the annotation editor's preset color swatches and custom-color
-  button.
-
-### Changed
-
-- The selection rectangle's corner handles now use the native macOS diagonal
-  resize cursors instead of falling back to the crosshair.
-- The post-capture overlay's save action is now "Save As" and always opens a
-  save panel to choose a destination; use the new Show in Finder action to
-  reveal an auto-saved file instead.
-
-### Fixed
-
-- The self-timer now captures the live screen at the end of the countdown. The
-  region timer previously presented the still frozen when the selection was
-  made, so anything arranged during the countdown was missed; timed region,
-  window, and fullscreen captures now re-grab after the countdown.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.7.0/AnyDoor-2.7.0.zip" length="8233456" type="application/octet-stream" sparkle:edSignature="9pHjXUyvNbGCds+r5Gi4U3AWQlw0IP05B3BCVGUf5phbG1r+8y65iJi5u9sRz0jYSgVf40JvhY2yMpyfYOfODQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.7.0/AnyDoor-2.7.0.zip" length="8233456" type="application/octet-stream" sparkle:edSignature="9pHjXUyvNbGCds+r5Gi4U3AWQlw0IP05B3BCVGUf5phbG1r+8y65iJi5u9sRz0jYSgVf40JvhY2yMpyfYOfODQ=="/>
         </item>
         <item>
             <title>2.6.0</title>
@@ -46,15 +44,6 @@
             <sparkle:shortVersionString>2.6.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.6.0/AnyDoor-2.6.0.zip" length="8195273" type="application/octet-stream" sparkle:edSignature="54wxR9btWekwE9uDOPQtxyRcyk+MsQ6hYcZ3BOPbqsoJr7sFZ0sWLueCKSTjG5rnXVOJeJBFVGyM2x5q5DGsCQ=="/>
-        </item>
-        <item>
-            <title>2.5.0</title>
-            <pubDate>Tue, 16 Jun 2026 01:31:06 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>2.5.0</sparkle:version>
-            <sparkle:shortVersionString>2.5.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.5.0/AnyDoor-2.5.0.zip" length="8031238" type="application/octet-stream" sparkle:edSignature="DCjY8UeT0TcPjFWWlxApyjNtQ2CA5M2FHn2P7Onzy/vxXZua6NGKUp4KahLDGDHBXXRDDuqCy8TKbAVCOaHlCQ=="/>
         </item>
         <item>
             <title>1.2.0</title>
