@@ -33,6 +33,7 @@ enum SyncSettingsRegistry {
         Entry(key: "capture.namingTemplate", type: .string),
         Entry(key: "capture.autoCopy", type: .bool),
         Entry(key: "capture.autoSave", type: .bool),
+        Entry(key: "capture.playSound", type: .bool),
         Entry(key: "capture.delaySeconds", type: .int),
         Entry(key: "capture.overlayTimeout", type: .int),
     ]

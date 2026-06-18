@@ -698,6 +698,23 @@
         }
       }
     },
+    "settings.capture.playSound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play sound after capture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "截图后播放音效"
+          }
+        }
+      }
+    },
     "settings.capture.behaviorSection": {
       "extractionState": "manual",
       "localizations": {

@@ -6,6 +6,16 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- A capture sound: a successful screenshot now plays the native macOS screenshot
+  shutter (`Screen Capture.aif`, falling back to the system `Shutter` / `Grab`
+  sounds) at the moment the capture commits. It covers every successful still
+  capture — region, window, fullscreen, and scrolling — through the shared output
+  path. A "play sound after capture" toggle in Settings › Capture (on by default)
+  controls it, and the preference rides settings backup. Screen recording is
+  unaffected (it keeps its own start/stop cues).
+
 ## [3.0.0] - 2026-06-18
 
 ### Added

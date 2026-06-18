@@ -244,6 +244,7 @@ enum L10n {
         case settingsCaptureNamingFooter = "settings.capture.namingFooter"
         case settingsCaptureNamingTemplate = "settings.capture.namingTemplate"
         case settingsCaptureOverlayTimeout = "settings.capture.overlayTimeout"
+        case settingsCapturePlaySound = "settings.capture.playSound"
         case settingsCaptureSaveDirectory = "settings.capture.saveDirectory"
         case settingsCaptureSaveSection = "settings.capture.saveSection"
         case settingsCaptureTimerDelay = "settings.capture.timerDelay"
