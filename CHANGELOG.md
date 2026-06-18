@@ -15,6 +15,21 @@ versioning.
   path. A "play sound after capture" toggle in Settings › Capture (on by default)
   controls it, and the preference rides settings backup. Screen recording is
   unaffected (it keeps its own start/stop cues).
+- Bluetooth device battery: a new menu-bar panel item whose hover popover lists
+  every connected Bluetooth accessory macOS reports a battery level for — AirPods
+  and true-wireless earbuds (left / right / case), Apple Magic keyboards, mice,
+  and trackpads, generic BLE keyboards and mice that expose the standard GATT
+  Battery Service, and Logitech HID++ mice (MX Master and similar). Levels are
+  read off the main actor via `ShellRunner` from two public, permission-free
+  sources — `system_profiler SPBluetoothDataType -json` (rich; gives the earbud
+  left/right/case triple and a device type) and `pmset -g accps` (covers the
+  HID++ mice that system_profiler silently omits) — merged by a pure, unit-tested
+  `BluetoothBatteryParser` that prefers the richer system_profiler readings and
+  folds pmset in for the gaps. Each reading is tinted by charge (red ≤ 20 %,
+  yellow ≤ 35 %, green otherwise). macOS exposes no battery-change notification,
+  so the list polls on demand when the popover opens and caches for 30 s to avoid
+  re-spawning the subprocesses; no new entitlement, TCC prompt, or private API is
+  involved.
 
 ## [3.0.0] - 2026-06-18
 
