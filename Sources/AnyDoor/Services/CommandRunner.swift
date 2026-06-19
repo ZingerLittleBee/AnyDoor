@@ -53,6 +53,12 @@ struct DefaultCommandRunner: CommandRunner {
             while process.isRunning {
                 if Date() > deadline {
                     process.terminate()
+                    // Await the readers before throwing so the pipes stay alive
+                    // until both reads resolve (terminate() closes the child's
+                    // write ends → EOF), closing the fd-recycle window. Matches
+                    // ShellRunner's timeout path.
+                    _ = await outReader.value
+                    _ = await errReader.value
                     throw HyperKeyError.timeout
                 }
                 try await Task.sleep(nanoseconds: 20_000_000)

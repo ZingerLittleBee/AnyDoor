@@ -20,4 +20,20 @@ final class CommandRunnerTests: XCTestCase {
         XCTAssertEqual(result.stdout.count, size, "expected the full \(size)-byte stdout, got \(result.stdout.count)")
         XCTAssertTrue(result.stderr.isEmpty)
     }
+
+    /// A child that outlives the deadline must make run() throw `.timeout`
+    /// promptly. The timeout branch awaits the drain readers, so terminate()
+    /// must close the child's write ends (→ EOF) and let those reads resolve —
+    /// guarding against the await itself hanging.
+    func testTimeoutThrowsPromptlyWithoutHanging() async {
+        let start = Date()
+        do {
+            _ = try await DefaultCommandRunner().run("/bin/sleep", args: ["10"], timeout: 0.5)
+            XCTFail("expected a timeout error for a child that outlives the deadline")
+        } catch {
+            XCTAssertTrue(error is HyperKeyError, "expected HyperKeyError.timeout, got \(error)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(start), 5,
+                          "timeout path must not hang awaiting the drain readers")
+    }
 }
