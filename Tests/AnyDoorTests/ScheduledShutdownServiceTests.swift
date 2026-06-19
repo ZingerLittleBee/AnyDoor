@@ -187,4 +187,28 @@ extension ScheduledShutdownServiceTests {
         XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
         XCTAssertEqual(executor.calls, [], "cancelling the grace warning aborts the shutdown")
     }
+
+    @MainActor
+    func testHandleWakeOverduePublishesReAnchoredStateViaOnChange() {
+        // The re-anchored grace target must be pushed through onChange so the panel
+        // subtitle reflects the live time, not the original (now past) deadline.
+        var current = Date(timeIntervalSince1970: 1_000_000)
+        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let service = ScheduledShutdownService(
+            executor: MockShutdownExecutor(), warning: MockShutdownWarning(), defaults: suite, now: { current }
+        )
+        service.arm(.minutes(1))
+        current = current.addingTimeInterval(120)
+        var notified: [ScheduledShutdownState] = []
+        service.onChange = { notified.append($0) }
+
+        service.handleWake()
+
+        guard case .armed(let fireDate)? = notified.last else {
+            return XCTFail("overdue re-anchor must notify with the new armed state")
+        }
+        XCTAssertEqual(fireDate.timeIntervalSince1970,
+                       current.timeIntervalSince1970 + ScheduledShutdownService.overdueGraceSeconds,
+                       accuracy: 0.5)
+    }
 }

@@ -125,8 +125,9 @@ final class ScheduledShutdownService {
     }
 
     /// Internal for testing: re-validate against the wall clock after wake. If
-    /// the deadline passed while asleep, enter the warning flow (which fires
-    /// immediately when overdue — the cancelable warning keeps that safe).
+    /// the deadline passed while asleep, enter the warning flow, which re-anchors
+    /// a short cancelable grace when the deadline already lapsed (so it never
+    /// fires without a chance to abort).
     func handleWake() {
         guard case .armed(let fireDate) = state else { return }
         invalidateTimers()
@@ -176,6 +177,7 @@ final class ScheduledShutdownService {
             // now so the user can still abort, then proceed through the warning.
             target = now().addingTimeInterval(Self.overdueGraceSeconds)
             state = .armed(fireDate: target)
+            notify()   // publish the re-anchored target so the panel subtitle is live
         }
         let remaining = max(1, Int(target.timeIntervalSince(now()).rounded()))
         warning.present(totalSeconds: remaining, onCancel: { [weak self] in self?.cancel() })
