@@ -20,6 +20,7 @@ struct PanelRowView: View {
     var trailingAccessory: AnyView? = nil
 
     @State private var activationPulse = 0
+    @State private var isHovered = false
 
     private var needsPermission: Bool { entry.permission == .denied }
 
@@ -48,8 +49,18 @@ struct PanelRowView: View {
             trailing
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
+        // Subtle neutral hover highlight, layered above the material/glass
+        // surface so it reads on both macOS < 26 and Liquid Glass. Uses the
+        // AppKit-backed `onHoverSafe` (not SwiftUI `.onHover`, which can resume
+        // off the main thread and crash on this toolchain — see HoverReader).
+        .background {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(isHovered ? 0.08 : 0))
+        }
         .adaptiveInteractiveSurface(cornerRadius: 8)
         .contentShape(Rectangle())
+        .onHoverSafe { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .onTapGesture {
             if needsPermission { onPermission(); return }
             triggerFeedback()

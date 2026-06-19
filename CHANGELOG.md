@@ -31,6 +31,55 @@ versioning.
   re-spawning the subprocesses; no new entitlement, TCC prompt, or private API is
   involved.
 
+### Changed
+
+- Menu-bar panel rows now show a subtle hover highlight — a neutral rounded
+  fill (8 % of the foreground color, so it reads as a slight lighten in dark
+  mode and a slight darken in light mode) layered above the material / glass
+  row surface, fading in and out on a short ease. It gives the same
+  row-tracking affordance as the command palette and native menus. Only the
+  top-level panel rows are highlighted, and hover is detected through the
+  AppKit-backed tracking path rather than SwiftUI's `.onHover`.
+- Menu-bar hover popovers now align their top edge with the hovered row (a
+  drop-down submenu feel) instead of centering vertically on it, shifting up
+  only when a tall popover would otherwise run off the bottom of the screen.
+  Placement is computed by a pure, unit-tested `HoverPopover.anchorOrigin`.
+
+### Fixed
+
+- Menu-bar hover popovers — App Shortcuts, Port Manager, brightness, Hosts,
+  Bluetooth battery, and the clipboard-history side popovers — were janky to
+  switch between (worst on rows that open a popover), sometimes failed to
+  appear, and could be left on screen as a stray window. Several root causes in
+  the shared hover pipeline:
+  - Every show and every row-to-row crossing built a throwaway `NSHostingView`
+    solely to measure the content's fitting size, and re-mounted synchronously
+    on the AppKit mouse-event tick. The popover now reuses a single measuring
+    host (one layout pass, no per-show allocation) and coalesces re-mounts a
+    frame later off the event tick, so a fast sweep across rows rebuilds once
+    instead of once per row crossed.
+  - The 400 ms hover-intent delay restarted on every crossing, so a continuous
+    sweep never reached it and the popover only appeared once the cursor
+    settled; and the hover tracking area was torn down and re-added on every
+    layout pass, which drops the mouse-enter edge when it is rebuilt under an
+    already-stationary cursor, silently losing the hover. The delay now keeps
+    its first deadline (leading-edge), and the tracking area is rebuilt only
+    when missing and reconciled against the live cursor so a dropped edge is
+    recovered.
+  - When a row's on-screen frame had not been recorded yet, the popover
+    anchored to the whole menu-bar panel frame, placing it against the panel
+    edge instead of beside the row; it no longer falls back to a panel anchor.
+  - A key-focus popover (Port Manager or clipboard history) could be orphaned
+    as a zombie window when the panel was dismissed by an outside click;
+    dismissal now orders out any stray hover panel.
+- The clipboard-history popover for 截图到剪贴板 (screenshot to clipboard) opened
+  far from the row — pinned near the bottom of the screen — because the four
+  screenshot-producing builtins (screenshot, capture window, capture fullscreen,
+  capture timer) all map to the same `screenshot` history kind and shared a
+  single anchor entry keyed by kind, so whichever row reported its position last
+  clobbered the others. Hover anchors are now keyed per row, so each row anchors
+  to itself while still showing the shared screenshot history.
+
 ## [3.0.0] - 2026-06-18
 
 ### Added

@@ -45,14 +45,35 @@ struct HoverReader: NSViewRepresentable {
 
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
-            for area in trackingAreas { removeTrackingArea(area) }
-            // `.activeAlways` so a non-activating menu panel still tracks hover;
-            // `.inVisibleRect` keeps the area sized to the view across layout.
-            addTrackingArea(NSTrackingArea(
-                rect: .zero,
-                options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
-                owner: self
-            ))
+            // `.inVisibleRect` keeps the area sized to the view across layout, so
+            // it rarely needs rebuilding; only (re)install when actually missing.
+            // Tearing it down and re-adding on every layout pass is gratuitous and
+            // also drops the enter edge: AppKit does not synthesize `mouseEntered:`
+            // when an area is re-added under an already-stationary cursor.
+            if trackingAreas.isEmpty {
+                // `.activeAlways` so a non-activating menu panel still tracks hover.
+                addTrackingArea(NSTrackingArea(
+                    rect: .zero,
+                    options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+                    owner: self
+                ))
+            }
+            // Reconcile against the live cursor: if a layout/attach left the cursor
+            // resting inside (or outside) the view without a crossing event, emit
+            // the edge that AppKit skipped so the hover state can't get stuck.
+            reconcileHover()
+        }
+
+        /// Recover a missing enter/exit edge by comparing the actual cursor
+        /// position to the tracked `inside` flag. See `updateTrackingAreas`.
+        private func reconcileHover() {
+            guard let window, window.isVisible else { return }
+            let pointInWindow = window.mouseLocationOutsideOfEventStream
+            let pointInView = convert(pointInWindow, from: nil)
+            let nowInside = bounds.contains(pointInView)
+            guard nowInside != inside else { return }
+            inside = nowInside
+            onChange?(nowInside)
         }
 
         nonisolated override func mouseEntered(with event: NSEvent) {
