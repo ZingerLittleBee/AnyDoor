@@ -33,6 +33,13 @@ versioning.
 
 ### Changed
 
+- Menu-bar panel rows now show a subtle hover highlight — a neutral rounded
+  fill (8 % of the foreground color, so it reads as a slight lighten in dark
+  mode and a slight darken in light mode) layered above the material / glass
+  row surface, fading in and out on a short ease. It gives the same
+  row-tracking affordance as the command palette and native menus. Only the
+  top-level panel rows are highlighted, and hover is detected through the
+  AppKit-backed tracking path rather than SwiftUI's `.onHover`.
 - Menu-bar hover popovers now align their top edge with the hovered row (a
   drop-down submenu feel) instead of centering vertically on it, shifting up
   only when a tall popover would otherwise run off the bottom of the screen.
