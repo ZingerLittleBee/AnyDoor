@@ -123,20 +123,38 @@ final class HoverPopover {
 
         let screen = NSScreen.screens.first(where: { $0.frame.intersects(referenceFrame) }) ?? NSScreen.main
         let screenFrame = screen?.visibleFrame ?? .zero
+        let origin = Self.anchorOrigin(
+            referenceFrame: referenceFrame,
+            size: panel.frame.size,
+            screenFrame: screenFrame
+        )
 
-        let size = panel.frame.size
-        let rightX = referenceFrame.maxX + 4
-        let leftX = referenceFrame.minX - 4 - size.width
-        let originX = (rightX + size.width <= screenFrame.maxX) ? rightX : leftX
-        let originY = max(screenFrame.minY,
-                          min(referenceFrame.midY - size.height / 2,
-                              screenFrame.maxY - size.height))
-
-        panel.setFrameOrigin(NSPoint(x: originX, y: originY))
+        panel.setFrameOrigin(origin)
         panel.orderFrontRegardless()
         if needsKeyFocus {
             panel.makeKey()
         }
+    }
+
+    /// Compute the popover's bottom-left origin (AppKit screen coordinates).
+    ///
+    /// Horizontally it sits just to the right of `referenceFrame`, flipping to
+    /// the left only when there isn't room on the right. Vertically it aligns
+    /// the popover's **top** edge with the row's top edge (a drop-down submenu
+    /// feel), shifting up only when a tall popover would overflow the bottom of
+    /// the screen — i.e. top-aligned by default, clamped on-screen otherwise.
+    static func anchorOrigin(referenceFrame: NSRect, size: NSSize, screenFrame: NSRect) -> NSPoint {
+        let rightX = referenceFrame.maxX + 4
+        let leftX = referenceFrame.minX - 4 - size.width
+        let originX = (rightX + size.width <= screenFrame.maxX) ? rightX : leftX
+
+        // Top of popover (origin.y + height) == top of the row (referenceFrame.maxY).
+        var originY = referenceFrame.maxY - size.height
+        // Don't let the top run past the top of the screen.
+        originY = min(originY, screenFrame.maxY - size.height)
+        // Don't let the bottom run past the bottom of the screen.
+        originY = max(originY, screenFrame.minY)
+        return NSPoint(x: originX, y: originY)
     }
 
     func scheduleHide(after delay: TimeInterval = 0.3) {
