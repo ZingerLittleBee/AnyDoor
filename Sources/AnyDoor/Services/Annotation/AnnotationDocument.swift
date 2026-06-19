@@ -13,7 +13,7 @@ final class AnnotationDocument {
     /// The number the next `counter` element will use (1-based).
     private(set) var nextCounter: Int = 1
 
-    private var undoStack: [Snapshot] = []
+    private var undoStack: [UndoFrame] = []
     private var redoStack: [Snapshot] = []
 
     init(baseImage: CGImage) {
@@ -31,12 +31,19 @@ final class AnnotationDocument {
         var nextCounter: Int
     }
 
+    /// An undo step plus the redo stack that existed before this checkpoint cleared
+    /// it, so `rollback()` (gesture-cancel) can restore prior state *including* redo.
+    private struct UndoFrame {
+        var state: Snapshot
+        var supersededRedo: [Snapshot]
+    }
+
     private var snapshot: Snapshot {
         Snapshot(elements: elements, cropRect: cropRect, nextCounter: nextCounter)
     }
 
     private func checkpoint() {
-        undoStack.append(snapshot)
+        undoStack.append(UndoFrame(state: snapshot, supersededRedo: redoStack))
         redoStack.removeAll()
     }
 
@@ -87,10 +94,13 @@ final class AnnotationDocument {
     func beginEdit() { checkpoint() }
 
     /// Discards the most recent checkpoint and restores its state, cancelling an
-    /// in-progress gesture (e.g. a zero-size drag) without leaving a redo entry.
+    /// in-progress gesture (e.g. a zero-size drag). Fully state-neutral: it also
+    /// reinstates the redo stack the checkpoint cleared, so cancelling a gesture
+    /// never destroys redo history built by an earlier `undo()`.
     func rollback() {
-        guard let s = undoStack.popLast() else { return }
-        apply(s)
+        guard let frame = undoStack.popLast() else { return }
+        redoStack = frame.supersededRedo
+        apply(frame.state)
     }
 
     /// Removes an element by id (no-op if absent).
@@ -124,14 +134,14 @@ final class AnnotationDocument {
     var canRedo: Bool { !redoStack.isEmpty }
 
     func undo() {
-        guard let prev = undoStack.popLast() else { return }
+        guard let frame = undoStack.popLast() else { return }
         redoStack.append(snapshot)
-        apply(prev)
+        apply(frame.state)
     }
 
     func redo() {
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(snapshot)
+        undoStack.append(UndoFrame(state: snapshot, supersededRedo: redoStack))
         apply(next)
     }
 
