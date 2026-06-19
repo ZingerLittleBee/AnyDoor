@@ -6,10 +6,15 @@ import AppKit
 /// Built-in `.submenu` rows (e.g. App Shortcuts, Port Manager) hover-show
 /// their dedicated popover content. Built-in `.action` rows that produce
 /// clipboard history (OCR / pick color / QR code / screenshot) hover-show
-/// the unified `ClipboardHistoryPopoverView` for the matching kind.
+/// the unified `ClipboardHistoryPopoverView`. The `.history` case carries the
+/// owning `BuiltinItem` (not the `ClipboardHistoryKind`) so the anchor frame is
+/// keyed per row: several builtins map to the same kind (e.g. screenshot /
+/// captureWindow / captureFullscreen / captureTimer all use `.screenshot`), and
+/// keying by kind let the last row to report a frame clobber the others' anchor.
+/// The popover content is still derived from `item.historyKind`.
 private enum HoverPopoverTarget: Hashable {
     case submenu(BuiltinItem)
-    case history(ClipboardHistoryKind)
+    case history(BuiltinItem)
     case brightnessControl(BuiltinItem)
 }
 
@@ -134,8 +139,8 @@ struct MenuBarView: View {
             }
         } else if case let .builtin(item) = entry.source,
                   item.kind == .action,
-                  let historyKind = item.historyKind {
-            let target = HoverPopoverTarget.history(historyKind)
+                  item.historyKind != nil {
+            let target = HoverPopoverTarget.history(item)
             PanelRowView(
                 entry: entry,
                 onToggle: {},
@@ -429,7 +434,10 @@ struct MenuBarView: View {
         case .submenu:
             // Other builtin submenu items (none today) — nothing to mount.
             break
-        case .history(let kind):
+        case .history(let item):
+            // Content is keyed by the kind (several items share `.screenshot`);
+            // the anchor is keyed by the item so each row anchors to itself.
+            guard let kind = item.historyKind else { break }
             let store = ClipboardHistoryStore.shared
             Task { @MainActor in
                 await store.pruneExpiredAndOverflow(force: false)
@@ -438,7 +446,7 @@ struct MenuBarView: View {
                 // Guard against the user moving off the row before reload finished.
                 // Setting `needsKeyFocus` is deferred until after this guard so we
                 // never briefly flip the flag for a popover we will not show.
-                guard activeHoverTarget == .history(kind) else { return }
+                guard activeHoverTarget == .history(item) else { return }
                 popover.needsKeyFocus = true
 
                 popover.updateContent {
@@ -457,7 +465,7 @@ struct MenuBarView: View {
                         }
                     )
                 }
-                anchorPopover(popover, to: .history(kind))
+                anchorPopover(popover, to: .history(item))
             }
         }
     }
