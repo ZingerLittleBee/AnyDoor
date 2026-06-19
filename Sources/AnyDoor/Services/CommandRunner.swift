@@ -33,6 +33,22 @@ struct DefaultCommandRunner: CommandRunner {
                 if process.isRunning { process.terminate() }
             }
 
+            // Drain both pipes concurrently so a child that fills either pipe
+            // buffer (~64KB) keeps flowing instead of blocking on write() forever
+            // (which would never let process.isRunning clear, tripping the timeout).
+            // Capture the raw read fds (Sendable) and rebuild non-owning FileHandles
+            // inside each reader; only that reader touches its fd.
+            let outFD = outPipe.fileHandleForReading.fileDescriptor
+            let errFD = errPipe.fileHandleForReading.fileDescriptor
+            let outReader = Task.detached { () -> Data in
+                let h = FileHandle(fileDescriptor: outFD, closeOnDealloc: false)
+                return (try? h.readToEnd()) ?? Data()
+            }
+            let errReader = Task.detached { () -> Data in
+                let h = FileHandle(fileDescriptor: errFD, closeOnDealloc: false)
+                return (try? h.readToEnd()) ?? Data()
+            }
+
             let deadline = Date().addingTimeInterval(timeout)
             while process.isRunning {
                 if Date() > deadline {
@@ -42,8 +58,8 @@ struct DefaultCommandRunner: CommandRunner {
                 try await Task.sleep(nanoseconds: 20_000_000)
             }
 
-            let stdout = String(data: outPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            let stderr = String(data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let stdout = String(data: await outReader.value, encoding: .utf8) ?? ""
+            let stderr = String(data: await errReader.value, encoding: .utf8) ?? ""
             return CommandResult(stdout: stdout, stderr: stderr, exitCode: process.terminationStatus)
         }.value
     }
