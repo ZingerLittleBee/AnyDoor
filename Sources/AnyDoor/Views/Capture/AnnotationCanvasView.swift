@@ -12,6 +12,11 @@ final class AnnotationEditorModel {
     /// and the canvas redraws after external changes (undo, tool/style switches).
     var revision: Int = 0
 
+    /// Set by the AppKit canvas: flushes any in-progress inline text field into the
+    /// document. Invoked before every export so text typed but not yet committed
+    /// with Return (e.g. when the user clicks Copy/Save/Pin/Done) is not dropped.
+    var commitPendingText: (@MainActor () -> Void)?
+
     init(image: CGImage) {
         self.document = AnnotationDocument(baseImage: image)
     }
@@ -23,8 +28,12 @@ final class AnnotationEditorModel {
     func redo() { document.redo(); revision += 1 }
     func noteMutation() { revision += 1 }
 
-    /// The exported image (crop applied), for copy / save / pin / done.
-    func exportImage() -> NSImage? { AnnotationRenderer.renderImage(document) }
+    /// The exported image (crop applied), for copy / save / pin / done. Flushes any
+    /// in-progress inline text first so uncommitted typing is never lost.
+    func exportImage() -> NSImage? {
+        commitPendingText?()
+        return AnnotationRenderer.renderImage(document)
+    }
 }
 
 /// SwiftUI wrapper around the AppKit drawing canvas.
@@ -60,6 +69,10 @@ final class CanvasNSView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.withAlphaComponent(0.001).cgColor
+        // Let the model flush in-progress inline text before any export. `[weak
+        // self]` keeps no retain cycle (the model owns the closure); after the
+        // canvas is gone the call is a safe no-op.
+        model.commitPendingText = { [weak self] in self?.commitActiveText() }
     }
     required init?(coder: NSCoder) { fatalError() }
 

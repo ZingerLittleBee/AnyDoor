@@ -35,10 +35,13 @@ final class BackupService {
 
     // MARK: - Export
 
-    func exportSnapshot() -> BackupSnapshot {
-        let bindings = (try? context.fetch(
+    /// Throws if a store read fails, so a transient fetch error surfaces to the
+    /// caller instead of silently producing (and writing) an empty backup that
+    /// would overwrite a good one.
+    func exportSnapshot() throws -> BackupSnapshot {
+        let bindings = try context.fetch(
             FetchDescriptor<KeyBinding>(sortBy: [SortDescriptor(\.displayOrder)])
-        )) ?? []
+        )
         let shortcuts = bindings.map { b in
             AppShortcutDTO(
                 appBundleID: b.appBundleID, appName: b.appName,
@@ -48,9 +51,9 @@ final class BackupService {
             )
         }
 
-        let prefs = (try? context.fetch(
+        let prefs = try context.fetch(
             FetchDescriptor<BuiltinPreference>(sortBy: [SortDescriptor(\.displayOrder)])
-        )) ?? []
+        )
         let preferences = prefs.map { p in
             BuiltinPreferenceDTO(
                 itemKey: p.itemKey, isVisible: p.isVisible,

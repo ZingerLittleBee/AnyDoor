@@ -211,9 +211,14 @@ private final class SelectionOverlayView: NSView {
     }
 
     /// The Y value that flips between AppKit (bottom-left) and CoreGraphics
-    /// (top-left) global coordinate spaces: the union of all screens' max-Y.
+    /// (top-left) global coordinate spaces: the PRIMARY display's height (the
+    /// CoreGraphics global origin is anchored at the primary display's top), NOT
+    /// the union of all screens' max-Y — a secondary display extending above the
+    /// primary must not change the constant. Matches `ScrollCaptureSession`.
     private func totalHeightFlip() -> CGFloat {
-        NSScreen.screens.map { $0.frame.maxY }.max() ?? screenFrame.maxY
+        SelectionGeometry.globalFlipHeight(
+            screenFrames: NSScreen.screens.map { $0.frame }, fallback: screenFrame.maxY
+        )
     }
 
     /// CGWindow global frame (top-left origin) -> this view's local rect

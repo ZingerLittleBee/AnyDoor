@@ -23,6 +23,11 @@ final class ScheduledShutdownService {
     static let warningLeadKey = "scheduledShutdown.warningLeadSeconds"
     static let defaultMinutesKey = "scheduledShutdown.defaultMinutes"
 
+    /// When the deadline is already overdue at the moment the warning flow opens
+    /// (typically the Mac slept past it), re-anchor this many seconds of cancelable
+    /// grace from now so the shutdown is never fired without a chance to abort.
+    static let overdueGraceSeconds: TimeInterval = 30
+
     private let executor: any ShutdownExecuting
     private let warning: any ShutdownWarningPresenting
     private let defaults: UserDefaults
@@ -120,8 +125,9 @@ final class ScheduledShutdownService {
     }
 
     /// Internal for testing: re-validate against the wall clock after wake. If
-    /// the deadline passed while asleep, enter the warning flow (which fires
-    /// immediately when overdue — the cancelable warning keeps that safe).
+    /// the deadline passed while asleep, enter the warning flow, which re-anchors
+    /// a short cancelable grace when the deadline already lapsed (so it never
+    /// fires without a chance to abort).
     func handleWake() {
         guard case .armed(let fireDate) = state else { return }
         invalidateTimers()
@@ -164,11 +170,16 @@ final class ScheduledShutdownService {
     /// Internal for testing: start (or resume) the cancelable warning.
     func beginWarning() {
         guard case .armed(let fireDate) = state else { return }
-        let remaining = Int(fireDate.timeIntervalSince(now()).rounded())
-        if remaining <= 0 {
-            performFire()
-            return
+        var target = fireDate
+        if target.timeIntervalSince(now()) <= 0 {
+            // Overdue (e.g. the deadline lapsed while the Mac slept): never fire
+            // without a cancelable window. Re-anchor a short grace countdown from
+            // now so the user can still abort, then proceed through the warning.
+            target = now().addingTimeInterval(Self.overdueGraceSeconds)
+            state = .armed(fireDate: target)
+            notify()   // publish the re-anchored target so the panel subtitle is live
         }
+        let remaining = max(1, Int(target.timeIntervalSince(now()).rounded()))
         warning.present(totalSeconds: remaining, onCancel: { [weak self] in self?.cancel() })
         countdownTimer?.invalidate()
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in

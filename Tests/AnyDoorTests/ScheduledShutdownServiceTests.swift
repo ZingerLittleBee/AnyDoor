@@ -146,19 +146,69 @@ extension ScheduledShutdownServiceTests {
     }
 
     @MainActor
-    func testHandleWakeOverdueEntersWarningFlowAndFires() {
-        // fireDate is in the past relative to the wake clock → overdue → fire.
+    func testHandleWakeOverduePresentsCancelableWarningInsteadOfFiringImmediately() {
+        // The deadline lapsed while the Mac slept. The shutdown must NOT fire
+        // instantly with no warning — it must re-anchor a short cancelable grace.
         var current = Date(timeIntervalSince1970: 1_000_000)
         let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
         let executor = MockShutdownExecutor()
+        let warning = MockShutdownWarning()
         let service = ScheduledShutdownService(
-            executor: executor, warning: MockShutdownWarning(), defaults: suite, now: { current }
+            executor: executor, warning: warning, defaults: suite, now: { current }
         )
         service.arm(.minutes(1))                 // fireDate = now + 60
         current = current.addingTimeInterval(120) // simulate sleeping past it
 
         service.handleWake()
 
-        XCTAssertEqual(service.state, .off)       // performFire cleared state
+        XCTAssertNotNil(warning.presentedSeconds, "an overdue wake must show a cancelable warning")
+        XCTAssertGreaterThan(warning.presentedSeconds ?? 0, 0)
+        XCTAssertTrue(service.state.isArmed, "should re-arm a grace window, not fire immediately")
+        XCTAssertNil(service.fireTask, "no shutdown should be kicked off during the grace window")
+        XCTAssertEqual(executor.calls, [], "must not shut down before the grace window elapses")
+    }
+
+    @MainActor
+    func testHandleWakeOverdueGraceWarningIsCancelable() {
+        var current = Date(timeIntervalSince1970: 1_000_000)
+        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let executor = MockShutdownExecutor()
+        let warning = MockShutdownWarning()
+        let service = ScheduledShutdownService(
+            executor: executor, warning: warning, defaults: suite, now: { current }
+        )
+        service.arm(.minutes(1))
+        current = current.addingTimeInterval(120)
+        service.handleWake()
+
+        warning.onCancel?()                      // user cancels during the grace window
+
+        XCTAssertEqual(service.state, .off)
+        XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
+        XCTAssertEqual(executor.calls, [], "cancelling the grace warning aborts the shutdown")
+    }
+
+    @MainActor
+    func testHandleWakeOverduePublishesReAnchoredStateViaOnChange() {
+        // The re-anchored grace target must be pushed through onChange so the panel
+        // subtitle reflects the live time, not the original (now past) deadline.
+        var current = Date(timeIntervalSince1970: 1_000_000)
+        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let service = ScheduledShutdownService(
+            executor: MockShutdownExecutor(), warning: MockShutdownWarning(), defaults: suite, now: { current }
+        )
+        service.arm(.minutes(1))
+        current = current.addingTimeInterval(120)
+        var notified: [ScheduledShutdownState] = []
+        service.onChange = { notified.append($0) }
+
+        service.handleWake()
+
+        guard case .armed(let fireDate)? = notified.last else {
+            return XCTFail("overdue re-anchor must notify with the new armed state")
+        }
+        XCTAssertEqual(fireDate.timeIntervalSince1970,
+                       current.timeIntervalSince1970 + ScheduledShutdownService.overdueGraceSeconds,
+                       accuracy: 0.5)
     }
 }
