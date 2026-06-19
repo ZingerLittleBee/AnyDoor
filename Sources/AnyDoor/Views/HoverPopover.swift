@@ -22,6 +22,13 @@ final class HoverPopover {
     private let panel: KeyableHoverPanel
     private let containerView: NSView
     private let hostingView: NSHostingView<AnyView>
+    /// Reusable, never-displayed scratch host used only to read `fittingSize`.
+    /// Created once and its `rootView` swapped per measure, so showing a popover
+    /// no longer allocates a throwaway `NSHostingView` (which rebuilt the whole
+    /// SwiftUI graph from scratch) on every hover/crossing. The live
+    /// `hostingView` keeps `sizingOptions = []` so it can never drive a
+    /// window-resize recursion (see `MenuBarController.showPanel`).
+    private let measuringView: NSHostingView<AnyView>
     private var hideTask: Task<Void, Never>?
     // nonisolated(unsafe) so deinit can remove observers without a MainActor hop.
     @ObservationIgnored nonisolated(unsafe) private var keyObserver: NSObjectProtocol?
@@ -36,7 +43,17 @@ final class HoverPopover {
 
     init<Content: View>(@ViewBuilder content: () -> Content) {
         let rootView = AnyView(content())
-        let initialSize = Self.fittingSize(for: rootView, fallback: NSSize(width: 240, height: 200))
+
+        let measuringView = NSHostingView(rootView: rootView)
+        measuringView.sizingOptions = .intrinsicContentSize
+        measuringView.layoutSubtreeIfNeeded()
+        self.measuringView = measuringView
+
+        let measured = measuringView.fittingSize
+        let initialSize = (measured.width > 0 && measured.height > 0)
+            ? measured
+            : NSSize(width: 240, height: 200)
+
         let hostingView = NSHostingView(rootView: rootView)
         hostingView.sizingOptions = []
         hostingView.frame = NSRect(origin: .zero, size: initialSize)
@@ -83,9 +100,20 @@ final class HoverPopover {
 
     func updateContent<Content: View>(@ViewBuilder content: () -> Content) {
         let rootView = AnyView(content())
+        // Measure on the reusable scratch host first, then install + resize in
+        // one pass. The live host lays out once at its final size instead of
+        // once before measuring and again after the resize.
+        let size = measure(rootView)
         hostingView.rootView = rootView
-        hostingView.layoutSubtreeIfNeeded()
-        resizePanel(to: Self.fittingSize(for: rootView, fallback: panel.frame.size))
+        resizePanel(to: size)
+    }
+
+    private func measure(_ rootView: AnyView) -> NSSize {
+        measuringView.rootView = rootView
+        measuringView.layoutSubtreeIfNeeded()
+        let fitting = measuringView.fittingSize
+        if fitting.width > 0 && fitting.height > 0 { return fitting }
+        return panel.frame.size
     }
 
     /// Show the popover anchored to the right side of `referenceFrame` (screen coordinates).
@@ -137,15 +165,6 @@ final class HoverPopover {
         containerView.frame = NSRect(origin: .zero, size: size)
         hostingView.frame = NSRect(origin: .zero, size: size)
     }
-
-    private static func fittingSize(for rootView: AnyView, fallback: NSSize) -> NSSize {
-        let measuringView = NSHostingView(rootView: rootView)
-        measuringView.sizingOptions = .intrinsicContentSize
-        measuringView.layoutSubtreeIfNeeded()
-        let fitting = measuringView.fittingSize
-        if fitting.width > 0 && fitting.height > 0 { return fitting }
-        return fallback
-    }
 }
 
 /// NSPanel subclass whose key-eligibility is controlled by an opt-in flag.
@@ -161,11 +180,21 @@ final class KeyableHoverPanel: NSPanel {
 @MainActor
 @Observable
 final class HoverGate {
+    /// Hover-intent debounce before the first popover appears.
+    private static let showDelayNanos: UInt64 = 400_000_000
+    /// Grace period before the popover auto-hides once nothing is hovered.
+    private static let hideDelayNanos: UInt64 = 300_000_000
+    /// Coalescing window for re-mounts while the popover is already shown.
+    /// Collapses a fast sweep across several hover rows into one mount and
+    /// keeps the work off the AppKit mouse-event tick (~one display frame).
+    private static let refreshDelayNanos: UInt64 = 16_000_000
+
     private(set) var isShown = false
     private var triggerHovered = false
     private var popoverHovered = false
     private var showTask: Task<Void, Never>?
     private var hideTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
 
     var onShow: () -> Void = {}
     var onHide: () -> Void = {}
@@ -177,12 +206,21 @@ final class HoverGate {
 
     func popoverHover(_ hovered: Bool) {
         popoverHovered = hovered
-        if hovered { showTask?.cancel(); hideTask?.cancel() }
-        else { scheduleHide() }
+        if hovered {
+            // Cancel AND nil, like every other cancel site: a cancelled-but-
+            // pending showTask would otherwise wedge the `guard showTask == nil`
+            // leading-edge re-arm in scheduleShow until it self-heals on wake.
+            showTask?.cancel(); showTask = nil
+            refreshTask?.cancel(); refreshTask = nil
+            hideTask?.cancel()
+        } else {
+            scheduleHide()
+        }
     }
 
     func showImmediately() {
-        showTask?.cancel()
+        showTask?.cancel(); showTask = nil
+        refreshTask?.cancel(); refreshTask = nil
         hideTask?.cancel()
         if !isShown { isShown = true }
         onShow()
@@ -193,8 +231,10 @@ final class HoverGate {
     func reset() {
         showTask?.cancel()
         hideTask?.cancel()
+        refreshTask?.cancel()
         showTask = nil
         hideTask = nil
+        refreshTask = nil
         triggerHovered = false
         popoverHovered = false
         if isShown {
@@ -206,14 +246,33 @@ final class HoverGate {
     private func scheduleShow() {
         hideTask?.cancel()
         if isShown {
-            onShow()
+            // Already visible: a row-to-row crossing only needs to re-mount the
+            // new content. Coalesce these off the mouse-event tick so a fast
+            // sweep doesn't rebuild the popover once per row crossed.
+            scheduleRefresh()
             return
         }
-        showTask?.cancel()
+        // Leading-edge: keep the first hover's deadline instead of restarting
+        // the 400ms countdown on every crossing. Whichever row the cursor rests
+        // on when the timer fires is shown via the caller's latest target.
+        guard showTask == nil else { return }
         showTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            guard let self, !Task.isCancelled, self.triggerHovered else { return }
+            try? await Task.sleep(nanoseconds: Self.showDelayNanos)
+            guard let self else { return }
+            self.showTask = nil
+            guard !Task.isCancelled, self.triggerHovered else { return }
             self.isShown = true
+            self.onShow()
+        }
+    }
+
+    private func scheduleRefresh() {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: Self.refreshDelayNanos)
+            guard let self else { return }
+            self.refreshTask = nil
+            guard !Task.isCancelled, self.isShown else { return }
             self.onShow()
         }
     }
@@ -222,7 +281,7 @@ final class HoverGate {
         guard isShown else { return }
         hideTask?.cancel()
         hideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? await Task.sleep(nanoseconds: Self.hideDelayNanos)
             guard let self, !Task.isCancelled else { return }
             guard !self.triggerHovered && !self.popoverHovered else { return }
             self.isShown = false
