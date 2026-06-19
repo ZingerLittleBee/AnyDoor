@@ -130,13 +130,17 @@ private struct BatteryBadge: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: level.batterySymbolName)
-                .font(.system(size: 14))
-                .foregroundStyle(BatteryPalette.color(level))
+            // Number first, icon last: the badge is right-aligned in the row, so
+            // a trailing fixed-width icon keeps every icon's right edge aligned
+            // and the percentages right-aligned against it (regardless of 2- vs
+            // 3-digit levels like 85% / 100%).
             Text("\(level)%")
                 .font(.system(size: 12, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
+            Image(systemName: level.batterySymbolName)
+                .font(.system(size: 14))
+                .foregroundStyle(BatteryPalette.color(level))
         }
     }
 }
