@@ -165,20 +165,21 @@ private final class AVServiceCache: @unchecked Sendable {
     /// accepts position-based fallback as the v1 strategy.
     private func locateService(for displayID: CGDirectDisplayID) -> AnyObject? {
         let proxies = enumerateExternalProxies()
+        // The caller owns every enumerated proxy and must release each one. Do it
+        // on EVERY return path with a single defer: the guards below can bail
+        // before any work (e.g. a stale displayID, or more online external
+        // displays than proxies), which previously leaked the whole array. The
+        // chosen proxy is released here too — IOAVServiceCreateWithService's
+        // takeRetainedValue holds an independent reference, so releasing the
+        // io_service_t afterward is correct and never double-frees.
+        defer { for service in proxies { IOObjectRelease(service) } }
         guard !proxies.isEmpty else { return nil }
         let externalDisplays = onlineExternalDisplays()
         guard let index = externalDisplays.firstIndex(of: displayID),
               index < proxies.count else { return nil }
-        defer {
-            for (i, service) in proxies.enumerated() where i != index {
-                IOObjectRelease(service)
-            }
-        }
         let service = proxies[index]
-        let av = IOAVServiceCreateWithService(kCFAllocatorDefault, service)?
+        return IOAVServiceCreateWithService(kCFAllocatorDefault, service)?
             .takeRetainedValue()
-        IOObjectRelease(service)
-        return av
     }
 
     /// Online external displays in `CGGetOnlineDisplayList` order.
