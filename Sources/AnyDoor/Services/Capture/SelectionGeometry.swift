@@ -22,6 +22,17 @@ enum SelectionGeometry {
         rect.intersection(bounds)
     }
 
+    /// The vertical flip constant between AppKit (bottom-left) and CoreGraphics
+    /// (top-left) **global** coordinate spaces. CoreGraphics anchors its global
+    /// origin at the top-left of the PRIMARY display (the screen at AppKit origin
+    /// `(0, 0)`), so the constant is the primary display's height — NOT the union
+    /// of all displays. A secondary display extending above the primary must not
+    /// change it. `screenFrames` are AppKit screen frames (e.g. `NSScreen.screens`).
+    static func globalFlipHeight(screenFrames: [CGRect], fallback: CGFloat) -> CGFloat {
+        let primary = screenFrames.first { $0.origin == .zero } ?? screenFrames.first
+        return primary?.maxY ?? fallback
+    }
+
     /// "W × H" using rounded integer points.
     static func formatDimensions(_ size: CGSize) -> String {
         "\(Int(size.width.rounded())) \u{00D7} \(Int(size.height.rounded()))"

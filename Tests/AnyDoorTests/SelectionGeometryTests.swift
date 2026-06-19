@@ -18,6 +18,27 @@ final class SelectionGeometryTests: XCTestCase {
         XCTAssertEqual(SelectionGeometry.formatDimensions(CGSize(width: 12.6, height: 40.2)), "13 × 40")
     }
 
+    /// The AppKit↔CoreGraphics global flip constant is the PRIMARY display height,
+    /// not the union top of all displays. When a secondary display extends above
+    /// the primary, the two diverge and using the union mis-maps every window frame.
+    func testGlobalFlipHeightUsesPrimaryNotUnion() {
+        let primary = CGRect(x: 0, y: 0, width: 1920, height: 1080)        // maxY 1080
+        let secondaryAbove = CGRect(x: 0, y: 1080, width: 1920, height: 1080) // maxY 2160
+        let flip = SelectionGeometry.globalFlipHeight(
+            screenFrames: [primary, secondaryAbove], fallback: 0
+        )
+        XCTAssertEqual(flip, 1080, "flip must be the primary display height, not the union max (2160)")
+    }
+
+    func testGlobalFlipHeightSingleDisplay() {
+        let only = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        XCTAssertEqual(SelectionGeometry.globalFlipHeight(screenFrames: [only], fallback: 0), 900)
+    }
+
+    func testGlobalFlipHeightEmptyUsesFallback() {
+        XCTAssertEqual(SelectionGeometry.globalFlipHeight(screenFrames: [], fallback: 777), 777)
+    }
+
     func testRectIsEmptyBelowMinimum() {
         XCTAssertTrue(SelectionGeometry.isTooSmall(CGRect(x: 0, y: 0, width: 3, height: 50)))
         XCTAssertFalse(SelectionGeometry.isTooSmall(CGRect(x: 0, y: 0, width: 6, height: 6)))
