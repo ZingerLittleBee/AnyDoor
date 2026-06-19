@@ -38,7 +38,7 @@ final class BackupServiceTests: XCTestCase {
 
         let service = BackupService(context: context, defaults: defaults,
                                     appPathResolver: { _ in nil })
-        let snapshot = service.exportSnapshot()
+        let snapshot = try service.exportSnapshot()
 
         XCTAssertEqual(snapshot.schemaVersion, BackupSnapshot.currentSchemaVersion)
         XCTAssertEqual(snapshot.appShortcuts.count, 1)
@@ -61,7 +61,7 @@ final class BackupServiceTests: XCTestCase {
 
         let service = BackupService(context: context, defaults: makeDefaults(),
                                     appPathResolver: { _ in nil })
-        let snapshot = service.exportSnapshot()
+        let snapshot = try service.exportSnapshot()
         XCTAssertEqual(snapshot.appShortcuts.count, 1)
         XCTAssertEqual(snapshot.appShortcuts.first?.appBundleID, "com.apple.Safari")
 

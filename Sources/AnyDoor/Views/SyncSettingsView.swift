@@ -49,7 +49,7 @@ struct SyncSettingsView: View {
         panel.nameFieldStringValue = "AnyDoor-Backup.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let snapshot = makeService().exportSnapshot()
+            let snapshot = try makeService().exportSnapshot()
             let data = try BackupCodec.encode(snapshot)
             try LocalFileBackend(url: url).uploadSync(data)
             statusMessage = L(.settingsSyncExportSuccess)
