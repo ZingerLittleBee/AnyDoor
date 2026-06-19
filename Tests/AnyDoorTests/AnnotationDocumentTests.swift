@@ -65,4 +65,17 @@ final class AnnotationDocumentTests: XCTestCase {
         XCTAssertEqual(doc.elements.count, 1)
         XCTAssertFalse(doc.canRedo)
     }
+
+    /// exportImage() must flush any pending inline text (the canvas registers a
+    /// commit hook) before rendering, so text typed but not Return-committed —
+    /// e.g. the user clicks Copy/Save/Pin/Done — is not silently dropped.
+    func testExportImageFlushesPendingTextFirst() {
+        let model = AnnotationEditorModel(image: makeImage())
+        var flushed = false
+        model.commitPendingText = { flushed = true }
+
+        _ = model.exportImage()
+
+        XCTAssertTrue(flushed, "exportImage must invoke the pending-text commit hook before rendering")
+    }
 }
