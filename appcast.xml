@@ -3,29 +3,97 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.1.0</title>
+            <pubDate>Fri, 19 Jun 2026 20:41:21 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.1.0</sparkle:version>
+            <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- A capture sound: a successful screenshot now plays the native macOS screenshot
+  shutter (`Screen Capture.aif`, falling back to the system `Shutter` / `Grab`
+  sounds) at the moment the capture commits. It covers every successful still
+  capture — region, window, fullscreen, and scrolling — through the shared output
+  path. A "play sound after capture" toggle in Settings › Capture (on by default)
+  controls it, and the preference rides settings backup. Screen recording is
+  unaffected (it keeps its own start/stop cues).
+- Bluetooth device battery: a new menu-bar panel item whose hover popover lists
+  every connected Bluetooth accessory macOS reports a battery level for — AirPods
+  and true-wireless earbuds (left / right / case), Apple Magic keyboards, mice,
+  and trackpads, generic BLE keyboards and mice that expose the standard GATT
+  Battery Service, and Logitech HID++ mice (MX Master and similar). Levels are
+  read off the main actor via `ShellRunner` from two public, permission-free
+  sources — `system_profiler SPBluetoothDataType -json` (rich; gives the earbud
+  left/right/case triple and a device type) and `pmset -g accps` (covers the
+  HID++ mice that system_profiler silently omits) — merged by a pure, unit-tested
+  `BluetoothBatteryParser` that prefers the richer system_profiler readings and
+  folds pmset in for the gaps. Each reading is tinted by charge (red ≤ 20 %,
+  yellow ≤ 35 %, green otherwise). macOS exposes no battery-change notification,
+  so the list polls on demand when the popover opens and caches for 30 s to avoid
+  re-spawning the subprocesses; no new entitlement, TCC prompt, or private API is
+  involved.
+
+### Changed
+
+- Menu-bar panel rows now show a subtle hover highlight — a neutral rounded
+  fill (8 % of the foreground color, so it reads as a slight lighten in dark
+  mode and a slight darken in light mode) layered above the material / glass
+  row surface, fading in and out on a short ease. It gives the same
+  row-tracking affordance as the command palette and native menus. Only the
+  top-level panel rows are highlighted, and hover is detected through the
+  AppKit-backed tracking path rather than SwiftUI's `.onHover`.
+- Menu-bar hover popovers now align their top edge with the hovered row (a
+  drop-down submenu feel) instead of centering vertically on it, shifting up
+  only when a tall popover would otherwise run off the bottom of the screen.
+  Placement is computed by a pure, unit-tested `HoverPopover.anchorOrigin`.
+
+### Fixed
+
+- Menu-bar hover popovers — App Shortcuts, Port Manager, brightness, Hosts,
+  Bluetooth battery, and the clipboard-history side popovers — were janky to
+  switch between (worst on rows that open a popover), sometimes failed to
+  appear, and could be left on screen as a stray window. Several root causes in
+  the shared hover pipeline:
+  - Every show and every row-to-row crossing built a throwaway `NSHostingView`
+    solely to measure the content's fitting size, and re-mounted synchronously
+    on the AppKit mouse-event tick. The popover now reuses a single measuring
+    host (one layout pass, no per-show allocation) and coalesces re-mounts a
+    frame later off the event tick, so a fast sweep across rows rebuilds once
+    instead of once per row crossed.
+  - The 400 ms hover-intent delay restarted on every crossing, so a continuous
+    sweep never reached it and the popover only appeared once the cursor
+    settled; and the hover tracking area was torn down and re-added on every
+    layout pass, which drops the mouse-enter edge when it is rebuilt under an
+    already-stationary cursor, silently losing the hover. The delay now keeps
+    its first deadline (leading-edge), and the tracking area is rebuilt only
+    when missing and reconciled against the live cursor so a dropped edge is
+    recovered.
+  - When a row's on-screen frame had not been recorded yet, the popover
+    anchored to the whole menu-bar panel frame, placing it against the panel
+    edge instead of beside the row; it no longer falls back to a panel anchor.
+  - A key-focus popover (Port Manager or clipboard history) could be orphaned
+    as a zombie window when the panel was dismissed by an outside click;
+    dismissal now orders out any stray hover panel.
+- The clipboard-history popover for 截图到剪贴板 (screenshot to clipboard) opened
+  far from the row — pinned near the bottom of the screen — because the four
+  screenshot-producing builtins (screenshot, capture window, capture fullscreen,
+  capture timer) all map to the same `screenshot` history kind and shared a
+  single anchor entry keyed by kind, so whichever row reported its position last
+  clobbered the others. Hover anchors are now keyed per row, so each row anchors
+  to itself while still showing the shared screenshot history.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.1.0/AnyDoor-3.1.0.zip" length="8962061" type="application/octet-stream" sparkle:edSignature="YnaDZMbaMXqMWCgNSn+v2rv/IfHVVUwKXWwSwiB8NUw7aNx6payM+BrOy4oZ2JKZNol343eZ//g0kAuGVuDWDA=="/>
+        </item>
+        <item>
             <title>3.0.0</title>
             <pubDate>Thu, 18 Jun 2026 14:58:10 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>3.0.0</sparkle:version>
             <sparkle:shortVersionString>3.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- An interactive first-run onboarding: a six-step window (left progress rail,
-  right content) where each step teaches through a hand-drawn, animated SwiftUI
-  mock rather than walls of text — the menu-bar panel dropping into place, three
-  live permission cards (Accessibility / Screen Recording / Automation) wired to
-  the real requests, a Hyper Key keyboard demo whose controls drive the real
-  Hyper Key settings, a looping capture Quick Access overlay, an auto-typing
-  command palette (`300 usd = rmb`, `:3000`, `hosts`) beside the clipboard wall, and a
-  Panel-settings customize demo. Back / Continue / Skip / Done are fixed at the
-  bottom (Esc skips, Return continues), Reduce Motion is honored, and every
-  destructive action is mock-only. It shows once on a clean install, never
-  participates in window state restoration, and can be reopened from
-  Settings › General › Getting Started.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.0.0/AnyDoor-3.0.0.zip" length="8837284" type="application/octet-stream" sparkle:edSignature="Kk8JLufIRwWDxEX9OUspiCo8RPD94aDx6O1vjnIc8w1RhDlAUvm2w2H/WODmqcjI8PkQIGS3MpYIVlZUB3+rCA=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.0.0/AnyDoor-3.0.0.zip" length="8837284" type="application/octet-stream" sparkle:edSignature="Kk8JLufIRwWDxEX9OUspiCo8RPD94aDx6O1vjnIc8w1RhDlAUvm2w2H/WODmqcjI8PkQIGS3MpYIVlZUB3+rCA=="/>
         </item>
         <item>
             <title>2.7.0</title>
@@ -35,15 +103,6 @@
             <sparkle:shortVersionString>2.7.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.7.0/AnyDoor-2.7.0.zip" length="8233456" type="application/octet-stream" sparkle:edSignature="9pHjXUyvNbGCds+r5Gi4U3AWQlw0IP05B3BCVGUf5phbG1r+8y65iJi5u9sRz0jYSgVf40JvhY2yMpyfYOfODQ=="/>
-        </item>
-        <item>
-            <title>2.6.0</title>
-            <pubDate>Tue, 16 Jun 2026 21:55:37 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>2.6.0</sparkle:version>
-            <sparkle:shortVersionString>2.6.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v2.6.0/AnyDoor-2.6.0.zip" length="8195273" type="application/octet-stream" sparkle:edSignature="54wxR9btWekwE9uDOPQtxyRcyk+MsQ6hYcZ3BOPbqsoJr7sFZ0sWLueCKSTjG5rnXVOJeJBFVGyM2x5q5DGsCQ=="/>
         </item>
         <item>
             <title>1.2.0</title>

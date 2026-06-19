@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-06-19
+
 ### Added
 
 - A capture sound: a successful screenshot now plays the native macOS screenshot
