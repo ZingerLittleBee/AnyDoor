@@ -10,6 +10,7 @@ struct PortListView: View {
                     PortRowView(record: record, inventory: inventory)
                 }
             }
+            .overlayScrollers()
         }
     }
 }

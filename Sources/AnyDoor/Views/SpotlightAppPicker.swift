@@ -176,6 +176,7 @@ struct SpotlightAppPicker: View {
                     }
                 }
                 .padding(.vertical, 12)
+                .overlayScrollers()
             }
             .frame(minHeight: 320, maxHeight: .infinity)
             .onChange(of: state.selectedIndex) { _, newIndex in

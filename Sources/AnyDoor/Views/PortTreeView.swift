@@ -10,6 +10,7 @@ struct PortTreeView: View {
                     PortProcessGroupRow(group: group, inventory: inventory)
                 }
             }
+            .overlayScrollers()
         }
     }
 }
