@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-06-20
+
 ### Fixed
 
 - Light-mode polish across the translucent panels. The menu-bar panel, the hover
