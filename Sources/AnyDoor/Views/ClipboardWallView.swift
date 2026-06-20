@@ -604,6 +604,29 @@ struct ClipboardWallView: View {
         return menu
     }
 
+    /// Memoizes `matchSnippet` for the current query so a wall re-render (e.g. a
+    /// selection change re-evaluates every visible card's body) or a re-realized
+    /// card while scrolling doesn't re-fold the item's text. Scoped to one query:
+    /// switching queries clears it, so a stale snippet can only briefly survive an
+    /// in-place item edit under the same query (display-only). `[UUID: String?]`
+    /// distinguishes a cached nil result from an absent entry.
+    @MainActor
+    private enum MatchSnippetCache {
+        private static var query = ""
+        private static var cache: [UUID: String?] = [:]
+
+        static func snippet(for item: ClipboardHistoryItem, query: String) -> String? {
+            if query != self.query {
+                self.query = query
+                cache.removeAll(keepingCapacity: true)
+            }
+            if let cached = cache[item.id] { return cached }
+            let computed = ClipboardSearch.matchSnippet(for: item, query: query)
+            cache[item.id] = computed
+            return computed
+        }
+    }
+
     private func cards(_ items: [ClipboardHistoryItem]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -615,7 +638,7 @@ struct ClipboardWallView: View {
                             item: item,
                             isSelected: index == state.selectedIndex,
                             historyDirectory: historyDirectory,
-                            matchSnippet: ClipboardSearch.matchSnippet(for: item, query: state.query),
+                            matchSnippet: MatchSnippetCache.snippet(for: item, query: state.query),
                             onToggleFavorite: { onToggleFavorite(item) },
                             // Select the card the user right-clicked so the
                             // action visibly applies to it.
