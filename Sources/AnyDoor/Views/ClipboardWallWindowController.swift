@@ -99,9 +99,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Never resurface a stale tag dialog (it may pin a deleted item).
         state.tagDialog = nil
         state.tagDialogText = ""
-        // Seed from the live flags: the wall hotkey itself carries ⌘, and the
-        // monitor only reports subsequent changes.
-        state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.command)
+        // Seed from the live flags: ⌥ may already be held when the wall opens,
+        // and the monitor only reports subsequent changes.
+        state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.option)
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
@@ -237,10 +237,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             let consumed = MainThreadIsolation.run { self?.handleScroll(event) ?? false }
             return consumed ? nil : event
         }
-        // Track ⌘ so the view can enable tab drag-to-reorder reactively.
+        // Track ⌥ so the view can enable tab drag-to-reorder reactively.
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             MainThreadIsolation.run {
-                self?.state.isReorderModifierHeld = event.modifierFlags.contains(.command)
+                self?.state.isReorderModifierHeld = event.modifierFlags.contains(.option)
             }
             return event
         }

@@ -37,7 +37,7 @@ struct ClipboardWallView: View {
     @State private var lastTap: TapRecord?
     @FocusState private var tagFieldFocused: Bool
 
-    /// ⌘-drag tab reordering. `tabFrames` tracks each capsule's frame in the
+    /// ⌥-drag tab reordering. `tabFrames` tracks each capsule's frame in the
     /// row's named coordinate space; `dragStartFrames` snapshots them when a
     /// drag begins, and all drag math uses the snapshot — live frames would
     /// include the offsets the drag itself applies (a feedback loop). The
@@ -141,7 +141,7 @@ struct ClipboardWallView: View {
                     }
                     .coordinateSpace(name: Self.tabRowSpace)
                 }
-                // The lifted (scaled, shadowed) dragged capsule and the ⌘-mode
+                // The lifted (scaled, shadowed) dragged capsule and the ⌥-mode
                 // delete badges poke past the row's tight bounds; don't clip them.
                 .scrollClipDisabled()
                 .onChange(of: state.category) { _, new in
@@ -381,7 +381,7 @@ struct ClipboardWallView: View {
                     in: Capsule())
         .foregroundStyle(active ? Color.white : Color.primary)
         // Edit-mode cue alongside the jiggle: a dashed outline on every
-        // capsule while ⌘ is held, like a "cut here" marquee.
+        // capsule while ⌥ is held, like a "cut here" marquee.
         .overlay {
             if reorderArmed {
                 Capsule().strokeBorder(
@@ -404,14 +404,14 @@ struct ClipboardWallView: View {
             Color.clear.preference(key: TabFramePreferenceKey.self,
                                    value: [cat: proxy.frame(in: .named(Self.tabRowSpace))])
         })
-        // Jiggle while ⌘ is held — the macOS "icons are movable now" signal.
+        // Jiggle while ⌥ is held — the macOS "icons are movable now" signal.
         // Alternating sign keeps neighbors out of phase; the capsule being
         // dragged stays level under the pointer.
         .modifier(JiggleEffect(active: jiggling, amplitude: jiggleAmplitude(for: cat)))
         // After the rotation on purpose: the badge sits still (anchored to
         // the layout bounds) while the capsule wiggles underneath it.
         .overlay(alignment: .topTrailing) {
-            // Launchpad-style delete badge on custom tags while ⌘-mode is
+            // Launchpad-style delete badge on custom tags while ⌥-mode is
             // active. Routes into the existing confirm dialog, whose copy
             // tells the user the category's items are kept.
             if jiggling, let id = cat.tagFilter {
@@ -434,14 +434,14 @@ struct ClipboardWallView: View {
         .opacity(draggedTab == cat ? 0.85 : 1)
         .shadow(color: .black.opacity(draggedTab == cat ? 0.25 : 0), radius: 4, y: 1)
         .zIndex(draggedTab == cat ? 1 : 0)
-        // Always attached; only a ⌘-initiated drag arms reordering (checked
+        // Always attached; only a ⌥-initiated drag arms reordering (checked
         // in onChanged). High priority so it beats the tap once the pointer
         // actually moves; a plain click stays a tab switch. Mouse drags never
         // scroll an NSScrollView on macOS, so the row's scrolling is fine.
         .highPriorityGesture(reorderGesture(for: cat))
     }
 
-    /// Whether ⌘-reorder mode is active (modifier held, no modal dialog up).
+    /// Whether ⌥-reorder mode is active (modifier held, no modal dialog up).
     private var reorderArmed: Bool {
         state.isReorderModifierHeld && state.tagDialog == nil
     }
@@ -502,9 +502,9 @@ struct ClipboardWallView: View {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.tabRowSpace))
             .onChanged { value in
                 if draggedTab == nil {
-                    // Only a ⌘-initiated drag arms reordering; a plain drag
+                    // Only a ⌥-initiated drag arms reordering; a plain drag
                     // on the row is inert. Once armed it stays armed for the
-                    // whole drag, even if ⌘ lifts mid-way.
+                    // whole drag, even if ⌥ lifts mid-way.
                     guard reorderArmed else { return }
                     draggedTab = cat
                     dragStartFrames = tabFrames
@@ -638,7 +638,7 @@ struct ClipboardWallView: View {
             hint("←→", .clipboardHintSelect)
             hint("⇥", .clipboardHintCategory)
             hint("⌘K", .clipboardHintFilterSource)
-            hint("⌘", .clipboardHintEditCategories)
+            hint("⌥", .clipboardHintEditCategories)
             hint("↵", .clipboardHintCopy)
             hint("⌥↵", .clipboardHintPastePlain)
             hint("space", .clipboardHintPreview)
