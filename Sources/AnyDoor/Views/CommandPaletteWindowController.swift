@@ -73,6 +73,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             },
             onRefreshRates: { [weak self] in
                 self?.refreshRates()
+            },
+            isPresented: { [weak self] in
+                self?.window?.isVisible == true
             }
         )
 

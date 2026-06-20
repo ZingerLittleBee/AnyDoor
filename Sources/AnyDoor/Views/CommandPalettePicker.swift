@@ -518,8 +518,15 @@ struct CommandPalettePicker: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let onRefreshRates: () -> Void
+    /// Reports whether the hosting panel is still on screen. Used to keep the
+    /// focus-recovery loop below from resurrecting a palette that was just
+    /// dismissed (see the `onChange(of: searchFocused)` note).
+    let isPresented: () -> Bool
 
     @FocusState private var searchFocused: Bool
+    // Counts consecutive failed attempts to reclaim focus. Reset whenever focus
+    // is actually regained; used to break the re-focus loop (see below).
+    @State private var refocusStrikes = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -567,8 +574,29 @@ struct CommandPalettePicker: View {
             DispatchQueue.main.async { searchFocused = true }
         }
         .onChange(of: searchFocused) { _, focused in
-            if !focused {
-                DispatchQueue.main.async { searchFocused = true }
+            // Keep the search field as the keyboard target — re-focus if a stray
+            // hit-test in the panel chrome steals it. Two guards on the recovery:
+            //
+            //  1. Bail after a few rapid strikes. Reasserting focus every runloop
+            //     tick pins a CPU core when the system refuses first-responder
+            //     (focus desync while the panel sits on another Space, etc.).
+            //     Regaining focus resets the counter (mirrors SpotlightAppPicker).
+            //  2. Only re-focus while the panel is still on screen. Esc/cancel
+            //     closes the window, which drops first-responder and fires this
+            //     handler; without this guard the deferred `searchFocused = true`
+            //     would make the field first responder again and reorder the just
+            //     -closed panel back in. Esc is the only dismiss path where the
+            //     app stays frontmost with no other window to take focus, so it
+            //     was the one that visibly "wouldn't close".
+            if focused {
+                refocusStrikes = 0
+                return
+            }
+            guard refocusStrikes < 3 else { return }
+            refocusStrikes += 1
+            DispatchQueue.main.async {
+                guard isPresented() else { return }
+                searchFocused = true
             }
         }
         .onChange(of: state.query) { _, _ in

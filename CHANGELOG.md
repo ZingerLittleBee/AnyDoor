@@ -39,6 +39,14 @@ versioning.
     fixed black wash; the Port Manager warning banner tint is strengthened so it
     stays distinct over light-mode material; and the command-palette confirmation
     scrim is softened a touch so it is less heavy over bright glass.
+- The command palette ignored Esc when the search field was empty. Closing the
+  panel dropped the search field's focus, and an unbounded focus-recovery loop
+  immediately reasserted it on the next runloop tick — which made the field first
+  responder again and reordered the just-closed panel back on screen. Esc was the
+  only dismiss path where the app stayed frontmost with no other window to take
+  focus, so it was the one that visibly "wouldn't close". The recovery now skips
+  reasserting focus once the panel is no longer on screen, and is capped after a
+  few rapid strikes (matching the Spotlight app picker).
 
 ## [3.1.0] - 2026-06-19
 
