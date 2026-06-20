@@ -330,6 +330,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             }
         }
         if let consumed = routeToTextWindow(event) { return consumed }
+        // ⌘K opens the source-filter menu, in both input and card-navigation
+        // modes (intercepted before the input-mode passthrough below).
+        if event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "k" {
+            state.requestOpenSourceMenu()
+            return true
+        }
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit

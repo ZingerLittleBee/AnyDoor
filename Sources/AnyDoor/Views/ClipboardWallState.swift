@@ -135,6 +135,11 @@ final class ClipboardWallState {
         sourceFilterBundleID = nil
     }
 
+    /// Bumped to ask the wall to open the source-filter menu from the keyboard
+    /// shortcut (⌘K). `ClipboardWallView` watches this and pops the native menu.
+    private(set) var sourceMenuOpenToken = 0
+    func requestOpenSourceMenu() { sourceMenuOpenToken += 1 }
+
     /// Cycle the active category tab (Tab / Shift-Tab), wrapping at both ends.
     func selectNextCategory() { stepCategory(by: 1) }
     func selectPreviousCategory() { stepCategory(by: -1) }

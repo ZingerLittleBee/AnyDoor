@@ -119,6 +119,11 @@ struct ClipboardWallView: View {
                 state.clearSourceFilter()
             }
         }
+        // The ⌘K shortcut (handled by the window controller) bumps this token;
+        // open the native source menu in response, when there is anything to filter.
+        .onChange(of: state.sourceMenuOpenToken) { _, _ in
+            if !sourceOptions.isEmpty { sourceMenuRequested = true }
+        }
         .overlay { if state.tagDialog != nil { tagDialogOverlay } }
     }
 
@@ -632,6 +637,7 @@ struct ClipboardWallView: View {
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
             hint("⇥", .clipboardHintCategory)
+            hint("⌘K", .clipboardHintFilterSource)
             hint("⌘", .clipboardHintEditCategories)
             hint("↵", .clipboardHintCopy)
             hint("⌥↵", .clipboardHintPastePlain)
