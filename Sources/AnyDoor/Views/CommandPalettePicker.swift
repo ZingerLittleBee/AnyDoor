@@ -555,7 +555,7 @@ struct CommandPalettePicker: View {
         .adaptivePanelSurface(cornerRadius: 16)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay {
@@ -585,7 +585,7 @@ struct CommandPalettePicker: View {
     /// Return → confirm and Esc → cancel while this is shown.
     private func confirmCard(_ confirmation: CommandPaletteConfirmation) -> some View {
         ZStack {
-            Color.black.opacity(0.35)
+            Color.black.opacity(0.25)
                 .ignoresSafeArea()
                 .onTapGesture { state.cancelConfirmation() }
 
@@ -621,7 +621,7 @@ struct CommandPalettePicker: View {
             .adaptivePanelSurface(cornerRadius: 14)
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                    .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
             )
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .shadow(radius: 24, y: 8)
