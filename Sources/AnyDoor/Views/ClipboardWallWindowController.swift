@@ -275,16 +275,19 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// trackpad swipe flip through the cards. Negative delta advances right.
     private func handleScroll(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        // Only convert scrolls over the wall itself into card navigation. A
+        // scroll targeting any other window — the floating text panel, or an
+        // open NSMenu such as the source filter — must reach that window rather
+        // than being swallowed here (otherwise the menu can't scroll and the
+        // cards advance under it). This subsumes the old floating-text-panel
+        // check, since that panel is a different window.
+        guard event.window === window else { return false }
         // The selection must not change behind the tag dialog's modal dimmer.
         if state.tagDialog != nil { return true }
-        // Scrolling over the floating text panel belongs to its text view,
-        // not to card navigation.
-        if ClipboardTextWindow.shared.owns(event.window) { return false }
         // The top strip (tab row + search field) hosts its own horizontal
         // ScrollView; let scrolls over that area reach it instead of becoming
         // card navigation.
-        if event.window === window,
-           event.locationInWindow.y > window.contentLayoutRect.maxY - Self.topStripHeight {
+        if event.locationInWindow.y > window.contentLayoutRect.maxY - Self.topStripHeight {
             return false
         }
         // Ignore trackpad inertia so flicking doesn't keep advancing after the
