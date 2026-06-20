@@ -84,7 +84,7 @@ private struct ScrollCaptureSessionView: View {
                     .id("bottom")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.black.opacity(0.15))
+                .background(Color(nsColor: .controlBackgroundColor))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .onChange(of: model.heightPx) { _, _ in
                     withAnimation(.linear(duration: 0.1)) { proxy.scrollTo("bottom", anchor: .bottom) }
