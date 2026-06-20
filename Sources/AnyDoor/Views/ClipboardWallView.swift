@@ -64,6 +64,17 @@ struct ClipboardWallView: View {
                                query: state.query)
     }
 
+    /// An order-sensitive signature of the displayed items, used as the
+    /// `onChange` trigger for mirroring the list into state. Hashing avoids
+    /// allocating a fresh `[UUID]` on every body evaluation (which `items.map`
+    /// would); `count` is folded in so the value also moves on size changes.
+    private func itemsSignature(_ items: [ClipboardHistoryItem]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(items.count)
+        for item in items { hasher.combine(item.id) }
+        return hasher.finalize()
+    }
+
     private struct SourceOption: Identifiable, Equatable {
         let bundleID: String
         let name: String
@@ -109,7 +120,7 @@ struct ClipboardWallView: View {
         // Mirror the displayed list into state for the controller's keyboard
         // handling. Runs after the view updates, so it never mutates during body.
         .onAppear { state.setItems(items) }
-        .onChange(of: items.map(\.id)) { _, _ in state.setItems(items) }
+        .onChange(of: itemsSignature(items)) { _, _ in state.setItems(items) }
         .onAppear {
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: ClipboardTagStore.shared.tags)))
