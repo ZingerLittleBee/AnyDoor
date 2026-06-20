@@ -37,7 +37,7 @@ struct ClipboardWallView: View {
     @State private var lastTap: TapRecord?
     @FocusState private var tagFieldFocused: Bool
 
-    /// ⌘-drag tab reordering. `tabFrames` tracks each capsule's frame in the
+    /// ⌥-drag tab reordering. `tabFrames` tracks each capsule's frame in the
     /// row's named coordinate space; `dragStartFrames` snapshots them when a
     /// drag begins, and all drag math uses the snapshot — live frames would
     /// include the offsets the drag itself applies (a feedback loop). The
@@ -50,6 +50,10 @@ struct ClipboardWallView: View {
     @State private var dragTranslation: CGFloat = 0
     @State private var dropIndex: Int?
 
+    /// Flips true when the source-filter button is clicked, asking the AppKit
+    /// anchor (see `SourceFilterMenuAnchor`) to pop the native menu.
+    @State private var sourceMenuRequested = false
+
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
         ClipboardSearch.filter(allItems,
@@ -58,6 +62,17 @@ struct ClipboardWallView: View {
                                tagID: state.category.tagFilter,
                                sourceBundleID: state.sourceFilterBundleID,
                                query: state.query)
+    }
+
+    /// An order-sensitive signature of the displayed items, used as the
+    /// `onChange` trigger for mirroring the list into state. Hashing avoids
+    /// allocating a fresh `[UUID]` on every body evaluation (which `items.map`
+    /// would); `count` is folded in so the value also moves on size changes.
+    private func itemsSignature(_ items: [ClipboardHistoryItem]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(items.count)
+        for item in items { hasher.combine(item.id) }
+        return hasher.finalize()
     }
 
     private struct SourceOption: Identifiable, Equatable {
@@ -84,8 +99,12 @@ struct ClipboardWallView: View {
 
     var body: some View {
         let items = filtered
+        // Compute the source grouping once per body eval and thread it through;
+        // it is O(n) over allItems, and the menu, trigger title, and the two
+        // onChange dependencies below would otherwise each recompute it.
+        let sources = sourceOptions
         return VStack(spacing: 10) {
-            tabs
+            tabs(sources)
             if items.isEmpty {
                 Spacer()
                 LocalizedText(.clipboardEmpty).foregroundStyle(.secondary)
@@ -101,7 +120,7 @@ struct ClipboardWallView: View {
         // Mirror the displayed list into state for the controller's keyboard
         // handling. Runs after the view updates, so it never mutates during body.
         .onAppear { state.setItems(items) }
-        .onChange(of: items.map(\.id)) { _, _ in state.setItems(items) }
+        .onChange(of: itemsSignature(items)) { _, _ in state.setItems(items) }
         .onAppear {
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: ClipboardTagStore.shared.tags)))
@@ -110,15 +129,20 @@ struct ClipboardWallView: View {
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: newTags)))
         }
-        .onChange(of: sourceOptions.map(\.bundleID)) { _, ids in
+        .onChange(of: sources.map(\.bundleID)) { _, ids in
             if let selected = state.sourceFilterBundleID, !ids.contains(selected) {
                 state.clearSourceFilter()
             }
         }
+        // The ⌘K shortcut (handled by the window controller) bumps this token;
+        // open the native source menu in response, when there is anything to filter.
+        .onChange(of: state.sourceMenuOpenToken) { _, _ in
+            if !sources.isEmpty { sourceMenuRequested = true }
+        }
         .overlay { if state.tagDialog != nil { tagDialogOverlay } }
     }
 
-    private var tabs: some View {
+    private func tabs(_ sources: [SourceOption]) -> some View {
         HStack(spacing: 8) {
             // Horizontal scroll so many custom tags can't push the search
             // field out of the window.
@@ -132,7 +156,7 @@ struct ClipboardWallView: View {
                     }
                     .coordinateSpace(name: Self.tabRowSpace)
                 }
-                // The lifted (scaled, shadowed) dragged capsule and the ⌘-mode
+                // The lifted (scaled, shadowed) dragged capsule and the ⌥-mode
                 // delete badges poke past the row's tight bounds; don't clip them.
                 .scrollClipDisabled()
                 .onChange(of: state.category) { _, new in
@@ -143,7 +167,7 @@ struct ClipboardWallView: View {
                 }
             }
             Spacer()
-            sourceFilterMenu
+            sourceFilterMenu(sources)
             // A real, focusable field so an IME can compose CJK search text. The
             // controller toggles focus between this field (input mode) and card
             // navigation; see ClipboardWallWindowController.handle(_:).
@@ -158,35 +182,194 @@ struct ClipboardWallView: View {
         }
     }
 
-    private var sourceFilterMenu: some View {
-        Menu {
-            Button {
-                state.clearSourceFilter()
-            } label: {
-                Label(L(.clipboardSourceAll), systemImage: state.sourceFilterBundleID == nil ? "checkmark" : "app")
-            }
-            if !sourceOptions.isEmpty { Divider() }
-            ForEach(sourceOptions) { option in
-                Button {
-                    state.sourceFilterBundleID = option.bundleID
-                } label: {
-                    Label("\(option.name) (\(option.count))",
-                          systemImage: state.sourceFilterBundleID == option.bundleID ? "checkmark" : "app")
-                }
-            }
+    private func sourceFilterMenu(_ sources: [SourceOption]) -> some View {
+        // A plain Button trigger styled like the old borderless menu label; the
+        // dropdown itself is a native NSMenu popped by the background anchor.
+        // Rationale: SwiftUI's `Menu` doesn't reliably render custom
+        // `Image(nsImage:)` items on macOS, and `.popover` misbehaves inside
+        // this borderless, non-activating floating panel. NSMenu renders the
+        // real app icon (`NSMenuItem.image`), the native selection checkmark
+        // (`NSMenuItem.state`), and auto-scrolls when taller than the screen.
+        Button {
+            sourceMenuRequested = true
         } label: {
-            Label(sourceFilterTitle, systemImage: "app.connected.to.app.below.fill")
-                .lineLimit(1)
+            HStack(spacing: 3) {
+                Label {
+                    Text(sourceFilterTitle(sources)).lineLimit(1)
+                } icon: {
+                    SourceFilterLeadingIcon(bundleID: state.sourceFilterBundleID)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.borderless)
+        .tint(.primary)
         .frame(maxWidth: 150)
-        .disabled(sourceOptions.isEmpty)
+        .disabled(sources.isEmpty)
         .help(L(.clipboardSourceFilterHelp))
+        .background(
+            SourceFilterMenuAnchor(
+                requested: $sourceMenuRequested,
+                allTitle: L(.clipboardSourceAll),
+                options: sources,
+                selectedBundleID: state.sourceFilterBundleID,
+                onSelect: { bundleID in
+                    if let bundleID {
+                        state.sourceFilterBundleID = bundleID
+                    } else {
+                        state.clearSourceFilter()
+                    }
+                }
+            )
+        )
     }
 
-    private var sourceFilterTitle: String {
+    /// Leading icon for the source-filter trigger: the selected source's real
+    /// app icon, or the generic "all sources" symbol when no source is filtered
+    /// (or while the icon resolves / when the bundle ID maps to no installed
+    /// app). Reads the warm `AppIconCache` synchronously first to avoid a flash.
+    private struct SourceFilterLeadingIcon: View {
+        let bundleID: String?
+        @State private var icon: NSImage?
+
+        var body: some View {
+            Group {
+                if let bundleID, let image = icon ?? AppIconCache.cachedForBundle(bundleID) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 15, height: 15)
+                } else {
+                    Image(systemName: "app.connected.to.app.below.fill")
+                }
+            }
+            .task(id: bundleID) {
+                guard let bundleID else { icon = nil; return }
+                if let warm = AppIconCache.cachedForBundle(bundleID) {
+                    icon = warm
+                } else {
+                    icon = await AppIconCache.icon(forBundleID: bundleID)
+                }
+            }
+        }
+    }
+
+    /// Bridges a native `NSMenu` for the source filter into SwiftUI. The
+    /// background `NSView` is only an anchor: when `requested` flips true it
+    /// builds the menu (app icon per source via `NSMenuItem.image`, the active
+    /// source marked with the native `.state` checkmark) and pops it just below
+    /// the trigger button. NSMenu runs its own tracking loop, so it works
+    /// reliably inside the wall's borderless, non-activating floating panel and
+    /// auto-scrolls when there are more sources than fit on screen.
+    private struct SourceFilterMenuAnchor: NSViewRepresentable {
+        @Binding var requested: Bool
+        let allTitle: String
+        let options: [SourceOption]
+        let selectedBundleID: String?
+        let onSelect: (String?) -> Void
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeNSView(context: Context) -> NSView {
+            let view = FlippedAnchorView()
+            context.coordinator.anchor = view
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {
+            let coordinator = context.coordinator
+            coordinator.allTitle = allTitle
+            coordinator.options = options
+            coordinator.selectedBundleID = selectedBundleID
+            coordinator.onSelect = onSelect
+            guard requested else { return }
+            // Defer past the current view update before mutating state or
+            // entering the menu's modal tracking loop.
+            Task { @MainActor in
+                requested = false
+                coordinator.popUp()
+            }
+        }
+
+        @MainActor
+        final class Coordinator: NSObject {
+            weak var anchor: NSView?
+            var allTitle = ""
+            var options: [SourceOption] = []
+            var selectedBundleID: String?
+            var onSelect: (String?) -> Void = { _ in }
+
+            func popUp() {
+                guard let anchor else { return }
+                let menu = NSMenu()
+                menu.autoenablesItems = false
+
+                let all = NSMenuItem(title: allTitle, action: #selector(pickAll), keyEquivalent: "")
+                all.target = self
+                all.state = selectedBundleID == nil ? .on : .off
+                menu.addItem(all)
+
+                if !options.isEmpty { menu.addItem(.separator()) }
+                for option in options {
+                    let item = NSMenuItem(title: "\(option.name) (\(option.count))",
+                                          action: #selector(pick(_:)),
+                                          keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = option.bundleID
+                    item.state = selectedBundleID == option.bundleID ? .on : .off
+                    item.image = Self.icon(forBundleID: option.bundleID)
+                    menu.addItem(item)
+                }
+
+                // The trigger sits at the bottom of the wall, so open the menu
+                // upward — its bottom edge just above the button — matching the
+                // old SwiftUI menu. `menu.size` is resolved once items are added;
+                // in the flipped anchor's coordinates a negative y is above the
+                // button's top edge.
+                let menuHeight = menu.size.height
+                menu.popUp(positioning: nil,
+                           at: NSPoint(x: 0, y: -menuHeight - 4),
+                           in: anchor)
+            }
+
+            /// A 16×16 app icon for the menu row. Prefers an icon already warmed
+            /// by the cards (`AppIconCache`); on a miss it resolves synchronously
+            /// — acceptable here since it only runs on click, not in a scrolling
+            /// list. Falls back to a generic `app` symbol when the bundle ID maps
+            /// to no installed app. Copies before resizing so the shared cached
+            /// image (used at full size by the cards) is never mutated.
+            private static func icon(forBundleID bundleID: String) -> NSImage {
+                let resolved: NSImage
+                if let warm = AppIconCache.cachedForBundle(bundleID) {
+                    resolved = warm
+                } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                    resolved = NSWorkspace.shared.icon(forFile: url.path)
+                } else {
+                    resolved = NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
+                }
+                let sized = (resolved.copy() as? NSImage) ?? resolved
+                sized.size = NSSize(width: 16, height: 16)
+                return sized
+            }
+
+            @objc private func pickAll() { onSelect(nil) }
+            @objc private func pick(_ sender: NSMenuItem) {
+                onSelect(sender.representedObject as? String)
+            }
+        }
+    }
+
+    /// Flipped so the menu's drop point (`bounds.height`) is the button's bottom
+    /// edge, giving a clean downward drop regardless of the host view geometry.
+    private final class FlippedAnchorView: NSView {
+        override var isFlipped: Bool { true }
+    }
+
+    private func sourceFilterTitle(_ sources: [SourceOption]) -> String {
         guard let selected = state.sourceFilterBundleID else { return L(.clipboardSourceAll) }
-        return sourceOptions.first { $0.bundleID == selected }?.name ?? selected
+        return sources.first { $0.bundleID == selected }?.name ?? selected
     }
 
     @ViewBuilder
@@ -213,7 +396,7 @@ struct ClipboardWallView: View {
                     in: Capsule())
         .foregroundStyle(active ? Color.white : Color.primary)
         // Edit-mode cue alongside the jiggle: a dashed outline on every
-        // capsule while ⌘ is held, like a "cut here" marquee.
+        // capsule while ⌥ is held, like a "cut here" marquee.
         .overlay {
             if reorderArmed {
                 Capsule().strokeBorder(
@@ -236,14 +419,14 @@ struct ClipboardWallView: View {
             Color.clear.preference(key: TabFramePreferenceKey.self,
                                    value: [cat: proxy.frame(in: .named(Self.tabRowSpace))])
         })
-        // Jiggle while ⌘ is held — the macOS "icons are movable now" signal.
+        // Jiggle while ⌥ is held — the macOS "icons are movable now" signal.
         // Alternating sign keeps neighbors out of phase; the capsule being
         // dragged stays level under the pointer.
         .modifier(JiggleEffect(active: jiggling, amplitude: jiggleAmplitude(for: cat)))
         // After the rotation on purpose: the badge sits still (anchored to
         // the layout bounds) while the capsule wiggles underneath it.
         .overlay(alignment: .topTrailing) {
-            // Launchpad-style delete badge on custom tags while ⌘-mode is
+            // Launchpad-style delete badge on custom tags while ⌥-mode is
             // active. Routes into the existing confirm dialog, whose copy
             // tells the user the category's items are kept.
             if jiggling, let id = cat.tagFilter {
@@ -266,14 +449,14 @@ struct ClipboardWallView: View {
         .opacity(draggedTab == cat ? 0.85 : 1)
         .shadow(color: .black.opacity(draggedTab == cat ? 0.25 : 0), radius: 4, y: 1)
         .zIndex(draggedTab == cat ? 1 : 0)
-        // Always attached; only a ⌘-initiated drag arms reordering (checked
+        // Always attached; only a ⌥-initiated drag arms reordering (checked
         // in onChanged). High priority so it beats the tap once the pointer
         // actually moves; a plain click stays a tab switch. Mouse drags never
         // scroll an NSScrollView on macOS, so the row's scrolling is fine.
         .highPriorityGesture(reorderGesture(for: cat))
     }
 
-    /// Whether ⌘-reorder mode is active (modifier held, no modal dialog up).
+    /// Whether ⌥-reorder mode is active (modifier held, no modal dialog up).
     private var reorderArmed: Bool {
         state.isReorderModifierHeld && state.tagDialog == nil
     }
@@ -334,9 +517,9 @@ struct ClipboardWallView: View {
         DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.tabRowSpace))
             .onChanged { value in
                 if draggedTab == nil {
-                    // Only a ⌘-initiated drag arms reordering; a plain drag
+                    // Only a ⌥-initiated drag arms reordering; a plain drag
                     // on the row is inert. Once armed it stays armed for the
-                    // whole drag, even if ⌘ lifts mid-way.
+                    // whole drag, even if ⌥ lifts mid-way.
                     guard reorderArmed else { return }
                     draggedTab = cat
                     dragStartFrames = tabFrames
@@ -421,6 +604,29 @@ struct ClipboardWallView: View {
         return menu
     }
 
+    /// Memoizes `matchSnippet` for the current query so a wall re-render (e.g. a
+    /// selection change re-evaluates every visible card's body) or a re-realized
+    /// card while scrolling doesn't re-fold the item's text. Scoped to one query:
+    /// switching queries clears it, so a stale snippet can only briefly survive an
+    /// in-place item edit under the same query (display-only). `[UUID: String?]`
+    /// distinguishes a cached nil result from an absent entry.
+    @MainActor
+    private enum MatchSnippetCache {
+        private static var query = ""
+        private static var cache: [UUID: String?] = [:]
+
+        static func snippet(for item: ClipboardHistoryItem, query: String) -> String? {
+            if query != self.query {
+                self.query = query
+                cache.removeAll(keepingCapacity: true)
+            }
+            if let cached = cache[item.id] { return cached }
+            let computed = ClipboardSearch.matchSnippet(for: item, query: query)
+            cache[item.id] = computed
+            return computed
+        }
+    }
+
     private func cards(_ items: [ClipboardHistoryItem]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
@@ -432,7 +638,7 @@ struct ClipboardWallView: View {
                             item: item,
                             isSelected: index == state.selectedIndex,
                             historyDirectory: historyDirectory,
-                            matchSnippet: ClipboardSearch.matchSnippet(for: item, query: state.query),
+                            matchSnippet: MatchSnippetCache.snippet(for: item, query: state.query),
                             onToggleFavorite: { onToggleFavorite(item) },
                             // Select the card the user right-clicked so the
                             // action visibly applies to it.
@@ -460,7 +666,16 @@ struct ClipboardWallView: View {
             }
             .onChange(of: state.selectedIndex) { _, new in
                 guard items.indices.contains(new) else { return }
-                withAnimation { proxy.scrollTo(items[new].id, anchor: .center) }
+                // Jump-to-ends scrolls instantly: animating across the whole
+                // list would run a multi-frame scroll animation (CADisplayLink +
+                // GPU compositing, and a layout pass as the offset sweeps past
+                // cards). A direct jump gives instant feedback and skips that;
+                // single steps still animate for visual continuity.
+                if state.prefersInstantScroll {
+                    proxy.scrollTo(items[new].id, anchor: .center)
+                } else {
+                    withAnimation { proxy.scrollTo(items[new].id, anchor: .center) }
+                }
             }
         }
     }
@@ -468,8 +683,10 @@ struct ClipboardWallView: View {
     private var hints: some View {
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
+            hint("⌘←→", .clipboardHintJumpEnds)
             hint("⇥", .clipboardHintCategory)
-            hint("⌘", .clipboardHintEditCategories)
+            hint("⌘K", .clipboardHintFilterSource)
+            hint("⌥", .clipboardHintEditCategories)
             hint("↵", .clipboardHintCopy)
             hint("⌥↵", .clipboardHintPastePlain)
             hint("space", .clipboardHintPreview)

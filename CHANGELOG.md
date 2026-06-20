@@ -6,6 +6,44 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard wall: ⌘K opens the source-app filter from the keyboard (in both the
+  search-input and card-navigation modes), so the dropdown no longer has to be
+  clicked. A "⌘K 筛选来源" hint is added to the wall footer.
+- Clipboard wall: ⌘← / ⌘→ jump the card selection to the first / last entry
+  (card-navigation mode only — in the search field they still move the text
+  caret). The jump scrolls to the target instantly instead of animating, so a
+  long history doesn't run a multi-frame scroll animation sweeping across the
+  cards. A "⌘←→ 首/尾" hint is added to the footer.
+
+### Changed
+
+- Clipboard wall: the source-app filter now shows real application icons. The
+  dropdown was switched from a SwiftUI `Menu` (which doesn't reliably render
+  custom `Image(nsImage:)` items on macOS) to a native `NSMenu` popped from a
+  view anchor: each source row shows that app's icon via `NSMenuItem.image`, the
+  active source keeps the native checkmark, the menu opens upward from the
+  trigger at the bottom of the wall, and it auto-scrolls when there are more
+  sources than fit. The trigger button itself now shows the selected source's
+  icon instead of a generic glyph.
+- Clipboard wall: the Launchpad-style tab edit / reorder mode is now armed by
+  holding ⌥ instead of ⌘ (the footer hint shows ⌥).
+- Clipboard wall performance with large histories. The source-app grouping is
+  now computed once per render instead of 4–5 times (it feeds the menu, the
+  trigger title, the disable check, and two `onChange` dependencies); the
+  list-sync `onChange` trigger hashes the displayed items instead of allocating a
+  fresh `[UUID]` on every body evaluation; and match snippets are memoized per
+  item for the active query, so a wall re-render or a card re-realized while
+  scrolling no longer re-folds the item's text on the main thread.
+
+### Fixed
+
+- Clipboard wall: scrolling over the open source-filter menu moved the cards
+  underneath it instead of scrolling the menu. Card-navigation scroll now only
+  acts on scroll events targeting the wall window itself, letting scrolls over
+  the menu (and the floating text panel) reach their own window.
+
 ## [3.1.1] - 2026-06-20
 
 ### Fixed

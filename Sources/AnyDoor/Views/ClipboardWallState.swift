@@ -127,13 +127,30 @@ final class ClipboardWallState {
         return items[selectedIndex]
     }
 
-    func moveLeft() { selectedIndex = max(0, selectedIndex - 1) }
-    func moveRight() { selectedIndex = min(max(0, items.count - 1), selectedIndex + 1) }
-    func select(_ index: Int) { if items.indices.contains(index) { selectedIndex = index } }
+    /// When true the next selection change scrolls instantly instead of
+    /// animating — set by the jump-to-ends commands (⌘← / ⌘→) so a long jump
+    /// gives instant feedback rather than a multi-frame scroll animation across
+    /// the whole list. The single-step moves reset it.
+    private(set) var prefersInstantScroll = false
+
+    func moveLeft() { prefersInstantScroll = false; selectedIndex = max(0, selectedIndex - 1) }
+    func moveRight() { prefersInstantScroll = false; selectedIndex = min(max(0, items.count - 1), selectedIndex + 1) }
+    func select(_ index: Int) {
+        if items.indices.contains(index) { prefersInstantScroll = false; selectedIndex = index }
+    }
+
+    /// Jump the selection to the first / last card (⌘← / ⌘→); scrolls instantly.
+    func moveToStart() { prefersInstantScroll = true; selectedIndex = 0 }
+    func moveToEnd() { prefersInstantScroll = true; selectedIndex = max(0, items.count - 1) }
 
     func clearSourceFilter() {
         sourceFilterBundleID = nil
     }
+
+    /// Bumped to ask the wall to open the source-filter menu from the keyboard
+    /// shortcut (⌘K). `ClipboardWallView` watches this and pops the native menu.
+    private(set) var sourceMenuOpenToken = 0
+    func requestOpenSourceMenu() { sourceMenuOpenToken += 1 }
 
     /// Cycle the active category tab (Tab / Shift-Tab), wrapping at both ends.
     func selectNextCategory() { stepCategory(by: 1) }

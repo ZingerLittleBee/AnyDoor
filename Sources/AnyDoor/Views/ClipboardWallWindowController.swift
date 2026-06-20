@@ -99,9 +99,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Never resurface a stale tag dialog (it may pin a deleted item).
         state.tagDialog = nil
         state.tagDialogText = ""
-        // Seed from the live flags: the wall hotkey itself carries ⌘, and the
-        // monitor only reports subsequent changes.
-        state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.command)
+        // Seed from the live flags: ⌥ may already be held when the wall opens,
+        // and the monitor only reports subsequent changes.
+        state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.option)
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
@@ -237,10 +237,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             let consumed = MainThreadIsolation.run { self?.handleScroll(event) ?? false }
             return consumed ? nil : event
         }
-        // Track ⌘ so the view can enable tab drag-to-reorder reactively.
+        // Track ⌥ so the view can enable tab drag-to-reorder reactively.
         flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             MainThreadIsolation.run {
-                self?.state.isReorderModifierHeld = event.modifierFlags.contains(.command)
+                self?.state.isReorderModifierHeld = event.modifierFlags.contains(.option)
             }
             return event
         }
@@ -275,16 +275,19 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// trackpad swipe flip through the cards. Negative delta advances right.
     private func handleScroll(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        // Only convert scrolls over the wall itself into card navigation. A
+        // scroll targeting any other window — the floating text panel, or an
+        // open NSMenu such as the source filter — must reach that window rather
+        // than being swallowed here (otherwise the menu can't scroll and the
+        // cards advance under it). This subsumes the old floating-text-panel
+        // check, since that panel is a different window.
+        guard event.window === window else { return false }
         // The selection must not change behind the tag dialog's modal dimmer.
         if state.tagDialog != nil { return true }
-        // Scrolling over the floating text panel belongs to its text view,
-        // not to card navigation.
-        if ClipboardTextWindow.shared.owns(event.window) { return false }
         // The top strip (tab row + search field) hosts its own horizontal
         // ScrollView; let scrolls over that area reach it instead of becoming
         // card navigation.
-        if event.window === window,
-           event.locationInWindow.y > window.contentLayoutRect.maxY - Self.topStripHeight {
+        if event.locationInWindow.y > window.contentLayoutRect.maxY - Self.topStripHeight {
             return false
         }
         // Ignore trackpad inertia so flicking doesn't keep advancing after the
@@ -327,6 +330,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             }
         }
         if let consumed = routeToTextWindow(event) { return consumed }
+        // ⌘K opens the source-filter menu, in both input and card-navigation
+        // modes (intercepted before the input-mode passthrough below).
+        if event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "k" {
+            state.requestOpenSourceMenu()
+            return true
+        }
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit
@@ -346,12 +356,16 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 paste(item, plain: event.modifierFlags.contains(.option))
             }
             return true
-        case 123:                                        // ←
+        case 123:                                        // ← / ⌘← (jump to first)
             if inputMode { return false }                // move the text caret
-            state.moveLeft(); syncTextPreview(); return true
-        case 124:                                        // →
+            if event.modifierFlags.contains(.command) { state.moveToStart() }
+            else { state.moveLeft() }
+            syncTextPreview(); return true
+        case 124:                                        // → / ⌘→ (jump to last)
             if inputMode { return false }                // field delegate may exit
-            state.moveRight(); syncTextPreview(); return true
+            if event.modifierFlags.contains(.command) { state.moveToEnd() }
+            else { state.moveRight() }
+            syncTextPreview(); return true
         case 49:                                         // space
             if inputMode { return false }                // insert a space
             togglePreview(); return true

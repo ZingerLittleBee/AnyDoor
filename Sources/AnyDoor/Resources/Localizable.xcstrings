@@ -3588,6 +3588,40 @@
         }
       }
     },
+    "clipboard.hint.filterSource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Filter source"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "筛选来源"
+          }
+        }
+      }
+    },
+    "clipboard.hint.jumpEnds": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First/last"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "首/尾"
+          }
+        }
+      }
+    },
     "clipboard.hint.pastePlain": {
       "extractionState": "manual",
       "localizations": {
