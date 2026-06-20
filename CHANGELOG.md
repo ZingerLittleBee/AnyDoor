@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-06-21
+
 ### Added
 
 - Clipboard wall: ⌘K opens the source-app filter from the keyboard (in both the

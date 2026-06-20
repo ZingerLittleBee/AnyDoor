@@ -3,56 +3,61 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.2.0</title>
+            <pubDate>Sun, 21 Jun 2026 03:06:35 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.2.0</sparkle:version>
+            <sparkle:shortVersionString>3.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Clipboard wall: ⌘K opens the source-app filter from the keyboard (in both the
+  search-input and card-navigation modes), so the dropdown no longer has to be
+  clicked. A "⌘K 筛选来源" hint is added to the wall footer.
+- Clipboard wall: ⌘← / ⌘→ jump the card selection to the first / last entry
+  (card-navigation mode only — in the search field they still move the text
+  caret). The jump scrolls to the target instantly instead of animating, so a
+  long history doesn't run a multi-frame scroll animation sweeping across the
+  cards. A "⌘←→ 首/尾" hint is added to the footer.
+
+### Changed
+
+- Clipboard wall: the source-app filter now shows real application icons. The
+  dropdown was switched from a SwiftUI `Menu` (which doesn't reliably render
+  custom `Image(nsImage:)` items on macOS) to a native `NSMenu` popped from a
+  view anchor: each source row shows that app's icon via `NSMenuItem.image`, the
+  active source keeps the native checkmark, the menu opens upward from the
+  trigger at the bottom of the wall, and it auto-scrolls when there are more
+  sources than fit. The trigger button itself now shows the selected source's
+  icon instead of a generic glyph.
+- Clipboard wall: the Launchpad-style tab edit / reorder mode is now armed by
+  holding ⌥ instead of ⌘ (the footer hint shows ⌥).
+- Clipboard wall performance with large histories. The source-app grouping is
+  now computed once per render instead of 4–5 times (it feeds the menu, the
+  trigger title, the disable check, and two `onChange` dependencies); the
+  list-sync `onChange` trigger hashes the displayed items instead of allocating a
+  fresh `[UUID]` on every body evaluation; and match snippets are memoized per
+  item for the active query, so a wall re-render or a card re-realized while
+  scrolling no longer re-folds the item's text on the main thread.
+
+### Fixed
+
+- Clipboard wall: scrolling over the open source-filter menu moved the cards
+  underneath it instead of scrolling the menu. Card-navigation scroll now only
+  acts on scroll events targeting the wall window itself, letting scrolls over
+  the menu (and the floating text panel) reach their own window.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.2.0/AnyDoor-3.2.0.zip" length="9009558" type="application/octet-stream" sparkle:edSignature="m2rxw5/GWxMPawoBCf7eidPHpXXNuvJSJSPYnCZGzJkafsukuyUik5tbwy/e3/cIpa3lFU7UrG0wszI1eQfvDw=="/>
+        </item>
+        <item>
             <title>3.1.1</title>
             <pubDate>Sat, 20 Jun 2026 17:59:20 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>3.1.1</sparkle:version>
             <sparkle:shortVersionString>3.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Fixed
-
-- Light-mode polish across the translucent panels. The menu-bar panel, the hover
-  popovers, and the command palette are built on semantic colors and materials
-  with no light/dark branching, but a few spots were tuned for a dark backdrop and
-  looked off on bright light-mode glass:
-  - **Panel edges vanished.** The command palette, its destructive-action confirm
-    card, and the Spotlight app picker drew their hairline border with a hardcoded
-    `Color.white` opacity, which went white-on-white over the bright surface. They
-    now use the semantic `separatorColor` hairline (the token already used by the
-    toast and clipboard rows), so the edge stays visible in both appearances.
-  - **Rows and buttons rendered too bright.** Interactive rows that sit inside a
-    panel which already supplies a material — the menu-bar panel rows (on macOS
-    earlier than 26), every App Shortcuts / Window Layout / Hosts / Port Manager
-    popover row, and the Port Manager's Refresh / view-mode buttons — each stacked
-    a second interactive glass/material on top, so they lit up noticeably lighter
-    than the surface around them in light mode. Idle rows now stay transparent
-    (letting the single panel material show through) and only paint a neutral hover
-    tint, matching the port list; the popover rows also gain a hover highlight they
-    previously lacked. macOS 26 keeps its per-row interactive Liquid Glass on the
-    menu-bar panel.
-  - **A bright scrollbar track.** The Port Manager (list and tree views), the
-    clipboard-history popover (list and text preview), and the Bluetooth-battery and
-    Spotlight app-picker lists honored the system "Show scroll bars: Always"
-    preference, which painted a persistent white scroller track against the
-    translucent surface. They now force overlay (floating, auto-hiding) scrollers,
-    matching the command palette.
-  - **Smaller tweaks.** The off-state toggle knob gains a hairline edge and a
-    slightly stronger off-track so it reads on the bright panel; the
-    scrolling-capture preview well uses an appearance-adaptive recess instead of a
-    fixed black wash; the Port Manager warning banner tint is strengthened so it
-    stays distinct over light-mode material; and the command-palette confirmation
-    scrim is softened a touch so it is less heavy over bright glass.
-- The command palette ignored Esc when the search field was empty. Closing the
-  panel dropped the search field's focus, and an unbounded focus-recovery loop
-  immediately reasserted it on the next runloop tick — which made the field first
-  responder again and reordered the just-closed panel back on screen. Esc was the
-  only dismiss path where the app stayed frontmost with no other window to take
-  focus, so it was the one that visibly "wouldn't close". The recovery now skips
-  reasserting focus once the panel is no longer on screen, and is capped after a
-  few rapid strikes (matching the Spotlight app picker).
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.1.1/AnyDoor-3.1.1.zip" length="8970739" type="application/octet-stream" sparkle:edSignature="xmtsN5ngJvykD4G9t1nsJXkDnBIiY1O3ryH27+IsvSJAG2HPpCpm/GxQSmCufNQTt+cKZb3J741ibObsU1C2Cw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.1.1/AnyDoor-3.1.1.zip" length="8970739" type="application/octet-stream" sparkle:edSignature="xmtsN5ngJvykD4G9t1nsJXkDnBIiY1O3ryH27+IsvSJAG2HPpCpm/GxQSmCufNQTt+cKZb3J741ibObsU1C2Cw=="/>
         </item>
         <item>
             <title>3.1.0</title>
@@ -62,15 +67,6 @@
             <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.1.0/AnyDoor-3.1.0.zip" length="8962061" type="application/octet-stream" sparkle:edSignature="YnaDZMbaMXqMWCgNSn+v2rv/IfHVVUwKXWwSwiB8NUw7aNx6payM+BrOy4oZ2JKZNol343eZ//g0kAuGVuDWDA=="/>
-        </item>
-        <item>
-            <title>3.0.0</title>
-            <pubDate>Thu, 18 Jun 2026 14:58:10 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>3.0.0</sparkle:version>
-            <sparkle:shortVersionString>3.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.0.0/AnyDoor-3.0.0.zip" length="8837284" type="application/octet-stream" sparkle:edSignature="Kk8JLufIRwWDxEX9OUspiCo8RPD94aDx6O1vjnIc8w1RhDlAUvm2w2H/WODmqcjI8PkQIGS3MpYIVlZUB3+rCA=="/>
         </item>
         <item>
             <title>1.2.0</title>
