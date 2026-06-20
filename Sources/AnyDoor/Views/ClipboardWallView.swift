@@ -50,6 +50,10 @@ struct ClipboardWallView: View {
     @State private var dragTranslation: CGFloat = 0
     @State private var dropIndex: Int?
 
+    /// Flips true when the source-filter button is clicked, asking the AppKit
+    /// anchor (see `SourceFilterMenuAnchor`) to pop the native menu.
+    @State private var sourceMenuRequested = false
+
     /// The query result narrowed by the active category tab and search text.
     private var filtered: [ClipboardHistoryItem] {
         ClipboardSearch.filter(allItems,
@@ -159,29 +163,188 @@ struct ClipboardWallView: View {
     }
 
     private var sourceFilterMenu: some View {
-        Menu {
-            Button {
-                state.clearSourceFilter()
-            } label: {
-                Label(L(.clipboardSourceAll), systemImage: state.sourceFilterBundleID == nil ? "checkmark" : "app")
-            }
-            if !sourceOptions.isEmpty { Divider() }
-            ForEach(sourceOptions) { option in
-                Button {
-                    state.sourceFilterBundleID = option.bundleID
-                } label: {
-                    Label("\(option.name) (\(option.count))",
-                          systemImage: state.sourceFilterBundleID == option.bundleID ? "checkmark" : "app")
-                }
-            }
+        // A plain Button trigger styled like the old borderless menu label; the
+        // dropdown itself is a native NSMenu popped by the background anchor.
+        // Rationale: SwiftUI's `Menu` doesn't reliably render custom
+        // `Image(nsImage:)` items on macOS, and `.popover` misbehaves inside
+        // this borderless, non-activating floating panel. NSMenu renders the
+        // real app icon (`NSMenuItem.image`), the native selection checkmark
+        // (`NSMenuItem.state`), and auto-scrolls when taller than the screen.
+        Button {
+            sourceMenuRequested = true
         } label: {
-            Label(sourceFilterTitle, systemImage: "app.connected.to.app.below.fill")
-                .lineLimit(1)
+            HStack(spacing: 3) {
+                Label {
+                    Text(sourceFilterTitle).lineLimit(1)
+                } icon: {
+                    SourceFilterLeadingIcon(bundleID: state.sourceFilterBundleID)
+                }
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.borderless)
+        .tint(.primary)
         .frame(maxWidth: 150)
         .disabled(sourceOptions.isEmpty)
         .help(L(.clipboardSourceFilterHelp))
+        .background(
+            SourceFilterMenuAnchor(
+                requested: $sourceMenuRequested,
+                allTitle: L(.clipboardSourceAll),
+                options: sourceOptions,
+                selectedBundleID: state.sourceFilterBundleID,
+                onSelect: { bundleID in
+                    if let bundleID {
+                        state.sourceFilterBundleID = bundleID
+                    } else {
+                        state.clearSourceFilter()
+                    }
+                }
+            )
+        )
+    }
+
+    /// Leading icon for the source-filter trigger: the selected source's real
+    /// app icon, or the generic "all sources" symbol when no source is filtered
+    /// (or while the icon resolves / when the bundle ID maps to no installed
+    /// app). Reads the warm `AppIconCache` synchronously first to avoid a flash.
+    private struct SourceFilterLeadingIcon: View {
+        let bundleID: String?
+        @State private var icon: NSImage?
+
+        var body: some View {
+            Group {
+                if let bundleID, let image = icon ?? AppIconCache.cachedForBundle(bundleID) {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 15, height: 15)
+                } else {
+                    Image(systemName: "app.connected.to.app.below.fill")
+                }
+            }
+            .task(id: bundleID) {
+                guard let bundleID else { icon = nil; return }
+                if let warm = AppIconCache.cachedForBundle(bundleID) {
+                    icon = warm
+                } else {
+                    icon = await AppIconCache.icon(forBundleID: bundleID)
+                }
+            }
+        }
+    }
+
+    /// Bridges a native `NSMenu` for the source filter into SwiftUI. The
+    /// background `NSView` is only an anchor: when `requested` flips true it
+    /// builds the menu (app icon per source via `NSMenuItem.image`, the active
+    /// source marked with the native `.state` checkmark) and pops it just below
+    /// the trigger button. NSMenu runs its own tracking loop, so it works
+    /// reliably inside the wall's borderless, non-activating floating panel and
+    /// auto-scrolls when there are more sources than fit on screen.
+    private struct SourceFilterMenuAnchor: NSViewRepresentable {
+        @Binding var requested: Bool
+        let allTitle: String
+        let options: [SourceOption]
+        let selectedBundleID: String?
+        let onSelect: (String?) -> Void
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeNSView(context: Context) -> NSView {
+            let view = FlippedAnchorView()
+            context.coordinator.anchor = view
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {
+            let coordinator = context.coordinator
+            coordinator.allTitle = allTitle
+            coordinator.options = options
+            coordinator.selectedBundleID = selectedBundleID
+            coordinator.onSelect = onSelect
+            guard requested else { return }
+            // Defer past the current view update before mutating state or
+            // entering the menu's modal tracking loop.
+            Task { @MainActor in
+                requested = false
+                coordinator.popUp()
+            }
+        }
+
+        @MainActor
+        final class Coordinator: NSObject {
+            weak var anchor: NSView?
+            var allTitle = ""
+            var options: [SourceOption] = []
+            var selectedBundleID: String?
+            var onSelect: (String?) -> Void = { _ in }
+
+            func popUp() {
+                guard let anchor else { return }
+                let menu = NSMenu()
+                menu.autoenablesItems = false
+
+                let all = NSMenuItem(title: allTitle, action: #selector(pickAll), keyEquivalent: "")
+                all.target = self
+                all.state = selectedBundleID == nil ? .on : .off
+                menu.addItem(all)
+
+                if !options.isEmpty { menu.addItem(.separator()) }
+                for option in options {
+                    let item = NSMenuItem(title: "\(option.name) (\(option.count))",
+                                          action: #selector(pick(_:)),
+                                          keyEquivalent: "")
+                    item.target = self
+                    item.representedObject = option.bundleID
+                    item.state = selectedBundleID == option.bundleID ? .on : .off
+                    item.image = Self.icon(forBundleID: option.bundleID)
+                    menu.addItem(item)
+                }
+
+                // The trigger sits at the bottom of the wall, so open the menu
+                // upward — its bottom edge just above the button — matching the
+                // old SwiftUI menu. `menu.size` is resolved once items are added;
+                // in the flipped anchor's coordinates a negative y is above the
+                // button's top edge.
+                let menuHeight = menu.size.height
+                menu.popUp(positioning: nil,
+                           at: NSPoint(x: 0, y: -menuHeight - 4),
+                           in: anchor)
+            }
+
+            /// A 16×16 app icon for the menu row. Prefers an icon already warmed
+            /// by the cards (`AppIconCache`); on a miss it resolves synchronously
+            /// — acceptable here since it only runs on click, not in a scrolling
+            /// list. Falls back to a generic `app` symbol when the bundle ID maps
+            /// to no installed app. Copies before resizing so the shared cached
+            /// image (used at full size by the cards) is never mutated.
+            private static func icon(forBundleID bundleID: String) -> NSImage {
+                let resolved: NSImage
+                if let warm = AppIconCache.cachedForBundle(bundleID) {
+                    resolved = warm
+                } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                    resolved = NSWorkspace.shared.icon(forFile: url.path)
+                } else {
+                    resolved = NSImage(systemSymbolName: "app", accessibilityDescription: nil) ?? NSImage()
+                }
+                let sized = (resolved.copy() as? NSImage) ?? resolved
+                sized.size = NSSize(width: 16, height: 16)
+                return sized
+            }
+
+            @objc private func pickAll() { onSelect(nil) }
+            @objc private func pick(_ sender: NSMenuItem) {
+                onSelect(sender.representedObject as? String)
+            }
+        }
+    }
+
+    /// Flipped so the menu's drop point (`bounds.height`) is the button's bottom
+    /// edge, giving a clean downward drop regardless of the host view geometry.
+    private final class FlippedAnchorView: NSView {
+        override var isFlipped: Bool { true }
     }
 
     private var sourceFilterTitle: String {
