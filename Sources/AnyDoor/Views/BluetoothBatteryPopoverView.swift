@@ -72,6 +72,7 @@ struct BluetoothBatteryPopoverView: View {
                     }
                 }
                 .padding(.horizontal, 6).padding(.vertical, 6)
+                .overlayScrollers()
             }
             .frame(maxHeight: 360)
         }

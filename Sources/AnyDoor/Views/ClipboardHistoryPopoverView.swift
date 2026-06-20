@@ -135,6 +135,7 @@ struct ClipboardHistoryPopoverView: View {
                 }
                 .padding(.horizontal, 6)
                 .padding(.vertical, 4)
+                .overlayScrollers()
             }
         }
     }
@@ -181,6 +182,7 @@ struct ClipboardHistoryPopoverView: View {
                     .font(.system(.body, design: .monospaced))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
+                    .overlayScrollers()
             }
         case .color:
             VStack(spacing: 12) {

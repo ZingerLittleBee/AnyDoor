@@ -101,13 +101,13 @@ private struct PortManagerToolbar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            toolbarButton(
+            PortToolbarButton(
                 action: { Task { await inventory.refresh(force: true) } },
                 label: L(.portToolbarRefresh),
                 systemImage: "arrow.clockwise",
                 shortcut: "⌘R"
             )
-            toolbarButton(
+            PortToolbarButton(
                 action: {
                     inventory.viewMode = (inventory.viewMode == .list) ? .tree : .list
                 },
@@ -118,13 +118,16 @@ private struct PortManagerToolbar: View {
         }
         .padding(.horizontal, 6).padding(.vertical, 4)
     }
+}
 
-    private func toolbarButton(
-        action: @escaping () -> Void,
-        label: String,
-        systemImage: String,
-        shortcut: String
-    ) -> some View {
+private struct PortToolbarButton: View {
+    let action: () -> Void
+    let label: String
+    let systemImage: String
+    let shortcut: String
+    @State private var isHovered = false
+
+    var body: some View {
         Button(action: action) {
             HStack {
                 Label(label, systemImage: systemImage)
@@ -133,12 +136,20 @@ private struct PortManagerToolbar: View {
             }
             .padding(.horizontal, 8).padding(.vertical, 6)
             // Make the entire row strip clickable (label + spacer + shortcut),
-            // not just the text/icon. Matches the pattern used in PortListView /
-            // PortTreeView / AppShortcutsPopoverView for consistent affordance.
+            // not just the text/icon. Idle rows stay transparent so the
+            // popover's single .regularMaterial shows through and only hover
+            // paints a neutral tint — matching the PortListView / PortTreeView
+            // rows. (Previously each button carried an always-on interactive
+            // glass surface, which rendered noticeably brighter than the list
+            // above it in light mode.)
             .contentShape(Rectangle())
-            .adaptiveInteractiveSurface(cornerRadius: 8)
+            .background(
+                isHovered ? Color.primary.opacity(0.06) : .clear,
+                in: .rect(cornerRadius: 8)
+            )
         }
         .buttonStyle(.plain)
+        .onHoverSafe { isHovered = $0 }
     }
 }
 
@@ -165,7 +176,7 @@ private struct PortScanErrorBanner: View {
         // `.regularMaterial` parent background. Intentionally no clipShape:
         // the popover already rounds the outer envelope, and rounding this
         // strip would create misaligned corners against the header divider.
-        .background(Color.yellow.opacity(0.15))
+        .background(Color.yellow.opacity(0.22))
     }
 
     private var message: String {

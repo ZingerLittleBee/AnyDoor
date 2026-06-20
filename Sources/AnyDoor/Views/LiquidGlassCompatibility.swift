@@ -22,6 +22,13 @@ struct AdaptiveGlassEffectContainer<Content: View>: View {
 }
 
 extension View {
+    /// Standalone interactive surface that paints its OWN material / glass. Use
+    /// it only for an interactive element sitting directly on the desktop or on a
+    /// non-material backdrop. Do NOT use it for rows inside a panel that already
+    /// has a material background (the menu-bar panel, the hover popovers) —
+    /// stacking a second material per row brightens and flattens the rows in
+    /// light mode. For those, keep idle rows transparent and paint a hover tint
+    /// (`Color.primary.opacity(0.06)`), or use `adaptiveMenuBarRowSurface`.
     @ViewBuilder
     func adaptiveInteractiveSurface(cornerRadius: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -30,6 +37,25 @@ extension View {
             self.glassEffect(.regular.interactive(), in: shape)
         } else {
             self.background(.regularMaterial, in: shape)
+        }
+    }
+
+    /// Interactive surface for rows that already live inside a single material
+    /// panel (the menu-bar panel — see `MenuBarController`, whose container is
+    /// already wrapped in `.regularMaterial`). On macOS 26+ each row gets its
+    /// own interactive Liquid Glass capsule, which composites cleanly over the
+    /// panel glass. On earlier systems the row stays transparent instead of
+    /// stacking a second `.regularMaterial` on top of the panel's material —
+    /// two stacked materials brighten and desaturate in light mode, flattening
+    /// the rows into one bright sheet — so idle rows let the panel material show
+    /// through and rely on the caller's hover tint for separation.
+    @ViewBuilder
+    func adaptiveMenuBarRowSurface(cornerRadius: CGFloat) -> some View {
+        if #available(macOS 26.0, *) {
+            let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            self.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            self
         }
     }
 

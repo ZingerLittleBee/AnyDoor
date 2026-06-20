@@ -57,7 +57,7 @@ struct PanelRowView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.primary.opacity(isHovered ? 0.08 : 0))
         }
-        .adaptiveInteractiveSurface(cornerRadius: 8)
+        .adaptiveMenuBarRowSurface(cornerRadius: 8)
         .contentShape(Rectangle())
         .onHoverSafe { isHovered = $0 }
         .animation(.easeOut(duration: 0.12), value: isHovered)
@@ -168,6 +168,11 @@ private struct PanelSwitchIndicator: View {
                 .fill(trackColor)
             Circle()
                 .fill(.white)
+                // Hairline edge so the white knob stays distinct from a light
+                // off-track in light mode (matches the native NSSwitch knob,
+                // which also keeps a subtle edge rather than relying on shadow
+                // alone). Near-invisible against a dark track in dark mode.
+                .overlay(Circle().strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5))
                 .shadow(color: .black.opacity(0.18), radius: 1, y: 1)
                 .padding(2)
         }
@@ -178,6 +183,8 @@ private struct PanelSwitchIndicator: View {
 
     private var trackColor: Color {
         if isOn { return .accentColor }
-        return .secondary.opacity(0.28)
+        // Slightly stronger than before so the off-track reads against the
+        // white knob on the bright light-mode menu-bar panel.
+        return .secondary.opacity(0.4)
     }
 }

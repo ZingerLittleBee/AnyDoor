@@ -90,7 +90,7 @@ struct SpotlightAppPicker: View {
         .background(.thickMaterial)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .onAppear {
@@ -176,6 +176,7 @@ struct SpotlightAppPicker: View {
                     }
                 }
                 .padding(.vertical, 12)
+                .overlayScrollers()
             }
             .frame(minHeight: 320, maxHeight: .infinity)
             .onChange(of: state.selectedIndex) { _, newIndex in

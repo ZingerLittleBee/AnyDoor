@@ -47,6 +47,7 @@ struct WindowLayoutPopoverView: View {
 private struct WindowLayoutRow: View {
     let entry: PanelEntry
     var onSelect: () -> Void
+    @State private var isHovered = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -62,10 +63,19 @@ private struct WindowLayoutRow: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .adaptiveInteractiveSurface(cornerRadius: 6)
         .contentShape(Rectangle())
+        // Idle rows stay transparent so the popover's single .regularMaterial
+        // shows through; only hover paints a neutral tint — matching the
+        // PortListView / PortTreeView rows. (Previously each row stacked an
+        // interactive glass surface that rendered brighter than the popover
+        // background in light mode.)
+        .background(
+            isHovered ? Color.primary.opacity(0.06) : .clear,
+            in: .rect(cornerRadius: 6)
+        )
         .onTapGesture(perform: onSelect)
         .onHoverSafe { hovering in
+            isHovered = hovering
             if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
     }
