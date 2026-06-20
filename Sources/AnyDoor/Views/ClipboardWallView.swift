@@ -628,7 +628,16 @@ struct ClipboardWallView: View {
             }
             .onChange(of: state.selectedIndex) { _, new in
                 guard items.indices.contains(new) else { return }
-                withAnimation { proxy.scrollTo(items[new].id, anchor: .center) }
+                // Jump-to-ends scrolls instantly: animating across the whole
+                // list would run a multi-frame scroll animation (CADisplayLink +
+                // GPU compositing, and a layout pass as the offset sweeps past
+                // cards). A direct jump gives instant feedback and skips that;
+                // single steps still animate for visual continuity.
+                if state.prefersInstantScroll {
+                    proxy.scrollTo(items[new].id, anchor: .center)
+                } else {
+                    withAnimation { proxy.scrollTo(items[new].id, anchor: .center) }
+                }
             }
         }
     }
@@ -636,6 +645,7 @@ struct ClipboardWallView: View {
     private var hints: some View {
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
+            hint("⌘←→", .clipboardHintJumpEnds)
             hint("⇥", .clipboardHintCategory)
             hint("⌘K", .clipboardHintFilterSource)
             hint("⌥", .clipboardHintEditCategories)

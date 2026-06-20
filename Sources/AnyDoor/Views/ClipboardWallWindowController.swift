@@ -356,12 +356,16 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 paste(item, plain: event.modifierFlags.contains(.option))
             }
             return true
-        case 123:                                        // ←
+        case 123:                                        // ← / ⌘← (jump to first)
             if inputMode { return false }                // move the text caret
-            state.moveLeft(); syncTextPreview(); return true
-        case 124:                                        // →
+            if event.modifierFlags.contains(.command) { state.moveToStart() }
+            else { state.moveLeft() }
+            syncTextPreview(); return true
+        case 124:                                        // → / ⌘→ (jump to last)
             if inputMode { return false }                // field delegate may exit
-            state.moveRight(); syncTextPreview(); return true
+            if event.modifierFlags.contains(.command) { state.moveToEnd() }
+            else { state.moveRight() }
+            syncTextPreview(); return true
         case 49:                                         // space
             if inputMode { return false }                // insert a space
             togglePreview(); return true
