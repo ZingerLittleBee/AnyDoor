@@ -1,0 +1,38 @@
+name: Deploy Landing
+
+# Rebuild and deploy the marketing landing page to Cloudflare Workers
+# whenever a release tag (v*) is pushed. release.sh pushes such a tag at
+# the end of every release, so a new version automatically refreshes the site.
+# Also exposed as a manual trigger for ad-hoc redeploys.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+# Avoid overlapping deploys; let the newest tag win.
+concurrency:
+  group: deploy-landing
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and deploy to Cloudflare
+        run: bun run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
