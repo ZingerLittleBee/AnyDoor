@@ -88,8 +88,12 @@ struct ClipboardWallView: View {
 
     var body: some View {
         let items = filtered
+        // Compute the source grouping once per body eval and thread it through;
+        // it is O(n) over allItems, and the menu, trigger title, and the two
+        // onChange dependencies below would otherwise each recompute it.
+        let sources = sourceOptions
         return VStack(spacing: 10) {
-            tabs
+            tabs(sources)
             if items.isEmpty {
                 Spacer()
                 LocalizedText(.clipboardEmpty).foregroundStyle(.secondary)
@@ -114,7 +118,7 @@ struct ClipboardWallView: View {
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: newTags)))
         }
-        .onChange(of: sourceOptions.map(\.bundleID)) { _, ids in
+        .onChange(of: sources.map(\.bundleID)) { _, ids in
             if let selected = state.sourceFilterBundleID, !ids.contains(selected) {
                 state.clearSourceFilter()
             }
@@ -122,12 +126,12 @@ struct ClipboardWallView: View {
         // The ⌘K shortcut (handled by the window controller) bumps this token;
         // open the native source menu in response, when there is anything to filter.
         .onChange(of: state.sourceMenuOpenToken) { _, _ in
-            if !sourceOptions.isEmpty { sourceMenuRequested = true }
+            if !sources.isEmpty { sourceMenuRequested = true }
         }
         .overlay { if state.tagDialog != nil { tagDialogOverlay } }
     }
 
-    private var tabs: some View {
+    private func tabs(_ sources: [SourceOption]) -> some View {
         HStack(spacing: 8) {
             // Horizontal scroll so many custom tags can't push the search
             // field out of the window.
@@ -152,7 +156,7 @@ struct ClipboardWallView: View {
                 }
             }
             Spacer()
-            sourceFilterMenu
+            sourceFilterMenu(sources)
             // A real, focusable field so an IME can compose CJK search text. The
             // controller toggles focus between this field (input mode) and card
             // navigation; see ClipboardWallWindowController.handle(_:).
@@ -167,7 +171,7 @@ struct ClipboardWallView: View {
         }
     }
 
-    private var sourceFilterMenu: some View {
+    private func sourceFilterMenu(_ sources: [SourceOption]) -> some View {
         // A plain Button trigger styled like the old borderless menu label; the
         // dropdown itself is a native NSMenu popped by the background anchor.
         // Rationale: SwiftUI's `Menu` doesn't reliably render custom
@@ -180,7 +184,7 @@ struct ClipboardWallView: View {
         } label: {
             HStack(spacing: 3) {
                 Label {
-                    Text(sourceFilterTitle).lineLimit(1)
+                    Text(sourceFilterTitle(sources)).lineLimit(1)
                 } icon: {
                     SourceFilterLeadingIcon(bundleID: state.sourceFilterBundleID)
                 }
@@ -192,13 +196,13 @@ struct ClipboardWallView: View {
         .buttonStyle(.borderless)
         .tint(.primary)
         .frame(maxWidth: 150)
-        .disabled(sourceOptions.isEmpty)
+        .disabled(sources.isEmpty)
         .help(L(.clipboardSourceFilterHelp))
         .background(
             SourceFilterMenuAnchor(
                 requested: $sourceMenuRequested,
                 allTitle: L(.clipboardSourceAll),
-                options: sourceOptions,
+                options: sources,
                 selectedBundleID: state.sourceFilterBundleID,
                 onSelect: { bundleID in
                     if let bundleID {
@@ -352,9 +356,9 @@ struct ClipboardWallView: View {
         override var isFlipped: Bool { true }
     }
 
-    private var sourceFilterTitle: String {
+    private func sourceFilterTitle(_ sources: [SourceOption]) -> String {
         guard let selected = state.sourceFilterBundleID else { return L(.clipboardSourceAll) }
-        return sourceOptions.first { $0.bundleID == selected }?.name ?? selected
+        return sources.first { $0.bundleID == selected }?.name ?? selected
     }
 
     @ViewBuilder
