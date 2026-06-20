@@ -6,6 +6,40 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Light-mode polish across the translucent panels. The menu-bar panel, the hover
+  popovers, and the command palette are built on semantic colors and materials
+  with no light/dark branching, but a few spots were tuned for a dark backdrop and
+  looked off on bright light-mode glass:
+  - **Panel edges vanished.** The command palette, its destructive-action confirm
+    card, and the Spotlight app picker drew their hairline border with a hardcoded
+    `Color.white` opacity, which went white-on-white over the bright surface. They
+    now use the semantic `separatorColor` hairline (the token already used by the
+    toast and clipboard rows), so the edge stays visible in both appearances.
+  - **Rows and buttons rendered too bright.** Interactive rows that sit inside a
+    panel which already supplies a material — the menu-bar panel rows (on macOS
+    earlier than 26), every App Shortcuts / Window Layout / Hosts / Port Manager
+    popover row, and the Port Manager's Refresh / view-mode buttons — each stacked
+    a second interactive glass/material on top, so they lit up noticeably lighter
+    than the surface around them in light mode. Idle rows now stay transparent
+    (letting the single panel material show through) and only paint a neutral hover
+    tint, matching the port list; the popover rows also gain a hover highlight they
+    previously lacked. macOS 26 keeps its per-row interactive Liquid Glass on the
+    menu-bar panel.
+  - **A bright scrollbar track.** The Port Manager (list and tree views), the
+    clipboard-history popover (list and text preview), and the Bluetooth-battery and
+    Spotlight app-picker lists honored the system "Show scroll bars: Always"
+    preference, which painted a persistent white scroller track against the
+    translucent surface. They now force overlay (floating, auto-hiding) scrollers,
+    matching the command palette.
+  - **Smaller tweaks.** The off-state toggle knob gains a hairline edge and a
+    slightly stronger off-track so it reads on the bright panel; the
+    scrolling-capture preview well uses an appearance-adaptive recess instead of a
+    fixed black wash; the Port Manager warning banner tint is strengthened so it
+    stays distinct over light-mode material; and the command-palette confirmation
+    scrim is softened a touch so it is less heavy over bright glass.
+
 ## [3.1.0] - 2026-06-19
 
 ### Added
