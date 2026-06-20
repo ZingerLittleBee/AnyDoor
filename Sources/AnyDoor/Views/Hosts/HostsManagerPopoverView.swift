@@ -25,9 +25,9 @@ struct HostsManagerPopoverView: View {
 
             AdaptiveGlassEffectContainer(spacing: 2) {
                 VStack(spacing: 2) {
-                    systemHostsRow
+                    HostsSystemRow()
                     ForEach(manager.profiles) { profile in
-                        profileRow(profile)
+                        HostsProfileRow(profile: profile, manager: manager)
                     }
                 }
             }
@@ -58,9 +58,18 @@ struct HostsManagerPopoverView: View {
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
-    // MARK: - Rows
+}
 
-    private var systemHostsRow: some View {
+// MARK: - Rows
+
+/// Idle rows stay transparent so the popover's single `.regularMaterial` shows
+/// through; only hover paints a neutral tint — matching the PortListView /
+/// PortTreeView rows. (Previously each row stacked an interactive glass surface
+/// that rendered noticeably brighter than the popover background in light mode.)
+private struct HostsSystemRow: View {
+    @State private var isHovered = false
+
+    var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "cpu").foregroundStyle(.secondary)
             Text("系统 Hosts")
@@ -72,10 +81,21 @@ struct HostsManagerPopoverView: View {
             .help("用默认编辑器打开")
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .adaptiveInteractiveSurface(cornerRadius: 6)
+        .contentShape(Rectangle())
+        .background(
+            isHovered ? Color.primary.opacity(0.06) : .clear,
+            in: .rect(cornerRadius: 6)
+        )
+        .onHoverSafe { isHovered = $0 }
     }
+}
 
-    private func profileRow(_ profile: HostProfile) -> some View {
+private struct HostsProfileRow: View {
+    let profile: HostProfile
+    let manager: HostsManager
+    @State private var isHovered = false
+
+    var body: some View {
         HStack(spacing: 8) {
             Image(systemName: profile.isActive ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(profile.isActive ? .green : .secondary)
@@ -84,9 +104,13 @@ struct HostsManagerPopoverView: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .contentShape(Rectangle())
-        .adaptiveInteractiveSurface(cornerRadius: 6)
+        .background(
+            isHovered ? Color.primary.opacity(0.06) : .clear,
+            in: .rect(cornerRadius: 6)
+        )
         .onTapGesture {
             Task { await manager.setActive(profile, !profile.isActive) }
         }
+        .onHoverSafe { isHovered = $0 }
     }
 }
