@@ -83,6 +83,11 @@ enum SelectedTextReader {
         down?.flags = .maskCommand
         let up = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: false)
         up?.flags = .maskCommand
+        // Tag both events so the HotkeyService CGEvent tap passes our own
+        // emissions through instead of swallowing them (e.g. when Cmd-C is a
+        // bound hotkey or while keyboard-lock is active).
+        down?.setIntegerValueField(.eventSourceUserData, value: kAnyDoorSynthesizedEventTag)
+        up?.setIntegerValueField(.eventSourceUserData, value: kAnyDoorSynthesizedEventTag)
         down?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
     }
