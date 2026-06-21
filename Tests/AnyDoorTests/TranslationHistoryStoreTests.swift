@@ -1,0 +1,157 @@
+import SwiftData
+import XCTest
+@testable import AnyDoor
+
+@MainActor
+final class TranslationHistoryStoreTests: XCTestCase {
+    private func makeContainer() throws -> ModelContainer {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try ModelContainer(for: TranslationRecord.self, configurations: config)
+    }
+
+    private func makeStore() throws -> (TranslationHistoryStore, ModelContainer) {
+        let container = try makeContainer()
+        let store = TranslationHistoryStore()
+        store.configure(modelContainer: container)
+        return (store, container)
+    }
+
+    private func insert(
+        _ container: ModelContainer,
+        text: String,
+        favorite: Bool = false,
+        at offset: TimeInterval
+    ) throws {
+        let record = TranslationRecord(
+            sourceText: text,
+            translatedText: "T-\(text)",
+            sourceLangCode: "en",
+            targetLangCode: "zh-Hans",
+            serviceID: "google",
+            serviceName: "Google",
+            isFavorite: favorite,
+            createdAt: Date(timeIntervalSinceReferenceDate: offset)
+        )
+        container.mainContext.insert(record)
+        try container.mainContext.save()
+    }
+
+    func testRecordPersists() throws {
+        let (store, container) = try makeStore()
+        store.record(
+            sourceText: "hello",
+            translatedText: "你好",
+            source: .english,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google"
+        )
+        let rows = try container.mainContext.fetch(FetchDescriptor<TranslationRecord>())
+        let row = try XCTUnwrap(rows.first)
+        XCTAssertEqual(row.sourceText, "hello")
+        XCTAssertEqual(row.translatedText, "你好")
+        XCTAssertEqual(row.sourceLangCode, "en")
+        XCTAssertEqual(row.targetLangCode, "zh-Hans")
+        XCTAssertEqual(row.serviceID, "google")
+    }
+
+    func testRecordWithNilSourceStoresEmptyCode() throws {
+        let (store, container) = try makeStore()
+        store.record(
+            sourceText: "hello",
+            translatedText: "你好",
+            source: nil,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google"
+        )
+        let row = try XCTUnwrap(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).first)
+        XCTAssertEqual(row.sourceLangCode, "")
+    }
+
+    func testRecentNewestFirstAndLimit() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "a", at: 100)
+        try insert(container, text: "b", at: 200)
+        try insert(container, text: "c", at: 300)
+
+        XCTAssertEqual(store.recent(limit: 2).map(\.sourceText), ["c", "b"])
+        XCTAssertEqual(store.recent(limit: 10).map(\.sourceText), ["c", "b", "a"])
+    }
+
+    func testFavoritesNewestFirst() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "plain", at: 100)
+        try insert(container, text: "fav-old", favorite: true, at: 200)
+        try insert(container, text: "fav-new", favorite: true, at: 300)
+
+        XCTAssertEqual(store.favorites().map(\.sourceText), ["fav-new", "fav-old"])
+    }
+
+    func testToggleFavoriteFlips() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "a", at: 100)
+        let row = try XCTUnwrap(store.recent(limit: 1).first)
+        XCTAssertFalse(row.isFavorite)
+        store.toggleFavorite(row)
+        XCTAssertTrue(try XCTUnwrap(store.recent(limit: 1).first).isFavorite)
+        store.toggleFavorite(row)
+        XCTAssertFalse(try XCTUnwrap(store.recent(limit: 1).first).isFavorite)
+    }
+
+    func testDeleteRemovesRow() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "a", at: 100)
+        let row = try XCTUnwrap(store.recent(limit: 1).first)
+        store.delete(row)
+        XCTAssertTrue(store.recent(limit: 10).isEmpty)
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).isEmpty)
+    }
+
+    func testClearRemovesAll() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "a", at: 100)
+        try insert(container, text: "b", at: 200)
+        store.clear()
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).isEmpty)
+    }
+
+    func testTrimKeepsFavoritesAndNewestNonFavorites() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "old-fav", favorite: true, at: 100)
+        try insert(container, text: "n1", at: 200)
+        try insert(container, text: "n2", at: 300)
+        try insert(container, text: "n3", at: 400)
+        try insert(container, text: "n4", at: 500)
+
+        // Keep the 2 newest non-favorites; the favorite is exempt regardless of age.
+        store.trim(retention: 2)
+
+        let survivors = Set(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).map(\.sourceText))
+        XCTAssertEqual(survivors, ["old-fav", "n4", "n3"])
+    }
+
+    func testTrimZeroOrNegativeKeepsEverything() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "a", at: 100)
+        try insert(container, text: "b", at: 200)
+        store.trim(retention: 0)
+        XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).count, 2)
+    }
+
+    func testNoContextIsSafe() {
+        let store = TranslationHistoryStore()
+        // No configure() call: every method must be a silent no-op, never crash.
+        store.record(
+            sourceText: "x",
+            translatedText: "y",
+            source: .english,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google"
+        )
+        XCTAssertTrue(store.recent(limit: 5).isEmpty)
+        XCTAssertTrue(store.favorites().isEmpty)
+        store.clear()
+    }
+}
