@@ -18,6 +18,11 @@ struct SettingsView: View {
                     Label { LocalizedText(.settingsTabCapture) } icon: { Image(systemName: "camera.viewfinder") }
                 }
 
+            TranslationSettingsView()
+                .tabItem {
+                    Label { LocalizedText(.settingsTabTranslation) } icon: { Image(systemName: "character.bubble") }
+                }
+
             GeneralSettingsView()
                 .tabItem {
                     Label { LocalizedText(.settingsTabGeneral) } icon: { Image(systemName: "gear") }
