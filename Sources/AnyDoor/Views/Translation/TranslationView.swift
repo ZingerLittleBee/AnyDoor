@@ -158,7 +158,7 @@ struct TranslationView: View {
         guard settings.autoSpeak, !autoSpokenRun else { return }
         guard let firstSuccess = coordinator.results.first(where: { $0.status == .success && !$0.text.isEmpty }) else { return }
         autoSpokenRun = true
-        SpeechService.shared.speak(firstSuccess.text, language: firstSuccess.detected ?? coordinator.effectiveTarget())
+        SpeechService.shared.speak(firstSuccess.text, language: coordinator.effectiveTarget())
     }
 
     private func copy(_ text: String) {
