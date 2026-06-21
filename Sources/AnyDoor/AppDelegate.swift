@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let config = ModelConfiguration(url: storeURL)
             modelContainer = try ModelContainer(
                 for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, HostProfile.self,
+                TranslationRecord.self,
                 configurations: config
             )
 
