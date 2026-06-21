@@ -277,6 +277,8 @@ enum L10n {
         case settingsTranslationServiceTesting = "settings.translation.serviceTesting"
         case settingsTranslationServiceTestOK = "settings.translation.serviceTestOK"
         case settingsTranslationServiceTestFailed = "settings.translation.serviceTestFailed"
+        case settingsTranslationServiceCancel = "settings.translation.serviceCancel"
+        case settingsTranslationServiceSave = "settings.translation.serviceSave"
         case settingsTranslationHistorySection = "settings.translation.historySection"
         case settingsTranslationHistoryRetention = "settings.translation.historyRetention"
         case settingsTranslationHistoryClear = "settings.translation.historyClear"

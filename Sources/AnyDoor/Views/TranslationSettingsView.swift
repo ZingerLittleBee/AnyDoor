@@ -269,12 +269,12 @@ private struct TranslationServiceConfigSheet: View {
 
             HStack {
                 Spacer()
-                Button(role: .cancel) { onCancel() } label: { Text(verbatim: "Cancel") }
+                Button(role: .cancel) { onCancel() } label: { LocalizedText(.settingsTranslationServiceCancel) }
                     .keyboardShortcut(.cancelAction)
                 Button {
                     let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
                     onSave(draft, trimmedKey.isEmpty ? nil : trimmedKey)
-                } label: { Text(verbatim: "Save") }
+                } label: { LocalizedText(.settingsTranslationServiceSave) }
                 .keyboardShortcut(.defaultAction)
                 .disabled(draft.displayName.trimmingCharacters(in: .whitespaces).isEmpty)
             }

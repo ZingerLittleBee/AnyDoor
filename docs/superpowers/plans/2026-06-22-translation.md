@@ -4472,6 +4472,8 @@ feat(translation): assemble translation panel view with toolbar, input, and resu
           case settingsTranslationApiKey = "settings.translation.apiKey"
           case settingsTranslationBaseURL = "settings.translation.baseURL"
           case settingsTranslationModel = "settings.translation.model"
+          case settingsTranslationServiceCancel = "settings.translation.serviceCancel"
+          case settingsTranslationServiceSave = "settings.translation.serviceSave"
   ```
 
 - [ ] **Step 2: Run the coverage test and confirm it fails.**
