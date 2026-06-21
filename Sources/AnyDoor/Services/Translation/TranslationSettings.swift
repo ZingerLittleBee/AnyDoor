@@ -13,12 +13,17 @@ final class TranslationSettings {
     static let secondTargetLanguageKey = "translation.secondTargetLanguage"
     static let autoSpeakKey = "translation.autoSpeak"
     static let servicesKey = "translation.services"
+    static let historyRetentionKey = "translation.historyRetention"
+
+    /// Number of non-favorite history records to keep when none has been chosen.
+    static let defaultHistoryRetention = 200
 
     private let defaults: UserDefaults
 
     private(set) var targetLanguageCode: String
     private(set) var secondTargetLanguageCode: String
     private(set) var autoSpeak: Bool
+    private(set) var historyRetention: Int
     private(set) var services: [TranslationServiceConfig]
 
     private static func readServices(_ defaults: UserDefaults) -> [TranslationServiceConfig] {
@@ -42,7 +47,15 @@ final class TranslationSettings {
         self.secondTargetLanguageCode = defaults.string(forKey: Self.secondTargetLanguageKey)
             ?? TranslationLanguage.english.code
         self.autoSpeak = defaults.object(forKey: Self.autoSpeakKey) as? Bool ?? false
+        self.historyRetention = Self.readHistoryRetention(defaults)
         self.services = Self.readServices(defaults)
+    }
+
+    private static func readHistoryRetention(_ defaults: UserDefaults) -> Int {
+        guard let stored = defaults.object(forKey: historyRetentionKey) as? Int else {
+            return defaultHistoryRetention
+        }
+        return stored
     }
 
     func setTargetLanguageCode(_ value: String) {
@@ -58,6 +71,11 @@ final class TranslationSettings {
     func setAutoSpeak(_ value: Bool) {
         autoSpeak = value
         defaults.set(value, forKey: Self.autoSpeakKey)
+    }
+
+    func setHistoryRetention(_ value: Int) {
+        historyRetention = value
+        defaults.set(value, forKey: Self.historyRetentionKey)
     }
 
     func setServices(_ value: [TranslationServiceConfig]) {
@@ -87,6 +105,7 @@ final class TranslationSettings {
         secondTargetLanguageCode = defaults.string(forKey: Self.secondTargetLanguageKey)
             ?? TranslationLanguage.english.code
         autoSpeak = defaults.object(forKey: Self.autoSpeakKey) as? Bool ?? false
+        historyRetention = Self.readHistoryRetention(defaults)
         services = Self.readServices(defaults)
     }
 

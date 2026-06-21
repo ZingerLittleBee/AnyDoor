@@ -13,7 +13,6 @@ struct TranslationSettingsView: View {
 
     @State private var editingConfig: TranslationServiceConfig?
     @State private var isPresentingNew = false
-    @State private var historyRetention: Int = 200
 
     var body: some View {
         Form {
@@ -143,11 +142,8 @@ struct TranslationSettingsView: View {
 
     private var historySection: some View {
         Section {
-            Stepper(value: $historyRetention, in: 20...2000, step: 20) {
-                Text(L(.settingsTranslationHistoryRetention) + ": \(historyRetention)")
-            }
-            .onChange(of: historyRetention) { _, newValue in
-                history.trim(retention: newValue)
+            Stepper(value: historyRetention, in: 20...2000, step: 20) {
+                Text(L(.settingsTranslationHistoryRetention) + ": \(settings.historyRetention)")
             }
 
             Button(role: .destructive) {
@@ -170,6 +166,16 @@ struct TranslationSettingsView: View {
     }
     private var autoSpeak: Binding<Bool> {
         Binding(get: { settings.autoSpeak }, set: { settings.setAutoSpeak($0) })
+    }
+    private var historyRetention: Binding<Int> {
+        Binding(
+            get: { settings.historyRetention },
+            set: { newValue in
+                settings.setHistoryRetention(newValue)
+                // Apply the new cap immediately so lowering it prunes existing rows.
+                history.trim(retention: newValue)
+            }
+        )
     }
     private func enabledBinding(_ config: TranslationServiceConfig) -> Binding<Bool> {
         Binding(

@@ -120,7 +120,8 @@ final class TranslationCoordinator {
             source: request.source ?? result.detected ?? detectedSource,
             target: request.target,
             serviceID: provider.id,
-            serviceName: serviceName)
+            serviceName: serviceName,
+            retention: settings.historyRetention)
     }
 
     func cancel() {

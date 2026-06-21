@@ -45,6 +45,29 @@ final class TranslationSettingsTests: XCTestCase {
         XCTAssertTrue(reloaded.autoSpeak)
     }
 
+    func testHistoryRetentionDefaultsWhenUnset() {
+        let s = TranslationSettings(defaults: makeDefaults())
+        XCTAssertEqual(s.historyRetention, TranslationSettings.defaultHistoryRetention)
+    }
+
+    func testHistoryRetentionSetterPersists() {
+        let d = makeDefaults()
+        let s = TranslationSettings(defaults: d)
+        s.setHistoryRetention(60)
+        XCTAssertEqual(s.historyRetention, 60)
+        // Survives a fresh load from the same backing store (no reset to default).
+        let reloaded = TranslationSettings(defaults: d)
+        XCTAssertEqual(reloaded.historyRetention, 60)
+    }
+
+    func testHistoryRetentionReloadFromDefaults() {
+        let d = makeDefaults()
+        let s = TranslationSettings(defaults: d)
+        d.set(40, forKey: TranslationSettings.historyRetentionKey)
+        s.reloadFromDefaults()
+        XCTAssertEqual(s.historyRetention, 40)
+    }
+
     func testSetServicesSortsByOrderAndPersists() {
         let d = makeDefaults()
         let s = TranslationSettings(defaults: d)

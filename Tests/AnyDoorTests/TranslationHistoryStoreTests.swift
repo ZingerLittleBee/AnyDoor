@@ -131,6 +131,41 @@ final class TranslationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(survivors, ["old-fav", "n4", "n3"])
     }
 
+    func testRecordEnforcesRetentionCap() throws {
+        let (store, container) = try makeStore()
+        // Seed 3 existing rows, then record 1 more with a cap of 3.
+        try insert(container, text: "n1", at: 100)
+        try insert(container, text: "n2", at: 200)
+        try insert(container, text: "n3", at: 300)
+        store.record(
+            sourceText: "n4",
+            translatedText: "T-n4",
+            source: .english,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google",
+            retention: 3
+        )
+        // The oldest non-favorite (n1) is pruned to keep the newest 3.
+        let survivors = Set(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).map(\.sourceText))
+        XCTAssertEqual(survivors, ["n4", "n3", "n2"])
+    }
+
+    func testRecordWithDefaultRetentionKeepsEverything() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "n1", at: 100)
+        // Default retention (0) means unlimited: the new row is kept alongside the old.
+        store.record(
+            sourceText: "n2",
+            translatedText: "T-n2",
+            source: .english,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google"
+        )
+        XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).count, 2)
+    }
+
     func testTrimZeroOrNegativeKeepsEverything() throws {
         let (store, container) = try makeStore()
         try insert(container, text: "a", at: 100)

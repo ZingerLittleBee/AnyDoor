@@ -22,14 +22,17 @@ final class TranslationHistoryStore {
     }
 
     /// Write one successful translation. A nil source language (auto-detect that
-    /// produced no detection) is stored as an empty code.
+    /// produced no detection) is stored as an empty code. When `retention > 0`
+    /// the durable cap is enforced after the insert by trimming the oldest
+    /// non-favorite rows, so history never grows past the configured limit.
     func record(
         sourceText: String,
         translatedText: String,
         source: TranslationLanguage?,
         target: TranslationLanguage,
         serviceID: String,
-        serviceName: String
+        serviceName: String,
+        retention: Int = 0
     ) {
         guard let modelContext else { return }
         let record = TranslationRecord(
@@ -42,6 +45,7 @@ final class TranslationHistoryStore {
         )
         modelContext.insert(record)
         try? modelContext.save()
+        trim(retention: retention)
     }
 
     /// Newest-first, capped at `limit`.
