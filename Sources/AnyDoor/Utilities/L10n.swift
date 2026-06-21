@@ -485,6 +485,9 @@ enum L10n {
         case onboardingSettingsSection = "onboarding.settings.section"
         case onboardingSettingsReopen = "onboarding.settings.reopen"
         case onboardingSettingsReopenHelp = "onboarding.settings.reopen.help"
+        case translationSwapLanguages = "translation.swap"
+        case translationAutoDetect = "translation.autoDetect"
+        case translationAutoDetectHint = "translation.autoDetect.hint"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
