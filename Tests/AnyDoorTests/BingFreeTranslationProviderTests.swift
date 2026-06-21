@@ -64,4 +64,20 @@ final class BingFreeTranslationProviderTests: XCTestCase {
     func testDecodeEmptyArrayThrows() {
         XCTAssertThrowsError(try BingFreeTranslationProvider.decode(Data("[]".utf8)))
     }
+
+    func testDecodeReadsChineseServiceDetectedCode() throws {
+        // Bing reports the service code "zh-CN" (not the catalog "zh-Hans") when
+        // Simplified Chinese is auto-detected as the source.
+        let json = #"""
+        [{"detectedLanguage":{"language":"zh-CN","score":1.0},"translations":[{"text":"hello","to":"en"}]}]
+        """#
+        let result = try BingFreeTranslationProvider.decode(Data(json.utf8))
+        XCTAssertEqual(result.text, "hello")
+        XCTAssertEqual(result.detectedCode, "zh-CN")
+        // The provider remaps this service code back to the catalog language.
+        XCTAssertEqual(
+            TranslationLanguage.fromServiceCode(try XCTUnwrap(result.detectedCode), for: .bingFree),
+            TranslationLanguage.simplifiedChinese
+        )
+    }
 }
