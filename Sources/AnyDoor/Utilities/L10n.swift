@@ -488,6 +488,12 @@ enum L10n {
         case translationSwapLanguages = "translation.swap"
         case translationAutoDetect = "translation.autoDetect"
         case translationAutoDetectHint = "translation.autoDetect.hint"
+        case translationExpand = "translation.expand"
+        case translationCollapse = "translation.collapse"
+        case translationSpeak = "translation.speak"
+        case translationCopy = "translation.copy"
+        case translationTranslating = "translation.translating"
+        case translationError = "translation.error"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
