@@ -4056,6 +4056,8 @@ feat(translation): assemble translation panel view with toolbar, input, and resu
 
 ### Task 22: Add the three translate cases to `BuiltinItem` and all its switches
 
+> **Execution-order correction (discovered during implementation):** Task 21's `TranslationView` toolbar calls `PanelStore.shared.run(.screenshotTranslate)`, so it cannot build until this task's `BuiltinItem.screenshotTranslate` case exists. **Do this task's enum/switch additions (and the three `builtin.translate*` L10n keys its `titleKey` switch needs, per the Localization policy) before Task 21's view is committed.** Because `L10n.swift` / `Localizable.xcstrings` carry both tasks' string additions, commit `BuiltinItem.swift` + the shared L10n/xcstrings + this task's test together, then commit `TranslationView.swift` separately.
+
 **Files:**
 - Modify: `/Users/zingerbee/Documents/worktree/AnyDoor/tr/Sources/AnyDoor/Models/BuiltinItem.swift`
 - Test: `/Users/zingerbee/Documents/worktree/AnyDoor/tr/Tests/AnyDoorTests/BuiltinItemTranslateTests.swift` (new)
