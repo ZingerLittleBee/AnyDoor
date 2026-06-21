@@ -2,8 +2,9 @@ import Foundation
 
 /// UserDefaults-backed translation configuration. Mirrors `CaptureSettings`:
 /// explicit write-through setters, `@MainActor @Observable` so SwiftUI settings
-/// can bind. Services are stored as JSON-encoded `[TranslationServiceConfig]`,
-/// falling back to `seededDefaults()` when the stored value is empty or garbage.
+/// can bind. Services are stored as a JSON *string* of `[TranslationServiceConfig]`
+/// (so they round-trip through `SyncSettingsRegistry`'s `.string` codec during
+/// config backup), falling back to `seededDefaults()` when empty or garbage.
 @MainActor
 @Observable
 final class TranslationSettings {
@@ -27,7 +28,10 @@ final class TranslationSettings {
     private(set) var services: [TranslationServiceConfig]
 
     private static func readServices(_ defaults: UserDefaults) -> [TranslationServiceConfig] {
-        guard let data = defaults.data(forKey: servicesKey),
+        // Services are stored as a JSON string (not raw Data) so they round-trip
+        // through `SyncSettingsRegistry`'s `.string` codec during config backup.
+        guard let json = defaults.string(forKey: servicesKey),
+              let data = json.data(using: .utf8),
               let decoded = try? JSONDecoder().decode([TranslationServiceConfig].self, from: data),
               !decoded.isEmpty else {
             return TranslationServiceConfig.seededDefaults()
@@ -36,8 +40,9 @@ final class TranslationSettings {
     }
 
     private func writeServices(_ value: [TranslationServiceConfig]) {
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        defaults.set(data, forKey: Self.servicesKey)
+        guard let data = try? JSONEncoder().encode(value),
+              let json = String(data: data, encoding: .utf8) else { return }
+        defaults.set(json, forKey: Self.servicesKey)
     }
 
     init(defaults: UserDefaults = .standard) {
