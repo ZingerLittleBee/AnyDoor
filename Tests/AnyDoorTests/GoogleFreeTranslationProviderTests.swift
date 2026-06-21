@@ -43,4 +43,20 @@ final class GoogleFreeTranslationProviderTests: XCTestCase {
     func testDecodeMalformedThrows() {
         XCTAssertThrowsError(try GoogleFreeTranslationProvider.decode(Data("{}".utf8)))
     }
+
+    func testDecodeReadsChineseServiceDetectedCode() throws {
+        // Google reports the service code "zh-CN" (not the catalog "zh-Hans") when
+        // Simplified Chinese is auto-detected as the source.
+        let json = #"""
+        [[["hello","你好",null,null,10]],null,"zh-CN",null,null,null,1.0,[],[["zh-CN"]]]
+        """#
+        let result = try GoogleFreeTranslationProvider.decode(Data(json.utf8))
+        XCTAssertEqual(result.text, "hello")
+        XCTAssertEqual(result.detectedCode, "zh-CN")
+        // The provider remaps this service code back to the catalog language.
+        XCTAssertEqual(
+            TranslationLanguage.fromServiceCode(try XCTUnwrap(result.detectedCode), for: .googleFree),
+            TranslationLanguage.simplifiedChinese
+        )
+    }
 }

@@ -38,6 +38,28 @@ struct TranslationLanguage: Hashable, Codable, Sendable, Identifiable {
         "zh-Hans": "zh-CN",
         "zh-Hant": "zh-TW",
     ]
+
+    /// Reverse of `serviceCodeRemap`: maps a service-specific code back to its
+    /// canonical BCP-47 catalog code (e.g. "zh-CN" -> "zh-Hans").
+    private static let serviceCodeReverseRemap: [String: String] = [
+        "zh-CN": "zh-Hans",
+        "zh-TW": "zh-Hant",
+    ]
+
+    /// Resolves a code returned by a service's detection response into a catalog
+    /// `TranslationLanguage`. Google / Bing report service codes (e.g. "zh-CN" /
+    /// "zh-TW") that diverge from the catalog's canonical BCP-47 codes, so the
+    /// service code is remapped before lookup. Codes already in canonical form
+    /// (e.g. "en") pass through unchanged.
+    static func fromServiceCode(_ code: String, for kind: TranslationServiceKind) -> TranslationLanguage? {
+        switch kind {
+        case .googleFree, .bingFree:
+            let canonical = serviceCodeReverseRemap[code] ?? code
+            return named(canonical)
+        case .apple, .openAICompatible:
+            return named(code)
+        }
+    }
 }
 
 extension TranslationLanguage {

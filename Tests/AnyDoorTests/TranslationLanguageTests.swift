@@ -45,6 +45,37 @@ final class TranslationLanguageTests: XCTestCase {
         XCTAssertEqual(TranslationLanguage.english.serviceCode(for: .googleFree), "en")
     }
 
+    func testFromServiceCodeRemapsChineseForGoogleAndBing() {
+        XCTAssertEqual(
+            TranslationLanguage.fromServiceCode("zh-CN", for: .googleFree),
+            TranslationLanguage.simplifiedChinese
+        )
+        XCTAssertEqual(
+            TranslationLanguage.fromServiceCode("zh-TW", for: .bingFree),
+            TranslationLanguage.named("zh-Hant")
+        )
+    }
+
+    func testFromServiceCodePassesThroughCanonicalCode() {
+        XCTAssertEqual(
+            TranslationLanguage.fromServiceCode("en", for: .googleFree),
+            TranslationLanguage.english
+        )
+    }
+
+    func testFromServiceCodeDoesNotRemapForApple() {
+        // Apple / OpenAI codes are already canonical; "zh-CN" is not a catalog code there.
+        XCTAssertNil(TranslationLanguage.fromServiceCode("zh-CN", for: .apple))
+        XCTAssertEqual(
+            TranslationLanguage.fromServiceCode("zh-Hans", for: .openAICompatible),
+            TranslationLanguage.simplifiedChinese
+        )
+    }
+
+    func testFromServiceCodeReturnsNilForUnknown() {
+        XCTAssertNil(TranslationLanguage.fromServiceCode("zz-Unknown", for: .googleFree))
+    }
+
     func testNLLanguageRoundTrip() {
         XCTAssertEqual(TranslationLanguage.english.nlLanguage?.rawValue, "en")
         XCTAssertNotNil(TranslationLanguage.simplifiedChinese.nlLanguage)

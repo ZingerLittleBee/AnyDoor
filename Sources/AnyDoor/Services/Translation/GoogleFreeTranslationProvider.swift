@@ -39,7 +39,8 @@ struct GoogleFreeTranslationProvider: TranslationProvider {
                     }
 
                     let decoded = try Self.decode(data)
-                    if let code = decoded.detectedCode, let language = TranslationLanguage.named(code) {
+                    if let code = decoded.detectedCode,
+                       let language = TranslationLanguage.fromServiceCode(code, for: .googleFree) {
                         continuation.yield(.detected(language))
                     }
                     continuation.yield(.final(decoded.text))
