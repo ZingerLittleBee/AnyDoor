@@ -32,8 +32,16 @@ struct OpenAICompatibleProvider: TranslationProvider {
                         continuation.finish(throwing: TranslationProviderError.missingAPIKey)
                         return
                     }
-                    guard let baseURL = config.baseURL, let model = config.model else {
-                        continuation.finish(throwing: TranslationProviderError.decodeFailed)
+                    guard let baseURL = config.baseURL, !baseURL.isEmpty else {
+                        continuation.finish(
+                            throwing: TranslationProviderError.missingConfiguration("missing base URL")
+                        )
+                        return
+                    }
+                    guard let model = config.model, !model.isEmpty else {
+                        continuation.finish(
+                            throwing: TranslationProviderError.missingConfiguration("missing model")
+                        )
                         return
                     }
 

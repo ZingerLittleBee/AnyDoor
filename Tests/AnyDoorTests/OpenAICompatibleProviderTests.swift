@@ -82,4 +82,51 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         XCTAssertNil(OpenAICompatibleProvider.parseSSELine(""))
         XCTAssertNil(OpenAICompatibleProvider.parseSSELine(": keep-alive"))
     }
+
+    private func makeConfig(baseURL: String?, model: String?) -> TranslationServiceConfig {
+        TranslationServiceConfig(
+            id: "llm",
+            kind: .openAICompatible,
+            displayName: "LLM",
+            iconName: "brain",
+            enabled: true,
+            order: 0,
+            baseURL: baseURL,
+            model: model,
+            promptTemplate: nil
+        )
+    }
+
+    private func firstError(
+        from stream: AsyncThrowingStream<TranslationChunk, Error>
+    ) async -> TranslationProviderError? {
+        do {
+            for try await _ in stream {}
+            return nil
+        } catch let error as TranslationProviderError {
+            return error
+        } catch {
+            return nil
+        }
+    }
+
+    func testTranslateMissingBaseURLReportsMissingConfiguration() async {
+        let provider = OpenAICompatibleProvider(
+            config: makeConfig(baseURL: nil, model: "gpt-4o-mini"),
+            apiKey: "sk-test"
+        )
+        let request = TranslationRequest(text: "hello", source: nil, target: .english)
+        let error = await firstError(from: provider.translate(request))
+        XCTAssertEqual(error, .missingConfiguration("missing base URL"))
+    }
+
+    func testTranslateMissingModelReportsMissingConfiguration() async {
+        let provider = OpenAICompatibleProvider(
+            config: makeConfig(baseURL: "https://api.example.com/v1", model: nil),
+            apiKey: "sk-test"
+        )
+        let request = TranslationRequest(text: "hello", source: nil, target: .english)
+        let error = await firstError(from: provider.translate(request))
+        XCTAssertEqual(error, .missingConfiguration("missing model"))
+    }
 }

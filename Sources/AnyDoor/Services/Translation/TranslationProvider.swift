@@ -24,6 +24,9 @@ enum TranslationProviderError: Error, Sendable, Equatable {
     case badResponse(Int)
     /// A required API key was not configured (OpenAI-compatible only).
     case missingAPIKey
+    /// A required connection field (base URL or model) was not configured
+    /// (OpenAI-compatible only). The associated value is a human-readable note.
+    case missingConfiguration(String)
     /// The response body could not be decoded into the expected shape.
     case decodeFailed
     /// A transport-level failure; the associated value is a human-readable note.
