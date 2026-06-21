@@ -18,6 +18,10 @@ region, or capture and record the screen — and reach for clipboard history,
 window layouts, `/etc/hosts` profiles, external-display brightness, a Hyper
 Key, and a Spotlight-style command palette when you need them.
 
+## Demo
+
+<video src="https://github.com/user-attachments/assets/e7fdea91-107b-4d7c-ab91-0cfa1d2912e1" poster="https://github.com/ZingerLittleBee/AnyDoor/raw/main/landing/public/promo-en.jpg" controls></video>
+
 ## Features
 
 ### App shortcuts
