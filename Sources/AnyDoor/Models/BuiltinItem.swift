@@ -59,6 +59,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case windowLayout
     case hostsManager
     case bluetoothBattery
+    case translate
+    case screenshotTranslate
+    case translateSelection
 
     enum Kind: Sendable {
         case toggle
@@ -84,7 +87,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
              .windowLeftTwoThirds, .windowRightTwoThirds,
              .windowMoveNextDisplay, .windowMovePreviousDisplay,
              .captureWindow, .captureFullscreen, .captureTimer, .captureModeBar, .recordScreen,
-             .captureScrolling: return .action
+             .captureScrolling,
+             .translate, .screenshotTranslate, .translateSelection: return .action
         case .brightness: return .brightnessControl
         case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
@@ -148,6 +152,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowLayout:      return .builtinWindowLayout
         case .hostsManager:      return .builtinHostsManager
         case .bluetoothBattery:  return .builtinBluetoothBattery
+        case .translate:           return .builtinTranslate
+        case .screenshotTranslate: return .builtinScreenshotTranslate
+        case .translateSelection:  return .builtinTranslateSelection
         }
     }
 
@@ -209,6 +216,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowLayout: return "macwindow"
         case .hostsManager: return "list.bullet.rectangle"
         case .bluetoothBattery: return "battery.100"
+        case .translate: return "character.bubble"
+        case .screenshotTranslate: return "text.viewfinder"
+        case .translateSelection: return "text.cursor"
         }
     }
 
@@ -271,6 +281,9 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .windowLayout:    return 2000
         case .hostsManager:    return 1950
         case .bluetoothBattery: return 1980
+        case .translate: return 980
+        case .screenshotTranslate: return 982
+        case .translateSelection: return 984
         }
     }
 

@@ -38,8 +38,11 @@ enum L10n {
         case builtinRestartFinder = "builtin.restartFinder"
         case builtinRestartMenuBar = "builtin.restartMenuBar"
         case builtinScreenshot = "builtin.screenshot"
+        case builtinScreenshotTranslate = "builtin.screenshotTranslate"
         case builtinShowHiddenFiles = "builtin.showHiddenFiles"
         case builtinSystemSleep = "builtin.systemSleep"
+        case builtinTranslate = "builtin.translate"
+        case builtinTranslateSelection = "builtin.translateSelection"
         case builtinWindowBottomHalf = "builtin.windowBottomHalf"
         case builtinWindowBottomLeftQuarter = "builtin.windowBottomLeftQuarter"
         case builtinWindowBottomRightQuarter = "builtin.windowBottomRightQuarter"
@@ -494,6 +497,12 @@ enum L10n {
         case translationCopy = "translation.copy"
         case translationTranslating = "translation.translating"
         case translationError = "translation.error"
+        case translationPin = "translation.pin"
+        case translationHistory = "translation.history"
+        case translationScreenshot = "translation.screenshot"
+        case translationSettings = "translation.settings"
+        case translationInputPlaceholder = "translation.inputPlaceholder"
+        case translationRecognizedAs = "translation.recognizedAs"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
