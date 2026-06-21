@@ -1,0 +1,38 @@
+{
+  "name": "video",
+  "version": "1.0.0",
+  "description": "AnyDoor promo video rendered with Remotion",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@remotion/cli": "4.0.481",
+    "@remotion/fonts": "4.0.481",
+    "@remotion/google-fonts": "4.0.481",
+    "@remotion/media": "4.0.481",
+    "@remotion/transitions": "4.0.481",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.481",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@remotion/eslint-config-flat": "4.0.481",
+    "@types/react": "19.2.7",
+    "@types/web": "0.0.166",
+    "eslint": "9.19.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "studio": "remotion studio",
+    "start": "remotion studio",
+    "typecheck": "tsc --noEmit",
+    "test:app-icons": "tsc --outDir .test-build --noEmit false && node scripts/assert-app-icons.cjs",
+    "test:system-montage": "tsc --outDir .test-build --noEmit false && node scripts/assert-system-montage.cjs",
+    "still:check": "remotion still AnyDoorPromo out/check-frame-030.png --scale=0.25 --frame=30",
+    "render": "bash scripts/render.sh"
+  },
+  "sideEffects": [
+    "*.css"
+  ]
+}

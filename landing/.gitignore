@@ -1,3 +1,9 @@
+# rendered promo videos — heavy build artifacts of the video/ workspace.
+# The poster JPG stays tracked (README thumbnail); the mp4/webm are published
+# out-of-band (GitHub upload for the README, R2/etc. for the web).
+public/promo-*.mp4
+public/promo-*.webm
+
 # build output
 dist/
 .astro/

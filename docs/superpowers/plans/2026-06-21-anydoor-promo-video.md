@@ -1,0 +1,1810 @@
+# AnyDoor Promo Video Implementation Plan
+
+> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Build and ship the bilingual 1920x1080 Remotion promo video for the AnyDoor landing page, including generated video assets and landing-page playback.
+
+**Architecture:** Add a standalone `video/` Remotion workspace at the repo root so video dependencies stay out of the Astro landing project. The Remotion composition re-creates the landing-page UI as frame-driven React components, while `landing/` only consumes rendered `promo-{zh,en}.{mp4,webm,jpg}` assets through a single language-aware `<video>` component.
+
+**Tech Stack:** Remotion, React, TypeScript, Zod, `@remotion/transitions`, `@remotion/fonts`, `@remotion/google-fonts`, Astro, Bun for the existing landing build.
+
+---
+
+## Chunk 1: Remotion Workspace Foundation
+
+### File Structure
+
+Create a focused `video/` workspace:
+
+- `video/package.json` owns Remotion scripts and video-only dependencies.
+- `video/.gitignore` is kept from the generated template and must ignore `node_modules/` and `/out/`.
+- `video/remotion.config.ts` owns renderer defaults only.
+- `video/tsconfig.json` owns TypeScript config for Remotion source.
+- `video/public/menubar-icon.png` is copied from `landing/public/menubar-icon.png` and referenced via `staticFile()`.
+- `video/src/index.ts` registers Remotion.
+- `video/src/Root.tsx` registers the two language compositions with a Zod schema.
+- `video/src/AnyDoorPromo.tsx` chains scenes with `TransitionSeries`.
+- `video/src/timing.ts` centralizes fps, dimensions, scene frame ranges, and easing helpers.
+- `video/src/theme.ts` mirrors landing CSS tokens as typed constants.
+- `video/src/copy.ts` mirrors only video strings from the landing copy.
+- `video/src/fonts.ts` blocks rendering until system fonts are ready, with documented Google-font fallback.
+- `video/src/scenes/Scene0.tsx` through `Scene5.tsx` start as compile-safe scene shells.
+- `.gitignore` ignores `video/out/` but not copied assets under `landing/public/`.
+
+Use @remotion-best-practices during implementation. Current Remotion docs confirm `<Composition schema defaultProps>`, `useCurrentFrame()` + `interpolate()` + `Easing`, `staticFile()` + `<Img>`, and `TransitionSeries.Sequence` / `TransitionSeries.Transition` with `linearTiming()` and `fade()`.
+
+### Task 1: Scaffold the Remotion Workspace
+
+**Files:**
+- Create: `video/package.json`
+- Create: `video/package-lock.json`
+- Create: `video/.gitignore`
+- Create: `video/remotion.config.ts`
+- Create: `video/tsconfig.json`
+- Create: `video/src/index.ts`
+- Create: `video/src/Root.tsx`
+- Create: `video/public/menubar-icon.png`
+- Modify: `.gitignore`
+
+- [ ] **Step 1: Scaffold from the official blank Remotion template**
+
+Run:
+
+```bash
+test ! -e video
+TMPDIR="$(mktemp -d)"
+(cd "$TMPDIR" && npx create-video@latest --yes --blank --no-tailwind video)
+mkdir video
+cp -R "$TMPDIR/video/." video/
+rm -rf "$TMPDIR"
+```
+
+Expected: a new `video/` folder with Remotion, React, TypeScript, and starter source files. Scaffolding happens outside the AnyDoor Git repo because `create-video --yes` may refuse to run inside an existing Git repository. The generator does not install dependencies and may create a nested `video/.git/`; if `test ! -e video` fails, stop and inspect instead of overwriting.
+
+- [ ] **Step 2: Remove nested repository metadata and starter source**
+
+Run:
+
+```bash
+rm -rf video/.git
+rm -rf video/src
+rm -f video/README.md video/.prettierrc video/eslint.config.mjs
+```
+
+Expected: `video/` is part of the main repo, not a nested Git repo, and no starter source remains that can import deleted files. Keep `video/.gitignore`; update it in the next step if it does not already ignore `node_modules/` and `/out/`.
+
+- [ ] **Step 3: Install template dependencies**
+
+Run:
+
+```bash
+cd video
+npm install
+```
+
+Expected: `video/package-lock.json` is created and `video/node_modules/` is ignored by `video/.gitignore`.
+
+- [ ] **Step 4: Add the required Remotion packages**
+
+Run:
+
+```bash
+cd video
+npx remotion add @remotion/transitions
+npx remotion add @remotion/fonts
+npx remotion add @remotion/google-fonts
+npx remotion add @remotion/media
+npm install zod
+```
+
+Expected: dependencies are added to `video/package.json` and the lockfile updates. Do not move these dependencies into `landing/package.json`.
+
+If the template still generated Tailwind-related packages despite `--no-tailwind`, remove them now:
+
+```bash
+cd video
+npm uninstall @remotion/tailwind-v4 tailwindcss
+```
+
+Expected: `video/package.json` does not contain Tailwind or `@remotion/tailwind-v4`.
+
+- [ ] **Step 5: Replace the generated scripts with the project scripts**
+
+Edit `video/package.json` so it contains these scripts while preserving the exact dependency versions generated by npm:
+
+```json
+{
+  "scripts": {
+    "studio": "remotion studio",
+    "start": "remotion studio",
+    "typecheck": "tsc --noEmit",
+    "still:check": "remotion still AnyDoorPromo out/check-frame-030.png --scale=0.25 --frame=30",
+    "render": "bash scripts/render.sh"
+  }
+}
+```
+
+Expected: `npm run typecheck` is available and `npm run render` delegates to the script added in Chunk 3.
+
+- [ ] **Step 6: Configure renderer defaults**
+
+Replace `video/remotion.config.ts` with:
+
+```ts
+import {Config} from '@remotion/cli/config';
+
+Config.setOverwriteOutput(true);
+Config.setVideoImageFormat('jpeg');
+```
+
+Expected: render commands may overwrite files in `video/out/` without extra prompts, and intermediate frames use JPEG.
+
+- [ ] **Step 7: Add temporary compile-safe source files**
+
+Run:
+
+```bash
+mkdir -p video/src
+```
+
+Create `video/src/index.ts`:
+
+```ts
+import {registerRoot} from 'remotion';
+import {RemotionRoot} from './Root';
+
+registerRoot(RemotionRoot);
+```
+
+Create `video/src/Root.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {Composition, AbsoluteFill} from 'remotion';
+
+const ScaffoldFrame: FC = () => (
+  <AbsoluteFill
+    style={{
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#050507',
+      color: '#f5f5f7',
+      fontFamily: 'system-ui, sans-serif',
+      fontSize: 48,
+    }}
+  >
+    AnyDoor Promo
+  </AbsoluteFill>
+);
+
+export const RemotionRoot: FC = () => (
+  <Composition
+    id="AnyDoorPromo"
+    component={ScaffoldFrame}
+    durationInFrames={90}
+    fps={30}
+    width={1920}
+    height={1080}
+  />
+);
+```
+
+Expected: the scaffold can typecheck before the real Root and composition replace it in Task 3.
+
+- [ ] **Step 8: Copy the door glyph asset**
+
+Run:
+
+```bash
+mkdir -p video/public
+cp landing/public/menubar-icon.png video/public/menubar-icon.png
+```
+
+Expected: `video/public/menubar-icon.png` exists and matches the landing asset. This is a source asset, not a render artifact, so commit it.
+
+- [ ] **Step 9: Ignore Remotion render output**
+
+Add this line to the root `.gitignore`:
+
+```gitignore
+/video/out/
+```
+
+Ensure `video/.gitignore` contains:
+
+```gitignore
+node_modules/
+/out/
+```
+
+Expected: `git status --short` does not show `video/node_modules/` or files under `video/out/` after installs and renders.
+
+- [ ] **Step 10: Typecheck the generated project**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: PASS with no TypeScript errors before replacing the starter source.
+
+- [ ] **Step 11: Check status and commit**
+
+Run:
+
+```bash
+git status --short
+```
+
+Expected: only `.gitignore`, `video/.gitignore`, `video/package.json`, `video/package-lock.json`, `video/remotion.config.ts`, `video/tsconfig.json`, `video/src/index.ts`, `video/src/Root.tsx`, and `video/public/menubar-icon.png` are staged or untracked for this task. No `video/.git/`, `video/node_modules/`, starter source, starter CSS, Tailwind package, or `@remotion/tailwind-v4` package should appear.
+
+Run:
+
+```bash
+git add .gitignore video/.gitignore video/package.json video/package-lock.json video/remotion.config.ts video/tsconfig.json video/src/index.ts video/src/Root.tsx video/public/menubar-icon.png
+git commit -m "build(video): scaffold Remotion promo workspace"
+```
+
+Expected: one commit containing only workspace setup and the copied glyph.
+
+### Task 2: Add Theme, Copy, Timing, and Font Loading
+
+**Files:**
+- Create: `video/src/AnyDoorPromo.tsx`
+- Create: `video/src/theme.ts`
+- Create: `video/src/copy.ts`
+- Create: `video/src/timing.ts`
+- Create: `video/src/fonts.ts`
+
+- [ ] **Step 1: Write the failing typecheck target**
+
+Create or update `video/src/AnyDoorPromo.tsx` to import the missing modules:
+
+```tsx
+import type {FC} from 'react';
+import {AbsoluteFill} from 'remotion';
+import {loadFonts} from './fonts';
+import {theme} from './theme';
+import {timeline} from './timing';
+import type {Lang} from './copy';
+
+export type AnyDoorPromoProps = {
+  lang: Lang;
+};
+
+export const AnyDoorPromo: FC<AnyDoorPromoProps> = ({lang}) => {
+  loadFonts();
+
+  return (
+    <AbsoluteFill style={{backgroundColor: theme.colors.bg}}>
+      <div>{lang}:{timeline.durationInFrames}</div>
+    </AbsoluteFill>
+  );
+};
+```
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: FAIL because `./fonts`, `./theme`, `./timing`, and `./copy` do not exist yet.
+
+- [ ] **Step 2: Add the theme tokens**
+
+Create `video/src/theme.ts`:
+
+```ts
+export const theme = {
+  colors: {
+    bg: '#050507',
+    surface: 'rgba(28, 28, 32, 0.85)',
+    line: 'rgba(255, 255, 255, 0.08)',
+    lineStrong: 'rgba(255, 255, 255, 0.14)',
+    text: '#f5f5f7',
+    textDim: '#a1a1aa',
+    textSoft: '#909099',
+    accent: '#0a84ff',
+    accent2: '#5e9bff',
+    green: '#30d158',
+    orange: '#ff9f0a',
+    red: '#ff453a',
+    purple: '#bf5af2',
+    pink: '#ff375f',
+  },
+  fonts: {
+    sans: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue", Inter, "Noto Sans SC", system-ui, sans-serif',
+    mono: 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace',
+  },
+  gradients: {
+    backdrop:
+      'radial-gradient(900px 600px at 80% -10%, rgba(10,132,255,.18), transparent 60%), radial-gradient(900px 600px at -10% 30%, rgba(191,90,242,.10), transparent 60%), radial-gradient(700px 500px at 50% 110%, rgba(48,209,88,.06), transparent 70%), #050507',
+    accentText: 'linear-gradient(135deg, #5e9bff 0%, #bf5af2 60%, #ff375f 110%)',
+    panel: 'linear-gradient(180deg, rgba(38,38,42,.92), rgba(22,22,26,.92))',
+    desktop:
+      'radial-gradient(120% 80% at 30% 30%, rgba(94,155,255,.45), transparent 60%), radial-gradient(110% 70% at 75% 75%, rgba(191,90,242,.40), transparent 60%), radial-gradient(90% 60% at 50% 110%, rgba(255,55,95,.20), transparent 60%), linear-gradient(160deg, #1a1a2e 0%, #16213e 40%, #0f0f1e 100%)',
+  },
+  shadow: {
+    panel: '0 0 0 .5px rgba(255,255,255,.06) inset, 0 30px 80px rgba(0,0,0,.6), 0 8px 28px rgba(0,0,0,.4)',
+    stage: '0 40px 100px rgba(0,0,0,.5)',
+  },
+} as const;
+
+export type Theme = typeof theme;
+```
+
+- [ ] **Step 3: Add bilingual video copy**
+
+Create `video/src/copy.ts`:
+
+```ts
+export type Lang = 'zh' | 'en';
+export type Bi = Record<Lang, string>;
+
+export const copy = {
+  coldOpen: {
+    caption: {zh: '一颗按键，一扇任意门', en: 'One key. Any door.'},
+  },
+  hotkey: {
+    caption: {zh: '按一下打开，再按一下隐藏。', en: 'Press to open. Press again to hide.'},
+  },
+  palette: {
+    caption: {zh: '命令面板 · 搜索、计算、换算一切。', en: 'Command palette — search, calc, convert.'},
+    queryCalc: '1234 * 8%',
+    resultCalc: '98.72',
+    queryPort: '3000',
+    portsTitle: {zh: '端口', en: 'Ports'},
+  },
+  ports: {
+    caption: {zh: '哪个进程占了 :3000？一键结束。', en: "What's on :3000? End it with one key."},
+    confirmTitle: {zh: '结束进程？', en: 'Kill process?'},
+    confirmMessage: {zh: 'node（端口 :3000 · PID 1024）将被结束。', en: 'node (port :3000 · PID 1024) will be terminated.'},
+    confirmButton: {zh: '结束', en: 'Kill'},
+  },
+  montage: {
+    caption: {
+      zh: 'Hosts、深色、静音、亮度——整台 Mac，一套热键。',
+      en: 'Hosts, dark mode, mute, brightness — one set of hotkeys.',
+    },
+  },
+  close: {
+    caption: {
+      zh: '启动器只能搜索，AnyDoor 控制整台 Mac。',
+      en: 'Launchers search. AnyDoor controls your Mac.',
+    },
+    meta: {zh: '免费 · 开源 · 纯本地 · macOS 14+', en: 'Free · open source · local-only · macOS 14+'},
+  },
+} as const;
+
+export const t = (value: Bi, lang: Lang) => value[lang];
+```
+
+- [ ] **Step 4: Add timeline constants and easing helpers**
+
+Create `video/src/timing.ts`:
+
+```ts
+import {Easing, interpolate} from 'remotion';
+
+export const video = {
+  width: 1920,
+  height: 1080,
+  fps: 30,
+} as const;
+
+export const sceneDurations = {
+  scene0: 90,
+  scene1: 180,
+  scene2: 180,
+  scene3: 180,
+  scene4: 180,
+  scene5: 240,
+} as const;
+
+export const transitions = {
+  standard: 12,
+  montageOut: 15,
+} as const;
+
+export const timeline = {
+  durationInFrames:
+    sceneDurations.scene0 +
+    sceneDurations.scene1 +
+    sceneDurations.scene2 +
+    sceneDurations.scene3 +
+    sceneDurations.scene4 +
+    sceneDurations.scene5 -
+    transitions.standard * 4 -
+    transitions.montageOut,
+} as const;
+
+export const ease = Easing.bezier(0.16, 1, 0.3, 1);
+export const overshoot = Easing.bezier(0.34, 1.56, 0.64, 1);
+
+export const clamp = (frame: number, input: [number, number], output: [number, number], easing = ease) =>
+  interpolate(frame, input, output, {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+    easing,
+  });
+```
+
+- [ ] **Step 5: Add font loading**
+
+Create `video/src/fonts.ts`:
+
+```ts
+import {continueRender, delayRender} from 'remotion';
+import {loadFont as loadInter} from '@remotion/google-fonts/Inter';
+import {loadFont as loadNotoSansSC} from '@remotion/google-fonts/NotoSansSC';
+import {loadFont as loadJetBrainsMono} from '@remotion/google-fonts/JetBrainsMono';
+
+let loaded = false;
+
+export const loadFonts = () => {
+  if (loaded) {
+    return;
+  }
+  loaded = true;
+
+  const inter = loadInter('normal', {weights: ['400', '500', '600', '700'], subsets: ['latin']});
+  const notoSansSC = loadNotoSansSC('normal', {weights: ['400', '500', '600', '700'], subsets: ['chinese-simplified']});
+  const jetBrainsMono = loadJetBrainsMono('normal', {weights: ['500', '600', '700'], subsets: ['latin']});
+
+  if (typeof document === 'undefined') {
+    return;
+  }
+
+  const handle = delayRender('Load promo fonts');
+  Promise.all([
+    inter.waitUntilDone(),
+    notoSansSC.waitUntilDone(),
+    jetBrainsMono.waitUntilDone(),
+    document.fonts.load('700 96px "SF Pro Display"'),
+    document.fonts.load('500 42px "SF Pro Text"'),
+    document.fonts.load('600 42px "PingFang SC"'),
+    document.fonts.load('600 28px "SF Mono"'),
+  ])
+    .catch(() => undefined)
+    .finally(() => continueRender(handle));
+};
+```
+
+Expected: system fonts are preferred by `theme.fonts`; Google fonts are available as portable fallback without committing Apple font files.
+
+- [ ] **Step 6: Verify typecheck now passes**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: PASS with the temporary `AnyDoorPromo` shell.
+
+- [ ] **Step 7: Commit**
+
+Run:
+
+```bash
+git add video/src/theme.ts video/src/copy.ts video/src/timing.ts video/src/fonts.ts video/src/AnyDoorPromo.tsx
+git commit -m "feat(video): add promo design tokens and timing"
+```
+
+Expected: one commit containing only reusable video constants and the temporary shell.
+
+### Task 3: Register Bilingual Compositions and Scene Shells
+
+**Files:**
+- Modify: `video/src/Root.tsx`
+- Modify: `video/src/AnyDoorPromo.tsx`
+- Create: `video/src/scenes/Scene0.tsx`
+- Create: `video/src/scenes/Scene1.tsx`
+- Create: `video/src/scenes/Scene2.tsx`
+- Create: `video/src/scenes/Scene3.tsx`
+- Create: `video/src/scenes/Scene4.tsx`
+- Create: `video/src/scenes/Scene5.tsx`
+
+- [ ] **Step 1: Confirm the current scaffold still typechecks**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: PASS with the temporary `ScaffoldFrame` composition from Task 1. This confirms the scaffold is clean before replacing `Root.tsx`.
+
+- [ ] **Step 2: Add the composition schema and ids**
+
+Replace `video/src/Root.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {Composition} from 'remotion';
+import {z} from 'zod';
+import {AnyDoorPromo} from './AnyDoorPromo';
+import {timeline, video} from './timing';
+
+export const promoSchema = z.object({
+  lang: z.enum(['zh', 'en']),
+});
+
+export type PromoProps = z.infer<typeof promoSchema>;
+
+export const RemotionRoot: FC = () => {
+  return (
+    <>
+      <Composition
+        id="AnyDoorPromo"
+        component={AnyDoorPromo}
+        schema={promoSchema}
+        defaultProps={{lang: 'zh'}}
+        width={video.width}
+        height={video.height}
+        fps={video.fps}
+        durationInFrames={timeline.durationInFrames}
+      />
+      <Composition
+        id="AnyDoorPromoEn"
+        component={AnyDoorPromo}
+        schema={promoSchema}
+        defaultProps={{lang: 'en'}}
+        width={video.width}
+        height={video.height}
+        fps={video.fps}
+        durationInFrames={timeline.durationInFrames}
+      />
+    </>
+  );
+};
+```
+
+- [ ] **Step 3: Generate compile-safe scene shells**
+
+Run this exact script to create all six shells from one explicit mapping:
+
+```bash
+cd video
+mkdir -p src/scenes
+node <<'EOF'
+const fs = require('node:fs');
+const scenes = [
+  ['Scene0', 'coldOpen'],
+  ['Scene1', 'hotkey'],
+  ['Scene2', 'palette'],
+  ['Scene3', 'ports'],
+  ['Scene4', 'montage'],
+  ['Scene5', 'close'],
+];
+
+for (const [name, key] of scenes) {
+  fs.writeFileSync(`src/scenes/${name}.tsx`, `import type {FC} from 'react';
+import {AbsoluteFill} from 'remotion';
+import type {Lang} from '../copy';
+import {copy, t} from '../copy';
+import {theme} from '../theme';
+
+export const ${name}: FC<{lang: Lang}> = ({lang}) => (
+  <AbsoluteFill
+    style={{
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: theme.gradients.backdrop,
+      color: theme.colors.text,
+      fontFamily: theme.fonts.sans,
+      fontSize: 56,
+      fontWeight: 700,
+    }}
+  >
+    {t(copy.${key}.caption, lang)}
+  </AbsoluteFill>
+);
+`);
+}
+EOF
+```
+
+Expected: these exact files exist and each one renders a distinct caption so Studio can identify it before detailed animation work.
+
+Verify the mapping:
+
+| File | Export | Caption key |
+| --- | --- | --- |
+| `video/src/scenes/Scene0.tsx` | `Scene0` | `copy.coldOpen.caption` |
+| `video/src/scenes/Scene1.tsx` | `Scene1` | `copy.hotkey.caption` |
+| `video/src/scenes/Scene2.tsx` | `Scene2` | `copy.palette.caption` |
+| `video/src/scenes/Scene3.tsx` | `Scene3` | `copy.ports.caption` |
+| `video/src/scenes/Scene4.tsx` | `Scene4` | `copy.montage.caption` |
+| `video/src/scenes/Scene5.tsx` | `Scene5` | `copy.close.caption` |
+
+- [ ] **Step 4: Wire `TransitionSeries`**
+
+Replace `video/src/AnyDoorPromo.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {AbsoluteFill} from 'remotion';
+import {TransitionSeries, linearTiming} from '@remotion/transitions';
+import {fade} from '@remotion/transitions/fade';
+import {slide} from '@remotion/transitions/slide';
+import type {Lang} from './copy';
+import {loadFonts} from './fonts';
+import {ease, sceneDurations, timeline, transitions} from './timing';
+import {Scene0} from './scenes/Scene0';
+import {Scene1} from './scenes/Scene1';
+import {Scene2} from './scenes/Scene2';
+import {Scene3} from './scenes/Scene3';
+import {Scene4} from './scenes/Scene4';
+import {Scene5} from './scenes/Scene5';
+
+export type AnyDoorPromoProps = {
+  lang: Lang;
+};
+
+const standardFade = (
+  <TransitionSeries.Transition
+    presentation={fade()}
+    timing={linearTiming({durationInFrames: transitions.standard, easing: ease})}
+  />
+);
+
+export const AnyDoorPromo: FC<AnyDoorPromoProps> = ({lang}) => {
+  loadFonts();
+
+  return (
+    <AbsoluteFill>
+      <TransitionSeries>
+        <TransitionSeries.Sequence durationInFrames={sceneDurations.scene0}>
+          <Scene0 lang={lang} />
+        </TransitionSeries.Sequence>
+        {standardFade}
+        <TransitionSeries.Sequence durationInFrames={sceneDurations.scene1}>
+          <Scene1 lang={lang} />
+        </TransitionSeries.Sequence>
+        {standardFade}
+        <TransitionSeries.Sequence durationInFrames={sceneDurations.scene2}>
+          <Scene2 lang={lang} />
+        </TransitionSeries.Sequence>
+        {standardFade}
+        <TransitionSeries.Sequence durationInFrames={sceneDurations.scene3}>
+          <Scene3 lang={lang} />
+        </TransitionSeries.Sequence>
+        {standardFade}
+        <TransitionSeries.Sequence durationInFrames={sceneDurations.scene4}>
+          <Scene4 lang={lang} />
+        </TransitionSeries.Sequence>
+        <TransitionSeries.Transition
+          presentation={slide({direction: 'from-right'})}
+          timing={linearTiming({durationInFrames: transitions.montageOut, easing: ease})}
+        />
+        <TransitionSeries.Sequence durationInFrames={sceneDurations.scene5}>
+          <Scene5 lang={lang} />
+        </TransitionSeries.Sequence>
+      </TransitionSeries>
+      <span style={{display: 'none'}}>{timeline.durationInFrames}</span>
+    </AbsoluteFill>
+  );
+};
+```
+
+- [ ] **Step 5: Typecheck and render a still**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+npx remotion still AnyDoorPromo out/check-scene0.png --scale=0.25 --frame=30
+npx remotion still AnyDoorPromoEn out/check-scene0-en.png --scale=0.25 --frame=30
+```
+
+Expected: PASS. `video/out/check-scene0.png` renders the zh cold-open shell and `video/out/check-scene0-en.png` renders the English shell, proving both composition ids are registered.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```bash
+git add video/src/Root.tsx video/src/AnyDoorPromo.tsx video/src/scenes
+git commit -m "feat(video): register bilingual promo compositions"
+```
+
+Expected: both `AnyDoorPromo` and `AnyDoorPromoEn` are visible in Remotion Studio.
+
+## Chunk 2: Motion Graphics Scenes
+
+### File Structure
+
+Keep scene code thin by extracting reusable UI units:
+
+- `video/src/ui/Backdrop.tsx` renders the dot grid and radial glow from `body::before/after`.
+- `video/src/ui/CaptionChip.tsx` renders lower-third bilingual captions.
+- `video/src/ui/DoorGlyph.tsx` renders the copied door glyph via `<Img staticFile()>`.
+- `video/src/ui/Keycap.tsx` and `video/src/ui/Keyboard.tsx` render frame-driven key press states.
+- `video/src/ui/DesktopStage.tsx` renders the faux macOS desktop, menu bar, dock, and app window.
+- `video/src/ui/CommandPalette.tsx` renders calculator typing and the port search handoff.
+- `video/src/ui/PortManager.tsx` renders the port list, selected row, confirmation card, and ended state.
+- `video/src/ui/MenuPanel.tsx` renders the close-scene AnyDoor menu panel.
+- `video/src/ui/SystemMontage.tsx` renders Hosts, Dark Mode, Mute, and brightness beats.
+- `video/src/scenes/Scene0.tsx` through `Scene5.tsx` own timing only, not low-level mockup details.
+
+No CSS transitions, CSS animations, or Tailwind animation classes are allowed in `video/`. All motion must come from `useCurrentFrame()`, `interpolate()`, `Easing`, and component props derived from the frame.
+
+### Task 4: Build Shared Visual Primitives
+
+**Files:**
+- Create: `video/src/ui/Backdrop.tsx`
+- Create: `video/src/ui/CaptionChip.tsx`
+- Create: `video/src/ui/DoorGlyph.tsx`
+- Create: `video/src/ui/Keycap.tsx`
+- Create: `video/src/ui/Keyboard.tsx`
+
+- [ ] **Step 1: Make scene shells fail on missing primitives**
+
+Update `Scene0.tsx` to render missing primitives with real props, not unused imports:
+
+```tsx
+<Backdrop />
+<DoorGlyph />
+<Keycap label="Space" pressed glow width={180} />
+<Keyboard pressedKeys={['⌥', 'Space']} />
+<CaptionChip text={copy.coldOpen.caption} lang={lang} />
+```
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: FAIL because `Backdrop`, `CaptionChip`, `DoorGlyph`, `Keycap`, and `Keyboard` do not exist. This failure also validates the intended props.
+
+- [ ] **Step 2: Implement `Backdrop`**
+
+Create `video/src/ui/Backdrop.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {AbsoluteFill, useCurrentFrame} from 'remotion';
+import {clamp} from '../timing';
+import {theme} from '../theme';
+
+export const Backdrop: FC<{dim?: number; progressFrame?: number}> = ({dim = 0, progressFrame}) => {
+  const currentFrame = useCurrentFrame();
+  const frame = progressFrame ?? currentFrame;
+  const gridOpacity = clamp(frame, [0, 45], [0.2, 0.5]);
+
+  return (
+    <AbsoluteFill style={{background: theme.gradients.backdrop}}>
+      <AbsoluteFill
+        style={{
+          opacity: gridOpacity * (1 - dim),
+          backgroundImage: 'radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px)',
+          backgroundSize: '3px 3px',
+          mixBlendMode: 'screen',
+        }}
+      />
+      <AbsoluteFill style={{backgroundColor: `rgba(0,0,0,${dim})`}} />
+    </AbsoluteFill>
+  );
+};
+```
+
+Use `progressFrame={0}` in Scene 5's final loop-return state so the dot grid matches Scene 0 frame `0`.
+
+- [ ] **Step 3: Implement `CaptionChip`**
+
+Create `video/src/ui/CaptionChip.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {useCurrentFrame} from 'remotion';
+import type {Bi, Lang} from '../copy';
+import {t} from '../copy';
+import {clamp} from '../timing';
+import {theme} from '../theme';
+
+export const CaptionChip: FC<{text: Bi; lang: Lang; from?: number; to?: number}> = ({
+  text,
+  lang,
+  from = 10,
+  to = 28,
+}) => {
+  const frame = useCurrentFrame();
+  const opacity = clamp(frame, [from, to], [0, 1]);
+  const y = clamp(frame, [from, to], [18, 0]);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: '50%',
+        bottom: 74,
+        transform: `translateX(-50%) translateY(${y}px)`,
+        opacity,
+        padding: '14px 22px',
+        border: `.5px solid ${theme.colors.lineStrong}`,
+        borderRadius: 999,
+        background: 'rgba(12,12,16,.62)',
+        boxShadow: '0 20px 60px rgba(0,0,0,.35)',
+        color: theme.colors.text,
+        fontFamily: theme.fonts.sans,
+        fontSize: lang === 'zh' ? 28 : 26,
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {t(text, lang)}
+    </div>
+  );
+};
+```
+
+- [ ] **Step 4: Implement `DoorGlyph`**
+
+Create `video/src/ui/DoorGlyph.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {Img, staticFile, useCurrentFrame} from 'remotion';
+import {clamp} from '../timing';
+
+export type DoorGlyphProps = {
+  size?: number;
+  seedOpacity?: number;
+  fadeInEnd?: number;
+  progressFrame?: number;
+};
+
+export const DoorGlyph: FC<DoorGlyphProps> = ({size = 180, seedOpacity = 0, fadeInEnd = 24, progressFrame}) => {
+  const currentFrame = useCurrentFrame();
+  const frame = progressFrame ?? currentFrame;
+  const opacity = clamp(frame, [0, fadeInEnd], [seedOpacity, 1]);
+  const scale = clamp(frame, [0, 36], [0.92, 1]);
+
+  return (
+    <Img
+      src={staticFile('menubar-icon.png')}
+      style={{
+        width: size,
+        height: size,
+        opacity,
+        transform: `scale(${scale})`,
+        filter: 'drop-shadow(0 0 44px rgba(94,155,255,.55))',
+      }}
+    />
+  );
+};
+```
+
+Use `seedOpacity={0.18}` only for Scene 0 and the loop-return portion of Scene 5. In Scene 5's final loop-return state, also pass `progressFrame={0}` so opacity and scale match Scene 0 frame `0`. Use the default `seedOpacity={0}` everywhere else.
+
+- [ ] **Step 5: Implement `Keycap` and `Keyboard`**
+
+Create `video/src/ui/Keycap.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {theme} from '../theme';
+
+export type KeycapProps = {
+  label: string;
+  pressed?: boolean;
+  glow?: boolean;
+  width?: number;
+};
+
+export const Keycap: FC<KeycapProps> = ({label, pressed = false, glow = false, width = 74}) => (
+  <div
+    style={{
+      width,
+      height: 54,
+      display: 'grid',
+      placeItems: 'center',
+      borderRadius: 10,
+      border: `.5px solid ${pressed ? theme.colors.accent2 : theme.colors.lineStrong}`,
+      borderBottomWidth: 3,
+      background: pressed ? theme.colors.accent : 'linear-gradient(180deg, #2c2c30, #1c1c20)',
+      boxShadow: pressed || glow ? '0 0 30px rgba(10,132,255,.55)' : 'none',
+      color: theme.colors.text,
+      fontFamily: theme.fonts.mono,
+      fontSize: label.length > 5 ? 18 : 22,
+      fontWeight: 700,
+      transform: pressed ? 'translateY(4px)' : 'translateY(0)',
+    }}
+  >
+    {label}
+  </div>
+);
+```
+
+Create `video/src/ui/Keyboard.tsx`:
+
+```tsx
+import type {FC} from 'react';
+import {Keycap} from './Keycap';
+
+export type KeyboardProps = {
+  pressedKeys?: string[];
+};
+
+const rows: string[][] = [
+  ['Esc', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6'],
+  ['⌘', 'K', ':', '3', '0', '0', '0', 'Return'],
+  ['⌃', '⌥', 'Space', '⌘'],
+];
+
+const widthFor = (label: string) => {
+  if (label === 'Space') return 260;
+  if (label === 'Return') return 120;
+  if (label === 'Esc') return 84;
+  return 74;
+};
+
+export const Keyboard: FC<KeyboardProps> = ({pressedKeys = []}) => (
+  <div style={{display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center'}}>
+    {rows.map((row, rowIndex) => (
+      <div key={`row-${rowIndex}`} style={{display: 'flex', gap: 10}}>
+        {row.map((key, keyIndex) => (
+          <Keycap key={`${rowIndex}-${keyIndex}-${key}`} label={key} width={widthFor(key)} pressed={pressedKeys.includes(key)} />
+        ))}
+      </div>
+    ))}
+  </div>
+);
+```
+
+Expected rendered output: fixed-width rows centered under the scene, with no layout shift when `pressedKeys` changes.
+
+- [ ] **Step 6: Typecheck**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+Run:
+
+```bash
+git add video/src/ui/Backdrop.tsx video/src/ui/CaptionChip.tsx video/src/ui/DoorGlyph.tsx video/src/ui/Keycap.tsx video/src/ui/Keyboard.tsx video/src/scenes/Scene0.tsx
+git commit -m "feat(video): add promo visual primitives"
+```
+
+### Task 5: Build Desktop, Palette, Port, Panel, and Montage UI Units
+
+**Files:**
+- Create: `video/src/ui/DesktopStage.tsx`
+- Create: `video/src/ui/CommandPalette.tsx`
+- Create: `video/src/ui/PortManager.tsx`
+- Create: `video/src/ui/MenuPanel.tsx`
+- Create: `video/src/ui/SystemMontage.tsx`
+
+- [ ] **Step 1: Write missing-component failures**
+
+Update scene files to render missing components with real props:
+
+- `Scene1` imports `useCurrentFrame`, sets `const frame = useCurrentFrame()`, and renders `<DesktopStage frame={frame} events={[{kind: 'open', appName: 'Finder', start: 30}, {kind: 'close', appName: 'Finder', start: 104}, {kind: 'open', appName: 'Safari', start: 132}]} />`.
+- `Scene2` imports `useCurrentFrame`, sets `const frame = useCurrentFrame()`, and renders `<CommandPalette frame={frame} lang={lang} />`.
+- `Scene3` imports `useCurrentFrame`, sets `const frame = useCurrentFrame()`, and renders `<PortManager frame={frame} lang={lang} />`.
+- `Scene4` imports `useCurrentFrame`, sets `const frame = useCurrentFrame()`, and renders `<SystemMontage frame={frame} lang={lang} />`.
+- `Scene5` renders `<MenuPanel lang={lang} />`.
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: FAIL because those UI modules do not exist. This failure validates the intended component props.
+
+- [ ] **Step 2: Implement `DesktopStage`**
+
+`DesktopStage` props:
+
+```ts
+type DesktopAppName = 'Finder' | 'Safari';
+type DesktopEvent =
+  | {kind: 'open'; appName: DesktopAppName; start: number}
+  | {kind: 'close'; appName: DesktopAppName; start: number};
+
+type DesktopStageProps = {
+  frame: number;
+  events: DesktopEvent[];
+};
+```
+
+Behavior:
+
+- Faux desktop uses `theme.gradients.desktop`.
+- Menu bar height is `32`.
+- Dock sits at the bottom and bounces the active dock icon during each `open.start..open.start+20`.
+- App window opacity/scale/translate uses `overshoot` only for each `open.start..open.start+24`.
+- Closing animation uses `ease` over each `close.start..close.start+18`.
+- The window is hidden after closing opacity reaches zero.
+- The active app at a frame is derived from the most recent event at or before that frame: `open` shows that app, `close` hides it. This lets Scene 1 express Finder open/hide and Safari open without special-case props.
+
+Layout contract:
+
+- Stage frame: `width: 1180`, `height: 720`, centered, `borderRadius: 18`, `padding: 8`, `border: .5px solid theme.colors.lineStrong`, `boxShadow: theme.shadow.stage`.
+- Menu bar: absolute top `8`, left/right `8`, height `32`, font `14`, right side includes a `DoorGlyph`-sized image at `16x16` plus `9:41`.
+- App window: `width: 760`, `height: 440`, centered at `top: 120`, titlebar `48`, traffic lights `13x13`, app logo `96x96`.
+- Dock: absolute bottom `24`, height `64`, icon size `44`, gap `10`, active dot `5x5`.
+- Text placement: app name is centered in the window body at font size `34`, tag at `20`; no text may overlap the dock or menu bar.
+
+Required structure:
+
+```tsx
+<div data-ui="desktop-stage">
+  <div data-ui="desktop-menubar" />
+  <div data-ui="desktop-window" />
+  <div data-ui="desktop-dock" />
+</div>
+```
+
+Expected visual match: the container should read as the landing `.hkscreen` mock, with the menu bar, dock, and centered app window using the same gradients and traffic-light styling.
+
+- [ ] **Step 3: Implement `CommandPalette`**
+
+`CommandPalette` props:
+
+```ts
+type CommandPaletteProps = {
+  frame: number;
+  lang: Lang;
+};
+```
+
+Behavior:
+
+- Glass overlay scales from `0.96` to `1` and opacity from `0` to `1` over frames `0..18`.
+- Query `1234 * 8%` types one character every 3 frames from local frame `24`.
+- Result `98.72` fades in over frames `58..72`.
+- Query switches to `3000` at frame `105`; a `Ports` section appears by frame `132`.
+- No real input element is used; this is deterministic renderable text.
+
+Layout contract:
+
+- Palette frame: `width: 980`, min height `420`, centered at `top: 250`, `borderRadius: 20`, `background: rgba(28,28,32,.82)`, `border: .5px solid theme.colors.lineStrong`.
+- Search row: height `82`, horizontal padding `28`, magnifier area `24x24`, query font `34` mono, query and result text never wraps.
+- Result row: height `76`, result number aligned right, label left, opacity controlled by frame.
+- Ports section: top divider, section title font `18`, port row height `64`, `:3000` mono pill at left, `node` centered-left, `PID 1024` right.
+- Text placement: Chinese and English captions outside the palette remain handled by scenes, not by this component.
+
+Required structure:
+
+```tsx
+<div data-ui="command-palette">
+  <div data-ui="palette-search" />
+  <div data-ui="palette-result" />
+  <div data-ui="palette-ports-section" />
+</div>
+```
+
+Expected visual match: the panel should read as a Raycast-style glass command palette, not a browser form.
+
+- [ ] **Step 4: Implement `PortManager`**
+
+`PortManager` props:
+
+```ts
+type PortManagerProps = {
+  frame: number;
+  lang: Lang;
+};
+```
+
+Behavior:
+
+- Reuse the same 12 sample ports as `landing/src/lib/data.ts`: `3000 node 1024`, `5173 vite 2156`, `5432 postgres 487`, `6379 redis-server 612`, `8080 docker 1893`, `8088 nginx 902`, `9229 node 4421`, `27017 mongod 765`, `4000 python3 3104`, `7000 ControlCenter 665`, `4500 rapportd 412`, `50000 python3 5821`. Only the first five need to be visible at once in the list viewport.
+- Search `:3000` types over frames `20..42`.
+- `node` row highlights by frames `52..68`.
+- Confirmation card appears over frames `84..104`.
+- Confirm button presses at frame `124`.
+- Row state changes to ended from frame `142` with the dot turning red and row opacity dropping to `.45`.
+
+Layout contract:
+
+- Outer frame: `width: 1220`, `height: 650`, centered, `display: grid`, columns `390px 1fr`, gap `24`, padding `16`, `borderRadius: 20`.
+- Sidebar: panel gradient, `borderRadius: 14`, header height `56`, active Port Manager row height `54`.
+- Main: panel gradient, `borderRadius: 14`, search row height `70`, list row height `58`, footer height `58`.
+- Confirmation card: `width: 460`, centered over main panel, title font `28`, message font `17`, buttons `132x44`, destructive button red.
+- Text placement: the `node` row remains visible behind the confirmation card; the card must not cover the search query.
+
+Required structure:
+
+```tsx
+<div data-ui="port-manager">
+  <aside data-ui="port-sidebar" />
+  <section data-ui="port-main">
+    <div data-ui="port-search" />
+    <div data-ui="port-list" />
+    <div data-ui="port-confirmation" />
+  </section>
+</div>
+```
+
+Expected visual match: the layout should read as the landing `.pm-wrap`, with side panel plus main port list, not a generic table.
+
+- [ ] **Step 5: Implement `MenuPanel`**
+
+`MenuPanel` props:
+
+```ts
+type MenuPanelProps = {
+  lang: Lang;
+};
+```
+
+`MenuPanel` renders the full enabled AnyDoor panel. It must include every row from `landing/src/lib/data.ts` `panelItems`; do not use a representative subset. Rows without real hotkeys can show a deterministic promo hotkey from the matrix below so the close scene satisfies “all items enabled, hotkeys listed”.
+
+```ts
+[
+  ['应用快捷键', 'App Shortcuts', ['⌥', 'Space']],
+  ['端口管理', 'Port Manager', ['⌘', 'P']],
+  ['Keep Awake', 'Keep Awake', ['⌥', 'A']],
+  ['静音', 'Mute', ['⌥', 'M']],
+  ['隐藏桌面图标', 'Hide Desktop', ['⌥', 'H']],
+  ['显示隐藏文件', 'Show Hidden Files', ['⌥', '.']],
+  ['深色模式', 'Dark Mode', ['⌥', 'D']],
+  ['锁定屏幕', 'Lock Screen', ['⌃', '⌘', 'Q']],
+  ['清空废纸篓', 'Empty Trash', ['⌘', '⌫']],
+  ['截图到剪贴板', 'Screenshot to Clipboard', ['⌘', '⇧', '5']],
+  ['剪贴板历史', 'Clipboard History', ['⌘', '⇧', 'V']],
+  ['显示器睡眠', 'Display Sleep', ['⌥', 'S']],
+  ['系统休眠', 'System Sleep', ['⌃', '⌥', 'S']],
+  ['隐藏 Dock', 'Hide Dock', ['⌥', 'K']],
+  ['自动隐藏菜单栏', 'Auto-hide Menu Bar', ['⌥', 'B']],
+  ['重启访达', 'Restart Finder', ['⌥', 'F']],
+  ['重启 Dock', 'Restart Dock', ['⌥', 'R']],
+  ['重启菜单栏', 'Restart Menu Bar', ['⌥', 'N']],
+  ['刷新 DNS', 'Flush DNS', ['⌥', 'G']],
+  ['禁用键盘', 'Keyboard Lock', ['⌥', 'L']],
+  ['屏幕取词', 'Screen OCR', ['⌥', 'O']],
+  ['屏幕取色', 'Pick Color', ['⌥', 'C']],
+  ['识别二维码', 'Scan QR Code', ['⌥', 'Q']],
+  ['显示器亮度', 'Display Brightness', ['⌥', '↑']],
+  ['窗口布局', 'Window Layout', ['⌥', 'W']],
+  ['Hosts 管理', 'Hosts Manager', ['⌥', 'H']],
+]
+```
+
+It must look like the landing `.mbpanel`: width `420`, panel gradient, `.5px` hairline, `16px` radius, `theme.shadow.panel`, mono keycaps. Because 26 rows are taller than the frame, mask the lower panel with `linear-gradient(180deg, #000 82%, transparent 100%)` as the landing hero does.
+
+Layout contract:
+
+- Panel frame: `width: 420`, max visible height `720`, padding `10`, row height `42`, row gap `2`.
+- Header: height `46`, title left, enabled count right (`26 enabled` / `26 个已启用`).
+- Row icon cell: `26x26`; label is one line with ellipsis; keycaps sit right-aligned and must not collide with labels.
+- Footer is omitted in the video panel so all enabled rows fit in the mask.
+
+- [ ] **Step 6: Implement `SystemMontage`**
+
+`SystemMontage` props:
+
+```ts
+type SystemMontageProps = {
+  frame: number;
+  lang: Lang;
+};
+```
+
+Beat timing:
+
+- `0..45`: Hosts profile switch, label `local.dev → api.dev`.
+- `45..90`: Dark Mode flip, stage background falls to black.
+- `90..135`: Mute, speaker glyph crosses out.
+- `135..180`: external-display brightness OSD increases from `42%` to `78%`.
+
+Each beat uses opacity/translate from `clamp()` and no CSS animation.
+
+Layout contract:
+
+- Montage stage: `width: 1120`, `height: 620`, centered, `borderRadius: 22`, `background: theme.gradients.desktop` except during dark-mode beat.
+- Each beat card: `width: 620`, `height: 300`, centered, card radius `18`, heading font `32`, supporting mono readout font `24`.
+- Hosts beat shows a two-column profile switch with arrows; Dark Mode beat shows a toggle and full-stage background darkening; Mute beat shows a speaker glyph with a crossing stroke; Brightness beat shows a macOS-style OSD with 12 bars.
+- Text placement: beat card heading stays top-left inside the card; animated readouts stay centered and never overlap the caption chip.
+
+Required structure:
+
+```tsx
+<div data-ui="system-montage">
+  <div data-ui="hosts-beat" />
+  <div data-ui="dark-mode-beat" />
+  <div data-ui="mute-beat" />
+  <div data-ui="brightness-beat" />
+</div>
+```
+
+- [ ] **Step 7: Typecheck**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Render static UI-unit stills**
+
+Run:
+
+```bash
+cd video
+npx remotion still AnyDoorPromo out/ui-desktop.png --scale=0.25 --frame=120
+npx remotion still AnyDoorPromo out/ui-palette.png --scale=0.25 --frame=300
+npx remotion still AnyDoorPromo out/ui-port-manager.png --scale=0.25 --frame=480
+npx remotion still AnyDoorPromo out/ui-montage.png --scale=0.25 --frame=660
+npx remotion still AnyDoorPromo out/ui-panel.png --scale=0.25 --frame=840
+```
+
+Expected: all stills render. Inspect them before committing:
+
+- `ui-desktop.png` reads as the landing `.hkscreen`, with no app window/dock/menu overlap.
+- `ui-palette.png` shows a glass command palette, not a native browser input.
+- `ui-port-manager.png` reads as the landing `.pm-wrap` two-column layout.
+- `ui-montage.png` has a single centered beat card with caption clearance.
+- `ui-panel.png` reads as the landing `.mbpanel`, includes the full enabled row set under the fade mask, and keycaps do not collide with labels.
+
+- [ ] **Step 9: Commit**
+
+Run:
+
+```bash
+git add video/src/ui/DesktopStage.tsx video/src/ui/CommandPalette.tsx video/src/ui/PortManager.tsx video/src/ui/MenuPanel.tsx video/src/ui/SystemMontage.tsx video/src/scenes
+git commit -m "feat(video): build promo mockup components"
+```
+
+### Task 6: Replace Scene Shells with Final Timing
+
+**Files:**
+- Modify: `video/src/scenes/Scene0.tsx`
+- Modify: `video/src/scenes/Scene1.tsx`
+- Modify: `video/src/scenes/Scene2.tsx`
+- Modify: `video/src/scenes/Scene3.tsx`
+- Modify: `video/src/scenes/Scene4.tsx`
+- Modify: `video/src/scenes/Scene5.tsx`
+
+- [ ] **Step 1: Implement Scene 0 cold open**
+
+Use `Backdrop`, centered `DoorGlyph seedOpacity={0.18}`, a glowing `Keycap` press from frames `42..58`, and `CaptionChip` from frame `34`.
+
+Expected frame checks:
+
+- Frame `0`: loop seed state, dark background with the door glyph dimmed to about `0.18` opacity and no visible key press.
+- Frame `45`: glyph visible, keycap glowing.
+- Frame `89`: stable state ready to fade into scene 1.
+
+- [ ] **Step 2: Implement Scene 1 hotkey app toggle**
+
+Use `DesktopStage` and `Keyboard`:
+
+- Frames `0..28`: desktop idle.
+- Frames `30..54`: `⌥Space` key press opens Finder via event `{kind: 'open', appName: 'Finder', start: 30}`.
+- Frames `58..100`: Finder window visible.
+- Frames `104..128`: same key press hides Finder via event `{kind: 'close', appName: 'Finder', start: 104}`.
+- Frames `132..156`: key press opens Safari via event `{kind: 'open', appName: 'Safari', start: 132}`.
+- Frames `160..179`: Safari window visible.
+
+Caption starts at frame `14`.
+
+- [ ] **Step 3: Implement Scene 2 command palette**
+
+Use `CommandPalette`:
+
+- Frames `0..24`: palette glass overlay enters.
+- Frames `24..85`: calc query and result.
+- Frames `105..165`: port query handoff.
+- Frame `179`: port search row is visible so transition into Scene 3 is coherent.
+- Caption uses `CaptionChip text={copy.palette.caption}` starting at frame `10`.
+
+- [ ] **Step 4: Implement Scene 3 Port Manager**
+
+Use `PortManager`:
+
+- Frames `0..42`: search `:3000`.
+- Frames `52..82`: row highlight.
+- Frames `84..124`: confirmation card.
+- Frames `142..179`: ended state.
+- Caption uses `CaptionChip text={copy.ports.caption}` starting at frame `10`.
+
+- [ ] **Step 5: Implement Scene 4 system-control montage**
+
+Use `SystemMontage`, with one beat every 45 frames. Caption starts at frame `10` and remains visible through the final beat.
+
+- [ ] **Step 6: Implement Scene 5 close and loop return**
+
+Use `MenuPanel`, the value caption, meta badges, and `DoorGlyph`:
+
+- Frames `0..80`: menu panel pullback.
+- Frames `82..150`: headline and meta badges. Headline uses `copy.close.caption`; badges split `copy.close.meta[lang]` by ` · ` into four pills (`免费`/`Free`, `开源`/`open source`, `纯本地`/`local-only`, `macOS 14+`).
+- Frames `156..214`: panel fades down while `DoorGlyph seedOpacity={0.18}` returns to the center. During this return, derive `loopProgressFrame = clamp(frame, [156, 214], [36, 0])` and pass it to both `<Backdrop progressFrame={loopProgressFrame} />` and `<DoorGlyph seedOpacity={0.18} progressFrame={loopProgressFrame} />`.
+- Frames `215..239`: final frame returns to Scene 0's frame-0 loop seed state, not Scene 0's fully visible glyph state.
+
+- [ ] **Step 7: Render boundary stills**
+
+Run:
+
+```bash
+cd video
+npx remotion still AnyDoorPromo out/check-000.png --scale=0.25 --frame=0
+npx remotion still AnyDoorPromo out/check-090.png --scale=0.25 --frame=90
+npx remotion still AnyDoorPromo out/check-270.png --scale=0.25 --frame=270
+npx remotion still AnyDoorPromo out/check-450.png --scale=0.25 --frame=450
+npx remotion still AnyDoorPromo out/check-630.png --scale=0.25 --frame=630
+npx remotion still AnyDoorPromo out/check-810.png --scale=0.25 --frame=810
+npx remotion still AnyDoorPromo out/check-986.png --scale=0.25 --frame=986
+npx remotion still AnyDoorPromoEn out/check-en-270.png --scale=0.25 --frame=270
+npx remotion still AnyDoorPromoEn out/check-en-450.png --scale=0.25 --frame=450
+npx remotion still AnyDoorPromoEn out/check-en-810.png --scale=0.25 --frame=810
+npx remotion still AnyDoorPromoEn out/check-en-986.png --scale=0.25 --frame=986
+npx remotion still AnyDoorPromo out/check-transition-084.png --scale=0.25 --frame=84
+npx remotion still AnyDoorPromo out/check-transition-096.png --scale=0.25 --frame=96
+```
+
+Expected: all stills render. Manually inspect them for clipped text, blank frames, transition overlap artifacts, and loop continuity. `check-000.png` and `check-986.png` must be visually identical except for codec/render noise; if not, adjust Scene 5 or Scene 0 before committing.
+
+- [ ] **Step 8: Run typecheck**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Commit**
+
+Run:
+
+```bash
+git add video/src/scenes video/src/ui
+git commit -m "feat(video): animate AnyDoor promo storyboard"
+```
+
+Expected: final scene implementation is committed separately from render scripts and landing integration.
+
+## Chunk 3: Rendering and Landing Integration
+
+### File Structure
+
+- `video/scripts/render.sh` renders zh/en MP4, zh/en WebM, zh/en poster JPG, then copies them into `landing/public/`.
+- `landing/public/promo-zh.mp4`, `promo-zh.webm`, `promo-zh.jpg`, `promo-en.mp4`, `promo-en.webm`, and `promo-en.jpg` are the shipped assets.
+- `landing/src/components/Showcase.astro` owns playback, language source swapping, and reduced-motion fallback.
+- `landing/src/styles/showcase.css` owns only Showcase styles and is imported by `Showcase.astro`.
+- `landing/src/pages/index.astro` inserts `<Showcase />` immediately after `<Hero />`.
+- `landing/src/lib/copy.ts` adds only the Showcase section text.
+
+### Task 7: Add Render Script and Generate Assets
+
+**Files:**
+- Create: `video/scripts/render.sh`
+- Create: `landing/public/promo-zh.mp4`
+- Create: `landing/public/promo-zh.webm`
+- Create: `landing/public/promo-zh.jpg`
+- Create: `landing/public/promo-en.mp4`
+- Create: `landing/public/promo-en.webm`
+- Create: `landing/public/promo-en.jpg`
+
+- [ ] **Step 1: Add the render script**
+
+Create `video/scripts/render.sh`:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LANDING_PUBLIC="$ROOT/../landing/public"
+
+cd "$ROOT"
+mkdir -p out "$LANDING_PUBLIC"
+
+render_language() {
+  local composition="$1"
+  local lang="$2"
+
+  npx remotion render "$composition" "out/promo-$lang.mp4" --codec=h264
+  npx remotion render "$composition" "out/promo-$lang.webm" --codec=vp9
+  npx remotion still "$composition" "out/promo-$lang.jpg" --frame=0
+
+  cp "out/promo-$lang.mp4" "$LANDING_PUBLIC/promo-$lang.mp4"
+  cp "out/promo-$lang.webm" "$LANDING_PUBLIC/promo-$lang.webm"
+  cp "out/promo-$lang.jpg" "$LANDING_PUBLIC/promo-$lang.jpg"
+}
+
+render_language AnyDoorPromo zh
+render_language AnyDoorPromoEn en
+```
+
+- [ ] **Step 2: Make the script executable**
+
+Run:
+
+```bash
+chmod +x video/scripts/render.sh
+```
+
+Expected: `test -x video/scripts/render.sh` succeeds.
+
+- [ ] **Step 3: Run a still smoke test before full render**
+
+Run:
+
+```bash
+cd video
+npm run still:check
+```
+
+Expected: PASS and `video/out/check-frame-030.png` exists.
+
+- [ ] **Step 4: Render the full asset matrix**
+
+Run:
+
+```bash
+cd video
+npm run render
+```
+
+Expected: PASS. `landing/public/` contains six `promo-*` files and `video/out/` contains the same generated files.
+
+- [ ] **Step 5: Confirm generated artifacts are staged intentionally**
+
+Run:
+
+```bash
+git status --short
+```
+
+Expected: `landing/public/promo-*` files are visible as new files; `video/out/*` files are not visible because `.gitignore` excludes them.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```bash
+git add video/scripts/render.sh landing/public/promo-zh.mp4 landing/public/promo-zh.webm landing/public/promo-zh.jpg landing/public/promo-en.mp4 landing/public/promo-en.webm landing/public/promo-en.jpg
+git commit -m "feat(video): render promo assets"
+```
+
+Expected: render script and landing assets are committed together.
+
+### Task 8: Add the Landing Showcase Component
+
+**Files:**
+- Modify: `landing/src/lib/copy.ts`
+- Create: `landing/src/components/Showcase.astro`
+- Create: `landing/src/styles/showcase.css`
+- Modify: `landing/src/pages/index.astro`
+
+- [ ] **Step 1: Add copy for the section**
+
+In `landing/src/lib/copy.ts`, add this top-level block after `hero`:
+
+```ts
+  showcase: {
+    eyebrow: { zh: '产品演示', en: 'Product demo' },
+    h2a: { zh: '一套热键，', en: 'One set of hotkeys.' },
+    h2b: { zh: '整台 Mac。', en: 'The whole Mac.' },
+    lede: {
+      zh: '从应用切换到命令面板、端口、Hosts、深色、静音和外接显示器亮度，全部在键盘上完成。',
+      en: 'From app toggling to command palette, ports, hosts, dark mode, mute, and external-display brightness, all from the keyboard.',
+    },
+    windowTitle: { zh: 'AnyDoor 产品演示', en: 'AnyDoor product demo' },
+  },
+```
+
+Expected: copy stays bilingual and follows the existing `copy.<section>` shape.
+
+- [ ] **Step 2: Create the Showcase component**
+
+Create `landing/src/components/Showcase.astro`:
+
+```astro
+---
+import { copy } from '../lib/copy';
+import '../styles/showcase.css';
+---
+
+<section class="section container-x showcase" aria-labelledby="showcase-title">
+  <div class="eyebrow">
+    <span class="dot" style="background: var(--color-accent-2); box-shadow: 0 0 12px var(--color-accent-2)" />
+    <span data-i18n-zh>{copy.showcase.eyebrow.zh}</span><span data-i18n-en>{copy.showcase.eyebrow.en}</span>
+  </div>
+  <h2 class="sec-h" id="showcase-title">
+    <span class="gradient-text"><span data-i18n-zh>{copy.showcase.h2a.zh}</span><span data-i18n-en>{copy.showcase.h2a.en}</span></span><br />
+    <span class="accent-text"><span data-i18n-zh>{copy.showcase.h2b.zh}</span><span data-i18n-en>{copy.showcase.h2b.en}</span></span>
+  </h2>
+  <p class="lede">
+    <span data-i18n-zh>{copy.showcase.lede.zh}</span><span data-i18n-en>{copy.showcase.lede.en}</span>
+  </p>
+
+  <div class="showcase-frame">
+    <div class="showcase-titlebar" aria-hidden="true">
+      <span class="traffic r"></span>
+      <span class="traffic y"></span>
+      <span class="traffic g"></span>
+      <span class="showcase-window-title">
+        <span data-i18n-zh>{copy.showcase.windowTitle.zh}</span><span data-i18n-en>{copy.showcase.windowTitle.en}</span>
+      </span>
+    </div>
+    <video
+      id="promo-video"
+      class="showcase-video"
+      autoplay
+      muted
+      loop
+      playsinline
+      preload="none"
+      aria-labelledby="showcase-title"
+    >
+      <source id="promo-video-webm" type="video/webm" />
+      <source id="promo-video-mp4" type="video/mp4" />
+    </video>
+  </div>
+</section>
+
+<script>
+  type Lang = 'zh' | 'en';
+
+  const root = document.documentElement;
+  const video = document.querySelector<HTMLVideoElement>('#promo-video');
+  const webm = document.querySelector<HTMLSourceElement>('#promo-video-webm');
+  const mp4 = document.querySelector<HTMLSourceElement>('#promo-video-mp4');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+  const currentLang = (): Lang => root.getAttribute('data-lang') === 'en' ? 'en' : 'zh';
+
+  const applyVideoLanguage = (lang: Lang) => {
+    if (!video || !webm || !mp4) return;
+
+    const nextWebm = `/promo-${lang}.webm`;
+    const nextMp4 = `/promo-${lang}.mp4`;
+    const nextPoster = `/promo-${lang}.jpg`;
+    if (mp4.getAttribute('src') === nextMp4) return;
+
+    webm.setAttribute('src', nextWebm);
+    mp4.setAttribute('src', nextMp4);
+    video.poster = nextPoster;
+    video.preload = 'metadata';
+    video.load();
+
+    if (reduceMotion.matches) {
+      video.pause();
+      return;
+    }
+
+    video.play().catch(() => {});
+  };
+
+  const applyMotionPreference = () => {
+    if (!video) return;
+    if (reduceMotion.matches) {
+      video.pause();
+      video.removeAttribute('autoplay');
+    } else {
+      video.setAttribute('autoplay', '');
+      video.play().catch(() => {});
+    }
+  };
+
+  applyVideoLanguage(currentLang());
+  applyMotionPreference();
+
+  new MutationObserver(() => applyVideoLanguage(currentLang()))
+    .observe(root, { attributes: true, attributeFilter: ['data-lang'] });
+
+  reduceMotion.addEventListener('change', applyMotionPreference);
+</script>
+```
+
+- [ ] **Step 3: Insert after Hero**
+
+Modify `landing/src/pages/index.astro`:
+
+```astro
+import Showcase from '../components/Showcase.astro';
+```
+
+and:
+
+```astro
+<Hero />
+<Showcase />
+<HotkeyDemo />
+```
+
+Expected: the interactive `HotkeyDemo` remains on the page and the video appears directly after the hero.
+
+- [ ] **Step 4: Add Showcase styles**
+
+Create `landing/src/styles/showcase.css`:
+
+```css
+/* ─────────────────────────── Promo showcase ─────────────────────────── */
+.showcase{padding-top: 40px}
+.showcase-frame{
+  position: relative;
+  margin-top: 56px;
+  overflow: hidden;
+  border-radius: 18px;
+  border: .5px solid var(--color-line-strong);
+  background:
+    radial-gradient(120% 100% at 20% 0%, rgba(94,155,255,.22), transparent 55%),
+    radial-gradient(120% 120% at 90% 100%, rgba(191,90,242,.20), transparent 55%),
+    linear-gradient(160deg, #1d2230, #0c0d12 70%);
+  box-shadow: 0 40px 100px rgba(0,0,0,.5);
+}
+.showcase-titlebar{
+  height: 34px;
+  display:flex;
+  align-items:center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: .5px solid rgba(255,255,255,.08);
+  background: rgba(0,0,0,.28);
+  backdrop-filter: blur(8px);
+}
+.showcase-titlebar .traffic{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+.showcase-titlebar .traffic.r{background:#ff5f57}
+.showcase-titlebar .traffic.y{background:#febc2e}
+.showcase-titlebar .traffic.g{background:#28c840}
+.showcase-window-title{
+  position:absolute;
+  left:50%;
+  transform:translateX(-50%);
+  font: 500 12px/1 var(--font-sans);
+  color: var(--color-text-soft);
+}
+.showcase-video{
+  display:block;
+  width:100%;
+  aspect-ratio:16 / 9;
+  object-fit:cover;
+  background: var(--color-bg);
+}
+@media (prefers-reduced-motion: reduce){
+  .showcase-video{object-fit:cover}
+}
+@media (max-width: 640px){
+  .showcase{padding-top: 20px}
+  .showcase-frame{margin-top: 36px; border-radius: 14px}
+}
+```
+
+- [ ] **Step 5: Build landing**
+
+Run:
+
+```bash
+cd landing
+bun install --frozen-lockfile
+bun run build
+```
+
+Expected: PASS. Astro should not complain about the new component or script.
+
+- [ ] **Step 6: Commit**
+
+Run:
+
+```bash
+git add landing/src/lib/copy.ts landing/src/components/Showcase.astro landing/src/pages/index.astro landing/src/styles/showcase.css
+git commit -m "feat(landing): add promo video showcase"
+```
+
+Expected: landing integration is committed separately from rendered assets.
+
+### Task 9: Verify Playback, Looping, and Final Quality
+
+**Files:**
+- No new files unless fixes are required.
+
+- [ ] **Step 1: Start Remotion Studio for final timing and loop review**
+
+Run:
+
+```bash
+cd video
+npm run studio
+```
+
+Expected: Studio opens both `AnyDoorPromo` and `AnyDoorPromoEn`. Review frames around `0`, `90`, `270`, `450`, `630`, `810`, and `986`. Explicitly scrub from frame `986` back to frame `0`; the loop must not jump. Stop the Studio process after review.
+
+- [ ] **Step 2: Verify final typecheck and still render**
+
+Run:
+
+```bash
+cd video
+npm run typecheck
+npm run still:check
+npx remotion still AnyDoorPromo out/font-check-zh.png --scale=0.5 --frame=810
+npx remotion still AnyDoorPromoEn out/font-check-en.png --scale=0.5 --frame=810
+```
+
+Expected: PASS. Open `out/font-check-zh.png` and `out/font-check-en.png`; CJK, Latin, and mono glyphs must render without tofu squares or fallback clipping in the headless render.
+
+- [ ] **Step 3: Verify landing build**
+
+Run:
+
+```bash
+cd landing
+bun run build
+```
+
+Expected: PASS.
+
+- [ ] **Step 4: Verify language switching in the browser**
+
+Run:
+
+```bash
+cd landing
+bun run dev
+```
+
+Expected: local Astro dev server starts. Open the printed local URL in both Safari and Chrome with DevTools Network open and cache disabled, then verify:
+
+- zh loads `/promo-zh.mp4` or `/promo-zh.webm`.
+- Clicking `EN` swaps to `/promo-en.mp4` or `/promo-en.webm`.
+- Clicking `中` swaps back to the zh asset.
+- With `localStorage.setItem('anydoor.lang', 'en')` before reload, the initial network requests do not fetch `/promo-zh.*`.
+- The inactive language is not preloaded as a second video.
+- Autoplay is muted, loops, and plays inline.
+- With `prefers-reduced-motion: reduce`, playback pauses and the poster remains visible.
+
+Stop the dev server after verification.
+
+- [ ] **Step 5: Verify asset presence and git cleanliness**
+
+Run:
+
+```bash
+ls landing/public/promo-*.mp4 landing/public/promo-*.webm landing/public/promo-*.jpg
+git status --short
+```
+
+Expected: six landing assets exist. `git status --short` contains only intentional changes or is clean after commits.
+
+- [ ] **Step 6: Final commit if verification required fixes**
+
+If verification required fixes, commit them:
+
+```bash
+git add <only-files-changed-by-verification-fixes>
+git commit -m "fix(video): polish promo playback verification"
+```
+
+Expected: no uncommitted fix remains.
+
+## Final Verification
+
+Run these before handoff:
+
+```bash
+cd video && npm run typecheck && npm run still:check
+cd landing && bun run build
+```
+
+If any Rust files were touched accidentally, stop and inspect the diff. This plan should not touch Swift/Rust application code, so `cargo fmt` and `cargo clippy` are not required for the intended scope.
