@@ -276,11 +276,15 @@ private struct EnterToTranslateEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let textView = scroll.documentView as? NSTextView else { return }
+        // Nothing to apply (e.g. the user's own keystrokes already synced the
+        // binding). Return BEFORE consuming the token so that, if SwiftUI ever
+        // delivers the setToken bump and the text change in separate passes, the
+        // later pass carrying the prefilled text is still recognized as programmatic.
+        guard textView.string != text else { return }
         // A programmatic set (prefill) bumps setToken; such a write must win even
         // while focused so the recognized/selected text replaces the field.
         let isProgrammatic = context.coordinator.lastSetToken != setToken
         context.coordinator.lastSetToken = setToken
-        guard textView.string != text else { return }
         // Otherwise, while the user is typing (text view is first responder), skip
         // the external write: it would collapse the caret/selection or break IME
         // composition, and the binding already mirrors the user's edits via
