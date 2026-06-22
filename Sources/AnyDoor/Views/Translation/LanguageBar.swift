@@ -79,10 +79,7 @@ struct LanguageBar: View {
     }
 
     private var swapButton: some View {
-        Button {
-            coordinator.swapLanguages()
-            onChange()
-        } label: {
+        Button(action: performSwap) {
             Image(systemName: "arrow.left.arrow.right")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -92,12 +89,27 @@ struct LanguageBar: View {
         }
         .buttonStyle(.plain)
         .onHover { swapHovered = $0 }
-        // ⌘S swaps source/target; the panel is key while open, so the hosting
-        // view's performKeyEquivalent fires this even while the input has focus.
-        .keyboardShortcut("s", modifiers: .command)
-        // Surface the shortcut in the tooltip (a plain button's help text isn't
-        // auto-decorated with its key equivalent the way a menu item's is).
+        // Tooltip shows the action and its shortcut. Kept on a plain Button (no
+        // `.keyboardShortcut` here): attaching a key equivalent to this same
+        // button suppresses its `.help` tooltip, so the shortcut lives on the
+        // hidden companion below instead.
         .help(L(.translationSwapLanguages) + " ⌘S")
+        .background(swapShortcut)
+    }
+
+    /// ⌘S on a zero-opacity companion button so the visible button keeps its
+    /// tooltip. The panel is key while open, so the hosting view's
+    /// performKeyEquivalent fires this even while the input has focus.
+    private var swapShortcut: some View {
+        Button("", action: performSwap)
+            .keyboardShortcut("s", modifiers: .command)
+            .opacity(0)
+            .accessibilityHidden(true)
+    }
+
+    private func performSwap() {
+        coordinator.swapLanguages()
+        onChange()
     }
 
     /// The capsule label shared by both pickers: title + a single trailing
