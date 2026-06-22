@@ -33,7 +33,11 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
         panel.isOpaque = false
         panel.hasShadow = true
         panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .moveToActiveSpace]
+        // `.canJoinAllSpaces` and `.moveToActiveSpace` are mutually exclusive;
+        // setting both throws NSInternalInconsistencyException. Match the other
+        // Spotlight-style summoned panels (command palette, app picker) and let
+        // the panel join all spaces so the global hotkey can surface it anywhere.
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
