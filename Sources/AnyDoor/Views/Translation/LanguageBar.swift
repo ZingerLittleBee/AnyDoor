@@ -89,11 +89,11 @@ struct LanguageBar: View {
         }
         .buttonStyle(.plain)
         .onHover { swapHovered = $0 }
-        // Tooltip shows the action and its shortcut. Kept on a plain Button (no
-        // `.keyboardShortcut` here): attaching a key equivalent to this same
-        // button suppresses its `.help` tooltip, so the shortcut lives on the
-        // hidden companion below instead.
-        .help(L(.translationSwapLanguages) + " ⌘S")
+        // SwiftUI's `.help` doesn't render a tooltip in this panel, so draw our
+        // own bubble; `.help` is kept for the accessibility hint. The ⌘S shortcut
+        // lives on the hidden companion below.
+        .help(L(.translationSwapLanguages))
+        .hoverTooltip(L(.translationSwapLanguages) + " ⌘S")
         .background(swapShortcut)
     }
 
