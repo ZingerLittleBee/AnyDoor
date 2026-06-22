@@ -6,6 +6,48 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Translation: a multi-service translator built around a pinnable floating
+  panel. A new 翻译 builtin (plus a configurable global hotkey and a command
+  palette entry) opens a Spotlight-style non-activating `NSPanel` with an
+  Enter-to-translate input, a source ⇄ target language bar, and a stack of
+  per-service result cards. Source language is auto-detected
+  (`NLLanguageRecognizer`); the language bar offers an "Auto Detect" source with
+  a detected-language hint, equal-width centered pickers, and a swap control
+  bound to ⌘S. The panel can be pinned on top with ⌘P (the pin's active state is
+  clearly highlighted), and each result card streams its output, speaks it (TTS
+  in the target voice), copies it, and collapses by tapping its header. One
+  input fans out to every enabled service concurrently, so one service failing
+  never blocks the others.
+- Translation services: Google (free), Bing (free), any OpenAI-compatible
+  streaming LLM endpoint (base URL + model + API key), and Apple's on-device
+  translation. Services are configured in a new Settings › Translation tab with a
+  per-service config sheet; LLM API keys are stored in the Keychain (and cached
+  in-process so a translation doesn't re-prompt for Keychain access). The Apple
+  on-device card uses `translationTask` and can pre-download offline language
+  packs from settings; its row is hidden on macOS 14, which lacks the API.
+- Translation entry points beyond the panel, each a separate hotkey-bindable
+  builtin: 截图翻译 (screenshot translate) drag-selects a screen region, OCRs it,
+  and opens the panel prefilled with the recognized text; 翻译选中文本 (translate
+  selection) reads the current selection — Accessibility first, with a
+  pasteboard-preserving Cmd-C fallback — and translates it. The selection reader
+  waits for held hotkey modifiers to clear before the clipboard fallback so a
+  trigger combo can't corrupt the synthesized copy, and reports a toast when no
+  text could be read instead of failing silently.
+- Translation history: successful translations are recorded to a SwiftData store
+  (`TranslationRecord`) with a configurable retention cap, browsable from an
+  in-window history and favorites viewer. Translation settings (enabled services,
+  target languages, auto-speak, retention) ride config backup; API keys and the
+  history are deliberately excluded.
+
+### Changed
+
+- Failure toasts now stay on screen for 5 seconds instead of the ~1 second used
+  for success and color toasts, so an error message can actually be read.
+- The blue keyboard focus ring is removed across all of the app's windows for a
+  cleaner look.
+
 ## [3.2.0] - 2026-06-21
 
 ### Added
