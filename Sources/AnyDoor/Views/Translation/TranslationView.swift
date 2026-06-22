@@ -227,7 +227,11 @@ private struct EnterToTranslateEditor: NSViewRepresentable {
         textView.isRichText = false
         textView.font = .systemFont(ofSize: 14)
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 4, height: 6)
+        // Zero the line-fragment padding and match the inset to the SwiftUI
+        // placeholder's padding (h:5, v:8) so the caret/text line up exactly with
+        // the placeholder instead of sitting on top of its first glyph.
+        textView.textContainerInset = NSSize(width: 5, height: 8)
+        textView.textContainer?.lineFragmentPadding = 0
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.string = text
         scroll.drawsBackground = false
