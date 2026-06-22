@@ -98,7 +98,7 @@ struct TranslationView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
-        .help(L(isPinned ? .translationUnpin : .translationPin))
+        .accessibilityLabel(L(isPinned ? .translationUnpin : .translationPin))
         .hoverTooltip(L(isPinned ? .translationUnpin : .translationPin), edge: .bottom)
     }
 
@@ -111,7 +111,7 @@ struct TranslationView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .contentShape(Rectangle())
-        .help(help)
+        .accessibilityLabel(help)
         .hoverTooltip(help, edge: .bottom)
     }
 

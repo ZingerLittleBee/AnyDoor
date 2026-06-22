@@ -89,10 +89,10 @@ struct LanguageBar: View {
         }
         .buttonStyle(.plain)
         .onHover { swapHovered = $0 }
-        // SwiftUI's `.help` doesn't render a tooltip in this panel, so draw our
-        // own bubble; `.help` is kept for the accessibility hint. The ⌘S shortcut
-        // lives on the hidden companion below.
-        .help(L(.translationSwapLanguages))
+        // Draw our own bubble (with the shortcut) instead of `.help`, whose native
+        // tooltip would double up with it; `.accessibilityLabel` keeps the
+        // VoiceOver hint. The ⌘S shortcut lives on the hidden companion below.
+        .accessibilityLabel(L(.translationSwapLanguages))
         .hoverTooltip(L(.translationSwapLanguages) + " ⌘S")
         .background(swapShortcut)
     }
