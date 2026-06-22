@@ -147,14 +147,16 @@ struct TranslationView: View {
                         Image(systemName: "speaker.wave.2").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help(L(.translationSpeak))
+                    .accessibilityLabel(L(.translationSpeak))
+                    .hoverTooltip(L(.translationSpeak))
                     Button {
                         copy(coordinator.inputText)
                     } label: {
                         Image(systemName: "doc.on.doc").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .help(L(.translationCopy))
+                    .accessibilityLabel(L(.translationCopy))
+                    .hoverTooltip(L(.translationCopy))
                 }
             }
         }

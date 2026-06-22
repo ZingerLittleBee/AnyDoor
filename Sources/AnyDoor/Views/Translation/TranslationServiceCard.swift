@@ -59,7 +59,8 @@ struct TranslationServiceCard: View {
                     .rotationEffect(.degrees(collapsed ? 180 : 0))
             }
             .buttonStyle(.plain)
-            .help(L(collapsed ? .translationExpand : .translationCollapse))
+            .accessibilityLabel(L(collapsed ? .translationExpand : .translationCollapse))
+            .hoverTooltip(L(collapsed ? .translationExpand : .translationCollapse))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -95,7 +96,8 @@ struct TranslationServiceCard: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(L(.translationSpeak))
+            .accessibilityLabel(L(.translationSpeak))
+            .hoverTooltip(L(.translationSpeak))
 
             Button {
                 copyToPasteboard(result.text)
@@ -105,7 +107,8 @@ struct TranslationServiceCard: View {
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help(L(.translationCopy))
+            .accessibilityLabel(L(.translationCopy))
+            .hoverTooltip(L(.translationCopy))
         }
     }
 

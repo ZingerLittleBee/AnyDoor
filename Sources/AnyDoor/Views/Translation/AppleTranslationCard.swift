@@ -133,7 +133,8 @@ private struct AppleTranslationCardBody: View {
                     Image(systemName: "speaker.wave.2").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(L(.translationSpeak))
+                .accessibilityLabel(L(.translationSpeak))
+                .hoverTooltip(L(.translationSpeak))
 
                 Button {
                     copy(state.output)
@@ -141,7 +142,8 @@ private struct AppleTranslationCardBody: View {
                     Image(systemName: "doc.on.doc").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(L(.translationCopy))
+                .accessibilityLabel(L(.translationCopy))
+                .hoverTooltip(L(.translationCopy))
             }
             Button {
                 toggleCollapsed()
@@ -152,7 +154,8 @@ private struct AppleTranslationCardBody: View {
                     .rotationEffect(.degrees(collapsed ? 180 : 0))
             }
             .buttonStyle(.plain)
-            .help(L(collapsed ? .translationExpand : .translationCollapse))
+            .accessibilityLabel(L(collapsed ? .translationExpand : .translationCollapse))
+            .hoverTooltip(L(collapsed ? .translationExpand : .translationCollapse))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
