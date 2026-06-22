@@ -133,10 +133,6 @@ struct TranslationSettingsView: View {
     @ViewBuilder
     private func serviceRow(_ config: TranslationServiceConfig) -> some View {
         HStack(spacing: 10) {
-            Toggle(isOn: enabledBinding(config)) { EmptyView() }
-                .labelsHidden()
-                .toggleStyle(.switch)
-
             Image(systemName: config.iconName)
                 .frame(width: 18)
                 .foregroundStyle(.secondary)
@@ -158,6 +154,12 @@ struct TranslationSettingsView: View {
                 }
                 .buttonStyle(.borderless)
             }
+
+            // Keep the enable switch trailing, matching the macOS settings-row
+            // convention of placing the control at the row's far edge.
+            Toggle(isOn: enabledBinding(config)) { EmptyView() }
+                .labelsHidden()
+                .toggleStyle(.switch)
         }
     }
 
