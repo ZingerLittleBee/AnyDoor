@@ -1,5 +1,8 @@
 import Foundation
+import OSLog
 import Security
+
+private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "translation.keychain")
 
 /// Thin Keychain wrapper for per-instance LLM API keys. Each secret is stored as
 /// a `kSecClassGenericPassword` item keyed by `account = id` under the injected
@@ -24,7 +27,10 @@ struct TranslationKeychainStore {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
         ]
-        SecItemAdd(attributes as CFDictionary, nil)
+        let status = SecItemAdd(attributes as CFDictionary, nil)
+        if status != errSecSuccess {
+            logger.error("SecItemAdd failed for translation API key: OSStatus \(status, privacy: .public)")
+        }
     }
 
     func apiKey(for id: String) -> String? {
@@ -49,6 +55,10 @@ struct TranslationKeychainStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: id,
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        // errSecItemNotFound is benign (nothing to delete); anything else is a fault.
+        if status != errSecSuccess, status != errSecItemNotFound {
+            logger.error("SecItemDelete failed for translation API key: OSStatus \(status, privacy: .public)")
+        }
     }
 }
