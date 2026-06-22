@@ -1871,6 +1871,22 @@
         }
       }
     },
+    "toast.noSelectedText": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No selected text found"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未读取到选中的文本"
+          }
+        }
+      }
+    },
     "toast.windowLayout.singleDisplay": {
       "extractionState": "manual",
       "localizations": {

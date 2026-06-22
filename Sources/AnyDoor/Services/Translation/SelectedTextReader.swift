@@ -10,11 +10,31 @@ enum SelectedTextReader {
     @MainActor
     static func read() async -> String? {
         if let ax = readViaAccessibility() { return ax }
+        // When invoked from a hotkey the user is likely still holding its
+        // modifiers (e.g. ⌘⌥T). Those flags would merge into the synthesized
+        // Cmd-C (becoming ⌘⌥C etc.) and silently fail to copy, so wait for the
+        // keyboard to settle before falling back to the clipboard.
+        await waitForModifiersToClear()
         return await readViaClipboard(
             pasteboard: .general,
             copy: { synthesizeCopy() },
-            settle: { try? await Task.sleep(nanoseconds: 120_000_000) }
+            settle: { try? await Task.sleep(nanoseconds: 200_000_000) }
         )
+    }
+
+    /// Poll the live modifier state and return once Command/Control/Option/Shift
+    /// are all released, or `timeout` elapses. Prevents a held hotkey modifier
+    /// from corrupting the synthesized Cmd-C in the clipboard fallback.
+    @MainActor
+    private static func waitForModifiersToClear(timeout: TimeInterval = 0.5) async {
+        let tracked: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        let step: UInt64 = 20_000_000 // 20 ms
+        let maxIterations = Int((timeout * 1_000_000_000) / Double(step))
+        for _ in 0..<maxIterations {
+            let flags = CGEventSource.flagsState(.combinedSessionState)
+            if flags.intersection(tracked).isEmpty { return }
+            try? await Task.sleep(nanoseconds: step)
+        }
     }
 
     /// The focused element's selected text via the Accessibility API. Returns

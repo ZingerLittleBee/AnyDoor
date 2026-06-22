@@ -328,6 +328,7 @@ enum L10n {
         case toastEmptyTrashFailed = "toast.emptyTrash.failed"
         case toastEmptyTrashPermissionDenied = "toast.emptyTrash.permissionDenied"
         case toastEmptyTrashSuccess = "toast.emptyTrash.success"
+        case toastNoSelectedText = "toast.noSelectedText"
         case toastOcrNoText = "toast.ocr.noText"
         case toastPickColorFailed = "toast.pickColor.failed"
         case toastPortKillFailed = "toast.portKill.failed"
