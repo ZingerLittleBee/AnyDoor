@@ -8,7 +8,10 @@ import SwiftUI
 ///
 /// Each side is a soft-filled capsule with a single trailing chevron (the system
 /// menu indicator is hidden) and a hover highlight; the swap control is a round
-/// icon button between them.
+/// icon button between them. The two pickers occupy equal flexible halves
+/// (source trailing-aligned, target leading-aligned) so the swap icon stays
+/// geometrically centered no matter how long the language names are. Swap is
+/// also bound to ⌘S.
 struct LanguageBar: View {
     @Bindable var coordinator: TranslationCoordinator
     /// Called after any language change (source/target/swap) so the host can
@@ -22,8 +25,10 @@ struct LanguageBar: View {
     var body: some View {
         HStack(spacing: 8) {
             sourcePicker
+                .frame(maxWidth: .infinity, alignment: .trailing)
             swapButton
             targetPicker
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.callout)
     }
@@ -87,6 +92,9 @@ struct LanguageBar: View {
         }
         .buttonStyle(.plain)
         .onHover { swapHovered = $0 }
+        // ⌘S swaps source/target; the panel is key while open, so the hosting
+        // view's performKeyEquivalent fires this even while the input has focus.
+        .keyboardShortcut("s", modifiers: .command)
         .help(L(.translationSwapLanguages))
     }
 
