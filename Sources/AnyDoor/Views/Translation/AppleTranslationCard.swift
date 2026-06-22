@@ -208,6 +208,11 @@ private nonisolated func run(_ session: TranslationSession,
             target: coordinator.effectiveTarget())
     } catch is CancellationError {
         // Superseded by a newer request; leave state for the new run.
+    } catch let error as CocoaError where error.code == .userCancelled {
+        // The person declined or dismissed the language-pack download sheet —
+        // that's a choice, not a failure, so fall back to idle (the card hides)
+        // instead of flashing a red error.
+        await state.reset()
     } catch {
         await state.fail(error.localizedDescription)
     }
