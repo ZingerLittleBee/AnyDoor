@@ -8,9 +8,9 @@ import SwiftUI
 struct TranslationServiceCard: View {
     let config: TranslationServiceConfig
     let result: TranslationResult
-    /// Resolved target/detected language used to pick a TTS voice.
+    /// Resolved target language used to pick the TTS voice (the translated text
+    /// is in the target language).
     let target: TranslationLanguage
-    let detectedFallbackCode: String?
 
     @State private var collapsed = false
 
@@ -114,10 +114,10 @@ struct TranslationServiceCard: View {
         }
     }
 
-    /// Detected source informs the spoken voice for the translation: the target
-    /// language is what was produced, so it drives the voice.
+    /// The translated text is in the target language, so the target drives the
+    /// spoken voice (not `result.detected`, which is the source language).
     private var voiceLanguage: TranslationLanguage? {
-        result.detected ?? target
+        target
     }
 
     /// Copy and suppress clipboard-history capture, matching every other

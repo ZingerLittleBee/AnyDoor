@@ -36,7 +36,12 @@ struct TranslationView: View {
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        // Reset the auto-speak guard at the start of every run, including the
+        // screenshot/selection prefill path that calls coordinator.translate()
+        // directly (not via runTranslation()).
+        .onChange(of: coordinator.runToken) { _, _ in autoSpokenRun = false }
         .onChange(of: coordinator.results.map(\.status)) { _, _ in autoSpeakIfNeeded() }
+        .onChange(of: appleAutoSpeakKey) { _, _ in autoSpeakIfNeeded() }
         .onAppear { inputFocused = true }
     }
 
@@ -57,7 +62,7 @@ struct TranslationView: View {
                 Task { await PanelStore.shared.run(.screenshotTranslate) }
             }
             toolbarButton(systemImage: "gearshape", help: L(.translationSettings)) {
-                SettingsOpener.shared.tryOpen()
+                SettingsOpener.shared.tryOpen(tab: .translation)
             }
         }
         .padding(.horizontal, 14)
@@ -133,8 +138,7 @@ struct TranslationView: View {
                 TranslationServiceCard(
                     config: config,
                     result: result,
-                    target: target,
-                    detectedFallbackCode: coordinator.detectedSource?.code
+                    target: target
                 )
             }
         }
@@ -143,7 +147,8 @@ struct TranslationView: View {
     // MARK: - Actions
 
     private func runTranslation() {
-        autoSpokenRun = false
+        // The auto-speak guard is reset by the coordinator.runToken onChange,
+        // which fires for both this path and the direct prefill translate().
         coordinator.translate()
     }
 
@@ -152,13 +157,43 @@ struct TranslationView: View {
         SettingsOpener.shared.tryOpen()
     }
 
-    /// On the first card that flips to `.success` after a run, speak it once
-    /// when the user enabled auto-speak.
+    /// A value that changes when the Apple card publishes a fresh success for the
+    /// current run, so onChange can re-evaluate auto-speak (the Apple card lives
+    /// outside `coordinator.results`).
+    private var appleAutoSpeakKey: String {
+        guard let apple = coordinator.appleResult, apple.runToken == coordinator.runToken else { return "" }
+        return apple.text
+    }
+
+    /// On the first enabled service that produces a success after a run, speak it
+    /// once when the user enabled auto-speak. The Apple card is included even
+    /// though it lives outside `coordinator.results`.
     private func autoSpeakIfNeeded() {
         guard settings.autoSpeak, !autoSpokenRun else { return }
-        guard let firstSuccess = coordinator.results.first(where: { $0.status == .success && !$0.text.isEmpty }) else { return }
+        guard let text = firstSuccessText() else { return }
         autoSpokenRun = true
-        SpeechService.shared.speak(firstSuccess.text, language: coordinator.effectiveTarget())
+        SpeechService.shared.speak(text, language: coordinator.effectiveTarget())
+    }
+
+    /// The translated text of the first enabled service (in configured order)
+    /// that has a non-empty success, considering both the stream results and the
+    /// Apple card's published success for the current run.
+    private func firstSuccessText() -> String? {
+        let appleText: String? = {
+            guard let apple = coordinator.appleResult,
+                  apple.runToken == coordinator.runToken,
+                  !apple.text.isEmpty else { return nil }
+            return apple.text
+        }()
+        for config in settings.enabledServicesInOrder {
+            if config.kind == .apple {
+                if let appleText { return appleText }
+            } else if let result = coordinator.results.first(where: { $0.serviceID == config.id }),
+                      result.status == .success, !result.text.isEmpty {
+                return result.text
+            }
+        }
+        return nil
     }
 
     private func copy(_ text: String) {
@@ -196,9 +231,20 @@ private struct EnterToTranslateEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let textView = scroll.documentView as? NSTextView else { return }
-        if textView.string != text {
-            textView.string = text
-        }
+        guard textView.string != text else { return }
+        // While the user is typing (text view is first responder), an external
+        // write would collapse the caret/selection and race streaming re-renders;
+        // the binding already mirrors the user's edits via textDidChange. When we
+        // must write (e.g. prefill), preserve the selection where possible.
+        let isEditing = textView.window?.firstResponder === textView
+        guard !isEditing else { return }
+        let previousSelection = textView.selectedRange()
+        textView.string = text
+        let clamped = NSRange(
+            location: min(previousSelection.location, (text as NSString).length),
+            length: 0
+        )
+        textView.setSelectedRange(clamped)
     }
 
     @MainActor

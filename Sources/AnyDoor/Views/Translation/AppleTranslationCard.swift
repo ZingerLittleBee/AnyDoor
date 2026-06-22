@@ -76,15 +76,15 @@ private struct AppleTranslationCardBody: View {
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        // Rebuild the session whenever the input or languages change; the
-        // coordinator's translate() bumps these the same way the stream path does.
-        .onChange(of: triggerKey) { _, _ in refreshConfiguration() }
-        .onAppear { refreshConfiguration() }
-        .translationTask(configuration) { @Sendable [state, coordinator] session in
+        // Rebuild the session only on an explicit translate run (Enter), matching
+        // the stream providers — not on every keystroke. `translate()` bumps
+        // `runToken`, which is the same signal the coordinator fans out on.
+        .onChange(of: coordinator.runToken) { _, _ in refreshConfiguration() }
+        .translationTask(configuration) { @Sendable [state, coordinator, config] session in
             // @Sendable makes this closure nonisolated, so `session` lives outside
             // the MainActor and can be passed straight to Apple's nonisolated
             // translate(_:). State writes hop back via `await`.
-            await run(session, state: state, coordinator: coordinator)
+            await run(session, state: state, coordinator: coordinator, config: config)
         }
     }
 
@@ -141,13 +141,6 @@ private struct AppleTranslationCardBody: View {
         }
     }
 
-    /// A value that changes whenever any input affecting the translation changes,
-    /// so onChange can rebuild the session configuration.
-    private var triggerKey: String {
-        let src = (coordinator.source ?? coordinator.detectedSource)?.code ?? "auto"
-        return "\(coordinator.inputText)\u{1}\(src)\u{1}\(coordinator.effectiveTarget().code)"
-    }
-
     /// Rebuild the configuration only when there is text to translate. Passing a
     /// fresh Configuration value re-runs `.translationTask`. A nil source lets
     /// Apple auto-detect.
@@ -181,12 +174,21 @@ private struct AppleTranslationCardBody: View {
 @available(macOS 15, *)
 private nonisolated func run(_ session: TranslationSession,
                              state: AppleCardState,
-                             coordinator: TranslationCoordinator) async {
+                             coordinator: TranslationCoordinator,
+                             config: TranslationServiceConfig) async {
     let text = await coordinator.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
     do {
         let translated = try await session.translate(text).targetText
         await state.succeed(translated)
+        // Record to history through the same store the coordinator uses, so an
+        // Apple-only success is not dropped (the coordinator's run() never sees it).
+        await coordinator.noteAppleSuccess(
+            serviceID: config.id,
+            serviceName: config.displayName,
+            sourceText: text,
+            translatedText: translated,
+            target: coordinator.effectiveTarget())
     } catch is CancellationError {
         // Superseded by a newer request; leave state for the new run.
     } catch {

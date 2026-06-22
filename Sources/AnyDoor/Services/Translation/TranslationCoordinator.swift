@@ -15,6 +15,17 @@ final class TranslationCoordinator {
     var target: TranslationLanguage
     private(set) var detectedSource: TranslationLanguage?
     private(set) var results: [TranslationResult] = []
+    /// Latest successful Apple on-device translation for the current run, keyed by
+    /// runToken so a stale value from a previous run is ignored. The Apple card
+    /// publishes here (it lives outside `results`) so the panel's auto-speak path
+    /// can include it.
+    private(set) var appleResult: (runToken: Int, text: String)?
+
+    /// Bumped on every `translate()` invocation. Views (e.g. the Apple card,
+    /// which binds to Apple's API directly instead of going through a provider)
+    /// observe this so they translate only on an explicit run, not per keystroke;
+    /// the panel also resets its auto-speak guard on each change.
+    private(set) var runToken: Int = 0
 
     /// Set by the app once the ModelContainer is ready; nil in tests.
     var history: TranslationHistoryStore?
@@ -50,6 +61,7 @@ final class TranslationCoordinator {
     }
 
     func translate() {
+        runToken &+= 1
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             results = []
@@ -120,6 +132,30 @@ final class TranslationCoordinator {
             source: request.source ?? result.detected ?? detectedSource,
             target: request.target,
             serviceID: provider.id,
+            serviceName: serviceName,
+            retention: settings.historyRetention)
+    }
+
+    /// Note a successful Apple on-device translation. The Apple card binds to
+    /// Apple's API directly (it is not a `TranslationProvider`), so it can't flow
+    /// through `run()`/`recordSuccess`; it calls this with its own output instead.
+    /// Publishes `appleResult` (so the panel's auto-speak can include it) and
+    /// records to history through the same store the coordinator uses.
+    func noteAppleSuccess(serviceID: String,
+                          serviceName: String,
+                          sourceText: String,
+                          translatedText: String,
+                          target: TranslationLanguage) {
+        guard !translatedText.isEmpty else { return }
+        appleResult = (runToken, translatedText)
+        guard let history,
+              !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        history.record(
+            sourceText: sourceText,
+            translatedText: translatedText,
+            source: source ?? detectedSource,
+            target: target,
+            serviceID: serviceID,
             serviceName: serviceName,
             retention: settings.historyRetention)
     }
