@@ -38,7 +38,6 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.minSize = NSSize(width: 420, height: 420)
-        panel.setFrameAutosaveName("")
 
         super.init(window: panel)
         panel.delegate = self
@@ -171,7 +170,7 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
         ) { [weak self] event in
             guard let self else { return event }
             MainThreadIsolation.run {
-                if event.window !== self.window { self.close() }
+                if !self.isInsideOwnWindows(event.window) { self.close() }
             }
             return event
         }
@@ -186,6 +185,23 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
     private func removeDismissMonitors() {
         for monitor in mouseMonitors { NSEvent.removeMonitor(monitor) }
         mouseMonitors = []
+    }
+
+    /// Whether a mouse-down landed in the panel or one of its auxiliary windows.
+    /// SwiftUI Menu/Picker dropdowns and popovers open in separate child/attached
+    /// windows of the panel, so clicking one must NOT dismiss the panel — only a
+    /// genuine click in an unrelated window should. A nil window (events outside
+    /// any app window) is handled by the global monitor, so treat it as inside
+    /// here to avoid double-dismissing.
+    private func isInsideOwnWindows(_ candidate: NSWindow?) -> Bool {
+        guard let candidate else { return true }
+        guard let window else { return false }
+        if candidate === window { return true }
+        // Child windows (e.g. SwiftUI Picker dropdowns) and attached sheets/popovers.
+        if window.childWindows?.contains(candidate) == true { return true }
+        if candidate.parent === window { return true }
+        if candidate.attachedSheet === window || window.attachedSheet === candidate { return true }
+        return false
     }
 
     // MARK: - NSWindowDelegate
