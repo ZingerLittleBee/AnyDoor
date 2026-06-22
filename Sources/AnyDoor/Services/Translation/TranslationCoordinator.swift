@@ -75,10 +75,17 @@ final class TranslationCoordinator {
 
         results = providers.map { TranslationResult.idle($0.id) }
 
+        let token = runToken
         for provider in providers {
             let id = provider.id
             tasks[id] = Task { [weak self] in
                 await self?.run(provider: provider, request: request, sourceText: text)
+                // Drop the completed entry, but only if a newer translate() hasn't
+                // already replaced it (the supersede/cancel race): cancel() clears
+                // the whole dict and a fresh run installs a new task + bumps
+                // runToken, so guard on the captured token.
+                guard let self, self.runToken == token else { return }
+                self.tasks[id] = nil
             }
         }
     }
