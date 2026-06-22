@@ -59,10 +59,9 @@ enum SelectedTextReader {
 
         var result: String?
         if pasteboard.changeCount != beforeCount {
-            let copied = pasteboard.string(forType: .string)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let copied, !copied.isEmpty {
-                result = pasteboard.string(forType: .string)
+            let copied = pasteboard.string(forType: .string)
+            if let copied, !copied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                result = copied
             }
         }
 
