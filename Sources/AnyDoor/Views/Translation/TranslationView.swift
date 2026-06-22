@@ -74,7 +74,10 @@ struct TranslationView: View {
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+        // Extra headroom so the upward hover tooltips have room to render above
+        // the buttons instead of being clipped by the window's top edge.
+        .padding(.top, 32)
+        .padding(.bottom, 8)
     }
 
     /// Pin toggle with an unmistakable active state: while pinned the icon flips
@@ -99,7 +102,7 @@ struct TranslationView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(L(isPinned ? .translationUnpin : .translationPin))
-        .hoverTooltip(L(isPinned ? .translationUnpin : .translationPin), edge: .bottom)
+        .hoverTooltip(L(isPinned ? .translationUnpin : .translationPin))
     }
 
     private func toolbarButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
@@ -112,7 +115,7 @@ struct TranslationView: View {
         .foregroundStyle(.secondary)
         .contentShape(Rectangle())
         .accessibilityLabel(help)
-        .hoverTooltip(help, edge: .bottom)
+        .hoverTooltip(help)
     }
 
     // MARK: - Input
