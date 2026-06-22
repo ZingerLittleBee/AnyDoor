@@ -27,7 +27,14 @@ struct TranslationSettingsView: View {
                 isNew: isPresentingNew,
                 keychain: keychain
             ) { saved, apiKey in
-                if let apiKey { keychain.setAPIKey(apiKey, for: saved.id) }
+                // A nil/empty key means "clear": delete the stored secret so the
+                // factory stops treating this service as configured. setAPIKey
+                // itself treats empty as a delete, but nil must delete too.
+                if let apiKey, !apiKey.isEmpty {
+                    keychain.setAPIKey(apiKey, for: saved.id)
+                } else {
+                    keychain.deleteAPIKey(for: saved.id)
+                }
                 settings.upsertService(saved)
                 editingConfig = nil
                 isPresentingNew = false
