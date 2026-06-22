@@ -174,6 +174,60 @@ final class TranslationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).count, 2)
     }
 
+    // MARK: - Observable wiring
+
+    func testRevisionBumpsOnEveryMutation() throws {
+        let (store, container) = try makeStore()
+        let start = store.revision
+
+        // record (unlimited retention path)
+        try insert(container, text: "a", at: 100)
+        store.record(
+            sourceText: "b",
+            translatedText: "T-b",
+            source: .english,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google"
+        )
+        XCTAssertGreaterThan(store.revision, start)
+
+        let afterRecord = store.revision
+        let row = try XCTUnwrap(store.recent(limit: 1).first)
+
+        store.toggleFavorite(row)
+        XCTAssertGreaterThan(store.revision, afterRecord)
+
+        let afterFavorite = store.revision
+        store.delete(row)
+        XCTAssertGreaterThan(store.revision, afterFavorite)
+
+        let afterDelete = store.revision
+        store.clear()
+        XCTAssertGreaterThan(store.revision, afterDelete)
+    }
+
+    func testRevisionBumpsOnRecordWithRetentionAndTrim() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "n1", at: 100)
+        let before = store.revision
+        // The retention > 0 path delegates the bump to trim().
+        store.record(
+            sourceText: "n2",
+            translatedText: "T-n2",
+            source: .english,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google",
+            retention: 5
+        )
+        XCTAssertGreaterThan(store.revision, before)
+
+        let afterRecord = store.revision
+        store.trim(retention: 1)
+        XCTAssertGreaterThan(store.revision, afterRecord)
+    }
+
     func testNoContextIsSafe() {
         let store = TranslationHistoryStore()
         // No configure() call: every method must be a silent no-op, never crash.

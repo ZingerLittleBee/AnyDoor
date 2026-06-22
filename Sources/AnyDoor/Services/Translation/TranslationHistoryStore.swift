@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftData
 
 /// Persists successful translations and serves the favorites + history panel.
@@ -6,11 +7,24 @@ import SwiftData
 /// shared `mainContext` is captured in `configure` after the ModelContainer is
 /// ready (`TranslationHistoryStore.shared.configure(modelContainer:)` from the
 /// app). Every method no-ops when no context is wired (unit tests / pre-bootstrap).
+///
+/// `@Observable` so a SwiftUI list re-renders when history changes. Reads
+/// (`recent`/`favorites`) return live SwiftData fetches; mutations bump
+/// `revision`, which the history view observes to refresh its snapshot — the
+/// same "publish a tracked token, re-fetch in body" idiom `ClipboardHistoryStore`
+/// uses with its `cachedItems`.
 @MainActor
+@Observable
 final class TranslationHistoryStore {
     static let shared = TranslationHistoryStore()
 
-    private var modelContext: ModelContext?
+    @ObservationIgnored private var modelContext: ModelContext?
+
+    /// Bumped on every write (record / toggleFavorite / delete / clear / trim).
+    /// SwiftUI views read this in `body` so `@Observable` tracks them as
+    /// dependents and re-renders when history mutates; the fetch methods are not
+    /// stored properties, so observing this token is what drives the refresh.
+    private(set) var revision: Int = 0
 
     init(modelContext: ModelContext? = nil) {
         self.modelContext = modelContext
@@ -45,7 +59,13 @@ final class TranslationHistoryStore {
         )
         modelContext.insert(record)
         try? modelContext.save()
-        trim(retention: retention)
+        // trim() bumps the revision; when retention is unlimited (<= 0) it
+        // returns early without bumping, so bump here to cover that path.
+        if retention > 0 {
+            trim(retention: retention)
+        } else {
+            revision &+= 1
+        }
     }
 
     /// Newest-first, capped at `limit`.
@@ -72,12 +92,14 @@ final class TranslationHistoryStore {
         guard let modelContext else { return }
         record.isFavorite.toggle()
         try? modelContext.save()
+        revision &+= 1
     }
 
     func delete(_ record: TranslationRecord) {
         guard let modelContext else { return }
         modelContext.delete(record)
         try? modelContext.save()
+        revision &+= 1
     }
 
     func clear() {
@@ -85,6 +107,7 @@ final class TranslationHistoryStore {
         let rows = (try? modelContext.fetch(FetchDescriptor<TranslationRecord>())) ?? []
         for row in rows { modelContext.delete(row) }
         try? modelContext.save()
+        revision &+= 1
     }
 
     /// Keep the newest `retention` non-favorite records; favorites are always
@@ -96,6 +119,7 @@ final class TranslationHistoryStore {
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         let nonFavorites = (try? modelContext.fetch(descriptor)) ?? []
+        revision &+= 1
         guard nonFavorites.count > retention else { return }
         for row in nonFavorites[retention...] { modelContext.delete(row) }
         try? modelContext.save()

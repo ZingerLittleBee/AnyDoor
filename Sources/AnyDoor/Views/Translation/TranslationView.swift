@@ -14,6 +14,8 @@ struct TranslationView: View {
     /// serviceIDs already auto-spoken for the current translation run, so the
     /// "first success" narration fires exactly once per run.
     @State private var autoSpokenRun = false
+    /// Whether the in-window History + Favorites popover is showing.
+    @State private var showingHistory = false
     @FocusState private var inputFocused: Bool
 
     init(controller: TranslationWindowController) {
@@ -55,7 +57,15 @@ struct TranslationView: View {
                 controller.setPinned(isPinned)
             }
             toolbarButton(systemImage: "clock.arrow.circlepath", help: L(.translationHistory)) {
-                showHistory()
+                showingHistory.toggle()
+            }
+            .popover(isPresented: $showingHistory, arrowEdge: .bottom) {
+                TranslationHistoryView(
+                    store: TranslationHistoryStore.shared,
+                    coordinator: coordinator
+                ) {
+                    showingHistory = false
+                }
             }
             toolbarButton(systemImage: "camera.viewfinder", help: L(.translationScreenshot)) {
                 controller.close()
@@ -150,11 +160,6 @@ struct TranslationView: View {
         // The auto-speak guard is reset by the coordinator.runToken onChange,
         // which fires for both this path and the direct prefill translate().
         coordinator.translate()
-    }
-
-    private func showHistory() {
-        // History UI lives in the settings tab; surface it there for now.
-        SettingsOpener.shared.tryOpen()
     }
 
     /// A value that changes when the Apple card publishes a fresh success for the
