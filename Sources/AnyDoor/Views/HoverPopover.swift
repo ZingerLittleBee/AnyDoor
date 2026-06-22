@@ -42,7 +42,7 @@ final class HoverPopover {
     }
 
     init<Content: View>(@ViewBuilder content: () -> Content) {
-        let rootView = AnyView(content())
+        let rootView = AnyView(content().focusEffectDisabled())
 
         let measuringView = NSHostingView(rootView: rootView)
         measuringView.sizingOptions = .intrinsicContentSize
@@ -99,7 +99,7 @@ final class HoverPopover {
     }
 
     func updateContent<Content: View>(@ViewBuilder content: () -> Content) {
-        let rootView = AnyView(content())
+        let rootView = AnyView(content().focusEffectDisabled())
         // Measure on the reusable scratch host first, then install + resize in
         // one pass. The live host lays out once at its final size instead of
         // once before measuring and again after the resize.

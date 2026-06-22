@@ -273,6 +273,7 @@ struct ClipboardTextPanelView: View {
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .focusEffectDisabled()
     }
 
     private var header: some View {

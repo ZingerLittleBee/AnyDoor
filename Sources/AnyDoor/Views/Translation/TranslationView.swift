@@ -45,6 +45,7 @@ struct TranslationView: View {
         .onChange(of: coordinator.results.map(\.status)) { _, _ in autoSpeakIfNeeded() }
         .onChange(of: appleAutoSpeakKey) { _, _ in autoSpeakIfNeeded() }
         .onAppear { inputFocused = true }
+        .focusEffectDisabled()
     }
 
     // MARK: - Toolbar
@@ -231,6 +232,7 @@ private struct EnterToTranslateEditor: NSViewRepresentable {
         textView.string = text
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
+        scroll.focusRingType = .none
         return scroll
     }
 

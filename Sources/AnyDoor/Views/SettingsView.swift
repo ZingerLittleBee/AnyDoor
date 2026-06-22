@@ -54,5 +54,6 @@ struct SettingsView: View {
         // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
         // focuses another app.
         .background(RegularWindowRegistrar())
+        .focusEffectDisabled()
     }
 }

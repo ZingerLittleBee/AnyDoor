@@ -140,6 +140,7 @@ struct ClipboardWallView: View {
             if !sources.isEmpty { sourceMenuRequested = true }
         }
         .overlay { if state.tagDialog != nil { tagDialogOverlay } }
+        .focusEffectDisabled()
     }
 
     private func tabs(_ sources: [SourceOption]) -> some View {

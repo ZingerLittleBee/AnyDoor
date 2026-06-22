@@ -606,6 +606,7 @@ struct CommandPalettePicker: View {
             state.selectedIndex = 0
             state.refreshPortsIfNeeded()
         }
+        .focusEffectDisabled()
     }
 
     /// Raycast-style in-palette confirmation for a destructive action. The
