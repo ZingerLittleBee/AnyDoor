@@ -7742,13 +7742,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Auto Detect (%@)"
+            "value": "Auto Detect · %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "自动检测（%@）"
+            "value": "自动检测 · %@"
           }
         }
       }

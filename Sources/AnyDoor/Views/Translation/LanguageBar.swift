@@ -5,25 +5,24 @@ import SwiftUI
 /// been detected, the menu label shows the detected language as a hint. The swap
 /// button delegates to the coordinator so an auto source resolves to the
 /// detected language before swapping.
+///
+/// Each side is a soft-filled capsule with a single trailing chevron (the system
+/// menu indicator is hidden) and a hover highlight; the swap control is a round
+/// icon button between them.
 struct LanguageBar: View {
     @Bindable var coordinator: TranslationCoordinator
     /// Called after any language change (source/target/swap) so the host can
     /// re-run translation if there is input text.
     var onChange: () -> Void = {}
 
-    var body: some View {
-        HStack(spacing: 10) {
-            sourcePicker
-            Button {
-                coordinator.swapLanguages()
-                onChange()
-            } label: {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 12, weight: .semibold))
-            }
-            .buttonStyle(.plain)
-            .help(L(.translationSwapLanguages))
+    @State private var sourceHovered = false
+    @State private var targetHovered = false
+    @State private var swapHovered = false
 
+    var body: some View {
+        HStack(spacing: 8) {
+            sourcePicker
+            swapButton
             targetPicker
         }
         .font(.callout)
@@ -35,7 +34,7 @@ struct LanguageBar: View {
                 coordinator.source = nil
                 onChange()
             } label: {
-                sourceRow(title: L(.translationAutoDetect), selected: coordinator.source == nil)
+                row(title: L(.translationAutoDetect), selected: coordinator.source == nil)
             }
             Divider()
             ForEach(TranslationLanguage.catalog) { lang in
@@ -43,18 +42,16 @@ struct LanguageBar: View {
                     coordinator.source = lang
                     onChange()
                 } label: {
-                    sourceRow(title: lang.displayName(), selected: coordinator.source == lang)
+                    row(title: lang.displayName(), selected: coordinator.source == lang)
                 }
             }
         } label: {
-            HStack(spacing: 4) {
-                Text(sourceLabel).lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
+            capsule(sourceLabel, hovered: sourceHovered)
         }
         .menuStyle(.borderlessButton)
-        .fixedSize(horizontal: false, vertical: true)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { sourceHovered = $0 }
     }
 
     private var targetPicker: some View {
@@ -64,22 +61,56 @@ struct LanguageBar: View {
                     coordinator.target = lang
                     onChange()
                 } label: {
-                    sourceRow(title: lang.displayName(), selected: coordinator.target == lang)
+                    row(title: lang.displayName(), selected: coordinator.target == lang)
                 }
             }
         } label: {
-            HStack(spacing: 4) {
-                Text(coordinator.target.displayName()).lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity)
+            capsule(coordinator.target.displayName(), hovered: targetHovered)
         }
         .menuStyle(.borderlessButton)
-        .fixedSize(horizontal: false, vertical: true)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { targetHovered = $0 }
     }
 
-    /// Source button title: the chosen language, or "Auto" plus the detected
-    /// language hint in parentheses when running in auto-detect mode.
+    private var swapButton: some View {
+        Button {
+            coordinator.swapLanguages()
+            onChange()
+        } label: {
+            Image(systemName: "arrow.left.arrow.right")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(fill(swapHovered)))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .onHover { swapHovered = $0 }
+        .help(L(.translationSwapLanguages))
+    }
+
+    /// The capsule label shared by both pickers: title + a single trailing
+    /// chevron, on a soft fill that brightens on hover.
+    private func capsule(_ title: String, hovered: Bool) -> some View {
+        HStack(spacing: 5) {
+            Text(title).lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(fill(hovered)))
+        .contentShape(Capsule())
+    }
+
+    private func fill(_ hovered: Bool) -> Color {
+        Color.primary.opacity(hovered ? 0.12 : 0.06)
+    }
+
+    /// Source button title: the chosen language, or "Auto Detect" plus the
+    /// detected language hint when running in auto-detect mode.
     private var sourceLabel: String {
         if let source = coordinator.source {
             return source.displayName()
@@ -91,7 +122,7 @@ struct LanguageBar: View {
     }
 
     @ViewBuilder
-    private func sourceRow(title: String, selected: Bool) -> some View {
+    private func row(title: String, selected: Bool) -> some View {
         if selected {
             Label(title, systemImage: "checkmark")
         } else {
