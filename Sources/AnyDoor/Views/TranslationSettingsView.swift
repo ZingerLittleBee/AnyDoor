@@ -77,19 +77,35 @@ struct TranslationSettingsView: View {
 
     // MARK: - Services
 
+    /// Services shown in settings. The Apple service produces no card on macOS 14
+    /// (its `.translationTask` requires macOS 15+), so hide its row there to mirror
+    /// the `if #available(macOS 15, *)` gate AppleTranslationCard uses.
+    private var visibleServices: [TranslationServiceConfig] {
+        if #available(macOS 15, *) {
+            return settings.services
+        }
+        return settings.services.filter { $0.kind != .apple }
+    }
+
     private var servicesSection: some View {
         Section {
-            ForEach(settings.services) { config in
+            ForEach(visibleServices) { config in
                 serviceRow(config)
             }
             .onMove { indices, newOffset in
-                var reordered = settings.services
+                var reordered = visibleServices
                 reordered.move(fromOffsets: indices, toOffset: newOffset)
-                for (index, var config) in reordered.enumerated() {
-                    config.order = index
-                    reordered[index] = config
+                // Hidden services (e.g. Apple on macOS 14) aren't shown, but must
+                // survive the reorder; keep them ahead of the reordered visible set.
+                let hidden = settings.services.filter { config in
+                    !reordered.contains { $0.id == config.id }
                 }
-                settings.setServices(reordered)
+                var merged = hidden + reordered
+                for (index, var config) in merged.enumerated() {
+                    config.order = index
+                    merged[index] = config
+                }
+                settings.setServices(merged)
             }
 
             Button {
