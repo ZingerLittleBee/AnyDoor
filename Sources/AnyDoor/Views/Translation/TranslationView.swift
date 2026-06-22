@@ -98,8 +98,11 @@ struct TranslationView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
         .buttonStyle(.plain)
+        // ⌘P toggles pin; the panel is key while open, so its performKeyEquivalent
+        // fires this even while the input has focus. Tooltip surfaces the shortcut.
+        .keyboardShortcut("p", modifiers: .command)
         .accessibilityLabel(L(isPinned ? .translationUnpin : .translationPin))
-        .hoverTooltip(L(isPinned ? .translationUnpin : .translationPin))
+        .hoverTooltip(L(isPinned ? .translationUnpin : .translationPin) + " ⌘P")
     }
 
     private func toolbarButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {

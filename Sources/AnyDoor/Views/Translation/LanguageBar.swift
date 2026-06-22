@@ -89,22 +89,12 @@ struct LanguageBar: View {
         }
         .buttonStyle(.plain)
         .onHover { swapHovered = $0 }
-        // Draw our own bubble (with the shortcut) instead of `.help`, whose native
-        // tooltip would double up with it; `.accessibilityLabel` keeps the
-        // VoiceOver hint. The ⌘S shortcut lives on the hidden companion below.
+        // ⌘S swaps; the panel is key while open, so its performKeyEquivalent fires
+        // this even while the input has focus. The bubble surfaces the shortcut and
+        // `.accessibilityLabel` keeps the VoiceOver hint.
+        .keyboardShortcut("s", modifiers: .command)
         .accessibilityLabel(L(.translationSwapLanguages))
         .hoverTooltip(L(.translationSwapLanguages) + " ⌘S")
-        .background(swapShortcut)
-    }
-
-    /// ⌘S on a zero-opacity companion button so the visible button keeps its
-    /// tooltip. The panel is key while open, so the hosting view's
-    /// performKeyEquivalent fires this even while the input has focus.
-    private var swapShortcut: some View {
-        Button("", action: performSwap)
-            .keyboardShortcut("s", modifiers: .command)
-            .opacity(0)
-            .accessibilityHidden(true)
     }
 
     private func performSwap() {
