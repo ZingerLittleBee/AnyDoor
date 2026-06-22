@@ -140,6 +140,13 @@ struct TranslationSettingsView: View {
             Text(config.displayName)
             Spacer()
 
+            if config.kind == .apple {
+                AppleLanguageDownloadButton(
+                    target: settings.targetLanguage,
+                    secondTarget: settings.secondTargetLanguage
+                )
+            }
+
             if config.kind == .openAICompatible {
                 Button { isPresentingNew = false; editingConfig = config } label: {
                     LocalizedText(.settingsTranslationEdit)
