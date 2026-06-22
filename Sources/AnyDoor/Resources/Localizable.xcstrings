@@ -9061,6 +9061,23 @@
           }
         }
       }
+    },
+    "settings.translation.downloadLanguages.unsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsupported"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

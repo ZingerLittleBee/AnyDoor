@@ -5,10 +5,14 @@ import Translation
 #endif
 
 /// Trailing control in the Apple service settings row that proactively downloads
-/// the on-device translation assets for the two configured target languages via
-/// `prepareTranslation()`, so the first real translation doesn't have to stop and
-/// fetch a language pack. On macOS 14 (no Translation API) it renders nothing,
-/// mirroring `AppleTranslationCard`.
+/// the on-device translation assets for the two configured target languages, so
+/// the first real translation doesn't have to stop and fetch a language pack.
+///
+/// The displayed state always reflects the *real* status reported by
+/// `LanguageAvailability` — never just whether `prepareTranslation()` returned,
+/// because that call also returns normally when the person dismisses the system
+/// download sheet without downloading. On macOS 14 (no Translation API) it renders
+/// nothing, mirroring `AppleTranslationCard`.
 struct AppleLanguageDownloadButton: View {
     let target: TranslationLanguage
     let secondTarget: TranslationLanguage
@@ -23,63 +27,97 @@ struct AppleLanguageDownloadButton: View {
 }
 
 #if canImport(Translation)
-/// Drives the proactive download. Each `.translationTask` session binds to a
-/// single source/target pair, so the two configured directions are prepared one
-/// at a time by draining `pending` and re-pointing `configuration` at the next
-/// pair. `@MainActor @Observable` so the SwiftUI control binds to `phase` and the
-/// `nonisolated` task closure can publish back via `await`.
+/// Drives one proactive download and tracks the real installed status. Apple's
+/// translation assets are per-language and shared system-wide, so downloading a
+/// single direction (`secondTarget → target`) installs both languages and makes
+/// the reverse direction available too — no need to prepare both ways. A
+/// `generation` token supersedes stale async work when the configured languages
+/// change mid-flight. `@MainActor @Observable` so the control binds to `phase` and
+/// the `nonisolated` task closure can publish back via `await`.
 @available(macOS 15, *)
 @MainActor
 @Observable
 private final class AppleDownloadModel {
-    enum Phase: Equatable { case idle, downloading, done, failed }
+    enum Phase: Equatable { case checking, idle, downloading, done, unsupported, failed }
 
-    var phase: Phase = .idle
+    var phase: Phase = .checking
     var configuration: TranslationSession.Configuration?
-    /// Remaining (source, target) code pairs still to prepare, drained one per
-    /// session because a session only covers its own configured pair.
-    private var pending: [(source: String, target: String)] = []
+    /// Exposed so the `nonisolated` runner can stamp the run it belongs to and
+    /// re-guard against being superseded.
+    var currentGeneration: Int { generation }
 
-    func start(pairs: [(source: String, target: String)]) {
-        guard !pairs.isEmpty else { phase = .done; return }
-        phase = .downloading
-        pending = pairs
-        advance()
+    /// The representative direction to install (nil when both languages match —
+    /// the framework can't translate a language to itself).
+    private var pair: LanguagePair?
+    private var generation = 0
+
+    struct LanguagePair: Equatable {
+        let source: String
+        let target: String
     }
 
-    /// Move on to the next pending direction, or settle on `.done` when drained.
-    /// Guarded on `.downloading` so a late callback from a task cancelled by a
-    /// `reset()` (e.g. the configured languages changed mid-download) can't revive
-    /// a stale state.
-    func advance() {
-        guard phase == .downloading else { return }
-        guard !pending.isEmpty else {
-            phase = .done
-            configuration = nil
-            return
-        }
-        let next = pending.removeFirst()
+    /// Re-read the real status for `pair` (on appear / language change). Skipped
+    /// while a download is active so a `.task` re-run (e.g. returning to the tab)
+    /// can't clobber it.
+    func evaluate(pair: LanguagePair?) async {
+        guard phase != .downloading else { return }
+        self.pair = pair
+        generation += 1
+        let gen = generation
+        configuration = nil
+        guard let pair else { phase = .done; return }
+        phase = .checking
+        let status = await statusOf(pair)
+        guard gen == generation else { return }
+        phase = Self.phase(for: status)
+    }
+
+    /// Trigger the system download sheet for the configured pair.
+    func startDownload() {
+        guard let pair else { phase = .done; return }
+        generation += 1
+        phase = .downloading
+        // A fresh Configuration makes `.translationTask` run prepareTranslation().
         configuration = TranslationSession.Configuration(
-            source: Locale.Language(identifier: next.source),
-            target: Locale.Language(identifier: next.target)
+            source: Locale.Language(identifier: pair.source),
+            target: Locale.Language(identifier: pair.target)
         )
     }
 
-    func fail() {
-        guard phase == .downloading else { return }
+    /// Called once `prepareTranslation()` returns (whether it completed or the
+    /// person dismissed the sheet). Settle on the *verified* status rather than
+    /// trusting that the call returned: `supported` here means "still not
+    /// installed", i.e. the sheet was dismissed without downloading.
+    func didFinishPreparing(gen: Int) async {
+        guard gen == generation, phase == .downloading, let pair else { return }
+        let status = await statusOf(pair)
+        guard gen == generation, phase == .downloading else { return }
+        configuration = nil
+        phase = Self.phase(for: status)
+    }
+
+    func fail(gen: Int) {
+        guard gen == generation, phase == .downloading else { return }
         phase = .failed
-        pending = []
         configuration = nil
     }
 
-    /// Drop back to idle and tear down any in-flight session. Used both when the
-    /// person declines/dismisses the system download sheet (a choice, not a
-    /// failure) and when the configured languages change, invalidating a prior
-    /// "downloaded" result.
-    func reset() {
-        phase = .idle
-        pending = []
-        configuration = nil
+    // MARK: - Availability
+
+    private func statusOf(_ pair: LanguagePair) async -> LanguageAvailability.Status {
+        await LanguageAvailability().status(
+            from: Locale.Language(identifier: pair.source),
+            to: Locale.Language(identifier: pair.target)
+        )
+    }
+
+    private static func phase(for status: LanguageAvailability.Status) -> Phase {
+        switch status {
+        case .installed: return .done       // assets present — ready offline
+        case .supported: return .idle       // supported but not downloaded yet
+        case .unsupported: return .unsupported
+        @unknown default: return .idle
+        }
     }
 }
 
@@ -90,14 +128,22 @@ private struct AppleLanguageDownloadButtonBody: View {
 
     @State private var model = AppleDownloadModel()
 
+    /// One representative direction is enough (assets are per-language). Nil when
+    /// both configured languages are the same.
+    private var pair: AppleDownloadModel.LanguagePair? {
+        guard target.code != secondTarget.code else { return nil }
+        return .init(source: secondTarget.code, target: target.code)
+    }
+
     var body: some View {
         control
             .font(.callout)
             .help(L(.settingsTranslationDownloadLanguagesHelp, target.displayName(), secondTarget.displayName()))
-            // Changing either configured language invalidates a prior result, so
-            // reset back to the download prompt rather than showing a stale state.
-            .onChange(of: target) { _, _ in model.reset() }
-            .onChange(of: secondTarget) { _, _ in model.reset() }
+            // Re-evaluate real status on appear and whenever either configured
+            // language changes, so the control never shows a stale result.
+            .task(id: "\(target.code)|\(secondTarget.code)") {
+                await model.evaluate(pair: pair)
+            }
             .translationTask(model.configuration) { @Sendable [model] session in
                 // @Sendable keeps the closure nonisolated so `session` can reach
                 // Apple's nonisolated prepareTranslation(); state writes hop back
@@ -109,8 +155,10 @@ private struct AppleLanguageDownloadButtonBody: View {
     @ViewBuilder
     private var control: some View {
         switch model.phase {
+        case .checking:
+            ProgressView().controlSize(.small)
         case .idle:
-            Button { startDownload() } label: {
+            Button { model.startDownload() } label: {
                 LocalizedText(.settingsTranslationDownloadLanguages)
             }
             .buttonStyle(.borderless)
@@ -127,8 +175,15 @@ private struct AppleLanguageDownloadButtonBody: View {
                 Image(systemName: "checkmark.circle.fill")
             }
             .foregroundStyle(.green)
+        case .unsupported:
+            Label {
+                LocalizedText(.settingsTranslationDownloadLanguagesUnsupported)
+            } icon: {
+                Image(systemName: "slash.circle")
+            }
+            .foregroundStyle(.secondary)
         case .failed:
-            Button { startDownload() } label: {
+            Button { model.startDownload() } label: {
                 Label {
                     LocalizedText(.settingsTranslationDownloadLanguagesFailed)
                 } icon: {
@@ -139,36 +194,30 @@ private struct AppleLanguageDownloadButtonBody: View {
             .foregroundStyle(.orange)
         }
     }
-
-    private func startDownload() {
-        // Same language both ways has nothing to fetch; treat it as already done.
-        guard target.code != secondTarget.code else {
-            model.start(pairs: [])
-            return
-        }
-        model.start(pairs: [
-            (source: secondTarget.code, target: target.code),
-            (source: target.code, target: secondTarget.code),
-        ])
-    }
 }
 
-/// Request the download for one configured pair. Runs from a `nonisolated`
-/// context so `session` never crosses the MainActor; results hop back via `await`.
+/// Request the download for the configured pair, then hand back to the model to
+/// verify the real result. Runs from a `nonisolated` context so `session` never
+/// crosses the MainActor; results hop back via `await`. The captured `generation`
+/// lets the model ignore a callback from a run a newer one has superseded.
 @available(macOS 15, *)
 private nonisolated func runApplePrepare(_ session: TranslationSession,
                                          model: AppleDownloadModel) async {
+    let gen = await model.currentGeneration
     do {
-        // Presents the system download sheet when the assets aren't installed,
-        // and returns immediately when they already are.
+        // Presents the system download sheet when assets aren't installed, returns
+        // immediately when they are, and — importantly — also returns *without
+        // error* when the person dismisses the sheet without downloading, which is
+        // why the model re-checks real availability instead of trusting this call.
         try await session.prepareTranslation()
-        await model.advance()
+        await model.didFinishPreparing(gen: gen)
     } catch is CancellationError {
         // Superseded by a newer configuration; the next task drives the state.
     } catch let error as CocoaError where error.code == .userCancelled {
-        await model.reset()
+        // Progress UI dismissed mid-download — verify what actually installed.
+        await model.didFinishPreparing(gen: gen)
     } catch {
-        await model.fail()
+        await model.fail(gen: gen)
     }
 }
 #endif

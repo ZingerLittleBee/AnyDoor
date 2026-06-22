@@ -288,6 +288,7 @@ enum L10n {
         case settingsTranslationDownloadLanguagesDownloading = "settings.translation.downloadLanguages.downloading"
         case settingsTranslationDownloadLanguagesDone = "settings.translation.downloadLanguages.done"
         case settingsTranslationDownloadLanguagesFailed = "settings.translation.downloadLanguages.failed"
+        case settingsTranslationDownloadLanguagesUnsupported = "settings.translation.downloadLanguages.unsupported"
         case settingsTranslationDownloadLanguagesHelp = "settings.translation.downloadLanguages.help"
         case settingsRecordingSection = "settings.recording.section"
         case settingsRecordingFrameRate = "settings.recording.frameRate"
