@@ -18,11 +18,14 @@ struct TranslationServiceCard: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             if !collapsed {
-                Divider()
-                body(for: result)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
+                VStack(alignment: .leading, spacing: 0) {
+                    Divider()
+                    body(for: result)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
@@ -31,26 +34,41 @@ struct TranslationServiceCard: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: config.iconName)
-                .foregroundStyle(.tint)
-                .frame(width: 18)
-            Text(config.displayName)
-                .font(.subheadline.weight(.semibold))
-            statusBadge
-            Spacer()
+            // The icon + name + status region (including the flexible gap) toggles
+            // collapse on tap; the trailing action buttons keep their own hit
+            // targets so a tap on them isn't swallowed by this gesture.
+            HStack(spacing: 8) {
+                Image(systemName: config.iconName)
+                    .foregroundStyle(.tint)
+                    .frame(width: 18)
+                Text(config.displayName)
+                    .font(.subheadline.weight(.semibold))
+                statusBadge
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { toggleCollapsed() }
+
             footerButtons
             Button {
-                collapsed.toggle()
+                toggleCollapsed()
             } label: {
-                Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                Image(systemName: "chevron.up")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? 180 : 0))
             }
             .buttonStyle(.plain)
             .help(L(collapsed ? .translationExpand : .translationCollapse))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Toggle the body's visibility with a short ease so the disclosure (and the
+    /// chevron's rotation) animate together.
+    private func toggleCollapsed() {
+        withAnimation(.easeInOut(duration: 0.22)) { collapsed.toggle() }
     }
 
     @ViewBuilder

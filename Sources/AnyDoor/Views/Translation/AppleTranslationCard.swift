@@ -64,6 +64,7 @@ private struct AppleTranslationCardBody: View {
 
     @State private var configuration: TranslationSession.Configuration?
     @State private var state = AppleCardState()
+    @State private var collapsed = false
 
     var body: some View {
         // While idle (no run yet) render nothing so the card matches the stream
@@ -91,11 +92,16 @@ private struct AppleTranslationCardBody: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider()
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+            if !collapsed {
+                VStack(alignment: .leading, spacing: 0) {
+                    Divider()
+                    content
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -103,15 +109,23 @@ private struct AppleTranslationCardBody: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Image(systemName: config.iconName)
-                .foregroundStyle(.tint)
-                .frame(width: 18)
-            Text(config.displayName)
-                .font(.subheadline.weight(.semibold))
-            if state.status == .loading || state.status == .streaming {
-                ProgressView().controlSize(.small)
+            // The icon + name + status region (including the flexible gap) toggles
+            // collapse on tap; the trailing action buttons keep their own hit
+            // targets so a tap on them isn't swallowed by this gesture.
+            HStack(spacing: 8) {
+                Image(systemName: config.iconName)
+                    .foregroundStyle(.tint)
+                    .frame(width: 18)
+                Text(config.displayName)
+                    .font(.subheadline.weight(.semibold))
+                if state.status == .loading || state.status == .streaming {
+                    ProgressView().controlSize(.small)
+                }
+                Spacer(minLength: 0)
             }
-            Spacer()
+            .contentShape(Rectangle())
+            .onTapGesture { toggleCollapsed() }
+
             if !state.output.isEmpty {
                 Button {
                     SpeechService.shared.speak(state.output, language: coordinator.effectiveTarget())
@@ -129,9 +143,25 @@ private struct AppleTranslationCardBody: View {
                 .buttonStyle(.plain)
                 .help(L(.translationCopy))
             }
+            Button {
+                toggleCollapsed()
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? 180 : 0))
+            }
+            .buttonStyle(.plain)
+            .help(L(collapsed ? .translationExpand : .translationCollapse))
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+    }
+
+    /// Toggle the body's visibility with a short ease so the disclosure (and the
+    /// chevron's rotation) animate together.
+    private func toggleCollapsed() {
+        withAnimation(.easeInOut(duration: 0.22)) { collapsed.toggle() }
     }
 
     @ViewBuilder
