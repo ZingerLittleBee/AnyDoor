@@ -23,7 +23,7 @@ enum ToastStyle: Sendable {
     var displayDuration: Duration {
         switch self {
         case .failure:
-            return .seconds(2.5)
+            return .seconds(5)
         case .success, .color:
             return .seconds(1)
         }
