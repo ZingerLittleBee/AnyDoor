@@ -8,10 +8,10 @@ import SwiftUI
 ///
 /// Each side is a soft-filled capsule with a single trailing chevron (the system
 /// menu indicator is hidden) and a hover highlight; the swap control is a round
-/// icon button between them. The two pickers occupy equal flexible halves
-/// (source trailing-aligned, target leading-aligned) so the swap icon stays
-/// geometrically centered no matter how long the language names are. Swap is
-/// also bound to ⌘S.
+/// icon button between them. The two pickers occupy equal flexible halves and are
+/// centered within their own half, so both sides have the same footprint and the
+/// swap icon stays geometrically centered no matter how long the language names
+/// are. Swap is also bound to ⌘S.
 struct LanguageBar: View {
     @Bindable var coordinator: TranslationCoordinator
     /// Called after any language change (source/target/swap) so the host can
@@ -25,10 +25,10 @@ struct LanguageBar: View {
     var body: some View {
         HStack(spacing: 8) {
             sourcePicker
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(maxWidth: .infinity, alignment: .center)
             swapButton
             targetPicker
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .font(.callout)
     }
@@ -95,7 +95,9 @@ struct LanguageBar: View {
         // ⌘S swaps source/target; the panel is key while open, so the hosting
         // view's performKeyEquivalent fires this even while the input has focus.
         .keyboardShortcut("s", modifiers: .command)
-        .help(L(.translationSwapLanguages))
+        // Surface the shortcut in the tooltip (a plain button's help text isn't
+        // auto-decorated with its key equivalent the way a menu item's is).
+        .help(L(.translationSwapLanguages) + " ⌘S")
     }
 
     /// The capsule label shared by both pickers: title + a single trailing
