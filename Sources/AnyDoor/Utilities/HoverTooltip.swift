@@ -18,6 +18,9 @@ private struct HoverTooltipModifier: ViewModifier {
     let text: String
     @State private var hovering = false
     @State private var visible = false
+    // Defaults high so the very first frame sits above (never on top of) the
+    // anchor; corrected to the real height once measured.
+    @State private var bubbleHeight: CGFloat = 30
 
     func body(content: Content) -> some View {
         content
@@ -37,9 +40,17 @@ private struct HoverTooltipModifier: ViewModifier {
             }
             .overlay(alignment: .top) {
                 if visible {
-                    // Height-independent placement: pin the bubble's bottom edge
-                    // 6pt above the anchor's top.
-                    bubble.alignmentGuide(.top) { $0[.bottom] + 6 }
+                    // Anchored to the top edge, then lifted fully above it by its
+                    // own measured height plus a 6pt gap so it never covers the
+                    // anchor (custom alignment guides aren't honored by overlay).
+                    bubble
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear.preference(key: TooltipHeightKey.self, value: proxy.size.height)
+                            }
+                        )
+                        .onPreferenceChange(TooltipHeightKey.self) { bubbleHeight = $0 }
+                        .offset(y: -(bubbleHeight + 6))
                 }
             }
     }
@@ -63,5 +74,12 @@ private struct HoverTooltipModifier: ViewModifier {
             .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
             .allowsHitTesting(false)
             .transition(.opacity)
+    }
+}
+
+private struct TooltipHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
