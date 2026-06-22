@@ -225,8 +225,23 @@ private nonisolated func run(_ session: TranslationSession,
                              config: TranslationServiceConfig) async {
     let text = await coordinator.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
+
+    // A missing on-device language pack makes session.translate present a system
+    // download sheet (from another process) that steals key focus and would
+    // dismiss the floating panel. Guard auto-dismiss ONLY for that case, so an
+    // installed (fast) translation doesn't hold focus for its whole duration.
+    let guarded = await mayDownloadLanguagePack(coordinator: coordinator)
+    if guarded { await coordinator.beginSystemSheet() }
+    let result: Result<String, Error>
     do {
-        let translated = try await session.translate(text).targetText
+        result = .success(try await session.translate(text).targetText)
+    } catch {
+        result = .failure(error)
+    }
+    if guarded { await coordinator.endSystemSheet() }
+
+    switch result {
+    case .success(let translated):
         await state.succeed(translated)
         // Record to history through the same store the coordinator uses, so an
         // Apple-only success is not dropped (the coordinator's run() never sees it).
@@ -236,15 +251,35 @@ private nonisolated func run(_ session: TranslationSession,
             sourceText: text,
             translatedText: translated,
             target: coordinator.effectiveTarget())
-    } catch is CancellationError {
-        // Superseded by a newer request; leave state for the new run.
-    } catch let error as CocoaError where error.code == .userCancelled {
-        // The person declined or dismissed the language-pack download sheet —
-        // that's a choice, not a failure, so fall back to idle (the card hides)
-        // instead of flashing a red error.
-        await state.reset()
-    } catch {
-        await state.fail(error.localizedDescription)
+    case .failure(let error):
+        if error is CancellationError {
+            // Superseded by a newer request; leave state for the new run.
+        } else if let cocoa = error as? CocoaError, cocoa.code == .userCancelled {
+            // The person declined or dismissed the language-pack download sheet —
+            // a choice, not a failure, so fall back to idle (the card hides)
+            // instead of flashing a red error.
+            await state.reset()
+        } else {
+            await state.fail(error.localizedDescription)
+        }
     }
+}
+
+/// Whether the current source→target pair still needs an on-device language
+/// pack — i.e. `session.translate` will present the system download sheet. Used
+/// to scope the panel's auto-dismiss guard to just the sheet-presenting case.
+@available(macOS 15, *)
+private nonisolated func mayDownloadLanguagePack(coordinator: TranslationCoordinator) async -> Bool {
+    let (sourceCode, targetCode) = await MainActor.run {
+        ((coordinator.source ?? coordinator.detectedSource)?.code, coordinator.effectiveTarget().code)
+    }
+    // Without a concrete source (auto-detect, nothing detected yet) we can't
+    // check, so assume a sheet may appear and protect the panel.
+    guard let sourceCode else { return true }
+    let status = await LanguageAvailability().status(
+        from: Locale.Language(identifier: sourceCode),
+        to: Locale.Language(identifier: targetCode)
+    )
+    return status == .supported
 }
 #endif

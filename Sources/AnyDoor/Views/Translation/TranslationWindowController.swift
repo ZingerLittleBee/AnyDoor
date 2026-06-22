@@ -15,6 +15,10 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
     private(set) var isPinned: Bool = false
     private var keyMonitor: Any?
     private var mouseMonitors: [Any] = []
+    /// While set, the Spotlight-style dismissal paths (resign-key + outside-click)
+    /// are inhibited. Used to ride out a system credential prompt that steals key
+    /// focus mid-translate (see `runKeychainSensitive`).
+    private var autoDismissSuspended = false
 
     private init() {
         let panel = KeyablePanel(
@@ -45,6 +49,19 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
 
         super.init(window: panel)
         panel.delegate = self
+
+        // Building an LLM provider reads its API key from the Keychain, which can
+        // raise a blocking system credential dialog; Apple's card can raise a
+        // language-pack download sheet. Both steal key focus (and the click that
+        // dismisses them lands in another process's window), which would trip the
+        // panel's auto-dismiss. Bracket that work so the panel survives.
+        let coordinator = TranslationCoordinator.shared
+        coordinator.withKeychainPromptGuard = { [weak self] work in
+            guard let self else { work(); return }
+            self.runKeychainSensitive(work)
+        }
+        coordinator.onBeginSystemSheet = { [weak self] in self?.suspendAutoDismiss() }
+        coordinator.onEndSystemSheet = { [weak self] in self?.reclaimFocusAndRearm() }
     }
 
     @available(*, unavailable)
@@ -85,6 +102,36 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
         removeKeyMonitor()
         removeDismissMonitors()
         window?.orderOut(nil)
+    }
+
+    /// Run keychain-sensitive work (which may block on a system credential
+    /// prompt) with auto-dismiss inhibited, then reclaim key focus and re-arm
+    /// dismissal only after the prompt's queued focus-loss events have flushed —
+    /// otherwise the resign-key / outside-click that the prompt generates would
+    /// close the panel out from under the user.
+    private func runKeychainSensitive(_ work: () -> Void) {
+        suspendAutoDismiss()
+        work()
+        reclaimFocusAndRearm()
+    }
+
+    /// Inhibit the Spotlight-style dismissal paths while a system prompt/sheet
+    /// holds focus. Paired with `reclaimFocusAndRearm`.
+    private func suspendAutoDismiss() {
+        autoDismissSuspended = true
+    }
+
+    /// Take key focus back from a system prompt/sheet (the click that dismissed
+    /// it landed in another process), then re-arm dismissal only after the queued
+    /// resign-key / outside-click events have flushed.
+    private func reclaimFocusAndRearm() {
+        if window?.isVisible == true {
+            window?.makeKeyAndOrderFront(nil)
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            self?.autoDismissSuspended = false
+        }
     }
 
     func setPinned(_ pinned: Bool) {
@@ -159,8 +206,10 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
     private func handle(keyCode: UInt16) -> Bool {
         guard let window, window.isVisible, window.isKeyWindow else { return false }
         // Esc dismisses only when unpinned; a pinned window ignores it so the
-        // input field can be cleared without losing the window.
-        if keyCode == 53, !isPinned {
+        // input field can be cleared without losing the window. Also held off
+        // while a system prompt/sheet is being ridden out, so a buffered Esc that
+        // dismissed that prompt can't leak through and close the panel.
+        if keyCode == 53, !isPinned, !autoDismissSuspended {
             close()
             return true
         }
@@ -174,6 +223,7 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
         ) { [weak self] event in
             guard let self else { return event }
             MainThreadIsolation.run {
+                guard !self.autoDismissSuspended else { return }
                 if !self.isInsideOwnWindows(event.window) { self.close() }
             }
             return event
@@ -181,7 +231,10 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
         let global = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] _ in
-            MainThreadIsolation.run { self?.close() }
+            MainThreadIsolation.run {
+                guard let self, !self.autoDismissSuspended else { return }
+                self.close()
+            }
         }
         mouseMonitors = [local, global].compactMap { $0 }
     }
@@ -216,7 +269,7 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
     /// Unpinned windows dismiss when focus leaves (Spotlight UX); pinned ones
     /// stay visible in the background.
     func windowDidResignKey(_ notification: Notification) {
-        guard !isPinned else { return }
+        guard !isPinned, !autoDismissSuspended else { return }
         close()
     }
 }

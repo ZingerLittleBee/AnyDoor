@@ -30,6 +30,26 @@ final class TranslationCoordinator {
     /// Set by the app once the ModelContainer is ready; nil in tests.
     var history: TranslationHistoryStore?
 
+    /// Brackets the synchronous provider build, which can read the Keychain and
+    /// raise a blocking system credential prompt. The window controller installs
+    /// this so its Spotlight-style floating panel doesn't auto-dismiss when that
+    /// prompt steals key focus; the default just runs the work (tests / headless).
+    var withKeychainPromptGuard: @MainActor (() -> Void) -> Void = { $0() }
+
+    /// Installed by the window controller to suspend / re-arm the panel's
+    /// auto-dismiss around ASYNC work that can surface a system sheet (e.g.
+    /// Apple's on-device language-pack download), which steals key focus like the
+    /// keychain prompt but fires off the main thread after `translate()` has
+    /// already returned. Defaults are no-ops (tests / headless).
+    var onBeginSystemSheet: @MainActor () -> Void = {}
+    var onEndSystemSheet: @MainActor () -> Void = {}
+
+    /// Bracket async system-sheet work (see `onBeginSystemSheet`). The Apple card
+    /// calls these around its bare `session.translate` only when a language pack
+    /// must be downloaded, so the panel survives the download sheet.
+    func beginSystemSheet() { onBeginSystemSheet() }
+    func endSystemSheet() { onEndSystemSheet() }
+
     private let settings: TranslationSettings
     private let makeProviders: @MainActor () -> [any TranslationProvider]
     private var tasks: [String: Task<Void, Never>] = [:]
@@ -70,7 +90,11 @@ final class TranslationCoordinator {
         cancel()
         updateDetection()
 
-        let providers = makeProviders()
+        // Build providers inside the guard: an LLM provider reads its API key from
+        // the Keychain here, which can synchronously surface a system credential
+        // prompt that would otherwise dismiss the floating panel.
+        var providers: [any TranslationProvider] = []
+        withKeychainPromptGuard { providers = makeProviders() }
         let request = TranslationRequest(text: text, source: source, target: effectiveTarget())
 
         results = providers.map { TranslationResult.idle($0.id) }
