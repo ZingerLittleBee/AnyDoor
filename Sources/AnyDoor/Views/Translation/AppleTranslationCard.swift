@@ -66,16 +66,16 @@ private struct AppleTranslationCardBody: View {
     @State private var state = AppleCardState()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-            content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+        // While idle (no run yet) render nothing so the card matches the stream
+        // service cards, which only appear once a translation runs — otherwise the
+        // resting `.idle` state would surface as a perpetual "translating" spinner.
+        // The driving modifiers stay attached to the always-present Group so a
+        // later runToken change still arms the session.
+        Group {
+            if state.status != .idle {
+                card
+            }
         }
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
         // Rebuild the session only on an explicit translate run (Enter), matching
         // the stream providers — not on every keystroke. `translate()` bumps
         // `runToken`, which is the same signal the coordinator fans out on.
@@ -86,6 +86,19 @@ private struct AppleTranslationCardBody: View {
             // translate(_:). State writes hop back via `await`.
             await run(session, state: state, coordinator: coordinator, config: config)
         }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider()
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+        }
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private var header: some View {
@@ -124,7 +137,11 @@ private struct AppleTranslationCardBody: View {
     @ViewBuilder
     private var content: some View {
         switch state.status {
-        case .idle, .loading:
+        case .idle:
+            // Not reachable while the card is hidden in `.idle`; kept as an empty
+            // resting state for safety.
+            EmptyView()
+        case .loading:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 LocalizedText(.translationTranslating).foregroundStyle(.secondary).font(.callout)
