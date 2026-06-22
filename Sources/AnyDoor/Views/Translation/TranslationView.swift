@@ -123,7 +123,7 @@ struct TranslationView: View {
     private var inputCard: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topLeading) {
-                EnterToTranslateEditor(text: $coordinator.inputText) { runTranslation() }
+                EnterToTranslateEditor(text: $coordinator.inputText, setToken: coordinator.inputSetToken) { runTranslation() }
                     .frame(minHeight: 70, maxHeight: 140)
                     .focused($inputFocused)
                 if coordinator.inputText.isEmpty {
@@ -247,6 +247,9 @@ struct TranslationView: View {
 /// intercept Return cleanly, so this thin AppKit bridge does.
 private struct EnterToTranslateEditor: NSViewRepresentable {
     @Binding var text: String
+    /// Bumps when `text` is set programmatically (prefill). Lets the editor adopt
+    /// the new value even while focused, unlike a plain external write.
+    var setToken: Int
     var onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -273,26 +276,35 @@ private struct EnterToTranslateEditor: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let textView = scroll.documentView as? NSTextView else { return }
+        // A programmatic set (prefill) bumps setToken; such a write must win even
+        // while focused so the recognized/selected text replaces the field.
+        let isProgrammatic = context.coordinator.lastSetToken != setToken
+        context.coordinator.lastSetToken = setToken
         guard textView.string != text else { return }
-        // While the user is typing (text view is first responder), an external
-        // write would collapse the caret/selection and race streaming re-renders;
-        // the binding already mirrors the user's edits via textDidChange. When we
-        // must write (e.g. prefill), preserve the selection where possible.
+        // Otherwise, while the user is typing (text view is first responder), skip
+        // the external write: it would collapse the caret/selection or break IME
+        // composition, and the binding already mirrors the user's edits via
+        // textDidChange.
         let isEditing = textView.window?.firstResponder === textView
-        guard !isEditing else { return }
+        guard isProgrammatic || !isEditing else { return }
         let previousSelection = textView.selectedRange()
         textView.string = text
-        let clamped = NSRange(
-            location: min(previousSelection.location, (text as NSString).length),
-            length: 0
-        )
-        textView.setSelectedRange(clamped)
+        // Caret to the end after a prefill; otherwise keep the prior position.
+        let location = isProgrammatic
+            ? (text as NSString).length
+            : min(previousSelection.location, (text as NSString).length)
+        textView.setSelectedRange(NSRange(location: location, length: 0))
     }
 
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         private let parent: EnterToTranslateEditor
-        init(_ parent: EnterToTranslateEditor) { self.parent = parent }
+        /// Last `setToken` the editor applied, to detect a new programmatic set.
+        var lastSetToken: Int
+        init(_ parent: EnterToTranslateEditor) {
+            self.parent = parent
+            self.lastSetToken = parent.setToken
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }

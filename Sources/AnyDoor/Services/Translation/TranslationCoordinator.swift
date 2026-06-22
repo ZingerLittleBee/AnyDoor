@@ -202,8 +202,15 @@ final class TranslationCoordinator {
         target = oldSource
     }
 
+    /// Bumped whenever the input text is set programmatically (e.g. prefill from
+    /// screenshot / selection / history), so the editor adopts it even while it
+    /// holds focus — its update guard otherwise skips external writes during
+    /// editing to protect IME composition.
+    private(set) var inputSetToken: Int = 0
+
     func prefill(_ text: String, autoTranslate: Bool) {
         inputText = text
+        inputSetToken &+= 1
         updateDetection()
         if autoTranslate {
             translate()
