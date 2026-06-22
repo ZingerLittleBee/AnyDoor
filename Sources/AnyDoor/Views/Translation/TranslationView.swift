@@ -51,12 +51,9 @@ struct TranslationView: View {
     // MARK: - Toolbar
 
     private var toolbar: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             Spacer()
-            toolbarButton(systemImage: isPinned ? "pin.fill" : "pin", help: L(.translationPin)) {
-                isPinned.toggle()
-                controller.setPinned(isPinned)
-            }
+            pinButton
             toolbarButton(systemImage: "clock.arrow.circlepath", help: L(.translationHistory)) {
                 showingHistory.toggle()
             }
@@ -80,13 +77,42 @@ struct TranslationView: View {
         .padding(.vertical, 8)
     }
 
+    /// Pin toggle with an unmistakable active state: while pinned the icon flips
+    /// to white on an accent-filled chip; unpinned it matches the other toolbar
+    /// glyphs (secondary, no fill).
+    private var pinButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { isPinned.toggle() }
+            controller.setPinned(isPinned)
+        } label: {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 12, weight: isPinned ? .semibold : .regular))
+                .foregroundStyle(isPinned ? Color.white : Color.secondary)
+                .frame(width: 24, height: 24)
+                .background {
+                    if isPinned {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.accentColor)
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .help(L(isPinned ? .translationUnpin : .translationPin))
+        .hoverTooltip(L(isPinned ? .translationUnpin : .translationPin), edge: .bottom)
+    }
+
     private func toolbarButton(systemImage: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: systemImage).font(.system(size: 13))
+            Image(systemName: systemImage)
+                .font(.system(size: 13))
+                .frame(width: 24, height: 24)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
+        .contentShape(Rectangle())
         .help(help)
+        .hoverTooltip(help, edge: .bottom)
     }
 
     // MARK: - Input

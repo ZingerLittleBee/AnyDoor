@@ -528,6 +528,7 @@ enum L10n {
         case translationTranslating = "translation.translating"
         case translationError = "translation.error"
         case translationPin = "translation.pin"
+        case translationUnpin = "translation.unpin"
         case translationHistory = "translation.history"
         case translationHistoryAll = "translation.history.all"
         case translationHistoryDelete = "translation.history.delete"

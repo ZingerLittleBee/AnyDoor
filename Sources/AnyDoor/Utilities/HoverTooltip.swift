@@ -7,15 +7,18 @@ extension View {
     /// hand-built panels (a bare `NSPanel` + `NSHostingView`, e.g. the translation
     /// panel) — `.onHover` still fires there, but no system tooltip appears (a
     /// system tooltip window can also end up behind a `.floating` panel). This
-    /// draws its own bubble above the view after a short hover delay; being part
-    /// of the panel's own view tree, it always sits on top of the panel.
-    func hoverTooltip(_ text: String) -> some View {
-        modifier(HoverTooltipModifier(text: text))
+    /// draws its own bubble after a short hover delay; being part of the panel's
+    /// own view tree, it always sits on top of the panel. `edge` is the side of
+    /// the anchor the bubble appears on — use `.bottom` for controls near the
+    /// panel's top (e.g. the toolbar) so the bubble doesn't fall off the top.
+    func hoverTooltip(_ text: String, edge: VerticalEdge = .top) -> some View {
+        modifier(HoverTooltipModifier(text: text, edge: edge))
     }
 }
 
 private struct HoverTooltipModifier: ViewModifier {
     let text: String
+    let edge: VerticalEdge
     @State private var hovering = false
     @State private var visible = false
     // Defaults high so the very first frame sits above (never on top of) the
@@ -38,11 +41,11 @@ private struct HoverTooltipModifier: ViewModifier {
                     withAnimation(.easeOut(duration: 0.1)) { visible = false }
                 }
             }
-            .overlay(alignment: .top) {
+            .overlay(alignment: edge == .top ? .top : .bottom) {
                 if visible {
-                    // Anchored to the top edge, then lifted fully above it by its
-                    // own measured height plus a 6pt gap so it never covers the
-                    // anchor (custom alignment guides aren't honored by overlay).
+                    // Anchored to the chosen edge, then pushed fully clear of the
+                    // anchor by its own measured height plus a 6pt gap so it never
+                    // covers it (custom alignment guides aren't honored by overlay).
                     bubble
                         .background(
                             GeometryReader { proxy in
@@ -50,7 +53,7 @@ private struct HoverTooltipModifier: ViewModifier {
                             }
                         )
                         .onPreferenceChange(TooltipHeightKey.self) { bubbleHeight = $0 }
-                        .offset(y: -(bubbleHeight + 6))
+                        .offset(y: (edge == .top ? -1 : 1) * (bubbleHeight + 6))
                 }
             }
     }

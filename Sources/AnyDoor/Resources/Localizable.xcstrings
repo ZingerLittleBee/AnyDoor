@@ -8773,6 +8773,22 @@
         }
       }
     },
+    "translation.unpin": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unpin Window"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消固定窗口"
+          }
+        }
+      }
+    },
     "translation.history": {
       "extractionState": "manual",
       "localizations": {
