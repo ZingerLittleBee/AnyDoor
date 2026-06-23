@@ -9246,6 +9246,57 @@
           }
         }
       }
+    },
+    "settings.translation.serviceManualMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Collapsed by default (translate manually)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "默认折叠（手动翻译）"
+          }
+        }
+      }
+    },
+    "settings.translation.serviceManualModeHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When collapsed this service does not auto-translate; expand its card to translate."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "折叠状态下不会自动翻译，展开卡片才会翻译。"
+          }
+        }
+      }
+    },
+    "translation.manualCollapsedHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manual · tap to translate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "手动 · 点击翻译"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
