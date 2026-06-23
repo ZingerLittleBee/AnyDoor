@@ -309,6 +309,7 @@ struct TranslationServiceConfigSheet: View {
                 Button { runTest() } label: { LocalizedText(.settingsTranslationServiceTest) }
                     .disabled(testState == .testing)
                 testStatusLabel
+                    .font(.callout)
                 Spacer()
                 Button(role: .cancel) { onCancel() } label: { LocalizedText(.settingsTranslationServiceCancel) }
                     .keyboardShortcut(.cancelAction)
@@ -319,6 +320,9 @@ struct TranslationServiceConfigSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(!isSaveable)
             }
+            // Pin the bar height so the status label appearing/changing after a
+            // test never resizes the bar and reflows the fixed-height card above.
+            .frame(height: 28)
             .padding(12)
         }
         .onAppear {
