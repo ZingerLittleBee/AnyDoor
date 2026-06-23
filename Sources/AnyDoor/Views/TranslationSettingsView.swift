@@ -275,17 +275,14 @@ struct TranslationServiceConfigSheet: View {
                 Section {
                     TextEditor(text: promptTemplate)
                         .font(.body.monospaced())
-                        // Hide the editor's default opaque background so it doesn't
-                        // render as a square-cornered box inside the rounded section.
+                        // Hide the editor's default opaque background so it blends
+                        // into the section card instead of drawing a second boxed
+                        // border inside it.
                         .scrollContentBackground(.hidden)
                         // Fixed height (not just minHeight): a min-only TextEditor
                         // greedily fills the form's slack and jumps taller when the
                         // layout re-runs on a state change (e.g. after a test).
                         .frame(height: 120)
-                        // Re-apply the text background with rounded corners so the
-                        // input reads as a rounded field, not a hard-edged box.
-                        .background(Color(nsColor: .textBackgroundColor))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
                 } header: {
                     LocalizedText(.settingsTranslationServicePrompt)
                 } footer: {
