@@ -15,6 +15,10 @@ final class TranslationCoordinator {
     var target: TranslationLanguage
     private(set) var detectedSource: TranslationLanguage?
     private(set) var results: [TranslationResult] = []
+    /// The request captured by the most recent `translate()`. `translateOne`
+    /// reuses it so a manually-expanded service translates the same text/target
+    /// its sibling cards used this run.
+    private(set) var currentRequest: TranslationRequest?
     /// Latest successful Apple on-device translation for the current run, keyed by
     /// runToken so a stale value from a previous run is ignored. The Apple card
     /// publishes here (it lives outside `results`) so the panel's auto-speak path
@@ -52,10 +56,12 @@ final class TranslationCoordinator {
 
     private let settings: TranslationSettings
     private let makeProviders: @MainActor () -> [any TranslationProvider]
+    private let makeProvider: @MainActor (TranslationServiceConfig) -> (any TranslationProvider)?
     private var tasks: [String: Task<Void, Never>] = [:]
 
     init(settings: TranslationSettings = .shared,
-         makeProviders: (@MainActor () -> [any TranslationProvider])? = nil) {
+         makeProviders: (@MainActor () -> [any TranslationProvider])? = nil,
+         makeProvider: (@MainActor (TranslationServiceConfig) -> (any TranslationProvider)?)? = nil) {
         self.settings = settings
         self.target = settings.targetLanguage
         if let makeProviders {
@@ -63,6 +69,7 @@ final class TranslationCoordinator {
         } else {
             self.makeProviders = { TranslationProviderFactory.makeStreamProviders(settings: settings) }
         }
+        self.makeProvider = makeProvider ?? { TranslationProviderFactory.makeStreamProvider(for: $0) }
     }
 
     func updateDetection() {
@@ -85,6 +92,7 @@ final class TranslationCoordinator {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             results = []
+            currentRequest = nil
             return
         }
         cancel()
@@ -96,8 +104,16 @@ final class TranslationCoordinator {
         var providers: [any TranslationProvider] = []
         withKeychainPromptGuard { providers = makeProviders() }
         let request = TranslationRequest(text: text, source: source, target: effectiveTarget())
+        currentRequest = request
 
-        results = providers.map { TranslationResult.idle($0.id) }
+        // Manual (collapsed-by-default) services get a deferred placeholder card
+        // with no task; they translate only when the user expands them. The
+        // factory already excludes them from the auto `providers` above.
+        var newResults = settings.enabledServicesInOrder
+            .filter { $0.startsManual }
+            .map { TranslationResult.deferred($0.id) }
+        newResults.append(contentsOf: providers.map { TranslationResult.idle($0.id) })
+        results = newResults
 
         let token = runToken
         for provider in providers {
@@ -111,6 +127,36 @@ final class TranslationCoordinator {
                 guard let self, self.runToken == token else { return }
                 self.tasks[id] = nil
             }
+        }
+    }
+
+    /// Translate a single manual service on demand, reusing the current run's
+    /// request. No-op unless that service currently holds a `.deferred` result
+    /// (guards against double-trigger / already-running / already-done).
+    func translateOne(serviceID: String) {
+        guard let request = currentRequest,
+              let config = settings.services.first(where: { $0.id == serviceID }),
+              results.first(where: { $0.serviceID == serviceID })?.status == .deferred else {
+            return
+        }
+
+        var provider: (any TranslationProvider)?
+        withKeychainPromptGuard { provider = makeProvider(config) }
+        guard let provider else {
+            update(serviceID) {
+                $0.status = .failure
+                $0.errorMessage = L(.translationErrorMissingConfig)
+            }
+            return
+        }
+
+        // Show the spinner immediately on expand, before the task's first hop.
+        update(serviceID) { $0.status = .loading }
+        let token = runToken
+        tasks[serviceID] = Task { [weak self] in
+            await self?.run(provider: provider, request: request, sourceText: request.text)
+            guard let self, self.runToken == token else { return }
+            self.tasks[serviceID] = nil
         }
     }
 

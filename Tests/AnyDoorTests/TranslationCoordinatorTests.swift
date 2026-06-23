@@ -42,6 +42,24 @@ final class TranslationCoordinatorTests: XCTestCase {
         return TranslationCoordinator(settings: settings, makeProviders: { providers })
     }
 
+    /// A coordinator whose settings contain a single manual LLM service and whose
+    /// single-provider builder returns `scripted` for that id.
+    private func makeManualCoordinator(scripted: ScriptedProvider)
+    -> TranslationCoordinator {
+        let d = UserDefaults(suiteName: "translation.coord.\(UUID().uuidString)")!
+        let settings = TranslationSettings(defaults: d)
+        var manual = TranslationServiceConfig(
+            id: scripted.id, kind: .openAICompatible, displayName: "LLM", iconName: "brain",
+            enabled: true, order: 0, baseURL: "https://api.example.com/v1", model: "gpt-x",
+            promptTemplate: TranslationServiceConfig.defaultPromptTemplate)
+        manual.manualMode = true
+        settings.setServices([manual])
+        return TranslationCoordinator(
+            settings: settings,
+            makeProviders: { [] },
+            makeProvider: { $0.id == scripted.id ? scripted : nil })
+    }
+
     private func waitUntil(_ predicate: @escaping () -> Bool,
                            timeout: TimeInterval = 2.0) async {
         let deadline = Date().addingTimeInterval(timeout)
@@ -141,6 +159,39 @@ final class TranslationCoordinatorTests: XCTestCase {
         let coordinator = makeCoordinator([provider])
         coordinator.inputText = "   "
         coordinator.translate()
+        XCTAssertTrue(coordinator.results.isEmpty)
+    }
+
+    func testManualServiceGetsDeferredResultAndStartsNoTask() async {
+        let scripted = ScriptedProvider(id: "llm", kind: .openAICompatible, chunks: [.final("你好")])
+        let coordinator = makeManualCoordinator(scripted: scripted)
+        coordinator.inputText = "Hello"
+        coordinator.target = TranslationLanguage.simplifiedChinese
+        coordinator.translate()
+
+        XCTAssertEqual(coordinator.results.first(where: { $0.serviceID == "llm" })?.status, .deferred)
+        // No task should have run: give any erroneous task time, then re-check.
+        try? await Task.sleep(nanoseconds: 80_000_000)
+        XCTAssertEqual(coordinator.results.first(where: { $0.serviceID == "llm" })?.status, .deferred)
+        XCTAssertTrue(coordinator.results.first(where: { $0.serviceID == "llm" })?.text.isEmpty ?? false)
+    }
+
+    func testTranslateOneRunsADeferredService() async {
+        let scripted = ScriptedProvider(id: "llm", kind: .openAICompatible, chunks: [.final("你好")])
+        let coordinator = makeManualCoordinator(scripted: scripted)
+        coordinator.inputText = "Hello"
+        coordinator.target = TranslationLanguage.simplifiedChinese
+        coordinator.translate()
+        coordinator.translateOne(serviceID: "llm")
+
+        await waitUntil { coordinator.results.first(where: { $0.serviceID == "llm" })?.status == .success }
+        XCTAssertEqual(coordinator.results.first(where: { $0.serviceID == "llm" })?.text, "你好")
+    }
+
+    func testTranslateOneIsNoOpWithoutADeferredResult() {
+        let coordinator = makeCoordinator([])
+        // No current request / no deferred entry -> must not crash or change state.
+        coordinator.translateOne(serviceID: "nope")
         XCTAssertTrue(coordinator.results.isEmpty)
     }
 }
