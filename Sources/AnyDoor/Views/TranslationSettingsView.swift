@@ -11,60 +11,26 @@ struct TranslationSettingsView: View {
     @State private var history = TranslationHistoryStore.shared
     private let keychain = TranslationKeychainStore()
 
-    @State private var editingConfig: TranslationServiceConfig?
-    @State private var isPresentingNew = false
-
     var body: some View {
-        ZStack {
-            Form {
-                languageSection
-                servicesSection
-                historySection
-            }
-            .formStyle(.grouped)
-
-            if let config = editingConfig {
-                serviceEditorOverlay(config)
-            }
+        Form {
+            languageSection
+            servicesSection
+            historySection
         }
-        .animation(.easeInOut(duration: 0.18), value: editingConfig?.id)
+        .formStyle(.grouped)
     }
 
-    /// The service editor as a card centered over a dimmed backdrop, so it sits
-    /// in the middle of the window. A `.sheet` pins to the window's top edge and
-    /// (at full height) reaches the bottom; a centered overlay is the only way to
-    /// place a modal in the window's vertical center. The backdrop swallows
-    /// clicks to the settings behind, giving it modal behavior.
-    @ViewBuilder
-    private func serviceEditorOverlay(_ config: TranslationServiceConfig) -> some View {
-        ZStack {
-            Color.black.opacity(0.28)
-                .ignoresSafeArea()
-
-            TranslationServiceConfigSheet(
-                config: config,
-                isNew: isPresentingNew,
-                keychain: keychain
-            ) { saved, apiKey in
-                applySave(saved, apiKey)
-                editingConfig = nil
-                isPresentingNew = false
-            } onCancel: {
-                editingConfig = nil
-                isPresentingNew = false
-            }
-            .frame(width: 512, height: 440)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.35), radius: 22, y: 8)
-        }
-        .transition(.opacity)
-    }
-
-    /// Present the editor sheet for a new or existing service.
+    /// Present the editor as a modal dialog centered over — and dimming — the
+    /// entire Settings window. It is hosted in a window-level scrim because the
+    /// tab bar lives in the window's toolbar, which a SwiftUI overlay inside a tab
+    /// cannot cover.
     private func presentEditor(_ config: TranslationServiceConfig, isNew: Bool) {
-        isPresentingNew = isNew
-        editingConfig = config
+        TranslationServiceEditorOverlay.shared.present(
+            config: config,
+            isNew: isNew,
+            keychain: keychain,
+            onSave: applySave
+        )
     }
 
     /// Persist the editor result: store or clear the API key (a nil/empty key
@@ -258,16 +224,21 @@ struct TranslationSettingsView: View {
 /// stored in (and pre-loaded from) the Keychain via `TranslationKeychainStore`;
 /// it is never persisted into `TranslationServiceConfig`.
 @MainActor
-private struct TranslationServiceConfigSheet: View {
+struct TranslationServiceConfigSheet: View {
     @State private var draft: TranslationServiceConfig
     @State private var apiKey: String
     @State private var testState: TestState = .idle
+    @FocusState private var focusedField: Field?
     private let isNew: Bool
     private let keychain: TranslationKeychainStore
     private let onSave: (TranslationServiceConfig, String?) -> Void
     private let onCancel: () -> Void
 
     private enum TestState: Equatable { case idle, testing, success, failure(String) }
+    /// Drives the initial keyboard focus so the cursor lands in a field as soon as
+    /// the editor appears (the scrim is a borderless panel; without an explicit
+    /// focus the caret would only land after a manual click).
+    private enum Field: Hashable { case name }
 
     init(
         config: TranslationServiceConfig,
@@ -289,6 +260,7 @@ private struct TranslationServiceConfigSheet: View {
             Form {
                 Section {
                     TextField(text: $draft.displayName) { LocalizedText(.settingsTranslationServiceName) }
+                        .focused($focusedField, equals: .name)
                     TextField(text: baseURL) { LocalizedText(.settingsTranslationServiceBaseURL) }
                     TextField(text: model) { LocalizedText(.settingsTranslationServiceModel) }
                     SecureField(text: $apiKey) { LocalizedText(.settingsTranslationServiceAPIKey) }
@@ -361,6 +333,12 @@ private struct TranslationServiceConfigSheet: View {
                 .disabled(!isSaveable)
             }
             .padding(12)
+        }
+        .onAppear {
+            // Defer one runloop hop so NSHostingView finishes building its
+            // responder chain before we claim focus; otherwise the assignment can
+            // land before the field exists and silently no-op.
+            DispatchQueue.main.async { focusedField = .name }
         }
     }
 
