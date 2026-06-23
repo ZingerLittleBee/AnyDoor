@@ -17,6 +17,9 @@ final class TranslationProviderFactoryTests: XCTestCase {
         let keychain = TranslationKeychainStore(service: keychainService)
         keychain.deleteAPIKey(for: "llm-keyed")
         keychain.deleteAPIKey(for: "llm-keyless")
+        keychain.deleteAPIKey(for: "single-llm")
+        keychain.deleteAPIKey(for: "manual")
+        keychain.deleteAPIKey(for: "auto")
         super.tearDown()
     }
 
@@ -86,5 +89,42 @@ final class TranslationProviderFactoryTests: XCTestCase {
         let providers = TranslationProviderFactory.makeStreamProviders(
             settings: settings, keychain: keychain)
         XCTAssertEqual(providers.map(\.id), ["llm-keyed"])
+    }
+
+    func testMakeStreamProviderBuildsSingleSkipsAppleAndIncomplete() {
+        let keychain = TranslationKeychainStore(service: keychainService)
+        keychain.setAPIKey("sk-1", for: "single-llm")
+
+        XCTAssertNil(TranslationProviderFactory.makeStreamProvider(
+            for: makeConfig(id: "apple", kind: .apple, order: 0), keychain: keychain))
+
+        XCTAssertNotNil(TranslationProviderFactory.makeStreamProvider(
+            for: makeConfig(id: "google", kind: .googleFree, order: 0), keychain: keychain))
+
+        XCTAssertNotNil(TranslationProviderFactory.makeStreamProvider(
+            for: makeConfig(id: "single-llm", kind: .openAICompatible, order: 0,
+                            baseURL: "https://api.example.com/v1", model: "gpt-x"),
+            keychain: keychain))
+
+        // Incomplete LLM config (no model) -> nil
+        XCTAssertNil(TranslationProviderFactory.makeStreamProvider(
+            for: makeConfig(id: "single-llm", kind: .openAICompatible, order: 0,
+                            baseURL: "https://api.example.com/v1", model: nil),
+            keychain: keychain))
+    }
+
+    func testMakeStreamProvidersExcludesManualServices() {
+        let keychain = TranslationKeychainStore(service: keychainService)
+        keychain.setAPIKey("sk-1", for: "manual")
+        keychain.setAPIKey("sk-2", for: "auto")
+        var manual = makeConfig(id: "manual", kind: .openAICompatible, order: 0,
+                                baseURL: "https://api.example.com/v1", model: "gpt-x")
+        manual.manualMode = true
+        let auto = makeConfig(id: "auto", kind: .openAICompatible, order: 1,
+                              baseURL: "https://api.example.com/v1", model: "gpt-x")
+        let settings = makeSettings([manual, auto])
+        let providers = TranslationProviderFactory.makeStreamProviders(
+            settings: settings, keychain: keychain)
+        XCTAssertEqual(providers.map(\.id), ["auto"])
     }
 }
