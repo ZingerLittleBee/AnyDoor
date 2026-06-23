@@ -105,4 +105,46 @@ final class TranslationServiceConfigTests: XCTestCase {
         XCTAssertFalse(TranslationServiceConfig.promptContainsText("Translate from {{source}} to {{target}}."))
         XCTAssertFalse(TranslationServiceConfig.promptContainsText(""))
     }
+
+    // MARK: - manualMode / startsManual
+
+    func testManualModeDefaultsToNilAndStartsManualFalse() {
+        let config = TranslationServiceConfig(
+            id: "x", kind: .openAICompatible, displayName: "X", iconName: "brain",
+            enabled: true, order: 0, baseURL: "https://a.com/v1", model: "m",
+            promptTemplate: nil)
+        XCTAssertNil(config.manualMode)
+        XCTAssertFalse(config.startsManual)
+    }
+
+    func testStartsManualTrueOnlyForLLMWithManualMode() {
+        var llm = TranslationServiceConfig(
+            id: "llm", kind: .openAICompatible, displayName: "L", iconName: "brain",
+            enabled: true, order: 0, baseURL: "https://a.com/v1", model: "m",
+            promptTemplate: nil)
+        llm.manualMode = true
+        XCTAssertTrue(llm.startsManual)
+
+        var google = TranslationServiceConfig(
+            id: "g", kind: .googleFree, displayName: "G", iconName: "globe",
+            enabled: true, order: 0, baseURL: nil, model: nil, promptTemplate: nil)
+        google.manualMode = true // ignored for non-LLM kinds
+        XCTAssertFalse(google.startsManual)
+    }
+
+    func testManualModeCodableRoundTripAndLegacyDecodesNil() throws {
+        var config = TranslationServiceConfig(
+            id: "llm", kind: .openAICompatible, displayName: "L", iconName: "brain",
+            enabled: true, order: 0, baseURL: "https://a.com/v1", model: "m",
+            promptTemplate: nil)
+        config.manualMode = true
+        let data = try JSONEncoder().encode(config)
+        XCTAssertEqual(try JSONDecoder().decode(TranslationServiceConfig.self, from: data), config)
+
+        // Legacy JSON (pre-feature) omits the key; must decode to nil, not throw.
+        let legacy = #"{"id":"old","kind":"openAICompatible","displayName":"O","iconName":"brain","enabled":true,"order":0}"#
+        let decoded = try JSONDecoder().decode(TranslationServiceConfig.self, from: Data(legacy.utf8))
+        XCTAssertNil(decoded.manualMode)
+        XCTAssertFalse(decoded.startsManual)
+    }
 }

@@ -17,6 +17,12 @@ struct TranslationServiceConfig: Codable, Identifiable, Sendable, Equatable {
     var model: String?
     /// `openAICompatible` only: prompt with `{{source}}`, `{{target}}`, `{{text}}`.
     var promptTemplate: String?
+    /// `openAICompatible` only: when true the service starts collapsed and does
+    /// not auto-translate on a run; its card translates only when expanded.
+    /// Optional so legacy stored JSON (which lacks the key) still decodes — a
+    /// non-optional property would make synthesized Decodable throw on the
+    /// missing key. Mirrors the other optional LLM fields.
+    var manualMode: Bool?
 }
 
 extension TranslationServiceConfig {
@@ -73,6 +79,12 @@ extension TranslationServiceConfig {
             return false
         }
         return true
+    }
+
+    /// Whether this service starts collapsed and defers translation until the
+    /// user expands its card. Only `openAICompatible` honors `manualMode`.
+    var startsManual: Bool {
+        kind == .openAICompatible && (manualMode ?? false)
     }
 
     /// Whether a prompt template still carries the `{{text}}` placeholder. A
