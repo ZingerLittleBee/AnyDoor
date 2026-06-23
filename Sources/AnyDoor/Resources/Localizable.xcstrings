@@ -9195,6 +9195,57 @@
           }
         }
       }
+    },
+    "settings.translation.serviceBaseURLInvalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a valid http(s) Base URL, e.g. https://api.openai.com/v1"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入有效的 http(s) Base URL，例如 https://api.openai.com/v1"
+          }
+        }
+      }
+    },
+    "settings.translation.servicePromptHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Placeholders: {{source}} source language, {{target}} target language, {{text}} input text"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "占位符：{{source}} 源语言、{{target}} 目标语言、{{text}} 待译文本"
+          }
+        }
+      }
+    },
+    "settings.translation.servicePromptMissingText": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The prompt is missing {{text}}; the source text will not be sent"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "提示词缺少 {{text}}，待译文本将不会被发送"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

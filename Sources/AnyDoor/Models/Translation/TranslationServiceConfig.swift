@@ -59,6 +59,29 @@ extension TranslationServiceConfig {
         ]
     }
 
+    /// Whether `string` is a syntactically valid http(s) endpoint with a host.
+    /// Used to gate Save in the editor sheet so an LLM service can't be saved
+    /// with a base URL that would only fail later at request time (and then make
+    /// the service silently vanish from the panel). Empty is invalid.
+    static func isValidBaseURL(_ string: String) -> Bool {
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let components = URLComponents(string: trimmed),
+              let scheme = components.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = components.host, !host.isEmpty else {
+            return false
+        }
+        return true
+    }
+
+    /// Whether a prompt template still carries the `{{text}}` placeholder. A
+    /// template without it would send the model an instruction with no source
+    /// text, so the editor warns when it is missing.
+    static func promptContainsText(_ template: String) -> Bool {
+        template.contains("{{text}}")
+    }
+
     /// Default LLM prompt template carrying the three placeholders.
     static let defaultPromptTemplate = """
     You are a professional translation engine. Translate the text from {{source}} \

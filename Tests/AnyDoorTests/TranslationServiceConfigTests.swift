@@ -63,4 +63,46 @@ final class TranslationServiceConfigTests: XCTestCase {
             XCTAssertNil(config.promptTemplate)
         }
     }
+
+    // MARK: - isValidBaseURL
+
+    func testIsValidBaseURLAcceptsHTTPS() {
+        XCTAssertTrue(TranslationServiceConfig.isValidBaseURL("https://api.openai.com/v1"))
+    }
+
+    func testIsValidBaseURLAcceptsHTTPLocalhost() {
+        XCTAssertTrue(TranslationServiceConfig.isValidBaseURL("http://localhost:11434/v1"))
+    }
+
+    func testIsValidBaseURLTrimsWhitespace() {
+        XCTAssertTrue(TranslationServiceConfig.isValidBaseURL("  https://api.example.com/v1  "))
+    }
+
+    func testIsValidBaseURLRejectsEmpty() {
+        XCTAssertFalse(TranslationServiceConfig.isValidBaseURL(""))
+        XCTAssertFalse(TranslationServiceConfig.isValidBaseURL("   "))
+    }
+
+    func testIsValidBaseURLRejectsMissingScheme() {
+        XCTAssertFalse(TranslationServiceConfig.isValidBaseURL("api.openai.com/v1"))
+    }
+
+    func testIsValidBaseURLRejectsNonHTTPScheme() {
+        XCTAssertFalse(TranslationServiceConfig.isValidBaseURL("ftp://example.com"))
+    }
+
+    func testIsValidBaseURLRejectsSchemeWithoutHost() {
+        XCTAssertFalse(TranslationServiceConfig.isValidBaseURL("https://"))
+    }
+
+    // MARK: - promptContainsText
+
+    func testPromptContainsTextTrueForDefaultTemplate() {
+        XCTAssertTrue(TranslationServiceConfig.promptContainsText(TranslationServiceConfig.defaultPromptTemplate))
+    }
+
+    func testPromptContainsTextFalseWhenPlaceholderRemoved() {
+        XCTAssertFalse(TranslationServiceConfig.promptContainsText("Translate from {{source}} to {{target}}."))
+        XCTAssertFalse(TranslationServiceConfig.promptContainsText(""))
+    }
 }

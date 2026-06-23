@@ -259,6 +259,12 @@ private struct TranslationServiceConfigSheet: View {
                     TextField(text: baseURL) { LocalizedText(.settingsTranslationServiceBaseURL) }
                     TextField(text: model) { LocalizedText(.settingsTranslationServiceModel) }
                     SecureField(text: $apiKey) { LocalizedText(.settingsTranslationServiceAPIKey) }
+                } footer: {
+                    if !TranslationServiceConfig.isValidBaseURL(draft.baseURL ?? "") {
+                        LocalizedText(.settingsTranslationServiceBaseURLInvalid)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
 
                 Section {
@@ -267,6 +273,17 @@ private struct TranslationServiceConfigSheet: View {
                         .frame(minHeight: 80)
                 } header: {
                     LocalizedText(.settingsTranslationServicePrompt)
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        LocalizedText(.settingsTranslationServicePromptHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if !TranslationServiceConfig.promptContainsText(promptTemplate.wrappedValue) {
+                            LocalizedText(.settingsTranslationServicePromptMissingText)
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
                 }
 
                 Section {
@@ -308,7 +325,7 @@ private struct TranslationServiceConfigSheet: View {
                     onSave(draft, trimmedKey.isEmpty ? nil : trimmedKey)
                 } label: { LocalizedText(.settingsTranslationServiceSave) }
                 .keyboardShortcut(.defaultAction)
-                .disabled(draft.displayName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!isSaveable)
             }
             .padding(12)
         }
@@ -326,6 +343,17 @@ private struct TranslationServiceConfigSheet: View {
             get: { draft.promptTemplate ?? TranslationServiceConfig.defaultPromptTemplate },
             set: { draft.promptTemplate = $0 }
         )
+    }
+
+    /// Save is allowed only once the service is actually runnable: a name, a
+    /// valid http(s) base URL, a model, and an API key. Without all four the
+    /// factory silently skips the service and it vanishes from the panel, which
+    /// reads as the feature being broken.
+    private var isSaveable: Bool {
+        !draft.displayName.trimmingCharacters(in: .whitespaces).isEmpty
+            && TranslationServiceConfig.isValidBaseURL(draft.baseURL ?? "")
+            && !(draft.model ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func runTest() {
