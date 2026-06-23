@@ -300,29 +300,6 @@ struct TranslationServiceConfigSheet: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                // Only surface the test result section once a test has run; idle
-                // shows nothing. The Test button itself lives in the bottom bar.
-                if testState != .idle {
-                    Section {
-                        switch testState {
-                        case .idle:
-                            EmptyView()
-                        case .testing:
-                            LocalizedText(.settingsTranslationServiceTesting)
-                                .foregroundStyle(.secondary)
-                        case .success:
-                            Label { LocalizedText(.settingsTranslationServiceTestOK) } icon: {
-                                Image(systemName: "checkmark.circle.fill")
-                            }
-                            .foregroundStyle(.green)
-                        case .failure(let message):
-                            Label { Text(message) } icon: { Image(systemName: "xmark.circle.fill") }
-                                .foregroundStyle(.red)
-                                .lineLimit(2)
-                        }
-                    }
-                }
             }
             .formStyle(.grouped)
 
@@ -331,6 +308,7 @@ struct TranslationServiceConfigSheet: View {
             HStack {
                 Button { runTest() } label: { LocalizedText(.settingsTranslationServiceTest) }
                     .disabled(testState == .testing)
+                testStatusLabel
                 Spacer()
                 Button(role: .cancel) { onCancel() } label: { LocalizedText(.settingsTranslationServiceCancel) }
                     .keyboardShortcut(.cancelAction)
@@ -348,6 +326,29 @@ struct TranslationServiceConfigSheet: View {
             // responder chain before we claim focus; otherwise the assignment can
             // land before the field exists and silently no-op.
             DispatchQueue.main.async { focusedField = .name }
+        }
+    }
+
+    /// The connection-test outcome shown next to the Test button. Idle renders
+    /// nothing; a failure is truncated to one line so it never pushes the bottom
+    /// bar's buttons off the edge.
+    @ViewBuilder
+    private var testStatusLabel: some View {
+        switch testState {
+        case .idle:
+            EmptyView()
+        case .testing:
+            LocalizedText(.settingsTranslationServiceTesting)
+                .foregroundStyle(.secondary)
+        case .success:
+            Label { LocalizedText(.settingsTranslationServiceTestOK) } icon: {
+                Image(systemName: "checkmark.circle.fill")
+            }
+            .foregroundStyle(.green)
+        case .failure(let message):
+            Label { Text(message) } icon: { Image(systemName: "xmark.circle.fill") }
+                .foregroundStyle(.red)
+                .lineLimit(1)
         }
     }
 
