@@ -291,13 +291,10 @@ struct TranslationServiceConfigSheet: View {
                     }
                 }
 
-                Section {
-                    HStack(spacing: 10) {
-                        Button { runTest() } label: {
-                            LocalizedText(.settingsTranslationServiceTest)
-                        }
-                        .disabled(testState == .testing)
-
+                // Only surface the test result section once a test has run; idle
+                // shows nothing. The Test button itself lives in the bottom bar.
+                if testState != .idle {
+                    Section {
                         switch testState {
                         case .idle:
                             EmptyView()
@@ -322,6 +319,8 @@ struct TranslationServiceConfigSheet: View {
             Divider()
 
             HStack {
+                Button { runTest() } label: { LocalizedText(.settingsTranslationServiceTest) }
+                    .disabled(testState == .testing)
                 Spacer()
                 Button(role: .cancel) { onCancel() } label: { LocalizedText(.settingsTranslationServiceCancel) }
                     .keyboardShortcut(.cancelAction)
