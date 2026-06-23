@@ -124,7 +124,7 @@ private struct TranslationServiceEditorScrim: View {
                 onSave: onSave,
                 onCancel: onCancel
             )
-            .frame(width: 512, height: 440)
+            .frame(width: 512, height: 560)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
