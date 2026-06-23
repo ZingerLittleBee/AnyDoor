@@ -15,34 +15,68 @@ struct TranslationSettingsView: View {
     @State private var isPresentingNew = false
 
     var body: some View {
-        Form {
-            languageSection
-            servicesSection
-            historySection
+        ZStack {
+            Form {
+                languageSection
+                servicesSection
+                historySection
+            }
+            .formStyle(.grouped)
+
+            if let config = editingConfig {
+                serviceEditorOverlay(config)
+            }
         }
-        .formStyle(.grouped)
-        .sheet(item: $editingConfig) { config in
+        .animation(.easeInOut(duration: 0.18), value: editingConfig?.id)
+    }
+
+    /// The service editor as a card centered over a dimmed backdrop, so it sits
+    /// in the middle of the window. A `.sheet` pins to the window's top edge and
+    /// (at full height) reaches the bottom; a centered overlay is the only way to
+    /// place a modal in the window's vertical center. The backdrop swallows
+    /// clicks to the settings behind, giving it modal behavior.
+    @ViewBuilder
+    private func serviceEditorOverlay(_ config: TranslationServiceConfig) -> some View {
+        ZStack {
+            Color.black.opacity(0.28)
+                .ignoresSafeArea()
+
             TranslationServiceConfigSheet(
                 config: config,
                 isNew: isPresentingNew,
                 keychain: keychain
             ) { saved, apiKey in
-                // A nil/empty key means "clear": delete the stored secret so the
-                // factory stops treating this service as configured. setAPIKey
-                // itself treats empty as a delete, but nil must delete too.
-                if let apiKey, !apiKey.isEmpty {
-                    keychain.setAPIKey(apiKey, for: saved.id)
-                } else {
-                    keychain.deleteAPIKey(for: saved.id)
-                }
-                settings.upsertService(saved)
+                applySave(saved, apiKey)
                 editingConfig = nil
                 isPresentingNew = false
             } onCancel: {
                 editingConfig = nil
                 isPresentingNew = false
             }
+            .frame(width: 512, height: 440)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .shadow(color: .black.opacity(0.35), radius: 22, y: 8)
         }
+        .transition(.opacity)
+    }
+
+    /// Present the editor sheet for a new or existing service.
+    private func presentEditor(_ config: TranslationServiceConfig, isNew: Bool) {
+        isPresentingNew = isNew
+        editingConfig = config
+    }
+
+    /// Persist the editor result: store or clear the API key (a nil/empty key
+    /// clears it so the factory stops treating the service as configured), then
+    /// upsert the config.
+    private func applySave(_ saved: TranslationServiceConfig, _ apiKey: String?) {
+        if let apiKey, !apiKey.isEmpty {
+            keychain.setAPIKey(apiKey, for: saved.id)
+        } else {
+            keychain.deleteAPIKey(for: saved.id)
+        }
+        settings.upsertService(saved)
     }
 
     // MARK: - Language
@@ -120,8 +154,7 @@ struct TranslationSettingsView: View {
                     model: "gpt-4o-mini",
                     promptTemplate: TranslationServiceConfig.defaultPromptTemplate
                 )
-                isPresentingNew = true
-                editingConfig = new
+                presentEditor(new, isNew: true)
             } label: {
                 Label { LocalizedText(.settingsTranslationAddService) } icon: { Image(systemName: "plus") }
             }
@@ -148,7 +181,7 @@ struct TranslationSettingsView: View {
             }
 
             if config.kind == .openAICompatible {
-                Button { isPresentingNew = false; editingConfig = config } label: {
+                Button { presentEditor(config, isNew: false) } label: {
                     LocalizedText(.settingsTranslationEdit)
                 }
                 .buttonStyle(.borderless)
@@ -329,7 +362,6 @@ private struct TranslationServiceConfigSheet: View {
             }
             .padding(12)
         }
-        .frame(width: 460, height: 480)
     }
 
     private var baseURL: Binding<String> {
