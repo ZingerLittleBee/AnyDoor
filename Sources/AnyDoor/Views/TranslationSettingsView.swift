@@ -62,16 +62,20 @@ struct TranslationSettingsView: View {
                     Text(lang.displayName()).tag(lang.code)
                 }
             } label: {
-                LocalizedText(.settingsTranslationSecondTarget)
+                // Attach the explanation to this specific field (an inline caption
+                // under its label) rather than as a section footer, so it sits
+                // directly beneath "备用目标语言".
+                VStack(alignment: .leading, spacing: 2) {
+                    LocalizedText(.settingsTranslationSecondTarget)
+                    LocalizedText(.settingsTranslationSecondTargetFooter)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Toggle(isOn: autoSpeak) { LocalizedText(.settingsTranslationAutoSpeak) }
         } header: {
             LocalizedText(.settingsTranslationLanguageSection)
-        } footer: {
-            LocalizedText(.settingsTranslationSecondTargetFooter)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
