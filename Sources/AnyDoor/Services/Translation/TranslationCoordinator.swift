@@ -144,8 +144,7 @@ final class TranslationCoordinator {
             if Task.isCancelled { return }
             update(provider.id) {
                 $0.status = .failure
-                $0.errorMessage = (error as? TranslationProviderError).map(String.init(describing:))
-                    ?? error.localizedDescription
+                $0.errorMessage = translationErrorMessage(error)
             }
         }
     }

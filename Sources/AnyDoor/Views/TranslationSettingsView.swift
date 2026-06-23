@@ -354,7 +354,7 @@ private struct TranslationServiceConfigSheet: View {
                 }
                 testState = received ? .success : .failure(L(.settingsTranslationServiceTestFailed))
             } catch {
-                testState = .failure(error.localizedDescription)
+                testState = .failure(translationErrorMessage(error))
             }
         }
     }

@@ -20,8 +20,13 @@ protocol TranslationProvider: Sendable {
 enum TranslationProviderError: Error, Sendable, Equatable {
     /// The request carried no translatable text.
     case emptyInput
-    /// The backend returned a non-success HTTP status code.
+    /// The backend returned a non-success HTTP status code with no decodable
+    /// error body.
     case badResponse(Int)
+    /// The backend returned a non-success HTTP status code and a decodable error
+    /// message (e.g. OpenAI's `{"error":{"message":...}}`). The message is the
+    /// backend's own text and is surfaced verbatim as the most actionable hint.
+    case apiError(status: Int, message: String)
     /// A required API key was not configured (OpenAI-compatible only).
     case missingAPIKey
     /// A required connection field (base URL or model) was not configured
@@ -29,6 +34,10 @@ enum TranslationProviderError: Error, Sendable, Equatable {
     case missingConfiguration(String)
     /// The response body could not be decoded into the expected shape.
     case decodeFailed
+    /// The backend reported success but produced no translated text (e.g. a 2xx
+    /// stream that yielded no content deltas). Surfaced as a failure instead of a
+    /// blank "success" card.
+    case emptyResponse
     /// A transport-level failure; the associated value is a human-readable note.
     case network(String)
 }

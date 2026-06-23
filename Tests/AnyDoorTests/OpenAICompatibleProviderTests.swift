@@ -129,4 +129,121 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         let error = await firstError(from: provider.translate(request))
         XCTAssertEqual(error, .missingConfiguration("missing model"))
     }
+
+    // MARK: - parseErrorMessage
+
+    func testParseErrorMessageOpenAIShape() {
+        let data = Data(#"{"error":{"message":"Incorrect API key provided","code":"invalid_api_key"}}"#.utf8)
+        XCTAssertEqual(OpenAICompatibleProvider.parseErrorMessage(data), "Incorrect API key provided")
+    }
+
+    func testParseErrorMessageStringErrorShape() {
+        let data = Data(#"{"error":"model not found"}"#.utf8)
+        XCTAssertEqual(OpenAICompatibleProvider.parseErrorMessage(data), "model not found")
+    }
+
+    func testParseErrorMessageFallsBackToRawText() {
+        XCTAssertEqual(OpenAICompatibleProvider.parseErrorMessage(Data("Bad Gateway".utf8)), "Bad Gateway")
+    }
+
+    func testParseErrorMessageEmptyReturnsNil() {
+        XCTAssertNil(OpenAICompatibleProvider.parseErrorMessage(Data()))
+    }
+
+    // MARK: - translate() over a mocked URLSession
+
+    override func tearDown() {
+        MockURLProtocol.responder = nil
+        super.tearDown()
+    }
+
+    private func mockProvider() -> OpenAICompatibleProvider {
+        OpenAICompatibleProvider(
+            config: makeConfig(baseURL: "https://api.example.com/v1", model: "gpt-4o-mini"),
+            apiKey: "sk-test",
+            session: MockURLProtocol.session()
+        )
+    }
+
+    private func collectChunks(
+        from stream: AsyncThrowingStream<TranslationChunk, Error>
+    ) async throws -> (deltas: [String], final: String?) {
+        var deltas: [String] = []
+        var finalText: String?
+        for try await chunk in stream {
+            switch chunk {
+            case .delta(let piece): deltas.append(piece)
+            case .final(let full): finalText = full
+            case .detected: break
+            }
+        }
+        return (deltas, finalText)
+    }
+
+    func testTranslateStreamAccumulatesContentDeltas() async throws {
+        MockURLProtocol.responder = { request in
+            let body = """
+            data: {"choices":[{"delta":{"role":"assistant"}}]}
+
+            data: {"choices":[{"delta":{"content":"你"}}]}
+
+            data: {"choices":[{"delta":{"content":"好"}}]}
+
+            data: [DONE]
+
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+            return (response, Data(body.utf8))
+        }
+        let request = TranslationRequest(text: "hello", source: .english, target: .simplifiedChinese)
+        let result = try await collectChunks(from: mockProvider().translate(request))
+        XCTAssertEqual(result.deltas, ["你", "好"])
+        XCTAssertEqual(result.final, "你好")
+    }
+
+    func testTranslateSurfacesAPIErrorMessageOnNon2xx() async {
+        MockURLProtocol.responder = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: "HTTP/1.1", headerFields: nil)!
+            return (response, Data(#"{"error":{"message":"Incorrect API key provided"}}"#.utf8))
+        }
+        let request = TranslationRequest(text: "hello", source: nil, target: .english)
+        let error = await firstError(from: mockProvider().translate(request))
+        XCTAssertEqual(error, .apiError(status: 401, message: "Incorrect API key provided"))
+    }
+
+    func testTranslateNon2xxWithoutBodyReportsBadResponse() async {
+        MockURLProtocol.responder = { request in
+            let response = HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: "HTTP/1.1", headerFields: nil)!
+            return (response, Data())
+        }
+        let request = TranslationRequest(text: "hello", source: nil, target: .english)
+        let error = await firstError(from: mockProvider().translate(request))
+        XCTAssertEqual(error, .badResponse(500))
+    }
+
+    func testTranslateContentlessStreamReportsEmptyResponse() async {
+        MockURLProtocol.responder = { request in
+            let body = """
+            data: {"choices":[{"delta":{"role":"assistant"}}]}
+
+            data: [DONE]
+
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+            return (response, Data(body.utf8))
+        }
+        let request = TranslationRequest(text: "hello", source: nil, target: .english)
+        let error = await firstError(from: mockProvider().translate(request))
+        XCTAssertEqual(error, .emptyResponse)
+    }
 }

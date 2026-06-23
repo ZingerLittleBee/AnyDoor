@@ -542,6 +542,11 @@ enum L10n {
         case translationSettings = "translation.settings"
         case translationInputPlaceholder = "translation.inputPlaceholder"
         case translationRecognizedAs = "translation.recognizedAs"
+        case translationErrorHTTP = "translation.error.http"
+        case translationErrorMissingAPIKey = "translation.error.missingAPIKey"
+        case translationErrorMissingConfig = "translation.error.missingConfig"
+        case translationErrorDecode = "translation.error.decode"
+        case translationErrorEmptyResponse = "translation.error.emptyResponse"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }

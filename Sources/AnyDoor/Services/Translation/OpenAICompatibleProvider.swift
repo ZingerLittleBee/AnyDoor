@@ -65,7 +65,18 @@ struct OpenAICompatibleProvider: TranslationProvider {
                         return
                     }
                     guard (200..<300).contains(http.statusCode) else {
-                        continuation.finish(throwing: TranslationProviderError.badResponse(http.statusCode))
+                        // Drain a bounded slice of the error body so the backend's
+                        // own message ("Incorrect API key provided", "model not
+                        // found", "insufficient quota") reaches the user instead of
+                        // a bare status code.
+                        let body = try? await Self.collectBody(bytes, limit: 8 * 1024)
+                        if let body, let message = Self.parseErrorMessage(body) {
+                            continuation.finish(
+                                throwing: TranslationProviderError.apiError(status: http.statusCode, message: message)
+                            )
+                        } else {
+                            continuation.finish(throwing: TranslationProviderError.badResponse(http.statusCode))
+                        }
                         return
                     }
 
@@ -76,6 +87,13 @@ struct OpenAICompatibleProvider: TranslationProvider {
                             accumulated += delta
                             continuation.yield(.delta(delta))
                         }
+                    }
+                    // A 2xx response that produced no content (non-SSE body, or a
+                    // stream of role/keep-alive-only deltas) would otherwise finish
+                    // as a blank success card; surface it as a failure instead.
+                    guard !accumulated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        continuation.finish(throwing: TranslationProviderError.emptyResponse)
+                        return
                     }
                     continuation.yield(.final(accumulated))
                     continuation.finish()
@@ -126,6 +144,37 @@ struct OpenAICompatibleProvider: TranslationProvider {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
+    }
+
+    /// Reads up to `limit` bytes from a non-2xx response so the backend's JSON
+    /// error message can be surfaced. Capped so a large error page can't grow
+    /// memory without bound.
+    static func collectBody(_ bytes: URLSession.AsyncBytes, limit: Int) async throws -> Data {
+        var data = Data()
+        for try await byte in bytes {
+            data.append(byte)
+            if data.count >= limit { break }
+        }
+        return data
+    }
+
+    /// Pulls a human-readable message out of an error body. Handles OpenAI's
+    /// `{"error":{"message":...}}`, the simpler `{"error":"..."}` / `{"message":...}`
+    /// shapes, and falls back to a trimmed slice of the raw body. Returns nil only
+    /// when the body carries nothing usable.
+    static func parseErrorMessage(_ data: Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        if let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let error = root["error"] as? [String: Any],
+               let message = error["message"] as? String, !message.isEmpty {
+                return message
+            }
+            if let message = root["error"] as? String, !message.isEmpty { return message }
+            if let message = root["message"] as? String, !message.isEmpty { return message }
+        }
+        let text = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return nil }
+        return String(text.prefix(500))
     }
 
     /// Extracts `choices[0].delta.content` from one SSE line. Returns nil for
