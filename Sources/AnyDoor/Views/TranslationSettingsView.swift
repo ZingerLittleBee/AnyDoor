@@ -275,7 +275,10 @@ struct TranslationServiceConfigSheet: View {
                 Section {
                     TextEditor(text: promptTemplate)
                         .font(.body.monospaced())
-                        .frame(minHeight: 80)
+                        // Fixed height (not just minHeight): a min-only TextEditor
+                        // greedily fills the form's slack and jumps taller when the
+                        // layout re-runs on a state change (e.g. after a test).
+                        .frame(height: 120)
                 } header: {
                     LocalizedText(.settingsTranslationServicePrompt)
                 } footer: {
