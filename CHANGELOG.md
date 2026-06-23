@@ -27,6 +27,12 @@ versioning.
   in-process so a translation doesn't re-prompt for Keychain access). The Apple
   on-device card uses `translationTask` and can pre-download offline language
   packs from settings; its row is hidden on macOS 14, which lacks the API.
+- Translation: OpenAI-compatible (LLM) services can be set to "collapsed by
+  default" in their editor. A collapsed service does not auto-translate on a run
+  — its card stays collapsed with a "tap to translate" hint and spends no tokens
+  until the user expands it, at which point only that service translates the
+  current input. Each new translation resets it back to collapsed. Apple, Google,
+  and Bing are unaffected.
 - Translation entry points beyond the panel, each a separate hotkey-bindable
   builtin: 截图翻译 (screenshot translate) drag-selects a screen region, OCRs it,
   and opens the panel prefilled with the recognized text; 翻译选中文本 (translate
