@@ -22,6 +22,8 @@ enum TranslationChunk: Sendable, Equatable {
 struct TranslationResult: Identifiable, Sendable, Equatable {
     enum Status: Sendable, Equatable {
         case idle
+        /// Manual (collapsed-by-default) service: shown but not yet translated.
+        case deferred
         case loading
         case streaming
         case success
@@ -41,6 +43,17 @@ struct TranslationResult: Identifiable, Sendable, Equatable {
         TranslationResult(
             serviceID: serviceID,
             status: .idle,
+            text: "",
+            detected: nil,
+            errorMessage: nil
+        )
+    }
+
+    /// A deferred (manual, not-yet-translated) result for the given service.
+    static func deferred(_ serviceID: String) -> TranslationResult {
+        TranslationResult(
+            serviceID: serviceID,
+            status: .deferred,
             text: "",
             detected: nil,
             errorMessage: nil

@@ -115,7 +115,7 @@ struct TranslationServiceCard: View {
     @ViewBuilder
     private func body(for result: TranslationResult) -> some View {
         switch result.status {
-        case .idle, .loading:
+        case .idle, .loading, .deferred:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
                 LocalizedText(.translationTranslating).foregroundStyle(.secondary).font(.callout)

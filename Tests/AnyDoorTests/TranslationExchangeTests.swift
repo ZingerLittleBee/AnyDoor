@@ -53,6 +53,14 @@ final class TranslationExchangeTests: XCTestCase {
         b.text = "hello"
         XCTAssertEqual(a, b)
     }
+
+    func testDeferredFactoryProducesDeferredStatus() {
+        let result = TranslationResult.deferred("svc")
+        XCTAssertEqual(result.status, .deferred)
+        XCTAssertEqual(result.serviceID, "svc")
+        XCTAssertTrue(result.text.isEmpty)
+        XCTAssertNil(result.errorMessage)
+    }
 }
 
 extension TranslationResult.Status: Hashable {}

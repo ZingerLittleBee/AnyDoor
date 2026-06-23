@@ -170,9 +170,9 @@ private struct AppleTranslationCardBody: View {
     @ViewBuilder
     private var content: some View {
         switch state.status {
-        case .idle:
-            // Not reachable while the card is hidden in `.idle`; kept as an empty
-            // resting state for safety.
+        case .idle, .deferred:
+            // Not reachable: the Apple card never defers (manual mode is
+            // openAICompatible-only). Kept to satisfy the shared enum switch.
             EmptyView()
         case .loading:
             HStack(spacing: 6) {
