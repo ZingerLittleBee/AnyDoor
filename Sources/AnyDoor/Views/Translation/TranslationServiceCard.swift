@@ -11,8 +11,23 @@ struct TranslationServiceCard: View {
     /// Resolved target language used to pick the TTS voice (the translated text
     /// is in the target language).
     let target: TranslationLanguage
+    /// Called when the user expands this card while it is still deferred (manual
+    /// service): kicks off its on-demand translation.
+    let onExpandDeferred: () -> Void
 
-    @State private var collapsed = false
+    @State private var collapsed: Bool
+
+    init(config: TranslationServiceConfig,
+         result: TranslationResult,
+         target: TranslationLanguage,
+         onExpandDeferred: @escaping () -> Void) {
+        self.config = config
+        self.result = result
+        self.target = target
+        self.onExpandDeferred = onExpandDeferred
+        // Manual services start collapsed; everything else starts expanded.
+        _collapsed = State(initialValue: config.startsManual)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -30,6 +45,11 @@ struct TranslationServiceCard: View {
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        // A new run resets a manual service to .deferred; re-collapse it. Non-manual
+        // services never enter .deferred, so their behavior is unchanged.
+        .onChange(of: result.status) { _, newStatus in
+            if newStatus == .deferred { collapsed = true }
+        }
     }
 
     private var header: some View {
@@ -44,6 +64,11 @@ struct TranslationServiceCard: View {
                 Text(config.displayName)
                     .font(.subheadline.weight(.semibold))
                 statusBadge
+                if result.status == .deferred {
+                    Text(L(.translationManualCollapsedHint))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 0)
             }
             .contentShape(Rectangle())
@@ -66,10 +91,14 @@ struct TranslationServiceCard: View {
         .padding(.vertical, 8)
     }
 
-    /// Toggle the body's visibility with a short ease so the disclosure (and the
-    /// chevron's rotation) animate together.
+    /// Toggle the body's visibility with a short ease. Expanding a deferred
+    /// (manual) card kicks off its on-demand translation.
     private func toggleCollapsed() {
+        let willExpand = collapsed
         withAnimation(.easeInOut(duration: 0.22)) { collapsed.toggle() }
+        if willExpand, result.status == .deferred {
+            onExpandDeferred()
+        }
     }
 
     @ViewBuilder

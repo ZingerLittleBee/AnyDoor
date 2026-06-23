@@ -180,7 +180,8 @@ struct TranslationView: View {
                 TranslationServiceCard(
                     config: config,
                     result: result,
-                    target: target
+                    target: target,
+                    onExpandDeferred: { coordinator.translateOne(serviceID: config.id) }
                 )
             }
         }
