@@ -113,21 +113,26 @@ private struct TranslationServiceEditorScrim: View {
     let onCancel: () -> Void
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.4)
-                .ignoresSafeArea()
+        // The scrim fills the parent window's frame, so the proxy height equals
+        // the window height; the card takes 80% of it and stays centered.
+        GeometryReader { proxy in
+            ZStack {
+                Color.black.opacity(0.4)
+                    .ignoresSafeArea()
 
-            TranslationServiceConfigSheet(
-                config: config,
-                isNew: isNew,
-                keychain: keychain,
-                onSave: onSave,
-                onCancel: onCancel
-            )
-            .frame(width: 512, height: 560)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
+                TranslationServiceConfigSheet(
+                    config: config,
+                    isNew: isNew,
+                    keychain: keychain,
+                    onSave: onSave,
+                    onCancel: onCancel
+                )
+                .frame(width: 512, height: proxy.size.height * 0.8)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }
