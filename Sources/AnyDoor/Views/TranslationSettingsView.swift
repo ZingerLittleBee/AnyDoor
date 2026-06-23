@@ -291,6 +291,16 @@ struct TranslationServiceConfigSheet: View {
                     }
                 }
 
+                Section {
+                    Toggle(isOn: manualMode) {
+                        LocalizedText(.settingsTranslationServiceManualMode)
+                    }
+                } footer: {
+                    LocalizedText(.settingsTranslationServiceManualModeHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 // Only surface the test result section once a test has run; idle
                 // shows nothing. The Test button itself lives in the bottom bar.
                 if testState != .idle {
@@ -352,6 +362,9 @@ struct TranslationServiceConfigSheet: View {
             get: { draft.promptTemplate ?? TranslationServiceConfig.defaultPromptTemplate },
             set: { draft.promptTemplate = $0 }
         )
+    }
+    private var manualMode: Binding<Bool> {
+        Binding(get: { draft.manualMode ?? false }, set: { draft.manualMode = $0 })
     }
 
     /// Save is allowed only once the service is actually runnable: a name, a
