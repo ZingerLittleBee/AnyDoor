@@ -27,7 +27,8 @@ struct TranslationLanguage: Hashable, Codable, Sendable, Identifiable {
         switch kind {
         case .googleFree, .bingFree:
             return Self.serviceCodeRemap[code] ?? code
-        case .apple, .openAICompatible:
+        // DeepL remaps via DeepLLanguage, not here; pass through to stay exhaustive.
+        case .apple, .openAICompatible, .deepl:
             return code
         }
     }
@@ -56,7 +57,7 @@ struct TranslationLanguage: Hashable, Codable, Sendable, Identifiable {
         case .googleFree, .bingFree:
             let canonical = serviceCodeReverseRemap[code] ?? code
             return named(canonical)
-        case .apple, .openAICompatible:
+        case .apple, .openAICompatible, .deepl:
             return named(code)
         }
     }

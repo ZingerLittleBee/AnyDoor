@@ -5,8 +5,12 @@ final class TranslationServiceConfigTests: XCTestCase {
     func testServiceKindCaseCoverage() {
         XCTAssertEqual(
             Set(TranslationServiceKind.allCases),
-            [.apple, .googleFree, .bingFree, .openAICompatible]
+            [.apple, .googleFree, .bingFree, .openAICompatible, .deepl]
         )
+    }
+
+    func testDeepLRawValueIsStable() {
+        XCTAssertEqual(TranslationServiceKind.deepl.rawValue, "deepl")
     }
 
     func testServiceKindRawValuesAreStable() {

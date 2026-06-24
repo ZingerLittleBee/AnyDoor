@@ -7,4 +7,5 @@ enum TranslationServiceKind: String, Codable, Sendable, CaseIterable {
     case googleFree
     case bingFree
     case openAICompatible
+    case deepl
 }

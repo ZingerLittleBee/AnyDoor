@@ -32,6 +32,8 @@ enum TranslationProviderFactory {
             }
             _ = (baseURL, model) // config carries them; provider reads from config
             return OpenAICompatibleProvider(config: config, apiKey: key, session: session)
+        case .deepl:
+            return nil // DeepL provider not yet implemented
         }
     }
 
