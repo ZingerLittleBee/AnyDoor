@@ -2,18 +2,17 @@ import AppKit
 import SwiftUI
 
 /// In-window History + Favorites viewer presented over the translation panel
-/// (a popover anchored to the toolbar's history button). Lists persisted
-/// `TranslationRecord` rows newest-first with an All / Favorites filter, a
-/// per-row favorite-star toggle, and a delete control. Tapping a row expands it
-/// inline to recall the stored result (full original + translation, with a copy
-/// button); an explicit "Re-translate" button in the expanded detail refills the
-/// input and re-runs the translation, then dismisses. Recall and copy are pure
-/// local reads — no network, no tokens.
+/// (a popover anchored to the toolbar's history button). Each translation run
+/// (one input fanned out to every service) is shown as a single card listing every
+/// service's result, newest-first, with an All / Favorites filter. Tapping a card
+/// expands it to recall the full original and each service's full translation (with
+/// a per-service copy button); an explicit "Re-translate" button re-runs the whole
+/// run and dismisses. The favorite star and delete control act on the whole run.
+/// Recall and copy are pure local reads — no network, no tokens.
 ///
-/// Binds to `TranslationHistoryStore.shared`: the view reads the store's
-/// `revision` token in `body` so `@Observable` re-renders the list whenever
-/// history mutates (record / favorite / delete / clear), then re-fetches the
-/// current filter's rows from SwiftData.
+/// Binds to `TranslationHistoryStore.shared`: the view reads the store's `revision`
+/// token in `body` so `@Observable` re-renders whenever history mutates, then
+/// re-fetches the current filter's rows from SwiftData and groups them by run.
 struct TranslationHistoryView: View {
     let store: TranslationHistoryStore
     let coordinator: TranslationCoordinator
@@ -22,26 +21,26 @@ struct TranslationHistoryView: View {
 
     private enum Filter: Hashable { case all, favorites }
     @State private var filter: Filter = .all
-    /// The single currently-expanded row (single-open accordion), or nil.
+    /// The single currently-expanded card (single-open accordion), keyed by run id.
     @State private var expandedID: String?
 
-    /// Soft cap on the All view so a huge history doesn't build an unbounded
-    /// list; favorites are always shown in full.
+    /// Soft cap on the All view so a huge history doesn't build an unbounded list;
+    /// favorites are always shown in full.
     private let recentLimit = 200
 
     var body: some View {
-        // Establish an observation dependency so the list refreshes on any
-        // store mutation (the fetch methods below are not observable).
+        // Establish an observation dependency so the list refreshes on any store
+        // mutation (the fetch methods below are not observable).
         _ = store.revision
-        let rows = currentRows()
+        let groups = currentGroups()
 
         return VStack(spacing: 0) {
             filterPicker
             Divider()
-            if rows.isEmpty {
+            if groups.isEmpty {
                 emptyState
             } else {
-                list(rows)
+                list(groups)
             }
         }
         .frame(width: 360, height: 420)
@@ -55,56 +54,60 @@ struct TranslationHistoryView: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .padding(10)
-        // Collapse any open row when switching filters so an expanded
-        // non-favorite row doesn't reappear expanded after toggling back.
+        // Collapse any open card when switching filters so an expanded non-favorite
+        // card doesn't reappear expanded after toggling back.
         .onChange(of: filter) { _, _ in expandedID = nil }
     }
 
-    private func list(_ rows: [TranslationRecord]) -> some View {
+    private func list(_ groups: [TranslationRunGroup]) -> some View {
         ScrollView {
             LazyVStack(spacing: 6) {
-                ForEach(rows, id: \.id) { record in
-                    row(record)
+                ForEach(groups) { group in
+                    card(group)
                 }
             }
             .padding(10)
         }
     }
 
-    private func row(_ record: TranslationRecord) -> some View {
+    private func card(_ group: TranslationRunGroup) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                toggle(record.id)
+                toggle(group.id)
             } label: {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(record.sourceText)
+                        Text(group.primary.sourceText)
                             .font(.callout.weight(.medium))
                             .lineLimit(2)
                             .foregroundStyle(.primary)
-                        Text(record.translatedText)
-                            .font(.callout)
-                            .lineLimit(2)
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 6) {
-                            if !record.serviceName.isEmpty {
-                                Text(record.serviceName)
+                        ForEach(group.records, id: \.id) { record in
+                            HStack(spacing: 6) {
+                                Text(record.translatedText)
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                    .foregroundStyle(.secondary)
+                                if !record.serviceName.isEmpty {
+                                    Text("· \(record.serviceName)")
+                                        .font(.caption2)
+                                        .foregroundStyle(.tertiary)
+                                }
                             }
-                            Text(record.createdAt, style: .relative)
                         }
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        Text(group.primary.createdAt, style: .relative)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                    rowControls(record)
+                    cardControls(group)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            if expandedID == record.id {
-                expandedDetail(record)
+            if expandedID == group.id {
+                expandedDetail(group)
                     .padding(.top, 8)
             }
         }
@@ -112,20 +115,21 @@ struct TranslationHistoryView: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func rowControls(_ record: TranslationRecord) -> some View {
+    private func cardControls(_ group: TranslationRunGroup) -> some View {
         VStack(spacing: 8) {
             Button {
-                store.toggleFavorite(record)
+                store.setFavorite(group.records, to: !group.isFavorite)
             } label: {
-                Image(systemName: record.isFavorite ? "star.fill" : "star")
+                Image(systemName: group.isFavorite ? "star.fill" : "star")
                     .font(.system(size: 12))
-                    .foregroundStyle(record.isFavorite ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(group.isFavorite ? AnyShapeStyle(.yellow) : AnyShapeStyle(.secondary))
             }
             .buttonStyle(.plain)
-            .help(L(record.isFavorite ? .translationHistoryUnfavorite : .translationHistoryFavorite))
+            .help(L(group.isFavorite ? .translationHistoryUnfavorite : .translationHistoryFavorite))
 
             Button {
-                store.delete(record)
+                if expandedID == group.id { expandedID = nil }
+                store.delete(group.records)
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 12))
@@ -136,11 +140,11 @@ struct TranslationHistoryView: View {
         }
     }
 
-    /// Recall detail shown when a row is expanded: full original + translation
-    /// (both selectable), a copy-translation button, and an explicit re-translate
-    /// button. Pure local read — no network, no tokens.
+    /// Recall detail shown when a card is expanded: full original, then each
+    /// service's full translation (selectable) with its own copy button, and an
+    /// explicit re-translate button. Pure local read — no network, no tokens.
     @ViewBuilder
-    private func expandedDetail(_ record: TranslationRecord) -> some View {
+    private func expandedDetail(_ group: TranslationRunGroup) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
 
@@ -148,39 +152,41 @@ struct TranslationHistoryView: View {
                 LocalizedText(.translationHistoryOriginalLabel)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                Text(record.sourceText)
+                Text(group.primary.sourceText)
                     .font(.callout)
                     .foregroundStyle(.primary)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack {
-                    LocalizedText(.translationHistoryTranslatedLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                    Button {
-                        copyTranslation(record.translatedText)
-                    } label: {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
+            ForEach(group.records, id: \.id) { record in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(record.serviceName)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Spacer()
+                        Button {
+                            copyTranslation(record.translatedText)
+                        } label: {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(L(.translationCopy))
+                        .help(L(.translationCopy))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(L(.translationCopy))
-                    .help(L(.translationCopy))
+                    Text(record.translatedText)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text(record.translatedText)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Button {
-                retranslate(record)
+                retranslate(group)
             } label: {
                 Label(L(.translationHistoryRetranslate), systemImage: "arrow.clockwise")
                     .font(.caption)
@@ -202,21 +208,21 @@ struct TranslationHistoryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func currentRows() -> [TranslationRecord] {
+    private func currentGroups() -> [TranslationRunGroup] {
         switch filter {
-        case .all: return store.recent(limit: recentLimit)
-        case .favorites: return store.favorites()
+        case .all: return groupByRun(store.recent(limit: recentLimit))
+        case .favorites: return groupByRun(store.favorites())
         }
     }
 
-    /// Single-open accordion: tapping the open row closes it, another opens it.
+    /// Single-open accordion: tapping the open card closes it, another opens it.
     private func toggle(_ id: String) {
         withAnimation(.easeInOut(duration: 0.18)) {
             expandedID = (expandedID == id ? nil : id)
         }
     }
 
-    /// Recall the stored translation onto the clipboard. Mirrors
+    /// Recall one service's stored translation onto the clipboard. Mirrors
     /// `TranslationView.copy`: notes the self-write so AnyDoor's own clipboard
     /// history ignores it, then shows the success toast.
     private func copyTranslation(_ text: String) {
@@ -227,9 +233,10 @@ struct TranslationHistoryView: View {
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 
-    /// Explicit re-translate: restore the record's direction and re-run the
-    /// translation, then dismiss. An empty source code means auto-detect.
-    private func retranslate(_ record: TranslationRecord) {
+    /// Explicit re-translate: restore the run's direction and re-run the whole run,
+    /// then dismiss. An empty source code means auto-detect.
+    private func retranslate(_ group: TranslationRunGroup) {
+        let record = group.primary
         coordinator.source = TranslationLanguage.named(record.sourceLangCode)
         if let target = TranslationLanguage.named(record.targetLangCode) {
             coordinator.target = target

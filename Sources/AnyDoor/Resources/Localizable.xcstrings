@@ -9331,23 +9331,6 @@
           }
         }
       }
-    },
-    "translation.history.translatedLabel": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Translation"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "译文"
-          }
-        }
-      }
     }
   },
   "version": "1.0"

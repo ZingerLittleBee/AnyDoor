@@ -123,6 +123,26 @@ final class TranslationHistoryStoreTests: XCTestCase {
         XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).isEmpty)
     }
 
+    func testSetFavoriteSetsWholeRunTogether() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "a", at: 100)
+        try insert(container, text: "b", at: 200)
+        let rows = store.recent(limit: 10)
+        XCTAssertEqual(rows.count, 2)
+        store.setFavorite(rows, to: true)
+        XCTAssertEqual(store.favorites().count, 2)
+        store.setFavorite(rows, to: false)
+        XCTAssertTrue(store.favorites().isEmpty)
+    }
+
+    func testDeleteRecordsRemovesWholeRun() throws {
+        let (store, container) = try makeStore()
+        try insert(container, text: "a", at: 100)
+        try insert(container, text: "b", at: 200)
+        store.delete(store.recent(limit: 10))
+        XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).isEmpty)
+    }
+
     func testClearRemovesAll() throws {
         let (store, container) = try makeStore()
         try insert(container, text: "a", at: 100)

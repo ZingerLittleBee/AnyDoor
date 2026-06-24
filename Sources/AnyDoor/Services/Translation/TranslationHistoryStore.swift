@@ -104,6 +104,23 @@ final class TranslationHistoryStore {
         revision &+= 1
     }
 
+    /// Set the favorite state of an entire run together (the history card toggles
+    /// all of a run's records as one).
+    func setFavorite(_ records: [TranslationRecord], to value: Bool) {
+        guard let modelContext, !records.isEmpty else { return }
+        for record in records { record.isFavorite = value }
+        try? modelContext.save()
+        revision &+= 1
+    }
+
+    /// Delete every record of a run (the history card's trash removes the whole run).
+    func delete(_ records: [TranslationRecord]) {
+        guard let modelContext, !records.isEmpty else { return }
+        for record in records { modelContext.delete(record) }
+        try? modelContext.save()
+        revision &+= 1
+    }
+
     func clear() {
         guard let modelContext else { return }
         let rows = (try? modelContext.fetch(FetchDescriptor<TranslationRecord>())) ?? []

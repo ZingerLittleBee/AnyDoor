@@ -546,7 +546,6 @@ enum L10n {
         case translationHistoryUnfavorite = "translation.history.unfavorite"
         case translationHistoryRetranslate = "translation.history.retranslate"
         case translationHistoryOriginalLabel = "translation.history.originalLabel"
-        case translationHistoryTranslatedLabel = "translation.history.translatedLabel"
         case translationScreenshot = "translation.screenshot"
         case translationSettings = "translation.settings"
         case translationInputPlaceholder = "translation.inputPlaceholder"
