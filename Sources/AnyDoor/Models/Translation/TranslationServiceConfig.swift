@@ -23,6 +23,11 @@ struct TranslationServiceConfig: Codable, Identifiable, Sendable, Equatable {
     /// non-optional property would make synthesized Decodable throw on the
     /// missing key. Mirrors the other optional LLM fields.
     var manualMode: Bool?
+    /// `openAICompatible` only: extra top-level JSON merged into the request body
+    /// (e.g. `{"thinking":{"type":"disabled"}}` to disable a model's thinking
+    /// mode). Optional so legacy stored JSON still decodes; the memberwise init
+    /// gives it an implicit nil default so existing call sites are unchanged.
+    var extraBodyJSON: String?
 }
 
 extension TranslationServiceConfig {
@@ -79,6 +84,26 @@ extension TranslationServiceConfig {
             return false
         }
         return true
+    }
+
+    /// Whether `json` is acceptable as `extraBodyJSON`: empty/whitespace (no extra
+    /// body) or a JSON **object**. A JSON array, scalar, or malformed string is
+    /// rejected. Backs both the editor's save gate and the runtime merge guard so
+    /// the two never diverge.
+    static func isValidExtraBody(_ json: String?) -> Bool {
+        let trimmed = (json ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        guard let data = trimmed.data(using: .utf8) else { return false }
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any]) != nil
+    }
+
+    /// Parses `extraBodyJSON` into a top-level dictionary, or nil when empty or not
+    /// a JSON object.
+    static func parseExtraBodyObject(_ json: String?) -> [String: Any]? {
+        let trimmed = (json ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return obj
     }
 
     /// Whether this service starts collapsed and defers translation until the

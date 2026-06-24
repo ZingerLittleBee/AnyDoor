@@ -151,4 +151,37 @@ final class TranslationServiceConfigTests: XCTestCase {
         XCTAssertNil(decoded.manualMode)
         XCTAssertFalse(decoded.startsManual)
     }
+
+    // MARK: - extraBodyJSON
+
+    func testExtraBodyJSONCodableRoundTripAndLegacyDecodesNil() throws {
+        var config = TranslationServiceConfig(
+            id: "llm", kind: .openAICompatible, displayName: "L", iconName: "brain",
+            enabled: true, order: 0, baseURL: "https://a.com/v1", model: "m", promptTemplate: nil)
+        config.extraBodyJSON = #"{"thinking":{"type":"disabled"}}"#
+        let data = try JSONEncoder().encode(config)
+        XCTAssertEqual(try JSONDecoder().decode(TranslationServiceConfig.self, from: data), config)
+
+        let legacy = #"{"id":"old","kind":"openAICompatible","displayName":"O","iconName":"brain","enabled":true,"order":0}"#
+        let decoded = try JSONDecoder().decode(TranslationServiceConfig.self, from: Data(legacy.utf8))
+        XCTAssertNil(decoded.extraBodyJSON)
+    }
+
+    func testIsValidExtraBody() {
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraBody(nil))
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraBody(""))
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraBody("   "))
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraBody(#"{"thinking":{"type":"disabled"}}"#))
+        XCTAssertFalse(TranslationServiceConfig.isValidExtraBody("[1,2,3]"))
+        XCTAssertFalse(TranslationServiceConfig.isValidExtraBody("42"))
+        XCTAssertFalse(TranslationServiceConfig.isValidExtraBody("{not json"))
+    }
+
+    func testParseExtraBodyObject() {
+        XCTAssertNil(TranslationServiceConfig.parseExtraBodyObject(nil))
+        XCTAssertNil(TranslationServiceConfig.parseExtraBodyObject(""))
+        XCTAssertNil(TranslationServiceConfig.parseExtraBodyObject("[1]"))
+        let obj = TranslationServiceConfig.parseExtraBodyObject(#"{"a":1}"#)
+        XCTAssertEqual(obj?["a"] as? Int, 1)
+    }
 }
