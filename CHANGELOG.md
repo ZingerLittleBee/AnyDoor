@@ -20,13 +20,18 @@ versioning.
   in the target voice), copies it, and collapses by tapping its header. One
   input fans out to every enabled service concurrently, so one service failing
   never blocks the others.
-- Translation services: Google (free), Bing (free), any OpenAI-compatible
-  streaming LLM endpoint (base URL + model + API key), and Apple's on-device
-  translation. Services are configured in a new Settings › Translation tab with a
-  per-service config sheet; LLM API keys are stored in the Keychain (and cached
-  in-process so a translation doesn't re-prompt for Keychain access). The Apple
-  on-device card uses `translationTask` and can pre-download offline language
-  packs from settings; its row is hidden on macOS 14, which lacks the API.
+- Translation services: Google (free), Bing (free), DeepL (official API or a
+  self-hosted DeepLX endpoint), any OpenAI-compatible streaming LLM endpoint
+  (base URL + model + API key), and Apple's on-device translation. Services are
+  configured in a new Settings › Translation tab with a per-service config sheet;
+  LLM API keys are stored in the Keychain (and cached in-process so a translation
+  doesn't re-prompt for Keychain access). The Apple on-device card uses
+  `translationTask` and can pre-download offline language packs from settings; its
+  row is hidden on macOS 14, which lacks the API. Adding an LLM service is a
+  one-click choice from a provider preset menu (OpenAI, DeepSeek, Qwen, Gemini,
+  Kimi, 智谱 GLM, OpenRouter, Ollama) that prefills the base URL and model so you
+  only supply an API key, and each LLM service has an optional extra request-body
+  field (JSON) for per-model options such as disabling thinking mode.
 - Translation: OpenAI-compatible (LLM) services can be set to "collapsed by
   default" in their editor. A collapsed service does not auto-translate on a run
   — its card stays collapsed with a "tap to translate" hint and spends no tokens
