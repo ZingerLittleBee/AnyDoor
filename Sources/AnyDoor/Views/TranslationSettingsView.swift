@@ -354,12 +354,14 @@ struct TranslationServiceConfigSheet: View {
 
     @ViewBuilder private var llmPromptSection: some View {
         Section {
-            TextEditor(text: promptTemplate)
-                .font(.body.monospaced())
-                .scrollContentBackground(.hidden)
-                // Fixed height (not just minHeight): a min-only TextEditor
-                // greedily fills the form's slack and jumps taller when the
-                // layout re-runs on a state change (e.g. after a test).
+            // PlainTextEditor (NSTextView-backed) instead of SwiftUI TextEditor so
+            // the scrollbar uses the app's overlay style, matching the translation
+            // input and the rest of the lists. A SwiftUI TextEditor can't set the
+            // NSScrollView scroller style reliably.
+            PlainTextEditor(text: promptTemplate, isEditable: true)
+                // Fixed height (not just minHeight): a min-only editor greedily
+                // fills the form's slack and jumps taller when the layout re-runs
+                // on a state change (e.g. after a test).
                 .frame(height: 120)
         } header: {
             LocalizedText(.settingsTranslationServicePrompt)
