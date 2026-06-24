@@ -15,10 +15,12 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
     private(set) var isPinned: Bool = false
     private var keyMonitor: Any?
     private var mouseMonitors: [Any] = []
-    /// While set, the Spotlight-style dismissal paths (resign-key + outside-click)
+    /// While active, the Spotlight-style dismissal paths (resign-key + outside-click)
     /// are inhibited. Used to ride out a system credential prompt that steals key
     /// focus mid-translate (see `runKeychainSensitive`).
-    private var autoDismissSuspended = false
+    private var autoDismissSuspension = AutoDismissSuspension()
+    private var autoDismissRearmTask: Task<Void, Never>?
+    private var autoDismissSuspended: Bool { autoDismissSuspension.isActive }
 
     private init() {
         let panel = KeyablePanel(
@@ -99,6 +101,9 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
 
     override func close() {
         saveFrame()
+        autoDismissRearmTask?.cancel()
+        autoDismissRearmTask = nil
+        autoDismissSuspension.reset()
         removeKeyMonitor()
         removeDismissMonitors()
         window?.orderOut(nil)
@@ -118,19 +123,30 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
     /// Inhibit the Spotlight-style dismissal paths while a system prompt/sheet
     /// holds focus. Paired with `reclaimFocusAndRearm`.
     private func suspendAutoDismiss() {
-        autoDismissSuspended = true
+        autoDismissRearmTask?.cancel()
+        autoDismissRearmTask = nil
+        if autoDismissSuspension.begin() {
+            removeDismissMonitors()
+        }
     }
 
     /// Take key focus back from a system prompt/sheet (the click that dismissed
     /// it landed in another process), then re-arm dismissal only after the queued
     /// resign-key / outside-click events have flushed.
     private func reclaimFocusAndRearm() {
+        guard autoDismissSuspension.end() == .readyToRearm else { return }
+
         if window?.isVisible == true {
             window?.makeKeyAndOrderFront(nil)
         }
-        Task { @MainActor [weak self] in
+        autoDismissRearmTask?.cancel()
+        autoDismissRearmTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
-            self?.autoDismissSuspended = false
+            guard let self, !Task.isCancelled else { return }
+            self.autoDismissRearmTask = nil
+            if !self.isPinned, self.window?.isVisible == true {
+                self.installDismissMonitors()
+            }
         }
     }
 
@@ -139,7 +155,7 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
         if pinned {
             // Pinned windows stay put: drop the Spotlight dismissal monitors.
             removeDismissMonitors()
-        } else if window?.isVisible == true {
+        } else if window?.isVisible == true, !autoDismissSuspended {
             installDismissMonitors()
         }
     }
@@ -218,6 +234,7 @@ final class TranslationWindowController: NSWindowController, NSWindowDelegate {
 
     private func installDismissMonitors() {
         removeDismissMonitors()
+        guard !autoDismissSuspended else { return }
         let local = NSEvent.addLocalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
         ) { [weak self] event in
