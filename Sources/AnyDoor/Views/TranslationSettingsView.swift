@@ -24,10 +24,11 @@ struct TranslationSettingsView: View {
     /// entire Settings window. It is hosted in a window-level scrim because the
     /// tab bar lives in the window's toolbar, which a SwiftUI overlay inside a tab
     /// cannot cover.
-    private func presentEditor(_ config: TranslationServiceConfig, isNew: Bool) {
+    private func presentEditor(_ config: TranslationServiceConfig, isNew: Bool, initialKey: String? = nil) {
         TranslationServiceEditorOverlay.shared.present(
             config: config,
             isNew: isNew,
+            initialKey: initialKey,
             keychain: keychain,
             onSave: applySave
         )
@@ -150,7 +151,7 @@ struct TranslationSettingsView: View {
                 )
             }
 
-            if config.kind == .openAICompatible {
+            if config.kind == .openAICompatible || config.kind == .deepl {
                 Button { presentEditor(config, isNew: false) } label: {
                     LocalizedText(.settingsTranslationEdit)
                 }
@@ -232,6 +233,9 @@ struct TranslationServiceConfigSheet: View {
     @State private var draft: TranslationServiceConfig
     @State private var apiKey: String
     @State private var testState: TestState = .idle
+    /// Keeps the DeepLX endpoint/token fields collapsed by default so official
+    /// DeepL users (the common case) aren't presented with self-hosted options.
+    @State private var showDeepLXAdvanced = false
     @FocusState private var focusedField: Field?
     private let isNew: Bool
     private let keychain: TranslationKeychainStore
@@ -247,12 +251,15 @@ struct TranslationServiceConfigSheet: View {
     init(
         config: TranslationServiceConfig,
         isNew: Bool,
+        initialKey: String? = nil,
         keychain: TranslationKeychainStore,
         onSave: @escaping (TranslationServiceConfig, String?) -> Void,
         onCancel: @escaping () -> Void
     ) {
         _draft = State(initialValue: config)
-        _apiKey = State(initialValue: keychain.apiKey(for: config.id) ?? "")
+        // A new-from-preset draft seeds its key from the preset (e.g. Ollama);
+        // otherwise load any stored key for an existing service.
+        _apiKey = State(initialValue: initialKey ?? keychain.apiKey(for: config.id) ?? "")
         self.isNew = isNew
         self.keychain = keychain
         self.onSave = onSave
@@ -262,54 +269,13 @@ struct TranslationServiceConfigSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Form {
-                Section {
-                    TextField(text: $draft.displayName) { LocalizedText(.settingsTranslationServiceName) }
-                        .focused($focusedField, equals: .name)
-                    TextField(text: baseURL) { LocalizedText(.settingsTranslationServiceBaseURL) }
-                    TextField(text: model) { LocalizedText(.settingsTranslationServiceModel) }
-                    SecureField(text: $apiKey) { LocalizedText(.settingsTranslationServiceAPIKey) }
-                } footer: {
-                    if !TranslationServiceConfig.isValidBaseURL(draft.baseURL ?? "") {
-                        LocalizedText(.settingsTranslationServiceBaseURLInvalid)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                    }
-                }
-
-                Section {
-                    TextEditor(text: promptTemplate)
-                        .font(.body.monospaced())
-                        // Hide the editor's default opaque background so it blends
-                        // into the section card instead of drawing a second boxed
-                        // border inside it.
-                        .scrollContentBackground(.hidden)
-                        // Fixed height (not just minHeight): a min-only TextEditor
-                        // greedily fills the form's slack and jumps taller when the
-                        // layout re-runs on a state change (e.g. after a test).
-                        .frame(height: 120)
-                } header: {
-                    LocalizedText(.settingsTranslationServicePrompt)
-                } footer: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        LocalizedText(.settingsTranslationServicePromptHint)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if !TranslationServiceConfig.promptContainsText(promptTemplate.wrappedValue) {
-                            LocalizedText(.settingsTranslationServicePromptMissingText)
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-
-                Section {
-                    Toggle(isOn: manualMode) {
-                        LocalizedText(.settingsTranslationServiceManualMode)
-                    }
-                } footer: {
-                    LocalizedText(.settingsTranslationServiceManualModeHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                if draft.kind == .deepl {
+                    deepLSection
+                } else {
+                    llmConnectionSection
+                    llmPromptSection
+                    llmExtraBodySection
+                    llmManualModeSection
                 }
             }
             .formStyle(.grouped)
@@ -367,6 +333,95 @@ struct TranslationServiceConfigSheet: View {
         }
     }
 
+    // MARK: - Kind-aware form sections
+
+    @ViewBuilder private var llmConnectionSection: some View {
+        Section {
+            TextField(text: $draft.displayName) { LocalizedText(.settingsTranslationServiceName) }
+                .focused($focusedField, equals: .name)
+            TextField(text: baseURL) { LocalizedText(.settingsTranslationServiceBaseURL) }
+            TextField(text: model) { LocalizedText(.settingsTranslationServiceModel) }
+            SecureField(text: $apiKey) { LocalizedText(.settingsTranslationServiceAPIKey) }
+        } footer: {
+            if !TranslationServiceConfig.isValidBaseURL(draft.baseURL ?? "") {
+                LocalizedText(.settingsTranslationServiceBaseURLInvalid)
+                    .font(.caption).foregroundStyle(.red)
+            }
+        }
+    }
+
+    @ViewBuilder private var llmPromptSection: some View {
+        Section {
+            TextEditor(text: promptTemplate)
+                .font(.body.monospaced())
+                .scrollContentBackground(.hidden)
+                // Fixed height (not just minHeight): a min-only TextEditor
+                // greedily fills the form's slack and jumps taller when the
+                // layout re-runs on a state change (e.g. after a test).
+                .frame(height: 120)
+        } header: {
+            LocalizedText(.settingsTranslationServicePrompt)
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                LocalizedText(.settingsTranslationServicePromptHint)
+                    .font(.caption).foregroundStyle(.secondary)
+                if !TranslationServiceConfig.promptContainsText(promptTemplate.wrappedValue) {
+                    LocalizedText(.settingsTranslationServicePromptMissingText)
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var llmExtraBodySection: some View {
+        Section {
+            TextField(text: extraBodyJSON, axis: .vertical) {
+                LocalizedText(.settingsTranslationServiceExtraBody)
+            }
+            .lineLimit(2...4)
+            .font(.body.monospaced())
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                LocalizedText(.settingsTranslationServiceExtraBodyHint)
+                    .font(.caption).foregroundStyle(.secondary)
+                if !TranslationServiceConfig.isValidExtraBody(draft.extraBodyJSON) {
+                    LocalizedText(.settingsTranslationServiceExtraBodyInvalid)
+                        .font(.caption).foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var llmManualModeSection: some View {
+        Section {
+            Toggle(isOn: manualMode) { LocalizedText(.settingsTranslationServiceManualMode) }
+        } footer: {
+            LocalizedText(.settingsTranslationServiceManualModeHint)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private var deepLSection: some View {
+        Section {
+            TextField(text: $draft.displayName) { LocalizedText(.settingsTranslationServiceName) }
+                .focused($focusedField, equals: .name)
+            SecureField(text: $apiKey) { LocalizedText(.settingsTranslationServiceAPIKey) }
+        }
+        Section {
+            DisclosureGroup(isExpanded: $showDeepLXAdvanced) {
+                TextField(text: baseURL) { LocalizedText(.settingsTranslationDeepLEndpoint) }
+                SecureField(text: deeplxToken) { LocalizedText(.settingsTranslationDeepLToken) }
+            } label: {
+                LocalizedText(.settingsTranslationDeepLAdvanced)
+            }
+        } footer: {
+            LocalizedText(.settingsTranslationDeepLHint)
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: - Bindings
+
     private var baseURL: Binding<String> {
         Binding(get: { draft.baseURL ?? "" }, set: { draft.baseURL = $0 })
     }
@@ -382,28 +437,43 @@ struct TranslationServiceConfigSheet: View {
     private var manualMode: Binding<Bool> {
         Binding(get: { draft.manualMode ?? false }, set: { draft.manualMode = $0 })
     }
+    private var extraBodyJSON: Binding<String> {
+        Binding(get: { draft.extraBodyJSON ?? "" },
+                set: { draft.extraBodyJSON = $0.isEmpty ? nil : $0 })
+    }
+    /// DeepLX token mirrors the same Keychain slot as the official DeepL key.
+    private var deeplxToken: Binding<String> {
+        Binding(get: { apiKey }, set: { apiKey = $0 })
+    }
 
-    /// Save is allowed only once the service is actually runnable: a name, a
-    /// valid http(s) base URL, a model, and an API key. Without all four the
-    /// factory silently skips the service and it vanishes from the panel, which
-    /// reads as the feature being broken.
+    /// Save is allowed only once the service is actually runnable. Rules vary by kind:
+    /// DeepL needs a name + (official key OR valid DeepLX endpoint); LLM services need
+    /// name + valid base URL + model + key + valid extraBody JSON.
     private var isSaveable: Bool {
-        !draft.displayName.trimmingCharacters(in: .whitespaces).isEmpty
-            && TranslationServiceConfig.isValidBaseURL(draft.baseURL ?? "")
-            && !(draft.model ?? "").trimmingCharacters(in: .whitespaces).isEmpty
-            && !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let named = !draft.displayName.trimmingCharacters(in: .whitespaces).isEmpty
+        let keyPresent = !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        switch draft.kind {
+        case .deepl:
+            // Official needs a key; DeepLX needs a valid endpoint (token optional).
+            let validEndpoint = TranslationServiceConfig.isValidBaseURL(draft.baseURL ?? "")
+            return named && (keyPresent || validEndpoint)
+        default:
+            return named
+                && TranslationServiceConfig.isValidBaseURL(draft.baseURL ?? "")
+                && !(draft.model ?? "").trimmingCharacters(in: .whitespaces).isEmpty
+                && keyPresent
+                && TranslationServiceConfig.isValidExtraBody(draft.extraBodyJSON)
+        }
     }
 
     private func runTest() {
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedKey.isEmpty else {
-            testState = .failure(L(.settingsTranslationServiceTestFailed))
-            return
-        }
         let config = draft
         testState = .testing
         Task {
-            let provider = OpenAICompatibleProvider(config: config, apiKey: trimmedKey)
+            let provider: any TranslationProvider = config.kind == .deepl
+                ? DeepLProvider(config: config, apiKey: trimmedKey)
+                : OpenAICompatibleProvider(config: config, apiKey: trimmedKey)
             let request = TranslationRequest(
                 text: "Hello",
                 source: TranslationLanguage.english,

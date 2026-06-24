@@ -28,6 +28,7 @@ final class TranslationServiceEditorOverlay {
     func present(
         config: TranslationServiceConfig,
         isNew: Bool,
+        initialKey: String? = nil,
         keychain: TranslationKeychainStore,
         onSave: @escaping (TranslationServiceConfig, String?) -> Void
     ) {
@@ -57,6 +58,7 @@ final class TranslationServiceEditorOverlay {
         let root = TranslationServiceEditorScrim(
             config: config,
             isNew: isNew,
+            initialKey: initialKey,
             keychain: keychain,
             onSave: { [weak self] saved, apiKey in
                 onSave(saved, apiKey)
@@ -108,6 +110,7 @@ final class TranslationServiceEditorOverlay {
 private struct TranslationServiceEditorScrim: View {
     let config: TranslationServiceConfig
     let isNew: Bool
+    let initialKey: String?
     let keychain: TranslationKeychainStore
     let onSave: (TranslationServiceConfig, String?) -> Void
     let onCancel: () -> Void
@@ -123,6 +126,7 @@ private struct TranslationServiceEditorScrim: View {
                 TranslationServiceConfigSheet(
                     config: config,
                     isNew: isNew,
+                    initialKey: initialKey,
                     keychain: keychain,
                     onSave: onSave,
                     onCancel: onCancel
