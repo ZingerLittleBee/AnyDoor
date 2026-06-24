@@ -246,4 +246,34 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         let error = await firstError(from: mockProvider().translate(request))
         XCTAssertEqual(error, .emptyResponse)
     }
+
+    func testBuildRequestMergesExtraBodyTopLevelKeys() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://api.example.com", model: "m", apiKey: "k", prompt: "p",
+            extraBodyJSON: #"{"thinking":{"type":"disabled"},"temperature":0.2}"#)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual((json["thinking"] as? [String: Any])?["type"] as? String, "disabled")
+        XCTAssertEqual(json["temperature"] as? Double, 0.2)
+        // Base keys remain intact.
+        XCTAssertEqual(json["model"] as? String, "m")
+        XCTAssertEqual(json["stream"] as? Bool, true)
+    }
+
+    func testBuildRequestExtraBodyDoesNotOverrideBaseKeys() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://api.example.com", model: "real", apiKey: "k", prompt: "p",
+            extraBodyJSON: #"{"model":"evil","stream":false}"#)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        XCTAssertEqual(json["model"] as? String, "real")
+        XCTAssertEqual(json["stream"] as? Bool, true)
+    }
+
+    func testBuildRequestIgnoresInvalidExtraBody() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://api.example.com", model: "m", apiKey: "k", prompt: "p",
+            extraBodyJSON: "[not an object]")
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
+        // Degrades to the plain request: only the three base keys.
+        XCTAssertEqual(Set(json.keys), ["model", "stream", "messages"])
+    }
 }

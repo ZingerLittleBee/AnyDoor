@@ -56,7 +56,8 @@ struct OpenAICompatibleProvider: TranslationProvider {
                         baseURL: baseURL,
                         model: model,
                         apiKey: apiKey,
-                        prompt: prompt
+                        prompt: prompt,
+                        extraBodyJSON: config.extraBodyJSON
                     )
 
                     let (bytes, response) = try await session.bytes(for: urlRequest)
@@ -126,7 +127,7 @@ struct OpenAICompatibleProvider: TranslationProvider {
 
     /// Builds the streaming `POST {baseURL}/chat/completions` request. A trailing
     /// slash on `baseURL` is trimmed so the path joins cleanly.
-    static func buildRequest(baseURL: String, model: String, apiKey: String, prompt: String) throws -> URLRequest {
+    static func buildRequest(baseURL: String, model: String, apiKey: String, prompt: String, extraBodyJSON: String? = nil) throws -> URLRequest {
         let trimmedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedBase = trimmedBase.hasSuffix("/") ? String(trimmedBase.dropLast()) : trimmedBase
         guard !normalizedBase.isEmpty, let url = URL(string: normalizedBase + "/chat/completions") else {
@@ -137,11 +138,19 @@ struct OpenAICompatibleProvider: TranslationProvider {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": model,
             "stream": true,
             "messages": [["role": "user", "content": prompt]],
         ]
+        // Merge any preset/user extra options (e.g. thinking-disable). Base keys
+        // win, so a stray "model"/"stream"/"messages" in the extra body can't
+        // hijack the request.
+        if let extra = TranslationServiceConfig.parseExtraBodyObject(extraBodyJSON) {
+            for (key, value) in extra where body[key] == nil {
+                body[key] = value
+            }
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         return request
     }
