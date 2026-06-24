@@ -46,17 +46,45 @@ struct TranslationHistoryView: View {
         .frame(width: 360, height: 420)
     }
 
+    // A custom two-segment control instead of a segmented `Picker`: the AppKit
+    // NSSegmentedControl the Picker bridges to draws a blue focus ring while the
+    // popover holds key focus (and `.focusEffectDisabled()` doesn't reach it), so
+    // we render plain buttons that never show one.
     private var filterPicker: some View {
-        Picker("", selection: $filter) {
-            LocalizedText(.translationHistoryAll).tag(Filter.all)
-            LocalizedText(.translationHistoryFavorites).tag(Filter.favorites)
+        HStack(spacing: 4) {
+            filterSegment(.all, label: .translationHistoryAll)
+            filterSegment(.favorites, label: .translationHistoryFavorites)
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
+        .padding(3)
+        .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .padding(10)
-        // Collapse any open card when switching filters so an expanded non-favorite
-        // card doesn't reappear expanded after toggling back.
-        .onChange(of: filter) { _, _ in expandedID = nil }
+    }
+
+    private func filterSegment(_ value: Filter, label: L10n.Key) -> some View {
+        let selected = filter == value
+        return Button {
+            guard filter != value else { return }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                filter = value
+                // Collapse any open card when switching filters so an expanded
+                // non-favorite card doesn't reappear expanded after toggling back.
+                expandedID = nil
+            }
+        } label: {
+            LocalizedText(label)
+                .font(.callout.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? Color.white : Color.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .background {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.accentColor)
+                    }
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.plain)
     }
 
     private func list(_ groups: [TranslationRunGroup]) -> some View {
