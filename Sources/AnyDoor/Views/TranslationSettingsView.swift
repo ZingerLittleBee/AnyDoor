@@ -113,19 +113,20 @@ struct TranslationSettingsView: View {
                 settings.setServices(merged)
             }
 
-            Button {
-                let new = TranslationServiceConfig(
-                    id: UUID().uuidString,
-                    kind: .openAICompatible,
-                    displayName: "OpenAI",
-                    iconName: "brain",
-                    enabled: true,
-                    order: settings.services.count,
-                    baseURL: "https://api.openai.com/v1",
-                    model: "gpt-4o-mini",
-                    promptTemplate: TranslationServiceConfig.defaultPromptTemplate
-                )
-                presentEditor(new, isNew: true)
+            Menu {
+                ForEach(TranslationServicePreset.catalog) { preset in
+                    Button {
+                        let (config, key) = preset.makeDraft(
+                            order: settings.services.count, id: UUID().uuidString)
+                        presentEditor(config, isNew: true, initialKey: key)
+                    } label: {
+                        Label {
+                            Text(preset.displayName.isEmpty ? L(.settingsTranslationPresetCustom) : preset.displayName)
+                        } icon: {
+                            Image(systemName: preset.iconName)
+                        }
+                    }
+                }
             } label: {
                 Label { LocalizedText(.settingsTranslationAddService) } icon: { Image(systemName: "plus") }
             }
