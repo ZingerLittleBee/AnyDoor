@@ -33,7 +33,16 @@ enum TranslationProviderFactory {
             _ = (baseURL, model) // config carries them; provider reads from config
             return OpenAICompatibleProvider(config: config, apiKey: key, session: session)
         case .deepl:
-            return nil // DeepL provider not yet implemented
+            let key = keychain.apiKey(for: config.id) ?? ""
+            if let baseURL = config.baseURL, !baseURL.isEmpty {
+                // DeepLX: a valid self-host base URL is enough; the token is optional.
+                guard TranslationServiceConfig.isValidBaseURL(baseURL) else { return nil }
+                return DeepLProvider(config: config, apiKey: key, session: session)
+            }
+            // Official DeepL needs an auth key; skip silently when absent (mirrors
+            // the openAICompatible "incomplete -> skip" behavior).
+            guard !key.isEmpty else { return nil }
+            return DeepLProvider(config: config, apiKey: key, session: session)
         }
     }
 

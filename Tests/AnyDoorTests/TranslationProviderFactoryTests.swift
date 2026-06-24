@@ -20,6 +20,8 @@ final class TranslationProviderFactoryTests: XCTestCase {
         keychain.deleteAPIKey(for: "single-llm")
         keychain.deleteAPIKey(for: "manual")
         keychain.deleteAPIKey(for: "auto")
+        keychain.deleteAPIKey(for: "deepl")
+        keychain.deleteAPIKey(for: "deeplx")
         super.tearDown()
     }
 
@@ -111,6 +113,37 @@ final class TranslationProviderFactoryTests: XCTestCase {
             for: makeConfig(id: "single-llm", kind: .openAICompatible, order: 0,
                             baseURL: "https://api.example.com/v1", model: nil),
             keychain: keychain))
+    }
+
+    func testBuildsDeepLOfficialWhenKeyed() {
+        let keychain = TranslationKeychainStore(service: keychainService)
+        keychain.setAPIKey("dk:fx", for: "deepl")
+        let config = makeConfig(id: "deepl", kind: .deepl, order: 0)
+        let provider = TranslationProviderFactory.makeStreamProvider(
+            for: config, keychain: keychain, session: .shared)
+        XCTAssertEqual(provider?.kind, .deepl)
+    }
+
+    func testSkipsDeepLOfficialWithoutKey() {
+        let keychain = TranslationKeychainStore(service: keychainService)
+        let config = makeConfig(id: "deepl", kind: .deepl, order: 0)
+        XCTAssertNil(TranslationProviderFactory.makeStreamProvider(
+            for: config, keychain: keychain, session: .shared))
+    }
+
+    func testBuildsDeepLXWithBaseURLAndNoKey() {
+        let keychain = TranslationKeychainStore(service: keychainService)
+        let config = makeConfig(id: "deeplx", kind: .deepl, order: 0, baseURL: "http://localhost:1188")
+        let provider = TranslationProviderFactory.makeStreamProvider(
+            for: config, keychain: keychain, session: .shared)
+        XCTAssertEqual(provider?.kind, .deepl)
+    }
+
+    func testSkipsDeepLXWithInvalidBaseURL() {
+        let keychain = TranslationKeychainStore(service: keychainService)
+        let config = makeConfig(id: "deeplx", kind: .deepl, order: 0, baseURL: "not-a-url")
+        XCTAssertNil(TranslationProviderFactory.makeStreamProvider(
+            for: config, keychain: keychain, session: .shared))
     }
 
     func testMakeStreamProvidersExcludesManualServices() {
