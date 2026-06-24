@@ -184,4 +184,38 @@ final class TranslationServiceConfigTests: XCTestCase {
         let obj = TranslationServiceConfig.parseExtraBodyObject(#"{"a":1}"#)
         XCTAssertEqual(obj?["a"] as? Int, 1)
     }
+
+    func testExtraHeadersJSONCodableRoundTripAndLegacyDecodesNil() throws {
+        var config = TranslationServiceConfig(
+            id: "llm", kind: .openAICompatible, displayName: "L", iconName: "brain",
+            enabled: true, order: 0, baseURL: "https://a.com/v1", model: "m", promptTemplate: nil)
+        config.extraHeadersJSON = #"{"api-key":"{{key}}"}"#
+        let data = try JSONEncoder().encode(config)
+        XCTAssertEqual(try JSONDecoder().decode(TranslationServiceConfig.self, from: data), config)
+
+        let legacy = #"{"id":"old","kind":"openAICompatible","displayName":"O","iconName":"brain","enabled":true,"order":0}"#
+        let decoded = try JSONDecoder().decode(TranslationServiceConfig.self, from: Data(legacy.utf8))
+        XCTAssertNil(decoded.extraHeadersJSON)
+    }
+
+    func testIsValidExtraHeaders() {
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraHeaders(nil))
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraHeaders(""))
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraHeaders("   "))
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraHeaders(#"{"api-key":"{{key}}"}"#))
+        XCTAssertTrue(TranslationServiceConfig.isValidExtraHeaders(#"{"X-Title":"AnyDoor","HTTP-Referer":"https://x.dev"}"#))
+        // Non-string values are rejected: an HTTP header value must be a string.
+        XCTAssertFalse(TranslationServiceConfig.isValidExtraHeaders(#"{"X-Num":42}"#))
+        XCTAssertFalse(TranslationServiceConfig.isValidExtraHeaders(#"{"nested":{"a":"b"}}"#))
+        XCTAssertFalse(TranslationServiceConfig.isValidExtraHeaders("[1,2,3]"))
+        XCTAssertFalse(TranslationServiceConfig.isValidExtraHeaders("{not json"))
+    }
+
+    func testParseExtraHeaders() {
+        XCTAssertNil(TranslationServiceConfig.parseExtraHeaders(nil))
+        XCTAssertNil(TranslationServiceConfig.parseExtraHeaders(""))
+        XCTAssertNil(TranslationServiceConfig.parseExtraHeaders(#"{"X-Num":42}"#))
+        let headers = TranslationServiceConfig.parseExtraHeaders(#"{"api-key":"abc"}"#)
+        XCTAssertEqual(headers?["api-key"], "abc")
+    }
 }

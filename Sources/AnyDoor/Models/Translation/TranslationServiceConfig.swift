@@ -28,6 +28,14 @@ struct TranslationServiceConfig: Codable, Identifiable, Sendable, Equatable {
     /// mode). Optional so legacy stored JSON still decodes; the memberwise init
     /// gives it an implicit nil default so existing call sites are unchanged.
     var extraBodyJSON: String?
+    /// `openAICompatible` only: extra HTTP headers merged into the request, as a
+    /// flat JSON object of string values (e.g. `{"api-key":"{{key}}"}` for Azure
+    /// OpenAI, which authenticates with an `api-key` header instead of
+    /// `Authorization: Bearer`). The `{{key}}` token in a value is replaced with
+    /// the Keychain API key at request time so the secret stays out of this DTO.
+    /// Optional so legacy stored JSON still decodes; the memberwise init gives it
+    /// an implicit nil default so existing call sites are unchanged.
+    var extraHeadersJSON: String?
 }
 
 extension TranslationServiceConfig {
@@ -103,6 +111,28 @@ extension TranslationServiceConfig {
         let trimmed = (json ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8),
               let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return obj
+    }
+
+    /// Whether `json` is acceptable as `extraHeadersJSON`: empty/whitespace (no
+    /// extra headers) or a JSON **object whose values are all strings**. An HTTP
+    /// header value must be a string, so a nested object/array/number/bool value
+    /// is rejected. Backs both the editor's save gate and the runtime parse so
+    /// the two never diverge.
+    static func isValidExtraHeaders(_ json: String?) -> Bool {
+        let trimmed = (json ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return true }
+        guard let data = trimmed.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return false }
+        return obj.values.allSatisfy { $0 is String }
+    }
+
+    /// Parses `extraHeadersJSON` into a `[name: value]` map of string headers, or
+    /// nil when empty or not a string-valued JSON object.
+    static func parseExtraHeaders(_ json: String?) -> [String: String]? {
+        let trimmed = (json ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: String] else { return nil }
         return obj
     }
 

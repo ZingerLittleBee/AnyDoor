@@ -9400,6 +9400,57 @@
         }
       }
     },
+    "settings.translation.serviceExtraHeaders": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra request headers (JSON, optional)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额外请求头（JSON，可选）"
+          }
+        }
+      }
+    },
+    "settings.translation.serviceExtraHeadersHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra HTTP headers as a JSON object of strings. Use {{key}} for the API key, e.g. Azure OpenAI needs {\"api-key\":\"{{key}}\"}."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "以字符串 JSON 对象形式附加的 HTTP 请求头。用 {{key}} 代入 API 密钥，例如 Azure OpenAI 需要 {\"api-key\":\"{{key}}\"}。"
+          }
+        }
+      }
+    },
+    "settings.translation.serviceExtraHeadersInvalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra headers must be a JSON object whose values are all strings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额外请求头必须是值全部为字符串的 JSON 对象。"
+          }
+        }
+      }
+    },
     "settings.translation.deepLAdvanced": {
       "extractionState": "manual",
       "localizations": {

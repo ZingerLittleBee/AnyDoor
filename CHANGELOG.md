@@ -31,7 +31,11 @@ versioning.
   one-click choice from a provider preset menu (OpenAI, DeepSeek, Qwen, Gemini,
   Kimi, 智谱 GLM, OpenRouter, Ollama) that prefills the base URL and model so you
   only supply an API key, and each LLM service has an optional extra request-body
-  field (JSON) for per-model options such as disabling thinking mode.
+  field (JSON) for per-model options such as disabling thinking mode, plus an
+  optional extra request-headers field (JSON) for endpoints that need custom
+  headers — e.g. Azure OpenAI, which authenticates with an `api-key` header
+  (use `{{key}}` to inject the stored key) and carries its `api-version` in the
+  base URL's query string.
 - Translation: OpenAI-compatible (LLM) services can be set to "collapsed by
   default" in their editor. A collapsed service does not auto-translate on a run
   — its card stays collapsed with a "tap to translate" hint and spends no tokens

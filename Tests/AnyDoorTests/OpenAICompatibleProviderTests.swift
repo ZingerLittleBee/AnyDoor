@@ -276,4 +276,52 @@ final class OpenAICompatibleProviderTests: XCTestCase {
         // Degrades to the plain request: only the three base keys.
         XCTAssertEqual(Set(json.keys), ["model", "stream", "messages"])
     }
+
+    // MARK: - Extra headers
+
+    func testBuildRequestAppliesExtraHeaders() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://api.example.com/v1", model: "m", apiKey: "k", prompt: "p",
+            extraHeadersJSON: #"{"X-Title":"AnyDoor","HTTP-Referer":"https://bybee.dev"}"#)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Title"), "AnyDoor")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "HTTP-Referer"), "https://bybee.dev")
+        // Defaults remain when not overridden.
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer k")
+    }
+
+    func testBuildRequestExtraHeaderKeyPlaceholderResolvesToAPIKey() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://res.openai.azure.com/openai/deployments/gpt4",
+            model: "gpt4", apiKey: "azure-secret", prompt: "p",
+            extraHeadersJSON: #"{"api-key":"{{key}}"}"#)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "api-key"), "azure-secret")
+    }
+
+    func testBuildRequestExtraHeaderCanOverrideAuthorization() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://api.example.com/v1", model: "m", apiKey: "k", prompt: "p",
+            extraHeadersJSON: #"{"Authorization":"Token abc"}"#)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Token abc")
+    }
+
+    func testBuildRequestIgnoresNonStringHeaderValues() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://api.example.com/v1", model: "m", apiKey: "k", prompt: "p",
+            extraHeadersJSON: #"{"X-Num":42}"#)
+        // A non-string-valued object is rejected wholesale; defaults stand.
+        XCTAssertNil(request.value(forHTTPHeaderField: "X-Num"))
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer k")
+    }
+
+    // MARK: - Base URL query preservation (Azure api-version)
+
+    func testBuildRequestPreservesBaseURLQuery() throws {
+        let request = try OpenAICompatibleProvider.buildRequest(
+            baseURL: "https://res.openai.azure.com/openai/deployments/gpt4?api-version=2024-02-01",
+            model: "gpt4", apiKey: "k", prompt: "p")
+        XCTAssertEqual(
+            request.url?.absoluteString,
+            "https://res.openai.azure.com/openai/deployments/gpt4/chat/completions?api-version=2024-02-01"
+        )
+    }
 }

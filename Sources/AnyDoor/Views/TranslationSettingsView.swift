@@ -276,6 +276,7 @@ struct TranslationServiceConfigSheet: View {
                     llmConnectionSection
                     llmPromptSection
                     llmExtraBodySection
+                    llmExtraHeadersSection
                     llmManualModeSection
                 }
             }
@@ -393,6 +394,25 @@ struct TranslationServiceConfigSheet: View {
         }
     }
 
+    @ViewBuilder private var llmExtraHeadersSection: some View {
+        Section {
+            TextField(text: extraHeadersJSON, axis: .vertical) {
+                LocalizedText(.settingsTranslationServiceExtraHeaders)
+            }
+            .lineLimit(2...4)
+            .font(.body.monospaced())
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                LocalizedText(.settingsTranslationServiceExtraHeadersHint)
+                    .font(.caption).foregroundStyle(.secondary)
+                if !TranslationServiceConfig.isValidExtraHeaders(draft.extraHeadersJSON) {
+                    LocalizedText(.settingsTranslationServiceExtraHeadersInvalid)
+                        .font(.caption).foregroundStyle(.red)
+                }
+            }
+        }
+    }
+
     @ViewBuilder private var llmManualModeSection: some View {
         Section {
             Toggle(isOn: manualMode) { LocalizedText(.settingsTranslationServiceManualMode) }
@@ -442,6 +462,10 @@ struct TranslationServiceConfigSheet: View {
         Binding(get: { draft.extraBodyJSON ?? "" },
                 set: { draft.extraBodyJSON = $0.isEmpty ? nil : $0 })
     }
+    private var extraHeadersJSON: Binding<String> {
+        Binding(get: { draft.extraHeadersJSON ?? "" },
+                set: { draft.extraHeadersJSON = $0.isEmpty ? nil : $0 })
+    }
     /// DeepLX token mirrors the same Keychain slot as the official DeepL key.
     private var deeplxToken: Binding<String> {
         Binding(get: { apiKey }, set: { apiKey = $0 })
@@ -464,6 +488,7 @@ struct TranslationServiceConfigSheet: View {
                 && !(draft.model ?? "").trimmingCharacters(in: .whitespaces).isEmpty
                 && keyPresent
                 && TranslationServiceConfig.isValidExtraBody(draft.extraBodyJSON)
+                && TranslationServiceConfig.isValidExtraHeaders(draft.extraHeadersJSON)
         }
     }
 

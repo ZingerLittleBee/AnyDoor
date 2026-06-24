@@ -57,7 +57,8 @@ struct OpenAICompatibleProvider: TranslationProvider {
                         model: model,
                         apiKey: apiKey,
                         prompt: prompt,
-                        extraBodyJSON: config.extraBodyJSON
+                        extraBodyJSON: config.extraBodyJSON,
+                        extraHeadersJSON: config.extraHeadersJSON
                     )
 
                     let (bytes, response) = try await session.bytes(for: urlRequest)
@@ -125,12 +126,24 @@ struct OpenAICompatibleProvider: TranslationProvider {
             .replacingOccurrences(of: "{{text}}", with: text)
     }
 
-    /// Builds the streaming `POST {baseURL}/chat/completions` request. A trailing
-    /// slash on `baseURL` is trimmed so the path joins cleanly.
-    static func buildRequest(baseURL: String, model: String, apiKey: String, prompt: String, extraBodyJSON: String? = nil) throws -> URLRequest {
+    /// Builds the streaming `POST {baseURL}/chat/completions` request. `baseURL` is
+    /// parsed as URL components so any existing query (e.g. Azure OpenAI's
+    /// `?api-version=`) survives the `/chat/completions` path append; a trailing
+    /// slash on the path is trimmed so it joins cleanly. Caller-supplied headers
+    /// are applied last so they can override the defaults — Azure authenticates
+    /// with an `api-key` header rather than `Authorization: Bearer`; a `{{key}}`
+    /// token in a header value is replaced with the API key.
+    static func buildRequest(baseURL: String, model: String, apiKey: String, prompt: String, extraBodyJSON: String? = nil, extraHeadersJSON: String? = nil) throws -> URLRequest {
         let trimmedBase = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedBase = trimmedBase.hasSuffix("/") ? String(trimmedBase.dropLast()) : trimmedBase
-        guard !normalizedBase.isEmpty, let url = URL(string: normalizedBase + "/chat/completions") else {
+        guard !trimmedBase.isEmpty,
+              var components = URLComponents(string: trimmedBase),
+              components.scheme != nil, components.host != nil else {
+            throw TranslationProviderError.network("invalid base URL")
+        }
+        var path = components.path
+        if path.hasSuffix("/") { path.removeLast() }
+        components.path = path + "/chat/completions"
+        guard let url = components.url else {
             throw TranslationProviderError.network("invalid base URL")
         }
 
@@ -138,6 +151,15 @@ struct OpenAICompatibleProvider: TranslationProvider {
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // Apply extra headers after the defaults so a caller can override them
+        // (e.g. swap Bearer auth for Azure's `api-key`). `{{key}}` resolves to the
+        // API key so the Keychain secret can be injected into a custom header.
+        if let headers = TranslationServiceConfig.parseExtraHeaders(extraHeadersJSON) {
+            for (name, value) in headers {
+                let resolved = value.replacingOccurrences(of: "{{key}}", with: apiKey)
+                request.setValue(resolved, forHTTPHeaderField: name)
+            }
+        }
         var body: [String: Any] = [
             "model": model,
             "stream": true,
