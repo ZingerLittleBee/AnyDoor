@@ -46,6 +46,7 @@ final class TranslationHistoryStore {
         target: TranslationLanguage,
         serviceID: String,
         serviceName: String,
+        runID: String = "",
         retention: Int = 0
     ) {
         guard let modelContext else { return }
@@ -55,7 +56,8 @@ final class TranslationHistoryStore {
             sourceLangCode: source?.code ?? "",
             targetLangCode: target.code,
             serviceID: serviceID,
-            serviceName: serviceName
+            serviceName: serviceName,
+            runID: runID
         )
         modelContext.insert(record)
         try? modelContext.save()

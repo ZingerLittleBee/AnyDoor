@@ -16,6 +16,10 @@ final class TranslationRecord {
     var serviceID: String = ""
     var serviceName: String = ""
     var isFavorite: Bool = false
+    /// Identifies the translation run this record belongs to: every service result
+    /// from one `translate()` shares it, so the history view can merge a run into a
+    /// single card. Empty on legacy rows, which each form their own one-record card.
+    var runID: String = ""
 
     init(
         sourceText: String,
@@ -25,7 +29,8 @@ final class TranslationRecord {
         serviceID: String,
         serviceName: String,
         isFavorite: Bool = false,
-        createdAt: Date = Date()
+        createdAt: Date = Date(),
+        runID: String = ""
     ) {
         self.id = UUID().uuidString
         self.createdAt = createdAt
@@ -36,5 +41,6 @@ final class TranslationRecord {
         self.serviceID = serviceID
         self.serviceName = serviceName
         self.isFavorite = isFavorite
+        self.runID = runID
     }
 }

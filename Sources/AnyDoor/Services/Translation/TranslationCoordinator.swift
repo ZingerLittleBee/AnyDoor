@@ -19,6 +19,11 @@ final class TranslationCoordinator {
     /// reuses it so a manually-expanded service translates the same text/target
     /// its sibling cards used this run.
     private(set) var currentRequest: TranslationRequest?
+    /// The id stamped onto every record written during the current run, so the
+    /// history view can merge a run's per-service records into one card. Set in
+    /// `translate()`; reused by `translateOne` (which records through the same
+    /// `run()` path).
+    private(set) var currentRunID: String = ""
     /// Latest successful Apple on-device translation for the current run, keyed by
     /// runToken so a stale value from a previous run is ignored. The Apple card
     /// publishes here (it lives outside `results`) so the panel's auto-speak path
@@ -105,6 +110,7 @@ final class TranslationCoordinator {
         withKeychainPromptGuard { providers = makeProviders() }
         let request = TranslationRequest(text: text, source: source, target: effectiveTarget())
         currentRequest = request
+        currentRunID = UUID().uuidString
 
         // Manual (collapsed-by-default) services get a deferred placeholder card
         // with no task; they translate only when the user expands them. The
@@ -116,10 +122,11 @@ final class TranslationCoordinator {
         results = newResults
 
         let token = runToken
+        let runID = currentRunID
         for provider in providers {
             let id = provider.id
             tasks[id] = Task { [weak self] in
-                await self?.run(provider: provider, request: request, sourceText: text)
+                await self?.run(provider: provider, request: request, sourceText: text, runID: runID)
                 // Drop the completed entry, but only if a newer translate() hasn't
                 // already replaced it (the supersede/cancel race): cancel() clears
                 // the whole dict and a fresh run installs a new task + bumps
@@ -153,8 +160,9 @@ final class TranslationCoordinator {
         // Show the spinner immediately on expand, before the task's first hop.
         update(serviceID) { $0.status = .loading }
         let token = runToken
+        let runID = currentRunID
         tasks[serviceID] = Task { [weak self] in
-            await self?.run(provider: provider, request: request, sourceText: request.text)
+            await self?.run(provider: provider, request: request, sourceText: request.text, runID: runID)
             guard let self, self.runToken == token else { return }
             self.tasks[serviceID] = nil
         }
@@ -162,7 +170,8 @@ final class TranslationCoordinator {
 
     private func run(provider: any TranslationProvider,
                      request: TranslationRequest,
-                     sourceText: String) async {
+                     sourceText: String,
+                     runID: String) async {
         setStatus(.loading, for: provider.id)
         do {
             for try await chunk in provider.translate(request) {
@@ -183,7 +192,7 @@ final class TranslationCoordinator {
             }
             if Task.isCancelled { return }
             update(provider.id) { $0.status = .success }
-            recordSuccess(provider: provider, request: request, sourceText: sourceText)
+            recordSuccess(provider: provider, request: request, sourceText: sourceText, runID: runID)
         } catch is CancellationError {
             // Silent: a fresh translate() superseded this run.
         } catch {
@@ -197,7 +206,8 @@ final class TranslationCoordinator {
 
     private func recordSuccess(provider: any TranslationProvider,
                                request: TranslationRequest,
-                               sourceText: String) {
+                               sourceText: String,
+                               runID: String) {
         guard let history,
               let result = results.first(where: { $0.serviceID == provider.id }),
               !result.text.isEmpty else { return }
@@ -209,6 +219,7 @@ final class TranslationCoordinator {
             target: request.target,
             serviceID: provider.id,
             serviceName: serviceName,
+            runID: runID,
             retention: settings.historyRetention)
     }
 
@@ -221,7 +232,8 @@ final class TranslationCoordinator {
                           serviceName: String,
                           sourceText: String,
                           translatedText: String,
-                          target: TranslationLanguage) {
+                          target: TranslationLanguage,
+                          runID: String) {
         guard !translatedText.isEmpty else { return }
         appleResult = (runToken, translatedText)
         guard let history,
@@ -233,6 +245,7 @@ final class TranslationCoordinator {
             target: target,
             serviceID: serviceID,
             serviceName: serviceName,
+            runID: runID,
             retention: settings.historyRetention)
     }
 

@@ -228,6 +228,8 @@ private nonisolated func run(_ session: TranslationSession,
                              config: TranslationServiceConfig) async {
     let text = await coordinator.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !text.isEmpty else { return }
+    // Freeze the run id at dispatch so a superseding run can't restamp this result.
+    let runID = await coordinator.currentRunID
 
     // A missing on-device language pack makes session.translate present a system
     // download sheet (from another process) that steals key focus and would
@@ -253,7 +255,8 @@ private nonisolated func run(_ session: TranslationSession,
             serviceName: config.displayName,
             sourceText: text,
             translatedText: translated,
-            target: coordinator.effectiveTarget())
+            target: coordinator.effectiveTarget(),
+            runID: runID)
     case .failure(let error):
         if error is CancellationError {
             // Superseded by a newer request; leave state for the new run.

@@ -55,6 +55,21 @@ final class TranslationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(row.serviceID, "google")
     }
 
+    func testRecordStoresRunID() throws {
+        let (store, container) = try makeStore()
+        store.record(
+            sourceText: "hello",
+            translatedText: "你好",
+            source: .english,
+            target: .simplifiedChinese,
+            serviceID: "google",
+            serviceName: "Google",
+            runID: "run-123"
+        )
+        let row = try XCTUnwrap(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).first)
+        XCTAssertEqual(row.runID, "run-123")
+    }
+
     func testRecordWithNilSourceStoresEmptyCode() throws {
         let (store, container) = try makeStore()
         store.record(
