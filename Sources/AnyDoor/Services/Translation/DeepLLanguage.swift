@@ -27,7 +27,13 @@ enum DeepLLanguage {
             case "en": return "EN"
             case "zh-Hans", "zh-Hant": return "ZH"
             case "pt": return "PT"
-            default: return officialTarget[lang.code] ?? lang.code.uppercased()
+            default:
+                // DeepLX wants base codes, so strip any region variant rather
+                // than reusing the variant-oriented officialTarget map (which
+                // would leak e.g. EN-US if a new variant code joined the catalog
+                // without its own case above).
+                let base = lang.code.split(separator: "-").first.map(String.init) ?? lang.code
+                return base.uppercased()
             }
         }
         return officialTarget[lang.code] ?? lang.code.uppercased()
