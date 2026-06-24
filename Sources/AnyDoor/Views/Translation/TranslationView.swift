@@ -272,6 +272,12 @@ private struct EnterToTranslateEditor: NSViewRepresentable {
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.focusRingType = .none
+        // Match the rest of the app's lists: floating, auto-hiding overlay
+        // scrollers that reserve no width, instead of the system's persistent
+        // legacy scrollbar when "Show scroll bars" is set to "Always".
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.verticalScroller?.scrollerStyle = .overlay
         return scroll
     }
 
