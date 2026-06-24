@@ -43,12 +43,14 @@ versioning.
   text could be read instead of failing silently.
 - Translation history: successful translations are recorded to a SwiftData store
   (`TranslationRecord`) with a configurable retention cap, browsable from an
-  in-window history and favorites viewer. Tapping a row expands it in place to
-  recall the stored result (full original and translation, with a copy button)
-  without re-translating; an explicit "Re-translate" button refills the input and
-  runs a fresh translation. Translation settings (enabled services, target
-  languages, auto-speak, retention) ride config backup; API keys and the history
-  are deliberately excluded.
+  in-window history and favorites viewer. Each translation run (one input fanned
+  out to every service) is shown as a single card listing every service's result;
+  tapping a card expands it in place to recall the full original and each service's
+  full translation (each with its own copy button) without re-translating, and an
+  explicit "Re-translate" button re-runs the whole run. The favorite star and the
+  delete control act on the whole run. Translation settings (enabled services,
+  target languages, auto-speak, retention) ride config backup; API keys and the
+  history are deliberately excluded.
 
 ### Changed
 
