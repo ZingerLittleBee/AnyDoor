@@ -9331,6 +9331,142 @@
           }
         }
       }
+    },
+    "settings.translation.presetCustom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自定义"
+          }
+        }
+      }
+    },
+    "settings.translation.serviceExtraBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra request body (JSON, optional)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额外请求参数（JSON，可选）"
+          }
+        }
+      }
+    },
+    "settings.translation.serviceExtraBodyHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra top-level JSON merged into the request body, e.g. to disable thinking mode."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "合并进请求体的额外 JSON 字段，例如关闭思考模式。"
+          }
+        }
+      }
+    },
+    "settings.translation.serviceExtraBodyInvalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extra parameters must be a valid JSON object."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "额外参数必须是合法的 JSON 对象。"
+          }
+        }
+      }
+    },
+    "settings.translation.deepLAdvanced": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced (DeepLX self-host)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "高级（DeepLX 自建端点）"
+          }
+        }
+      }
+    },
+    "settings.translation.deepLEndpoint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DeepLX endpoint (optional)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DeepLX 端点（可选）"
+          }
+        }
+      }
+    },
+    "settings.translation.deepLToken": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Access token (optional)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "访问令牌（可选）"
+          }
+        }
+      }
+    },
+    "settings.translation.deepLHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave the endpoint empty to use the official DeepL API (free/Pro chosen by your key). Fill it to use your self-hosted DeepLX instead."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "端点留空则使用 DeepL 官方 API（按 Key 自动选择免费/Pro）；填写则改用你自建的 DeepLX 服务。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
