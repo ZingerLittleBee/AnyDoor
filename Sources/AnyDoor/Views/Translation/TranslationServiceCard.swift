@@ -16,6 +16,7 @@ struct TranslationServiceCard: View {
     let onExpandDeferred: () -> Void
 
     @State private var collapsed: Bool
+    @State private var hovered = false
 
     init(config: TranslationServiceConfig,
          result: TranslationResult,
@@ -37,14 +38,14 @@ struct TranslationServiceCard: View {
                     Divider()
                     body(for: result)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, TranslationTheme.tileInsetH)
+                        .padding(.vertical, TranslationTheme.tileInsetV)
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .translationTile(isHovered: hovered, isExpanded: !collapsed)
+        .onHover { hovered = $0 }
         // A new run resets a manual service to .deferred; re-collapse it. Non-manual
         // services never enter .deferred, so their behavior is unchanged.
         .onChange(of: result.status) { _, newStatus in
@@ -87,7 +88,7 @@ struct TranslationServiceCard: View {
             .accessibilityLabel(L(collapsed ? .translationExpand : .translationCollapse))
             .hoverTooltip(L(collapsed ? .translationExpand : .translationCollapse))
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, TranslationTheme.tileInsetH)
         .padding(.vertical, 8)
     }
 
@@ -95,7 +96,7 @@ struct TranslationServiceCard: View {
     /// (manual) card kicks off its on-demand translation.
     private func toggleCollapsed() {
         let willExpand = collapsed
-        withAnimation(.easeInOut(duration: 0.22)) { collapsed.toggle() }
+        withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
         if willExpand, result.status == .deferred {
             onExpandDeferred()
         }
