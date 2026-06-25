@@ -81,8 +81,9 @@ struct TranslationView: View {
     }
 
     /// Pin toggle with an unmistakable active state: while pinned the icon flips
-    /// to white on an accent-filled chip; unpinned it matches the other toolbar
-    /// glyphs (secondary, no fill).
+    /// to white on an accent-tinted control surface (tinted Liquid Glass on
+    /// macOS 26, a flat accent fill on the fallback); unpinned it matches the
+    /// other toolbar glyphs (secondary, flat at rest).
     private var pinButton: some View {
         let shape = RoundedRectangle(cornerRadius: TranslationTheme.controlRadius, style: .continuous)
         return Button {
@@ -153,7 +154,7 @@ struct TranslationView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                        .background(TranslationTheme.metaChipFill, in: Capsule())
                 }
                 Spacer()
                 if !coordinator.inputText.isEmpty {

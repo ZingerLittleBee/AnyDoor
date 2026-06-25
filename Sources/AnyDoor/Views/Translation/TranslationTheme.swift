@@ -36,6 +36,10 @@ enum TranslationTheme {
     static func controlTint(isHovered: Bool) -> Color {
         Color.primary.opacity(isHovered ? 0.12 : 0.06)
     }
+
+    /// Soft fill for informational meta chips (e.g. the detected-language hint).
+    /// Kept on the secondary color so it reads as a passive badge, not a control.
+    static let metaChipFill = Color.secondary.opacity(0.12)
 }
 
 extension View {
