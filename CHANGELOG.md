@@ -58,8 +58,8 @@ versioning.
   full translation (each with its own copy button) without re-translating, and an
   explicit "Re-translate" button re-runs the whole run. The favorite star and the
   delete control act on the whole run. Translation settings (enabled services,
-  target languages, auto-speak, retention) ride config backup; API keys and the
-  history are deliberately excluded.
+  target languages, auto-speak) ride config backup; API keys, the retention
+  preference, and the history are deliberately excluded.
 
 ### Changed
 
@@ -67,6 +67,22 @@ versioning.
   for success and color toasts, so an error message can actually be read.
 - The blue keyboard focus ring is removed across all of the app's windows for a
   cleaner look.
+- Build tooling: the string-catalog compiler plugin now uses SwiftPM's current
+  URL APIs for generated input and output paths.
+
+### Fixed
+
+- Translation selection preserves the user's full pasteboard contents when the
+  Cmd-C fallback is needed, including non-string items such as images, files,
+  and rich text.
+- Clipboard history no longer records the transient selected text that appears
+  between the synthetic Cmd-C fallback and pasteboard restoration during
+  translation selection.
+- Superseded translation runs no longer let stale provider or Apple on-device
+  results overwrite a newer run after cancellation.
+- Text-to-speech uses AVSpeechSynthesizer-compatible locale identifiers for
+  Simplified and Traditional Chinese, so Chinese translations can be spoken
+  reliably.
 
 ## [3.2.0] - 2026-06-21
 
