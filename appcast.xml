@@ -3,52 +3,45 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.3.0</title>
+            <pubDate>Fri, 26 Jun 2026 01:50:36 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.3.0</sparkle:version>
+            <sparkle:shortVersionString>3.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Translation: a floating multi-service panel with auto source detection,
+  language swap, streaming results, copy, TTS, pinning, and access from a builtin,
+  global hotkey, or the command palette.
+- Translation providers and settings: Apple on-device, Google, Bing, DeepL /
+  DeepLX, and OpenAI-compatible endpoints with provider presets, Keychain-stored
+  API keys, manual-on-expand LLM services, Apple language-pack downloads, and
+  backup sync for non-secret settings.
+- Translation entry points and history: translate selected text, translate OCR
+  from a screenshot region, browse per-run history and favorites, re-translate,
+  and trim history with a retention cap.
+
+### Changed
+
+- Failure toasts now stay on screen for 5 seconds instead of the ~1 second used
+  for success and color toasts, so an error message can actually be read.
+- The blue keyboard focus ring is removed across all of the app's windows for a
+  cleaner look.
+- Build tooling: the string-catalog compiler plugin now uses SwiftPM's current
+  URL APIs for generated input and output paths.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.3.0/AnyDoor-3.3.0.zip" length="10068098" type="application/octet-stream" sparkle:edSignature="v2iGTN2hthgUhh0G3cPgV7HlVwTIorBvZBWbnJEwZaOZhDSrJ2z7WuQwiYmQGt2pEDKkf/xdONpsjsCXpRbgAg=="/>
+        </item>
+        <item>
             <title>3.2.0</title>
             <pubDate>Sun, 21 Jun 2026 03:06:35 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>3.2.0</sparkle:version>
             <sparkle:shortVersionString>3.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Clipboard wall: ⌘K opens the source-app filter from the keyboard (in both the
-  search-input and card-navigation modes), so the dropdown no longer has to be
-  clicked. A "⌘K 筛选来源" hint is added to the wall footer.
-- Clipboard wall: ⌘← / ⌘→ jump the card selection to the first / last entry
-  (card-navigation mode only — in the search field they still move the text
-  caret). The jump scrolls to the target instantly instead of animating, so a
-  long history doesn't run a multi-frame scroll animation sweeping across the
-  cards. A "⌘←→ 首/尾" hint is added to the footer.
-
-### Changed
-
-- Clipboard wall: the source-app filter now shows real application icons. The
-  dropdown was switched from a SwiftUI `Menu` (which doesn't reliably render
-  custom `Image(nsImage:)` items on macOS) to a native `NSMenu` popped from a
-  view anchor: each source row shows that app's icon via `NSMenuItem.image`, the
-  active source keeps the native checkmark, the menu opens upward from the
-  trigger at the bottom of the wall, and it auto-scrolls when there are more
-  sources than fit. The trigger button itself now shows the selected source's
-  icon instead of a generic glyph.
-- Clipboard wall: the Launchpad-style tab edit / reorder mode is now armed by
-  holding ⌥ instead of ⌘ (the footer hint shows ⌥).
-- Clipboard wall performance with large histories. The source-app grouping is
-  now computed once per render instead of 4–5 times (it feeds the menu, the
-  trigger title, the disable check, and two `onChange` dependencies); the
-  list-sync `onChange` trigger hashes the displayed items instead of allocating a
-  fresh `[UUID]` on every body evaluation; and match snippets are memoized per
-  item for the active query, so a wall re-render or a card re-realized while
-  scrolling no longer re-folds the item's text on the main thread.
-
-### Fixed
-
-- Clipboard wall: scrolling over the open source-filter menu moved the cards
-  underneath it instead of scrolling the menu. Card-navigation scroll now only
-  acts on scroll events targeting the wall window itself, letting scrolls over
-  the menu (and the floating text panel) reach their own window.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.2.0/AnyDoor-3.2.0.zip" length="9009558" type="application/octet-stream" sparkle:edSignature="m2rxw5/GWxMPawoBCf7eidPHpXXNuvJSJSPYnCZGzJkafsukuyUik5tbwy/e3/cIpa3lFU7UrG0wszI1eQfvDw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.2.0/AnyDoor-3.2.0.zip" length="9009558" type="application/octet-stream" sparkle:edSignature="m2rxw5/GWxMPawoBCf7eidPHpXXNuvJSJSPYnCZGzJkafsukuyUik5tbwy/e3/cIpa3lFU7UrG0wszI1eQfvDw=="/>
         </item>
         <item>
             <title>3.1.1</title>
@@ -58,15 +51,6 @@
             <sparkle:shortVersionString>3.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.1.1/AnyDoor-3.1.1.zip" length="8970739" type="application/octet-stream" sparkle:edSignature="xmtsN5ngJvykD4G9t1nsJXkDnBIiY1O3ryH27+IsvSJAG2HPpCpm/GxQSmCufNQTt+cKZb3J741ibObsU1C2Cw=="/>
-        </item>
-        <item>
-            <title>3.1.0</title>
-            <pubDate>Fri, 19 Jun 2026 20:41:21 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>3.1.0</sparkle:version>
-            <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.1.0/AnyDoor-3.1.0.zip" length="8962061" type="application/octet-stream" sparkle:edSignature="YnaDZMbaMXqMWCgNSn+v2rv/IfHVVUwKXWwSwiB8NUw7aNx6payM+BrOy4oZ2JKZNol343eZ//g0kAuGVuDWDA=="/>
         </item>
         <item>
             <title>1.2.0</title>

@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-06-26
+
 ### Added
 
 - Translation: a floating multi-service panel with auto source detection,
