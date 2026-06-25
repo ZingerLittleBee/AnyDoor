@@ -71,7 +71,7 @@ enum SelectedTextReader {
         copy: () -> Void,
         settle: () async -> Void
     ) async -> String? {
-        let previous = pasteboard.string(forType: .string)
+        let previous = PasteboardSnapshot(pasteboard)
         let beforeCount = pasteboard.changeCount
 
         copy()
@@ -85,10 +85,11 @@ enum SelectedTextReader {
             }
         }
 
-        // Restore the caller's pasteboard regardless of outcome.
-        pasteboard.clearContents()
-        if let previous {
-            pasteboard.setString(previous, forType: .string)
+        // Restore the caller's pasteboard only when the synthetic copy actually
+        // changed it. Preserve every pasteboard item/type, not just plain text.
+        if pasteboard.changeCount != beforeCount {
+            previous.restore(to: pasteboard)
+            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
         }
         return result
     }
@@ -109,5 +110,36 @@ enum SelectedTextReader {
         up?.setIntegerValueField(.eventSourceUserData, value: kAnyDoorSynthesizedEventTag)
         down?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
+    }
+
+    private struct PasteboardSnapshot {
+        private struct Item {
+            let values: [(NSPasteboard.PasteboardType, Data)]
+        }
+
+        private let items: [Item]
+
+        init(_ pasteboard: NSPasteboard) {
+            items = pasteboard.pasteboardItems?.map { item in
+                Item(values: item.types.compactMap { type in
+                    item.data(forType: type).map { (type, $0) }
+                })
+            } ?? []
+        }
+
+        @MainActor
+        func restore(to pasteboard: NSPasteboard) {
+            pasteboard.clearContents()
+            let restoredItems = items.map { item in
+                let restored = NSPasteboardItem()
+                for (type, data) in item.values {
+                    restored.setData(data, forType: type)
+                }
+                return restored
+            }
+            if !restoredItems.isEmpty {
+                pasteboard.writeObjects(restoredItems)
+            }
+        }
     }
 }
