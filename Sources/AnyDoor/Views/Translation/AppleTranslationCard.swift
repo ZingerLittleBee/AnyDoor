@@ -65,6 +65,7 @@ private struct AppleTranslationCardBody: View {
     @State private var configuration: TranslationSession.Configuration?
     @State private var state = AppleCardState()
     @State private var collapsed = false
+    @State private var hovered = false
 
     var body: some View {
         // While idle (no run yet) render nothing so the card matches the stream
@@ -97,14 +98,14 @@ private struct AppleTranslationCardBody: View {
                     Divider()
                     content
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
+                        .padding(.horizontal, TranslationTheme.tileInsetH)
+                        .padding(.vertical, TranslationTheme.tileInsetV)
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .translationTile(isHovered: hovered, isExpanded: !collapsed)
+        .onHover { hovered = $0 }
     }
 
     private var header: some View {
@@ -157,14 +158,14 @@ private struct AppleTranslationCardBody: View {
             .accessibilityLabel(L(collapsed ? .translationExpand : .translationCollapse))
             .hoverTooltip(L(collapsed ? .translationExpand : .translationCollapse))
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, TranslationTheme.tileInsetH)
         .padding(.vertical, 8)
     }
 
     /// Toggle the body's visibility with a short ease so the disclosure (and the
     /// chevron's rotation) animate together.
     private func toggleCollapsed() {
-        withAnimation(.easeInOut(duration: 0.22)) { collapsed.toggle() }
+        withAnimation(.easeInOut(duration: 0.2)) { collapsed.toggle() }
     }
 
     @ViewBuilder
