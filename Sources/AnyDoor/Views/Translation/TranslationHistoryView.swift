@@ -140,7 +140,7 @@ struct TranslationHistoryView: View {
             }
         }
         .padding(8)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .translationTile(isHovered: false, isExpanded: expandedID == group.id)
     }
 
     private func cardControls(_ group: TranslationRunGroup) -> some View {
