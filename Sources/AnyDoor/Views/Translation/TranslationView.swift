@@ -31,6 +31,12 @@ struct TranslationView: View {
             ScrollView {
                 VStack(spacing: TranslationTheme.sectionGap) {
                     inputCard
+                        // Mount the Apple language-pack driver on an always-visible
+                        // element. The Apple card renders nothing while its status
+                        // is unknown or installed+idle, and SwiftUI fires no
+                        // appearance lifecycle on an empty view — so the availability
+                        // check and download must be driven from here.
+                        .background { applePackDriver }
                     LanguageBar(coordinator: coordinator) { runTranslation() }
                     resultCards
                 }
@@ -129,6 +135,15 @@ struct TranslationView: View {
             .onHover { hovered = $0 }
             .accessibilityLabel(help)
             .hoverTooltip(help)
+        }
+    }
+
+    /// Invisible driver that keeps the Apple language-pack availability up to date
+    /// (and runs downloads), mounted only when the Apple service is enabled.
+    @ViewBuilder
+    private var applePackDriver: some View {
+        if settings.enabledServicesInOrder.contains(where: { $0.kind == .apple }) {
+            AppleLanguagePackDriver(coordinator: coordinator)
         }
     }
 

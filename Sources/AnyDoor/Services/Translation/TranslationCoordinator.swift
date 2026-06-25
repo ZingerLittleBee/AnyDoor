@@ -36,6 +36,17 @@ final class TranslationCoordinator {
     /// the panel also resets its auto-speak guard on each change.
     private(set) var runToken: Int = 0
 
+    /// Apple on-device language-pack availability for the current source→target
+    /// pair. Mirrors `AppleLanguagePackModel.Phase` (kept ungated so it can live
+    /// on the non-macOS-15 coordinator). An always-present driver view writes this
+    /// and the Apple card reads it to render its download gate — because SwiftUI
+    /// fires no appearance lifecycle on a card that renders nothing, the check
+    /// can't live on the (often hidden) card itself.
+    enum ApplePackPhase: Sendable { case unknown, checking, needsDownload, downloading, installed, unsupported, failed }
+    var applePackPhase: ApplePackPhase = .unknown
+    /// Bumped by the Apple card to ask the driver to start a language download.
+    var appleDownloadRequestToken: Int = 0
+
     /// Set by the app once the ModelContainer is ready; nil in tests.
     var history: TranslationHistoryStore?
 

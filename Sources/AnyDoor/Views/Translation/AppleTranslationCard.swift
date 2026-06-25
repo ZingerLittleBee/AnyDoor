@@ -21,6 +21,24 @@ struct AppleTranslationCard: View {
     }
 }
 
+/// Invisible, always-mounted driver for Apple's on-device language pack. Mount it
+/// as a `.background` of an always-visible panel element: SwiftUI fires no
+/// appearance lifecycle on a view that renders nothing, and the Apple result card
+/// renders nothing while its pack status is unknown or while installed+idle — so
+/// the availability check and the download must be driven from a view that is
+/// always on screen, not from the (often hidden) card.
+struct AppleLanguagePackDriver: View {
+    @Bindable var coordinator: TranslationCoordinator
+
+    var body: some View {
+        if #available(macOS 15, *) {
+            AppleLanguagePackDriverBody(coordinator: coordinator)
+        } else {
+            Color.clear.frame(width: 0, height: 0)
+        }
+    }
+}
+
 #if canImport(Translation)
 /// Holds the card's mutable render state in a MainActor reference type so the
 /// `nonisolated` `.translationTask` closure can publish results via `await`
@@ -58,13 +76,72 @@ private final class AppleCardState {
 }
 
 @available(macOS 15, *)
+private struct AppleLanguagePackDriverBody: View {
+    @Bindable var coordinator: TranslationCoordinator
+    @State private var pack = AppleLanguagePackModel()
+
+    /// The on-device pair whose assets gate Apple translation. Uses the actual
+    /// source→target when a source is known (selected or detected), otherwise the
+    /// configured `secondTarget → target` direction (assets are per-language, so
+    /// one direction is enough) — matching the settings download button.
+    private var relevantPair: AppleLanguagePackModel.LanguagePair? {
+        let target = coordinator.effectiveTarget().code
+        let source = (coordinator.source ?? coordinator.detectedSource)?.code
+            ?? TranslationSettings.shared.secondTargetLanguage.code
+        guard source != target else { return nil }
+        return .init(source: source, target: target)
+    }
+
+    private var pairKey: String {
+        relevantPair.map { "\($0.source)|\($0.target)" } ?? "none"
+    }
+
+    var body: some View {
+        Color.clear
+            // Re-read real availability on first appearance and on every pair
+            // change. `.onChange(initial:)` on this always-visible background fires
+            // reliably (unlike lifecycle on the hidden card). Result is mirrored to
+            // the coordinator so the card can render its gate.
+            .onChange(of: pairKey, initial: true) {
+                Task { await pack.evaluate(pair: relevantPair) }
+            }
+            .onChange(of: pack.phase, initial: true) { _, phase in
+                coordinator.applePackPhase = Self.mapped(phase)
+            }
+            // The card bumps this token to request a download.
+            .onChange(of: coordinator.appleDownloadRequestToken) { _, _ in
+                guard pack.phase != .downloading else { return }
+                pack.startDownload()
+            }
+            // Drive the on-device language download; guard the floating panel's
+            // auto-dismiss while the system sheet (from another process) holds key
+            // focus.
+            .translationTask(pack.configuration) { @Sendable [pack, coordinator] session in
+                await coordinator.beginSystemSheet()
+                await runApplePrepare(session, model: pack)
+                await coordinator.endSystemSheet()
+            }
+    }
+
+    private static func mapped(_ phase: AppleLanguagePackModel.Phase) -> TranslationCoordinator.ApplePackPhase {
+        switch phase {
+        case .checking: return .checking
+        case .needsDownload: return .needsDownload
+        case .downloading: return .downloading
+        case .installed: return .installed
+        case .unsupported: return .unsupported
+        case .failed: return .failed
+        }
+    }
+}
+
+@available(macOS 15, *)
 private struct AppleTranslationCardBody: View {
     let config: TranslationServiceConfig
     @Bindable var coordinator: TranslationCoordinator
 
     @State private var configuration: TranslationSession.Configuration?
     @State private var state = AppleCardState()
-    @State private var pack = AppleLanguagePackModel()
     @State private var collapsed = false
     @State private var hovered = false
     /// Set when a translate run is requested (Enter) while the language pack isn't
@@ -72,35 +149,27 @@ private struct AppleTranslationCardBody: View {
     /// available — after the user downloads it, or once the async check resolves.
     @State private var wantsTranslateWhenReady = false
 
+    /// Apple pack availability, owned by the always-present driver and mirrored on
+    /// the coordinator. The card only reads it.
+    private var phase: TranslationCoordinator.ApplePackPhase { coordinator.applePackPhase }
+
     var body: some View {
-        // Always-mounted host: the availability check and both driving
-        // configurations (translate / prepare-download) stay attached even when
-        // nothing renders, so a later run or language change still arms them.
         Group {
             rootContent
         }
-        // Re-read real pack availability on appear and whenever the relevant
-        // source→target pair changes.
-        .task(id: pairKey) { await pack.evaluate(pair: relevantPair) }
         // Rebuild the translate session only on an explicit run (Enter), and only
-        // when the pack is installed — see refreshConfiguration().
+        // when the pack is installed — see refreshConfiguration(). Change-driven
+        // `.onChange` fires even while the card renders nothing, so this still
+        // arms a translation from the hidden idle state.
         .onChange(of: coordinator.runToken) { _, _ in refreshConfiguration() }
         // Once the pack becomes installed, fire any pending translate request
         // (covers both the post-download re-run and the run-while-checking race).
-        .onChange(of: pack.phase) { _, newValue in packPhaseChanged(newValue) }
+        .onChange(of: phase) { _, newValue in packPhaseChanged(newValue) }
         .translationTask(configuration) { @Sendable [state, coordinator, config] session in
             // @Sendable makes this closure nonisolated, so `session` lives outside
             // the MainActor and can be passed straight to Apple's nonisolated
             // translate(_:). State writes hop back via `await`.
             await run(session, state: state, coordinator: coordinator, config: config)
-        }
-        // Drive the on-device language download when the user taps the download
-        // affordance; guard the floating panel's auto-dismiss while the system
-        // sheet (presented from another process) holds key focus.
-        .translationTask(pack.configuration) { @Sendable [pack, coordinator] session in
-            await coordinator.beginSystemSheet()
-            await runApplePrepare(session, model: pack)
-            await coordinator.endSystemSheet()
         }
     }
 
@@ -112,8 +181,8 @@ private struct AppleTranslationCardBody: View {
     /// only appears once a translation runs.
     @ViewBuilder
     private var rootContent: some View {
-        switch pack.phase {
-        case .checking, .installed:
+        switch phase {
+        case .unknown, .checking, .installed:
             // While idle (no run yet) render nothing so the card matches the
             // stream service cards; the resting `.idle` state would otherwise
             // surface as a perpetual "translating" spinner.
@@ -125,23 +194,6 @@ private struct AppleTranslationCardBody: View {
         case .unsupported:
             EmptyView()
         }
-    }
-
-    /// The on-device pair whose assets gate Apple translation. Uses the actual
-    /// source→target when a source is known (selected or detected), otherwise the
-    /// configured `secondTarget → target` direction — the same representative
-    /// direction the settings download button checks. Assets are per-language, so
-    /// one direction is enough.
-    private var relevantPair: AppleLanguagePackModel.LanguagePair? {
-        let target = coordinator.effectiveTarget().code
-        let source = (coordinator.source ?? coordinator.detectedSource)?.code
-            ?? TranslationSettings.shared.secondTargetLanguage.code
-        guard source != target else { return nil }
-        return .init(source: source, target: target)
-    }
-
-    private var pairKey: String {
-        relevantPair.map { "\($0.source)|\($0.target)" } ?? "none"
     }
 
     // MARK: - Download card (pack not installed)
@@ -175,7 +227,7 @@ private struct AppleTranslationCardBody: View {
 
     @ViewBuilder
     private var downloadControl: some View {
-        switch pack.phase {
+        switch phase {
         case .downloading:
             HStack(spacing: 6) {
                 ProgressView().controlSize(.small)
@@ -207,17 +259,17 @@ private struct AppleTranslationCardBody: View {
         }
     }
 
-    /// Present the system download sheet for the relevant pair (no-op while a
-    /// download is already in flight).
+    /// Ask the always-present driver to present the system download sheet (no-op
+    /// while a download is already in flight).
     private func startDownload() {
-        guard pack.phase != .downloading else { return }
-        pack.startDownload()
+        guard phase != .downloading else { return }
+        coordinator.appleDownloadRequestToken &+= 1
     }
 
     /// React to the pack becoming installed: fire a pending translate request so
     /// a just-downloaded pack immediately produces a result, and the run requested
     /// while the check was still resolving isn't dropped.
-    private func packPhaseChanged(_ phase: AppleLanguagePackModel.Phase) {
+    private func packPhaseChanged(_ phase: TranslationCoordinator.ApplePackPhase) {
         guard phase == .installed, wantsTranslateWhenReady else { return }
         let text = coordinator.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         wantsTranslateWhenReady = false
@@ -340,7 +392,7 @@ private struct AppleTranslationCardBody: View {
             wantsTranslateWhenReady = false
             return
         }
-        guard pack.phase == .installed else {
+        guard phase == .installed else {
             state.reset()
             configuration = nil
             wantsTranslateWhenReady = true
