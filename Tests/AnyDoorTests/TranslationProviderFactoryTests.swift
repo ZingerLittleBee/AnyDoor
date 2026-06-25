@@ -1,7 +1,6 @@
 import XCTest
 @testable import AnyDoor
 
-@MainActor
 final class TranslationProviderFactoryTests: XCTestCase {
     private var defaultsSuite = ""
     private var keychainService = ""
@@ -44,6 +43,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         )
     }
 
+    @MainActor
     private func makeSettings(_ configs: [TranslationServiceConfig]) -> TranslationSettings {
         let d = UserDefaults(suiteName: defaultsSuite)!
         let s = TranslationSettings(defaults: d)
@@ -51,6 +51,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         return s
     }
 
+    @MainActor
     func testBuildsNonAppleStreamProvidersInOrder() {
         let keychain = TranslationKeychainStore(service: keychainService)
         keychain.setAPIKey("sk-123", for: "llm-keyed")
@@ -67,6 +68,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         XCTAssertEqual(providers.map(\.id), ["google", "bing", "llm-keyed"])
     }
 
+    @MainActor
     func testSkipsAppleAndDisabledServices() {
         let settings = makeSettings([
             makeConfig(id: "apple", kind: .apple, order: 0),
@@ -78,6 +80,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         XCTAssertEqual(providers.map(\.id), ["bing"])
     }
 
+    @MainActor
     func testSkipsOpenAIWithoutKeychainKey() {
         let keychain = TranslationKeychainStore(service: keychainService)
         keychain.setAPIKey("sk-123", for: "llm-keyed")
@@ -93,6 +96,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         XCTAssertEqual(providers.map(\.id), ["llm-keyed"])
     }
 
+    @MainActor
     func testMakeStreamProviderBuildsSingleSkipsAppleAndIncomplete() {
         let keychain = TranslationKeychainStore(service: keychainService)
         keychain.setAPIKey("sk-1", for: "single-llm")
@@ -115,6 +119,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
             keychain: keychain))
     }
 
+    @MainActor
     func testBuildsDeepLOfficialWhenKeyed() {
         let keychain = TranslationKeychainStore(service: keychainService)
         keychain.setAPIKey("dk:fx", for: "deepl")
@@ -124,6 +129,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         XCTAssertEqual(provider?.kind, .deepl)
     }
 
+    @MainActor
     func testSkipsDeepLOfficialWithoutKey() {
         let keychain = TranslationKeychainStore(service: keychainService)
         let config = makeConfig(id: "deepl", kind: .deepl, order: 0)
@@ -131,6 +137,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
             for: config, keychain: keychain, session: .shared))
     }
 
+    @MainActor
     func testBuildsDeepLXWithBaseURLAndNoKey() {
         let keychain = TranslationKeychainStore(service: keychainService)
         let config = makeConfig(id: "deeplx", kind: .deepl, order: 0, baseURL: "http://localhost:1188")
@@ -139,6 +146,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         XCTAssertEqual(provider?.kind, .deepl)
     }
 
+    @MainActor
     func testSkipsDeepLXWithInvalidBaseURL() {
         let keychain = TranslationKeychainStore(service: keychainService)
         let config = makeConfig(id: "deeplx", kind: .deepl, order: 0, baseURL: "not-a-url")
@@ -146,6 +154,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
             for: config, keychain: keychain, session: .shared))
     }
 
+    @MainActor
     func testMakeStreamProvidersExcludesManualServices() {
         let keychain = TranslationKeychainStore(service: keychainService)
         keychain.setAPIKey("sk-1", for: "manual")

@@ -62,5 +62,3 @@ final class TranslationExchangeTests: XCTestCase {
         XCTAssertNil(result.errorMessage)
     }
 }
-
-extension TranslationResult.Status: Hashable {}
