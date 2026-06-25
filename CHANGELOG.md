@@ -8,58 +8,16 @@ versioning.
 
 ### Added
 
-- Translation: a multi-service translator built around a pinnable floating
-  panel. A new 翻译 builtin (plus a configurable global hotkey and a command
-  palette entry) opens a Spotlight-style non-activating `NSPanel` with an
-  Enter-to-translate input, a source ⇄ target language bar, and a stack of
-  per-service result cards. Source language is auto-detected
-  (`NLLanguageRecognizer`); the language bar offers an "Auto Detect" source with
-  a detected-language hint, equal-width centered pickers, and a swap control
-  bound to ⌘S. The panel can be pinned on top with ⌘P (the pin's active state is
-  clearly highlighted), and each result card streams its output, speaks it (TTS
-  in the target voice), copies it, and collapses by tapping its header. One
-  input fans out to every enabled service concurrently, so one service failing
-  never blocks the others.
-- Translation services: Google (free), Bing (free), DeepL (official API or a
-  self-hosted DeepLX endpoint), any OpenAI-compatible streaming LLM endpoint
-  (base URL + model + API key), and Apple's on-device translation. Services are
-  configured in a new Settings › Translation tab with a per-service config sheet;
-  LLM API keys are stored in the Keychain (and cached in-process so a translation
-  doesn't re-prompt for Keychain access). The Apple on-device card uses
-  `translationTask` and can pre-download offline language packs from settings; its
-  row is hidden on macOS 14, which lacks the API. Adding an LLM service is a
-  one-click choice from a provider preset menu (OpenAI, DeepSeek, Qwen, Gemini,
-  Kimi, 智谱 GLM, OpenRouter, Ollama) that prefills the base URL and model so you
-  only supply an API key, and each LLM service has an optional extra request-body
-  field (JSON) for per-model options such as disabling thinking mode, plus an
-  optional extra request-headers field (JSON) for endpoints that need custom
-  headers — e.g. Azure OpenAI, which authenticates with an `api-key` header
-  (use `{{key}}` to inject the stored key) and carries its `api-version` in the
-  base URL's query string.
-- Translation: OpenAI-compatible (LLM) services can be set to "collapsed by
-  default" in their editor. A collapsed service does not auto-translate on a run
-  — its card stays collapsed with a "tap to translate" hint and spends no tokens
-  until the user expands it, at which point only that service translates the
-  current input. Each new translation resets it back to collapsed. Apple, Google,
-  and Bing are unaffected.
-- Translation entry points beyond the panel, each a separate hotkey-bindable
-  builtin: 截图翻译 (screenshot translate) drag-selects a screen region, OCRs it,
-  and opens the panel prefilled with the recognized text; 翻译选中文本 (translate
-  selection) reads the current selection — Accessibility first, with a
-  pasteboard-preserving Cmd-C fallback — and translates it. The selection reader
-  waits for held hotkey modifiers to clear before the clipboard fallback so a
-  trigger combo can't corrupt the synthesized copy, and reports a toast when no
-  text could be read instead of failing silently.
-- Translation history: successful translations are recorded to a SwiftData store
-  (`TranslationRecord`) with a configurable retention cap, browsable from an
-  in-window history and favorites viewer. Each translation run (one input fanned
-  out to every service) is shown as a single card listing every service's result;
-  tapping a card expands it in place to recall the full original and each service's
-  full translation (each with its own copy button) without re-translating, and an
-  explicit "Re-translate" button re-runs the whole run. The favorite star and the
-  delete control act on the whole run. Translation settings (enabled services,
-  target languages, auto-speak) ride config backup; API keys, the retention
-  preference, and the history are deliberately excluded.
+- Translation: a floating multi-service panel with auto source detection,
+  language swap, streaming results, copy, TTS, pinning, and access from a builtin,
+  global hotkey, or the command palette.
+- Translation providers and settings: Apple on-device, Google, Bing, DeepL /
+  DeepLX, and OpenAI-compatible endpoints with provider presets, Keychain-stored
+  API keys, manual-on-expand LLM services, Apple language-pack downloads, and
+  backup sync for non-secret settings.
+- Translation entry points and history: translate selected text, translate OCR
+  from a screenshot region, browse per-run history and favorites, re-translate,
+  and trim history with a retention cap.
 
 ### Changed
 
@@ -72,14 +30,11 @@ versioning.
 
 ### Fixed
 
-- Translation selection preserves the user's full pasteboard contents when the
-  Cmd-C fallback is needed, including non-string items such as images, files,
-  and rich text.
-- Clipboard history no longer records the transient selected text that appears
-  between the synthetic Cmd-C fallback and pasteboard restoration during
-  translation selection.
+- Translation selection preserves the user's full pasteboard contents and keeps
+  transient selected text out of clipboard history when the Cmd-C fallback is
+  needed.
 - Superseded translation runs no longer let stale provider or Apple on-device
-  results overwrite a newer run after cancellation.
+  results overwrite a newer run.
 - Text-to-speech uses AVSpeechSynthesizer-compatible locale identifiers for
   Simplified and Traditional Chinese, so Chinese translations can be spoken
   reliably.
