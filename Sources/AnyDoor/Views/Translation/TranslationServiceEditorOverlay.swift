@@ -132,8 +132,8 @@ private struct TranslationServiceEditorScrim: View {
                     onCancel: onCancel
                 )
                 .frame(width: 512, height: proxy.size.height * 0.9)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-                .clipShape(RoundedRectangle(cornerRadius: 16))
+                .adaptivePanelSurface(cornerRadius: 16)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .shadow(color: .black.opacity(0.35), radius: 24, y: 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
