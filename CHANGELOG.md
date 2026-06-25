@@ -28,17 +28,6 @@ versioning.
 - Build tooling: the string-catalog compiler plugin now uses SwiftPM's current
   URL APIs for generated input and output paths.
 
-### Fixed
-
-- Translation selection preserves the user's full pasteboard contents and keeps
-  transient selected text out of clipboard history when the Cmd-C fallback is
-  needed.
-- Superseded translation runs no longer let stale provider or Apple on-device
-  results overwrite a newer run.
-- Text-to-speech uses AVSpeechSynthesizer-compatible locale identifiers for
-  Simplified and Traditional Chinese, so Chinese translations can be spoken
-  reliably.
-
 ## [3.2.0] - 2026-06-21
 
 ### Added
