@@ -8,7 +8,13 @@ final class SpeechServiceTests: XCTestCase {
             for: .simplifiedChinese,
             fallbackDetectedCode: "ja"
         )
-        XCTAssertEqual(code, TranslationLanguage.simplifiedChinese.code)
+        XCTAssertEqual(code, "zh-CN")
+    }
+
+    func testTraditionalChineseUsesTaiwanVoiceCode() throws {
+        let language = try XCTUnwrap(TranslationLanguage.named("zh-Hant"))
+        let code = SpeechService.voiceLanguageCode(for: language, fallbackDetectedCode: nil)
+        XCTAssertEqual(code, "zh-TW")
     }
 
     func testNilLanguageUsesFallbackDetectedCode() {

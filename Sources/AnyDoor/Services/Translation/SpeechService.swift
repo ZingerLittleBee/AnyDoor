@@ -36,11 +36,19 @@ final class SpeechService {
         for language: TranslationLanguage?,
         fallbackDetectedCode: String?
     ) -> String {
-        if let language { return language.code }
+        if let language { return speechCode(for: language.code) }
         if let fallback = fallbackDetectedCode?.trimmingCharacters(in: .whitespacesAndNewlines),
            !fallback.isEmpty {
-            return fallback
+            return speechCode(for: fallback)
         }
         return "en"
+    }
+
+    private static func speechCode(for code: String) -> String {
+        switch code {
+        case "zh-Hans": return "zh-CN"
+        case "zh-Hant": return "zh-TW"
+        default: return code
+        }
     }
 }
