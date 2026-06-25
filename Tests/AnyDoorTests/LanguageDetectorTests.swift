@@ -8,6 +8,15 @@ final class LanguageDetectorTests: XCTestCase {
         XCTAssertEqual(detected?.code, "en", "got: \(String(describing: detected?.code))")
     }
 
+    func testAmbiguousShortLatinTextReturnsNil() {
+        XCTAssertNil(LanguageDetector.detect("is"))
+    }
+
+    func testHighConfidenceShortLatinTextStillDetectsEnglish() {
+        let detected = LanguageDetector.detect("it is")
+        XCTAssertEqual(detected?.code, "en", "got: \(String(describing: detected?.code))")
+    }
+
     func testDetectsSimplifiedChinese() {
         let detected = LanguageDetector.detect("今天天气很好，我们一起去公园散步吧。")
         // NLLanguageRecognizer reports zh-Hans for simplified script; the catalog
