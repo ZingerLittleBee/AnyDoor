@@ -9,8 +9,8 @@
 [![Built with Swift](https://img.shields.io/badge/built_with-Swift_6.2-F05138?logo=swift&logoColor=white&style=for-the-badge)](https://www.swift.org)
 
 A macOS menu bar control center driven by global hotkeys. Bind any key
-combination to launch and toggle apps, flip system settings, or run one-off
-actions — all without leaving the keyboard.
+combination to launch and toggle apps, translate text, flip system settings,
+or run one-off actions — all without leaving the keyboard.
 
 Press a shortcut to open an app. Press it again to hide it. Use the same
 muscle memory to mute audio, lock the screen, sample a color, OCR a screen

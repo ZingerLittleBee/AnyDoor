@@ -9,7 +9,7 @@
 [![Built with Swift](https://img.shields.io/badge/built_with-Swift_6.2-F05138?logo=swift&logoColor=white&style=for-the-badge)](https://www.swift.org)
 
 AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把任意键位组合绑定到
-应用切换、系统开关或一次性动作，整个流程不需要离开键盘。
+应用切换、文本翻译、系统开关或一次性动作，整个流程不需要离开键盘。
 
 按一次快捷键打开或激活应用，再按一次隐藏。同样的肌肉记忆也可以用来静音、锁屏、
 取色、对屏幕区域 OCR、翻译选中文本或屏幕文字、截图与录屏——需要时还有剪贴板历史、
