@@ -84,5 +84,6 @@ private struct RecordingControlsView: View {
         .frame(width: 220, height: 48)
         .background(Color.black.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .focusEffectDisabled()
     }
 }

@@ -16,6 +16,18 @@ enum ToastStyle: Sendable {
             return message
         }
     }
+
+    /// How long the toast stays on screen before auto-dismissing. Failures linger
+    /// longer than the snappy success/color confirmations so the user has time to
+    /// read what went wrong.
+    var displayDuration: Duration {
+        switch self {
+        case .failure:
+            return .seconds(5)
+        case .success, .color:
+            return .seconds(1)
+        }
+    }
 }
 
 /// A compact status pill: a leading icon or color swatch next to one line of text.

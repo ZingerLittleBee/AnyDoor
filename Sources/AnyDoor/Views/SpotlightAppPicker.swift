@@ -120,6 +120,7 @@ struct SpotlightAppPicker: View {
         .onChange(of: state.query) { _, _ in
             state.selectedIndex = 0
         }
+        .focusEffectDisabled()
     }
 
     private var searchField: some View {

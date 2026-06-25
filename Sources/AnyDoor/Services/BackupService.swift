@@ -147,6 +147,7 @@ final class BackupService {
         await HyperKeyService.shared.reloadFromDefaults()
         ScheduledShutdownService.shared.reloadFromDefaults()
         CaptureSettings.shared.reloadFromDefaults()
+        TranslationSettings.shared.reloadFromDefaults()
         ClipboardTagStore.shared.reload()
         // An import may remove tag definitions, leaving items tagged with ids
         // that no longer exist. Sweep those ghost ids and reclaim storage.

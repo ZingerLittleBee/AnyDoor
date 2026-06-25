@@ -12,6 +12,13 @@ struct PlainTextEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
         scroll.drawsBackground = false
+        scroll.focusRingType = .none
+        // Match the rest of the app's lists: floating, auto-hiding overlay
+        // scrollers that reserve no width, instead of the system's persistent
+        // legacy scrollbar when "Show scroll bars" is set to "Always".
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.verticalScroller?.scrollerStyle = .overlay
         guard let textView = scroll.documentView as? NSTextView else { return scroll }
         textView.delegate = context.coordinator
         context.coordinator.textView = textView

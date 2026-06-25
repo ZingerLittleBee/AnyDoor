@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let config = ModelConfiguration(url: storeURL)
             modelContainer = try ModelContainer(
                 for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, HostProfile.self,
+                TranslationRecord.self,
                 configurations: config
             )
 
@@ -134,9 +135,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             WindowLayoutProvider(item: .windowMoveNextDisplay, action: .moveToNextDisplay),
             WindowLayoutProvider(item: .windowMovePreviousDisplay, action: .moveToPreviousDisplay),
             ClipboardWallProvider(),
+            TranslateProvider(),
+            ScreenshotTranslateProvider(),
+            TranslateSelectionProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
+
+        // Translation history: give the store the shared container, then point
+        // the coordinator at it so successful translations get recorded.
+        TranslationHistoryStore.shared.configure(modelContainer: modelContainer)
+        TranslationCoordinator.shared.history = TranslationHistoryStore.shared
 
         // Scheduled Shutdown: push state to the panel and re-arm any persisted
         // schedule (or cancel a deadline missed while the app was quit).

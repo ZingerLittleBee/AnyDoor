@@ -9,14 +9,15 @@
 [![Built with Swift](https://img.shields.io/badge/built_with-Swift_6.2-F05138?logo=swift&logoColor=white&style=for-the-badge)](https://www.swift.org)
 
 A macOS menu bar control center driven by global hotkeys. Bind any key
-combination to launch and toggle apps, flip system settings, or run one-off
-actions — all without leaving the keyboard.
+combination to launch and toggle apps, translate text, flip system settings,
+or run one-off actions — all without leaving the keyboard.
 
 Press a shortcut to open an app. Press it again to hide it. Use the same
 muscle memory to mute audio, lock the screen, sample a color, OCR a screen
-region, or capture and record the screen — and reach for clipboard history,
-window layouts, `/etc/hosts` profiles, external-display brightness, a Hyper
-Key, and a Spotlight-style command palette when you need them.
+region, translate selected or on-screen text, or capture and record the screen
+— and reach for clipboard history, window layouts, `/etc/hosts` profiles,
+external-display brightness, a Hyper Key, and a Spotlight-style command palette
+when you need them.
 
 ## Demo
 
@@ -52,6 +53,8 @@ Key, and a Spotlight-style command palette when you need them.
 - OCR a screen region — Vision framework recognizes text and copies it
 - Scan QR / barcode — decode a code on screen and copy its payload
 - Pick Color — system color sampler captures HEX into the clipboard
+- Translate text — open the translation window, translate the current
+  selection, or OCR a screen region and translate the recognized text
 
 ### Screen capture
 
@@ -95,6 +98,27 @@ Key, and a Spotlight-style command palette when you need them.
 - Recognizes text (OCR), barcodes, and colors inside captured images.
 - Per-source exclusions — skip history from password managers and other
   chosen apps; excluded sources travel with backups.
+
+### Translation
+
+- Translate typed text, the current text selection, or text recognized from a
+  screen region.
+- Run multiple services side by side: Apple on-device translation, Google,
+  Bing, DeepL / DeepLX, and OpenAI-compatible providers such as OpenAI,
+  DeepSeek, Qwen, Gemini, Kimi, GLM, OpenRouter, Ollama, or a custom endpoint.
+- Configure default and fallback target languages; if source and target match,
+  AnyDoor automatically uses the second target language.
+- Per-service API keys are stored in Keychain. Service definitions, ordering,
+  prompt templates, extra request body / headers, and manual-on-expand mode are
+  configurable from Settings.
+- Apple translation can download required language packs from the Translation
+  settings tab on supported macOS versions.
+- Translation history groups every provider result from the same run, supports
+  favorites, copy, re-translate, retention trimming, and clear-all.
+- Text-to-speech can read the source or translated text, with optional
+  auto-speak for the first successful result.
+- The selected-text fallback preserves the user's full pasteboard contents and
+  suppresses AnyDoor's temporary copy/restore writes from clipboard history.
 
 ### Window layout
 
@@ -178,6 +202,8 @@ Key, and a Spotlight-style command palette when you need them.
 - **Screenshot** tab: save location, filename template, auto-save /
   auto-copy, timer-delay presets, quick-access overlay timeout, and
   recording options.
+- **Translation** tab: target languages, auto-speak, service ordering,
+  provider/API-key setup, Apple language-pack downloads, and history retention.
 - **General** tab: launch at login, language, menu bar icon style, Hyper
   Key, command palette hotkey, scheduled shutdown, accessibility /
   automation / screen-recording permission status with one-click request,
@@ -191,10 +217,13 @@ Key, and a Spotlight-style command palette when you need them.
 
 ### Backup & restore
 
-- Export app shortcuts, built-in preferences, and whitelisted general
-  settings into a versioned snapshot, and import it on another Mac.
-- Clipboard history and machine-specific keys are excluded; app paths are
-  re-resolved from bundle IDs on import, and changes apply without a relaunch.
+- Export app shortcuts, built-in preferences, clipboard / capture settings,
+  translation target languages, auto-speak, service definitions, and other
+  whitelisted general settings into a versioned snapshot, and import it on
+  another Mac.
+- Clipboard history, translation history, API keys, and machine-specific keys
+  are excluded; app paths are re-resolved from bundle IDs on import, and
+  changes apply without a relaunch.
 
 ### Security & permissions
 
@@ -397,6 +426,8 @@ publishes it.
 - **AppKit menu bar** — an `NSStatusItem` plus a floating `NSPanel` (managed by
   `MenuBarController`), not SwiftUI's `MenuBarExtra`
 - **Privileged XPC helper** writes `/etc/hosts` after verifying the caller's code signature
+- **Translation coordinator** fans out requests to enabled providers, records
+  per-run history, and guards stale async results from superseded runs
 - App runs as an accessory (no Dock icon)
 
 ## Tech Stack
@@ -405,6 +436,8 @@ publishes it.
 - SwiftData
 - CGEvent tap (`.cghidEventTap`)
 - Privileged XPC helper for `/etc/hosts`
+- Vision OCR, Natural Language detection, AVFoundation speech, and Apple's
+  Translation framework when available
 - Swift Package Manager
 
 ## Acknowledgements

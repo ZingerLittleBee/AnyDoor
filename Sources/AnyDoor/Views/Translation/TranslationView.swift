@@ -1,0 +1,366 @@
+import AppKit
+import SwiftUI
+
+/// Root translation panel UI: toolbar, input editor, language bar, and the
+/// stacked result cards (one generic card per stream service in configured
+/// order, plus the dedicated Apple card on macOS 15+). Enter in the input
+/// triggers a fan-out translation; auto-speak narrates the first success.
+struct TranslationView: View {
+    let controller: TranslationWindowController
+
+    @State private var coordinator = TranslationCoordinator.shared
+    @State private var settings = TranslationSettings.shared
+    @State private var isPinned: Bool
+    /// serviceIDs already auto-spoken for the current translation run, so the
+    /// "first success" narration fires exactly once per run.
+    @State private var autoSpokenRun = false
+    /// Whether the in-window History + Favorites popover is showing.
+    @State private var showingHistory = false
+    @State private var pinHovered = false
+    @FocusState private var inputFocused: Bool
+
+    init(controller: TranslationWindowController) {
+        self.controller = controller
+        _isPinned = State(initialValue: controller.isPinned)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            toolbar
+            Divider()
+            ScrollView {
+                VStack(spacing: TranslationTheme.sectionGap) {
+                    inputCard
+                        // Mount the Apple language-pack driver on an always-visible
+                        // element. The Apple card renders nothing while its status
+                        // is unknown or installed+idle, and SwiftUI fires no
+                        // appearance lifecycle on an empty view — so the availability
+                        // check and download must be driven from here.
+                        .background { applePackDriver }
+                    LanguageBar(coordinator: coordinator) { runTranslation() }
+                    resultCards
+                }
+                .padding(TranslationTheme.windowPadding)
+            }
+        }
+        .translationShell()
+        .clipShape(RoundedRectangle(cornerRadius: TranslationTheme.shellRadius, style: .continuous))
+        // Reset the auto-speak guard at the start of every run, including the
+        // screenshot/selection prefill path that calls coordinator.translate()
+        // directly (not via runTranslation()).
+        .onChange(of: coordinator.runToken) { _, _ in autoSpokenRun = false }
+        .onChange(of: coordinator.results.map(\.status)) { _, _ in autoSpeakIfNeeded() }
+        .onChange(of: appleAutoSpeakKey) { _, _ in autoSpeakIfNeeded() }
+        .onAppear { inputFocused = true }
+        .focusEffectDisabled()
+    }
+
+    // MARK: - Toolbar
+
+    private var toolbar: some View {
+        AdaptiveGlassEffectContainer(spacing: TranslationTheme.controlGap) {
+            HStack(spacing: TranslationTheme.controlGap) {
+                Spacer()
+                pinButton
+                TranslationToolbarButton(systemImage: "clock.arrow.circlepath", help: L(.translationHistory)) {
+                    showingHistory.toggle()
+                }
+                .popover(isPresented: $showingHistory, arrowEdge: .bottom) {
+                    TranslationHistoryView(
+                        store: TranslationHistoryStore.shared,
+                        coordinator: coordinator
+                    ) {
+                        showingHistory = false
+                    }
+                }
+                TranslationToolbarButton(systemImage: "camera.viewfinder", help: L(.translationScreenshot)) {
+                    controller.close()
+                    Task { await PanelStore.shared.run(.screenshotTranslate) }
+                }
+                TranslationToolbarButton(systemImage: "gearshape", help: L(.translationSettings)) {
+                    SettingsOpener.shared.tryOpen(tab: .translation)
+                }
+            }
+        }
+        .padding(.horizontal, TranslationTheme.windowPadding)
+        .padding(.vertical, 8)
+    }
+
+    /// Pin toggle with an unmistakable active state: while pinned the icon flips
+    /// to white on an accent-tinted control surface (tinted Liquid Glass on
+    /// macOS 26, a flat accent fill on the fallback); unpinned it matches the
+    /// other toolbar glyphs (secondary, flat at rest).
+    private var pinButton: some View {
+        let shape = RoundedRectangle(cornerRadius: TranslationTheme.controlRadius, style: .continuous)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) { isPinned.toggle() }
+            controller.setPinned(isPinned)
+        } label: {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .font(.system(size: 12, weight: isPinned ? .semibold : .regular))
+                .foregroundStyle(isPinned ? Color.white : Color.secondary)
+                .frame(width: 24, height: 24)
+                .translationControlSurface(shape: shape, isHovered: pinHovered, isActive: isPinned, idleVisible: false)
+                .contentShape(shape)
+        }
+        .buttonStyle(.plain)
+        .onHover { pinHovered = $0 }
+        // ⌘P toggles pin; the panel is key while open, so its performKeyEquivalent
+        // fires this even while the input has focus. Tooltip surfaces the shortcut.
+        .keyboardShortcut("p", modifiers: .command)
+        .accessibilityLabel(L(isPinned ? .translationUnpin : .translationPin))
+        .hoverTooltip(L(isPinned ? .translationUnpin : .translationPin) + " ⌘P")
+    }
+
+    /// A toolbar glyph button whose small control surface appears only on hover
+    /// (macOS 26: interactive glass; earlier: a soft tint), so idle toolbar glyphs
+    /// stay flat like the system toolbar.
+    private struct TranslationToolbarButton: View {
+        let systemImage: String
+        let help: String
+        let action: () -> Void
+        @State private var hovered = false
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: TranslationTheme.controlRadius, style: .continuous)
+            return Button(action: action) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .translationControlSurface(shape: shape, isHovered: hovered, idleVisible: false)
+                    .contentShape(shape)
+            }
+            .buttonStyle(.plain)
+            .onHover { hovered = $0 }
+            .accessibilityLabel(help)
+            .hoverTooltip(help)
+        }
+    }
+
+    /// Invisible driver that keeps the Apple language-pack availability up to date
+    /// (and runs downloads), mounted only when the Apple service is enabled.
+    @ViewBuilder
+    private var applePackDriver: some View {
+        if settings.enabledServicesInOrder.contains(where: { $0.kind == .apple }) {
+            AppleLanguagePackDriver(coordinator: coordinator)
+        }
+    }
+
+    // MARK: - Input
+
+    private var inputCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .topLeading) {
+                EnterToTranslateEditor(text: $coordinator.inputText, setToken: coordinator.inputSetToken) { runTranslation() }
+                    .frame(minHeight: 70, maxHeight: 140)
+                    .focused($inputFocused)
+                if coordinator.inputText.isEmpty {
+                    LocalizedText(.translationInputPlaceholder)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 8)
+                        .allowsHitTesting(false)
+                }
+            }
+            HStack(spacing: 8) {
+                if let detected = coordinator.detectedSource, coordinator.source == nil {
+                    Text(L(.translationRecognizedAs, detected.displayName()))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(TranslationTheme.metaChipFill, in: Capsule())
+                }
+                Spacer()
+                if !coordinator.inputText.isEmpty {
+                    Button {
+                        SpeechService.shared.speak(coordinator.inputText, language: coordinator.source ?? coordinator.detectedSource)
+                    } label: {
+                        Image(systemName: "speaker.wave.2").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L(.translationSpeak))
+                    .hoverTooltip(L(.translationSpeak))
+                    Button {
+                        copy(coordinator.inputText)
+                    } label: {
+                        Image(systemName: "doc.on.doc").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(L(.translationCopy))
+                    .hoverTooltip(L(.translationCopy))
+                }
+            }
+        }
+        .padding(10)
+        .translationWell()
+        .onChange(of: coordinator.inputText) { _, _ in coordinator.updateDetection() }
+    }
+
+    // MARK: - Results
+
+    @ViewBuilder
+    private var resultCards: some View {
+        let target = coordinator.effectiveTarget()
+        ForEach(settings.enabledServicesInOrder) { config in
+            if config.kind == .apple {
+                AppleTranslationCard(config: config, coordinator: coordinator)
+            } else if let result = coordinator.results.first(where: { $0.serviceID == config.id }) {
+                TranslationServiceCard(
+                    config: config,
+                    result: result,
+                    target: target,
+                    onExpandDeferred: { coordinator.translateOne(serviceID: config.id) }
+                )
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func runTranslation() {
+        // The auto-speak guard is reset by the coordinator.runToken onChange,
+        // which fires for both this path and the direct prefill translate().
+        coordinator.translate()
+    }
+
+    /// A value that changes when the Apple card publishes a fresh success for the
+    /// current run, so onChange can re-evaluate auto-speak (the Apple card lives
+    /// outside `coordinator.results`).
+    private var appleAutoSpeakKey: String {
+        guard let apple = coordinator.appleResult, apple.runToken == coordinator.runToken else { return "" }
+        return apple.text
+    }
+
+    /// On the first enabled service that produces a success after a run, speak it
+    /// once when the user enabled auto-speak. The Apple card is included even
+    /// though it lives outside `coordinator.results`.
+    private func autoSpeakIfNeeded() {
+        guard settings.autoSpeak, !autoSpokenRun else { return }
+        guard let text = firstSuccessText() else { return }
+        autoSpokenRun = true
+        SpeechService.shared.speak(text, language: coordinator.effectiveTarget())
+    }
+
+    /// The translated text of the first enabled service (in configured order)
+    /// that has a non-empty success, considering both the stream results and the
+    /// Apple card's published success for the current run.
+    private func firstSuccessText() -> String? {
+        let appleText: String? = {
+            guard let apple = coordinator.appleResult,
+                  apple.runToken == coordinator.runToken,
+                  !apple.text.isEmpty else { return nil }
+            return apple.text
+        }()
+        for config in settings.enabledServicesInOrder {
+            if config.kind == .apple {
+                if let appleText { return appleText }
+            } else if let result = coordinator.results.first(where: { $0.serviceID == config.id }),
+                      result.status == .success, !result.text.isEmpty {
+                return result.text
+            }
+        }
+        return nil
+    }
+
+    private func copy(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+        ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+}
+
+/// An NSTextView-backed multiline editor where a bare Return triggers
+/// translation (Shift+Return inserts a newline). SwiftUI's TextEditor can't
+/// intercept Return cleanly, so this thin AppKit bridge does.
+private struct EnterToTranslateEditor: NSViewRepresentable {
+    @Binding var text: String
+    /// Bumps when `text` is set programmatically (prefill). Lets the editor adopt
+    /// the new value even while focused, unlike a plain external write.
+    var setToken: Int
+    var onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scroll = NSTextView.scrollableTextView()
+        guard let textView = scroll.documentView as? NSTextView else { return scroll }
+        textView.delegate = context.coordinator
+        textView.isRichText = false
+        textView.font = .systemFont(ofSize: 14)
+        textView.drawsBackground = false
+        // Zero the line-fragment padding and match the inset to the SwiftUI
+        // placeholder's padding (h:5, v:8) so the caret/text line up exactly with
+        // the placeholder instead of sitting on top of its first glyph.
+        textView.textContainerInset = NSSize(width: 5, height: 8)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.string = text
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.focusRingType = .none
+        // Match the rest of the app's lists: floating, auto-hiding overlay
+        // scrollers that reserve no width, instead of the system's persistent
+        // legacy scrollbar when "Show scroll bars" is set to "Always".
+        scroll.scrollerStyle = .overlay
+        scroll.autohidesScrollers = true
+        scroll.verticalScroller?.scrollerStyle = .overlay
+        return scroll
+    }
+
+    func updateNSView(_ scroll: NSScrollView, context: Context) {
+        guard let textView = scroll.documentView as? NSTextView else { return }
+        // Nothing to apply (e.g. the user's own keystrokes already synced the
+        // binding). Return BEFORE consuming the token so that, if SwiftUI ever
+        // delivers the setToken bump and the text change in separate passes, the
+        // later pass carrying the prefilled text is still recognized as programmatic.
+        guard textView.string != text else { return }
+        // A programmatic set (prefill) bumps setToken; such a write must win even
+        // while focused so the recognized/selected text replaces the field.
+        let isProgrammatic = context.coordinator.lastSetToken != setToken
+        context.coordinator.lastSetToken = setToken
+        // Otherwise, while the user is typing (text view is first responder), skip
+        // the external write: it would collapse the caret/selection or break IME
+        // composition, and the binding already mirrors the user's edits via
+        // textDidChange.
+        let isEditing = textView.window?.firstResponder === textView
+        guard isProgrammatic || !isEditing else { return }
+        let previousSelection = textView.selectedRange()
+        textView.string = text
+        // Caret to the end after a prefill; otherwise keep the prior position.
+        let location = isProgrammatic
+            ? (text as NSString).length
+            : min(previousSelection.location, (text as NSString).length)
+        textView.setSelectedRange(NSRange(location: location, length: 0))
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        private let parent: EnterToTranslateEditor
+        /// Last `setToken` the editor applied, to detect a new programmatic set.
+        var lastSetToken: Int
+        init(_ parent: EnterToTranslateEditor) {
+            self.parent = parent
+            self.lastSetToken = parent.setToken
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+
+        /// Bare Return submits; Shift+Return falls through to insert a newline.
+        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            if selector == #selector(NSResponder.insertNewline(_:)) {
+                let shift = NSApp.currentEvent?.modifierFlags.contains(.shift) ?? false
+                if !shift {
+                    parent.onSubmit()
+                    return true
+                }
+            }
+            return false
+        }
+    }
+}

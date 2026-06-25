@@ -59,7 +59,7 @@ final class ToastPresenter {
         }
 
         dismissTask = Task {
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            try? await Task.sleep(for: style.displayDuration)
             guard !Task.isCancelled else { return }
             self.dismiss()
         }

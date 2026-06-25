@@ -30,5 +30,6 @@ struct ShutdownWarningView: View {
         .padding(20)
         .frame(width: 260)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .focusEffectDisabled()
     }
 }

@@ -6,6 +6,28 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Translation: a floating multi-service panel with auto source detection,
+  language swap, streaming results, copy, TTS, pinning, and access from a builtin,
+  global hotkey, or the command palette.
+- Translation providers and settings: Apple on-device, Google, Bing, DeepL /
+  DeepLX, and OpenAI-compatible endpoints with provider presets, Keychain-stored
+  API keys, manual-on-expand LLM services, Apple language-pack downloads, and
+  backup sync for non-secret settings.
+- Translation entry points and history: translate selected text, translate OCR
+  from a screenshot region, browse per-run history and favorites, re-translate,
+  and trim history with a retention cap.
+
+### Changed
+
+- Failure toasts now stay on screen for 5 seconds instead of the ~1 second used
+  for success and color toasts, so an error message can actually be read.
+- The blue keyboard focus ring is removed across all of the app's windows for a
+  cleaner look.
+- Build tooling: the string-catalog compiler plugin now uses SwiftPM's current
+  URL APIs for generated input and output paths.
+
 ## [3.2.0] - 2026-06-21
 
 ### Added

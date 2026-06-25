@@ -6,7 +6,7 @@ import Foundation
 /// are deliberately absent.
 enum SyncSettingsRegistry {
 
-    enum ValueType { case bool, int, string, stringArray }
+    enum ValueType: Equatable { case bool, int, string, stringArray }
 
     struct Entry {
         let key: String
@@ -36,6 +36,10 @@ enum SyncSettingsRegistry {
         Entry(key: "capture.playSound", type: .bool),
         Entry(key: "capture.delaySeconds", type: .int),
         Entry(key: "capture.overlayTimeout", type: .int),
+        Entry(key: "translation.targetLanguage", type: .string),
+        Entry(key: "translation.secondTargetLanguage", type: .string),
+        Entry(key: "translation.autoSpeak", type: .bool),
+        Entry(key: "translation.services", type: .string),
     ]
 
     private static let entriesByKey: [String: Entry] =

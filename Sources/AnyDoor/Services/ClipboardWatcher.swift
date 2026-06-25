@@ -19,6 +19,7 @@ final class ClipboardWatcher {
 
     private var lastChangeCount: Int
     private var suppressedChangeCount: Int?
+    private var selfWriteDepth = 0
     private var timer: Timer?
 
     init(
@@ -65,11 +66,26 @@ final class ClipboardWatcher {
         suppressedChangeCount = changeCount
     }
 
+    /// Suppress AnyDoor-owned pasteboard writes that span an async window.
+    /// `noteSelfWrite` handles a single completed write; this scoped form also
+    /// covers intermediate states that a timer tick can observe before cleanup.
+    func beginSelfWrite() {
+        selfWriteDepth += 1
+    }
+
+    func endSelfWrite(changeCount: Int) {
+        if selfWriteDepth > 0 {
+            selfWriteDepth -= 1
+        }
+        noteSelfWrite(changeCount: changeCount)
+    }
+
     func poll() async {
         let current = pasteboard.changeCount
         guard current != lastChangeCount else { return }
         lastChangeCount = current
 
+        guard selfWriteDepth == 0 else { return }
         guard isEnabled() else { return }
         if let suppressed = suppressedChangeCount, suppressed == current {
             suppressedChangeCount = nil

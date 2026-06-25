@@ -26,6 +26,7 @@ struct OnboardingView: View {
             }
         }
         .frame(width: 680, height: 520)
+        .focusEffectDisabled()
     }
 
     // MARK: Sidebar (progress rail)

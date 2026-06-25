@@ -120,5 +120,6 @@ private struct ScreenshotPreviewContent: View {
         }
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .focusEffectDisabled()
     }
 }

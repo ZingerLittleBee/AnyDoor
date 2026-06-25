@@ -1,5 +1,17 @@
 import AppKit
+import Observation
 import SwiftUI
+
+/// Stable identifiers for the Settings `TabView` tabs, so callers can deep-link
+/// to a specific tab (e.g. the translation gear button) instead of landing on
+/// whatever tab was last open.
+enum SettingsTab: String, Hashable {
+    case panel
+    case clipboard
+    case capture
+    case translation
+    case general
+}
 
 /// Bridges SwiftUI's `\.openSettings` environment action into AppKit code paths
 /// (status item context menu, dock reopen handler, etc.).
@@ -11,9 +23,14 @@ import SwiftUI
 /// `SettingsOpenerCaptureView` once at launch, which records the action closure
 /// here on first appearance.
 @MainActor
+@Observable
 final class SettingsOpener {
     static let shared = SettingsOpener()
-    var open: (() -> Void)?
+    @ObservationIgnored var open: (() -> Void)?
+
+    /// The tab `SettingsView` should select. `nil` leaves the last-open tab.
+    /// Observed by `SettingsView`'s `TabView` selection binding.
+    var desiredTab: SettingsTab?
 
     func tryOpen() {
         NSApp.activate(ignoringOtherApps: true)
@@ -23,6 +40,12 @@ final class SettingsOpener {
         }
         // Fallback for the (rare) case the capture view hasn't appeared yet.
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+
+    /// Open Settings and deep-link to `tab`.
+    func tryOpen(tab: SettingsTab) {
+        desiredTab = tab
+        tryOpen()
     }
 }
 

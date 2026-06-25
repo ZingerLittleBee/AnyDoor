@@ -77,18 +77,21 @@ struct GeneralSettingsView: View {
                     .fixedSize()
                     .disabled(hyperKey.isApplying)
                 } label: {
-                    HStack(spacing: 6) {
-                        LocalizedText(.settingsGeneralHyperKeyLabel)
-                        if hyperKey.isActive {
-                            Circle().fill(.green).frame(width: 6, height: 6)
+                    // Inline caption under the label (same pattern as the
+                    // translation "备用目标语言" field), instead of a separate row.
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
+                            LocalizedText(.settingsGeneralHyperKeyLabel)
+                            if hyperKey.isActive {
+                                Circle().fill(.green).frame(width: 6, height: 6)
+                            }
                         }
+                        Text(String(format: L(.settingsGeneralHyperKeyDescription),
+                                    triggerNameForDescription, hyperModifierGlyphs))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-
-                Text(String(format: L(.settingsGeneralHyperKeyDescription),
-                            triggerNameForDescription, hyperModifierGlyphs))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 LabeledContent {
                     Picker(selection: quickPressBinding) {
@@ -99,12 +102,15 @@ struct GeneralSettingsView: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
-                } label: { LocalizedText(.settingsGeneralHyperKeyQuickPress) }
-
-                Text(String(format: L(.settingsGeneralHyperKeyQuickPressDescription),
-                            triggerNameForDescription))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        LocalizedText(.settingsGeneralHyperKeyQuickPress)
+                        Text(String(format: L(.settingsGeneralHyperKeyQuickPressDescription),
+                                    triggerNameForDescription))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 Toggle(isOn: includeShiftBinding) { LocalizedText(.settingsGeneralHyperKeyIncludeShift) }
                     .disabled(hyperKey.trigger == .none || hyperKey.isApplying)

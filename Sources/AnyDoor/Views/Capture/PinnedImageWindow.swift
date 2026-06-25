@@ -143,5 +143,6 @@ private struct PinnedImageView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .onHoverSafe { hovering = $0 }
+        .focusEffectDisabled()
     }
 }

@@ -91,6 +91,7 @@ struct HostsEditorView: View {
         .onChange(of: renameFieldFocused) { _, focused in
             if !focused { commitRename() }
         }
+        .focusEffectDisabled()
     }
 
     @ViewBuilder

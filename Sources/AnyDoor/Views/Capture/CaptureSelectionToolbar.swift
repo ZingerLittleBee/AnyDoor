@@ -21,6 +21,7 @@ struct CaptureSelectionToolbar: View {
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .fixedSize()
+        .focusEffectDisabled()
     }
 
     /// One mode button. The whole padded icon+label area is the hit target (a plain

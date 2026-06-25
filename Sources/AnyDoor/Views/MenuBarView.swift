@@ -77,6 +77,7 @@ struct MenuBarView: View {
             // search field). Otherwise hide as before.
             if popover?.isHoldingFocus != true { popover?.hide() }
         }
+        .focusEffectDisabled()
     }
 
     @ViewBuilder

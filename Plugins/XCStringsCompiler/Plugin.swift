@@ -7,21 +7,22 @@ struct XCStringsCompilerPlugin: BuildToolPlugin {
         guard let target = target as? SourceModuleTarget else { return [] }
 
         let xcstrings = target.sourceFiles
-            .filter { $0.path.extension == "xcstrings" }
+            .filter { $0.url.pathExtension == "xcstrings" }
 
         return xcstrings.map { file in
-            let inputPath = file.path
-            let outputDirectory = context.pluginWorkDirectory
-                .appending(["xcstrings", inputPath.stem])
+            let inputURL = file.url
+            let outputDirectory = context.pluginWorkDirectoryURL
+                .appending(path: "xcstrings", directoryHint: .isDirectory)
+                .appending(path: inputURL.deletingPathExtension().lastPathComponent, directoryHint: .isDirectory)
             return .prebuildCommand(
-                displayName: "Compile \(inputPath.lastComponent)",
-                executable: Path("/usr/bin/xcrun"),
+                displayName: "Compile \(inputURL.lastPathComponent)",
+                executable: URL(fileURLWithPath: "/usr/bin/xcrun"),
                 arguments: [
                     "xcstringstool",
                     "compile",
-                    inputPath.string,
+                    inputURL.path,
                     "--output-directory",
-                    outputDirectory.string
+                    outputDirectory.path
                 ],
                 outputFilesDirectory: outputDirectory
             )
