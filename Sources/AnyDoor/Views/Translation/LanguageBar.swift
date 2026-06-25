@@ -23,12 +23,14 @@ struct LanguageBar: View {
     @State private var swapHovered = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            sourcePicker
-                .frame(maxWidth: .infinity, alignment: .center)
-            swapButton
-            targetPicker
-                .frame(maxWidth: .infinity, alignment: .center)
+        AdaptiveGlassEffectContainer(spacing: TranslationTheme.controlGap) {
+            HStack(spacing: TranslationTheme.controlGap) {
+                sourcePicker
+                    .frame(maxWidth: .infinity, alignment: .center)
+                swapButton
+                targetPicker
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
         .font(.callout)
     }
@@ -84,7 +86,7 @@ struct LanguageBar: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 28, height: 28)
-                .background(Circle().fill(fill(swapHovered)))
+                .translationControlSurface(shape: Circle(), isHovered: swapHovered)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
@@ -113,12 +115,8 @@ struct LanguageBar: View {
         }
         .padding(.horizontal, 11)
         .padding(.vertical, 5)
-        .background(Capsule().fill(fill(hovered)))
+        .translationControlSurface(shape: Capsule(), isHovered: hovered)
         .contentShape(Capsule())
-    }
-
-    private func fill(_ hovered: Bool) -> Color {
-        Color.primary.opacity(hovered ? 0.12 : 0.06)
     }
 
     /// Source button title: the chosen language, or "Auto Detect" plus the
