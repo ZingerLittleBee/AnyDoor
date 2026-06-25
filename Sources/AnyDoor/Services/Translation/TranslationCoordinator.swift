@@ -105,13 +105,14 @@ final class TranslationCoordinator {
 
     func translate() {
         runToken &+= 1
+        cancel()
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
             results = []
             currentRequest = nil
+            appleResult = nil
             return
         }
-        cancel()
         updateDetection()
 
         // Build providers inside the guard: an LLM provider reads its API key from
@@ -243,8 +244,11 @@ final class TranslationCoordinator {
                           serviceName: String,
                           sourceText: String,
                           translatedText: String,
+                          source: TranslationLanguage? = nil,
                           target: TranslationLanguage,
-                          runID: String) {
+                          runID: String,
+                          runToken: Int) {
+        guard runToken == self.runToken else { return }
         guard !translatedText.isEmpty else { return }
         appleResult = (runToken, translatedText)
         guard let history,
@@ -252,7 +256,7 @@ final class TranslationCoordinator {
         history.record(
             sourceText: sourceText,
             translatedText: translatedText,
-            source: source ?? detectedSource,
+            source: source ?? self.source ?? detectedSource,
             target: target,
             serviceID: serviceID,
             serviceName: serviceName,

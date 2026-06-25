@@ -34,6 +34,33 @@ final class TranslationCoordinatorTests: XCTestCase {
         }
     }
 
+    private actor CancellationProbe {
+        private(set) var didTerminate = false
+
+        func markTerminated() {
+            didTerminate = true
+        }
+
+        func isTerminated() -> Bool {
+            didTerminate
+        }
+    }
+
+    private struct NeverFinishingProvider: TranslationProvider {
+        let id: String
+        let kind: TranslationServiceKind = .googleFree
+        let probe: CancellationProbe
+
+        func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationChunk, Error> {
+            AsyncThrowingStream { continuation in
+                continuation.yield(.delta("partial"))
+                continuation.onTermination = { _ in
+                    Task { await probe.markTerminated() }
+                }
+            }
+        }
+    }
+
     private func makeCoordinator(_ providers: [any TranslationProvider],
                                  defaultsSuite: String = "translation.coord.\(UUID().uuidString)")
     -> TranslationCoordinator {
@@ -64,6 +91,14 @@ final class TranslationCoordinatorTests: XCTestCase {
                            timeout: TimeInterval = 2.0) async {
         let deadline = Date().addingTimeInterval(timeout)
         while !predicate() && Date() < deadline {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
+    private func waitUntil(_ predicate: @escaping () async -> Bool,
+                           timeout: TimeInterval = 2.0) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !(await predicate()) && Date() < deadline {
             try? await Task.sleep(nanoseconds: 5_000_000)
         }
     }
@@ -160,6 +195,51 @@ final class TranslationCoordinatorTests: XCTestCase {
         coordinator.inputText = "   "
         coordinator.translate()
         XCTAssertTrue(coordinator.results.isEmpty)
+    }
+
+    func testEmptyInputCancelsExistingProviderTasks() async {
+        let probe = CancellationProbe()
+        let provider = NeverFinishingProvider(id: "slow", probe: probe)
+        let coordinator = makeCoordinator([provider])
+        coordinator.inputText = "Hello"
+        coordinator.target = TranslationLanguage.simplifiedChinese
+        coordinator.translate()
+
+        await waitUntil {
+            coordinator.results.first(where: { $0.serviceID == "slow" })?.status == .streaming
+        }
+
+        coordinator.inputText = "   "
+        coordinator.translate()
+
+        await waitUntil { await probe.isTerminated() }
+        let didTerminate = await probe.isTerminated()
+        XCTAssertTrue(didTerminate)
+        XCTAssertTrue(coordinator.results.isEmpty)
+    }
+
+    func testStaleAppleSuccessIsIgnored() {
+        let coordinator = makeCoordinator([])
+        coordinator.inputText = "old"
+        coordinator.target = TranslationLanguage.simplifiedChinese
+        coordinator.translate()
+        let oldToken = coordinator.runToken
+        let oldRunID = coordinator.currentRunID
+
+        coordinator.inputText = "new"
+        coordinator.translate()
+
+        coordinator.noteAppleSuccess(
+            serviceID: "apple",
+            serviceName: "Apple",
+            sourceText: "old",
+            translatedText: "旧结果",
+            target: TranslationLanguage.simplifiedChinese,
+            runID: oldRunID,
+            runToken: oldToken
+        )
+
+        XCTAssertNil(coordinator.appleResult)
     }
 
     func testManualServiceGetsDeferredResultAndStartsNoTask() async {
