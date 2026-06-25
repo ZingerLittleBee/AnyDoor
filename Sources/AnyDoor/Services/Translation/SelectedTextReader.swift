@@ -61,10 +61,10 @@ enum SelectedTextReader {
         return trimmed.isEmpty ? nil : string
     }
 
-    /// Pasteboard fallback: snapshot the current string, trigger `copy`, wait
-    /// for `settle`, then read the copied selection only if the pasteboard's
-    /// `changeCount` advanced and the result is non-blank. The prior contents
-    /// are always restored before returning.
+    /// Pasteboard fallback: snapshot current pasteboard contents, trigger
+    /// `copy`, wait for `settle`, then read the copied selection only if the
+    /// pasteboard's `changeCount` advanced and the result is non-blank. The
+    /// prior contents are always restored before returning.
     @MainActor
     static func readViaClipboard(
         pasteboard: NSPasteboard,
@@ -73,6 +73,9 @@ enum SelectedTextReader {
     ) async -> String? {
         let previous = PasteboardSnapshot(pasteboard)
         let beforeCount = pasteboard.changeCount
+        let watcher = ClipboardWatcher.shared
+        watcher?.beginSelfWrite()
+        defer { watcher?.endSelfWrite(changeCount: pasteboard.changeCount) }
 
         copy()
         await settle()
