@@ -530,26 +530,6 @@ final class PanelStore {
         rebuildHotkeySnapshots()
     }
 
-    /// Reorder top-level entries by new keys array (ordered).
-    /// - Note: Kept for backward compatibility while `PanelSettingsView` is
-    ///   updated in Task 7 to use `reorderTopLevel(within:by:)`.
-    func reorderTopLevel(by newOrder: [BuiltinItem]) {
-        guard let container = modelContainer else { return }
-        let context = container.mainContext
-        guard let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) else { return }
-        let prefsByKey = Dictionary(uniqueKeysWithValues: prefs.map { ($0.itemKey, $0) })
-        var order: Double = 100
-        for item in newOrder {
-            if let pref = prefsByKey[item.rawValue] {
-                pref.displayOrder = order
-                order += 100
-            }
-        }
-        try? context.save()
-        rebuild()
-        rebuildHotkeySnapshots()
-    }
-
     /// Reorder the top-level entries inside a single group. Reassigns
     /// `displayOrder` (stride 100) for that group's items only; cross-group
     /// order is unaffected because the group order index dominates the sort in

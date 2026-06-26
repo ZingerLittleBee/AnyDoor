@@ -3,6 +3,7 @@ import AppKit
 
 struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
+    @State private var grouping = PanelGroupingStore.shared
     @State private var conflictAlert: ConflictAlert?
     @State private var pendingDelete: PendingDelete?
 
@@ -50,84 +51,22 @@ struct PanelSettingsView: View {
         }
     }
 
-    /// A single flat row in the Panel settings list: a top-level entry, an app
-    /// shortcut / window-layout child, or a non-draggable adornment.
-    private struct PanelListRow: Identifiable {
-        enum Content {
-            case entry(PanelEntry)
-            case addApp
-            case brightnessRecorders
-        }
-        let id: String
-        let content: Content
-        let group: PanelDragGroup
-        let opacity: Double
-    }
-
-    /// Flatten `topLevelEntries` and their children/adornments into one ordered
-    /// list. Children render directly beneath their parent, but as their own
-    /// list rows so each is individually draggable.
-    private var displayRows: [PanelListRow] {
-        var rows: [PanelListRow] = []
-        let appShortcutsVisible = builtinVisible(.appShortcuts)
-        let brightnessVisible = builtinVisible(.brightness)
-        let windowLayoutVisible = builtinVisible(.windowLayout)
-
-        for entry in panel.topLevelEntries {
-            rows.append(PanelListRow(
-                id: "top:\(entry.id)",
-                content: .entry(entry),
-                group: .topLevel,
-                opacity: entry.isVisible ? 1.0 : 0.5
-            ))
-
-            switch entry.source {
-            case .builtin(.appShortcuts):
-                for child in panel.appShortcutChildren {
-                    let visible = appShortcutsVisible && child.isVisible
-                    rows.append(PanelListRow(
-                        id: "appChild:\(child.id)",
-                        content: .entry(child),
-                        group: .appChild,
-                        opacity: visible ? 1.0 : 0.5
-                    ))
-                }
-                rows.append(PanelListRow(
-                    id: "addApp",
-                    content: .addApp,
-                    group: .fixed,
-                    opacity: appShortcutsVisible ? 1.0 : 0.5
-                ))
-            case .builtin(.brightness):
-                rows.append(PanelListRow(
-                    id: "brightnessRecorders",
-                    content: .brightnessRecorders,
-                    group: .fixed,
-                    opacity: brightnessVisible ? 1.0 : 0.5
-                ))
-            case .builtin(.windowLayout):
-                for child in panel.windowLayoutChildren {
-                    rows.append(PanelListRow(
-                        id: "windowChild:\(child.id)",
-                        content: .entry(child),
-                        group: .windowChild,
-                        opacity: windowLayoutVisible ? 1.0 : 0.5
-                    ))
-                }
-            default:
-                break
-            }
-        }
-        return rows
-    }
-
-    private func builtinVisible(_ item: BuiltinItem) -> Bool {
-        panel.topLevelEntries.first { $0.source == .builtin(item) }?.isVisible ?? true
+    private var displayRows: [PanelSettingsRow] {
+        PanelSettingsRowBuilder.build(
+            topLevel: panel.topLevelEntries,
+            appChildren: panel.appShortcutChildren,
+            windowChildren: panel.windowLayoutChildren,
+            themedOrder: grouping.themedOrder,
+            collapsedGroups: grouping.collapsedGroups,
+            collapsedParents: grouping.collapsedParents
+        )
     }
 
     @ViewBuilder
-    private func rowView(_ row: PanelListRow) -> some View {
+    private func rowView(_ row: PanelSettingsRow) -> some View {
         switch row.content {
+        case let .header(group):
+            headerRow(group)
         case let .entry(entry):
             switch row.group {
             case .appChild:    appChildRow(entry)
@@ -139,6 +78,39 @@ struct PanelSettingsView: View {
         case .brightnessRecorders:
             brightnessHotkeyRecorders()
         }
+    }
+
+    /// A themed section header: a drag handle, a collapse chevron, the uppercase
+    /// localized title, and a count of the group's top-level entries.
+    private func headerRow(_ group: BuiltinGroup) -> some View {
+        let count = panel.topLevelEntries.filter {
+            if case .builtin(let item) = $0.source { return BuiltinGroup.group(for: item) == group }
+            return false
+        }.count
+        let collapsed = grouping.isCollapsed(group)
+        return HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 12)
+            if let titleKey = group.titleKey {
+                LocalizedText(titleKey)
+                    .font(.system(size: 11, weight: .semibold))
+                    .textCase(.uppercase)
+                    .foregroundStyle(.secondary)
+                    .tracking(0.6)
+            }
+            Text("\(count)")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 6).padding(.vertical, 1)
+                .background(Capsule().fill(Color.secondary.opacity(0.12)))
+            Spacer()
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .onTapGesture { grouping.setCollapsed(group, !collapsed) }
     }
 
     @ViewBuilder
@@ -190,6 +162,7 @@ struct PanelSettingsView: View {
         HStack(spacing: 8) {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.tertiary)
+            parentDisclosure(for: entry)
             Toggle("", isOn: Binding(
                 get: { entry.isVisible },
                 set: { newValue in
@@ -208,6 +181,26 @@ struct PanelSettingsView: View {
             deleteButton(for: entry)
         }
         .padding(.vertical, 4)
+    }
+
+    /// A collapse chevron for parent rows that own children (`appShortcuts`,
+    /// `windowLayout`). Other rows get an equal-width spacer so columns align.
+    @ViewBuilder
+    private func parentDisclosure(for entry: PanelEntry) -> some View {
+        if case let .builtin(item) = entry.source, item == .appShortcuts || item == .windowLayout {
+            let collapsed = grouping.isParentCollapsed(item)
+            Button {
+                grouping.setParentCollapsed(item, !collapsed)
+            } label: {
+                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .frame(width: 12)
+        } else {
+            Color.clear.frame(width: 12)
+        }
     }
 
     private func typeBadge(for entry: PanelEntry) -> L10n.Key {
@@ -295,9 +288,8 @@ struct PanelSettingsView: View {
     }
 
     /// Unified `onMove` for the flattened list. Routes a drag back to the group
-    /// the dragged row belongs to (top-level / app child / window child) and
-    /// calls the matching reorder method; a drop outside the group is clamped to
-    /// stay within it. Children re-render under their parent after `rebuild()`.
+    /// the dragged row belongs to and calls the matching reorder method; a drop
+    /// outside the group is clamped to stay within it.
     private func move(from source: IndexSet, to destination: Int) {
         let rows = displayRows
         guard let decision = PanelReorder.localMove(
@@ -305,14 +297,18 @@ struct PanelSettingsView: View {
         ) else { return }
 
         switch decision.group {
-        case .topLevel:
+        case let .topLevel(group):
             var items = rows.compactMap { row -> BuiltinItem? in
-                guard row.group == .topLevel, case let .entry(entry) = row.content,
+                guard row.group == .topLevel(group), case let .entry(entry) = row.content,
                       case let .builtin(item) = entry.source else { return nil }
                 return item
             }
             items.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
-            panel.reorderTopLevel(by: items)
+            panel.reorderTopLevel(within: group, by: items)
+        case .groupHeader:
+            var order = grouping.themedOrder
+            order.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
+            panel.reorderThemedGroups(by: order)
         case .appChild:
             var ids = panel.appShortcutChildren.compactMap { entry -> UUID? in
                 if case let .appShortcut(id) = entry.source { return id } else { return nil }
