@@ -97,12 +97,19 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
 
-        // Refresh the installed-apps list OFF the main actor: the window is
-        // already on screen, so the `/Applications` scan can never delay
-        // summoning the palette. When it resolves, repopulate the Applications
-        // section in place (the @Observable state re-renders) and warm the new
-        // icons. Subsequent opens render instantly from the cache above.
+        // After the window is on screen, refresh state that the synchronous
+        // seed above can't supply, then repopulate the sections in place (the
+        // @Observable state re-renders). Two pieces, folded into one task so the
+        // section rebuild happens exactly once:
+        //   1. Toggle states. `topLevelEntries.toggleState` is only accurate
+        //      after `PanelStore.refreshAll()` polls each provider, which today
+        //      runs from the menu-bar panel's onAppear. Without this, a palette
+        //      opened before the panel shows every toggle as off, so the on-state
+        //      icon styling never appears.
+        //   2. The installed-apps list, scanned OFF the main actor so the
+        //      `/Applications` walk never delays summoning the palette.
         Task { [weak self, weak pickerState] in
+            await PanelStore.shared.refreshAll()
             let apps = await Task.detached(priority: .userInitiated) {
                 InstalledAppsScanner.scan()
             }.value
