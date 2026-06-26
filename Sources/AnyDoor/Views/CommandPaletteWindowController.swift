@@ -5,6 +5,25 @@ import SwiftUI
 final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate {
     static let shared = CommandPaletteWindowController()
 
+    /// Built-in actions grouped under their own "Screenshot" palette section.
+    private static let captureItems: Set<BuiltinItem> = [
+        .screenshot, .captureWindow, .captureFullscreen, .captureTimer,
+        .captureModeBar, .recordScreen, .captureScrolling,
+    ]
+    /// Built-in actions grouped under their own "Translation" palette section.
+    private static let translationItems: Set<BuiltinItem> = [
+        .translate, .screenshotTranslate, .translateSelection,
+    ]
+    /// Power / session actions grouped under their own palette section.
+    private static let powerItems: Set<BuiltinItem> = [
+        .lockScreen, .displaySleep, .systemSleep, .scheduledShutdown, .keepAwake,
+    ]
+    /// Quick toggles and appearance controls grouped under their own section.
+    private static let toggleAppearanceItems: Set<BuiltinItem> = [
+        .muteAudio, .microphoneMute, .darkMode, .hideDock, .autoHideMenuBar,
+        .hideDesktopIcons, .showHiddenFiles, .keyboardLock, .brightness,
+    ]
+
     private var state: CommandPaletteState?
     private var keyMonitor: Any?
     /// Last installed-apps scan, refreshed off the main actor on every open. Seeds
@@ -167,11 +186,34 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 return false
             }
         }
-        if !commands.isEmpty {
+        // Carve themed sub-groups out of the flat command list. Any command not
+        // claimed by a group falls back to the general Commands section, which
+        // is listed first; the groups follow in declaration order.
+        func builtin(_ entry: PanelEntry) -> BuiltinItem? {
+            if case .builtin(let item) = entry.source { return item }
+            return nil
+        }
+        let groups: [(L10n.Key, Set<BuiltinItem>)] = [
+            (.commandPaletteSectionToggles, Self.toggleAppearanceItems),
+            (.commandPaletteSectionPower, Self.powerItems),
+            (.commandPaletteSectionCapture, Self.captureItems),
+            (.commandPaletteSectionTranslation, Self.translationItems),
+        ]
+        let grouped = groups.reduce(into: Set<BuiltinItem>()) { $0.formUnion($1.1) }
+        let generalCommands = commands.filter { entry in
+            guard let item = builtin(entry) else { return true }
+            return !grouped.contains(item)
+        }
+        if !generalCommands.isEmpty {
             sections.append(CommandPaletteSection(
                 titleKey: .commandPaletteSectionCommands,
-                entries: commands
+                entries: generalCommands
             ))
+        }
+        for (titleKey, items) in groups {
+            let entries = commands.filter { builtin($0).map(items.contains) ?? false }
+            guard !entries.isEmpty else { continue }
+            sections.append(CommandPaletteSection(titleKey: titleKey, entries: entries))
         }
 
         let windowLayout = store.windowLayoutChildren.filter(\.isVisible)
