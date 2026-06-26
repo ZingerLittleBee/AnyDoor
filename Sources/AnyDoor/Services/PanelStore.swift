@@ -8,7 +8,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "panel")
 ///
 /// Owns the provider registry, reads BuiltinPreference / KeyBinding from SwiftData,
 /// and exposes three collections to the views:
-/// - `topLevelEntries` — built-in items, sorted by BuiltinPreference.displayOrder
+/// - `topLevelEntries` — built-in items, sorted by (group order index, displayOrder)
 /// - `appShortcutChildren` — KeyBinding rows, sorted by KeyBinding.displayOrder
 /// - `windowLayoutChildren` — the four window-layout action children, sorted by displayOrder
 @Observable @MainActor
@@ -147,9 +147,25 @@ final class PanelStore {
             }
         }
 
-        self.topLevelEntries = topLevel
+        // Sort by (group order index, displayOrder) so both this settings page
+        // and the menu-bar panel render group-contiguous blocks. Existing
+        // displayOrder values stay valid as within-group order — no migration.
+        let grouping = PanelGroupingStore.shared
+        self.topLevelEntries = topLevel.sorted { lhs, rhs in
+            let li = grouping.orderIndex(for: group(of: lhs))
+            let ri = grouping.orderIndex(for: group(of: rhs))
+            if li != ri { return li < ri }
+            return lhs.displayOrder < rhs.displayOrder
+        }
         self.appShortcutChildren = children
         self.windowLayoutChildren = windowChildren.sorted { $0.displayOrder < $1.displayOrder }
+    }
+
+    /// The themed group an entry belongs to. Non-builtin top-level entries (none
+    /// today) fall into `.general`.
+    private func group(of entry: PanelEntry) -> BuiltinGroup {
+        if case .builtin(let item) = entry.source { return BuiltinGroup.group(for: item) }
+        return .general
     }
 
     private func subtitle(for item: BuiltinItem) -> String? {
@@ -515,6 +531,8 @@ final class PanelStore {
     }
 
     /// Reorder top-level entries by new keys array (ordered).
+    /// - Note: Kept for backward compatibility while `PanelSettingsView` is
+    ///   updated in Task 7 to use `reorderTopLevel(within:by:)`.
     func reorderTopLevel(by newOrder: [BuiltinItem]) {
         guard let container = modelContainer else { return }
         let context = container.mainContext
@@ -530,6 +548,35 @@ final class PanelStore {
         try? context.save()
         rebuild()
         rebuildHotkeySnapshots()
+    }
+
+    /// Reorder the top-level entries inside a single group. Reassigns
+    /// `displayOrder` (stride 100) for that group's items only; cross-group
+    /// order is unaffected because the group order index dominates the sort in
+    /// `rebuild()`, so per-group displayOrder need only be monotonic.
+    func reorderTopLevel(within group: BuiltinGroup, by newOrder: [BuiltinItem]) {
+        guard let container = modelContainer else { return }
+        let context = container.mainContext
+        guard let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) else { return }
+        let prefsByKey = Dictionary(uniqueKeysWithValues: prefs.map { ($0.itemKey, $0) })
+        var order: Double = 100
+        for item in newOrder where BuiltinGroup.group(for: item) == group {
+            if let pref = prefsByKey[item.rawValue] {
+                pref.displayOrder = order
+                order += 100
+            }
+        }
+        try? context.save()
+        rebuild()
+        rebuildHotkeySnapshots()
+    }
+
+    /// Reorder the themed sections themselves. Persists the new order in
+    /// `PanelGroupingStore` and rebuilds; bindings are unchanged so no hotkey
+    /// snapshot rebuild is needed.
+    func reorderThemedGroups(by newOrder: [BuiltinGroup]) {
+        PanelGroupingStore.shared.setThemedOrder(newOrder)
+        rebuild()
     }
 
     /// Reorder app shortcuts by new id array (ordered).
