@@ -1,4 +1,3 @@
-// Sources/AnyDoor/Models/BuiltinGroup.swift
 import Foundation
 
 /// Single source of truth for how built-in commands are grouped into themed

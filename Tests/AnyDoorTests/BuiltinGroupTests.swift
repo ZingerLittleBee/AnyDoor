@@ -1,4 +1,3 @@
-// Tests/AnyDoorTests/BuiltinGroupTests.swift
 import Foundation
 import Testing
 @testable import AnyDoor
