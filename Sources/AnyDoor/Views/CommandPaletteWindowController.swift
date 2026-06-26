@@ -5,25 +5,6 @@ import SwiftUI
 final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate {
     static let shared = CommandPaletteWindowController()
 
-    /// Built-in actions grouped under their own "Screenshot" palette section.
-    private static let captureItems: Set<BuiltinItem> = [
-        .screenshot, .captureWindow, .captureFullscreen, .captureTimer,
-        .captureModeBar, .recordScreen, .captureScrolling,
-    ]
-    /// Built-in actions grouped under their own "Translation" palette section.
-    private static let translationItems: Set<BuiltinItem> = [
-        .translate, .screenshotTranslate, .translateSelection,
-    ]
-    /// Power / session actions grouped under their own palette section.
-    private static let powerItems: Set<BuiltinItem> = [
-        .lockScreen, .displaySleep, .systemSleep, .scheduledShutdown, .keepAwake,
-    ]
-    /// Quick toggles and appearance controls grouped under their own section.
-    private static let toggleAppearanceItems: Set<BuiltinItem> = [
-        .muteAudio, .microphoneMute, .darkMode, .hideDock, .autoHideMenuBar,
-        .hideDesktopIcons, .showHiddenFiles, .keyboardLock, .brightness,
-    ]
-
     private var state: CommandPaletteState?
     private var keyMonitor: Any?
     /// Last installed-apps scan, refreshed off the main actor on every open. Seeds
@@ -193,12 +174,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             if case .builtin(let item) = entry.source { return item }
             return nil
         }
-        let groups: [(L10n.Key, Set<BuiltinItem>)] = [
-            (.commandPaletteSectionToggles, Self.toggleAppearanceItems),
-            (.commandPaletteSectionPower, Self.powerItems),
-            (.commandPaletteSectionCapture, Self.captureItems),
-            (.commandPaletteSectionTranslation, Self.translationItems),
-        ]
+        // Source the themed sub-groups from the shared BuiltinGroup catalog so
+        // the palette and the Panel settings page never drift. Order and titles
+        // are unchanged: themedDefaultOrder is [toggles, power, capture, translation].
+        let groups: [(L10n.Key, Set<BuiltinItem>)] = BuiltinGroup.themedDefaultOrder.map { group in
+            (group.titleKey!, group.members)
+        }
         let grouped = groups.reduce(into: Set<BuiltinItem>()) { $0.formUnion($1.1) }
         let generalCommands = commands.filter { entry in
             guard let item = builtin(entry) else { return true }
