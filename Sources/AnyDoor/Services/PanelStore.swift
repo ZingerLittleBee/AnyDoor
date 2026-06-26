@@ -19,6 +19,13 @@ final class PanelStore {
     private(set) var appShortcutChildren: [PanelEntry] = []
     private(set) var windowLayoutChildren: [PanelEntry] = []
 
+    /// On-disk app path for each app-shortcut binding id, captured in `rebuild()`.
+    /// Settings rows read the Finder icon by path through this map instead of a
+    /// per-render `binding(id:)` SwiftData fetch, which — combined with a
+    /// synchronous `NSWorkspace.icon(forFile:)` read in the row body — dropped
+    /// scroll frames as the List recycled app rows.
+    private(set) var appShortcutPaths: [UUID: String] = [:]
+
     /// The window-layout child items that are partitioned out of topLevelEntries
     /// and exposed separately via `windowLayoutChildren`.
     private static let windowLayoutChildKeys: Set<BuiltinItem> = [
@@ -119,10 +126,12 @@ final class PanelStore {
 
         // KeyBinding rows → appShortcutChildren
         var children: [PanelEntry] = []
+        var pathMap: [UUID: String] = [:]
         if let bindings = try? context.fetch(
             FetchDescriptor<KeyBinding>(sortBy: [SortDescriptor(\.displayOrder)])
         ) {
             for binding in bindings {
+                pathMap[binding.id] = binding.appPath
                 // keyCode == -1 is the "unbound" sentinel used for newly-added
                 // app shortcuts. Project it as a nil hotkey so the recorder
                 // renders its placeholder instead of "Key(-1)".
@@ -158,6 +167,7 @@ final class PanelStore {
             return lhs.displayOrder < rhs.displayOrder
         }
         self.appShortcutChildren = children
+        self.appShortcutPaths = pathMap
         self.windowLayoutChildren = windowChildren.sorted { $0.displayOrder < $1.displayOrder }
     }
 

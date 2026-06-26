@@ -24,6 +24,13 @@ struct PanelSettingsView: View {
                 .onMove(perform: move)
             }
             .listStyle(.inset)
+            // Warm the icon cache for every app-shortcut path off the main
+            // thread when the list appears (and whenever the set changes), so
+            // the first scroll past an app row finds a resolved icon instead of
+            // a cold-cache disk hit. Re-keyed on count so add/remove re-warms.
+            .task(id: panel.appShortcutPaths.count) {
+                AppIconCache.prewarm(Array(panel.appShortcutPaths.values))
+            }
 
             LocalizedText(.settingsPanelTip)
                 .font(.caption2).foregroundStyle(.tertiary)
@@ -339,7 +346,7 @@ struct PanelSettingsView: View {
                 }
             ))
             .toggleStyle(.checkbox).labelsHidden()
-            appIcon(for: child)
+            AppShortcutIcon(path: appShortcutPath(for: child), fallbackSymbol: child.symbol)
             Text(child.localizedTitle()).font(.body)
             Spacer()
             HotkeyRecorder(
@@ -353,19 +360,11 @@ struct PanelSettingsView: View {
         .padding(.vertical, 3)
     }
 
-    /// Renders the real Finder app icon for an app shortcut row, falling back to
-    /// the generic SF Symbol if the binding or its file can't be resolved.
-    @ViewBuilder
-    private func appIcon(for entry: PanelEntry) -> some View {
-        if case let .appShortcut(id) = entry.source,
-           let binding = panel.binding(id: id) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: binding.appPath))
-                .resizable()
-                .interpolation(.high)
-                .frame(width: 18, height: 18)
-        } else {
-            Image(systemName: entry.symbol).frame(width: 18)
-        }
+    /// The on-disk app path for an app-shortcut row, read from the prebuilt path
+    /// map (no per-render SwiftData fetch).
+    private func appShortcutPath(for entry: PanelEntry) -> String? {
+        if case let .appShortcut(id) = entry.source { return panel.appShortcutPaths[id] }
+        return nil
     }
 
     private func windowChildRow(_ child: PanelEntry) -> some View {
@@ -417,6 +416,39 @@ struct PanelSettingsView: View {
         }
     }
 
+}
+
+/// The Finder icon for an app-shortcut row. Loads the icon through the shared
+/// `AppIconCache` in a `.task` (warm path resolves synchronously from cache;
+/// cold path reads disk OFF the main thread inside the cache), so scrolling a
+/// fresh app row into view never blocks the main thread. Resolving the icon
+/// inline in the row body — the old `NSWorkspace.icon(forFile:)` call — dropped
+/// scroll frames as the List recycled rows.
+private struct AppShortcutIcon: View {
+    let path: String?
+    let fallbackSymbol: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 18, height: 18)
+            } else {
+                Image(systemName: fallbackSymbol).frame(width: 18)
+            }
+        }
+        .task(id: path) {
+            guard let path else { image = nil; return }
+            if let cached = AppIconCache.cached(path) {
+                image = cached
+            } else {
+                image = await AppIconCache.icon(for: path)
+            }
+        }
+    }
 }
 
 private struct ConflictAlert: Identifiable {

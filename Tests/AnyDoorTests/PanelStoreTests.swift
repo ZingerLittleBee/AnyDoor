@@ -84,6 +84,28 @@ final class PanelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testAppShortcutPathsMapBindingIDToAppPath() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self,
+            configurations: config
+        )
+        let context = container.mainContext
+        let a = KeyBinding(keyCode: 122, modifierFlags: 0,
+                           appBundleID: "a", appName: "A", appPath: "/Applications/A.app",
+                           displayOrder: 100)
+        context.insert(a)
+        try context.save()
+
+        let store = PanelStore.shared
+        store.bootstrap(modelContainer: container, providers: [])
+
+        // The path map lets settings rows resolve the Finder icon by path with
+        // no per-render SwiftData fetch.
+        XCTAssertEqual(store.appShortcutPaths[a.id], "/Applications/A.app")
+    }
+
+    @MainActor
     func testRunDropsOverlappingCallForSameItem() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
