@@ -7,23 +7,84 @@ struct PanelSettingsView: View {
     @State private var conflictAlert: ConflictAlert?
     @State private var pendingDelete: PendingDelete?
 
+    /// Live frame of every row in the `listSpace` coordinate space, fed by a
+    /// preference. Measured in the *content* space so it stays put while
+    /// scrolling (only a layout change re-emits it) — the drag projection and
+    /// the insertion indicator read it.
+    @State private var rowFrames: [String: CGRect] = [:]
+    /// The in-flight reorder drag, or nil. Local `@State` (not the `@Observable`
+    /// store) so `withAnimation` captures the lift/settle cleanly.
+    @State private var drag: DragSession?
+
+    /// Named coordinate space the row frames and the drag gesture share.
+    private static let listSpace = "panelSettingsList"
+
+    /// Width of the disclosure-chevron column. Doubles as the parent-row toggle's
+    /// hit-target width — wide enough to click comfortably, and shared by the
+    /// header chevron and the spacer that stands in for it so every row's columns
+    /// stay aligned.
+    private static let disclosureColumnWidth: CGFloat = 20
+
+    /// Width of the drag-handle column — wide enough, together with the full row
+    /// height, to give the grab handle a comfortable drag/hover target instead of
+    /// the bare glyph.
+    private static let handleColumnWidth: CGFloat = 24
+
+    /// Shared easing for collapse/expand and drop-settle: drives the row
+    /// transition, the reorder slide, and the disclosure chevron rotation so
+    /// they move in lockstep. `.smooth` is a non-overshooting spring that fits a
+    /// settling list better than a bouncy one.
+    private static let collapseAnimation: Animation = .smooth(duration: 0.24)
+
     var body: some View {
         VStack(spacing: 0) {
-            List {
-                // Render every parent, child, and adornment as a flat list row so
-                // children become real, individually draggable rows. A nested
-                // `ForEach.onMove` inside a composed parent row never wires into
-                // the List's reordering machinery, so children could not be
-                // dragged. `move(from:to:)` routes each drag back to the group it
-                // belongs to (see PanelReorder).
-                ForEach(displayRows) { row in
-                    rowView(row)
-                        .opacity(row.opacity)
-                        .moveDisabled(row.group == .fixed)
+            ScrollView {
+                // The List → ScrollView migration. Rows render in a plain VStack
+                // (not a List) so collapse/expand and reorder animate: macOS
+                // `List` is NSTableView-backed and ignores row insert/delete and
+                // move animations even under a live transaction (the chevron
+                // animates, the rows do not). A plain VStack — not LazyVStack —
+                // keeps every row in the tree so its transition is reliable and
+                // scrolling never rebuilds a row (the bounded row count makes
+                // eager layout cheap, and it drops the NSTableView cell-recycling
+                // that made scrolling janky). Reordering is a custom drag gesture
+                // on each row's handle (see `dragGesture`), since `.onMove` only
+                // works inside a List.
+                VStack(spacing: 0) {
+                    ForEach(displayRows) { row in
+                        let dragging = drag?.rowID == row.id
+                        rowView(row)
+                            .opacity(row.opacity)
+                            .background(rowFrameReader(row))
+                            .background(
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color.accentColor.opacity(dragging ? 0.10 : 0))
+                            )
+                            .scaleEffect(dragging ? 1.01 : 1)
+                            .shadow(color: .black.opacity(dragging ? 0.16 : 0),
+                                    radius: dragging ? 5 : 0, y: 2)
+                            .zIndex(dragging ? 1 : 0)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
                 }
-                .onMove(perform: move)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .coordinateSpace(name: Self.listSpace)
+                .overlay(alignment: .topLeading) { insertionIndicator }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                // One value-keyed animation for every structural change: collapse
+                // (ids added/removed, with the row `.transition`) and drop-settle
+                // (ids reordered, rows slide). A visibility toggle leaves the id
+                // list unchanged, so it stays instant.
+                .animation(Self.collapseAnimation, value: rowsKey)
+                .overlayScrollers()
+                .onPreferenceChange(RowFrameKey.self) { frames in
+                    MainThreadIsolation.run { rowFrames = frames }
+                }
             }
-            .listStyle(.inset)
+            // Don't clip the lifted (scaled, shadowed) dragged row at the scroll
+            // edges.
+            .scrollClipDisabled()
             // Warm the icon cache for every app-shortcut path off the main
             // thread when the list appears (and whenever the set changes), so
             // the first scroll past an app row finds a resolved icon instead of
@@ -58,6 +119,13 @@ struct PanelSettingsView: View {
         }
     }
 
+    /// The ordered row-id list; the trigger for the structural animation.
+    /// Reordering or collapsing changes it (animated); a visibility toggle keeps
+    /// the same ids (instant).
+    private var rowsKey: [String] {
+        displayRows.map(\.id)
+    }
+
     private var displayRows: [PanelSettingsRow] {
         PanelSettingsRowBuilder.build(
             topLevel: panel.topLevelEntries,
@@ -73,12 +141,12 @@ struct PanelSettingsView: View {
     private func rowView(_ row: PanelSettingsRow) -> some View {
         switch row.content {
         case let .header(group):
-            headerRow(group)
+            headerRow(group, row: row)
         case let .entry(entry):
             switch row.group {
-            case .appChild:    appChildRow(entry)
-            case .windowChild: windowChildRow(entry)
-            default:           mainRow(entry)
+            case .appChild:    appChildRow(entry, row: row)
+            case .windowChild: windowChildRow(entry, row: row)
+            default:           mainRow(entry, row: row)
             }
         case .addApp:
             addAppButton()
@@ -89,18 +157,20 @@ struct PanelSettingsView: View {
 
     /// A themed section header: a drag handle, a collapse chevron, the uppercase
     /// localized title, and a count of the group's top-level entries.
-    private func headerRow(_ group: BuiltinGroup) -> some View {
+    private func headerRow(_ group: BuiltinGroup, row: PanelSettingsRow) -> some View {
         let count = panel.topLevelEntries.filter {
             if case .builtin(let item) = $0.source { return BuiltinGroup.group(for: item) == group }
             return false
         }.count
         let collapsed = grouping.isCollapsed(group)
         return HStack(spacing: 8) {
-            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
-            Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+            dragHandle(for: row)
+            Image(systemName: "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: 12)
+                .rotationEffect(.degrees(collapsed ? 0 : 90))
+                .animation(Self.collapseAnimation, value: collapsed)
+                .frame(width: Self.disclosureColumnWidth)
             if let titleKey = group.titleKey {
                 LocalizedText(titleKey)
                     .font(.system(size: 11, weight: .semibold))
@@ -118,6 +188,7 @@ struct PanelSettingsView: View {
         .padding(.vertical, 6)
         .contentShape(Rectangle())
         .onTapGesture { grouping.setCollapsed(group, !collapsed) }
+        .hoverCursor(.pointingHand)
     }
 
     @ViewBuilder
@@ -165,10 +236,9 @@ struct PanelSettingsView: View {
         }
     }
 
-    private func mainRow(_ entry: PanelEntry) -> some View {
+    private func mainRow(_ entry: PanelEntry, row: PanelSettingsRow) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.tertiary)
+            dragHandle(for: row)
             parentDisclosure(for: entry)
             Toggle("", isOn: Binding(
                 get: { entry.isVisible },
@@ -199,14 +269,21 @@ struct PanelSettingsView: View {
             Button {
                 grouping.setParentCollapsed(item, !collapsed)
             } label: {
-                Image(systemName: collapsed ? "chevron.right" : "chevron.down")
+                Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .rotationEffect(.degrees(collapsed ? 0 : 90))
+                    .animation(Self.collapseAnimation, value: collapsed)
+                    // Grow the hit target from the bare glyph to the full column
+                    // width and row height.
+                    .frame(width: Self.disclosureColumnWidth)
+                    .frame(maxHeight: .infinity)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .frame(width: 12)
+            .hoverCursor(.pointingHand)
         } else {
-            Color.clear.frame(width: 12)
+            Color.clear.frame(width: Self.disclosureColumnWidth)
         }
     }
 
@@ -248,6 +325,7 @@ struct PanelSettingsView: View {
             .buttonStyle(.plain)
             .frame(width: 20)
             .help(L(.settingsPanelDeleteItemHelp, entry.localizedTitle()))
+            .hoverCursor(.pointingHand)
         } else {
             // Reserve the same width so other columns stay aligned across rows.
             Color.clear.frame(width: 20)
@@ -294,49 +372,153 @@ struct PanelSettingsView: View {
         }
     }
 
-    /// Unified `onMove` for the flattened list. Routes a drag back to the group
-    /// the dragged row belongs to and calls the matching reorder method; a drop
-    /// outside the group is clamped to stay within it.
-    private func move(from source: IndexSet, to destination: Int) {
-        let rows = displayRows
-        guard let decision = PanelReorder.localMove(
-            groups: rows.map(\.group), from: source, to: destination
-        ) else { return }
+    // MARK: Drag-to-reorder
 
-        switch decision.group {
+    /// The grab handle plus its reorder gesture. Rows in a `.fixed` group never
+    /// reach here (their builders draw no handle), so every handle is draggable.
+    private func dragHandle(for row: PanelSettingsRow) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .foregroundStyle(drag?.rowID == row.id ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+            // Grow the grab/hover target from the bare glyph to the full column
+            // width and row height.
+            .frame(width: Self.handleColumnWidth)
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .hoverCursor(.openHand)
+            .gesture(dragGesture(for: row))
+    }
+
+    /// Measures a row's frame into the shared `listSpace` so the drag can map the
+    /// pointer to an insertion index.
+    private func rowFrameReader(_ row: PanelSettingsRow) -> some View {
+        GeometryReader { geo in
+            Color.clear.preference(
+                key: RowFrameKey.self,
+                value: [row.id: geo.frame(in: .named(Self.listSpace))]
+            )
+        }
+    }
+
+    /// A custom drag confined to the dragged row's group: the pointer's Y maps to
+    /// an insertion index among the same-group peers, an accent line previews the
+    /// drop, and release commits through the matching reorder method.
+    private func dragGesture(for row: PanelSettingsRow) -> some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.listSpace))
+            .onChanged { value in
+                if drag?.rowID != row.id {
+                    withAnimation(.snappy(duration: 0.16)) {
+                        drag = DragSession(rowID: row.id, group: row.group,
+                                           dropIndex: groupIndex(of: row))
+                    }
+                }
+                let midYs = peers(of: row.group, excluding: row.id)
+                    .compactMap { rowFrames[$0.id]?.midY }
+                let index = PanelDrag.dropIndex(pointerY: value.location.y, peerMidYs: midYs)
+                if drag?.dropIndex != index {
+                    withAnimation(.snappy(duration: 0.16)) { drag?.dropIndex = index }
+                }
+            }
+            .onEnded { _ in
+                guard let session = drag, session.rowID == row.id else { return }
+                commitDrag(session)
+                withAnimation(.snappy(duration: 0.18)) { drag = nil }
+            }
+    }
+
+    /// Same-group rows in display order (optionally excluding one id). A drag only
+    /// ever reorders within this set.
+    private func peers(of group: PanelDragGroup, excluding excludedID: String? = nil) -> [PanelSettingsRow] {
+        displayRows.filter { $0.group == group && $0.id != excludedID }
+    }
+
+    /// The dragged row's current position among its peers — the drop index that
+    /// would leave the order unchanged.
+    private func groupIndex(of row: PanelSettingsRow) -> Int {
+        peers(of: row.group).firstIndex { $0.id == row.id } ?? 0
+    }
+
+    /// Routes a finished drag to the reorder method for its group, rebuilding the
+    /// group's order with the dragged element reinserted at the drop index.
+    private func commitDrag(_ session: DragSession) {
+        let groupRows = peers(of: session.group)
+        switch session.group {
         case let .topLevel(group):
-            var items = rows.compactMap { row -> BuiltinItem? in
-                guard row.group == .topLevel(group), case let .entry(entry) = row.content,
-                      case let .builtin(item) = entry.source else { return nil }
-                return item
-            }
-            items.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
-            panel.reorderTopLevel(within: group, by: items)
-        case .groupHeader:
-            var order = grouping.themedOrder
-            order.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
-            panel.reorderThemedGroups(by: order)
+            let items = groupRows.compactMap(builtinItem(of:))
+            guard let dragged = builtinItem(ofRowID: session.rowID) else { return }
+            panel.reorderTopLevel(within: group,
+                                  by: PanelDrag.reordered(items, moving: dragged, to: session.dropIndex))
         case .appChild:
-            var ids = panel.appShortcutChildren.compactMap { entry -> UUID? in
-                if case let .appShortcut(id) = entry.source { return id } else { return nil }
-            }
-            ids.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
-            panel.reorderAppShortcuts(by: ids)
+            let ids = groupRows.compactMap(appShortcutID(of:))
+            guard let dragged = appShortcutID(ofRowID: session.rowID) else { return }
+            panel.reorderAppShortcuts(by: PanelDrag.reordered(ids, moving: dragged, to: session.dropIndex))
         case .windowChild:
-            var items = panel.windowLayoutChildren.compactMap { entry -> BuiltinItem? in
-                if case let .builtin(item) = entry.source { return item } else { return nil }
-            }
-            items.move(fromOffsets: IndexSet(integer: decision.from), toOffset: decision.to)
-            panel.reorderWindowChildren(by: items)
+            let items = groupRows.compactMap(builtinItem(of:))
+            guard let dragged = builtinItem(ofRowID: session.rowID) else { return }
+            panel.reorderWindowChildren(by: PanelDrag.reordered(items, moving: dragged, to: session.dropIndex))
+        case .groupHeader:
+            let groups = groupRows.compactMap(headerGroup(of:))
+            guard let dragged = headerGroup(ofRowID: session.rowID) else { return }
+            panel.reorderThemedGroups(by: PanelDrag.reordered(groups, moving: dragged, to: session.dropIndex))
         case .fixed:
             break
         }
     }
 
-    private func appChildRow(_ child: PanelEntry) -> some View {
+    /// The accent insertion line, positioned between the dragged row's peers.
+    @ViewBuilder
+    private var insertionIndicator: some View {
+        if let drag, let y = insertionLineY(drag) {
+            Capsule()
+                .fill(Color.accentColor)
+                .frame(height: 2)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 4)
+                .offset(y: y - 1)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Y (in `listSpace`) of the drop line for the current drag: the top of the
+    /// target peer, the midpoint between two peers, or the bottom of the last.
+    private func insertionLineY(_ session: DragSession) -> CGFloat? {
+        let rects = peers(of: session.group, excluding: session.rowID)
+            .compactMap { rowFrames[$0.id] }
+            .sorted { $0.minY < $1.minY }
+        guard !rects.isEmpty else { return nil }
+        let index = min(max(session.dropIndex, 0), rects.count)
+        if index == 0 { return rects.first!.minY }
+        if index >= rects.count { return rects.last!.maxY }
+        return (rects[index - 1].maxY + rects[index].minY) / 2
+    }
+
+    // MARK: Row identity helpers
+
+    private func builtinItem(of row: PanelSettingsRow) -> BuiltinItem? {
+        if case let .entry(entry) = row.content, case let .builtin(item) = entry.source { return item }
+        return nil
+    }
+    private func appShortcutID(of row: PanelSettingsRow) -> UUID? {
+        if case let .entry(entry) = row.content, case let .appShortcut(id) = entry.source { return id }
+        return nil
+    }
+    private func headerGroup(of row: PanelSettingsRow) -> BuiltinGroup? {
+        if case let .header(group) = row.content { return group }
+        return nil
+    }
+    private func builtinItem(ofRowID id: String) -> BuiltinItem? {
+        displayRows.first { $0.id == id }.flatMap(builtinItem(of:))
+    }
+    private func appShortcutID(ofRowID id: String) -> UUID? {
+        displayRows.first { $0.id == id }.flatMap(appShortcutID(of:))
+    }
+    private func headerGroup(ofRowID id: String) -> BuiltinGroup? {
+        displayRows.first { $0.id == id }.flatMap(headerGroup(of:))
+    }
+
+    private func appChildRow(_ child: PanelEntry, row: PanelSettingsRow) -> some View {
         HStack(spacing: 8) {
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
-            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+            dragHandle(for: row)
             Toggle("", isOn: Binding(
                 get: { child.isVisible },
                 set: { newValue in
@@ -367,10 +549,10 @@ struct PanelSettingsView: View {
         return nil
     }
 
-    private func windowChildRow(_ child: PanelEntry) -> some View {
+    private func windowChildRow(_ child: PanelEntry, row: PanelSettingsRow) -> some View {
         HStack(spacing: 8) {
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
-            Image(systemName: "line.3.horizontal").foregroundStyle(.tertiary)
+            dragHandle(for: row)
             Image(systemName: child.symbol).frame(width: 18)
             Text(child.localizedTitle()).font(.body)
             Spacer()
@@ -393,6 +575,7 @@ struct PanelSettingsView: View {
                     .font(.caption)
             }
             .buttonStyle(.bordered)
+            .hoverCursor(.pointingHand)
             Spacer()
         }
         .padding(.vertical, 4)
@@ -448,6 +631,21 @@ private struct AppShortcutIcon: View {
                 image = await AppIconCache.icon(for: path)
             }
         }
+    }
+}
+
+/// An in-flight Panel settings reorder drag.
+private struct DragSession {
+    let rowID: String
+    let group: PanelDragGroup
+    var dropIndex: Int
+}
+
+/// Collects each row's frame in the list coordinate space for the drag.
+private struct RowFrameKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
     }
 }
 
