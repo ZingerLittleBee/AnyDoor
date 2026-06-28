@@ -18,6 +18,7 @@ struct TranslationSettingsView: View {
             historySection
         }
         .formStyle(.grouped)
+        .overlayScrollers()
     }
 
     /// Present the editor as a modal dialog centered over — and dimming — the
@@ -281,6 +282,7 @@ struct TranslationServiceConfigSheet: View {
                 }
             }
             .formStyle(.grouped)
+            .overlayScrollers()
 
             Divider()
 

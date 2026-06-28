@@ -28,6 +28,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let reopenSettingsLaunchGrace: TimeInterval = 3
 
     override init() {
+        // Force overlay (floating, auto-hiding) scrollers app-wide, regardless
+        // of the system "Show scroll bars: Always" setting. Writing it to the
+        // app's own defaults domain (higher priority than NSGlobalDomain, where
+        // the system value lives) overrides it for this process, so every
+        // NSScrollView — SwiftUI ScrollView/Form/List, popovers, the menu panel
+        // — is *born* with overlay scrollers. That avoids the legacy thick
+        // scrollbar entirely, and the one-frame flash that any after-the-fact
+        // restyling causes on a Settings tab switch. See OverlayScrollers.swift.
+        UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)

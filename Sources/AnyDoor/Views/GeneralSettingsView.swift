@@ -223,6 +223,7 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .overlayScrollers()
         // Poll while the tab is visible so the badges update live after the
         // user grants a permission in System Settings.
         .task {
