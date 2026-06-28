@@ -163,12 +163,16 @@ struct PanelSettingsView: View {
     @ViewBuilder
     private func brightnessHotkeyRow(item: BuiltinItem, labelKey: L10n.Key) -> some View {
         HStack(spacing: 8) {
-            // Mirror the indented child rows (app shortcut / window layout): a
-            // leading accent bar, then a handle-width spacer standing in for the
-            // drag handle these fixed rows don't have, so the label lines up with
-            // the other children instead of sitting flush-left.
+            // Mirror the app-shortcut child row's leading columns so the label
+            // lines up with the parent "屏幕亮度" title — which sits after the
+            // handle, checkbox, and symbol columns. A child accent bar, a
+            // handle-width spacer (these fixed rows aren't draggable), then
+            // invisible checkbox + symbol columns. The checkbox placeholder is a
+            // hidden real Toggle so it reserves the exact native checkbox width.
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
             Color.clear.frame(width: Self.handleColumnWidth)
+            Toggle("", isOn: .constant(false)).toggleStyle(.checkbox).labelsHidden().hidden()
+            Color.clear.frame(width: 18)
             LocalizedText(labelKey).font(.caption).foregroundStyle(.secondary)
             Spacer()
             HotkeyRecorder(hotkey: .constant(PanelStore.shared.hotkeyForBuiltin(item))) { newValue in
