@@ -52,7 +52,7 @@ final class PanelStoreTests: XCTestCase {
         XCTAssertEqual(store.topLevelEntries.count, expectedVisible.count)
         // Window children should appear in windowLayoutChildren instead
         XCTAssertEqual(store.windowLayoutChildren.count, windowChildKeys.count)
-        // Order should follow defaultOrder — first entry should be keepAwake (defaultOrder 100)
+        // Flat displayOrder sort: keepAwake has the lowest defaultOrder (100).
         let firstSource = store.topLevelEntries.first?.source
         XCTAssertEqual(firstSource, .builtin(.keepAwake))
     }
@@ -83,6 +83,28 @@ final class PanelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testAppShortcutPathsMapBindingIDToAppPath() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self,
+            configurations: config
+        )
+        let context = container.mainContext
+        let a = KeyBinding(keyCode: 122, modifierFlags: 0,
+                           appBundleID: "a", appName: "A", appPath: "/Applications/A.app",
+                           displayOrder: 100)
+        context.insert(a)
+        try context.save()
+
+        let store = PanelStore.shared
+        store.bootstrap(modelContainer: container, providers: [])
+
+        // The path map lets settings rows resolve the Finder icon by path with
+        // no per-render SwiftData fetch.
+        XCTAssertEqual(store.appShortcutPaths[a.id], "/Applications/A.app")
+    }
+
+    @MainActor
     func testRunDropsOverlappingCallForSameItem() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
@@ -98,5 +120,49 @@ final class PanelStoreTests: XCTestCase {
 
         let count = await provider.runCount
         XCTAssertEqual(count, 1, "a run re-entered while the same item is in-flight must be dropped")
+    }
+
+    @MainActor
+    func testTopLevelEntriesSortedByDisplayOrder() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self, configurations: config
+        )
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+
+        let store = PanelStore.shared
+        store.bootstrap(modelContainer: container, providers: [])
+
+        // The Panel settings page is an ungrouped flat list: top-level entries
+        // are ordered purely by displayOrder.
+        let orders = store.topLevelEntries.map(\.displayOrder)
+        XCTAssertEqual(orders, orders.sorted(), "top-level entries must be sorted by displayOrder")
+    }
+
+    @MainActor
+    func testReorderTopLevelPersistsFlatOrder() async throws {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self, configurations: config
+        )
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+        let store = PanelStore.shared
+        store.bootstrap(modelContainer: container, providers: [])
+
+        func topItems() -> [BuiltinItem] {
+            store.topLevelEntries.compactMap { entry in
+                if case .builtin(let item) = entry.source { return item }
+                return nil
+            }
+        }
+        let before = topItems()
+        XCTAssertGreaterThan(before.count, 2)
+        // Move the first item to the end of the flat list.
+        var reordered = before
+        let moved = reordered.removeFirst()
+        reordered.append(moved)
+        store.reorderTopLevel(by: reordered)
+
+        XCTAssertEqual(topItems(), reordered, "top-level order must reflect the flat reorder")
     }
 }

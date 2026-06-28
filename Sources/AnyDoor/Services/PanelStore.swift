@@ -8,7 +8,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "panel")
 ///
 /// Owns the provider registry, reads BuiltinPreference / KeyBinding from SwiftData,
 /// and exposes three collections to the views:
-/// - `topLevelEntries` — built-in items, sorted by BuiltinPreference.displayOrder
+/// - `topLevelEntries` — built-in items, sorted by (group order index, displayOrder)
 /// - `appShortcutChildren` — KeyBinding rows, sorted by KeyBinding.displayOrder
 /// - `windowLayoutChildren` — the four window-layout action children, sorted by displayOrder
 @Observable @MainActor
@@ -19,9 +19,16 @@ final class PanelStore {
     private(set) var appShortcutChildren: [PanelEntry] = []
     private(set) var windowLayoutChildren: [PanelEntry] = []
 
+    /// On-disk app path for each app-shortcut binding id, captured in `rebuild()`.
+    /// Settings rows read the Finder icon by path through this map instead of a
+    /// per-render `binding(id:)` SwiftData fetch, which — combined with a
+    /// synchronous `NSWorkspace.icon(forFile:)` read in the row body — dropped
+    /// scroll frames as the List recycled app rows.
+    private(set) var appShortcutPaths: [UUID: String] = [:]
+
     /// The window-layout child items that are partitioned out of topLevelEntries
     /// and exposed separately via `windowLayoutChildren`.
-    private static let windowLayoutChildKeys: Set<BuiltinItem> = [
+    static let windowLayoutChildKeys: Set<BuiltinItem> = [
         .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
         .windowTopHalf, .windowBottomHalf,
         .windowTopLeftQuarter, .windowTopRightQuarter,
@@ -119,10 +126,12 @@ final class PanelStore {
 
         // KeyBinding rows → appShortcutChildren
         var children: [PanelEntry] = []
+        var pathMap: [UUID: String] = [:]
         if let bindings = try? context.fetch(
             FetchDescriptor<KeyBinding>(sortBy: [SortDescriptor(\.displayOrder)])
         ) {
             for binding in bindings {
+                pathMap[binding.id] = binding.appPath
                 // keyCode == -1 is the "unbound" sentinel used for newly-added
                 // app shortcuts. Project it as a nil hotkey so the recorder
                 // renders its placeholder instead of "Key(-1)".
@@ -147,8 +156,14 @@ final class PanelStore {
             }
         }
 
-        self.topLevelEntries = topLevel
+        // Flat order by displayOrder — the Panel settings page is an ungrouped
+        // list and the menu-bar panel mirrors it. displayOrder is the canonical
+        // hand-tuned order (see BuiltinItem.defaultOrder), normalized for
+        // pre-existing stores by the one-shot flatten backfill in
+        // BuiltinPreferenceSeeder.
+        self.topLevelEntries = topLevel.sorted { $0.displayOrder < $1.displayOrder }
         self.appShortcutChildren = children
+        self.appShortcutPaths = pathMap
         self.windowLayoutChildren = windowChildren.sorted { $0.displayOrder < $1.displayOrder }
     }
 
@@ -514,7 +529,10 @@ final class PanelStore {
         rebuildHotkeySnapshots()
     }
 
-    /// Reorder top-level entries by new keys array (ordered).
+    /// Reorder the top-level entries as one flat list. Reassigns a global
+    /// `displayOrder` (stride 100) across the passed order; window-layout
+    /// children (partitioned into `windowLayoutChildren`, never present in
+    /// `newOrder`) keep their own order untouched.
     func reorderTopLevel(by newOrder: [BuiltinItem]) {
         guard let container = modelContainer else { return }
         let context = container.mainContext

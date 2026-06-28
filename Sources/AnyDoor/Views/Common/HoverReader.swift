@@ -37,6 +37,7 @@ struct HoverReader: NSViewRepresentable {
     final class HoverTrackingView: NSView {
         var onChange: (@MainActor (Bool) -> Void)?
         private var inside = false
+        private var trackedBounds: NSRect = .null
 
         // Click-transparent: this is a background hover sensor only. Tracking-area
         // enter/exit events are delivered regardless of hit-testing, so returning
@@ -45,16 +46,21 @@ struct HoverReader: NSViewRepresentable {
 
         override func updateTrackingAreas() {
             super.updateTrackingAreas()
-            // `.inVisibleRect` keeps the area sized to the view across layout, so
-            // it rarely needs rebuilding; only (re)install when actually missing.
-            // Tearing it down and re-adding on every layout pass is gratuitous and
-            // also drops the enter edge: AppKit does not synthesize `mouseEntered:`
-            // when an area is re-added under an already-stationary cursor.
-            if trackingAreas.isEmpty {
+            // Use an explicit `bounds`-sized tracking rect instead of
+            // `.inVisibleRect`. For rows SwiftUI hosts inside a `ScrollView` —
+            // especially ones inserted by a collapse/expand `.transition` — an
+            // `.inVisibleRect` area can stop delivering enter/exit crossings even
+            // though it is installed with the correct geometry, so the hover state
+            // never updates. An explicit rect, rebuilt only when `bounds` actually
+            // changes (not on every scroll-driven layout pass), is reliable; the
+            // "re-add drops the enter edge" gap is covered by `reconcileHover()`.
+            if trackingAreas.isEmpty || trackedBounds != bounds {
+                trackingAreas.forEach(removeTrackingArea)
+                trackedBounds = bounds
                 // `.activeAlways` so a non-activating menu panel still tracks hover.
                 addTrackingArea(NSTrackingArea(
-                    rect: .zero,
-                    options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect],
+                    rect: bounds,
+                    options: [.activeAlways, .mouseEnteredAndExited],
                     owner: self
                 ))
             }

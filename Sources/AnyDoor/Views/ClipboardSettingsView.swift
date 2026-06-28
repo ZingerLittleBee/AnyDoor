@@ -43,6 +43,7 @@ struct ClipboardSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .overlayScrollers()
         .task {
             reloadClipboardExcludedApps()
         }

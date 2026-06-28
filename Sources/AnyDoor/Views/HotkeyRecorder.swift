@@ -64,6 +64,7 @@ struct HotkeyRecorder: View {
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .contentShape(Rectangle())
                 .onTapGesture { startRecording() }
+                .hoverCursor(.pointingHand)
 
             if allowsClear && hotkey != nil && !isRecording {
                 Button {
@@ -77,6 +78,7 @@ struct HotkeyRecorder: View {
                 .buttonStyle(.plain)
                 .padding(.trailing, 6)
                 .help(L(.hotkeyRecorderClear))
+                .hoverCursor(.pointingHand)
             }
         }
         .background(

@@ -1037,7 +1037,7 @@ private struct CommandPaletteRow: View {
     var body: some View {
         HStack(spacing: 12) {
             icon
-                .frame(width: 22, height: 22)
+                .frame(width: Self.iconSize, height: Self.iconSize)
             titleBlock
             Spacer()
             if let option, option.isChecked {
@@ -1115,10 +1115,34 @@ private struct CommandPaletteRow: View {
             // smaller point size than the 22pt frame to read at the same visual
             // weight as NSImage app icons. Built-in toggles read at full
             // strength; other symbol rows match the dimmer fallback weight.
+            //
+            // A toggle in its on-state gets an accent-tinted badge behind the
+            // glyph (mirroring the menu-bar panel's `iconBadge`), so the active
+            // state is visible right on the icon without a trailing switch. The
+            // glyph color itself never changes — only the badge tint does, like
+            // the menu bar (whose symbol stays `.primary` on and off).
             Image(systemName: entry.symbol)
-                .font(.system(size: 15))
+                .font(.system(size: 13))
                 .foregroundStyle(isBuiltin ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .frame(width: Self.iconSize, height: Self.iconSize)
+                .background {
+                    if isToggleOn {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.accentColor.opacity(0.22))
+                    }
+                }
         }
+    }
+
+    /// Side length of the leading icon slot / on-state badge. Kept at the
+    /// original size so row height, alignment and the badge stay unchanged —
+    /// only the glyph drawn inside it is smaller (the 13pt symbol above).
+    private static let iconSize: CGFloat = 22
+
+    /// True when this row is a toggle that is currently on. Drives the
+    /// accent-tinted on-state badge behind the icon.
+    private var isToggleOn: Bool {
+        entry.kind == .toggle && entry.toggleState == true
     }
 
     /// File path whose Finder icon backs this row, or nil when the row draws an

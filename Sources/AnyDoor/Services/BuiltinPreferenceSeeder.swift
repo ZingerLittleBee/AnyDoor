@@ -15,6 +15,7 @@ enum BuiltinPreferenceSeeder {
     private static let windowLayoutBackfillFlag = "windowLayoutDefaultsApplied_v1"
     private static let windowLayoutBackfillV2Flag = "windowLayoutDefaultsApplied_v2"
     private static let clipboardWallHotkeyFlag = "clipboardWallDefaultHotkey_v1"
+    private static let topLevelFlattenFlag = "panelTopLevelOrderFlattened_v1"
 
     @MainActor
     static func seedIfNeeded(in context: ModelContext) {
@@ -47,6 +48,7 @@ enum BuiltinPreferenceSeeder {
             applyWindowLayoutBackfillIfNeeded(in: context)
             applyWindowLayoutBackfillV2IfNeeded(in: context)
             applyClipboardWallHotkeyIfNeeded(in: context)
+            applyTopLevelFlattenIfNeeded(in: context)
         } catch {
             logger.error("BuiltinPreference seeding failed: \(error)")
         }
@@ -78,6 +80,35 @@ enum BuiltinPreferenceSeeder {
             logger.info("Seeded default Command+Shift+V hotkey for clipboard wall")
         } catch {
             logger.error("clipboardWall hotkey seed failed: \(error)")
+        }
+    }
+
+    /// One-shot normalization of top-level rows back to the canonical flat order
+    /// when themed grouping was removed from the Panel settings page.
+    ///
+    /// While grouping existed, `reorderTopLevel(within:)` rewrote per-group
+    /// `displayOrder` starting at 100 for each group, so different groups could
+    /// hold overlapping values — harmless then (the group index dominated the
+    /// sort), but it scrambles the now-flat `displayOrder`-only sort. Reset every
+    /// top-level built-in to its `defaultOrder` (the hand-tuned flat order).
+    /// Window-layout children are excluded so their independent reorder survives.
+    @MainActor
+    private static func applyTopLevelFlattenIfNeeded(in context: ModelContext) {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: topLevelFlattenFlag) else { return }
+        defer { defaults.set(true, forKey: topLevelFlattenFlag) }   // one-shot regardless of outcome
+
+        do {
+            let rows = try context.fetch(FetchDescriptor<BuiltinPreference>())
+            for row in rows {
+                guard let item = BuiltinItem(rawValue: row.itemKey),
+                      !PanelStore.windowLayoutChildKeys.contains(item) else { continue }
+                row.displayOrder = item.defaultOrder
+            }
+            try context.save()
+            logger.info("Flattened top-level displayOrder to canonical defaults")
+        } catch {
+            logger.error("top-level flatten backfill failed: \(error)")
         }
     }
 

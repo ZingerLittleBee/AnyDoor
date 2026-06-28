@@ -97,12 +97,19 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
 
-        // Refresh the installed-apps list OFF the main actor: the window is
-        // already on screen, so the `/Applications` scan can never delay
-        // summoning the palette. When it resolves, repopulate the Applications
-        // section in place (the @Observable state re-renders) and warm the new
-        // icons. Subsequent opens render instantly from the cache above.
+        // After the window is on screen, refresh state that the synchronous
+        // seed above can't supply, then repopulate the sections in place (the
+        // @Observable state re-renders). Two pieces, folded into one task so the
+        // section rebuild happens exactly once:
+        //   1. Toggle states. `topLevelEntries.toggleState` is only accurate
+        //      after `PanelStore.refreshAll()` polls each provider, which today
+        //      runs from the menu-bar panel's onAppear. Without this, a palette
+        //      opened before the panel shows every toggle as off, so the on-state
+        //      icon styling never appears.
+        //   2. The installed-apps list, scanned OFF the main actor so the
+        //      `/Applications` walk never delays summoning the palette.
         Task { [weak self, weak pickerState] in
+            await PanelStore.shared.refreshAll()
             let apps = await Task.detached(priority: .userInitiated) {
                 InstalledAppsScanner.scan()
             }.value
@@ -160,11 +167,34 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 return false
             }
         }
-        if !commands.isEmpty {
+        // Carve themed sub-groups out of the flat command list. Any command not
+        // claimed by a group falls back to the general Commands section, which
+        // is listed first; the groups follow in declaration order.
+        func builtin(_ entry: PanelEntry) -> BuiltinItem? {
+            if case .builtin(let item) = entry.source { return item }
+            return nil
+        }
+        // Source the themed sub-groups from the shared BuiltinGroup catalog so
+        // the palette and the Panel settings page never drift. Order and titles
+        // are unchanged: themedDefaultOrder is [toggles, power, capture, translation].
+        let groups: [(L10n.Key, Set<BuiltinItem>)] = BuiltinGroup.themedDefaultOrder.map { group in
+            (group.titleKey!, group.members)
+        }
+        let grouped = groups.reduce(into: Set<BuiltinItem>()) { $0.formUnion($1.1) }
+        let generalCommands = commands.filter { entry in
+            guard let item = builtin(entry) else { return true }
+            return !grouped.contains(item)
+        }
+        if !generalCommands.isEmpty {
             sections.append(CommandPaletteSection(
                 titleKey: .commandPaletteSectionCommands,
-                entries: commands
+                entries: generalCommands
             ))
+        }
+        for (titleKey, items) in groups {
+            let entries = commands.filter { builtin($0).map(items.contains) ?? false }
+            guard !entries.isEmpty else { continue }
+            sections.append(CommandPaletteSection(titleKey: titleKey, entries: entries))
         }
 
         let windowLayout = store.windowLayoutChildren.filter(\.isVisible)

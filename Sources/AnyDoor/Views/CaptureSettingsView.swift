@@ -82,6 +82,7 @@ struct CaptureSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .overlayScrollers()
     }
 
     // MARK: - Bindings into CaptureSettings setters
