@@ -445,11 +445,27 @@ struct PanelSettingsView: View {
         let rects = peers(of: session.group, excluding: session.rowID)
             .compactMap { rowFrames[$0.id] }
             .sorted { $0.minY < $1.minY }
-        guard !rects.isEmpty else { return nil }
+        guard let lastRect = rects.last else { return nil }
         let index = min(max(session.dropIndex, 0), rects.count)
-        if index == 0 { return rects.first!.minY }
-        if index >= rects.count { return rects.last!.maxY }
-        return (rects[index - 1].maxY + rects[index].minY) / 2
+        // Anchor the line to the TOP of the peer that will follow the dropped
+        // row, not the midpoint of the gap above it. When a top-level parent is
+        // expanded its child rows sit in that gap, so the old midpoint floated
+        // the line into the middle of the children instead of at the boundary.
+        if index < rects.count {
+            return rects[index].minY
+        }
+        // Dropping past the last peer. A top-level peer may be an expanded parent
+        // whose children sit below it; since it is the last top-level row,
+        // everything rendered below it belongs to its block, so extend to the
+        // bottom of the last child. Child groups have no sub-rows — the peer's
+        // own bottom is the boundary.
+        if session.group == .topLevel {
+            let blockBottom = rowFrames
+                .filter { $0.key != session.rowID && $0.value.minY >= lastRect.minY }
+                .values.map(\.maxY).max()
+            return blockBottom ?? lastRect.maxY
+        }
+        return lastRect.maxY
     }
 
     // MARK: Row identity helpers
