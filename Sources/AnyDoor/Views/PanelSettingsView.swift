@@ -131,8 +131,6 @@ struct PanelSettingsView: View {
             topLevel: panel.topLevelEntries,
             appChildren: panel.appShortcutChildren,
             windowChildren: panel.windowLayoutChildren,
-            themedOrder: grouping.themedOrder,
-            collapsedGroups: grouping.collapsedGroups,
             collapsedParents: grouping.collapsedParents
         )
     }
@@ -140,8 +138,6 @@ struct PanelSettingsView: View {
     @ViewBuilder
     private func rowView(_ row: PanelSettingsRow) -> some View {
         switch row.content {
-        case let .header(group):
-            headerRow(group, row: row)
         case let .entry(entry):
             switch row.group {
             case .appChild:    appChildRow(entry, row: row)
@@ -155,55 +151,24 @@ struct PanelSettingsView: View {
         }
     }
 
-    /// A themed section header: a drag handle, a collapse chevron, the uppercase
-    /// localized title, and a count of the group's top-level entries.
-    private func headerRow(_ group: BuiltinGroup, row: PanelSettingsRow) -> some View {
-        let count = panel.topLevelEntries.filter {
-            if case .builtin(let item) = $0.source { return BuiltinGroup.group(for: item) == group }
-            return false
-        }.count
-        let collapsed = grouping.isCollapsed(group)
-        return HStack(spacing: 8) {
-            dragHandle(for: row)
-            Image(systemName: "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .rotationEffect(.degrees(collapsed ? 0 : 90))
-                .animation(Self.collapseAnimation, value: collapsed)
-                .frame(width: Self.disclosureColumnWidth)
-            if let titleKey = group.titleKey {
-                LocalizedText(titleKey)
-                    .font(.system(size: 11, weight: .semibold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
-                    .tracking(0.6)
-            }
-            Text("\(count)")
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(.tertiary)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(Capsule().fill(Color.secondary.opacity(0.12)))
-            Spacer()
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-        .onTapGesture { grouping.setCollapsed(group, !collapsed) }
-        .hoverCursor(.pointingHand)
-    }
-
     @ViewBuilder
     private func brightnessHotkeyRecorders() -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(spacing: 6) {
             brightnessHotkeyRow(item: .brightnessUp, labelKey: .builtinBrightnessUp)
             brightnessHotkeyRow(item: .brightnessDown, labelKey: .builtinBrightnessDown)
         }
-        .padding(.leading, 36)
         .padding(.vertical, 4)
     }
 
     @ViewBuilder
     private func brightnessHotkeyRow(item: BuiltinItem, labelKey: L10n.Key) -> some View {
-        HStack {
+        HStack(spacing: 8) {
+            // Mirror the indented child rows (app shortcut / window layout): a
+            // leading accent bar, then a handle-width spacer standing in for the
+            // drag handle these fixed rows don't have, so the label lines up with
+            // the other children instead of sitting flush-left.
+            Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
+            Color.clear.frame(width: Self.handleColumnWidth)
             LocalizedText(labelKey).font(.caption).foregroundStyle(.secondary)
             Spacer()
             HotkeyRecorder(hotkey: .constant(PanelStore.shared.hotkeyForBuiltin(item))) { newValue in
@@ -214,6 +179,7 @@ struct PanelSettingsView: View {
             // of recorders align flush along the panel's right edge.
             Color.clear.frame(width: 20)
         }
+        .padding(.vertical, 3)
     }
 
     private func handleBrightnessHotkeyChange(item: BuiltinItem, newValue: HotkeyDescriptor?) {
@@ -442,11 +408,10 @@ struct PanelSettingsView: View {
     private func commitDrag(_ session: DragSession) {
         let groupRows = peers(of: session.group)
         switch session.group {
-        case let .topLevel(group):
+        case .topLevel:
             let items = groupRows.compactMap(builtinItem(of:))
             guard let dragged = builtinItem(ofRowID: session.rowID) else { return }
-            panel.reorderTopLevel(within: group,
-                                  by: PanelDrag.reordered(items, moving: dragged, to: session.dropIndex))
+            panel.reorderTopLevel(by: PanelDrag.reordered(items, moving: dragged, to: session.dropIndex))
         case .appChild:
             let ids = groupRows.compactMap(appShortcutID(of:))
             guard let dragged = appShortcutID(ofRowID: session.rowID) else { return }
@@ -455,10 +420,6 @@ struct PanelSettingsView: View {
             let items = groupRows.compactMap(builtinItem(of:))
             guard let dragged = builtinItem(ofRowID: session.rowID) else { return }
             panel.reorderWindowChildren(by: PanelDrag.reordered(items, moving: dragged, to: session.dropIndex))
-        case .groupHeader:
-            let groups = groupRows.compactMap(headerGroup(of:))
-            guard let dragged = headerGroup(ofRowID: session.rowID) else { return }
-            panel.reorderThemedGroups(by: PanelDrag.reordered(groups, moving: dragged, to: session.dropIndex))
         case .fixed:
             break
         }
@@ -501,18 +462,11 @@ struct PanelSettingsView: View {
         if case let .entry(entry) = row.content, case let .appShortcut(id) = entry.source { return id }
         return nil
     }
-    private func headerGroup(of row: PanelSettingsRow) -> BuiltinGroup? {
-        if case let .header(group) = row.content { return group }
-        return nil
-    }
     private func builtinItem(ofRowID id: String) -> BuiltinItem? {
         displayRows.first { $0.id == id }.flatMap(builtinItem(of:))
     }
     private func appShortcutID(ofRowID id: String) -> UUID? {
         displayRows.first { $0.id == id }.flatMap(appShortcutID(of:))
-    }
-    private func headerGroup(ofRowID id: String) -> BuiltinGroup? {
-        displayRows.first { $0.id == id }.flatMap(headerGroup(of:))
     }
 
     private func appChildRow(_ child: PanelEntry, row: PanelSettingsRow) -> some View {

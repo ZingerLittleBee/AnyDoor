@@ -2,10 +2,10 @@ import Foundation
 import Testing
 @testable import AnyDoor
 
-/// `PanelSettingsRowBuilder` flattens grouped Panel entries into one ordered
-/// list of rows (with injected section headers + collapse handling) that the
-/// settings `List` renders. These tests pin header placement and the two
-/// collapse behaviors without spinning up SwiftUI.
+/// `PanelSettingsRowBuilder` flattens Panel entries into one ordered list of rows
+/// (top-level entries in `displayOrder`, with each parent's children and
+/// adornments following it) that the settings list renders. These tests pin the
+/// flat ordering and the parent-collapse behavior without spinning up SwiftUI.
 struct PanelSettingsRowBuilderTests {
 
     private func entry(_ item: BuiltinItem, visible: Bool = true) -> PanelEntry {
@@ -40,51 +40,28 @@ struct PanelSettingsRowBuilderTests {
         )
     }
 
-    /// general: appShortcuts, clipboardWall ; togglesAppearance: brightness, muteAudio
     private func sampleTopLevel() -> [PanelEntry] {
         [entry(.appShortcuts), entry(.clipboardWall), entry(.brightness), entry(.muteAudio)]
     }
 
-    @Test func generalEntriesLeadWithoutAHeader() {
+    @Test func emitsTopLevelEntriesFlatInGivenOrder() {
         let rows = PanelSettingsRowBuilder.build(
             topLevel: sampleTopLevel(),
             appChildren: [],
             windowChildren: [],
-            themedOrder: [.togglesAppearance],
-            collapsedGroups: [],
             collapsedParents: []
         )
-        // First row is the general appShortcuts entry, not a header.
-        guard case .entry(let first) = rows.first?.content else {
-            Issue.record("first row should be an entry"); return
+        // Every row is an entry (plus the brightness recorders adornment); there
+        // are no section headers, and the entries keep the input order.
+        let entrySources = rows.compactMap { row -> PanelEntry.Source? in
+            if case .entry(let e) = row.content { return e.source } else { return nil }
         }
-        #expect(first.source == .builtin(.appShortcuts))
-        #expect(rows.first?.group == .topLevel(.general))
-        // Exactly one header exists, for togglesAppearance.
-        let headers = rows.compactMap { row -> BuiltinGroup? in
-            if case .header(let g) = row.content { return g } else { return nil }
-        }
-        #expect(headers == [.togglesAppearance])
-    }
-
-    @Test func collapsedThemedGroupEmitsHeaderOnly() {
-        let rows = PanelSettingsRowBuilder.build(
-            topLevel: sampleTopLevel(),
-            appChildren: [],
-            windowChildren: [],
-            themedOrder: [.togglesAppearance],
-            collapsedGroups: [.togglesAppearance],
-            collapsedParents: []
-        )
-        // The header is present but neither brightness nor muteAudio rows follow.
-        #expect(rows.contains { if case .header(.togglesAppearance) = $0.content { return true } else { return false } })
-        let toggleEntries = rows.contains { row in
-            if case .entry(let e) = row.content, case .builtin(let i) = e.source {
-                return BuiltinGroup.group(for: i) == .togglesAppearance
-            }
-            return false
-        }
-        #expect(!toggleEntries)
+        #expect(entrySources == [
+            .builtin(.appShortcuts), .builtin(.clipboardWall),
+            .builtin(.brightness), .builtin(.muteAudio),
+        ])
+        // First row carries the flat top-level drag group.
+        #expect(rows.first?.group == .topLevel)
     }
 
     @Test func collapsedAppShortcutsParentHidesChildrenAndAddRow() {
@@ -92,8 +69,6 @@ struct PanelSettingsRowBuilderTests {
             topLevel: [entry(.appShortcuts)],
             appChildren: [appChild("Codex"), appChild("Warp")],
             windowChildren: [],
-            themedOrder: [],
-            collapsedGroups: [],
             collapsedParents: []
         )
         // Expanded: parent + 2 app children + add-app row.
@@ -104,8 +79,6 @@ struct PanelSettingsRowBuilderTests {
             topLevel: [entry(.appShortcuts)],
             appChildren: [appChild("Codex"), appChild("Warp")],
             windowChildren: [],
-            themedOrder: [],
-            collapsedGroups: [],
             collapsedParents: [.appShortcuts]
         )
         // Collapsed: only the parent entry remains.
@@ -114,13 +87,11 @@ struct PanelSettingsRowBuilderTests {
         #expect(collapsed.contains { if case .entry(let e) = $0.content { return e.source == .builtin(.appShortcuts) } else { return false } })
     }
 
-    @Test func brightnessRecordersFollowBrightnessInThemedGroup() {
+    @Test func brightnessRecordersFollowBrightness() {
         let rows = PanelSettingsRowBuilder.build(
             topLevel: [entry(.brightness)],
             appChildren: [],
             windowChildren: [],
-            themedOrder: [.togglesAppearance],
-            collapsedGroups: [],
             collapsedParents: []
         )
         let recorderIndex = rows.firstIndex { if case .brightnessRecorders = $0.content { return true } else { return false } }

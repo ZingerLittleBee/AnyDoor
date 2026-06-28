@@ -52,10 +52,9 @@ final class PanelStoreTests: XCTestCase {
         XCTAssertEqual(store.topLevelEntries.count, expectedVisible.count)
         // Window children should appear in windowLayoutChildren instead
         XCTAssertEqual(store.windowLayoutChildren.count, windowChildKeys.count)
-        // After group-aware sort, .general entries (group index 0) come first;
-        // .appShortcuts has the lowest defaultOrder among general items (200).
+        // Flat displayOrder sort: keepAwake has the lowest defaultOrder (100).
         let firstSource = store.topLevelEntries.first?.source
-        XCTAssertEqual(firstSource, .builtin(.appShortcuts))
+        XCTAssertEqual(firstSource, .builtin(.keepAwake))
     }
 
     @MainActor
@@ -124,91 +123,46 @@ final class PanelStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testTopLevelEntriesAreGroupContiguous() async throws {
+    func testTopLevelEntriesSortedByDisplayOrder() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: KeyBinding.self, BuiltinPreference.self, configurations: config
         )
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
-        // Ensure default group order for a deterministic assertion.
-        PanelGroupingStore.shared.setThemedOrder(BuiltinGroup.themedDefaultOrder)
 
         let store = PanelStore.shared
         store.bootstrap(modelContainer: container, providers: [])
 
-        // Map each top-level entry to its group order index; the sequence of
-        // indices must be non-decreasing (every group forms a contiguous block).
-        let indices = store.topLevelEntries.compactMap { entry -> Int? in
-            guard case .builtin(let item) = entry.source else { return nil }
-            return PanelGroupingStore.shared.orderIndex(for: BuiltinGroup.group(for: item))
-        }
-        XCTAssertEqual(indices, indices.sorted(), "top-level entries must be grouped contiguously")
-        // General (index 0) leads, so the first entry belongs to .general.
-        let firstItem: BuiltinItem? = {
-            if case .builtin(let item) = store.topLevelEntries.first?.source { return item }
-            return nil
-        }()
-        XCTAssertEqual(firstItem.map(BuiltinGroup.group(for:)), .general)
+        // The Panel settings page is an ungrouped flat list: top-level entries
+        // are ordered purely by displayOrder.
+        let orders = store.topLevelEntries.map(\.displayOrder)
+        XCTAssertEqual(orders, orders.sorted(), "top-level entries must be sorted by displayOrder")
     }
 
     @MainActor
-    func testReorderWithinGroupOnlyTouchesThatGroup() async throws {
+    func testReorderTopLevelPersistsFlatOrder() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: KeyBinding.self, BuiltinPreference.self, configurations: config
         )
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
-        PanelGroupingStore.shared.setThemedOrder(BuiltinGroup.themedDefaultOrder)
         let store = PanelStore.shared
         store.bootstrap(modelContainer: container, providers: [])
 
-        func powerItems() -> [BuiltinItem] {
+        func topItems() -> [BuiltinItem] {
             store.topLevelEntries.compactMap { entry in
-                guard case .builtin(let item) = entry.source,
-                      BuiltinGroup.group(for: item) == .powerSession else { return nil }
-                return item
+                if case .builtin(let item) = entry.source { return item }
+                return nil
             }
         }
-        let before = powerItems()
-        XCTAssertGreaterThan(before.count, 1)
-        // Move the first power item to the end of the power group.
+        let before = topItems()
+        XCTAssertGreaterThan(before.count, 2)
+        // Move the first item to the end of the flat list.
         var reordered = before
         let moved = reordered.removeFirst()
         reordered.append(moved)
-        store.reorderTopLevel(within: .powerSession, by: reordered)
+        store.reorderTopLevel(by: reordered)
 
-        XCTAssertEqual(powerItems(), reordered, "power group should reflect the new within-group order")
-        // The translation group's relative order is unaffected.
-        let translation = store.topLevelEntries.compactMap { entry -> BuiltinItem? in
-            guard case .builtin(let item) = entry.source,
-                  BuiltinGroup.group(for: item) == .translation else { return nil }
-            return item
-        }
-        XCTAssertEqual(translation, [.translate, .screenshotTranslate, .translateSelection])
-    }
-
-    @MainActor
-    func testReorderThemedGroupsChangesSectionOrder() async throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(
-            for: KeyBinding.self, BuiltinPreference.self, configurations: config
-        )
-        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
-        let store = PanelStore.shared
-        store.bootstrap(modelContainer: container, providers: [])
-
-        store.reorderThemedGroups(by: [.translation, .togglesAppearance, .powerSession, .screenshot])
-        // After reorder, translation (now index 1) precedes togglesAppearance (index 2).
-        func firstIndexOfGroup(_ g: BuiltinGroup) -> Int? {
-            store.topLevelEntries.firstIndex {
-                guard case .builtin(let item) = $0.source else { return false }
-                return BuiltinGroup.group(for: item) == g
-            }
-        }
-        XCTAssertNotNil(firstIndexOfGroup(.translation))
-        XCTAssertLessThan(firstIndexOfGroup(.translation)!, firstIndexOfGroup(.togglesAppearance)!)
-
-        // Restore default order so later tests are deterministic.
-        store.reorderThemedGroups(by: BuiltinGroup.themedDefaultOrder)
+        XCTAssertEqual(topItems(), reordered, "top-level order must reflect the flat reorder")
     }
 }

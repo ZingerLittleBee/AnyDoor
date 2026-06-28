@@ -28,7 +28,7 @@ final class PanelStore {
 
     /// The window-layout child items that are partitioned out of topLevelEntries
     /// and exposed separately via `windowLayoutChildren`.
-    private static let windowLayoutChildKeys: Set<BuiltinItem> = [
+    static let windowLayoutChildKeys: Set<BuiltinItem> = [
         .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
         .windowTopHalf, .windowBottomHalf,
         .windowTopLeftQuarter, .windowTopRightQuarter,
@@ -156,26 +156,15 @@ final class PanelStore {
             }
         }
 
-        // Sort by (group order index, displayOrder) so both this settings page
-        // and the menu-bar panel render group-contiguous blocks. Existing
-        // displayOrder values stay valid as within-group order — no migration.
-        let grouping = PanelGroupingStore.shared
-        self.topLevelEntries = topLevel.sorted { lhs, rhs in
-            let li = grouping.orderIndex(for: group(of: lhs))
-            let ri = grouping.orderIndex(for: group(of: rhs))
-            if li != ri { return li < ri }
-            return lhs.displayOrder < rhs.displayOrder
-        }
+        // Flat order by displayOrder — the Panel settings page is an ungrouped
+        // list and the menu-bar panel mirrors it. displayOrder is the canonical
+        // hand-tuned order (see BuiltinItem.defaultOrder), normalized for
+        // pre-existing stores by the one-shot flatten backfill in
+        // BuiltinPreferenceSeeder.
+        self.topLevelEntries = topLevel.sorted { $0.displayOrder < $1.displayOrder }
         self.appShortcutChildren = children
         self.appShortcutPaths = pathMap
         self.windowLayoutChildren = windowChildren.sorted { $0.displayOrder < $1.displayOrder }
-    }
-
-    /// The themed group an entry belongs to. Non-builtin top-level entries (none
-    /// today) fall into `.general`.
-    private func group(of entry: PanelEntry) -> BuiltinGroup {
-        if case .builtin(let item) = entry.source { return BuiltinGroup.group(for: item) }
-        return .general
     }
 
     private func subtitle(for item: BuiltinItem) -> String? {
@@ -540,17 +529,17 @@ final class PanelStore {
         rebuildHotkeySnapshots()
     }
 
-    /// Reorder the top-level entries inside a single group. Reassigns
-    /// `displayOrder` (stride 100) for that group's items only; cross-group
-    /// order is unaffected because the group order index dominates the sort in
-    /// `rebuild()`, so per-group displayOrder need only be monotonic.
-    func reorderTopLevel(within group: BuiltinGroup, by newOrder: [BuiltinItem]) {
+    /// Reorder the top-level entries as one flat list. Reassigns a global
+    /// `displayOrder` (stride 100) across the passed order; window-layout
+    /// children (partitioned into `windowLayoutChildren`, never present in
+    /// `newOrder`) keep their own order untouched.
+    func reorderTopLevel(by newOrder: [BuiltinItem]) {
         guard let container = modelContainer else { return }
         let context = container.mainContext
         guard let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) else { return }
         let prefsByKey = Dictionary(uniqueKeysWithValues: prefs.map { ($0.itemKey, $0) })
         var order: Double = 100
-        for item in newOrder where BuiltinGroup.group(for: item) == group {
+        for item in newOrder {
             if let pref = prefsByKey[item.rawValue] {
                 pref.displayOrder = order
                 order += 100
@@ -559,14 +548,6 @@ final class PanelStore {
         try? context.save()
         rebuild()
         rebuildHotkeySnapshots()
-    }
-
-    /// Reorder the themed sections themselves. Persists the new order in
-    /// `PanelGroupingStore` and rebuilds; bindings are unchanged so no hotkey
-    /// snapshot rebuild is needed.
-    func reorderThemedGroups(by newOrder: [BuiltinGroup]) {
-        PanelGroupingStore.shared.setThemedOrder(newOrder)
-        rebuild()
     }
 
     /// Reorder app shortcuts by new id array (ordered).
