@@ -493,15 +493,10 @@ struct PanelSettingsView: View {
         HStack(spacing: 8) {
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
             dragHandle(for: row)
-            Toggle("", isOn: Binding(
-                get: { child.isVisible },
-                set: { newValue in
-                    if case let .appShortcut(id) = child.source {
-                        panel.updateAppShortcut(id: id, isVisible: newValue)
-                    }
-                }
-            ))
-            .toggleStyle(.checkbox).labelsHidden()
+            // App-shortcut children have no visibility checkbox, but reserve the
+            // exact native checkbox width with a hidden Toggle so the icon stays
+            // aligned with the parent row's icon column.
+            Toggle("", isOn: .constant(false)).toggleStyle(.checkbox).labelsHidden().hidden()
             AppShortcutIcon(path: appShortcutPath(for: child), fallbackSymbol: child.symbol)
             Text(child.localizedTitle()).font(.body)
             Spacer()
