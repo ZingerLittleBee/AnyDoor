@@ -234,7 +234,7 @@ struct PanelSettingsView: View {
     /// `windowLayout`). Other rows get an equal-width spacer so columns align.
     @ViewBuilder
     private func parentDisclosure(for entry: PanelEntry) -> some View {
-        if case let .builtin(item) = entry.source, item == .appShortcuts || item == .windowLayout {
+        if case let .builtin(item) = entry.source, item == .appShortcuts || item == .windowLayout || item == .brightness {
             let collapsed = grouping.isParentCollapsed(item)
             Button {
                 grouping.setParentCollapsed(item, !collapsed)
@@ -522,6 +522,10 @@ struct PanelSettingsView: View {
         HStack(spacing: 8) {
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
             dragHandle(for: row)
+            // Window-layout children have no visibility checkbox, but reserve the
+            // exact native checkbox width with a hidden Toggle so the icon stays
+            // aligned with the parent row's icon column.
+            Toggle("", isOn: .constant(false)).toggleStyle(.checkbox).labelsHidden().hidden()
             Image(systemName: child.symbol).frame(width: 18)
             Text(child.localizedTitle()).font(.body)
             Spacer()
