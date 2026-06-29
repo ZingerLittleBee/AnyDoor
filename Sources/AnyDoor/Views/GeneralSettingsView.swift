@@ -7,11 +7,18 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "settings"
 
 @MainActor
 struct GeneralSettingsView: View {
-    @State private var launchAtLogin = LaunchAtLogin.isEnabled
+    // These default to cheap placeholders rather than reading the live
+    // permission / launch-at-login status in the @State initializer. The Settings
+    // TabView reconstructs every tab's view struct on each tab switch, which
+    // re-evaluates these initializer expressions every time — so a synchronous
+    // read here (SMAppService.status, AXIsProcessTrusted, CGPreflight...) would
+    // tax every switch, not just this tab. The `.task` below loads the real
+    // values once on appear and keeps polling them while the tab is visible.
+    @State private var launchAtLogin = false
     @Environment(LocalizationManager.self) private var localization
-    @State private var accessibilityGranted = HotkeyService.hasAccessibilityPermission
+    @State private var accessibilityGranted = false
     @State private var automationGranted = false
-    @State private var screenCaptureGranted = ScreenCapturePermission.isGranted
+    @State private var screenCaptureGranted = false
     @AppStorage(MenuBarIcon.visibilityKey) private var menuBarIconVisible = true
     @AppStorage(MenuBarIcon.nameKey) private var menuBarIconName = MenuBarIcon.defaultName
     @State private var updateService = UpdateService.shared
@@ -227,11 +234,23 @@ struct GeneralSettingsView: View {
         // Poll while the tab is visible so the badges update live after the
         // user grants a permission in System Settings.
         .task {
+            // Read launch-at-login + permission status OFF the main thread. These
+            // are nonisolated `static` calls but each blocks for tens-to-hundreds
+            // of ms (SMAppService.status, the Apple Events automation probe,
+            // AXIsProcessTrusted, CGPreflight); running them on the MainActor here
+            // is what made every switch to this tab hitch (~200ms). Hopping the
+            // result back to the MainActor keeps the switch itself cheap.
+            launchAtLogin = await Task.detached { LaunchAtLogin.isEnabled }.value
             await AutomationPermission.activateSystemEvents()
             while !Task.isCancelled {
-                accessibilityGranted = HotkeyService.hasAccessibilityPermission
-                automationGranted = AutomationPermission.isGranted
-                screenCaptureGranted = ScreenCapturePermission.isGranted
+                // Call the underlying API directly; the HotkeyService wrapper is
+                // MainActor-isolated and can't be reached from a detached task.
+                let access = await Task.detached { AXIsProcessTrusted() }.value
+                let automation = await Task.detached { AutomationPermission.isGranted }.value
+                let capture = await Task.detached { ScreenCapturePermission.isGranted }.value
+                accessibilityGranted = access
+                automationGranted = automation
+                screenCaptureGranted = capture
                 try? await Task.sleep(for: .seconds(1))
             }
         }
