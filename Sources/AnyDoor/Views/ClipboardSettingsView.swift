@@ -45,7 +45,11 @@ struct ClipboardSettingsView: View {
         .formStyle(.grouped)
         .overlayScrollers()
         .task {
-            reloadClipboardExcludedApps()
+            // Scan installed apps off the main thread; the filesystem walk +
+            // Bundle reads block for hundreds of ms and would hitch the tab
+            // switch if run on the MainActor.
+            clipboardExcludedBundleIDs = ClipboardPreferences.excludedBundleIDs(from: .standard)
+            installedApps = await Task.detached { InstalledAppsScanner.scan() }.value
         }
     }
 

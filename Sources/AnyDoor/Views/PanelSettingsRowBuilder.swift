@@ -74,6 +74,7 @@ enum PanelSettingsRowBuilder {
                     ))
                 }
             case .builtin(.brightness):
+                guard !collapsedParents.contains(.brightness) else { continue }
                 rows.append(PanelSettingsRow(
                     id: "brightnessRecorders",
                     content: .brightnessRecorders,

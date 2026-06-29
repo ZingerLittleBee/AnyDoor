@@ -6,6 +6,35 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Settings › 面板 edit mode. A top-right 编辑 / 完成 toggle (mirroring SwiftUI's
+  iOS-only `EditButton` convention) flips the list into edit mode: each row's
+  drag handle and visibility checkbox slide in from the leading edge while the
+  content reflows, and the usage tip appears at the bottom. Out of edit mode the
+  list reads as a clean reference view — no checkbox or handle clutter — with
+  hidden items still conveyed by dimming. Changes apply live; there is no
+  separate save step. The visibility checkbox is now a lightweight pure-SwiftUI
+  control, so it carries no AppKit focus ring.
+- The 屏幕亮度 row is collapsible, like App Shortcuts and Window Layout: its
+  brightness-up / brightness-down hotkey rows hide when the row is collapsed.
+
+### Changed
+
+- Settings tab switching no longer hitches. Several tabs did blocking
+  main-thread work that the `TabView` re-paid on every switch:
+  - The General tab read launch-at-login (`SMAppService.status`) and the
+    Accessibility / Automation / Screen-Recording permission state in `@State`
+    initializers — which the TabView re-evaluates each time it rebuilds a tab's
+    view — so every switch paid for them. They now default to cheap placeholders
+    and load off the main thread.
+  - The Clipboard tab scanned installed apps (an `/Applications` walk plus
+    bundle reads) on the main actor in its `.task`; it now runs detached.
+  - The 面板 list renders its reorder handles, visibility checkboxes, and
+    per-row frame probes only while in edit mode, so the resting list is far
+    lighter to lay out. Together these cut the 面板 tab's switch cost from
+    ~140 ms to ~40 ms.
+
 ## [3.3.0] - 2026-06-26
 
 ### Added

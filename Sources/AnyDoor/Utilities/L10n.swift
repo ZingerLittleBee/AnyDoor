@@ -243,6 +243,8 @@ enum L10n {
         case settingsPanelDeleteItemHelp = "settings.panel.delete.itemHelp"
         case settingsPanelDeleteMessage = "settings.panel.delete.message"
         case settingsPanelDeleteTitle = "settings.panel.delete.title"
+        case settingsPanelEdit = "settings.panel.edit"
+        case settingsPanelEditDone = "settings.panel.edit.done"
         case settingsPanelHotkeyConflictMessage = "settings.panel.hotkeyConflict.message"
         case settingsPanelHotkeyConflictReplace = "settings.panel.hotkeyConflict.replace"
         case settingsPanelHotkeyConflictTitle = "settings.panel.hotkeyConflict.title"

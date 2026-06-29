@@ -5,8 +5,9 @@ import Observation
 /// (no SwiftData involvement). `@Observable` so the settings view re-renders when
 /// it changes.
 ///
-/// Only rows that own children (`appShortcuts`, `windowLayout`) are collapsible;
-/// the page is otherwise a flat, ungrouped list ordered by `displayOrder`.
+/// Only rows that own children (`appShortcuts`, `windowLayout`, `brightness`)
+/// are collapsible; the page is otherwise a flat, ungrouped list ordered by
+/// `displayOrder`.
 @MainActor
 @Observable
 final class PanelGroupingStore {
