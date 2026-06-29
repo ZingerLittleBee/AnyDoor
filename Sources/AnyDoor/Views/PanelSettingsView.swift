@@ -16,6 +16,16 @@ struct PanelSettingsView: View {
     /// store) so `withAnimation` captures the lift/settle cleanly.
     @State private var drag: DragSession?
 
+    /// Edit mode. Transient (resets when the window closes): reveals the per-row
+    /// visibility checkbox and drag handle. Out of edit mode the list reads as a
+    /// clean reference view — hidden items still convey their state via dimming.
+    /// Changes apply live; there is no separate save step.
+    @State private var isEditing = false
+
+    /// Spring for entering/leaving edit mode — drives the leading columns sliding
+    /// in and the content reflowing right in lockstep.
+    private static let editAnimation: Animation = .smooth(duration: 0.28)
+
     /// Named coordinate space the row frames and the drag gesture share.
     private static let listSpace = "panelSettingsList"
 
@@ -38,6 +48,7 @@ struct PanelSettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            editModeHeader
             ScrollView {
                 // The List → ScrollView migration. Rows render in a plain VStack
                 // (not a List) so collapse/expand and reorder animate: macOS
@@ -55,7 +66,12 @@ struct PanelSettingsView: View {
                         let dragging = drag?.rowID == row.id
                         rowView(row)
                             .opacity(row.opacity)
-                            .background(rowFrameReader(row))
+                            // Per-row frame probes feed the drag's drop-index math,
+                            // which only runs in edit mode. Gating them here keeps
+                            // the resting (non-edit) list free of ~40 GeometryReader
+                            // layout passes — entering edit mode attaches them
+                            // before any drag can start, so frames are ready in time.
+                            .background { if isEditing { rowFrameReader(row) } }
                             .background(
                                 RoundedRectangle(cornerRadius: 6, style: .continuous)
                                     .fill(Color.accentColor.opacity(dragging ? 0.10 : 0))
@@ -71,7 +87,10 @@ struct PanelSettingsView: View {
                 .coordinateSpace(name: Self.listSpace)
                 .overlay(alignment: .topLeading) { insertionIndicator }
                 .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.top, 4)
+                // Trailing breathing room so the last row never butts against the
+                // window's bottom edge (the tip footer only shows in edit mode).
+                .padding(.bottom, 12)
                 // One value-keyed animation for every structural change: collapse
                 // (ids added/removed, with the row `.transition`) and drop-settle
                 // (ids reordered, rows slide). A visibility toggle leaves the id
@@ -93,9 +112,16 @@ struct PanelSettingsView: View {
                 AppIconCache.prewarm(Array(panel.appShortcutPaths.values))
             }
 
-            LocalizedText(.settingsPanelTip)
-                .font(.caption2).foregroundStyle(.tertiary)
-                .padding(8)
+            // The tip describes edit-only affordances (hiding via the checkbox,
+            // adding/removing app shortcuts), so it appears only in edit mode
+            // rather than as a permanent footer — keeping the resting view clean.
+            if isEditing {
+                LocalizedText(.settingsPanelTip)
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .padding(8)
+                    .frame(maxWidth: .infinity)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .alert(item: $conflictAlert) { alert in
             Alert(
@@ -117,6 +143,28 @@ struct PanelSettingsView: View {
                 secondaryButton: .cancel(Text(L(.settingsPanelCancel)))
             )
         }
+    }
+
+    /// A top header (below the window's tab bar, so it never overlaps it) holding
+    /// the edit-mode toggle, right-aligned. Mirrors SwiftUI's `EditButton`
+    /// convention (which is iOS-only): a borderless text button that swaps between
+    /// "编辑" and "完成".
+    private var editModeHeader: some View {
+        HStack {
+            Spacer()
+            Button {
+                withAnimation(Self.editAnimation) { isEditing.toggle() }
+            } label: {
+                LocalizedText(isEditing ? .settingsPanelEditDone : .settingsPanelEdit)
+                    .font(.body)
+                    .foregroundStyle(.tint)
+            }
+            .buttonStyle(.plain)
+            .hoverCursor(.pointingHand)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+        .padding(.bottom, 2)
     }
 
     /// The ordered row-id list; the trigger for the structural animation.
@@ -168,10 +216,17 @@ struct PanelSettingsView: View {
             // handle, checkbox, and symbol columns. A child accent bar, a
             // handle-width spacer (these fixed rows aren't draggable), then
             // invisible checkbox + symbol columns. The checkbox placeholder is a
-            // hidden real Toggle so it reserves the exact native checkbox width.
+            // plain clear spacer matching PanelCheckbox's width.
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
-            Color.clear.frame(width: Self.handleColumnWidth)
-            Toggle("", isOn: .constant(false)).toggleStyle(.checkbox).labelsHidden().hidden()
+            if isEditing {
+                // These rows aren't draggable; the spacers only reserve the
+                // handle + checkbox columns so the label stays aligned under the
+                // parent "屏幕亮度" title while in edit mode.
+                Color.clear.frame(width: Self.handleColumnWidth)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                Color.clear.frame(width: PanelCheckbox.width)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             Color.clear.frame(width: 18)
             LocalizedText(labelKey).font(.caption).foregroundStyle(.secondary)
             Spacer()
@@ -208,19 +263,22 @@ struct PanelSettingsView: View {
 
     private func mainRow(_ entry: PanelEntry, row: PanelSettingsRow) -> some View {
         HStack(spacing: 8) {
-            dragHandle(for: row)
+            if isEditing {
+                dragHandle(for: row)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             parentDisclosure(for: entry)
-            Toggle("", isOn: Binding(
-                get: { entry.isVisible },
-                set: { newValue in
-                    if case let .builtin(item) = entry.source {
-                        panel.setBuiltinVisibility(item, isVisible: newValue)
+            if isEditing {
+                PanelCheckbox(isOn: Binding(
+                    get: { entry.isVisible },
+                    set: { newValue in
+                        if case let .builtin(item) = entry.source {
+                            panel.setBuiltinVisibility(item, isVisible: newValue)
+                        }
                     }
-                }
-            ))
-            .toggleStyle(.checkbox).labelsHidden()
-            .noFocusRing()
-            .disabled(false)
+                ))
+                .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             Image(systemName: entry.symbol).frame(width: 16)
             Text(entry.localizedTitle()).font(.body)
             LocalizedText(typeBadge(for: entry)).font(.caption2).foregroundStyle(.tertiary)
@@ -493,11 +551,15 @@ struct PanelSettingsView: View {
     private func appChildRow(_ child: PanelEntry, row: PanelSettingsRow) -> some View {
         HStack(spacing: 8) {
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
-            dragHandle(for: row)
-            // App-shortcut children have no visibility checkbox, but reserve the
-            // exact native checkbox width with a hidden Toggle so the icon stays
-            // aligned with the parent row's icon column.
-            Toggle("", isOn: .constant(false)).toggleStyle(.checkbox).labelsHidden().hidden()
+            if isEditing {
+                dragHandle(for: row)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                // App-shortcut children have no visibility checkbox, but reserve
+                // the checkbox-column width so the icon stays aligned with the
+                // parent row's checkbox in edit mode.
+                Color.clear.frame(width: PanelCheckbox.width)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             AppShortcutIcon(path: appShortcutPath(for: child), fallbackSymbol: child.symbol)
             Text(child.localizedTitle()).font(.body)
             Spacer()
@@ -522,11 +584,14 @@ struct PanelSettingsView: View {
     private func windowChildRow(_ child: PanelEntry, row: PanelSettingsRow) -> some View {
         HStack(spacing: 8) {
             Rectangle().fill(Color.accentColor.opacity(0.3)).frame(width: 2).padding(.leading, 16)
-            dragHandle(for: row)
-            // Window-layout children have no visibility checkbox, but reserve the
-            // exact native checkbox width with a hidden Toggle so the icon stays
-            // aligned with the parent row's icon column.
-            Toggle("", isOn: .constant(false)).toggleStyle(.checkbox).labelsHidden().hidden()
+            if isEditing {
+                dragHandle(for: row)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+                // Reserve the checkbox-column width so the icon stays aligned with
+                // the parent row's checkbox in edit mode.
+                Color.clear.frame(width: PanelCheckbox.width)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
             Image(systemName: child.symbol).frame(width: 18)
             Text(child.localizedTitle()).font(.body)
             Spacer()
@@ -573,6 +638,55 @@ struct PanelSettingsView: View {
         }
     }
 
+}
+
+/// Lightweight pure-SwiftUI checkbox for the visibility column. Replaces
+/// `Toggle(.checkbox)` + `noFocusRing()`: the native checkbox is an NSButton and
+/// the focus-ring suppressor an NSView probe, and ~33 of each (one per top-level
+/// row) dominated the Panel tab's switch cost (~85ms of ~140ms — see profiling).
+/// A `Button` + SF Symbol renders the same affordance with no AppKit backing and
+/// no focus ring to suppress.
+private struct PanelCheckbox: View {
+    @Binding var isOn: Bool
+
+    /// Shared checkbox-column width so child rows can reserve an aligned spacer.
+    static let width: CGFloat = 16
+
+    /// Side length of the drawn box; matches the native checkbox (~14pt).
+    private static let box: CGFloat = 14
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            glyph
+                .frame(width: Self.width, height: Self.width)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverCursor(.pointingHand)
+    }
+
+    // Hand-drawn to track the native checkbox: a rounded square that fills with
+    // the accent color and shows a bold white checkmark when on, and is an empty
+    // control-background square with a thin hairline border when off.
+    private var glyph: some View {
+        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+            .fill(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(nsColor: .textBackgroundColor)))
+            .overlay {
+                RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                    .strokeBorder(isOn ? Color.accentColor : Color.secondary.opacity(0.45),
+                                  lineWidth: 1)
+            }
+            .overlay {
+                if isOn {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .frame(width: Self.box, height: Self.box)
+    }
 }
 
 /// The Finder icon for an app-shortcut row. Loads the icon through the shared
