@@ -3,36 +3,52 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.4.0</title>
+            <pubDate>Mon, 29 Jun 2026 21:46:04 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.4.0</sparkle:version>
+            <sparkle:shortVersionString>3.4.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Settings › 面板 edit mode. A top-right 编辑 / 完成 toggle (mirroring SwiftUI's
+  iOS-only `EditButton` convention) flips the list into edit mode: each row's
+  drag handle and visibility checkbox slide in from the leading edge while the
+  content reflows, and the usage tip appears at the bottom. Out of edit mode the
+  list reads as a clean reference view — no checkbox or handle clutter — with
+  hidden items still conveyed by dimming. Changes apply live; there is no
+  separate save step. The visibility checkbox is now a lightweight pure-SwiftUI
+  control, so it carries no AppKit focus ring.
+- The 屏幕亮度 row is collapsible, like App Shortcuts and Window Layout: its
+  brightness-up / brightness-down hotkey rows hide when the row is collapsed.
+
+### Changed
+
+- Settings tab switching no longer hitches. Several tabs did blocking
+  main-thread work that the `TabView` re-paid on every switch:
+  - The General tab read launch-at-login (`SMAppService.status`) and the
+    Accessibility / Automation / Screen-Recording permission state in `@State`
+    initializers — which the TabView re-evaluates each time it rebuilds a tab's
+    view — so every switch paid for them. They now default to cheap placeholders
+    and load off the main thread.
+  - The Clipboard tab scanned installed apps (an `/Applications` walk plus
+    bundle reads) on the main actor in its `.task`; it now runs detached.
+  - The 面板 list renders its reorder handles, visibility checkboxes, and
+    per-row frame probes only while in edit mode, so the resting list is far
+    lighter to lay out. Together these cut the 面板 tab's switch cost from
+    ~140 ms to ~40 ms.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.0/AnyDoor-3.4.0.zip" length="10258940" type="application/octet-stream" sparkle:edSignature="EuKlpwGoZWgkQkz5vUk2z+yf7f9GnRIDLqwIKOJvP2DQP20XxS3yeaub/wkAZI2fGgL8fC1SsHbBrRlog6gCAw=="/>
+        </item>
+        <item>
             <title>3.3.0</title>
             <pubDate>Fri, 26 Jun 2026 01:50:36 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>3.3.0</sparkle:version>
             <sparkle:shortVersionString>3.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Translation: a floating multi-service panel with auto source detection,
-  language swap, streaming results, copy, TTS, pinning, and access from a builtin,
-  global hotkey, or the command palette.
-- Translation providers and settings: Apple on-device, Google, Bing, DeepL /
-  DeepLX, and OpenAI-compatible endpoints with provider presets, Keychain-stored
-  API keys, manual-on-expand LLM services, Apple language-pack downloads, and
-  backup sync for non-secret settings.
-- Translation entry points and history: translate selected text, translate OCR
-  from a screenshot region, browse per-run history and favorites, re-translate,
-  and trim history with a retention cap.
-
-### Changed
-
-- Failure toasts now stay on screen for 5 seconds instead of the ~1 second used
-  for success and color toasts, so an error message can actually be read.
-- The blue keyboard focus ring is removed across all of the app's windows for a
-  cleaner look.
-- Build tooling: the string-catalog compiler plugin now uses SwiftPM's current
-  URL APIs for generated input and output paths.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.3.0/AnyDoor-3.3.0.zip" length="10068098" type="application/octet-stream" sparkle:edSignature="v2iGTN2hthgUhh0G3cPgV7HlVwTIorBvZBWbnJEwZaOZhDSrJ2z7WuQwiYmQGt2pEDKkf/xdONpsjsCXpRbgAg=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.3.0/AnyDoor-3.3.0.zip" length="10068098" type="application/octet-stream" sparkle:edSignature="v2iGTN2hthgUhh0G3cPgV7HlVwTIorBvZBWbnJEwZaOZhDSrJ2z7WuQwiYmQGt2pEDKkf/xdONpsjsCXpRbgAg=="/>
         </item>
         <item>
             <title>3.2.0</title>
@@ -42,15 +58,6 @@
             <sparkle:shortVersionString>3.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.2.0/AnyDoor-3.2.0.zip" length="9009558" type="application/octet-stream" sparkle:edSignature="m2rxw5/GWxMPawoBCf7eidPHpXXNuvJSJSPYnCZGzJkafsukuyUik5tbwy/e3/cIpa3lFU7UrG0wszI1eQfvDw=="/>
-        </item>
-        <item>
-            <title>3.1.1</title>
-            <pubDate>Sat, 20 Jun 2026 17:59:20 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>3.1.1</sparkle:version>
-            <sparkle:shortVersionString>3.1.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.1.1/AnyDoor-3.1.1.zip" length="8970739" type="application/octet-stream" sparkle:edSignature="xmtsN5ngJvykD4G9t1nsJXkDnBIiY1O3ryH27+IsvSJAG2HPpCpm/GxQSmCufNQTt+cKZb3J741ibObsU1C2Cw=="/>
         </item>
         <item>
             <title>1.2.0</title>

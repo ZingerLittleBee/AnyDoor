@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-06-29
+
 ### Added
 
 - Settings › 面板 edit mode. A top-right 编辑 / 完成 toggle (mirroring SwiftUI's
