@@ -219,6 +219,7 @@ struct PanelSettingsView: View {
                 }
             ))
             .toggleStyle(.checkbox).labelsHidden()
+            .noFocusRing()
             .disabled(false)
             Image(systemName: entry.symbol).frame(width: 16)
             Text(entry.localizedTitle()).font(.body)
