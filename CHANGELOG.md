@@ -6,6 +6,17 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Release builds appeared washed-out on macOS 26 (Tahoe). The universal-binary
+  build uses the `swiftbuild` backend, which records the deployment-target
+  version (14.0) in the binary's `LC_BUILD_VERSION` `sdk` field instead of the
+  real SDK version. macOS 26 gates the modern window appearance on the linked
+  SDK version (>= 26), so the released app fell back to the legacy appearance
+  while `swift run` (native backend, real SDK) looked correct. The release
+  script now forces `platform_version` to the real SDK version, keeping `minos`
+  at 14.0 so the app still runs on macOS 14+.
+
 ## [3.4.0] - 2026-06-29
 
 ### Added

@@ -132,7 +132,17 @@ RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 # plugin with "Unable to resolve build file ... PACKAGE-TARGET" errors.
 # Sparkle.framework is taken from the matching macos-arm64_x86_64 slice of
 # Sparkle.xcframework.
-BUILD_FLAGS=(--build-system swiftbuild --arch arm64 --arch x86_64)
+#
+# The `swiftbuild` backend writes the deployment-target version (14.0) into
+# the binary's LC_BUILD_VERSION `sdk` field instead of the real SDK version
+# (the `native` backend writes the real SDK). On macOS 26 (Tahoe) the system
+# gates the modern window appearance on the linked SDK version (>= 26): a
+# 14.0 `sdk` field forces the app into the legacy, washed-out appearance.
+# Override `platform_version` so the binary records minos 14.0 (still runs on
+# macOS 14+) but the real SDK version, restoring the intended appearance.
+MACOS_SDK_VERSION="$(xcrun --show-sdk-version --sdk macosx)"
+BUILD_FLAGS=(--build-system swiftbuild --arch arm64 --arch x86_64
+    -Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker "$MACOS_SDK_VERSION")
 log "swift build -c release (universal: arm64 + x86_64)"
 swift build -c release "${BUILD_FLAGS[@]}"
 
