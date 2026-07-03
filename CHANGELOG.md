@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.4.1] - 2026-07-04
+
 ### Changed
 
 - Clipboard wall cards grew from 190×190 to 230×230 (panel height 285→325),

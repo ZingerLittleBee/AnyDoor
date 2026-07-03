@@ -3,43 +3,86 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.4.1</title>
+            <pubDate>Sat, 04 Jul 2026 00:29:32 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.4.1</sparkle:version>
+            <sparkle:shortVersionString>3.4.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Changed
+
+- Clipboard wall cards grew from 190×190 to 230×230 (panel height 285→325),
+  with larger preview and match-snippet text, improving legibility of longer
+  text/OCR/QR previews.
+
+### Fixed
+
+- Release builds appeared washed-out on macOS 26 (Tahoe). The universal-binary
+  build uses the `swiftbuild` backend, which records the deployment-target
+  version (14.0) in the binary's `LC_BUILD_VERSION` `sdk` field instead of the
+  real SDK version. macOS 26 gates the modern window appearance on the linked
+  SDK version (>= 26), so the released app fell back to the legacy appearance
+  while `swift run` (native backend, real SDK) looked correct. The release
+  script now forces `platform_version` to the real SDK version, keeping `minos`
+  at 14.0 so the app still runs on macOS 14+.
+- The Settings window opened by itself on every launch of the released app —
+  most visibly after a reboot/login auto-launch. Same root cause as the
+  washed-out appearance above: with a 14.0 `sdk` stamp, macOS 26's SwiftUI
+  applies the legacy behavior where an app whose only scene is `Settings`
+  presents that window at launch, regardless of the launch mechanism (login
+  item, `open -a`, direct exec). Verified by A/B-stamping the same binary with
+  `vtool`: `sdk 14.0` opens the window, the real SDK keeps it closed. The
+  state-restoration and reopen-suppression defenses in `AppDelegate` were never
+  the trigger. Fixed by the `platform_version` override above.
+- Release tooling now asserts the minimum-macOS declaration stays in sync across
+  `scripts/release.sh` (`MIN_MACOS`), `Package.swift` (`.macOS`), and
+  `Info.plist` (`LSMinimumSystemVersion`). The `platform_version` override force-
+  stamps `minos`, so without this guard a future platform bump would silently
+  ship a binary claiming support for an older macOS than it was built for.
+- Clipboard wall cards intermittently showed a blank source-app icon after fast
+  scrolling. The icon was resolved through an async `.task` that could be torn
+  down by the wall's frequent view-body re-evaluations before the detached
+  resolve landed; the source icon is a single cheap Launch Services lookup, so
+  it's now resolved synchronously on the main actor instead.
+- The clipboard wall's source-filter trigger showed a blue keyboard focus ring
+  when the wall opened, unlike the tab row beside it. It's no longer part of
+  the focus chain (mouse clicks still open the menu).
+- Hyper Key: retrying the trigger mapping right after a failed `hidutil` GET
+  could leave a stale signature in the persisted `hyperKey.ownedSignatures`,
+  since only the SET-reached failure path rolled it back. A failed GET (which
+  never mutates `hidutil`) now also rolls the persisted ownership back to its
+  prior state.
+- Hosts: composing or applying against `/etc/hosts` fell back to an empty
+  string when the file couldn't be read, risking a write that wiped the
+  system's own entries. A failed read now aborts the apply with a surfaced
+  error instead.
+- Hosts: deleting an active profile removed its SwiftData row before
+  confirming the block-removal write to `/etc/hosts` succeeded, so a failed
+  write could orphan the block outside any tracked profile. The row is now
+  deleted only after the deactivation is applied and verified — including
+  against a coalesced `scheduleApply()` result, which can otherwise report a
+  batch-mate's success (or a rolled-back no-op retry) instead of this
+  profile's own write.
+- Clipboard: deleting a history item removed its on-disk payload file
+  (PNG/copied files) before the row deletion was saved, so a failed save
+  could leave a surviving row pointing at deleted files — and the failed-save
+  path never rolled back the pending deletion, letting a later unrelated save
+  silently flush it and drop the row anyway. The payload is now captured
+  before, and removed only after, the row deletion is confirmed saved; a
+  failed save rolls back the pending deletion and refreshes from the
+  persisted state.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.1/AnyDoor-3.4.1.zip" length="10194237" type="application/octet-stream" sparkle:edSignature="fP/NbicOVfq/MdqzRUG+XTUMkdI9l5j6SomINE0yCu5DqZ7QWic9VXJYeEmwb/I1VZ8mFl+IrdadI1opuX5nBQ=="/>
+        </item>
+        <item>
             <title>3.4.0</title>
             <pubDate>Mon, 29 Jun 2026 21:46:04 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>3.4.0</sparkle:version>
             <sparkle:shortVersionString>3.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Settings › 面板 edit mode. A top-right 编辑 / 完成 toggle (mirroring SwiftUI's
-  iOS-only `EditButton` convention) flips the list into edit mode: each row's
-  drag handle and visibility checkbox slide in from the leading edge while the
-  content reflows, and the usage tip appears at the bottom. Out of edit mode the
-  list reads as a clean reference view — no checkbox or handle clutter — with
-  hidden items still conveyed by dimming. Changes apply live; there is no
-  separate save step. The visibility checkbox is now a lightweight pure-SwiftUI
-  control, so it carries no AppKit focus ring.
-- The 屏幕亮度 row is collapsible, like App Shortcuts and Window Layout: its
-  brightness-up / brightness-down hotkey rows hide when the row is collapsed.
-
-### Changed
-
-- Settings tab switching no longer hitches. Several tabs did blocking
-  main-thread work that the `TabView` re-paid on every switch:
-  - The General tab read launch-at-login (`SMAppService.status`) and the
-    Accessibility / Automation / Screen-Recording permission state in `@State`
-    initializers — which the TabView re-evaluates each time it rebuilds a tab's
-    view — so every switch paid for them. They now default to cheap placeholders
-    and load off the main thread.
-  - The Clipboard tab scanned installed apps (an `/Applications` walk plus
-    bundle reads) on the main actor in its `.task`; it now runs detached.
-  - The 面板 list renders its reorder handles, visibility checkboxes, and
-    per-row frame probes only while in edit mode, so the resting list is far
-    lighter to lay out. Together these cut the 面板 tab's switch cost from
-    ~140 ms to ~40 ms.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.0/AnyDoor-3.4.0.zip" length="10258940" type="application/octet-stream" sparkle:edSignature="EuKlpwGoZWgkQkz5vUk2z+yf7f9GnRIDLqwIKOJvP2DQP20XxS3yeaub/wkAZI2fGgL8fC1SsHbBrRlog6gCAw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.0/AnyDoor-3.4.0.zip" length="10258940" type="application/octet-stream" sparkle:edSignature="EuKlpwGoZWgkQkz5vUk2z+yf7f9GnRIDLqwIKOJvP2DQP20XxS3yeaub/wkAZI2fGgL8fC1SsHbBrRlog6gCAw=="/>
         </item>
         <item>
             <title>3.3.0</title>
@@ -49,15 +92,6 @@
             <sparkle:shortVersionString>3.3.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.3.0/AnyDoor-3.3.0.zip" length="10068098" type="application/octet-stream" sparkle:edSignature="v2iGTN2hthgUhh0G3cPgV7HlVwTIorBvZBWbnJEwZaOZhDSrJ2z7WuQwiYmQGt2pEDKkf/xdONpsjsCXpRbgAg=="/>
-        </item>
-        <item>
-            <title>3.2.0</title>
-            <pubDate>Sun, 21 Jun 2026 03:06:35 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>3.2.0</sparkle:version>
-            <sparkle:shortVersionString>3.2.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.2.0/AnyDoor-3.2.0.zip" length="9009558" type="application/octet-stream" sparkle:edSignature="m2rxw5/GWxMPawoBCf7eidPHpXXNuvJSJSPYnCZGzJkafsukuyUik5tbwy/e3/cIpa3lFU7UrG0wszI1eQfvDw=="/>
         </item>
         <item>
             <title>1.2.0</title>
