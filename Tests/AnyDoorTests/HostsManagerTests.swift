@@ -183,6 +183,37 @@ final class HostsManagerTests: XCTestCase {
         XCTAssertNotNil(mgr.lastError, "lastError must surface the read failure")
     }
 
+    // MARK: - Fix 2: deleting an active profile survives a failed system write
+
+    func test_deleteActiveProfile_failedWrite_keepsRow_restoresActive() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        await mgr.setActive(mgr.profiles[0], true)
+        XCTAssertEqual(mock.writeCount, 1)
+        // The delete's block-removal write fails.
+        mock.errorToThrow = HostsWriterError.writeFailed("denied")
+        await mgr.deleteProfile(mgr.profiles[0])
+        // Row must survive so its block is not orphaned in /etc/hosts.
+        XCTAssertEqual(mgr.profiles.count, 1, "Profile must survive a failed system write")
+        XCTAssertTrue(mgr.profiles[0].isActive, "Active state must be restored on failed delete")
+        XCTAssertNotNil(mgr.lastError, "lastError must surface the write failure")
+    }
+
+    func test_deleteActiveProfile_successfulWrite_removesRowAndBlock() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        await mgr.setActive(mgr.profiles[0], true)
+        await mgr.deleteProfile(mgr.profiles[0])
+        XCTAssertEqual(mgr.profiles.count, 0)
+        let written = try XCTUnwrap(mock.lastWritten)
+        XCTAssertFalse(written.contains(HostsFile.beginMarker), "Managed block removed on delete")
+        XCTAssertTrue(written.contains("127.0.0.1 localhost"))
+    }
+
     // MARK: - Fix 3: backup failure surfaced but write proceeds
 
     func test_backupFailure_surfacedButWriteProceeds() async throws {

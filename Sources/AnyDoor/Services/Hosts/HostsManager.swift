@@ -53,6 +53,9 @@ final class HostsManager {
     private let debounceInterval: Duration
     private var applyPending = false
     private var applyTask: Task<Void, Never>?
+    /// Result of the most recent `applyAndPersist`; read by callers that must act
+    /// only on a successful system write (e.g. `deleteProfile`).
+    private var lastApplySucceeded = false
 
     // MARK: - Init
 
@@ -126,13 +129,24 @@ final class HostsManager {
         return profiles.first { $0.id == duplicate.id }
     }
 
+    /// Delete a profile. For an active profile the invariant "persisted state
+    /// equals what was applied" must hold: remove its managed block from the
+    /// system first and only drop the DB row once that write succeeds, so a
+    /// failed write leaves the row (and its block) intact instead of orphaning it.
     func deleteProfile(_ profile: HostProfile) async {
         guard let context = modelContainer?.mainContext else { return }
-        let wasActive = profile.isActive
+        if profile.isActive {
+            // Deactivate in memory and apply; the row is only deleted on success.
+            profile.isActive = false
+            guard await scheduleApply() else {
+                // scheduleApply's failure path rolled back `isActive` to true and
+                // set `lastError`; keep the row so the block is not orphaned.
+                return
+            }
+        }
         context.delete(profile)
         try? context.save()
         reload()
-        if wasActive { await scheduleApply() }
     }
 
     private func copyName(for name: String) -> String {
@@ -214,7 +228,8 @@ final class HostsManager {
 
     /// Coalescing debounced entry-point for composed applies. All callers that
     /// go through the compose path use this instead of `applyAndPersist` directly.
-    private func scheduleApply() async {
+    @discardableResult
+    private func scheduleApply() async -> Bool {
         applyPending = true
         if applyTask == nil {
             applyTask = Task { @MainActor in
@@ -222,17 +237,20 @@ final class HostsManager {
                 // Serial retry loop: pick up any toggle that arrived during the write.
                 while self.applyPending {
                     self.applyPending = false
-                    await self.applyAndPersist()
+                    self.lastApplySucceeded = await self.applyAndPersist()
                 }
                 self.applyTask = nil
             }
         }
         await applyTask?.value
+        return lastApplySucceeded
     }
 
     // MARK: - Apply
 
-    private func applyAndPersist() async {
+    /// Returns `true` when the compose+write+persist succeeded (including a no-op
+    /// skip), `false` when the write failed and the context was rolled back.
+    private func applyAndPersist() async -> Bool {
         // Capture backup error; a failed backup must not abort the write.
         var backupError: Error?
         do {
@@ -252,12 +270,14 @@ final class HostsManager {
                 lastError = nil
             }
             reload()
+            return true
         } catch {
             // Discard unsaved in-memory mutations so reload() sees the persisted state.
             modelContainer?.mainContext.rollback()
             lastError = message(for: error)
             logger.error("Apply failed: \(error)")
             reload()
+            return false
         }
     }
 
