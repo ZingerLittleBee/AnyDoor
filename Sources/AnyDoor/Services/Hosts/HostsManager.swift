@@ -138,9 +138,15 @@ final class HostsManager {
         if profile.isActive {
             // Deactivate in memory and apply; the row is only deleted on success.
             profile.isActive = false
-            guard await scheduleApply() else {
-                // scheduleApply's failure path rolled back `isActive` to true and
-                // set `lastError`; keep the row so the block is not orphaned.
+            let applied = await scheduleApply()
+            // scheduleApply coalesces concurrent callers into one task and returns
+            // the shared last-iteration result, so its Bool alone can report a
+            // batch-mate's success — including a no-op retry after a failed write
+            // whose rollback() restored `isActive` to true. Gate the irreversible
+            // delete on the fact that matters: this profile's deactivation was
+            // actually applied and saved (`isActive` stayed false).
+            guard applied, !profile.isActive else {
+                if lastError == nil { lastError = "删除配置失败，请重试" }
                 return
             }
         }
