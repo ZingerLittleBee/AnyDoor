@@ -421,6 +421,10 @@ final class ClipboardHistoryStore {
             try container.mainContext.save()
         } catch {
             historyLogger.error("Failed to delete clipboard history item: \(error)")
+            // Discard the pending deletion so a later unrelated save can't
+            // silently flush it, and refresh the cache so the UI keeps the row.
+            container.mainContext.rollback()
+            if let kind { await reload(kind: kind) }
             return
         }
         removePayloadFiles(payloads)
