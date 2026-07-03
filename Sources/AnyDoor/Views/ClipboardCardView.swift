@@ -29,7 +29,7 @@ struct ClipboardCardView: View {
             Divider()
             preview.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 190, height: 190)
+        .frame(width: 230, height: 230)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
@@ -159,12 +159,12 @@ struct ClipboardCardView: View {
         case .text, .ocr, .qrcode:
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.text ?? item.previewTitle)
-                    .font(.system(size: 11)).lineLimit(matchSnippet == nil ? 6 : 3)
+                    .font(.system(size: 13)).lineLimit(matchSnippet == nil ? 6 : 3)
                 // Surface the matched line so a search hit buried below the first
                 // line is visible rather than leaving the card looking unrelated.
                 if let matchSnippet {
                     Text(matchSnippet)
-                        .font(.system(size: 10)).lineLimit(2)
+                        .font(.system(size: 12)).lineLimit(2)
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 5).padding(.vertical, 2)
                         .background(Color.accentColor.opacity(0.15), in: RoundedRectangle(cornerRadius: 4))

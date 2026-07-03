@@ -47,7 +47,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
 
     /// Guards against re-entrant show/dismiss while the slide animation runs.
     private var isAnimating = false
-    private static let panelHeight: CGFloat = 285
+    private static let panelHeight: CGFloat = 325
     private static let animationDuration: TimeInterval = 0.22
 
     private var historyDirectory: URL { ClipboardHistoryStore.defaultHistoryDirectory() }
