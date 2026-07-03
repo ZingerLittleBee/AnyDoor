@@ -409,22 +409,48 @@ final class ClipboardHistoryStore {
     /// Delete a single item and its on-disk payload (image PNG / copied files).
     func delete(_ item: ClipboardHistoryItem) async {
         guard let container = modelContainer else { return }
-        deleteScreenshotFileIfNeeded(for: item)   // covers .screenshot and .image (both use fileName)
-        deleteCopiedFilesIfNeeded(for: item)
+        // Capture the on-disk payload names BEFORE removing the row: after a
+        // successful delete + save the model is deallocated and its properties
+        // are unsafe to read. Persist the row deletion first so a failed save
+        // never leaves a surviving row pointing at deleted files; the worst case
+        // then is orphan files, which pruneExpiredAndOverflow later sweeps.
+        let payloads = payloadFileNames(for: item)
         let kind = item.historyKind
         container.mainContext.delete(item)
-        try? container.mainContext.save()
+        do {
+            try container.mainContext.save()
+        } catch {
+            historyLogger.error("Failed to delete clipboard history item: \(error)")
+            return
+        }
+        removePayloadFiles(payloads)
         if let kind { await reload(kind: kind) }
     }
 
-    /// Remove copied-file payloads for a `.file` entry (no-op for reference-only).
-    private func deleteCopiedFilesIfNeeded(for item: ClipboardHistoryItem) {
-        guard item.kind == ClipboardHistoryKind.file.rawValue else { return }
-        let directory = historyDirectoryProvider()
-        for entry in item.files {
-            if let stored = entry.storedName {
-                try? FileManager.default.removeItem(at: directory.appendingPathComponent(stored))
+    /// Collect the on-disk payload file names an item owns (screenshot/image PNG
+    /// under `fileName`; copied `.file` payloads under `storedName`). Read this
+    /// BEFORE deleting the row so the names survive the model's deallocation.
+    private func payloadFileNames(for item: ClipboardHistoryItem) -> [String] {
+        var names: [String] = []
+        if item.kind == ClipboardHistoryKind.screenshot.rawValue
+            || item.kind == ClipboardHistoryKind.image.rawValue,
+           let fileName = item.fileName {
+            names.append(fileName)
+        }
+        if item.kind == ClipboardHistoryKind.file.rawValue {
+            for entry in item.files {
+                if let stored = entry.storedName { names.append(stored) }
             }
+        }
+        return names
+    }
+
+    /// Remove previously captured payload file names from history storage.
+    private func removePayloadFiles(_ fileNames: [String]) {
+        guard !fileNames.isEmpty else { return }
+        let directory = historyDirectoryProvider()
+        for name in fileNames {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
         }
     }
 
@@ -465,11 +491,18 @@ final class ClipboardHistoryStore {
                 }
             }
 
+            // Capture payload names BEFORE deleting rows, then remove files only
+            // after the save succeeds — a failed save must not orphan a surviving
+            // row's payload. Leftover files are handled by the orphan sweep below.
+            var payloadsToDelete: [String] = []
             for item in all where idsToDelete.contains(item.id) {
-                deleteScreenshotFileIfNeeded(for: item)
+                payloadsToDelete.append(contentsOf: payloadFileNames(for: item))
                 context.delete(item)
             }
-            if !idsToDelete.isEmpty { try context.save() }
+            if !idsToDelete.isEmpty {
+                try context.save()
+                removePayloadFiles(payloadsToDelete)
+            }
 
             // Sweep orphan files no longer referenced by surviving rows.
             // Both .screenshot and .image rows persist a single PNG under fileName;
@@ -640,14 +673,6 @@ final class ClipboardHistoryStore {
         } catch {
             historyLogger.error("Failed to clear clipboard history: \(error)")
         }
-    }
-
-    private func deleteScreenshotFileIfNeeded(for item: ClipboardHistoryItem) {
-        guard item.kind == ClipboardHistoryKind.screenshot.rawValue
-                || item.kind == ClipboardHistoryKind.image.rawValue,
-              let fileName = item.fileName else { return }
-        let url = historyDirectoryProvider().appendingPathComponent(fileName)
-        try? FileManager.default.removeItem(at: url)
     }
 
     private func removeOrphanScreenshotFiles(keeping survivingFiles: Set<String>) {

@@ -313,6 +313,48 @@ final class ClipboardHistoryStoreTests: XCTestCase {
         XCTAssertTrue(store.timeline(category: nil, query: "").isEmpty)
     }
 
+    func testDeleteRemovesOnDiskPayloadAfterSave() async throws {
+        let container = try makeContainer()
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) }, historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        await store.record(.image(png: Data([0x89, 0x50, 0x4E, 0x47])), source: nil)
+        let item = try XCTUnwrap(store.timeline(category: nil, query: "").first)
+        let fileName = try XCTUnwrap(item.fileName)
+        let fileURL = directory.appendingPathComponent(fileName)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
+
+        await store.delete(item)
+
+        // The row is gone and its on-disk payload is removed after the save.
+        XCTAssertTrue(store.timeline(category: nil, query: "").isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    func testPruneRemovesOverflowPayloadFiles() async throws {
+        let container = try makeContainer()
+        var now = Date(timeIntervalSinceReferenceDate: 100)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let store = ClipboardHistoryStore(now: { now }, maxItemsPerKind: 1, historyDirectory: directory)
+        store.bootstrap(modelContainer: container)
+
+        await store.record(.image(png: Data([0x89, 0x50, 0x4E, 0x47])), source: nil)
+        let oldest = try XCTUnwrap(store.items(for: .image).first)
+        let oldestFile = directory.appendingPathComponent(try XCTUnwrap(oldest.fileName))
+
+        now = Date(timeIntervalSinceReferenceDate: 200)
+        await store.record(.image(png: Data([0x89, 0x50, 0x4E, 0x47])), source: nil)
+
+        await store.pruneExpiredAndOverflow(force: true)
+
+        // The overflowed row's PNG is removed after the prune save.
+        XCTAssertEqual(store.items(for: .image).count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldestFile.path))
+        try? FileManager.default.removeItem(at: directory)
+    }
+
     func testPruneExemptsFavorites() async throws {
         let container = try makeContainer()
         let now = Date(timeIntervalSinceReferenceDate: 10_000_000)
