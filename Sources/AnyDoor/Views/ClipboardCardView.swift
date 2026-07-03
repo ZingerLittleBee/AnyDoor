@@ -145,8 +145,11 @@ struct ClipboardCardView: View {
     /// the header stays clean rather than showing a generic placeholder.
     @ViewBuilder
     private var sourceIcon: some View {
-        if let bundleID = item.sourceBundleID {
-            SourceAppIcon(bundleID: bundleID, appName: item.sourceAppName)
+        if let bundleID = item.sourceBundleID,
+           let icon = AppIconCache.iconForBundleSync(bundleID) {
+            Image(nsImage: icon)
+                .resizable().scaledToFit()
+                .help(item.sourceAppName ?? "")
         }
     }
 
@@ -215,36 +218,12 @@ struct ClipboardCardView: View {
         UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
     }
 
-    /// Source-app icon resolved off the main thread via `AppIconCache`. Reads the
-    /// cache synchronously in `body` first (so a warm icon renders with no flash),
-    /// and only kicks off the async bundle-ID resolution on a cache miss — keeping
-    /// the disk/`NSWorkspace` lookup off the scrolling card's render path. Renders
-    /// nothing when the bundle ID maps to no installed app.
-    private struct SourceAppIcon: View {
-        let bundleID: String
-        let appName: String?
-        @State private var loaded: NSImage?
-
-        var body: some View {
-            Group {
-                if let icon = loaded ?? AppIconCache.cachedForBundle(bundleID) {
-                    Image(nsImage: icon)
-                        .resizable().scaledToFit()
-                        .help(appName ?? "")
-                }
-            }
-            .task(id: bundleID) {
-                if loaded == nil, AppIconCache.cachedForBundle(bundleID) == nil {
-                    loaded = await AppIconCache.icon(forBundleID: bundleID)
-                }
-            }
-        }
-    }
-
-    /// Image/file-card thumbnail decoded off the main thread via `ClipboardThumbnail`.
-    /// Same warm-path-synchronous / cold-path-async contract as `SourceAppIcon`, so
-    /// many image cards sliding in no longer each run a full-resolution decode on the
-    /// main thread. Shows a `photo` placeholder while the first decode is in flight.
+    /// Image/file-card thumbnail decoded off the main thread via `ClipboardThumbnail`:
+    /// reads the warm cache synchronously in `body`, and only kicks off the async
+    /// decode on a miss, so many image cards sliding in no longer each run a
+    /// full-resolution decode on the main thread. Unlike the lightweight source-app
+    /// icon (resolved inline), the thumbnail decode is heavy enough to keep async.
+    /// Shows a `photo` placeholder while the first decode is in flight.
     private struct ThumbnailView: View {
         let url: URL
         @State private var loaded: NSImage?
