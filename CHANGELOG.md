@@ -16,6 +16,15 @@ versioning.
   while `swift run` (native backend, real SDK) looked correct. The release
   script now forces `platform_version` to the real SDK version, keeping `minos`
   at 14.0 so the app still runs on macOS 14+.
+- The Settings window opened by itself on every launch of the released app —
+  most visibly after a reboot/login auto-launch. Same root cause as the
+  washed-out appearance above: with a 14.0 `sdk` stamp, macOS 26's SwiftUI
+  applies the legacy behavior where an app whose only scene is `Settings`
+  presents that window at launch, regardless of the launch mechanism (login
+  item, `open -a`, direct exec). Verified by A/B-stamping the same binary with
+  `vtool`: `sdk 14.0` opens the window, the real SDK keeps it closed. The
+  state-restoration and reopen-suppression defenses in `AppDelegate` were never
+  the trigger. Fixed by the `platform_version` override above.
 
 ## [3.4.0] - 2026-06-29
 
