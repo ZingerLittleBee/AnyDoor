@@ -161,6 +161,28 @@ final class HostsManagerTests: XCTestCase {
         XCTAssertTrue(written.contains("2.2.2.2 beta"))
     }
 
+    // MARK: - Fix 1: unreadable /etc/hosts aborts the apply instead of writing empty
+
+    func test_liveReadFailure_abortsApply_setsError_neverWrites() async throws {
+        struct LiveReadError: Error {}
+        let mock = MockHostsWriter()
+        let container = try makeContainer()
+        let live: () throws -> String = { throw LiveReadError() }
+        let mgr = HostsManager(
+            writer: mock,
+            backup: HostsBackupStore(backupDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString), readLiveHosts: live),
+            readLiveHosts: live,
+            debounceInterval: .milliseconds(1))
+        mgr.bootstrap(modelContainer: container)
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        let profile = mgr.profiles[0]
+        await mgr.setActive(profile, true)
+        // A failed read must never destroy the system file: no write may be issued.
+        XCTAssertEqual(mock.writeCount, 0, "A failed /etc/hosts read must abort before any write")
+        XCTAssertNotNil(mgr.lastError, "lastError must surface the read failure")
+    }
+
     // MARK: - Fix 3: backup failure surfaced but write proceeds
 
     func test_backupFailure_surfacedButWriteProceeds() async throws {

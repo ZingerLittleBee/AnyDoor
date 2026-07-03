@@ -5,6 +5,19 @@ import Observation
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hosts")
 
+/// Errors originating in HostsManager itself (as opposed to the writer/backup).
+enum HostsManagerError: Error {
+    /// Reading the live `/etc/hosts` failed, so we cannot safely compose or write.
+    case liveReadFailed
+
+    /// Chinese UI message, consistent with the other `lastError` strings.
+    var userMessage: String {
+        switch self {
+        case .liveReadFailed: return "无法读取系统 hosts 文件"
+        }
+    }
+}
+
 /// Single source of truth for host profiles. SwiftData-backed, @MainActor.
 /// Persisted state always equals what was successfully applied to the system.
 @Observable @MainActor
@@ -19,7 +32,7 @@ final class HostsManager {
             return AppleScriptWriter()
         },
         backup: HostsBackupStore.makeDefault(),
-        readLiveHosts: { (try? String(contentsOf: URL(fileURLWithPath: "/etc/hosts"), encoding: .utf8)) ?? "" }
+        readLiveHosts: { try String(contentsOf: URL(fileURLWithPath: "/etc/hosts"), encoding: .utf8) }
     )
 
     private(set) var profiles: [HostProfile] = []
@@ -31,7 +44,9 @@ final class HostsManager {
     private let makeWriter: () -> HostsWriter
     // `var` so tests can inject backupErrorOverride on the value-type HostsBackupStore.
     var backup: HostsBackupStore
-    private let readLiveHosts: () -> String
+    // Throwing: a failed read of `/etc/hosts` must abort composing/applying, never
+    // fall back to an empty string (which would destroy the system's own entries).
+    private let readLiveHosts: () throws -> String
     private var modelContainer: ModelContainer?
 
     // MARK: - Debounce / serialization state
@@ -44,7 +59,7 @@ final class HostsManager {
     /// Designated initialiser. Accepts a factory so the writer can be re-resolved per write.
     init(makeWriter: @escaping () -> HostsWriter,
          backup: HostsBackupStore,
-         readLiveHosts: @escaping () -> String,
+         readLiveHosts: @escaping () throws -> String,
          debounceInterval: Duration = .milliseconds(150)) {
         self.makeWriter = makeWriter
         self.backup = backup
@@ -55,7 +70,7 @@ final class HostsManager {
     /// Convenience initialiser for tests that supply a fixed writer.
     convenience init(writer: HostsWriter,
                      backup: HostsBackupStore,
-                     readLiveHosts: @escaping () -> String,
+                     readLiveHosts: @escaping () throws -> String,
                      debounceInterval: Duration = .milliseconds(150)) {
         self.init(makeWriter: { writer }, backup: backup, readLiveHosts: readLiveHosts,
                   debounceInterval: debounceInterval)
@@ -73,7 +88,11 @@ final class HostsManager {
         profiles = (try? context.fetch(
             FetchDescriptor<HostProfile>(sortBy: [SortDescriptor(\.displayOrder)])
         )) ?? []
-        let parsed = HostsFile.parse(readLiveHosts())
+        // Display-only: if the live read fails, keep the previously shown system
+        // content rather than blanking it. The apply path handles read failures
+        // via `HostsManagerError.liveReadFailed`.
+        guard let live = try? readLiveHosts() else { return }
+        let parsed = HostsFile.parse(live)
         systemHosts = [parsed.prefix, parsed.suffix]
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
@@ -165,7 +184,7 @@ final class HostsManager {
             lastError = backupError != nil ? "备份创建失败，可能无法完整恢复" : nil
             reload()
         } catch {
-            lastError = String(describing: error)
+            lastError = message(for: error)
             logger.error("System hosts edit failed: \(error)")
             reload()
         }
@@ -236,7 +255,7 @@ final class HostsManager {
         } catch {
             // Discard unsaved in-memory mutations so reload() sees the persisted state.
             modelContainer?.mainContext.rollback()
-            lastError = String(describing: error)
+            lastError = message(for: error)
             logger.error("Apply failed: \(error)")
             reload()
         }
@@ -246,12 +265,12 @@ final class HostsManager {
     /// system content is preserved from the live file; otherwise it is replaced
     /// (used by `updateSystemHosts`). The managed block is always rebuilt from
     /// the currently active profiles.
-    private func composedContent(systemPrefix: String?) -> String {
+    private func composedContent(systemPrefix: String?) throws -> String {
         let parsed: HostsFile.Parsed
         if let systemPrefix {
             parsed = HostsFile.Parsed(prefix: systemPrefix, managed: nil, suffix: "")
         } else {
-            parsed = HostsFile.parse(readLiveHosts())
+            parsed = HostsFile.parse(try readLive())
         }
         let active = profiles
             .filter(\.isActive)
@@ -264,8 +283,27 @@ final class HostsManager {
     /// entirely when it would not change the file (e.g. toggling or deleting a
     /// blank profile) so the user is never prompted for a no-op.
     private func applyContent(_ content: String) async throws {
-        guard content != readLiveHosts() else { return }
+        guard content != (try readLive()) else { return }
         let writer = makeWriter()
         try await writer.write(content)
+    }
+
+    /// Read the live `/etc/hosts`, mapping any failure to `liveReadFailed` so
+    /// compose/apply abort with a user-facing Chinese message instead of writing
+    /// against a bogus empty baseline.
+    private func readLive() throws -> String {
+        do {
+            return try readLiveHosts()
+        } catch {
+            logger.error("Reading /etc/hosts failed: \(error)")
+            throw HostsManagerError.liveReadFailed
+        }
+    }
+
+    /// Map an error to a user-facing message. Known HostsManager errors use their
+    /// Chinese text; everything else falls back to a description.
+    private func message(for error: Error) -> String {
+        if let error = error as? HostsManagerError { return error.userMessage }
+        return String(describing: error)
     }
 }
