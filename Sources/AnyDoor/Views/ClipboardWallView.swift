@@ -206,6 +206,10 @@ struct ClipboardWallView: View {
             }
         }
         .buttonStyle(.borderless)
+        // Keep the trigger out of the keyboard focus chain so opening the wall
+        // doesn't land a blue focus ring on it (the ring the tab row also avoids
+        // by not using a Button); mouse clicks still open the menu.
+        .focusable(false)
         .tint(.primary)
         .frame(maxWidth: 150)
         .disabled(sources.isEmpty)

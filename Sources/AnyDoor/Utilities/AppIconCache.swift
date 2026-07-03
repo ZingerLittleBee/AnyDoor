@@ -78,6 +78,26 @@ enum AppIconCache {
         bundleCache[bundleID]
     }
 
+    /// Synchronous main-actor resolution + memoization by bundle identifier.
+    ///
+    /// The source-app icon is a single, cheap Launch Services lookup
+    /// (`urlForApplication` + `icon(forFile:)`), unlike the potentially heavy
+    /// image-thumbnail decode. Resolving it inline on the main actor — instead of
+    /// through an async `.task`/`@State` hop — keeps the clipboard card's source
+    /// icon reliable: the async path could leave the header's icon slot blank when
+    /// the card's `.task` was torn down by the wall's frequent body re-evaluations
+    /// before the detached resolve landed. Memoized so each distinct source app is
+    /// resolved once; returns nil when the bundle ID maps to no installed app.
+    static func iconForBundleSync(_ bundleID: String) -> NSImage? {
+        if let hit = bundleCache[bundleID] { return hit }
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+            return nil
+        }
+        let image = NSWorkspace.shared.icon(forFile: url.path)
+        bundleCache[bundleID] = image
+        return image
+    }
+
     /// Returns the icon for the app with `bundleID`, resolving its URL and icon on
     /// a background task on a cache miss. Returns nil when the bundle ID maps to no
     /// installed app. Concurrent requests for the same ID share one resolution.

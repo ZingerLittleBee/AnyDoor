@@ -46,6 +46,30 @@ final class HyperKeyControllerTests: XCTestCase {
         }
     }
 
+    func testGetFailureRollsBackPersistedOwnership() async throws {
+        let runner = FakeCommandRunner()
+        runner.responses = [
+            // first apply: GET (empty) + SET (ok)
+            CommandResult(stdout: "(null)\n", stderr: "", exitCode: 0),
+            CommandResult(stdout: "", stderr: "", exitCode: 0),
+            // second apply: GET fails — hidutil never mutated, no SET
+            CommandResult(stdout: "", stderr: "boom", exitCode: 1),
+        ]
+        let controller = HyperKeyController(runner: runner)
+        let first = try await controller.apply(trigger: .capsLock, virtualKey: .f19)
+
+        do {
+            _ = try await controller.apply(trigger: .leftControl, virtualKey: .f19)
+            XCTFail("expected throw")
+        } catch {
+            // A failed GET means hidutil is unchanged, so the pre-persisted signature
+            // must be rolled back to the prior state — not left dangling.
+            let data = UserDefaults.standard.data(forKey: "hyperKey.ownedSignatures")!
+            let set = try JSONDecoder().decode(OwnedSignatures.self, from: data)
+            XCTAssertEqual(set, [first])
+        }
+    }
+
     func testApplyRevertsPersistedSetOnSetFailure() async throws {
         let runner = FakeCommandRunner()
         runner.responses = [

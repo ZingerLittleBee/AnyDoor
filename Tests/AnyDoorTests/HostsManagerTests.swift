@@ -2,6 +2,49 @@ import XCTest
 import SwiftData
 @testable import AnyDoor
 
+/// Test writer whose next write can be suspended until the test releases it,
+/// so a second mutation can join the coalesced applyTask mid-write.
+private final class GatedHostsWriter: HostsWriter, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _lastWritten: String?
+    private var _gateNext = false
+    private var _isSuspended = false
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    var lastWritten: String? { lock.withLock { _lastWritten } }
+    var isSuspended: Bool { lock.withLock { _isSuspended } }
+
+    func gateNextWrite() { lock.withLock { _gateNext = true } }
+
+    /// Resume the suspended write, optionally failing it.
+    func release(throwing error: Error? = nil) {
+        let cont = lock.withLock {
+            let c = continuation
+            continuation = nil
+            _isSuspended = false
+            return c
+        }
+        if let error { cont?.resume(throwing: error) } else { cont?.resume() }
+    }
+
+    func write(_ content: String) async throws {
+        let gated = lock.withLock {
+            let g = _gateNext
+            _gateNext = false
+            return g
+        }
+        if gated {
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+                lock.withLock {
+                    continuation = c
+                    _isSuspended = true
+                }
+            }
+        }
+        lock.withLock { _lastWritten = content }
+    }
+}
+
 @MainActor
 final class HostsManagerTests: XCTestCase {
     private func makeContainer() throws -> ModelContainer {
@@ -159,6 +202,97 @@ final class HostsManagerTests: XCTestCase {
         let written = try XCTUnwrap(mock.lastWritten)
         XCTAssertTrue(written.contains("1.1.1.1 alpha"))
         XCTAssertTrue(written.contains("2.2.2.2 beta"))
+    }
+
+    // MARK: - Fix 1: unreadable /etc/hosts aborts the apply instead of writing empty
+
+    func test_liveReadFailure_abortsApply_setsError_neverWrites() async throws {
+        struct LiveReadError: Error {}
+        let mock = MockHostsWriter()
+        let container = try makeContainer()
+        let live: () throws -> String = { throw LiveReadError() }
+        let mgr = HostsManager(
+            writer: mock,
+            backup: HostsBackupStore(backupDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString), readLiveHosts: live),
+            readLiveHosts: live,
+            debounceInterval: .milliseconds(1))
+        mgr.bootstrap(modelContainer: container)
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        let profile = mgr.profiles[0]
+        await mgr.setActive(profile, true)
+        // A failed read must never destroy the system file: no write may be issued.
+        XCTAssertEqual(mock.writeCount, 0, "A failed /etc/hosts read must abort before any write")
+        XCTAssertNotNil(mgr.lastError, "lastError must surface the read failure")
+    }
+
+    // MARK: - Fix 2: deleting an active profile survives a failed system write
+
+    func test_deleteActiveProfile_failedWrite_keepsRow_restoresActive() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        await mgr.setActive(mgr.profiles[0], true)
+        XCTAssertEqual(mock.writeCount, 1)
+        // The delete's block-removal write fails.
+        mock.errorToThrow = HostsWriterError.writeFailed("denied")
+        await mgr.deleteProfile(mgr.profiles[0])
+        // Row must survive so its block is not orphaned in /etc/hosts.
+        XCTAssertEqual(mgr.profiles.count, 1, "Profile must survive a failed system write")
+        XCTAssertTrue(mgr.profiles[0].isActive, "Active state must be restored on failed delete")
+        XCTAssertNotNil(mgr.lastError, "lastError must surface the write failure")
+    }
+
+    /// Regression: deleteProfile must not trust the shared coalesced apply result.
+    /// A delete that joins an in-flight applyTask whose write fails gets rolled
+    /// back (`isActive` restored) — the follow-up retry is then a no-op "success"
+    /// that must NOT let the delete drop the row while its block is still live.
+    func test_deleteActiveProfile_joiningFailedCoalescedApply_keepsRow() async throws {
+        let writer = GatedHostsWriter()
+        let (mgr, _) = try makeManager(writer: writer,
+                                       live: { writer.lastWritten ?? "127.0.0.1 localhost\n" },
+                                       debounceInterval: .milliseconds(10))
+        mgr.createProfile(name: "A", content: "1.1.1.1 a")
+        mgr.createProfile(name: "B", content: "2.2.2.2 b")
+        let aID = mgr.profiles[0].id
+        let bID = mgr.profiles[1].id
+        await mgr.setActive(mgr.profiles[0], true) // A applied; live file has A's block
+
+        // Suspend the next write (B's activation) mid-flight, like an open auth dialog.
+        writer.gateNextWrite()
+        let toggleB = Task { @MainActor in
+            if let b = mgr.profiles.first(where: { $0.id == bID }) { await mgr.setActive(b, true) }
+        }
+        while !writer.isSuspended { try await Task.sleep(for: .milliseconds(5)) }
+
+        // Delete A while the coalesced apply is suspended: it joins the same task.
+        let deleteA = Task { @MainActor in
+            if let a = mgr.profiles.first(where: { $0.id == aID }) { await mgr.deleteProfile(a) }
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        writer.release(throwing: HostsWriterError.writeFailed("denied"))
+        await toggleB.value
+        await deleteA.value
+
+        // Rollback restored A.isActive; the retry was a no-op. A's block is still
+        // in the live file, so its row must survive and the failure must surface.
+        XCTAssertEqual(mgr.profiles.count, 2, "Profile A must survive: its block was never removed")
+        XCTAssertEqual(mgr.profiles.first { $0.id == aID }?.isActive, true)
+        XCTAssertNotNil(mgr.lastError, "The failed delete must surface an error")
+    }
+
+    func test_deleteActiveProfile_successfulWrite_removesRowAndBlock() async throws {
+        let mock = MockHostsWriter()
+        let (mgr, _) = try makeManager(writer: mock,
+                                       live: { mock.lastWritten ?? "127.0.0.1 localhost\n" })
+        mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        await mgr.setActive(mgr.profiles[0], true)
+        await mgr.deleteProfile(mgr.profiles[0])
+        XCTAssertEqual(mgr.profiles.count, 0)
+        let written = try XCTUnwrap(mock.lastWritten)
+        XCTAssertFalse(written.contains(HostsFile.beginMarker), "Managed block removed on delete")
+        XCTAssertTrue(written.contains("127.0.0.1 localhost"))
     }
 
     // MARK: - Fix 3: backup failure surfaced but write proceeds
