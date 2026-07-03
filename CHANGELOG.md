@@ -25,6 +25,11 @@ versioning.
   `vtool`: `sdk 14.0` opens the window, the real SDK keeps it closed. The
   state-restoration and reopen-suppression defenses in `AppDelegate` were never
   the trigger. Fixed by the `platform_version` override above.
+- Release tooling now asserts the minimum-macOS declaration stays in sync across
+  `scripts/release.sh` (`MIN_MACOS`), `Package.swift` (`.macOS`), and
+  `Info.plist` (`LSMinimumSystemVersion`). The `platform_version` override force-
+  stamps `minos`, so without this guard a future platform bump would silently
+  ship a binary claiming support for an older macOS than it was built for.
 
 ## [3.4.0] - 2026-06-29
 

@@ -23,6 +23,12 @@ DIST="$REPO_ROOT/dist"
 ARCHIVE="$REPO_ROOT/scripts/release-archive"
 SPARKLE_BIN="$REPO_ROOT/scripts/sparkle-bin"
 
+# Minimum macOS version stamped into the binary's LC_BUILD_VERSION `minos`
+# field via the platform_version override in the build step. Must stay in sync
+# with Package.swift's `.macOS` platform and Info.plist's LSMinimumSystemVersion;
+# the preflight asserts all three agree.
+MIN_MACOS="14.0"
+
 log() { printf '\033[1;34m▸\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -81,6 +87,19 @@ gh auth status -h github.com >/dev/null 2>&1 || die "gh CLI is not authenticated
 command -v create-dmg >/dev/null 2>&1 \
   || die "create-dmg not found in PATH — run: brew install create-dmg"
 
+# The build step force-overrides LC_BUILD_VERSION `minos` to MIN_MACOS via
+# `-platform_version`. The linker applies that value unconditionally (only a
+# warning if the compiled objects target a newer min), so a Package.swift
+# platform bump would otherwise silently ship a binary claiming to support an
+# older macOS than the code was built for. Assert the three min-OS declarations
+# stay in lockstep so any bump must touch all of them together.
+MIN_MACOS_MAJOR="${MIN_MACOS%%.*}"
+grep -q "\.macOS(\.v${MIN_MACOS_MAJOR})" Package.swift \
+  || die "Package.swift platform does not match MIN_MACOS ($MIN_MACOS) — update MIN_MACOS in scripts/release.sh, Package.swift's .macOS(...), and Info.plist LSMinimumSystemVersion together"
+plist_min="$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.plist 2>/dev/null || true)"
+[[ "$plist_min" == "$MIN_MACOS" ]] \
+  || die "Info.plist LSMinimumSystemVersion ($plist_min) does not match MIN_MACOS ($MIN_MACOS) — update MIN_MACOS in scripts/release.sh, Package.swift's .macOS(...), and Info.plist LSMinimumSystemVersion together"
+
 # --- 2. Resolve version --------------------------------------------------
 LAST_STEP=2
 RECOVERY_HINT="nothing to undo; version not yet written"
@@ -138,11 +157,13 @@ RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
 # (the `native` backend writes the real SDK). On macOS 26 (Tahoe) the system
 # gates the modern window appearance on the linked SDK version (>= 26): a
 # 14.0 `sdk` field forces the app into the legacy, washed-out appearance.
-# Override `platform_version` so the binary records minos 14.0 (still runs on
-# macOS 14+) but the real SDK version, restoring the intended appearance.
+# Override `platform_version` so the binary records minos MIN_MACOS (still runs
+# on that macOS and later) but the real SDK version, restoring the intended
+# appearance. The preflight guarantees MIN_MACOS matches Package.swift and
+# Info.plist, so this override can't understate the supported minimum.
 MACOS_SDK_VERSION="$(xcrun --show-sdk-version --sdk macosx)"
 BUILD_FLAGS=(--build-system swiftbuild --arch arm64 --arch x86_64
-    -Xlinker -platform_version -Xlinker macos -Xlinker 14.0 -Xlinker "$MACOS_SDK_VERSION")
+    -Xlinker -platform_version -Xlinker macos -Xlinker "$MIN_MACOS" -Xlinker "$MACOS_SDK_VERSION")
 log "swift build -c release (universal: arm64 + x86_64)"
 swift build -c release "${BUILD_FLAGS[@]}"
 
