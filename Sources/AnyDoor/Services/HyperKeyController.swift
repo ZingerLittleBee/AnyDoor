@@ -105,12 +105,19 @@ actor HyperKeyController {
         do {
             try await readModifyWrite(removeAll: oldOwned, add: newSig, didReachSet: &setReached)
         } catch {
-            // Only attempt revert when the SET phase was reached (GET succeeded).
-            // If the GET itself failed, hidutil is unchanged — no revert needed.
             if setReached {
+                // SET was reached (GET succeeded): hidutil may have been mutated, so
+                // undo the newSig entry and only restore persisted ownership if that
+                // revert succeeds.
                 if (try? await readModifyWrite(removeAll: [newSig], add: nil)) != nil {
                     persistOwned(oldOwned)
                 }
+            } else {
+                // GET failed: hidutil was never mutated, so the pre-persisted newSig
+                // was never applied. Roll persisted ownership back unconditionally —
+                // safe precisely because a failed GET means the system state is
+                // unchanged (avoids a stale signature blocking termination/reconcile).
+                persistOwned(oldOwned)
             }
             throw error
         }
