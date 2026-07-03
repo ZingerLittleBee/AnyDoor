@@ -42,7 +42,7 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelp
 
     // MARK: PrivilegedHelperProtocol
 
-    func writeHosts(_ content: String, withReply reply: @escaping (String?) -> Void) {
+    func writeHosts(_ content: String, withReply reply: @escaping @Sendable (String?) -> Void) {
         guard content.utf8.count <= PrivilegedHelperConstants.maxPayloadBytes else {
             reply("payload too large"); return
         }
@@ -56,12 +56,12 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelp
         }
     }
 
-    func helperVersion(withReply reply: @escaping (String) -> Void) {
+    func helperVersion(withReply reply: @escaping @Sendable (String) -> Void) {
         // The helper is a bare Mach-O without an Info.plist; read the shared constant instead.
         reply(PrivilegedHelperConstants.helperVersion)
     }
 
-    func shutDown(withReply reply: @escaping (String?) -> Void) {
+    func shutDown(withReply reply: @escaping @Sendable (String?) -> Void) {
         writeQueue.async {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/sbin/shutdown")
@@ -84,7 +84,9 @@ final class HostsHelperListener: NSObject, NSXPCListenerDelegate, PrivilegedHelp
         var bytes = Array(template.utf8) + [0]
         let fd = bytes.withUnsafeMutableBufferPointer { mkstemp($0.baseAddress!) }
         guard fd >= 0 else { throw NSError(domain: "hosts", code: Int(errno)) }
-        let tmpPath = String(cString: bytes)
+        // `bytes` is the mkstemp template with the trailing NUL we appended;
+        // mkstemp rewrites it in place without changing its length.
+        let tmpPath = String(decoding: bytes.dropLast(), as: UTF8.self)
         defer { unlink(tmpPath) }
 
         let data = Array(content.utf8)

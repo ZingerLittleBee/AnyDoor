@@ -16,11 +16,11 @@ public enum PrivilegedHelperConstants {
 @objc public protocol PrivilegedHelperProtocol {
     /// Replace `/etc/hosts` with `content`. Replies with nil on success or an
     /// error message describing the failure.
-    func writeHosts(_ content: String, withReply reply: @escaping (String?) -> Void)
+    func writeHosts(_ content: String, withReply reply: @escaping @Sendable (String?) -> Void)
     /// Returns the helper's bundle/build version for diagnostics + upgrade checks.
-    func helperVersion(withReply reply: @escaping (String) -> Void)
+    func helperVersion(withReply reply: @escaping @Sendable (String) -> Void)
     /// Power the machine off as root. Replies with nil on success or an error
     /// message. A fixed verb — no caller-supplied arguments — so there is no
     /// command-injection surface.
-    func shutDown(withReply reply: @escaping (String?) -> Void)
+    func shutDown(withReply reply: @escaping @Sendable (String?) -> Void)
 }
