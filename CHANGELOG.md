@@ -6,6 +6,12 @@ versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Clipboard wall cards grew from 190×190 to 230×230 (panel height 285→325),
+  with larger preview and match-snippet text, improving legibility of longer
+  text/OCR/QR previews.
+
 ### Fixed
 
 - Release builds appeared washed-out on macOS 26 (Tahoe). The universal-binary
@@ -30,6 +36,38 @@ versioning.
   `Info.plist` (`LSMinimumSystemVersion`). The `platform_version` override force-
   stamps `minos`, so without this guard a future platform bump would silently
   ship a binary claiming support for an older macOS than it was built for.
+- Clipboard wall cards intermittently showed a blank source-app icon after fast
+  scrolling. The icon was resolved through an async `.task` that could be torn
+  down by the wall's frequent view-body re-evaluations before the detached
+  resolve landed; the source icon is a single cheap Launch Services lookup, so
+  it's now resolved synchronously on the main actor instead.
+- The clipboard wall's source-filter trigger showed a blue keyboard focus ring
+  when the wall opened, unlike the tab row beside it. It's no longer part of
+  the focus chain (mouse clicks still open the menu).
+- Hyper Key: retrying the trigger mapping right after a failed `hidutil` GET
+  could leave a stale signature in the persisted `hyperKey.ownedSignatures`,
+  since only the SET-reached failure path rolled it back. A failed GET (which
+  never mutates `hidutil`) now also rolls the persisted ownership back to its
+  prior state.
+- Hosts: composing or applying against `/etc/hosts` fell back to an empty
+  string when the file couldn't be read, risking a write that wiped the
+  system's own entries. A failed read now aborts the apply with a surfaced
+  error instead.
+- Hosts: deleting an active profile removed its SwiftData row before
+  confirming the block-removal write to `/etc/hosts` succeeded, so a failed
+  write could orphan the block outside any tracked profile. The row is now
+  deleted only after the deactivation is applied and verified — including
+  against a coalesced `scheduleApply()` result, which can otherwise report a
+  batch-mate's success (or a rolled-back no-op retry) instead of this
+  profile's own write.
+- Clipboard: deleting a history item removed its on-disk payload file
+  (PNG/copied files) before the row deletion was saved, so a failed save
+  could leave a surviving row pointing at deleted files — and the failed-save
+  path never rolled back the pending deletion, letting a later unrelated save
+  silently flush it and drop the row anyway. The payload is now captured
+  before, and removed only after, the row deletion is confirmed saved; a
+  failed save rolls back the pending deletion and refreshes from the
+  persisted state.
 
 ## [3.4.0] - 2026-06-29
 
