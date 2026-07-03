@@ -440,6 +440,12 @@ publishes it.
   Translation framework when available
 - Swift Package Manager
 
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development setup, code conventions, and pull-request process. For larger
+changes, please open an issue first to discuss the idea.
+
 ## Acknowledgements
 
 Bundled third-party code; full license texts in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md).

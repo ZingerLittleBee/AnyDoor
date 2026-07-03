@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & usage help
+    url: https://github.com/ZingerLittleBee/AnyDoor#readme
+    about: Check the README first — it covers features, permissions, and setup.

@@ -1,0 +1,78 @@
+name: Bug report
+description: Report something that isn't working correctly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill in the fields below —
+        complete reports get fixed much faster. You can write in English or Chinese.
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: When I press the hotkey, ...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps to trigger the bug.
+      placeholder: |
+        1. Open Settings → Panel
+        2. Bind ⌥Space to Safari
+        3. Press ⌥Space while ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen instead.
+    validations:
+      required: true
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: e.g. macOS 26.1
+    validations:
+      required: true
+  - type: input
+    id: anydoor-version
+    attributes:
+      label: AnyDoor version
+      description: Shown in Settings → General, or in the update banner.
+      placeholder: e.g. 3.4.1
+    validations:
+      required: true
+  - type: dropdown
+    id: architecture
+    attributes:
+      label: Mac architecture
+      options:
+        - Apple Silicon (M-series)
+        - Intel
+        - Not sure
+    validations:
+      required: false
+  - type: checkboxes
+    id: permissions
+    attributes:
+      label: Granted permissions
+      description: Which permissions has AnyDoor been granted? (Check System Settings → Privacy & Security.)
+      options:
+        - label: Accessibility
+        - label: Screen Recording (capture / recording features)
+        - label: Automation / System Events (AppleScript-backed toggles)
+        - label: Privileged helper enabled (hosts management)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Anything else that helps — Console.app output, screenshots, or a screen recording.
+    validations:
+      required: false

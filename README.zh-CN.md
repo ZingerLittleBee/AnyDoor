@@ -379,6 +379,10 @@ codesign，提交 Apple 公证，打包 DMG 和 zip，重新生成 Sparkle appca
 - Vision OCR、Natural Language 检测、AVFoundation 朗读，以及可用时的 Apple Translation framework
 - Swift Package Manager
 
+## 参与贡献
+
+欢迎贡献！开发环境搭建、代码规范和 PR 流程见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。较大的改动请先开 issue 讨论。
+
 ## 致谢
 
 捆绑的第三方代码，完整许可证文本见 [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md)。
