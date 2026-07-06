@@ -20,6 +20,9 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         panel.titleVisibility = .hidden
         // Keep the close traffic light: unlike the translation panel this window
         // has no outside-click dismissal, so the mouse needs a close affordance.
+        // The card ignores the titlebar safe area (see ImageConversionView), so
+        // the button overlays the card's top-left corner instead of floating in
+        // a transparent strip above it.
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isMovableByWindowBackground = true

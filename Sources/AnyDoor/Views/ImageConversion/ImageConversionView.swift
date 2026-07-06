@@ -26,6 +26,11 @@ struct ImageConversionView: View {
         }
         .adaptivePanelSurface(cornerRadius: 16)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Fill the whole window: without this the hosting view treats the
+        // transparent titlebar as a safe-area inset and the card gets pushed
+        // below it, leaving an invisible-but-draggable strip above the card
+        // with the traffic light floating in it.
+        .ignoresSafeArea()
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $model.isDropTargeted, perform: handleDrop)
         .focusEffectDisabled()
     }
@@ -44,8 +49,8 @@ struct ImageConversionView: View {
                 } icon: {
                     Image(systemName: "photo.on.rectangle")
                 }
-                // Clear the close traffic light floating over the transparent
-                // titlebar (fullSizeContentView pulls content under it).
+                // Clear the close traffic light overlaying the card's top-left
+                // corner (the card ignores the titlebar safe area).
                 .padding(.leading, 18)
                 Spacer()
                 Button {
