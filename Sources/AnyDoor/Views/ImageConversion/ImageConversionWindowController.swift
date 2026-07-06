@@ -55,6 +55,15 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         show()
     }
 
+    /// Opens the window with a set of basket items preloaded (e.g. echoed from a
+    /// clipboard-history entry). Unlike `toggle`, this never reads the Finder
+    /// selection and never closes an already-open window — it merges the items
+    /// into the current basket and brings the window forward.
+    func present(items: [ImageConversionBasketItem]) {
+        viewModel.add(items)
+        show()
+    }
+
     func show() {
         guard let window else { return }
         window.title = L(.imageConversionTitle)

@@ -99,6 +99,18 @@ final class ImageConversionViewModel {
         items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
     }
 
+    /// Merges preloaded basket items (e.g. from a clipboard-history entry),
+    /// deduping by id and preserving insertion order so a bitmap keeps its
+    /// history-derived display name.
+    func add(_ newItems: [ImageConversionBasketItem]) {
+        var existing = Set(items.map(\.id))
+        var next = items
+        for item in newItems where existing.insert(item.id).inserted {
+            next.append(item)
+        }
+        items = next
+    }
+
     func remove(_ item: ImageConversionBasketItem) {
         items.removeAll { $0.id == item.id }
     }

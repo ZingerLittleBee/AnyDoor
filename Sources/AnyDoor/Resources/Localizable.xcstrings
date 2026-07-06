@@ -2024,6 +2024,23 @@
         }
       }
     },
+    "clipboard.action.convertImage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Convert Image Format"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图片格式转换"
+          }
+        }
+      }
+    },
     "clipboard.action.copy": {
       "extractionState": "manual",
       "localizations": {
@@ -4332,6 +4349,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "移除"
+          }
+        }
+      }
+    },
+    "imageConversion.sourceMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Can't read the image; the source file may have been deleted"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法读取图片，源文件可能已被删除"
           }
         }
       }

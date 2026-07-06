@@ -194,6 +194,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             },
             onEdit: { [weak self] item in self?.beginEdit(item) },
             onCopy: { [weak self] item in self?.copyWithoutPasting(item) },
+            onConvertImage: { [weak self] item in self?.convertImage(item) },
             onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
             onDelete: { item in
                 Task { await ClipboardHistoryStore.shared.delete(item) }
@@ -539,6 +540,45 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Suppress the watcher so the copy isn't captured as a new duplicate.
         watcher?.noteSelfWrite(changeCount: pb.changeCount)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+
+    /// "Convert Image Format" from a card's context menu: preload the entry into
+    /// the Image Conversion basket and open that window. Screenshot/image cards
+    /// enter as bitmaps (output → Downloads); file cards enter their image files
+    /// as file references (output → beside the original). A missing payload
+    /// surfaces a failure toast and leaves the window closed. The wall dismisses
+    /// first (without restoring focus) so its slide-out doesn't fight the
+    /// conversion panel's activation.
+    private func convertImage(_ item: ClipboardHistoryItem) {
+        guard let items = basketItems(for: item), !items.isEmpty else {
+            ToastPresenter.shared.show(.failure(L(.imageConversionSourceMissing)))
+            return
+        }
+        dismiss(restoreFocus: false) {
+            Task { @MainActor in
+                ImageConversionWindowController.shared.present(items: items)
+            }
+        }
+    }
+
+    /// Resolve a clipboard-history entry into Image Conversion basket items, or
+    /// nil when the payload can't be loaded (stored bitmap gone, or no image
+    /// file survives on disk).
+    private func basketItems(for item: ClipboardHistoryItem) -> [ImageConversionBasketItem]? {
+        switch item.historyKind {
+        case .screenshot, .image:
+            guard let fileName = item.fileName else { return nil }
+            let url = historyDirectory.appendingPathComponent(fileName)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return [.bitmap(data, displayName: item.previewTitle)]
+        case .file:
+            let urls = ClipboardImageConversionEntry.imageFileURLs(from: item.files)
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+            guard !urls.isEmpty else { return nil }
+            return urls.map { .file($0) }
+        default:
+            return nil
+        }
     }
 
     /// "Reveal in Finder" from a file card's context menu. Prefers each entry's
