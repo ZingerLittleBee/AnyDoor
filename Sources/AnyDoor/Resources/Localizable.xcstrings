@@ -4285,6 +4285,23 @@
         }
       }
     },
+    "imageConversion.history.clear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清空记录"
+          }
+        }
+      }
+    },
     "imageConversion.history.empty": {
       "extractionState": "manual",
       "localizations": {

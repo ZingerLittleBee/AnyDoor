@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -43,13 +44,19 @@ struct ImageConversionView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
-                    ForEach(model.availableFormats) { format in
-                        Text(format.displayName).tag(format)
+                HStack(spacing: 6) {
+                    LocalizedText(.imageConversionTargetFormat)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
+                        ForEach(model.availableFormats) { format in
+                            Text(format.displayName).tag(format)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 112)
                 }
-                .labelsHidden()
-                .frame(width: 112)
+                .help(L(.imageConversionTargetFormat))
             }
             if model.isQualityAdjustable {
                 qualityControl
@@ -178,6 +185,18 @@ struct ImageConversionView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
+                Button {
+                    store.clear()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(records.isEmpty)
+                .accessibilityLabel(L(.imageConversionHistoryClear))
+                .help(L(.imageConversionHistoryClear))
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
@@ -230,13 +249,15 @@ struct ImageConversionView: View {
 private struct ImageConversionRow: View {
     let item: ImageConversionBasketItem
     let remove: () -> Void
+    @State private var thumbnail: NSImage?
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(nsImage: iconImage)
+            Image(nsImage: resolvedThumbnail)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 30, height: 30)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.displayName)
                     .font(.system(size: 13, weight: .medium))
@@ -261,25 +282,65 @@ private struct ImageConversionRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .task(id: item.id) {
+            thumbnail = await loadThumbnail()
+        }
     }
 
-    private var iconImage: NSImage {
+    /// Async-decoded image preview, with a synchronous cache fast path for file
+    /// items and a file-type icon while the decode is in flight.
+    private var resolvedThumbnail: NSImage {
+        if let thumbnail { return thumbnail }
         if let url = item.fileURL {
-            return NSWorkspace.shared.icon(forFile: url.path)
-        }
-        if case let .bitmap(data) = item.payload, let image = NSImage(data: data) {
-            return image
+            return ClipboardThumbnail.cached(at: url) ?? NSWorkspace.shared.icon(forFile: url.path)
         }
         return NSWorkspace.shared.icon(for: .image)
+    }
+
+    private func loadThumbnail() async -> NSImage? {
+        switch item.payload {
+        case .file(let url):
+            return await ClipboardThumbnail.thumbnail(at: url)
+        case .bitmap(let data):
+            return await BitmapThumbnail.decode(data)
+        }
+    }
+}
+
+/// Downsampled thumbnails for in-memory bitmap basket items — the Data twin of
+/// `ClipboardThumbnail`, without a cache (bitmap items are few and short-lived).
+private enum BitmapThumbnail {
+    /// Carries the non-Sendable `NSImage` produced off-main back to the main
+    /// actor. `@unchecked` is sound because the image is freshly created in the
+    /// detached task and never mutated afterwards — only read while drawing.
+    private struct SendableImage: @unchecked Sendable {
+        let image: NSImage
+    }
+
+    static func decode(_ data: Data) async -> NSImage? {
+        let task = Task.detached(priority: .userInitiated) { () -> SendableImage? in
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: 96,
+            ]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+                return nil
+            }
+            return SendableImage(image: NSImage(cgImage: cgImage, size: .zero))
+        }
+        return await task.value?.image
     }
 }
 
 private struct ImageConversionHistoryRow: View {
     let record: ImageConversionRecord
+    @State private var preview: NSImage?
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(nsImage: previewImage)
+            Image(nsImage: resolvedPreview)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
                 .frame(width: 28, height: 28)
@@ -316,15 +377,18 @@ private struct ImageConversionHistoryRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .task(id: record.outputPath) {
+            guard FileManager.default.fileExists(atPath: record.outputPath) else { return }
+            preview = await ClipboardThumbnail.thumbnail(at: record.outputURL)
+        }
     }
 
-    /// Resolves the preview from the output path at render time; a deleted file
-    /// degrades to a generic placeholder rather than a broken image.
-    private var previewImage: NSImage {
-        if FileManager.default.fileExists(atPath: record.outputPath),
-           let image = NSImage(contentsOfFile: record.outputPath) {
-            return image
-        }
+    /// Resolves the preview from the output path at render time (downsampled and
+    /// cached via `ClipboardThumbnail`); a deleted file degrades to a generic
+    /// placeholder rather than a broken image.
+    private var resolvedPreview: NSImage {
+        if let preview { return preview }
+        if let cached = ClipboardThumbnail.cached(at: record.outputURL) { return cached }
         return NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
             ?? NSWorkspace.shared.icon(for: .image)
     }

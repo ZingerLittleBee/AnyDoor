@@ -153,6 +153,7 @@ enum L10n {
         case imageConversionDropSubtitle = "imageConversion.drop.subtitle"
         case imageConversionDropTitle = "imageConversion.drop.title"
         case imageConversionFileMissing = "imageConversion.fileMissing"
+        case imageConversionHistoryClear = "imageConversion.history.clear"
         case imageConversionHistoryEmpty = "imageConversion.history.empty"
         case imageConversionHistoryTitle = "imageConversion.history.title"
         case imageConversionNoFormats = "imageConversion.noFormats"

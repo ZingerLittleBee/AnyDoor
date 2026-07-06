@@ -75,6 +75,18 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
         XCTAssertEqual(store.revision, start &+ 2)
     }
 
+    func testClearRemovesAllRecordsAndBumpsRevision() throws {
+        let store = try makeStore()
+        record(store, name: "a", at: Date(timeIntervalSinceReferenceDate: 100))
+        record(store, name: "b", at: Date(timeIntervalSinceReferenceDate: 200))
+        let revisionBeforeClear = store.revision
+
+        store.clear()
+
+        XCTAssertTrue(store.recent().isEmpty)
+        XCTAssertEqual(store.revision, revisionBeforeClear &+ 1)
+    }
+
     func testNoOpsWithoutContext() {
         let store = ImageConversionHistoryStore(modelContext: nil)
         record(store, name: "a", at: Date(timeIntervalSinceReferenceDate: 100))

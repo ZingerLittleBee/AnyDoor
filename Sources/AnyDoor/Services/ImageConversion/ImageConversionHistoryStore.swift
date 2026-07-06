@@ -75,6 +75,16 @@ final class ImageConversionHistoryStore {
         revision &+= 1
     }
 
+    /// Remove every record (the history header's clear action).
+    func clear() {
+        guard let modelContext else { return }
+        let rows = (try? modelContext.fetch(FetchDescriptor<ImageConversionRecord>())) ?? []
+        guard !rows.isEmpty else { return }
+        for row in rows { modelContext.delete(row) }
+        try? modelContext.save()
+        revision &+= 1
+    }
+
     /// Keep the newest `capacity` records, deleting the overflow oldest.
     private func trim() {
         guard let modelContext else { return }
