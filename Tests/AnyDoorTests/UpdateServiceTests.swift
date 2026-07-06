@@ -109,22 +109,6 @@ final class UpdateServiceTests: XCTestCase {
         XCTAssertNil(service.availableVersion)
     }
 
-    func testDidFailCheckUpdatesLastCheckDateWithoutClearingBanner() {
-        let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
-
-        service.didFindUpdate(version: "1.2.0")
-        let originalDate = service.lastCheckDate
-        XCTAssertEqual(service.availableVersion, "1.2.0")
-
-        // Sleep briefly so the second date is observably distinct.
-        Thread.sleep(forTimeInterval: 0.01)
-        service.didFailCheck()
-
-        XCTAssertEqual(service.availableVersion, "1.2.0", "failure must not clear an existing banner")
-        XCTAssertNotNil(service.lastCheckDate)
-        XCTAssertNotEqual(service.lastCheckDate, originalDate, "failure must update lastCheckDate")
-    }
 }
 
 @MainActor

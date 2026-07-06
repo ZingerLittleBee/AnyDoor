@@ -220,10 +220,6 @@ struct GeneralSettingsView: View {
 
                 Toggle(isOn: $updateService.automaticChecksEnabled) { LocalizedText(.settingsAboutAutoCheck) }
 
-                LabeledContent { Text(updateService.lastCheckDate?.formatted(date: .abbreviated, time: .shortened) ?? "—")
-                    .foregroundStyle(.secondary)
-                } label: { LocalizedText(.settingsAboutLastCheck) }
-
                 Button { updateService.checkForUpdates() } label: { LocalizedText(.settingsAboutCheckNow) }
             } header: {
                 LocalizedText(.settingsGeneralAbout)

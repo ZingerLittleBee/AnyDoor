@@ -188,7 +188,6 @@ enum L10n {
         case settingsAboutAutoCheck = "settings.about.autoCheck"
         case settingsAboutCheckNow = "settings.about.checkNow"
         case settingsAboutCurrentVersion = "settings.about.currentVersion"
-        case settingsAboutLastCheck = "settings.about.lastCheck"
         case settingsAppPickerEmpty = "settings.appPicker.empty"
         case settingsAppPickerSearchPlaceholder = "settings.appPicker.searchPlaceholder"
         case settingsAppPickerSystemTag = "settings.appPicker.systemTag"

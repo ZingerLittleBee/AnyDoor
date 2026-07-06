@@ -6546,23 +6546,6 @@
         }
       }
     },
-    "settings.about.lastCheck": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last Check"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "上次检查"
-          }
-        }
-      }
-    },
     "settings.appPicker.empty": {
       "extractionState": "manual",
       "localizations": {

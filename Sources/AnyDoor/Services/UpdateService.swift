@@ -16,7 +16,6 @@ final class UpdateService {
     // MARK: - Public state
 
     private(set) var availableVersion: String? = nil
-    private(set) var lastCheckDate: Date? = nil
 
     var automaticChecksEnabled: Bool {
         didSet {
@@ -84,20 +83,10 @@ final class UpdateService {
         } else {
             availableVersion = version
         }
-        lastCheckDate = Date()
     }
 
     func didNotFindUpdate() {
         availableVersion = nil
-        lastCheckDate = Date()
-    }
-
-    /// Called when Sparkle aborts a check (e.g., network failure or feed parse error).
-    /// We update `lastCheckDate` so the UI reflects "we tried just now" but we
-    /// deliberately do NOT clear `availableVersion` — a prior successful check
-    /// may still be valid.
-    func didFailCheck() {
-        lastCheckDate = Date()
     }
 }
 
