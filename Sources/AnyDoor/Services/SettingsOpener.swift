@@ -2,10 +2,11 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Stable identifiers for the Settings `TabView` tabs, so callers can deep-link
-/// to a specific tab (e.g. the translation gear button) instead of landing on
-/// whatever tab was last open.
-enum SettingsTab: String, Hashable {
+/// Stable identifiers for the Settings sidebar sections, so callers can
+/// deep-link to a specific section (e.g. the translation gear button) instead
+/// of landing on whatever section was last open. Declaration order is the
+/// sidebar display order.
+enum SettingsTab: String, Hashable, CaseIterable {
     case panel
     case clipboard
     case capture

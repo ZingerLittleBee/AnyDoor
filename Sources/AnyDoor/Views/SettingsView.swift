@@ -3,38 +3,28 @@ import SwiftUI
 struct SettingsView: View {
     @State private var opener = SettingsOpener.shared
     @State private var selectedTab: SettingsTab = .panel
+    @Environment(LocalizationManager.self) private var localization
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            PanelSettingsView()
-                .tabItem {
-                    Label { LocalizedText(.settingsTabPanel) } icon: { Image(systemName: "rectangle.stack") }
+        // Reading the preference here (not just inside LocalizedText rows)
+        // makes the whole body — including the navigationTitle string —
+        // re-evaluate when the user switches language.
+        let _ = localization.preference
+        NavigationSplitView {
+            List(selection: $selectedTab) {
+                ForEach(SettingsTab.allCases, id: \.self) { tab in
+                    Label { LocalizedText(tab.titleKey) } icon: { Image(systemName: tab.systemImage) }
+                        .tag(tab)
                 }
-                .tag(SettingsTab.panel)
-
-            ClipboardSettingsView()
-                .tabItem {
-                    Label { LocalizedText(.settingsTabClipboard) } icon: { Image(systemName: "doc.on.clipboard") }
-                }
-                .tag(SettingsTab.clipboard)
-
-            CaptureSettingsView()
-                .tabItem {
-                    Label { LocalizedText(.settingsTabCapture) } icon: { Image(systemName: "camera.viewfinder") }
-                }
-                .tag(SettingsTab.capture)
-
-            TranslationSettingsView()
-                .tabItem {
-                    Label { LocalizedText(.settingsTabTranslation) } icon: { Image(systemName: "character.bubble") }
-                }
-                .tag(SettingsTab.translation)
-
-            GeneralSettingsView()
-                .tabItem {
-                    Label { LocalizedText(.settingsTabGeneral) } icon: { Image(systemName: "gear") }
-                }
-                .tag(SettingsTab.general)
+            }
+            .listStyle(.sidebar)
+            .navigationSplitViewColumnWidth(180)
+            // The sidebar is the window's whole navigation — collapsing it
+            // would strand the user, so drop the toggle button.
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            detailView
+                .navigationTitle(L(selectedTab.titleKey))
         }
         // Honor a deep-link request (e.g. the translation gear) then clear it so
         // a later plain open lands on the last-selected tab.
@@ -49,11 +39,44 @@ struct SettingsView: View {
                 opener.desiredTab = nil
             }
         }
-        .frame(width: 560, height: 480)
+        .frame(width: 740, height: 480)
         // Adopt .regular activation policy while Settings is open so the window
         // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
         // focuses another app.
         .background(RegularWindowRegistrar())
         .focusEffectDisabled()
+    }
+
+    @ViewBuilder
+    private var detailView: some View {
+        switch selectedTab {
+        case .panel: PanelSettingsView()
+        case .clipboard: ClipboardSettingsView()
+        case .capture: CaptureSettingsView()
+        case .translation: TranslationSettingsView()
+        case .general: GeneralSettingsView()
+        }
+    }
+}
+
+private extension SettingsTab {
+    var titleKey: L10n.Key {
+        switch self {
+        case .panel: .settingsTabPanel
+        case .clipboard: .settingsTabClipboard
+        case .capture: .settingsTabCapture
+        case .translation: .settingsTabTranslation
+        case .general: .settingsTabGeneral
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .panel: "rectangle.stack"
+        case .clipboard: "doc.on.clipboard"
+        case .capture: "camera.viewfinder"
+        case .translation: "character.bubble"
+        case .general: "gear"
+        }
     }
 }
