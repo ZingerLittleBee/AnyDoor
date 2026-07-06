@@ -1,7 +1,7 @@
 ---
 id: 002
 title: "Image Conversion: Finder selection echo + strict hotkey toggle"
-status: in-progress
+status: done
 prd: docs/prds/2026-07-06-image-conversion.md
 ---
 
