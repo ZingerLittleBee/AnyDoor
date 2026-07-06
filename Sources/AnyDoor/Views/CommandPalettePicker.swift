@@ -871,7 +871,6 @@ struct CommandPalettePicker: View {
                             onSelect: { onSelect(entry) }
                         )
                         .id(entry.id)
-                        .legacyMaterialBackground()
                     }
                 }
                 .overlayScrollers()
@@ -950,33 +949,35 @@ struct CommandPalettePicker: View {
                 : nil
 
             ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                    // Sentinel at the very top of the scroll content. Scrolling
-                    // here forces scroll offset back to 0 so the first section
-                    // header sits naturally above row 0 instead of pinning over
-                    // it (which would hide row 0 when newIndex reaches 0).
+                // Deliberately flat — no `Section`/`pinnedViews`. Wrapping the
+                // rows in `Section` makes SwiftUI's lazy layout re-traverse the
+                // whole sectioned view list on EVERY scroll-wheel event
+                // (~6.5 ms per event at ~260 rows, debug and release alike),
+                // which saturates the main thread under a 120 Hz trackpad
+                // event stream and causes intermittent dropped frames. A flat
+                // ForEach with inline header rows costs ~0.5 ms steady-state.
+                // The trade-off: headers scroll away with the content instead
+                // of pinning (Raycast behaves the same way). Do not reintroduce
+                // Section here without re-running a scroll-cost measurement.
+                LazyVStack(spacing: 0) {
+                    // Sentinel at the very top of the scroll content: keyboard
+                    // navigation scrolls here when the selection returns to
+                    // row 0 so the first section header is brought into view
+                    // (scrolling to the row itself would leave the header
+                    // clipped above the viewport).
                     Color.clear
                         .frame(height: 0)
                         .id("top-sentinel")
                     ForEach(state.filteredSections) { section in
-                        Section {
-                            ForEach(section.entries) { entry in
-                                CommandPaletteRow(
-                                    entry: entry,
-                                    hyperFlags: state.hyperFlags,
-                                    isSelected: entry.id == selectedID,
-                                    onSelect: { onSelect(entry) }
-                                )
-                                .id(entry.id)
-                                // Pre-macOS-26 fallback: rows share the pinned
-                                // header's material layering so the header/row
-                                // boundary has no visible double-material
-                                // seam. On macOS 26+ rows stay transparent on
-                                // top of the panel's Liquid Glass surface.
-                                .legacyMaterialBackground()
-                            }
-                        } header: {
-                            sectionHeader(titleKey: section.titleKey)
+                        sectionHeader(titleKey: section.titleKey)
+                        ForEach(section.entries) { entry in
+                            CommandPaletteRow(
+                                entry: entry,
+                                hyperFlags: state.hyperFlags,
+                                isSelected: entry.id == selectedID,
+                                onSelect: { onSelect(entry) }
+                            )
+                            .id(entry.id)
                         }
                     }
                 }
@@ -984,18 +985,12 @@ struct CommandPalettePicker: View {
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { Color.clear.frame(height: 8) }
             .frame(minHeight: 320, maxHeight: .infinity)
-            .onChange(of: state.selectedIndex) { oldIndex, newIndex in
+            .onChange(of: state.selectedIndex) { _, newIndex in
                 guard entries.indices.contains(newIndex) else { return }
                 if newIndex == 0 {
                     // Top of list — scroll to the sentinel so the first
-                    // section header lands naturally at the top (not pinning
-                    // over row 0).
+                    // section header is visible above row 0.
                     proxy.scrollTo("top-sentinel")
-                } else if newIndex < oldIndex {
-                    // Nav up. ScrollTo the row above the target so the
-                    // target lands one row down — visible just below the
-                    // pinned section header instead of hidden behind it.
-                    proxy.scrollTo(entries[newIndex - 1].id)
                 } else {
                     proxy.scrollTo(entries[newIndex].id)
                 }
@@ -1010,17 +1005,8 @@ struct CommandPalettePicker: View {
             .foregroundStyle(.secondary)
             .tracking(0.6)
             .padding(.horizontal, 22)
-            // Uniform vertical padding regardless of section index so any
-            // section that becomes the pinned one has the same height. The
-            // `isFirst` differential collapsed the first section's band
-            // when it stuck to the top.
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // On macOS 26+ the header uses Liquid Glass so it reads as a
-            // distinct band on top of the panel's glass while still masking
-            // rows that scroll underneath. Earlier systems fall back to
-            // .thickMaterial for the same masking job.
-            .adaptiveStickyHeaderSurface()
     }
 }
 
