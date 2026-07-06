@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-07-06
+
 ### Added
 
 - Image Conversion: a new built-in action opens a floating conversion window

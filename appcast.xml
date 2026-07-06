@@ -3,77 +3,46 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.5.0</title>
+            <pubDate>Mon, 06 Jul 2026 19:53:49 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.5.0</sparkle:version>
+            <sparkle:shortVersionString>3.5.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Image Conversion: a new built-in action opens a floating conversion window
+  where images can be batch-converted through ImageIO to PNG, JPEG, HEIC, AVIF,
+  TIFF, GIF, BMP, PDF, or ICO when the system encoder supports the target
+  format. Images enter the basket by dragging files in, pressing ⌘V (copied
+  files or a copied bitmap), summoning the window with images selected in
+  Finder (the selection is echoed in; the hotkey is a strict open/close
+  toggle), or right-clicking an image/screenshot/file card on the clipboard
+  wall. File sources convert next to the original (never overwriting — name
+  collisions get a Finder-style counter); clipboard bitmaps convert into
+  Downloads with a timestamped name; outputs land on the clipboard as files,
+  ready to paste.
+- Image Conversion: a quality slider (1–100%, default 85%) applies to lossy
+  targets (JPEG/HEIC/AVIF); the last-used format and quality persist and are
+  included in config backup/sync.
+- Image Conversion: the window keeps the last 50 conversion records with
+  thumbnails, Reveal in Finder, copy-as-file, and a clear-all action.
+- Screenshot "Save As" can now save in any supported image format (PNG, JPEG,
+  HEIC, AVIF, TIFF, GIF, BMP, PDF, ICO) — the chosen filename extension picks
+  the format and lossy saves honor the Image Conversion quality setting. The
+  capture pipeline itself still records PNG.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.5.0/AnyDoor-3.5.0.zip" length="10490946" type="application/octet-stream" sparkle:edSignature="QgBa6Mi9XxAEQWwYAlVVCcp/qt/sV4q6cJQ6FP/2UK4RtkjbUCzA9QP59oIEi+yb6ApQitKbnRdJhnoqujMhDw=="/>
+        </item>
+        <item>
             <title>3.4.1</title>
             <pubDate>Sat, 04 Jul 2026 00:29:32 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>3.4.1</sparkle:version>
             <sparkle:shortVersionString>3.4.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Changed
-
-- Clipboard wall cards grew from 190×190 to 230×230 (panel height 285→325),
-  with larger preview and match-snippet text, improving legibility of longer
-  text/OCR/QR previews.
-
-### Fixed
-
-- Release builds appeared washed-out on macOS 26 (Tahoe). The universal-binary
-  build uses the `swiftbuild` backend, which records the deployment-target
-  version (14.0) in the binary's `LC_BUILD_VERSION` `sdk` field instead of the
-  real SDK version. macOS 26 gates the modern window appearance on the linked
-  SDK version (>= 26), so the released app fell back to the legacy appearance
-  while `swift run` (native backend, real SDK) looked correct. The release
-  script now forces `platform_version` to the real SDK version, keeping `minos`
-  at 14.0 so the app still runs on macOS 14+.
-- The Settings window opened by itself on every launch of the released app —
-  most visibly after a reboot/login auto-launch. Same root cause as the
-  washed-out appearance above: with a 14.0 `sdk` stamp, macOS 26's SwiftUI
-  applies the legacy behavior where an app whose only scene is `Settings`
-  presents that window at launch, regardless of the launch mechanism (login
-  item, `open -a`, direct exec). Verified by A/B-stamping the same binary with
-  `vtool`: `sdk 14.0` opens the window, the real SDK keeps it closed. The
-  state-restoration and reopen-suppression defenses in `AppDelegate` were never
-  the trigger. Fixed by the `platform_version` override above.
-- Release tooling now asserts the minimum-macOS declaration stays in sync across
-  `scripts/release.sh` (`MIN_MACOS`), `Package.swift` (`.macOS`), and
-  `Info.plist` (`LSMinimumSystemVersion`). The `platform_version` override force-
-  stamps `minos`, so without this guard a future platform bump would silently
-  ship a binary claiming support for an older macOS than it was built for.
-- Clipboard wall cards intermittently showed a blank source-app icon after fast
-  scrolling. The icon was resolved through an async `.task` that could be torn
-  down by the wall's frequent view-body re-evaluations before the detached
-  resolve landed; the source icon is a single cheap Launch Services lookup, so
-  it's now resolved synchronously on the main actor instead.
-- The clipboard wall's source-filter trigger showed a blue keyboard focus ring
-  when the wall opened, unlike the tab row beside it. It's no longer part of
-  the focus chain (mouse clicks still open the menu).
-- Hyper Key: retrying the trigger mapping right after a failed `hidutil` GET
-  could leave a stale signature in the persisted `hyperKey.ownedSignatures`,
-  since only the SET-reached failure path rolled it back. A failed GET (which
-  never mutates `hidutil`) now also rolls the persisted ownership back to its
-  prior state.
-- Hosts: composing or applying against `/etc/hosts` fell back to an empty
-  string when the file couldn't be read, risking a write that wiped the
-  system's own entries. A failed read now aborts the apply with a surfaced
-  error instead.
-- Hosts: deleting an active profile removed its SwiftData row before
-  confirming the block-removal write to `/etc/hosts` succeeded, so a failed
-  write could orphan the block outside any tracked profile. The row is now
-  deleted only after the deactivation is applied and verified — including
-  against a coalesced `scheduleApply()` result, which can otherwise report a
-  batch-mate's success (or a rolled-back no-op retry) instead of this
-  profile's own write.
-- Clipboard: deleting a history item removed its on-disk payload file
-  (PNG/copied files) before the row deletion was saved, so a failed save
-  could leave a surviving row pointing at deleted files — and the failed-save
-  path never rolled back the pending deletion, letting a later unrelated save
-  silently flush it and drop the row anyway. The payload is now captured
-  before, and removed only after, the row deletion is confirmed saved; a
-  failed save rolls back the pending deletion and refreshes from the
-  persisted state.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.1/AnyDoor-3.4.1.zip" length="10194237" type="application/octet-stream" sparkle:edSignature="fP/NbicOVfq/MdqzRUG+XTUMkdI9l5j6SomINE0yCu5DqZ7QWic9VXJYeEmwb/I1VZ8mFl+IrdadI1opuX5nBQ=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.1/AnyDoor-3.4.1.zip" length="10194237" type="application/octet-stream" sparkle:edSignature="fP/NbicOVfq/MdqzRUG+XTUMkdI9l5j6SomINE0yCu5DqZ7QWic9VXJYeEmwb/I1VZ8mFl+IrdadI1opuX5nBQ=="/>
         </item>
         <item>
             <title>3.4.0</title>
@@ -83,15 +52,6 @@
             <sparkle:shortVersionString>3.4.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.0/AnyDoor-3.4.0.zip" length="10258940" type="application/octet-stream" sparkle:edSignature="EuKlpwGoZWgkQkz5vUk2z+yf7f9GnRIDLqwIKOJvP2DQP20XxS3yeaub/wkAZI2fGgL8fC1SsHbBrRlog6gCAw=="/>
-        </item>
-        <item>
-            <title>3.3.0</title>
-            <pubDate>Fri, 26 Jun 2026 01:50:36 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>3.3.0</sparkle:version>
-            <sparkle:shortVersionString>3.3.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.3.0/AnyDoor-3.3.0.zip" length="10068098" type="application/octet-stream" sparkle:edSignature="v2iGTN2hthgUhh0G3cPgV7HlVwTIorBvZBWbnJEwZaOZhDSrJ2z7WuQwiYmQGt2pEDKkf/xdONpsjsCXpRbgAg=="/>
         </item>
         <item>
             <title>1.2.0</title>
