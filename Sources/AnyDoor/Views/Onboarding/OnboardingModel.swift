@@ -25,6 +25,7 @@ enum OnboardingState {
 enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
     case menuBar
     case permissions
+    case appShortcuts
     case hyperKey
     case capture
     case clipboardPalette
@@ -39,6 +40,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .menuBar:          return .onboardingSidebarMenuBar
         case .permissions:      return .onboardingSidebarPermissions
+        case .appShortcuts:     return .onboardingSidebarAppShortcuts
         case .hyperKey:         return .onboardingSidebarHyperKey
         case .capture:          return .onboardingSidebarCapture
         case .clipboardPalette: return .onboardingSidebarClipboard
@@ -52,6 +54,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .menuBar:          return .onboardingMenuBarTitle
         case .permissions:      return .onboardingPermissionsTitle
+        case .appShortcuts:     return .onboardingAppShortcutsTitle
         case .hyperKey:         return .onboardingHyperKeyTitle
         case .capture:          return .onboardingCaptureTitle
         case .clipboardPalette: return .onboardingClipboardTitle
@@ -65,6 +68,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .menuBar:          return .onboardingMenuBarSubtitle
         case .permissions:      return .onboardingPermissionsSubtitle
+        case .appShortcuts:     return .onboardingAppShortcutsSubtitle
         case .hyperKey:         return .onboardingHyperKeySubtitle
         case .capture:          return .onboardingCaptureSubtitle
         case .clipboardPalette: return .onboardingClipboardSubtitle
@@ -79,6 +83,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .menuBar:          return "menubar.arrow.up.rectangle"
         case .permissions:      return "lock.shield"
+        case .appShortcuts:     return "keyboard"
         case .hyperKey:         return "command"
         case .capture:          return "camera.viewfinder"
         case .clipboardPalette: return "doc.on.clipboard"
@@ -92,6 +97,7 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         switch self {
         case .menuBar:          return .blue
         case .permissions:      return .green
+        case .appShortcuts:     return .mint
         case .hyperKey:         return .purple
         case .capture:          return .orange
         case .clipboardPalette: return .teal

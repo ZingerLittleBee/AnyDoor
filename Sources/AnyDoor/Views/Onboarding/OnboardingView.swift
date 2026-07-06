@@ -125,6 +125,7 @@ struct OnboardingView: View {
         switch step {
         case .menuBar:          OnboardingMenuBarStep()
         case .permissions:      OnboardingPermissionsStep()
+        case .appShortcuts:     OnboardingAppShortcutsStep()
         case .hyperKey:         OnboardingHyperKeyStep()
         case .capture:          OnboardingCaptureStep()
         case .clipboardPalette: OnboardingClipboardPaletteStep()

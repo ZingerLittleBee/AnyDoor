@@ -8,6 +8,10 @@ versioning.
 
 ### Added
 
+- Onboarding: a new App Shortcuts step demos the product's core interaction —
+  a bound hotkey presses down on a mock desktop and the target app's window
+  springs to the front over the dimmed previous window, a second press hides
+  it; chips cycle through example apps.
 - Onboarding: two new steps demo Translation and Image Conversion with
   animated mocks of the real UI — the translation panel auto-types a sentence,
   detects the language, and streams results from two services in parallel; the

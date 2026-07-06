@@ -4812,6 +4812,57 @@
         }
       }
     },
+    "onboarding.appShortcuts.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add app shortcuts from the menu-bar panel or Settings → Panel."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在菜单栏面板或 设置 → 面板 中添加应用快捷键。"
+          }
+        }
+      }
+    },
+    "onboarding.appShortcuts.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bind a global hotkey to an app: press to bring it to the front, press again to hide it — and it launches if it isn't running."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "给任意应用绑定全局快捷键:按下唤至前台,再按一次隐藏,应用未运行时会自动启动。"
+          }
+        }
+      }
+    },
+    "onboarding.appShortcuts.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One hotkey, any app"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一键唤出任意应用"
+          }
+        }
+      }
+    },
     "onboarding.capture.autoFeatures": {
       "extractionState": "manual",
       "localizations": {
@@ -5624,6 +5675,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "新手引导"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.appShortcuts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Shortcuts"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用切换"
           }
         }
       }
