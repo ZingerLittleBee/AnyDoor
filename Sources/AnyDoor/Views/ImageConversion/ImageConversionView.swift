@@ -30,64 +30,75 @@ struct ImageConversionView: View {
         .focusEffectDisabled()
     }
 
+    // Two rows so the localized title and the format/quality controls never
+    // compete for width: English labels ("Image Conversion", "Target format",
+    // "Quality") overflow a single row as soon as a lossy format reveals the
+    // quality slider, hyphen-wrapping the title.
     private var toolbar: some View {
-        HStack(spacing: 10) {
-            Label {
-                LocalizedText(.imageConversionTitle)
-                    .font(.headline)
-            } icon: {
-                Image(systemName: "photo.on.rectangle")
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                Label {
+                    LocalizedText(.imageConversionTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                } icon: {
+                    Image(systemName: "photo.on.rectangle")
+                }
+                Spacer()
+                Button {
+                    model.clear()
+                } label: {
+                    Image(systemName: "trash")
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .disabled(model.items.isEmpty || model.isConverting)
+                .accessibilityLabel(L(.imageConversionClear))
+                .help(L(.imageConversionClear))
+
+                Button {
+                    model.convert()
+                } label: {
+                    HStack(spacing: 6) {
+                        if model.isConverting {
+                            ProgressView()
+                                .controlSize(.small)
+                                .frame(width: 14, height: 14)
+                        } else {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                        }
+                        Text(L(model.isConverting ? .imageConversionConverting : .imageConversionConvert))
+                    }
+                    .frame(minWidth: 86)
+                }
+                .disabled(!model.canConvert)
             }
-            Spacer()
-            if model.availableFormats.isEmpty {
-                LocalizedText(.imageConversionNoFormats)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack(spacing: 6) {
-                    LocalizedText(.imageConversionTargetFormat)
+
+            HStack(spacing: 14) {
+                if model.availableFormats.isEmpty {
+                    LocalizedText(.imageConversionNoFormats)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
-                        ForEach(model.availableFormats) { format in
-                            Text(format.displayName).tag(format)
+                } else {
+                    HStack(spacing: 6) {
+                        LocalizedText(.imageConversionTargetFormat)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
+                            ForEach(model.availableFormats) { format in
+                                Text(format.displayName).tag(format)
+                            }
                         }
+                        .labelsHidden()
+                        .frame(width: 112)
                     }
-                    .labelsHidden()
-                    .frame(width: 112)
+                    .help(L(.imageConversionTargetFormat))
                 }
-                .help(L(.imageConversionTargetFormat))
-            }
-            if model.isQualityAdjustable {
-                qualityControl
-            }
-            Button {
-                model.clear()
-            } label: {
-                Image(systemName: "trash")
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .disabled(model.items.isEmpty || model.isConverting)
-            .accessibilityLabel(L(.imageConversionClear))
-            .help(L(.imageConversionClear))
-
-            Button {
-                model.convert()
-            } label: {
-                HStack(spacing: 6) {
-                    if model.isConverting {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 14, height: 14)
-                    } else {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                    }
-                    Text(L(model.isConverting ? .imageConversionConverting : .imageConversionConvert))
+                if model.isQualityAdjustable {
+                    qualityControl
                 }
-                .frame(minWidth: 86)
+                Spacer()
             }
-            .disabled(!model.canConvert)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
