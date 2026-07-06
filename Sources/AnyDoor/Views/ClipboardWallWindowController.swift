@@ -111,6 +111,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Preview → editor handoff ("e" key / the preview header's edit
         // button) goes down the same path as the card's context menu.
         ClipboardTextWindow.shared.onEditRequest = { [weak self] item in self?.beginEdit(item) }
+        // Preview copy ("c" key / the preview header's copy button) writes the
+        // item to the pasteboard down the same path as the card's context menu.
+        ClipboardTextWindow.shared.onCopyRequest = { [weak self] item in self?.copyWithoutPasting(item) }
 
         guard let window, let screen = NSScreen.main else { return }
         // Remember who had focus so paste/Esc can hand it back.
@@ -191,6 +194,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             },
             onEdit: { [weak self] item in self?.beginEdit(item) },
             onCopy: { [weak self] item in self?.copyWithoutPasting(item) },
+            onConvertImage: { [weak self] item in self?.convertImage(item) },
             onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
             onDelete: { item in
                 Task { await ClipboardHistoryStore.shared.delete(item) }
@@ -406,21 +410,44 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "s" {
                 textWindow.saveRequested(); return true  // ⌘S → save
             }
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "w" {
+                textWindow.requestClose(); return true   // ⌘W → dirty-checked close
+            }
             // Everything else (typing, ⌘Z, arrows…) belongs to the key editor.
             return false
         }
         if textWindow.isPreviewVisible {
+            let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            // ⌘C copies the current text selection, falling back to the whole
+            // item when nothing is selected. The preview panel is non-key, so
+            // the standard copy: responder chain never reaches its text view —
+            // handle it here instead.
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copyPreviewSelection()
+                return true
+            }
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "w" {
+                textWindow.close(); return true          // ⌘W → close preview
+            }
             switch event.keyCode {
             case 53, 49:                                 // esc / space close it
                 textWindow.close(); return true
             default:
-                // Plain "e" swaps the preview for the editor (the preview
-                // header shows the hint); other keys fall through so arrows
-                // and type-to-search keep working.
-                if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-                   event.charactersIgnoringModifiers?.lowercased() == "e" {
-                    textWindow.requestEditFromPreview()
-                    return true
+                // Plain "e" swaps the preview for the editor and plain "c"
+                // copies the whole item to the pasteboard (the preview header
+                // shows both hints); other keys fall through so arrows and
+                // type-to-search keep working.
+                if mods.isEmpty {
+                    switch event.charactersIgnoringModifiers?.lowercased() {
+                    case "e":
+                        textWindow.requestEditFromPreview()
+                        return true
+                    case "c":
+                        textWindow.requestCopyFromPreview()
+                        return true
+                    default:
+                        break
+                    }
                 }
                 return nil
             }
@@ -494,6 +521,64 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Suppress the watcher so the re-copy isn't captured as a duplicate.
         watcher?.noteSelfWrite(changeCount: pb.changeCount)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+
+    /// ⌘C in the read-only preview: copy the current text selection to the
+    /// pasteboard, or the whole item when nothing is selected. Keeps the
+    /// preview and wall open, mirroring `copyWithoutPasting`.
+    private func copyPreviewSelection() {
+        guard let selection = ClipboardTextWindow.shared.selectedPreviewText(),
+              !selection.isEmpty else {
+            if let item = ClipboardTextWindow.shared.previewedItem {
+                copyWithoutPasting(item)
+            }
+            return
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(selection, forType: .string)
+        // Suppress the watcher so the copy isn't captured as a new duplicate.
+        watcher?.noteSelfWrite(changeCount: pb.changeCount)
+        ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+
+    /// "Convert Image Format" from a card's context menu: preload the entry into
+    /// the Image Conversion basket and open that window. Screenshot/image cards
+    /// enter as bitmaps (output → Downloads); file cards enter their image files
+    /// as file references (output → beside the original). A missing payload
+    /// surfaces a failure toast and leaves the window closed. The wall dismisses
+    /// first (without restoring focus) so its slide-out doesn't fight the
+    /// conversion panel's activation.
+    private func convertImage(_ item: ClipboardHistoryItem) {
+        guard let items = basketItems(for: item), !items.isEmpty else {
+            ToastPresenter.shared.show(.failure(L(.imageConversionSourceMissing)))
+            return
+        }
+        dismiss(restoreFocus: false) {
+            Task { @MainActor in
+                ImageConversionWindowController.shared.present(items: items)
+            }
+        }
+    }
+
+    /// Resolve a clipboard-history entry into Image Conversion basket items, or
+    /// nil when the payload can't be loaded (stored bitmap gone, or no image
+    /// file survives on disk).
+    private func basketItems(for item: ClipboardHistoryItem) -> [ImageConversionBasketItem]? {
+        switch item.historyKind {
+        case .screenshot, .image:
+            guard let fileName = item.fileName else { return nil }
+            let url = historyDirectory.appendingPathComponent(fileName)
+            guard let data = try? Data(contentsOf: url) else { return nil }
+            return [.bitmap(data, displayName: item.previewTitle)]
+        case .file:
+            let urls = ClipboardImageConversionEntry.imageFileURLs(from: item.files)
+                .filter { FileManager.default.fileExists(atPath: $0.path) }
+            guard !urls.isEmpty else { return nil }
+            return urls.map { .file($0) }
+        default:
+            return nil
+        }
     }
 
     /// "Reveal in Finder" from a file card's context menu. Prefers each entry's

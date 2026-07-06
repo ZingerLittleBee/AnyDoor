@@ -40,6 +40,8 @@ enum SyncSettingsRegistry {
         Entry(key: "translation.secondTargetLanguage", type: .string),
         Entry(key: "translation.autoSpeak", type: .bool),
         Entry(key: "translation.services", type: .string),
+        Entry(key: "imageConversion.targetFormat", type: .string),
+        Entry(key: "imageConversion.quality", type: .int),
     ]
 
     private static let entriesByKey: [String: Entry] =

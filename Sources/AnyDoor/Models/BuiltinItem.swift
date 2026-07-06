@@ -62,6 +62,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case translate
     case screenshotTranslate
     case translateSelection
+    case imageConversion
 
     enum Kind: Sendable {
         case toggle
@@ -88,7 +89,8 @@ enum BuiltinItem: String, CaseIterable, Sendable {
              .windowMoveNextDisplay, .windowMovePreviousDisplay,
              .captureWindow, .captureFullscreen, .captureTimer, .captureModeBar, .recordScreen,
              .captureScrolling,
-             .translate, .screenshotTranslate, .translateSelection: return .action
+             .translate, .screenshotTranslate, .translateSelection,
+             .imageConversion: return .action
         case .brightness: return .brightnessControl
         case .brightnessUp, .brightnessDown: return .hiddenHotkey
         }
@@ -155,6 +157,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .translate:           return .builtinTranslate
         case .screenshotTranslate: return .builtinScreenshotTranslate
         case .translateSelection:  return .builtinTranslateSelection
+        case .imageConversion:     return .builtinImageConversion
         }
     }
 
@@ -219,6 +222,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .translate: return "character.bubble"
         case .screenshotTranslate: return "text.viewfinder"
         case .translateSelection: return "text.cursor"
+        case .imageConversion: return "photo.on.rectangle"
         }
     }
 
@@ -284,6 +288,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case .translate: return 980
         case .screenshotTranslate: return 982
         case .translateSelection: return 984
+        case .imageConversion: return 986
         }
     }
 

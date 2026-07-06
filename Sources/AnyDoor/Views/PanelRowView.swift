@@ -95,6 +95,7 @@ struct PanelRowView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(.primary)
                 .symbolEffect(.bounce, value: activationPulse)
+                .opticallyCentered(symbol: entry.symbol, pointSize: 12)
         }
         .frame(width: 24, height: 24)
     }

@@ -14,6 +14,7 @@ struct ClipboardCardView: View {
     /// Context-menu actions; nil hides the matching menu item (previews/tests).
     var onEdit: (() -> Void)? = nil
     var onCopy: (() -> Void)? = nil
+    var onConvertImage: (() -> Void)? = nil
     var onRevealInFinder: (() -> Void)? = nil
     var onToggleTag: ((String) -> Void)? = nil
     var onNewTag: (() -> Void)? = nil
@@ -59,6 +60,13 @@ struct ClipboardCardView: View {
         if let onCopy {
             menu.addItem(ClosureMenuItem(
                 title: L(.clipboardActionCopy), systemImage: "doc.on.doc", handler: onCopy
+            ))
+        }
+        if let onConvertImage,
+           ClipboardImageConversionEntry.isConvertible(kind: item.historyKind, files: item.files) {
+            menu.addItem(ClosureMenuItem(
+                title: L(.clipboardActionConvertImage), systemImage: "arrow.left.arrow.right.square",
+                handler: onConvertImage
             ))
         }
         if item.historyKind == .file, let onRevealInFinder {
