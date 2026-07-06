@@ -16,6 +16,12 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            // Clearance for the traffic lights, which sit on top of the
+            // sidebar card now that the split view extends into the title-bar
+            // region (see ignoresSafeArea below).
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Color.clear.frame(height: 36)
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 generalRow
                     .padding(.horizontal, 10)
@@ -27,6 +33,11 @@ struct SettingsView: View {
             .toolbar(removing: .sidebarToggle)
         } detail: {
             detailView
+                // Keep the detail pages' content out of the former title-bar
+                // strip (they were designed to start below it).
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    Color.clear.frame(height: 24)
+                }
                 // An empty title suppresses the Settings scene's fallback
                 // window title — the selected sidebar row already says where
                 // you are. Hiding the toolbar background also drops the
@@ -35,6 +46,14 @@ struct SettingsView: View {
                 .navigationTitle("")
                 .toolbarBackground(.hidden, for: .windowToolbar)
         }
+        // .windowStyle(.hiddenTitleBar) on the Settings scene makes the window
+        // full-size-content with a transparent title bar, but SwiftUI still
+        // reports the title-bar region as a top safe area (32pt) and would lay
+        // the split view out below it — leaving the traffic lights on a bare
+        // strip above the sidebar card. Ignoring that safe area extends the
+        // sidebar's glass card to the window's top edge, System Settings-style,
+        // with the traffic lights sitting on the card.
+        .ignoresSafeArea(.container, edges: .top)
         // Honor a deep-link request (e.g. the translation gear) then clear it so
         // a later plain open lands on the last-selected tab.
         .onChange(of: opener.desiredTab) { _, tab in
