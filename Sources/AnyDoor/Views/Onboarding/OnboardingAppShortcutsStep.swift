@@ -1,13 +1,15 @@
 import SwiftUI
 
 /// Step 3 — "One hotkey, any app": the product's core interaction. A mock
-/// desktop replays the toggle loop: the bound hotkey presses down, the target
-/// app's window springs to the front over a dimmed background window; a second
-/// press hides it again. Chips cycle through example apps, each with its own
-/// hotkey and window.
+/// desktop replays the toggle loop: the Hyper Key + a letter press down, the
+/// target app's window springs to the front over a dimmed background window;
+/// a second press hides it again. Chips cycle through example apps, and the
+/// trigger picker below drives the real `HyperKeyService` (the same setting
+/// the Hyper Key page fine-tunes next), so a choice here takes effect.
 struct OnboardingAppShortcutsStep: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @State private var hyperKey = HyperKeyService.shared
     @State private var exampleIndex = 0
     @State private var keyPressed = false
     @State private var windowVisible = false
@@ -48,6 +50,8 @@ struct OnboardingAppShortcutsStep: View {
                 desktop
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
 
+                hyperKeyPicker
+
                 Label {
                     LocalizedText(.onboardingAppShortcutsHint)
                 } icon: {
@@ -61,13 +65,35 @@ struct OnboardingAppShortcutsStep: View {
         .task(id: exampleIndex) { await playToggleCycle() }
     }
 
-    // MARK: Hotkey combo
+    // MARK: Hotkey combo (Hyper Key + letter)
+
+    /// Compact keycap face for the Hyper trigger: the glyph from the trigger's
+    /// display label ("Caps Lock (⇪)" → "⇪"), or the raw label for F-keys.
+    /// While no trigger is chosen, Caps Lock is shown as the suggestion —
+    /// mirroring the Hyper Key page.
+    private var triggerCapLabel: String {
+        let trigger = hyperKey.trigger == .none ? .capsLock : hyperKey.trigger
+        let label = trigger.displayLabel
+        if let open = label.firstIndex(of: "("), let close = label.firstIndex(of: ")"), open < close {
+            return String(label[label.index(after: open)..<close])
+        }
+        return label
+    }
+
+    private var hyperGlyphLabel: String {
+        hyperKey.includeShift ? "⌃⌥⇧⌘" : "⌃⌥⌘"
+    }
 
     private var hotkeyCombo: some View {
         HStack(spacing: 6) {
-            OnboardingKeycap(label: "⌥", width: 30, highlighted: true, pressed: keyPressed, tint: .mint)
+            OnboardingKeycap(label: triggerCapLabel, width: 34, highlighted: true, pressed: keyPressed, tint: .mint)
             OnboardingKeycap(label: example.key, width: 30, highlighted: true, pressed: keyPressed, tint: .mint)
                 .id(exampleIndex)
+            if hyperKey.isActive {
+                Text(verbatim: "= \(hyperGlyphLabel)")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+            }
             Image(systemName: "arrow.right")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -76,6 +102,51 @@ struct OnboardingAppShortcutsStep: View {
                 .foregroundStyle(windowVisible ? example.tint : .secondary)
         }
         .onboardingAnimation(.spring(response: 0.25, dampingFraction: 0.6), reduceMotion: reduceMotion, value: keyPressed)
+    }
+
+    // MARK: Hyper Key trigger picker
+
+    /// Drives the real `HyperKeyService`, exactly like the Hyper Key page's
+    /// trigger control — picking a key here activates it for real.
+    private var hyperKeyPicker: some View {
+        HStack {
+            LocalizedText(.settingsGeneralHyperKeyLabel)
+                .font(.system(size: 12, weight: .medium))
+            if hyperKey.isActive {
+                Circle().fill(.green).frame(width: 6, height: 6)
+                LocalizedText(.onboardingHyperKeyEnabledNote)
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+            }
+            Spacer()
+            Picker(selection: triggerBinding) {
+                ForEach(HyperKeyTrigger.allCases, id: \.self) { trigger in
+                    Text(trigger == .none ? L(.settingsGeneralHyperKeyTriggerNone) : trigger.displayLabel)
+                        .tag(trigger)
+                }
+            } label: { EmptyView() }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+            .disabled(hyperKey.isApplying)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.background)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                }
+        }
+    }
+
+    private var triggerBinding: Binding<HyperKeyTrigger> {
+        Binding(
+            get: { hyperKey.trigger },
+            set: { new in Task { await hyperKey.setTrigger(new) } }
+        )
     }
 
     // MARK: Mock desktop
