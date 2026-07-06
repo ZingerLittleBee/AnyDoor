@@ -36,19 +36,20 @@ final class OnboardingTests: XCTestCase {
     }
 
     func test_navigation_advancesAndClampsAtBounds() {
-        var nav = OnboardingNavigation(stepCount: 6)
+        let count = OnboardingStep.allCases.count
+        var nav = OnboardingNavigation(stepCount: count)
 
         // Cannot step before the first page.
         nav.back()
         XCTAssertEqual(nav.index, 0)
 
-        for _ in 0..<10 { nav.next() }
-        XCTAssertEqual(nav.index, 5)
+        for _ in 0..<(count + 10) { nav.next() }
+        XCTAssertEqual(nav.index, count - 1)
         XCTAssertTrue(nav.isLast)
         XCTAssertEqual(nav.current, .customize)
 
         nav.back()
-        XCTAssertEqual(nav.index, 4)
+        XCTAssertEqual(nav.index, count - 2)
         XCTAssertFalse(nav.isLast)
     }
 
@@ -67,7 +68,7 @@ final class OnboardingTests: XCTestCase {
     }
 
     func test_navigation_progressSpansZeroToOne() {
-        var nav = OnboardingNavigation(stepCount: 6)
+        var nav = OnboardingNavigation(stepCount: OnboardingStep.allCases.count)
         XCTAssertEqual(nav.progress, 0, accuracy: 0.0001)
         nav.go(to: .customize)
         XCTAssertEqual(nav.progress, 1, accuracy: 0.0001)
@@ -106,7 +107,7 @@ final class OnboardingTests: XCTestCase {
 
     func test_steps_areOrderedAndDistinct() {
         let steps = OnboardingStep.allCases
-        XCTAssertEqual(steps.count, 6)
+        XCTAssertEqual(steps.count, 8)
         // rawValue is the page index, in order.
         XCTAssertEqual(steps.map(\.rawValue), Array(0..<steps.count))
         // Every step has a distinct title and sidebar label key.

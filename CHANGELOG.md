@@ -6,6 +6,14 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Onboarding: two new steps demo Translation and Image Conversion with
+  animated mocks of the real UI — the translation panel auto-types a sentence,
+  detects the language, and streams results from two services in parallel; the
+  conversion window replays a drag-in, one-click convert, and the output
+  landing in history. Both honor Reduce Motion.
+
 ## [3.5.0] - 2026-07-06
 
 ### Added

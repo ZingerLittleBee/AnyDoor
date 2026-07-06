@@ -5271,6 +5271,57 @@
         }
       }
     },
+    "onboarding.imageConversion.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PNG, JPEG, HEIC, AVIF, TIFF, GIF, BMP, PDF, and ICO."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "支持 PNG、JPEG、HEIC、AVIF、TIFF、GIF、BMP、PDF 和 ICO。"
+          }
+        }
+      }
+    },
+    "onboarding.imageConversion.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drop images into the basket, pick a format and quality, convert in one click — every result lands in history, ready to reveal or copy."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "把图片拖进篮子,选好格式和质量,一键转换,每个结果都会进入历史,随时定位或复制。"
+          }
+        }
+      }
+    },
+    "onboarding.imageConversion.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Convert images by drag & drop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拖进来,就能转格式"
+          }
+        }
+      }
+    },
     "onboarding.menuBar.hint": {
       "extractionState": "manual",
       "localizations": {
@@ -5645,6 +5696,23 @@
         }
       }
     },
+    "onboarding.sidebar.imageConversion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image Conversion"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图片转换"
+          }
+        }
+      }
+    },
     "onboarding.sidebar.menuBar": {
       "extractionState": "manual",
       "localizations": {
@@ -5675,6 +5743,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "权限"
+          }
+        }
+      }
+    },
+    "onboarding.sidebar.translation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "翻译"
+          }
+        }
+      }
+    },
+    "onboarding.translation.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter translates, Shift+Enter breaks the line — results can be spoken or copied."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter 翻译,Shift+Enter 换行,结果可朗读或复制。"
+          }
+        }
+      }
+    },
+    "onboarding.translation.subtitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type and press Enter — every enabled service answers in parallel. Screenshot and selected-text translation are one hotkey away."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入后按 Enter,启用的翻译服务并行给出结果,截图翻译和划词翻译也只需一个快捷键。"
+          }
+        }
+      }
+    },
+    "onboarding.translation.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate, side by side"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "即时翻译,多服务对照"
           }
         }
       }
