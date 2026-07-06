@@ -1,7 +1,7 @@
 ---
 id: 001
 title: "Image Conversion: core conversion pipeline (tracer bullet)"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-06-image-conversion.md
 ---
 
