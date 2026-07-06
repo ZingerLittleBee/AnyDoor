@@ -32,6 +32,21 @@ final class ClipboardTextWindow {
     var isEditing: Bool { isVisible && model?.isEditable == true }
     var isPreviewVisible: Bool { isVisible && model?.isEditable == false }
 
+    /// The item currently shown in the read-only preview, if any.
+    var previewedItem: ClipboardHistoryItem? { isPreviewVisible ? model?.item : nil }
+
+    /// The text currently selected in the read-only preview, or nil when nothing
+    /// is selected. Walks the hosting view to the backing NSTextView; the panel
+    /// is non-key, but AppKit still tracks a mouse selection in it, so ⌘C routed
+    /// from the wall can copy exactly that range.
+    func selectedPreviewText() -> String? {
+        guard isPreviewVisible, let content = panel?.contentView,
+              let textView = Self.findTextView(in: content) else { return nil }
+        let range = textView.selectedRange()
+        guard range.length > 0 else { return nil }
+        return (textView.string as NSString).substring(with: range)
+    }
+
     /// Whether `window` is the floating text panel (the wall's scroll monitor
     /// uses this to leave scroll events over the panel alone).
     func owns(_ window: NSWindow?) -> Bool {
@@ -186,6 +201,15 @@ final class ClipboardTextWindow {
             return true
         }
         return false
+    }
+
+    /// Depth-first search for the backing NSTextView (editable or not).
+    private static func findTextView(in view: NSView) -> NSTextView? {
+        if let textView = view as? NSTextView { return textView }
+        for subview in view.subviews {
+            if let found = findTextView(in: subview) { return found }
+        }
+        return nil
     }
 }
 

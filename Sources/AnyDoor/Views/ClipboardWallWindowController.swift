@@ -413,15 +413,24 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             return false
         }
         if textWindow.isPreviewVisible {
+            let mods = event.modifierFlags.intersection([.command, .control, .option, .shift])
+            // ⌘C copies the current text selection, falling back to the whole
+            // item when nothing is selected. The preview panel is non-key, so
+            // the standard copy: responder chain never reaches its text view —
+            // handle it here instead.
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "c" {
+                copyPreviewSelection()
+                return true
+            }
             switch event.keyCode {
             case 53, 49:                                 // esc / space close it
                 textWindow.close(); return true
             default:
                 // Plain "e" swaps the preview for the editor and plain "c"
-                // copies the item to the pasteboard (the preview header shows
-                // both hints); other keys fall through so arrows and
+                // copies the whole item to the pasteboard (the preview header
+                // shows both hints); other keys fall through so arrows and
                 // type-to-search keep working.
-                if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
+                if mods.isEmpty {
                     switch event.charactersIgnoringModifiers?.lowercased() {
                     case "e":
                         textWindow.requestEditFromPreview()
@@ -503,6 +512,25 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         let pb = NSPasteboard.general
         ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: historyDirectory)
         // Suppress the watcher so the re-copy isn't captured as a duplicate.
+        watcher?.noteSelfWrite(changeCount: pb.changeCount)
+        ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+
+    /// ⌘C in the read-only preview: copy the current text selection to the
+    /// pasteboard, or the whole item when nothing is selected. Keeps the
+    /// preview and wall open, mirroring `copyWithoutPasting`.
+    private func copyPreviewSelection() {
+        guard let selection = ClipboardTextWindow.shared.selectedPreviewText(),
+              !selection.isEmpty else {
+            if let item = ClipboardTextWindow.shared.previewedItem {
+                copyWithoutPasting(item)
+            }
+            return
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(selection, forType: .string)
+        // Suppress the watcher so the copy isn't captured as a new duplicate.
         watcher?.noteSelfWrite(changeCount: pb.changeCount)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
