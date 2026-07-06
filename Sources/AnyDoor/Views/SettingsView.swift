@@ -53,7 +53,6 @@ struct SettingsView: View {
         // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
         // focuses another app.
         .background(RegularWindowRegistrar())
-        .background(SettingsWindowChrome())
         .focusEffectDisabled()
     }
 
@@ -94,30 +93,6 @@ struct SettingsView: View {
         case .general: GeneralSettingsView()
         }
     }
-}
-
-/// System Settings-style window chrome: a transparent title bar with the
-/// content extended into it, so the sidebar's glass card spans the window's
-/// full height and the traffic lights sit on top of the card — instead of a
-/// separate title-bar strip above it. SwiftUI still insets the sidebar list
-/// below the (invisible) title-bar region via the window's safe area, so rows
-/// don't slide under the traffic lights.
-private struct SettingsWindowChrome: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        // The view isn't attached to its window yet during makeNSView; defer
-        // the lookup to the next runloop tick (same dance as
-        // RegularWindowRegistrar).
-        DispatchQueue.main.async {
-            guard let window = view.window else { return }
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.styleMask.insert(.fullSizeContentView)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 private extension SettingsTab {
