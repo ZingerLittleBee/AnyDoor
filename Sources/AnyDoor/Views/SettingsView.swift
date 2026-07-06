@@ -3,13 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @State private var opener = SettingsOpener.shared
     @State private var selectedTab: SettingsTab = .panel
-    @Environment(LocalizationManager.self) private var localization
 
     var body: some View {
-        // Reading the preference here (not just inside LocalizedText rows)
-        // makes the whole body — including the navigationTitle string —
-        // re-evaluate when the user switches language.
-        let _ = localization.preference
         NavigationSplitView {
             List(selection: $selectedTab) {
                 ForEach(SettingsTab.allCases, id: \.self) { tab in
@@ -24,7 +19,10 @@ struct SettingsView: View {
             .toolbar(removing: .sidebarToggle)
         } detail: {
             detailView
-                .navigationTitle(L(selectedTab.titleKey))
+                // No title: the selected sidebar row already says where you are.
+                // Hiding the toolbar background also drops the hairline that
+                // appears over the detail column once content scrolls under it.
+                .toolbarBackground(.hidden, for: .windowToolbar)
         }
         // Honor a deep-link request (e.g. the translation gear) then clear it so
         // a later plain open lands on the last-selected tab.
