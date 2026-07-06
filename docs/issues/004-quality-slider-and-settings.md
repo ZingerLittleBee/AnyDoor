@@ -1,7 +1,7 @@
 ---
 id: 004
 title: "Image Conversion: lossy quality slider + persisted, syncable settings"
-status: ready-for-agent
+status: in-progress
 prd: docs/prds/2026-07-06-image-conversion.md
 ---
 
