@@ -18,7 +18,7 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(180)
+            .navigationSplitViewColumnWidth(160)
             // The sidebar is the window's whole navigation — collapsing it
             // would strand the user, so drop the toggle button.
             .toolbar(removing: .sidebarToggle)
@@ -39,7 +39,7 @@ struct SettingsView: View {
                 opener.desiredTab = nil
             }
         }
-        .frame(width: 740, height: 480)
+        .frame(width: 680, height: 480)
         // Adopt .regular activation policy while Settings is open so the window
         // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
         // focuses another app.
