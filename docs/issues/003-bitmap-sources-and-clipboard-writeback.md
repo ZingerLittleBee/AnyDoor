@@ -1,7 +1,7 @@
 ---
 id: 003
 title: "Image Conversion: bitmap sources, Downloads output, clipboard write-back"
-status: ready-for-agent
+status: in-progress
 prd: docs/prds/2026-07-06-image-conversion.md
 ---
 
