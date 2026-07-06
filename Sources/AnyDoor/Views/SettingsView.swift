@@ -7,24 +7,19 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView {
             // General is pinned to the sidebar's bottom edge, apart from the
-            // feature sections. A second single-row List (same selection
-            // binding) keeps the native sidebar row styling; only one of the
-            // two lists ever shows the selection highlight because a tag
-            // matching the selected tab exists in exactly one of them.
-            VStack(spacing: 0) {
-                List(selection: $selectedTab) {
-                    ForEach(SettingsTab.allCases.filter { $0 != .general }, id: \.self) { tab in
-                        sidebarRow(tab)
-                    }
+            // feature sections. It lives in a bottom safe-area inset of the
+            // one List — a second List would draw its own slice of the sidebar
+            // card chrome and visibly break the card's outline at the seam.
+            List(selection: $selectedTab) {
+                ForEach(SettingsTab.allCases.filter { $0 != .general }, id: \.self) { tab in
+                    sidebarRow(tab)
                 }
-                .listStyle(.sidebar)
-
-                List(selection: $selectedTab) {
-                    sidebarRow(.general)
-                }
-                .listStyle(.sidebar)
-                .scrollDisabled(true)
-                .frame(height: 44)
+            }
+            .listStyle(.sidebar)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                generalRow
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
             }
             .navigationSplitViewColumnWidth(160)
             // The sidebar is the window's whole navigation — collapsing it
@@ -64,6 +59,28 @@ struct SettingsView: View {
     private func sidebarRow(_ tab: SettingsTab) -> some View {
         Label { LocalizedText(tab.titleKey) } icon: { Image(systemName: tab.systemImage) }
             .tag(tab)
+    }
+
+    /// The pinned General row. Not a List row (see the safe-area-inset comment
+    /// above), so the sidebar-row look — insets, pill radius, accent selection
+    /// fill — is reproduced by hand to match the rows in the List.
+    private var generalRow: some View {
+        let isSelected = selectedTab == .general
+        return Button {
+            selectedTab = .general
+        } label: {
+            Label { LocalizedText(SettingsTab.general.titleKey) } icon: { Image(systemName: SettingsTab.general.systemImage) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(isSelected ? Color.white : Color.primary)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? Color.accentColor : Color.clear)
+        )
     }
 
     @ViewBuilder
