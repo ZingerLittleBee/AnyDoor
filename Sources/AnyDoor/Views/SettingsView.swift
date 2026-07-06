@@ -6,22 +6,38 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedTab) {
-                ForEach(SettingsTab.allCases, id: \.self) { tab in
-                    Label { LocalizedText(tab.titleKey) } icon: { Image(systemName: tab.systemImage) }
-                        .tag(tab)
+            // General is pinned to the sidebar's bottom edge, apart from the
+            // feature sections. A second single-row List (same selection
+            // binding) keeps the native sidebar row styling; only one of the
+            // two lists ever shows the selection highlight because a tag
+            // matching the selected tab exists in exactly one of them.
+            VStack(spacing: 0) {
+                List(selection: $selectedTab) {
+                    ForEach(SettingsTab.allCases.filter { $0 != .general }, id: \.self) { tab in
+                        sidebarRow(tab)
+                    }
                 }
+                .listStyle(.sidebar)
+
+                List(selection: $selectedTab) {
+                    sidebarRow(.general)
+                }
+                .listStyle(.sidebar)
+                .scrollDisabled(true)
+                .frame(height: 44)
             }
-            .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(160)
             // The sidebar is the window's whole navigation — collapsing it
             // would strand the user, so drop the toggle button.
             .toolbar(removing: .sidebarToggle)
         } detail: {
             detailView
-                // No title: the selected sidebar row already says where you are.
-                // Hiding the toolbar background also drops the hairline that
-                // appears over the detail column once content scrolls under it.
+                // An empty title suppresses the Settings scene's fallback
+                // window title — the selected sidebar row already says where
+                // you are. Hiding the toolbar background also drops the
+                // hairline that appears over the detail column once content
+                // scrolls under it.
+                .navigationTitle("")
                 .toolbarBackground(.hidden, for: .windowToolbar)
         }
         // Honor a deep-link request (e.g. the translation gear) then clear it so
@@ -43,6 +59,11 @@ struct SettingsView: View {
         // focuses another app.
         .background(RegularWindowRegistrar())
         .focusEffectDisabled()
+    }
+
+    private func sidebarRow(_ tab: SettingsTab) -> some View {
+        Label { LocalizedText(tab.titleKey) } icon: { Image(systemName: tab.systemImage) }
+            .tag(tab)
     }
 
     @ViewBuilder
