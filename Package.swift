@@ -14,6 +14,12 @@ let package = Package(
             url: "https://github.com/sparkle-project/Sparkle",
             exact: "2.9.2"
         ),
+        // PROTOTYPE(onboarding-ui): remove once the onboarding UI prototype is settled,
+        // unless the TourKit-based variant wins. See Views/Onboarding/OnboardingPrototype.swift.
+        .package(
+            url: "https://github.com/rampatra/TourKit.git",
+            exact: "1.0.0"
+        ),
     ],
     targets: [
         .plugin(
@@ -26,6 +32,7 @@ let package = Package(
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "TourKit", package: "TourKit"),
                 "HostsHelperShared",
             ],
             resources: [

@@ -49,7 +49,10 @@ final class OnboardingWindowController {
         w.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         w.center()
 
-        let root = OnboardingView { [weak self] in
+        // PROTOTYPE(onboarding-ui): OnboardingPrototypeHost wraps OnboardingView plus
+        // two TourKit-based variants behind a DEBUG-only floating switcher. Revert to
+        // `OnboardingView { … }` when the prototype is settled — see OnboardingPrototype.swift.
+        let root = OnboardingPrototypeHost { [weak self] in
             self?.window?.close()
         }
         .environment(LocalizationManager.shared)
