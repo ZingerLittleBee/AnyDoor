@@ -460,6 +460,7 @@ enum L10n {
         case captureToastCopied = "capture.toast.copied"
         case captureToastFailed = "capture.toast.failed"
         case captureToastDeleted = "capture.toast.deleted"
+        case captureToastSaveAsFailed = "capture.toast.saveAsFailed"
         case captureOverlayCopy = "capture.overlay.copy"
         case captureOverlaySave = "capture.overlay.save"
         case captureOverlaySaveAs = "capture.overlay.saveAs"

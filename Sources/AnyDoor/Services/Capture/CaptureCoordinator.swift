@@ -381,13 +381,55 @@ final class CaptureCoordinator {
         }
     }
 
-    /// "Save As": always prompt for a destination via a save panel.
+    /// "Save As": always prompt for a destination via a save panel. The panel
+    /// offers every whitelisted, encoder-available format (same source of truth as
+    /// the Image Conversion window); the chosen extension drives the output format.
     private func saveAs(png: Data) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = CaptureFilename.make(template: settings.namingTemplate, date: Date(), calendar: .current) + ".png"
-        panel.allowedContentTypes = [.png]
-        if panel.runModal() == .OK, let url = panel.url {
+        panel.allowedContentTypes = ImageConversionFormat.availableTargets().compactMap(\.utType)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let format = ImageConversionFormat.forSaveExtension(url.pathExtension)
+        // PNG is the capture pipeline's native format: write the original bytes
+        // unchanged so a plain ".png" Save As never round-trips through the encoder.
+        guard format != .png else {
             try? png.write(to: url, options: .atomic)
+            return
+        }
+
+        // Any other whitelisted extension transcodes the captured PNG through the
+        // shared conversion core, using the persisted quality for lossy formats.
+        // On failure we surface a toast and write nothing (no partial file).
+        let quality = Double(ImageConversionPreferences.qualityPercent()) / 100
+        do {
+            try Self.transcode(png: png, to: url, format: format, quality: quality)
+        } catch {
+            ToastPresenter.shared.show(.failure(L(.captureToastSaveAsFailed)))
+        }
+    }
+
+    /// Transcodes captured PNG bytes to `destination` in `format`, honoring the
+    /// lossy-quality setting. Encoding runs to a temporary file first, then the
+    /// finished file is moved atomically into place — so a mid-encode failure can
+    /// never leave a partial file behind or clobber an existing file at the
+    /// destination. Throws on any encode failure.
+    nonisolated static func transcode(
+        png: Data,
+        to destination: URL,
+        format: ImageConversionFormat,
+        quality: Double
+    ) throws {
+        let fileManager = FileManager.default
+        let tempURL = fileManager.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(format.fileExtension)
+        defer { try? fileManager.removeItem(at: tempURL) }
+        try ImageConverter().convert(data: png, to: tempURL, format: format, quality: quality)
+        if fileManager.fileExists(atPath: destination.path) {
+            _ = try fileManager.replaceItemAt(destination, withItemAt: tempURL)
+        } else {
+            try fileManager.moveItem(at: tempURL, to: destination)
         }
     }
 

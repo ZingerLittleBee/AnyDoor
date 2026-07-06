@@ -1973,6 +1973,23 @@
         }
       }
     },
+    "capture.toast.saveAsFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversion failed; nothing saved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "转换失败，未保存文件"
+          }
+        }
+      }
+    },
     "capture.toast.saved": {
       "extractionState": "manual",
       "localizations": {
