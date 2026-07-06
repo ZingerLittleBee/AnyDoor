@@ -409,6 +409,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "s" {
                 textWindow.saveRequested(); return true  // ⌘S → save
             }
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "w" {
+                textWindow.requestClose(); return true   // ⌘W → dirty-checked close
+            }
             // Everything else (typing, ⌘Z, arrows…) belongs to the key editor.
             return false
         }
@@ -421,6 +424,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "c" {
                 copyPreviewSelection()
                 return true
+            }
+            if mods == .command, event.charactersIgnoringModifiers?.lowercased() == "w" {
+                textWindow.close(); return true          // ⌘W → close preview
             }
             switch event.keyCode {
             case 53, 49:                                 // esc / space close it
