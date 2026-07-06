@@ -1,7 +1,7 @@
 ---
 id: 006
 title: "Image Conversion: clipboard-history right-click entry"
-status: in-progress
+status: done
 prd: docs/prds/2026-07-06-image-conversion.md
 ---
 
