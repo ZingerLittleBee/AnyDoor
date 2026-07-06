@@ -18,7 +18,8 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         )
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
-        panel.standardWindowButton(.closeButton)?.isHidden = true
+        // Keep the close traffic light: unlike the translation panel this window
+        // has no outside-click dismissal, so the mouse needs a close affordance.
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
         panel.isMovableByWindowBackground = true
@@ -72,6 +73,9 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         installKeyMonitor()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        // Drop the initial first responder so no control renders a focus ring
+        // when the window appears (keyboard focus returns on first Tab).
+        window.makeFirstResponder(nil)
     }
 
     override func close() {
@@ -157,7 +161,12 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
 
     func windowDidMove(_ notification: Notification) { saveFrame() }
     func windowDidResize(_ notification: Notification) { saveFrame() }
-    func windowWillClose(_ notification: Notification) { removeKeyMonitor() }
+    // The traffic-light close path bypasses our `close()` override, so the
+    // cleanup lives in the delegate callback both paths reach.
+    func windowWillClose(_ notification: Notification) {
+        saveFrame()
+        removeKeyMonitor()
+    }
 }
 
 private final class ImageConversionPanel: NSPanel {

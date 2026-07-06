@@ -44,6 +44,9 @@ struct ImageConversionView: View {
                 } icon: {
                     Image(systemName: "photo.on.rectangle")
                 }
+                // Clear the close traffic light floating over the transparent
+                // titlebar (fullSizeContentView pulls content under it).
+                .padding(.leading, 18)
                 Spacer()
                 Button {
                     model.clear()
