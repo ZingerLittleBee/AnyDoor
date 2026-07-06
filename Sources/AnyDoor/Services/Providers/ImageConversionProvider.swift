@@ -6,6 +6,6 @@ final class ImageConversionProvider: ActionProvider {
     var permission: PermissionStatus { .notRequired }
 
     func run() async throws {
-        ImageConversionWindowController.shared.toggle()
+        await ImageConversionWindowController.shared.toggle()
     }
 }

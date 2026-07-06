@@ -42,12 +42,17 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         fatalError("init(coder:) is not supported")
     }
 
-    func toggle() {
+    /// Strict toggle: an already-visible window is closed without reading the
+    /// Finder selection; otherwise the current Finder selection is echoed into
+    /// the basket before the window appears.
+    func toggle() async {
         if window?.isVisible == true {
             close()
-        } else {
-            show()
+            return
         }
+        let urls = await FinderSelectionReader.read()
+        viewModel.addFiles(urls)
+        show()
     }
 
     func show() {
