@@ -1,7 +1,7 @@
 ---
 id: 007
 title: "Image Conversion: screenshot Save As in any whitelisted format"
-status: in-progress
+status: done
 prd: docs/prds/2026-07-06-image-conversion.md
 ---
 
