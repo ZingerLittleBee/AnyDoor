@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Image Conversion: a new built-in action opens a floating conversion window
+  where dragged image files can be batch-converted through ImageIO to PNG, JPEG,
+  HEIC, AVIF, TIFF, GIF, BMP, PDF, or ICO when the system encoder supports the
+  target format.
+
 ## [3.4.1] - 2026-07-04
 
 ### Changed

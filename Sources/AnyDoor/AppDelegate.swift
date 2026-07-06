@@ -147,6 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             TranslateProvider(),
             ScreenshotTranslateProvider(),
             TranslateSelectionProvider(),
+            ImageConversionProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
