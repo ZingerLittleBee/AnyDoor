@@ -42,6 +42,15 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Lossy formats accept a quality parameter; lossless ones ignore it, so the
+    /// UI only offers the quality slider for these.
+    var isLossy: Bool {
+        switch self {
+        case .jpeg, .heic, .avif: return true
+        case .png, .tiff, .gif, .bmp, .pdf, .ico: return false
+        }
+    }
+
     var displayName: String {
         switch self {
         case .png: return "PNG"

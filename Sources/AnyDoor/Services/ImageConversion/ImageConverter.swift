@@ -99,12 +99,8 @@ struct ImageConverter: Sendable {
     }
 
     private func destinationProperties(format: ImageConversionFormat, quality: Double) -> [CFString: Any] {
-        switch format {
-        case .jpeg, .heic, .avif:
-            return [kCGImageDestinationLossyCompressionQuality: min(max(quality, 0), 1)]
-        case .png, .tiff, .gif, .bmp, .pdf, .ico:
-            return [:]
-        }
+        guard format.isLossy else { return [:] }
+        return [kCGImageDestinationLossyCompressionQuality: min(max(quality, 0), 1)]
     }
 
     private func makeIconImage(from source: CGImageSource) -> CGImage? {

@@ -49,6 +49,9 @@ struct ImageConversionView: View {
                 .labelsHidden()
                 .frame(width: 112)
             }
+            if model.isQualityAdjustable {
+                qualityControl
+            }
             Button {
                 model.clear()
             } label: {
@@ -79,6 +82,29 @@ struct ImageConversionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    private var qualityControl: some View {
+        HStack(spacing: 6) {
+            LocalizedText(.imageConversionQuality)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Slider(
+                value: Binding(
+                    get: { Double(model.qualityPercent) },
+                    set: { model.qualityPercent = Int($0.rounded()) }
+                ),
+                in: Double(ImageConversionPreferences.minQualityPercent)...Double(ImageConversionPreferences.maxQualityPercent)
+            )
+            .controlSize(.small)
+            .frame(width: 96)
+            Text("\(model.qualityPercent)%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L(.imageConversionQuality))
     }
 
     private var emptyState: some View {

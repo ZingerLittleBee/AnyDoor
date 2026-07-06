@@ -151,6 +151,7 @@ enum L10n {
         case imageConversionDropSubtitle = "imageConversion.drop.subtitle"
         case imageConversionDropTitle = "imageConversion.drop.title"
         case imageConversionNoFormats = "imageConversion.noFormats"
+        case imageConversionQuality = "imageConversion.quality"
         case imageConversionRemove = "imageConversion.remove"
         case imageConversionTargetFormat = "imageConversion.targetFormat"
         case imageConversionTitle = "imageConversion.title"

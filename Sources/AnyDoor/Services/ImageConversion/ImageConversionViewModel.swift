@@ -50,6 +50,10 @@ final class ImageConversionViewModel {
     var selectedFormat: ImageConversionFormat {
         didSet { ImageConversionPreferences.setTargetFormat(selectedFormat, defaults: defaults) }
     }
+    /// Whole-percent quality (1–100) applied to lossy targets for the whole run.
+    var qualityPercent: Int {
+        didSet { ImageConversionPreferences.setQualityPercent(qualityPercent, defaults: defaults) }
+    }
     var isConverting = false
     var isDropTargeted = false
 
@@ -65,7 +69,11 @@ final class ImageConversionViewModel {
             availableFormats: availableFormats,
             defaults: defaults
         )
+        self.qualityPercent = ImageConversionPreferences.qualityPercent(defaults: defaults)
     }
+
+    /// The quality slider is only meaningful for lossy targets.
+    var isQualityAdjustable: Bool { selectedFormat.isLossy }
 
     var canConvert: Bool {
         !items.isEmpty && !isConverting && availableFormats.contains(selectedFormat)
@@ -109,11 +117,13 @@ final class ImageConversionViewModel {
             }
         }
         let target = selectedFormat
+        let quality = Double(qualityPercent) / 100.0
 
         Task {
             let summary = await ImageConversionSession().convertAll(
                 inputs: inputs,
                 target: target,
+                quality: quality,
                 downloadsDirectory: ImageConversionSession.defaultDownloadsDirectory
             )
             finish(summary)

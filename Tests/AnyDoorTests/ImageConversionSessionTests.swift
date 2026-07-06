@@ -117,6 +117,64 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertTrue(summary.outputURLs.isEmpty)
     }
 
+    /// A noisy image (rather than a flat fill) so JPEG's lossy quantization
+    /// produces a measurable size difference between low and high quality.
+    private func makeNoisyImage(width: Int, height: Int) -> CGImage {
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        var seed: UInt64 = 0x9E37_79B9_7F4A_7C15
+        for index in 0..<bytes.count {
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            bytes[index] = UInt8(truncatingIfNeeded: seed >> 33)
+        }
+        let context = CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )!
+        return context.makeImage()!
+    }
+
+    private func writeNoisyPNG(to url: URL, width: Int = 128, height: Int = 128) throws {
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, makeNoisyImage(width: width, height: height), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+
+    private func fileSize(_ url: URL) throws -> Int {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        return try XCTUnwrap(values.fileSize)
+    }
+
+    func testLowerJPEGQualityProducesSmallerOutputThroughSessionSeam() async throws {
+        let lowDir = try tempDirectory()
+        let highDir = try tempDirectory()
+        let lowSource = lowDir.appendingPathComponent("Photo.png")
+        let highSource = highDir.appendingPathComponent("Photo.png")
+        try writeNoisyPNG(to: lowSource)
+        try writeNoisyPNG(to: highSource)
+
+        let low = await ImageConversionSession().convertAll(
+            inputs: [.file(lowSource)],
+            target: .jpeg,
+            quality: 0.10,
+            downloadsDirectory: lowDir
+        )
+        let high = await ImageConversionSession().convertAll(
+            inputs: [.file(highSource)],
+            target: .jpeg,
+            quality: 0.95,
+            downloadsDirectory: highDir
+        )
+
+        let lowOutput = try XCTUnwrap(low.outputURLs.first)
+        let highOutput = try XCTUnwrap(high.outputURLs.first)
+        XCTAssertLessThan(try fileSize(lowOutput), try fileSize(highOutput))
+    }
+
     func testConvertAllMixesFileAndBitmapSources() async throws {
         let dir = try tempDirectory()
         let downloads = try tempDirectory()

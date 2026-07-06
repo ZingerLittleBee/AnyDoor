@@ -4234,6 +4234,23 @@
         }
       }
     },
+    "imageConversion.quality": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quality"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "质量"
+          }
+        }
+      }
+    },
     "imageConversion.remove": {
       "extractionState": "manual",
       "localizations": {
