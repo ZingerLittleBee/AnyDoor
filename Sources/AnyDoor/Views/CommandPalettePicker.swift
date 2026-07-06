@@ -1110,6 +1110,7 @@ private struct CommandPaletteRow: View {
             Image(systemName: entry.symbol)
                 .font(.system(size: 13))
                 .foregroundStyle(isBuiltin ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                .opticallyCentered(symbol: entry.symbol, pointSize: 13)
                 .frame(width: Self.iconSize, height: Self.iconSize)
                 .background {
                     if isToggleOn {
