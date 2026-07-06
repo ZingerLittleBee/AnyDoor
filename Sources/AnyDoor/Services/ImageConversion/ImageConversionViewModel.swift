@@ -133,6 +133,7 @@ final class ImageConversionViewModel {
     private func finish(_ summary: ImageConversionSummary) {
         isConverting = false
         if summary.converted > 0 {
+            recordHistory(summary.outputs)
             items.removeAll()
             copyOutputsToPasteboard(summary.outputURLs)
         }
@@ -141,6 +142,22 @@ final class ImageConversionViewModel {
             summary.converted,
             summary.skipped
         )))
+    }
+
+    /// Write one Conversion Record per produced output. The target format and
+    /// quality are the whole run's config (one config per run).
+    private func recordHistory(_ outputs: [ImageConversionOutput]) {
+        let target = selectedFormat
+        let quality = qualityPercent
+        for output in outputs {
+            ImageConversionHistoryStore.shared.record(
+                sourceName: output.sourceName,
+                sourceKind: output.sourceKind,
+                targetFormat: target,
+                qualityPercent: quality,
+                outputPath: output.outputURL.path
+            )
+        }
     }
 
     private func copyOutputsToPasteboard(_ outputURLs: [URL]) {

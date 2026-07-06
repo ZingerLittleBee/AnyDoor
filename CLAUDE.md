@@ -50,9 +50,9 @@ The codebase is large; the layout below is organized by subsystem (not a file-by
 Sources/AnyDoor/
 ├── AnyDoor.swift               # @main, Settings scene only (menu bar is managed by MenuBarController)
 ├── AppDelegate.swift           # ModelContainer, providers registry, service bootstrap, state-restoration opt-out
-├── Models/                     # SwiftData @Model (exactly these 5 = the ModelContainer schema):
+├── Models/                     # SwiftData @Model (exactly these 6 = the ModelContainer schema):
 │                               #   KeyBinding / BuiltinPreference / ClipboardHistoryItem / HostProfile /
-│                               #   TranslationRecord.
+│                               #   TranslationRecord / ImageConversionRecord.
 │                               #   Value types: BuiltinItem / PanelEntry (+ HotkeyDescriptor) /
 │                               #   HotkeyAction (+ HotkeySnapshot) / HyperKey.swift (HyperKeyTrigger /
 │                               #   HyperKeyQuickPress / HyperKeyVirtualKey) / PortRecord / MenuBarIcon /
@@ -122,7 +122,7 @@ Sources/AnyDoor/
 ## Architecture Notes
 
 - **Shared ModelContainer**: created in `AppDelegate.init()` and handed to all SwiftUI views via `.modelContainer()`. Do not create multiple ModelContainer instances.
-- **Pinned store path**: ModelContainer is explicitly configured with `url: ~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store` so `swift run` and the `.app` don't write to different locations due to Bundle ID differences. The schema registers exactly five `@Model` types — `KeyBinding`, `BuiltinPreference`, `ClipboardHistoryItem`, `HostProfile`, `TranslationRecord`. On launch `AppDelegate` performs a one-time migration from the legacy `default.store` and cleans it up (see `migrateLegacyStore`). **Keep this path when changing the ModelConfiguration**, otherwise user data appears "lost".
+- **Pinned store path**: ModelContainer is explicitly configured with `url: ~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store` so `swift run` and the `.app` don't write to different locations due to Bundle ID differences. The schema registers exactly six `@Model` types — `KeyBinding`, `BuiltinPreference`, `ClipboardHistoryItem`, `HostProfile`, `TranslationRecord`, `ImageConversionRecord`. On launch `AppDelegate` performs a one-time migration from the legacy `default.store` and cleans it up (see `migrateLegacyStore`). **Keep this path when changing the ModelConfiguration**, otherwise user data appears "lost".
 - **Launch-time SwiftData seeding/migration**: besides `migrateLegacyStore`, `AppDelegate.applicationDidFinishLaunching` runs idempotent `BuiltinPreferenceSeeder` (one `BuiltinPreference` row per `BuiltinItem`, appends newly added builtins at max order+1, uses versioned backfill flags) and `KeyBindingOrderBackfill` (assigns stride-100 `displayOrder` to legacy zero-order rows). New `@Model` fields **must carry inline defaults** so SwiftData lightweight migration can backfill existing rows (see `KeyBinding.isEnabled/isVisible/displayOrder`). **Inline defaults only backfill scalar types** (Bool/Int/String/Date): a new array/Codable field becomes a transformable column that migration leaves NULL, and faulting a legacy row then throws `NSInvalidUnarchiveOperationException` at launch. Store such data as an optional scalar instead — e.g. `ClipboardHistoryItem.tagIDsJSON: String?` (JSON) behind a computed `tagIDs: [String]` facade.
 - **CGEvent callback concurrency safety**: the callback is a C-style free function, not on `@MainActor`. Data is passed safely via `HotkeySnapshot` (a Sendable value type carrying `HotkeyAction`) plus `nonisolated(unsafe)` storage.
 - **CGEvent tap timeout & watchdog**: the system budgets the tap callback at ~1 second; exceeding it triggers `.tapDisabledByTimeout` and auto-disables the tap. Current defenses:

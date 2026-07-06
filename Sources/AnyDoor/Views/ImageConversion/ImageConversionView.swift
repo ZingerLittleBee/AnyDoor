@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ImageConversionView: View {
     @Bindable var model: ImageConversionViewModel
+    var store: ImageConversionHistoryStore = .shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +21,7 @@ struct ImageConversionView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            historySection
         }
         .adaptivePanelSurface(cornerRadius: 16)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -163,6 +165,53 @@ struct ImageConversionView: View {
             .padding(14)
     }
 
+    // Reading `store.revision` here (during body evaluation) establishes an
+    // @Observable dependency so the section re-fetches on every store write —
+    // the same idiom `TranslationHistoryView` uses.
+    private var historySection: some View {
+        _ = store.revision
+        let records = store.recent()
+        return VStack(spacing: 0) {
+            Divider()
+            HStack {
+                LocalizedText(.imageConversionHistoryTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
+
+            if records.isEmpty {
+                historyEmpty
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(records, id: \.id) { record in
+                            ImageConversionHistoryRow(record: record)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
+            }
+        }
+        .frame(height: 168)
+    }
+
+    private var historyEmpty: some View {
+        VStack {
+            Spacer()
+            LocalizedText(.imageConversionHistoryEmpty)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
         var accepted = false
         for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -222,6 +271,88 @@ private struct ImageConversionRow: View {
             return image
         }
         return NSWorkspace.shared.icon(for: .image)
+    }
+}
+
+private struct ImageConversionHistoryRow: View {
+    let record: ImageConversionRecord
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: previewImage)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(record.sourceName)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(record.targetFormat.uppercased())
+                    Text(record.createdAt, style: .relative)
+                        .lineLimit(1)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(action: reveal) {
+                Image(systemName: "folder")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L(.clipboardActionRevealInFinder))
+            .help(L(.clipboardActionRevealInFinder))
+
+            Button(action: copyAsFile) {
+                Image(systemName: "doc.on.doc")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L(.imageConversionCopyAsFile))
+            .help(L(.imageConversionCopyAsFile))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    /// Resolves the preview from the output path at render time; a deleted file
+    /// degrades to a generic placeholder rather than a broken image.
+    private var previewImage: NSImage {
+        if FileManager.default.fileExists(atPath: record.outputPath),
+           let image = NSImage(contentsOfFile: record.outputPath) {
+            return image
+        }
+        return NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
+            ?? NSWorkspace.shared.icon(for: .image)
+    }
+
+    /// Selects the output in Finder; a missing file shows a toast instead of a
+    /// broken reveal.
+    private func reveal() {
+        let url = record.outputURL
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
+            return
+        }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    /// Puts the output on the pasteboard as a file URL (with self-write
+    /// suppression so AnyDoor's own clipboard history ignores it), ready to paste.
+    private func copyAsFile() {
+        let url = record.outputURL
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+        ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 }
 

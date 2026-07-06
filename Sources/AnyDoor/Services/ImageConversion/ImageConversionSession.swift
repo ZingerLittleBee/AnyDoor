@@ -7,10 +7,27 @@ enum ImageConversionInput: Sendable {
     case bitmap(Data)
 }
 
+/// Whether a conversion source was an on-disk file or an in-memory bitmap.
+/// Stored as a raw string on `ImageConversionRecord`.
+enum ImageConversionSourceKind: String, Sendable {
+    case file
+    case bitmap
+}
+
+/// One produced output, carrying the metadata a history record needs.
+struct ImageConversionOutput: Equatable, Sendable {
+    let sourceName: String
+    let sourceKind: ImageConversionSourceKind
+    let outputURL: URL
+}
+
 struct ImageConversionSummary: Equatable, Sendable {
     let converted: Int
     let skipped: Int
-    let outputURLs: [URL]
+    let outputs: [ImageConversionOutput]
+
+    /// The produced files in order. Preserved for callers that only need the URLs.
+    var outputURLs: [URL] { outputs.map(\.outputURL) }
 }
 
 struct ImageConversionSession: Sendable {
@@ -65,7 +82,7 @@ private func convertAllSynchronously(
     let converter = ImageConverter()
     var converted = 0
     var skipped = 0
-    var outputURLs: [URL] = []
+    var outputs: [ImageConversionOutput] = []
 
     for input in inputs {
         switch input {
@@ -78,7 +95,11 @@ private func convertAllSynchronously(
             do {
                 try converter.convertFile(at: fileURL, to: outputURL, format: target, quality: quality)
                 converted += 1
-                outputURLs.append(outputURL)
+                outputs.append(ImageConversionOutput(
+                    sourceName: fileURL.lastPathComponent,
+                    sourceKind: .file,
+                    outputURL: outputURL
+                ))
             } catch {
                 skipped += 1
             }
@@ -95,12 +116,18 @@ private func convertAllSynchronously(
             do {
                 try converter.convert(data: data, to: outputURL, format: target, quality: quality)
                 converted += 1
-                outputURLs.append(outputURL)
+                // A bitmap has no source filename; the output's base name is the
+                // most meaningful label ("Clipboard <timestamp>").
+                outputs.append(ImageConversionOutput(
+                    sourceName: outputURL.deletingPathExtension().lastPathComponent,
+                    sourceKind: .bitmap,
+                    outputURL: outputURL
+                ))
             } catch {
                 skipped += 1
             }
         }
     }
 
-    return ImageConversionSummary(converted: converted, skipped: skipped, outputURLs: outputURLs)
+    return ImageConversionSummary(converted: converted, skipped: skipped, outputs: outputs)
 }

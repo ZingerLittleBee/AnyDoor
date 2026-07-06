@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let config = ModelConfiguration(url: storeURL)
             modelContainer = try ModelContainer(
                 for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, HostProfile.self,
-                TranslationRecord.self,
+                TranslationRecord.self, ImageConversionRecord.self,
                 configurations: config
             )
 
@@ -156,6 +156,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the coordinator at it so successful translations get recorded.
         TranslationHistoryStore.shared.configure(modelContainer: modelContainer)
         TranslationCoordinator.shared.history = TranslationHistoryStore.shared
+
+        // Image Conversion history: wire the shared container so completed
+        // conversions get recorded from the conversion view model.
+        ImageConversionHistoryStore.shared.configure(modelContainer: modelContainer)
 
         // Scheduled Shutdown: push state to the panel and re-arm any persisted
         // schedule (or cancel a deadline missed while the app was quit).

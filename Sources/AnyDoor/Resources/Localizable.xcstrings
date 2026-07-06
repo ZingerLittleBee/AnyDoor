@@ -4183,6 +4183,23 @@
         }
       }
     },
+    "imageConversion.copyAsFile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy as File"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复制为文件"
+          }
+        }
+      }
+    },
     "imageConversion.drop.subtitle": {
       "extractionState": "manual",
       "localizations": {
@@ -4213,6 +4230,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "拖入图片开始转换"
+          }
+        }
+      }
+    },
+    "imageConversion.fileMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The output file no longer exists"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输出文件已不存在"
+          }
+        }
+      }
+    },
+    "imageConversion.history.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Converted images will appear here"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "转换过的图片会显示在这里"
+          }
+        }
+      }
+    },
+    "imageConversion.history.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Conversion Records"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "转换记录"
           }
         }
       }
