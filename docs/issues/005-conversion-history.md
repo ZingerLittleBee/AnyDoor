@@ -1,7 +1,7 @@
 ---
 id: 005
 title: "Image Conversion: conversion history (sixth SwiftData model)"
-status: in-progress
+status: done
 prd: docs/prds/2026-07-06-image-conversion.md
 ---
 
