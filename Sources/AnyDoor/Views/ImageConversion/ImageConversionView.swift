@@ -35,23 +35,21 @@ struct ImageConversionView: View {
         .focusEffectDisabled()
     }
 
-    // Two rows so the localized title and the format/quality controls never
-    // compete for width: English labels ("Image Conversion", "Target format",
-    // "Quality") overflow a single row as soon as a lossy format reveals the
-    // quality slider, hyphen-wrapping the title.
+    // Two rows: the first shares the traffic-light line — AppKit draws the
+    // buttons over the card's top-left, the title sits beside them and the
+    // actions right-align; the second row carries the conversion config,
+    // right-aligned. Splitting also keeps the long English labels from
+    // hyphen-wrapping the title in one row.
     private var toolbar: some View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
-                Label {
-                    LocalizedText(.imageConversionTitle)
-                        .font(.headline)
-                        .lineLimit(1)
-                } icon: {
-                    Image(systemName: "photo.on.rectangle")
-                }
-                // Clear the close traffic light overlaying the card's top-left
-                // corner (the card ignores the titlebar safe area).
-                .padding(.leading, 18)
+                LocalizedText(.imageConversionTitle)
+                    .font(.headline)
+                    .lineLimit(1)
+                    // Clear the three traffic lights overlaying the card's
+                    // top-left corner (their rightmost edge is ≈61pt from the
+                    // window edge; the toolbar already pads 16pt).
+                    .padding(.leading, 70)
                 Spacer()
                 Button {
                     model.clear()
@@ -83,6 +81,10 @@ struct ImageConversionView: View {
             }
 
             HStack(spacing: 14) {
+                if model.isQualityAdjustable {
+                    qualityControl
+                }
+                Spacer()
                 if model.availableFormats.isEmpty {
                     LocalizedText(.imageConversionNoFormats)
                         .font(.caption)
@@ -98,14 +100,12 @@ struct ImageConversionView: View {
                             }
                         }
                         .labelsHidden()
-                        .frame(width: 112)
+                        // Trailing-aligned inside the fixed slot so the popup's
+                        // right edge lines up with the Convert button above.
+                        .frame(width: 112, alignment: .trailing)
                     }
                     .help(L(.imageConversionTargetFormat))
                 }
-                if model.isQualityAdjustable {
-                    qualityControl
-                }
-                Spacer()
             }
         }
         .padding(.horizontal, 16)

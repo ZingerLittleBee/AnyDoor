@@ -18,13 +18,14 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         )
         panel.titlebarAppearsTransparent = true
         panel.titleVisibility = .hidden
-        // Keep the close traffic light: unlike the translation panel this window
-        // has no outside-click dismissal, so the mouse needs a close affordance.
+        // Full traffic-light set stays visible: close works (this window has no
+        // outside-click dismissal, so the mouse needs an affordance); minimize
+        // and zoom are disabled placeholders that keep the familiar spacing.
         // The card ignores the titlebar safe area (see ImageConversionView), so
-        // the button overlays the card's top-left corner instead of floating in
+        // the buttons overlay the card's top-left corner instead of floating in
         // a transparent strip above it.
-        panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
-        panel.standardWindowButton(.zoomButton)?.isHidden = true
+        panel.standardWindowButton(.miniaturizeButton)?.isEnabled = false
+        panel.standardWindowButton(.zoomButton)?.isEnabled = false
         panel.isMovableByWindowBackground = true
         panel.backgroundColor = .clear
         panel.isOpaque = false
@@ -79,6 +80,31 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         // Drop the initial first responder so no control renders a focus ring
         // when the window appears (keyboard focus returns on first Tab).
         window.makeFirstResponder(nil)
+        alignTrafficLights()
+    }
+
+    /// Vertically centers the traffic lights on the toolbar's first row and
+    /// keeps minimize/zoom as disabled placeholders. AppKit pins the buttons to
+    /// the standard titlebar position (higher than the row once the card
+    /// ignores the titlebar safe area) and re-evaluates zoom's enabled state,
+    /// so this runs after every titlebar layout pass (resize, key changes).
+    private func alignTrafficLights() {
+        guard let window else { return }
+        // 10pt toolbar top padding + half the ~24pt first row.
+        let centerFromWindowTop: CGFloat = 22
+        for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let button = window.standardWindowButton(kind), let container = button.superview else { continue }
+            let origin = NSPoint(
+                x: button.frame.origin.x,
+                y: container.bounds.height - centerFromWindowTop - button.frame.height / 2
+            )
+            if button.frame.origin != origin {
+                button.setFrameOrigin(origin)
+            }
+            if kind != .closeButton, button.isEnabled {
+                button.isEnabled = false
+            }
+        }
     }
 
     override func close() {
@@ -163,7 +189,12 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     }
 
     func windowDidMove(_ notification: Notification) { saveFrame() }
-    func windowDidResize(_ notification: Notification) { saveFrame() }
+    func windowDidResize(_ notification: Notification) {
+        saveFrame()
+        alignTrafficLights()
+    }
+    func windowDidBecomeKey(_ notification: Notification) { alignTrafficLights() }
+    func windowDidResignKey(_ notification: Notification) { alignTrafficLights() }
     // The traffic-light close path bypasses our `close()` override, so the
     // cleanup lives in the delegate callback both paths reach.
     func windowWillClose(_ notification: Notification) {
