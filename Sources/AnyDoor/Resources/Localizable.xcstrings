@@ -4132,6 +4132,23 @@
         }
       }
     },
+    "imageConversion.clipboardItem": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard image"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板图片"
+          }
+        }
+      }
+    },
     "imageConversion.convert": {
       "extractionState": "manual",
       "localizations": {
@@ -4172,13 +4189,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Drag image files here"
+            "value": "Drag images in or press ⌘V"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "把图片文件拖到这里"
+            "value": "拖入图片文件，或按 ⌘V 粘贴"
           }
         }
       }

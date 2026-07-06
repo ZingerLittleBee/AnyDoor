@@ -158,17 +158,20 @@ private struct ImageConversionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: item.url.path))
+            Image(nsImage: iconImage)
                 .resizable()
+                .aspectRatio(contentMode: .fit)
                 .frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
+                Text(item.displayName)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
-                Text(item.folderPath)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             Button(action: remove) {
@@ -183,6 +186,16 @@ private struct ImageConversionRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var iconImage: NSImage {
+        if let url = item.fileURL {
+            return NSWorkspace.shared.icon(forFile: url.path)
+        }
+        if case let .bitmap(data) = item.payload, let image = NSImage(data: data) {
+            return image
+        }
+        return NSWorkspace.shared.icon(for: .image)
     }
 }
 

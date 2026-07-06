@@ -21,7 +21,29 @@ struct ImageConverter: Sendable {
               CGImageSourceGetCount(source) > 0 else {
             throw ImageConversionError.unreadableSource(sourceURL)
         }
+        try encode(source: source, to: outputURL, format: format, quality: quality)
+    }
 
+    /// Converts an in-memory bitmap (e.g. a pasted screenshot) to `outputURL`.
+    func convert(
+        data: Data,
+        to outputURL: URL,
+        format: ImageConversionFormat,
+        quality: Double = ImageConverter.defaultQuality
+    ) throws {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              CGImageSourceGetCount(source) > 0 else {
+            throw ImageConversionError.encodingFailed(outputURL)
+        }
+        try encode(source: source, to: outputURL, format: format, quality: quality)
+    }
+
+    private func encode(
+        source: CGImageSource,
+        to outputURL: URL,
+        format: ImageConversionFormat,
+        quality: Double
+    ) throws {
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -38,7 +60,7 @@ struct ImageConverter: Sendable {
         let properties = destinationProperties(format: format, quality: quality)
         if format == .ico {
             guard let icon = makeIconImage(from: source) else {
-                throw ImageConversionError.unreadableSource(sourceURL)
+                throw ImageConversionError.encodingFailed(outputURL)
             }
             CGImageDestinationAddImage(destination, icon, properties as CFDictionary)
         } else {
@@ -53,6 +75,14 @@ struct ImageConverter: Sendable {
 
     static func canDecodeFile(at url: URL) -> Bool {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              CGImageSourceGetCount(source) > 0 else {
+            return false
+        }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil) != nil
+    }
+
+    static func canDecodeData(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) > 0 else {
             return false
         }

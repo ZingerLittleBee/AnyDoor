@@ -145,6 +145,7 @@ enum L10n {
         case hostsProfileEnable = "hosts.profile.enable"
         case imageConversionBasketCount = "imageConversion.basket.count"
         case imageConversionClear = "imageConversion.clear"
+        case imageConversionClipboardItem = "imageConversion.clipboardItem"
         case imageConversionConvert = "imageConversion.convert"
         case imageConversionConverting = "imageConversion.converting"
         case imageConversionDropSubtitle = "imageConversion.drop.subtitle"

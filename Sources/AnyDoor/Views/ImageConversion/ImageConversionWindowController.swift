@@ -122,7 +122,28 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             close()
             return true
         }
+        if event.keyCode == 9, event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+            pasteFromClipboard()
+            return true
+        }
         return false
+    }
+
+    /// ⌘V: copied image files enter as file references (like drag & drop); a
+    /// copied bitmap enters as a bitmap item. Non-image content is ignored.
+    private func pasteFromClipboard() {
+        let pasteboard = NSPasteboard.general
+        if let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self],
+            options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL], !urls.isEmpty {
+            viewModel.addFiles(urls)
+            return
+        }
+        if let image = NSImage(pasteboard: pasteboard),
+           let png = ClipboardCapture.pngData(from: image) {
+            viewModel.addBitmap(png)
+        }
     }
 
     func windowDidMove(_ notification: Notification) { saveFrame() }

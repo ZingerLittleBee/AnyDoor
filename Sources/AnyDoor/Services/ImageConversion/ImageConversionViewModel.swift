@@ -3,11 +3,43 @@ import Foundation
 import Observation
 
 struct ImageConversionBasketItem: Identifiable, Equatable, Sendable {
-    let url: URL
+    /// A basket entry is either an on-disk file (output beside it) or an
+    /// in-memory bitmap such as a pasted screenshot (output to Downloads).
+    enum Payload: Equatable, Sendable {
+        case file(URL)
+        case bitmap(Data)
+    }
 
-    var id: String { url.standardizedFileURL.path }
-    var name: String { url.lastPathComponent }
-    var folderPath: String { url.deletingLastPathComponent().path }
+    let id: String
+    let payload: Payload
+    let displayName: String
+
+    static func file(_ url: URL) -> ImageConversionBasketItem {
+        let standardized = url.standardizedFileURL
+        return ImageConversionBasketItem(
+            id: standardized.path,
+            payload: .file(standardized),
+            displayName: standardized.lastPathComponent
+        )
+    }
+
+    static func bitmap(_ data: Data, displayName: String) -> ImageConversionBasketItem {
+        ImageConversionBasketItem(
+            id: "bitmap:\(UUID().uuidString)",
+            payload: .bitmap(data),
+            displayName: displayName
+        )
+    }
+
+    var fileURL: URL? {
+        if case let .file(url) = payload { return url }
+        return nil
+    }
+
+    /// Secondary row line: the source folder for files, empty for bitmaps.
+    var subtitle: String {
+        fileURL?.deletingLastPathComponent().path ?? ""
+    }
 }
 
 @MainActor
@@ -49,9 +81,14 @@ final class ImageConversionViewModel {
         for url in imageURLs {
             let key = url.path
             guard existing.insert(key).inserted else { continue }
-            next.append(ImageConversionBasketItem(url: url))
+            next.append(.file(url))
         }
-        items = next.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        items = next.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// Adds a pasted bitmap (e.g. a fresh screenshot) with a generic display name.
+    func addBitmap(_ data: Data) {
+        items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
     }
 
     func remove(_ item: ImageConversionBasketItem) {
@@ -65,13 +102,19 @@ final class ImageConversionViewModel {
     func convert() {
         guard canConvert else { return }
         isConverting = true
-        let fileURLs = items.map(\.url)
+        let inputs: [ImageConversionInput] = items.map { item in
+            switch item.payload {
+            case let .file(url): return .file(url)
+            case let .bitmap(data): return .bitmap(data)
+            }
+        }
         let target = selectedFormat
 
         Task {
             let summary = await ImageConversionSession().convertAll(
-                fileURLs: fileURLs,
-                target: target
+                inputs: inputs,
+                target: target,
+                downloadsDirectory: ImageConversionSession.defaultDownloadsDirectory
             )
             finish(summary)
         }
