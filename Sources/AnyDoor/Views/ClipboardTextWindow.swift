@@ -21,6 +21,10 @@ final class ClipboardTextWindow {
     /// preview's "e" key / header button route through this so editing always
     /// goes down the same path as the card's context menu.
     var onEditRequest: ((ClipboardHistoryItem) -> Void)?
+    /// Set by the wall controller: how to copy an item to the pasteboard. The
+    /// preview's "c" key / header button route through this so copying always
+    /// goes down the same path as the card's context menu.
+    var onCopyRequest: ((ClipboardHistoryItem) -> Void)?
 
     private init() {}
 
@@ -75,6 +79,13 @@ final class ClipboardTextWindow {
         onEditRequest?(item)
     }
 
+    /// Copy the previewed item to the pasteboard ("c" key or the header's copy
+    /// button). Keeps the preview and wall open. No-op outside preview mode.
+    func requestCopyFromPreview() {
+        guard isPreviewVisible, let item = model?.item else { return }
+        onCopyRequest?(item)
+    }
+
     func close() {
         for monitor in mouseMonitors { NSEvent.removeMonitor(monitor) }
         mouseMonitors = []
@@ -121,6 +132,7 @@ final class ClipboardTextWindow {
         let model = ClipboardTextPanelModel(item: item, isEditable: editable)
         model.onDismiss = { [weak self] in self?.close() }
         model.onEditRequest = { [weak self] in self?.requestEditFromPreview() }
+        model.onCopyRequest = { [weak self] in self?.requestCopyFromPreview() }
         self.model = model
         self.onClose = onClose
 
@@ -200,6 +212,9 @@ final class ClipboardTextPanelModel {
     /// Asks the host to swap this read-only preview for the editor ("e" key /
     /// the header's edit button). No-op when already editing.
     var onEditRequest: () -> Void = {}
+    /// Asks the host to copy this item to the pasteboard ("c" key / the
+    /// header's copy button). Keeps the preview open.
+    var onCopyRequest: () -> Void = {}
 
     init(item: ClipboardHistoryItem, isEditable: Bool) {
         self.item = item
@@ -253,6 +268,11 @@ final class ClipboardTextPanelModel {
         onEditRequest()
     }
 
+    func requestCopy() {
+        guard !isEditable else { return }
+        onCopyRequest()
+    }
+
     func discard() { onDismiss() }
 }
 
@@ -282,6 +302,22 @@ struct ClipboardTextPanelView: View {
                 .font(.headline)
             Spacer()
             if !model.isEditable {
+                // Doubles as the discoverability hint for the "c" shortcut.
+                Button { model.requestCopy() } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "doc.on.doc")
+                        LocalizedText(.clipboardActionCopy)
+                        Text("C")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.15), in: RoundedRectangle(cornerRadius: 3))
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(L(.clipboardActionCopy))
+                .padding(.trailing, 6)
                 // Doubles as the discoverability hint for the "e" shortcut.
                 Button { model.requestEdit() } label: {
                     HStack(spacing: 5) {

@@ -111,6 +111,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Preview → editor handoff ("e" key / the preview header's edit
         // button) goes down the same path as the card's context menu.
         ClipboardTextWindow.shared.onEditRequest = { [weak self] item in self?.beginEdit(item) }
+        // Preview copy ("c" key / the preview header's copy button) writes the
+        // item to the pasteboard down the same path as the card's context menu.
+        ClipboardTextWindow.shared.onCopyRequest = { [weak self] item in self?.copyWithoutPasting(item) }
 
         guard let window, let screen = NSScreen.main else { return }
         // Remember who had focus so paste/Esc can hand it back.
@@ -414,13 +417,21 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             case 53, 49:                                 // esc / space close it
                 textWindow.close(); return true
             default:
-                // Plain "e" swaps the preview for the editor (the preview
-                // header shows the hint); other keys fall through so arrows
-                // and type-to-search keep working.
-                if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-                   event.charactersIgnoringModifiers?.lowercased() == "e" {
-                    textWindow.requestEditFromPreview()
-                    return true
+                // Plain "e" swaps the preview for the editor and plain "c"
+                // copies the item to the pasteboard (the preview header shows
+                // both hints); other keys fall through so arrows and
+                // type-to-search keep working.
+                if event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty {
+                    switch event.charactersIgnoringModifiers?.lowercased() {
+                    case "e":
+                        textWindow.requestEditFromPreview()
+                        return true
+                    case "c":
+                        textWindow.requestCopyFromPreview()
+                        return true
+                    default:
+                        break
+                    }
                 }
                 return nil
             }
