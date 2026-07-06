@@ -9,9 +9,25 @@ versioning.
 ### Added
 
 - Image Conversion: a new built-in action opens a floating conversion window
-  where dragged image files can be batch-converted through ImageIO to PNG, JPEG,
-  HEIC, AVIF, TIFF, GIF, BMP, PDF, or ICO when the system encoder supports the
-  target format.
+  where images can be batch-converted through ImageIO to PNG, JPEG, HEIC, AVIF,
+  TIFF, GIF, BMP, PDF, or ICO when the system encoder supports the target
+  format. Images enter the basket by dragging files in, pressing ⌘V (copied
+  files or a copied bitmap), summoning the window with images selected in
+  Finder (the selection is echoed in; the hotkey is a strict open/close
+  toggle), or right-clicking an image/screenshot/file card on the clipboard
+  wall. File sources convert next to the original (never overwriting — name
+  collisions get a Finder-style counter); clipboard bitmaps convert into
+  Downloads with a timestamped name; outputs land on the clipboard as files,
+  ready to paste.
+- Image Conversion: a quality slider (1–100%, default 85%) applies to lossy
+  targets (JPEG/HEIC/AVIF); the last-used format and quality persist and are
+  included in config backup/sync.
+- Image Conversion: the window keeps the last 50 conversion records with
+  thumbnails, Reveal in Finder, copy-as-file, and a clear-all action.
+- Screenshot "Save As" can now save in any supported image format (PNG, JPEG,
+  HEIC, AVIF, TIFF, GIF, BMP, PDF, ICO) — the chosen filename extension picks
+  the format and lossy saves honor the Image Conversion quality setting. The
+  capture pipeline itself still records PNG.
 
 ## [3.4.1] - 2026-07-04
 
