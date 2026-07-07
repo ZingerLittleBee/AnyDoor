@@ -252,6 +252,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+        // Dev-only: dump the Settings window's AppKit view tree (frames and
+        // private decoration views included) to /tmp for chrome debugging.
+        if ProcessInfo.processInfo.arguments.contains("--dump-settings-views") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard let window = NSApp.windows.first(where: { $0.frame.width == 680 }),
+                      let frameView = window.contentView?.superview,
+                      let desc = frameView.perform(Selector(("_subtreeDescription")))?
+                          .takeUnretainedValue() as? String
+                else { return }
+                try? desc.write(toFile: "/tmp/settings-views.txt", atomically: true, encoding: .utf8)
+            }
+        }
         #endif
 
         // First-run onboarding. Shows once on a clean install; afterwards it is

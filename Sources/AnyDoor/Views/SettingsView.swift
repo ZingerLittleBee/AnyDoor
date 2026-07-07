@@ -24,10 +24,9 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            // Taller card header: System Settings starts the sidebar content
-            // ~63pt below the window top (measured), giving the traffic
-            // lights a roomier header zone than the split view's built-in
-            // ~48pt toolbar clearance provides.
+            // Clearance between the traffic lights (lowered to y=17 by
+            // TrafficLightPosition) and the first row — without it the rows
+            // start at ~33pt and collide with the lights.
             .safeAreaInset(edge: .top, spacing: 0) {
                 Color.clear.frame(height: 14)
             }
@@ -78,7 +77,7 @@ struct SettingsView: View {
         // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
         // focuses another app.
         .background(RegularWindowRegistrar())
-        .background(TrafficLightLayout(headerHeight: 52))
+        .background(TrafficLightPosition())
         .focusEffectDisabled()
     }
 
@@ -107,32 +106,30 @@ struct SettingsView: View {
     }
 }
 
-/// Lowers the traffic lights into the sidebar card's header, System
-/// Settings-style: the standard title bar centers them ~16pt down, hugging the
-/// card's top edge, while System Settings centers them in a taller (~52pt)
-/// header row. There is no public knob for this (`toolbarStyle = .unified` is
-/// ignored in hiddenTitleBar windows), so this uses the same technique as
-/// Electron's `trafficLightPosition`: grow the title-bar container view and
-/// re-center the three buttons inside it, re-applying whenever AppKit re-lays
-/// the title bar out. Only subview frames are touched — never the window
-/// frame, which would loop against the scene's sizing (see the frame trick at
-/// the end of `SettingsView.body`).
-private struct TrafficLightLayout: NSViewRepresentable {
-    let headerHeight: CGFloat
+/// Moves the traffic lights down and right into the sidebar card's header,
+/// matching System Settings (its buttons sit at ~(18, 18) from the window's
+/// top-left; the default title bar puts them at ~(8, 8), hugging the card's
+/// corner). Only the three buttons' frame origins are translated. Do NOT grow
+/// the title-bar container / title-bar view instead: the sidebar column lays
+/// its glass card out below an internal NSTitlebarBackgroundView whose height
+/// tracks the container, so a taller container pushes the card's top edge
+/// below the buttons — exactly the wrap effect this window is built around.
+/// (And never touch the window frame: that loops against the scene's sizing —
+/// see the frame trick at the end of `SettingsView.body`.)
+private struct TrafficLightPosition: NSViewRepresentable {
+    /// Target distance from the window's top-left corner to the close
+    /// button's top-left corner (measured from System Settings on macOS 26).
+    private static let inset = CGPoint(x: 17, y: 17)
+    /// The sidebar glass card's corner radius (the system default is 8).
+    static let cardCornerRadius: CGFloat = 16
 
     func makeNSView(context: Context) -> TrackingView {
-        let view = TrackingView()
-        view.headerHeight = headerHeight
-        return view
+        TrackingView()
     }
 
-    func updateNSView(_ nsView: TrackingView, context: Context) {
-        nsView.headerHeight = headerHeight
-    }
+    func updateNSView(_ nsView: TrackingView, context: Context) {}
 
     final class TrackingView: NSView {
-        var headerHeight: CGFloat = 52
-
         // nonisolated(unsafe): only touched on the main thread — written in
         // viewDidMoveToWindow, read in deinit after all other refs are gone.
         private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
@@ -142,8 +139,10 @@ private struct TrafficLightLayout: NSViewRepresentable {
             observers.forEach { NotificationCenter.default.removeObserver($0) }
             observers = []
             guard let window else { return }
-            layout(window)
-            // AppKit re-lays the title bar out on these; win the last word.
+            Self.layout(window)
+            // AppKit re-lays the buttons out on these; win the last word.
+            // (layout is a translation by the remaining delta, so re-applying
+            // when already in place is a no-op.)
             let names: [Notification.Name] = [
                 NSWindow.didResizeNotification,
                 NSWindow.didBecomeKeyNotification,
@@ -152,10 +151,10 @@ private struct TrafficLightLayout: NSViewRepresentable {
             observers = names.map { name in
                 NotificationCenter.default.addObserver(
                     forName: name, object: window, queue: .main
-                ) { [weak self] notification in
+                ) { notification in
                     guard let window = notification.object as? NSWindow else { return }
                     // Same main-thread dance as RegularWindowCoordinator.
-                    MainThreadIsolation.run { self?.layout(window) }
+                    MainThreadIsolation.run { Self.layout(window) }
                 }
             }
         }
@@ -164,29 +163,57 @@ private struct TrafficLightLayout: NSViewRepresentable {
             observers.forEach { NotificationCenter.default.removeObserver($0) }
         }
 
-        private func layout(_ window: NSWindow) {
-            let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-            guard let titlebarView = window.standardWindowButton(.closeButton)?.superview,
-                  let container = titlebarView.superview else { return }
+        private static func applyCornerRadii(_ window: NSWindow) {
+            guard #available(macOS 26.0, *) else { return }
+            // The WINDOW's corner radius is intentionally left stock (16pt;
+            // System Settings uses ~26.5pt). There is no public NSWindow API,
+            // and every private route leaves the shape inconsistent or
+            // crashes: the frame view's radius setter only rounds the content
+            // (rim + shadow keep the old radius → notched corners), a
+            // transparent window clipped in SwiftUI leaves the same rim and
+            // shadow-hole artifacts, and a runtime subclass of the theme
+            // frame overriding `_cornerRadius` trips AppKit's
+            // NSDynamicProperties assertion at launch.
+            //
+            // Sidebar glass card: public NSGlassEffectView API.
+            if let contentView = window.contentView,
+               let card = findConcentricGlass(in: contentView) as? NSGlassEffectView,
+               card.cornerRadius != TrafficLightPosition.cardCornerRadius {
+                card.cornerRadius = TrafficLightPosition.cardCornerRadius
+            }
+        }
 
-            // Grow the title-bar container downward from the window's top edge
-            // so the lowered buttons stay inside it (hit-testing is bounded by
-            // the container's frame).
-            var containerFrame = container.frame
-            containerFrame.origin.y = window.frame.height - headerHeight
-            containerFrame.size.height = headerHeight
-            container.frame = containerFrame
+        private static func findConcentricGlass(in view: NSView) -> NSView? {
+            if String(describing: type(of: view)).contains("ConcentricGlassEffectView") { return view }
+            for sub in view.subviews {
+                if let hit = findConcentricGlass(in: sub) { return hit }
+            }
+            return nil
+        }
 
-            var titlebarFrame = titlebarView.frame
-            titlebarFrame.size.height = headerHeight
-            titlebarFrame.origin.y = 0
-            titlebarView.frame = titlebarFrame
-
-            for type in buttons {
+        private static func layout(_ window: NSWindow) {
+            // System Settings carries the resizable style bit (it renders the
+            // zoom button in color instead of disabled-gray). It does not
+            // actually make the window user-resizable: the scene pins the
+            // content size to the fixed root frame.
+            window.styleMask.insert(.resizable)
+            applyCornerRadii(window)
+            guard let close = window.standardWindowButton(.closeButton),
+                  let superview = close.superview else { return }
+            // Current distance from the window's top-left to the close
+            // button's top-left, robust against superview flippedness.
+            let currentTop = superview.isFlipped
+                ? close.frame.minY
+                : superview.bounds.height - close.frame.maxY
+            let dx = TrafficLightPosition.inset.x - close.frame.minX
+            let dTop = TrafficLightPosition.inset.y - currentTop
+            guard dx != 0 || dTop != 0 else { return }
+            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
                 guard let button = window.standardWindowButton(type) else { continue }
-                var frame = button.frame
-                frame.origin.y = (headerHeight - frame.height) / 2
-                button.setFrameOrigin(frame.origin)
+                var origin = button.frame.origin
+                origin.x += dx
+                origin.y += superview.isFlipped ? dTop : -dTop
+                button.setFrameOrigin(origin)
             }
         }
     }
