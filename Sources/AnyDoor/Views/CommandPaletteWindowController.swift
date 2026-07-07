@@ -328,8 +328,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func commit(_ entry: PanelEntry) {
-        // Option parents drill into a second level instead of closing.
-        if case .builtin(let item) = entry.source, CommandPaletteOptions.isOptionParent(item) {
+        switch CommandPaletteCommitIntent.classify(entry.source) {
+        case .drillIntoOptions(let item):
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let options = await CommandPaletteOptions.options(for: item)
@@ -344,12 +344,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                     self.close() // not an option parent right now (brightness lost its display)
                 }
             }
-            return
-        }
-
-        // A second-level option either confirms (destructive, e.g. a port kill)
-        // or runs its action and dismisses.
-        if case .paletteOption(let id) = entry.source {
+        case .runOrConfirmOption(let id):
             guard let option = state?.option(id: id) else { close(); return }
             if let confirmation = option.confirmation {
                 state?.requestConfirmation(confirmation, perform: option.perform)
@@ -357,11 +352,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 close()
                 Task { await option.perform() }
             }
-            return
-        }
-
-        // Killing a port from the root numeric search asks for confirmation too.
-        if case .portRecord(let record) = entry.source {
+        case .confirmPortKill(let record):
             let confirmation = CommandPaletteOptions.portKillConfirmation(for: record)
             state?.requestConfirmation(confirmation) {
                 let result = await PortInventory.shared.kill(pid: record.pid)
@@ -369,55 +360,39 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                     CommandPalettePortKillToast.style(for: record, result: result)
                 )
             }
-            return
-        }
-
-        // A keyword-completion hint enters its scope and keeps the palette open
-        // so the user types the conversion body next — like an option drill-in.
-        if case .devToolScopeSuggestion(let scope) = entry.source {
+        case .enterDevToolScope(let scope):
             state?.enterDevToolScope(scope)
-            return
-        }
-
-        close()
-        switch entry.source {
-        case .appShortcut(let id):
+        case .launchAppShortcut(let id):
+            close()
             guard let binding = PanelStore.shared.binding(id: id) else { return }
             AppSwitcher.toggle(bundleID: binding.appBundleID, appPath: binding.appPath)
-        case .installedApp(let bundleID, let path):
+        case .launchApp(let bundleID, let path):
+            close()
             AppSwitcher.toggle(bundleID: bundleID, appPath: path)
-        case .portRecord:
-            break // handled above (routed through confirmation)
-        case .builtin(let item):
-            switch item.kind {
-            case .toggle:
-                Task { await PanelStore.shared.toggle(item) }
-            case .action:
-                Task { await PanelStore.shared.run(item) }
-            case .submenu, .brightnessControl, .hiddenHotkey:
-                break
+        case .toggleBuiltin(let item):
+            close()
+            Task { await PanelStore.shared.toggle(item) }
+        case .runBuiltin(let item):
+            close()
+            Task { await PanelStore.shared.run(item) }
+        case .copyToClipboard(let text, let toast):
+            close()
+            ClipboardWatcher.selfWrite(string: text)
+            switch toast {
+            case .calc(let display):
+                ToastPresenter.shared.show(.success(L(.toastCalcCopied, display)))
+            case .generic:
+                ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
             }
-        case .calcResult(let result):
-            ClipboardWatcher.selfWrite(string: result.copyText)
-            ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
-        case .devTool(let result):
-            ClipboardWatcher.selfWrite(string: result.output)
-            // Confirm without echoing the value — dev-tool outputs (hashes, multi-line
-            // JSON) are long and unhelpful in a toast.
-            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
-        case .conversion(let result):
-            ClipboardWatcher.selfWrite(string: result.copyText)
-            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
-        case .hostProfile(let id):
+        case .toggleHostProfile(let id):
+            close()
             // Toggle the named profile's activation directly (same as the
             // drill-in hosts options — no privileged-write confirmation).
             if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
                 Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
             }
-        case .devToolScopeSuggestion:
-            break // handled above (enters scope, stays open)
-        case .paletteOption:
-            break // handled above
+        case .dismiss:
+            close()
         }
     }
 
