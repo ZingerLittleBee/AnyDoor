@@ -92,62 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
         // Register providers
-        let providers: [any BuiltinProvider] = [
-            KeepAwakeProvider(onChange: { state in
-                PanelStore.shared.onKeepAwakeStateChange(state)
-            }),
-            HideDesktopIconsProvider(),
-            ShowHiddenFilesProvider(),
-            MuteAudioProvider(),
-            MicrophoneMuteProvider(),
-            DarkModeProvider(),
-            LockScreenProvider(),
-            EmptyTrashProvider(),
-            CaptureRegionProvider(),
-            CaptureWindowProvider(),
-            CaptureFullscreenProvider(),
-            CaptureTimerProvider(),
-            CaptureModeBarProvider(),
-            RecordScreenProvider(),
-            CaptureScrollingProvider(),
-            ClearClipboardProvider(),
-            DisplaySleepProvider(),
-            SystemSleepProvider(),
-            ScheduledShutdownProvider(),
-            HideDockProvider(),
-            AutoHideMenuBarProvider(),
-            RestartFinderProvider(),
-            RestartDockProvider(),
-            RestartMenuBarProvider(),
-            FlushDNSProvider(),
-            KeyboardLockProvider(),
-            OCRProvider(),
-            QRCodeProvider(),
-            PickColorProvider(),
-            ClipboardMonitoringProvider(),
-            WindowLayoutProvider(item: .windowLeftHalf, action: .leftHalf),
-            WindowLayoutProvider(item: .windowRightHalf, action: .rightHalf),
-            WindowLayoutProvider(item: .windowMaximize, action: .maximize),
-            WindowLayoutProvider(item: .windowCenter, action: .center),
-            WindowLayoutProvider(item: .windowTopHalf, action: .topHalf),
-            WindowLayoutProvider(item: .windowBottomHalf, action: .bottomHalf),
-            WindowLayoutProvider(item: .windowTopLeftQuarter, action: .topLeftQuarter),
-            WindowLayoutProvider(item: .windowTopRightQuarter, action: .topRightQuarter),
-            WindowLayoutProvider(item: .windowBottomLeftQuarter, action: .bottomLeftQuarter),
-            WindowLayoutProvider(item: .windowBottomRightQuarter, action: .bottomRightQuarter),
-            WindowLayoutProvider(item: .windowLeftThird, action: .leftThird),
-            WindowLayoutProvider(item: .windowCenterThird, action: .centerThird),
-            WindowLayoutProvider(item: .windowRightThird, action: .rightThird),
-            WindowLayoutProvider(item: .windowLeftTwoThirds, action: .leftTwoThirds),
-            WindowLayoutProvider(item: .windowRightTwoThirds, action: .rightTwoThirds),
-            WindowLayoutProvider(item: .windowMoveNextDisplay, action: .moveToNextDisplay),
-            WindowLayoutProvider(item: .windowMovePreviousDisplay, action: .moveToPreviousDisplay),
-            ClipboardWallProvider(),
-            TranslateProvider(),
-            ScreenshotTranslateProvider(),
-            TranslateSelectionProvider(),
-            ImageConversionProvider(),
-        ]
+        let providers = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
+            PanelStore.shared.onKeepAwakeStateChange(state)
+        })
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
         HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
