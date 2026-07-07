@@ -24,6 +24,13 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            // Taller card header: System Settings starts the sidebar content
+            // ~63pt below the window top (measured), giving the traffic
+            // lights a roomier header zone than the split view's built-in
+            // ~48pt toolbar clearance provides.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Color.clear.frame(height: 14)
+            }
             .navigationSplitViewColumnWidth(180)
             // The sidebar is the window's whole navigation — collapsing it
             // would strand the user, so drop the toggle button.
@@ -71,6 +78,7 @@ struct SettingsView: View {
         // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
         // focuses another app.
         .background(RegularWindowRegistrar())
+        .background(TrafficLightLayout(headerHeight: 52))
         .focusEffectDisabled()
     }
 
@@ -95,6 +103,91 @@ struct SettingsView: View {
         case .capture: CaptureSettingsView()
         case .translation: TranslationSettingsView()
         case .general: GeneralSettingsView()
+        }
+    }
+}
+
+/// Lowers the traffic lights into the sidebar card's header, System
+/// Settings-style: the standard title bar centers them ~16pt down, hugging the
+/// card's top edge, while System Settings centers them in a taller (~52pt)
+/// header row. There is no public knob for this (`toolbarStyle = .unified` is
+/// ignored in hiddenTitleBar windows), so this uses the same technique as
+/// Electron's `trafficLightPosition`: grow the title-bar container view and
+/// re-center the three buttons inside it, re-applying whenever AppKit re-lays
+/// the title bar out. Only subview frames are touched — never the window
+/// frame, which would loop against the scene's sizing (see the frame trick at
+/// the end of `SettingsView.body`).
+private struct TrafficLightLayout: NSViewRepresentable {
+    let headerHeight: CGFloat
+
+    func makeNSView(context: Context) -> TrackingView {
+        let view = TrackingView()
+        view.headerHeight = headerHeight
+        return view
+    }
+
+    func updateNSView(_ nsView: TrackingView, context: Context) {
+        nsView.headerHeight = headerHeight
+    }
+
+    final class TrackingView: NSView {
+        var headerHeight: CGFloat = 52
+
+        // nonisolated(unsafe): only touched on the main thread — written in
+        // viewDidMoveToWindow, read in deinit after all other refs are gone.
+        private nonisolated(unsafe) var observers: [NSObjectProtocol] = []
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+            observers = []
+            guard let window else { return }
+            layout(window)
+            // AppKit re-lays the title bar out on these; win the last word.
+            let names: [Notification.Name] = [
+                NSWindow.didResizeNotification,
+                NSWindow.didBecomeKeyNotification,
+                NSWindow.didResignKeyNotification,
+            ]
+            observers = names.map { name in
+                NotificationCenter.default.addObserver(
+                    forName: name, object: window, queue: .main
+                ) { [weak self] notification in
+                    guard let window = notification.object as? NSWindow else { return }
+                    // Same main-thread dance as RegularWindowCoordinator.
+                    MainThreadIsolation.run { self?.layout(window) }
+                }
+            }
+        }
+
+        deinit {
+            observers.forEach { NotificationCenter.default.removeObserver($0) }
+        }
+
+        private func layout(_ window: NSWindow) {
+            let buttons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+            guard let titlebarView = window.standardWindowButton(.closeButton)?.superview,
+                  let container = titlebarView.superview else { return }
+
+            // Grow the title-bar container downward from the window's top edge
+            // so the lowered buttons stay inside it (hit-testing is bounded by
+            // the container's frame).
+            var containerFrame = container.frame
+            containerFrame.origin.y = window.frame.height - headerHeight
+            containerFrame.size.height = headerHeight
+            container.frame = containerFrame
+
+            var titlebarFrame = titlebarView.frame
+            titlebarFrame.size.height = headerHeight
+            titlebarFrame.origin.y = 0
+            titlebarView.frame = titlebarFrame
+
+            for type in buttons {
+                guard let button = window.standardWindowButton(type) else { continue }
+                var frame = button.frame
+                frame.origin.y = (headerHeight - frame.height) / 2
+                button.setFrameOrigin(frame.origin)
+            }
         }
     }
 }
