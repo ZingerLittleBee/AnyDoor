@@ -19,5 +19,11 @@ struct AnyDoorApp: App {
                 .environment(appDelegate.localizationManager)
                 .environment(\.locale, appDelegate.localizationManager.effectiveLocale)
         }
+        // System Settings-style chrome: no title-bar strip — the sidebar spans
+        // the window's full height and the traffic lights sit on top of it.
+        // Setting the AppKit flags directly on the NSWindow does NOT achieve
+        // this (SwiftUI still reserves the title-bar safe area); only the
+        // scene-level window style extends the layout into that region.
+        .windowStyle(.hiddenTitleBar)
     }
 }

@@ -110,7 +110,9 @@ Sources/AnyDoor/
     ├── Clipboard    ClipboardWall* / ClipboardHistory* / ClipboardCardView
     ├── Cmd Palette  CommandPalettePicker / SpotlightAppPicker (+ WindowController)
     ├── Hosts/       HostsEditorView / PlainTextEditor / HelperApprovalBanner
-    ├── Settings     SettingsView (TabView: Panel + Clipboard + Capture + Translation + General) /
+    ├── Settings     SettingsView (System Settings-style NavigationSplitView: fixed sidebar with
+    │                Panel + Clipboard + Capture + Translation + General, traffic lights inside the
+    │                sidebar; see the chrome notes in SettingsView.swift) /
     │                PanelSettingsView / CaptureSettingsView / TranslationSettingsView /
     │                GeneralSettingsView (embeds SyncSettingsView as a section)
     ├── ImageConv    ImageConversionWindowController / ImageConversionView
