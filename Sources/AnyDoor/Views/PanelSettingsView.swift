@@ -163,6 +163,12 @@ struct PanelSettingsView: View {
             .hoverCursor(.pointingHand)
         }
         .padding(.horizontal, 14)
+        // Pull the button up into the title-bar band so it aligns with the
+        // traffic lights. The detail column's content starts ~24pt below the
+        // window top (below the — now title-less — toolbar band), so a plain
+        // top padding would sit the button well below the lights; a negative
+        // offset lifts it level with them.
+        .offset(y: -21)
         .padding(.top, 8)
         .padding(.bottom, 2)
     }
