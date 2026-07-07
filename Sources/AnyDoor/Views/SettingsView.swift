@@ -36,11 +36,7 @@ struct SettingsView: View {
             .toolbar(removing: .sidebarToggle)
         } detail: {
             detailView
-                // The pane name, like pre-26 System Settings shows in its
-                // detail toolbar. On macOS 26 System Settings shows no toolbar
-                // title, so remove the item there — but keep the title set:
-                // it still names the window (Window menu, accessibility).
-                .navigationTitle(L(selectedTab.titleKey))
+                .modifier(DetailNavigationTitle(selectedTab: selectedTab))
                 .modifier(RemoveToolbarTitleOnTahoe())
         }
         // Honor a deep-link request (e.g. the translation gear) then clear it so
@@ -215,6 +211,27 @@ private struct TrafficLightPosition: NSViewRepresentable {
                 origin.y += superview.isFlipped ? dTop : -dTop
                 button.setFrameOrigin(origin)
             }
+        }
+    }
+}
+
+/// Sets the detail's navigation title, which also drives the window title.
+///
+/// On macOS 26 the title MUST stay constant across panes: varying it makes
+/// AppKit relayout the titlebar and snap the traffic lights back to their
+/// default origin on every tab switch (the lights are custom-positioned into
+/// the sidebar card — see `TrafficLightPosition`). System Settings shows no
+/// toolbar title on Tahoe anyway (we drop the item via `RemoveToolbarTitleOnTahoe`),
+/// so a constant window title is faithful and lossless. Earlier systems show
+/// the pane name in the detail toolbar, like pre-26 System Settings.
+private struct DetailNavigationTitle: ViewModifier {
+    let selectedTab: SettingsTab
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.navigationTitle(Text(verbatim: "AnyDoor"))
+        } else {
+            content.navigationTitle(L(selectedTab.titleKey))
         }
     }
 }
