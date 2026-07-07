@@ -186,11 +186,13 @@ private struct TrafficLightPosition: NSViewRepresentable {
         }
 
         private static func layout(_ window: NSWindow) {
-            // System Settings carries the resizable style bit (it renders the
-            // zoom button in color instead of disabled-gray). It does not
-            // actually make the window user-resizable: the scene pins the
-            // content size to the fixed root frame.
-            window.styleMask.insert(.resizable)
+            // Only the close (red) button stays active; the miniaturize (yellow)
+            // and zoom (green) buttons render disabled-gray. Dropping
+            // .miniaturizable and .resizable from the mask greys them without
+            // hiding them, matching a fixed-size utility Settings window. (The
+            // scene pins the content size, so losing .resizable does not make
+            // the window user-resizable anyway.)
+            window.styleMask.remove([.miniaturizable, .resizable])
             applyCornerRadii(window)
             guard let close = window.standardWindowButton(.closeButton),
                   let superview = close.superview else { return }
