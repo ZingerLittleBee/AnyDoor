@@ -9,6 +9,13 @@ struct SettingsView: View {
     @State private var opener = SettingsOpener.shared
     @State private var selectedTab: SettingsTab = .panel
 
+    /// Full window height, title-bar region included — the root view spans the
+    /// whole window (see the frame trick at the end of `body`).
+    static let contentHeight: CGFloat = 512
+    /// The extra height the Settings scene adds to the reported layout height
+    /// when sizing its window — the hidden title bar's region.
+    static let titleBarAccommodation: CGFloat = 32
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selectedTab) {
@@ -43,10 +50,23 @@ struct SettingsView: View {
                 opener.desiredTab = nil
             }
         }
-        // Fixed width, flexible height: the window stays vertically resizable
-        // like System Settings.
-        .frame(width: 680)
-        .frame(minHeight: 480, idealHeight: 480)
+        // System Settings-style chrome, part 2 (part 1 is the scene-level
+        // .hiddenTitleBar): the sidebar's glass card must reach the window's
+        // top edge and WRAP the traffic lights. SwiftUI fights this two ways:
+        // the scene always sizes the window to the root's layout height PLUS a
+        // 32pt title-bar accommodation, and it lays the root out below that
+        // region (ignoresSafeArea is a dead end: a flexible root just clamps
+        // to the safe-area proposal, a fixed root leaves a 32pt dead band at
+        // the bottom, and correcting the window frame from AppKit loops
+        // against NSHostingView.updateAnimatedWindowSize until AppKit throws).
+        //
+        // So render taller than we report: the inner frame is the real size —
+        // the full window, title bar included — and the outer frame reports a
+        // layout height 32pt shorter, so the scene opens the window at exactly
+        // contentHeight. Bottom alignment makes the overflow stick out the
+        // TOP, covering the title-bar region (SwiftUI doesn't clip frames).
+        .frame(width: 680, height: Self.contentHeight)
+        .frame(height: Self.contentHeight - Self.titleBarAccommodation, alignment: .bottom)
         // Adopt .regular activation policy while Settings is open so the window
         // stays reachable (Dock / Cmd-Tab) instead of vanishing when the user
         // focuses another app.
