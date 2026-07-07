@@ -2,10 +2,10 @@ import AppKit
 import Observation
 import SwiftUI
 
-/// Stable identifiers for the Settings `TabView` tabs, so callers can deep-link
-/// to a specific tab (e.g. the translation gear button) instead of landing on
-/// whatever tab was last open.
-enum SettingsTab: String, Hashable {
+/// Stable identifiers for the Settings sidebar panes, so callers can deep-link
+/// to a specific pane (e.g. the translation gear button) instead of landing on
+/// whatever pane was last open.
+enum SettingsTab: String, Hashable, CaseIterable {
     case panel
     case clipboard
     case capture
@@ -29,7 +29,7 @@ final class SettingsOpener {
     @ObservationIgnored var open: (() -> Void)?
 
     /// The tab `SettingsView` should select. `nil` leaves the last-open tab.
-    /// Observed by `SettingsView`'s `TabView` selection binding.
+    /// Observed by `SettingsView`'s sidebar selection binding.
     var desiredTab: SettingsTab?
 
     func tryOpen() {
