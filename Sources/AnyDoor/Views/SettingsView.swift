@@ -77,14 +77,12 @@ struct SettingsView: View {
         .focusEffectDisabled()
     }
 
-    /// System Settings-style row: a small colored icon tile + title.
+    /// Sidebar row: a flat monochrome-tinted symbol (no colored tile) + title.
     private func sidebarRow(_ tab: SettingsTab) -> some View {
         HStack(spacing: 8) {
             Image(systemName: tab.systemImage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.white)
+                .font(.system(size: 15))
                 .frame(width: 24, height: 24)
-                .background(tab.iconColor.gradient, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             LocalizedText(tab.titleKey)
         }
         .tag(tab)
@@ -275,16 +273,6 @@ private extension SettingsTab {
         case .capture: "camera.viewfinder"
         case .translation: "character.bubble"
         case .general: "gear"
-        }
-    }
-
-    var iconColor: Color {
-        switch self {
-        case .panel: .blue
-        case .clipboard: .orange
-        case .capture: .purple
-        case .translation: .teal
-        case .general: .gray
         }
     }
 }
