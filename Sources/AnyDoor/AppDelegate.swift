@@ -237,35 +237,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bootstrapUpdater()
         installSettingsOpenerCapture()
 
-        #if DEBUG
-        // Dev-only: `swift run AnyDoor --open-settings[=<tab>]` opens the
-        // Settings window right after launch, so Settings UI work can be
-        // iterated on without clicking through the menu-bar item. The short
-        // delay lets the off-screen capture view resolve `\.openSettings`.
-        if let arg = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--open-settings") }) {
-            let tab = arg.split(separator: "=").last.flatMap { SettingsTab(rawValue: String($0)) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                if let tab {
-                    SettingsOpener.shared.tryOpen(tab: tab)
-                } else {
-                    SettingsOpener.shared.tryOpen()
-                }
-            }
-        }
-        // Dev-only: dump the Settings window's AppKit view tree (frames and
-        // private decoration views included) to /tmp for chrome debugging.
-        if ProcessInfo.processInfo.arguments.contains("--dump-settings-views") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                guard let window = NSApp.windows.first(where: { $0.frame.width == 680 }),
-                      let frameView = window.contentView?.superview,
-                      let desc = frameView.perform(Selector(("_subtreeDescription")))?
-                          .takeUnretainedValue() as? String
-                else { return }
-                try? desc.write(toFile: "/tmp/settings-views.txt", atomically: true, encoding: .utf8)
-            }
-        }
-        #endif
-
         // First-run onboarding. Shows once on a clean install; afterwards it is
         // only reachable from Settings (the window opts out of state restoration
         // and reverts the app to `.accessory` when closed).
