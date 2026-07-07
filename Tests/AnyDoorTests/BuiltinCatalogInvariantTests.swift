@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import AnyDoor
 
@@ -75,7 +76,8 @@ struct BuiltinCatalogInvariantTests {
 
     @Test @MainActor func everyHiddenHotkeyItemCompilesToASnapshot() {
         for item in BuiltinItem.allCases where item.kind == .hiddenHotkey {
-            let pref = BuiltinPreference(itemKey: item.rawValue, keyCode: 1, modifierFlags: 0x10_0000)
+            let pref = BuiltinPreference(itemKey: item.rawValue, keyCode: 1,
+                                         modifierFlags: Int(CGEventFlags.maskCommand.rawValue))
             let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
             #expect(snapshots.count == 1,
                     "\(item) is hiddenHotkey-kind but HotkeyCoordinator.compile drops its binding")

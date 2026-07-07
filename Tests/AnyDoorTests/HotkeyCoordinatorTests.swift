@@ -1,12 +1,16 @@
+import CoreGraphics
 import XCTest
 @testable import AnyDoor
 
 final class HotkeyCoordinatorTests: XCTestCase {
 
-    private func makeBinding(keyCode: Int = 1, modifierFlags: Int = 0x100000) -> KeyBinding {
+    private let command = Int(CGEventFlags.maskCommand.rawValue)
+    private let control = Int(CGEventFlags.maskControl.rawValue)
+
+    private func makeBinding(keyCode: Int = 1, modifierFlags: Int? = nil) -> KeyBinding {
         KeyBinding(
             keyCode: keyCode,
-            modifierFlags: modifierFlags,
+            modifierFlags: modifierFlags ?? command,
             appBundleID: "com.example.app",
             appName: "Example",
             appPath: "/Applications/Example.app",
@@ -19,13 +23,13 @@ final class HotkeyCoordinatorTests: XCTestCase {
     @MainActor
     func testAppShortcutCompilesToLaunchApp() {
         let snapshots = HotkeyCoordinator.compile(
-            bindings: [makeBinding(keyCode: 11, modifierFlags: 0x40000)],
+            bindings: [makeBinding(keyCode: 11, modifierFlags: control)],
             prefs: [],
             paletteHotkey: nil
         )
         XCTAssertEqual(snapshots.count, 1)
         XCTAssertEqual(snapshots[0].keyCode, 11)
-        XCTAssertEqual(snapshots[0].modifierFlags, 0x40000)
+        XCTAssertEqual(snapshots[0].modifierFlags, control)
         guard case .launchApp(let bundleID, let path) = snapshots[0].action else {
             return XCTFail("expected launchApp, got \(snapshots[0].action)")
         }
@@ -38,7 +42,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let pref = BuiltinPreference(
             itemKey: BuiltinItem.keepAwake.rawValue,
             keyCode: 2,
-            modifierFlags: 0x100000
+            modifierFlags: command
         )
         let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
         XCTAssertEqual(snapshots.count, 1)
@@ -53,7 +57,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let pref = BuiltinPreference(
             itemKey: BuiltinItem.lockScreen.rawValue,
             keyCode: 3,
-            modifierFlags: 0x100000
+            modifierFlags: command
         )
         let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
         XCTAssertEqual(snapshots.count, 1)
@@ -68,12 +72,12 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let up = BuiltinPreference(
             itemKey: BuiltinItem.brightnessUp.rawValue,
             keyCode: 4,
-            modifierFlags: 0x100000
+            modifierFlags: command
         )
         let down = BuiltinPreference(
             itemKey: BuiltinItem.brightnessDown.rawValue,
             keyCode: 5,
-            modifierFlags: 0x100000
+            modifierFlags: command
         )
         let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [up, down], paletteHotkey: nil)
         XCTAssertEqual(snapshots.map(\.action), [.brightnessUp, .brightnessDown])
@@ -84,12 +88,12 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let submenu = BuiltinPreference(
             itemKey: BuiltinItem.appShortcuts.rawValue,
             keyCode: 6,
-            modifierFlags: 0x100000
+            modifierFlags: command
         )
         let control = BuiltinPreference(
             itemKey: BuiltinItem.brightness.rawValue,
             keyCode: 7,
-            modifierFlags: 0x100000
+            modifierFlags: command
         )
         let snapshots = HotkeyCoordinator.compile(
             bindings: [],
@@ -108,14 +112,14 @@ final class HotkeyCoordinatorTests: XCTestCase {
 
     @MainActor
     func testOrphanPrefKeyIsSkipped() {
-        let pref = BuiltinPreference(itemKey: "noSuchBuiltin", keyCode: 8, modifierFlags: 0x100000)
+        let pref = BuiltinPreference(itemKey: "noSuchBuiltin", keyCode: 8, modifierFlags: command)
         let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
         XCTAssertTrue(snapshots.isEmpty)
     }
 
     @MainActor
     func testPaletteHotkeyIsAppended() {
-        let descriptor = HotkeyDescriptor(keyCode: 49, modifierFlags: 0x100000)
+        let descriptor = HotkeyDescriptor(keyCode: 49, modifierFlags: command)
         let snapshots = HotkeyCoordinator.compile(
             bindings: [makeBinding()],
             prefs: [],
