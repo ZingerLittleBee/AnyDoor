@@ -22,15 +22,9 @@ actor PickColorProvider: ActionProvider {
             // Copy in the user's preferred output format; history still stores the
             // raw hex (the color bucket is hex-based and renders the swatch).
             let formatted = ColorFormat.current.format(hex: hex) ?? hex
-            await MainActor.run {
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(formatted, forType: .string)
-                // Suppress the watcher so it doesn't re-capture this picked color
-                // as a generic text entry. Done in the same synchronous MainActor
-                // block as the write to stay race-free against the 0.5s poll.
-                ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
-            }
+            // Self-write so the watcher doesn't re-capture this picked color
+            // as a generic text entry.
+            await ClipboardWatcher.selfWrite(string: formatted)
             await ClipboardHistoryStore.shared.recordColor(hex: hex)
             let colorMsg = await MainActor.run { L(.toastColorCopied, formatted) }
             await ToastPresenter.shared.show(

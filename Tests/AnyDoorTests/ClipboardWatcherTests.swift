@@ -52,4 +52,51 @@ final class ClipboardWatcherTests: XCTestCase {
         await store.reload(kind: .text)
         XCTAssertTrue(store.items(for: .text).isEmpty)   // our own write was ignored
     }
+
+    func testSelfWriteFunnelWritesAndSuppresses() async throws {
+        let store = try makeStore()
+        let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
+        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
+        ClipboardWatcher.shared = watcher
+        defer { ClipboardWatcher.shared = nil }
+
+        ClipboardWatcher.selfWrite(string: "internal", to: pb)
+        XCTAssertEqual(pb.string(forType: .string), "internal")
+        await watcher.poll()
+        await store.reload(kind: .text)
+        XCTAssertTrue(store.items(for: .text).isEmpty)   // funnel suppressed the capture
+    }
+
+    func testSelfWriteThrowingBodyStillSuppresses() async throws {
+        let store = try makeStore()
+        let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
+        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
+        ClipboardWatcher.shared = watcher
+        defer { ClipboardWatcher.shared = nil }
+
+        // A body that clears (bumping changeCount) and then fails must still
+        // suppress the partial write.
+        XCTAssertThrowsError(try ClipboardWatcher.selfWrite(to: pb) { p -> Void in
+            p.clearContents()
+            throw ClipboardHistoryError.missingText
+        })
+        await watcher.poll()
+        await store.reload(kind: .text)
+        XCTAssertTrue(store.items(for: .text).isEmpty)
+    }
+
+    func testExternalWriteAfterSelfWriteIsStillRecorded() async throws {
+        let store = try makeStore()
+        let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
+        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
+        ClipboardWatcher.shared = watcher
+        defer { ClipboardWatcher.shared = nil }
+
+        ClipboardWatcher.selfWrite(string: "internal", to: pb)
+        // A later "external" copy advances changeCount past the suppressed one.
+        pb.clearContents(); pb.setString("external", forType: .string)
+        await watcher.poll()
+        await store.reload(kind: .text)
+        XCTAssertEqual(store.items(for: .text).map(\.text), ["external"])
+    }
 }

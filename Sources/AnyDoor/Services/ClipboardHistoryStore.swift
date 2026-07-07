@@ -611,39 +611,34 @@ final class ClipboardHistoryStore {
 
     func copyToPasteboard(_ item: ClipboardHistoryItem) async throws {
         guard let kind = item.historyKind else { throw ClipboardHistoryError.missingText }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
+        try ClipboardWatcher.selfWrite { pasteboard in
+            pasteboard.clearContents()
 
-        switch kind {
-        case .ocr, .qrcode:
-            guard let text = item.text else { throw ClipboardHistoryError.missingText }
-            pasteboard.setString(text, forType: .string)
-        case .color:
-            guard let hex = item.colorHex else { throw ClipboardHistoryError.missingColor }
-            pasteboard.setString(hex, forType: .string)
-        case .screenshot:
-            guard let fileName = item.fileName else { throw ClipboardHistoryError.missingScreenshotFile }
-            let url = historyDirectoryProvider().appendingPathComponent(fileName)
-            guard let image = NSImage(contentsOf: url) else { throw ClipboardHistoryError.missingScreenshotFile }
-            pasteboard.writeObjects([image])
-        case .text:
-            // Plain-text paste entries copy back as a string, mirroring OCR/QR.
-            guard let text = item.text else { throw ClipboardHistoryError.missingText }
-            pasteboard.setString(text, forType: .string)
-        case .image, .file:
-            // `copyToPasteboard` is the legacy per-kind hover-popover copy path and
-            // only handles text/ocr/qrcode/color/screenshot. Image and file rows do
-            // exist (the watcher creates them), but their write-back goes through
-            // `ClipboardPasteService` from the clipboard wall, not here — so reject
-            // any stray image/file rows that reach this path.
-            throw ClipboardHistoryError.missingText
+            switch kind {
+            case .ocr, .qrcode:
+                guard let text = item.text else { throw ClipboardHistoryError.missingText }
+                pasteboard.setString(text, forType: .string)
+            case .color:
+                guard let hex = item.colorHex else { throw ClipboardHistoryError.missingColor }
+                pasteboard.setString(hex, forType: .string)
+            case .screenshot:
+                guard let fileName = item.fileName else { throw ClipboardHistoryError.missingScreenshotFile }
+                let url = historyDirectoryProvider().appendingPathComponent(fileName)
+                guard let image = NSImage(contentsOf: url) else { throw ClipboardHistoryError.missingScreenshotFile }
+                pasteboard.writeObjects([image])
+            case .text:
+                // Plain-text paste entries copy back as a string, mirroring OCR/QR.
+                guard let text = item.text else { throw ClipboardHistoryError.missingText }
+                pasteboard.setString(text, forType: .string)
+            case .image, .file:
+                // `copyToPasteboard` is the legacy per-kind hover-popover copy path and
+                // only handles text/ocr/qrcode/color/screenshot. Image and file rows do
+                // exist (the watcher creates them), but their write-back goes through
+                // `ClipboardPasteService` from the clipboard wall, not here — so reject
+                // any stray image/file rows that reach this path.
+                throw ClipboardHistoryError.missingText
+            }
         }
-
-        // Reached only when the switch above performed a write (every other case
-        // throws before this point). Suppress the watcher so it doesn't re-capture
-        // this app-originated re-copy as a duplicate generic text/image entry.
-        // Still synchronous on the @MainActor store, so race-free vs the poll.
-        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
     }
 
     func clearAll() async {

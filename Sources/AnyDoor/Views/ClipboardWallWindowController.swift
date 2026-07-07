@@ -11,8 +11,6 @@ import SwiftUI
 final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate, QLPreviewPanelDataSource {
     static let shared = ClipboardWallWindowController()
 
-    /// Set by AppDelegate so paste-from-history can suppress the self-write.
-    weak var watcher: ClipboardWatcher?
     /// The shared SwiftData container, injected by AppDelegate. Needed so the
     /// wall's @Query observes the same context the watcher writes to.
     var modelContainer: ModelContainer?
@@ -105,7 +103,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
-        Task { [weak self] in await self?.watcher?.poll() }
+        Task { await ClipboardWatcher.shared?.poll() }
         installHostingView()
         installMonitors()
         // Preview → editor handoff ("e" key / the preview header's edit
@@ -484,9 +482,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
             return
         }
-        let pb = NSPasteboard.general
-        ClipboardPasteService.writePayload(for: item, asPlainText: plain, to: pb, historyDirectory: historyDirectory)
-        watcher?.noteSelfWrite(changeCount: pb.changeCount)
+        ClipboardWatcher.selfWrite { pb in
+            ClipboardPasteService.writePayload(for: item, asPlainText: plain, to: pb, historyDirectory: historyDirectory)
+        }
         // Slide out first; reactivating the prior app returns focus there, so
         // the synthesized ⌘V lands in it rather than on our panel.
         dismiss(restoreFocus: true) { [copyOnly = ClipboardPreferences.copyOnly] in
@@ -516,10 +514,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
             return
         }
-        let pb = NSPasteboard.general
-        ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: historyDirectory)
-        // Suppress the watcher so the re-copy isn't captured as a duplicate.
-        watcher?.noteSelfWrite(changeCount: pb.changeCount)
+        ClipboardWatcher.selfWrite { pb in
+            ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: historyDirectory)
+        }
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 
@@ -534,11 +531,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             }
             return
         }
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(selection, forType: .string)
-        // Suppress the watcher so the copy isn't captured as a new duplicate.
-        watcher?.noteSelfWrite(changeCount: pb.changeCount)
+        ClipboardWatcher.selfWrite(string: selection)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 

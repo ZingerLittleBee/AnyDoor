@@ -431,10 +431,10 @@ private struct ImageConversionHistoryRow: View {
             ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
             return
         }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([url as NSURL])
-        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+        ClipboardWatcher.selfWrite { pb in
+            pb.clearContents()
+            pb.writeObjects([url as NSURL])
+        }
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 }

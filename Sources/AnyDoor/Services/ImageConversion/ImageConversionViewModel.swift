@@ -174,9 +174,9 @@ final class ImageConversionViewModel {
 
     private func copyOutputsToPasteboard(_ outputURLs: [URL]) {
         guard !outputURLs.isEmpty else { return }
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects(outputURLs as [NSURL])
-        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+        ClipboardWatcher.selfWrite { pb in
+            pb.clearContents()
+            pb.writeObjects(outputURLs as [NSURL])
+        }
     }
 }

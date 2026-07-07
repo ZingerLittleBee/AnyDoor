@@ -8,8 +8,7 @@ actor ClearClipboardProvider: ActionProvider {
 
     func run() async throws {
         await MainActor.run {
-            let changeCount = ClipboardActions.clear()
-            ClipboardWatcher.shared?.noteSelfWrite(changeCount: changeCount)
+            ClipboardWatcher.selfWrite { ClipboardActions.clear($0) }
             ToastPresenter.shared.show(.success(L(.toastClipboardCleared)))
         }
     }

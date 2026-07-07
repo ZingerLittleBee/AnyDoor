@@ -83,13 +83,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
         }
 
-        // Start the clipboard watcher and hand it to the wall controller so the
-        // controller can suppress its own write-backs from being re-recorded.
+        // Start the clipboard watcher. Internal pasteboard writes suppress
+        // their own capture through `ClipboardWatcher.selfWrite`.
         let watcher = ClipboardWatcher(store: ClipboardHistoryStore.shared)
         watcher.start()
         clipboardWatcher = watcher
         ClipboardWatcher.shared = watcher
-        ClipboardWallWindowController.shared.watcher = watcher
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
         // Register providers

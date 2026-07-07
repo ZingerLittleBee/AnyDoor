@@ -15,10 +15,7 @@ enum PortActions {
 
     @MainActor
     static func copyToPasteboard(_ text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+        ClipboardWatcher.selfWrite(string: text)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 

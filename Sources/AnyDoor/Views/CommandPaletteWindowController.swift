@@ -398,29 +398,15 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 break
             }
         case .calcResult(let result):
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(result.copyText, forType: .string)
-            // Suppress clipboard-history capture, matching every other internal
-            // copy path (PickColor / OCR / QRCode / Screenshot).
-            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+            ClipboardWatcher.selfWrite(string: result.copyText)
             ToastPresenter.shared.show(.success(L(.toastCalcCopied, result.display)))
         case .devTool(let result):
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(result.output, forType: .string)
-            // Suppress clipboard-history capture, matching every other internal
-            // copy path (Calc / PickColor / OCR / QRCode / Screenshot).
-            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+            ClipboardWatcher.selfWrite(string: result.output)
             // Confirm without echoing the value — dev-tool outputs (hashes, multi-line
             // JSON) are long and unhelpful in a toast.
             ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
         case .conversion(let result):
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(result.copyText, forType: .string)
-            // Suppress clipboard-history capture, matching every other internal copy path.
-            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+            ClipboardWatcher.selfWrite(string: result.copyText)
             ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
         case .hostProfile(let id):
             // Toggle the named profile's activation directly (same as the
