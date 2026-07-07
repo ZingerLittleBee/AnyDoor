@@ -150,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ImageConversionProvider(),
         ]
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
+        HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
 
         // Translation history: give the store the shared container, then point
@@ -188,7 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Wire HotkeyService dispatcher
         HotkeyService.shared.setDispatcher { action in
-            PanelStore.shared.dispatch(action)
+            HotkeyCoordinator.shared.dispatch(action)
         }
 
         HotkeyService.shared.setQuickPressDispatcher { @MainActor action in
@@ -200,7 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         HotkeyService.shared.start()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
 
         // Hyper Key Phase 1: unconditional reconcile of last-known mapping.
         // Phase 2: tap-gated apply, handled inside HyperKeyService.bootstrapAfterTap.
@@ -422,7 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func refreshBindings() {
         PanelStore.shared.rebuild()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     // MARK: - Legacy store migration (unchanged behavior, just preserved)

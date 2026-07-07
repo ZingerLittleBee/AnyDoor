@@ -156,6 +156,6 @@ final class BackupService {
         )
         await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
         PanelStore.shared.rebuild()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 }
