@@ -254,10 +254,7 @@ struct TranslationHistoryView: View {
     /// `TranslationView.copy`: notes the self-write so AnyDoor's own clipboard
     /// history ignores it, then shows the success toast.
     private func copyTranslation(_ text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+        ClipboardWatcher.selfWrite(string: text)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 

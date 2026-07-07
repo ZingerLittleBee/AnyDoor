@@ -83,73 +83,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
         }
 
-        // Start the clipboard watcher and hand it to the wall controller so the
-        // controller can suppress its own write-backs from being re-recorded.
+        // Start the clipboard watcher. Internal pasteboard writes suppress
+        // their own capture through `ClipboardWatcher.selfWrite`.
         let watcher = ClipboardWatcher(store: ClipboardHistoryStore.shared)
         watcher.start()
         clipboardWatcher = watcher
         ClipboardWatcher.shared = watcher
-        ClipboardWallWindowController.shared.watcher = watcher
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
         // Register providers
-        let providers: [any BuiltinProvider] = [
-            KeepAwakeProvider(onChange: { state in
-                PanelStore.shared.onKeepAwakeStateChange(state)
-            }),
-            HideDesktopIconsProvider(),
-            ShowHiddenFilesProvider(),
-            MuteAudioProvider(),
-            MicrophoneMuteProvider(),
-            DarkModeProvider(),
-            LockScreenProvider(),
-            EmptyTrashProvider(),
-            CaptureRegionProvider(),
-            CaptureWindowProvider(),
-            CaptureFullscreenProvider(),
-            CaptureTimerProvider(),
-            CaptureModeBarProvider(),
-            RecordScreenProvider(),
-            CaptureScrollingProvider(),
-            ClearClipboardProvider(),
-            DisplaySleepProvider(),
-            SystemSleepProvider(),
-            ScheduledShutdownProvider(),
-            HideDockProvider(),
-            AutoHideMenuBarProvider(),
-            RestartFinderProvider(),
-            RestartDockProvider(),
-            RestartMenuBarProvider(),
-            FlushDNSProvider(),
-            KeyboardLockProvider(),
-            OCRProvider(),
-            QRCodeProvider(),
-            PickColorProvider(),
-            ClipboardMonitoringProvider(),
-            WindowLayoutProvider(item: .windowLeftHalf, action: .leftHalf),
-            WindowLayoutProvider(item: .windowRightHalf, action: .rightHalf),
-            WindowLayoutProvider(item: .windowMaximize, action: .maximize),
-            WindowLayoutProvider(item: .windowCenter, action: .center),
-            WindowLayoutProvider(item: .windowTopHalf, action: .topHalf),
-            WindowLayoutProvider(item: .windowBottomHalf, action: .bottomHalf),
-            WindowLayoutProvider(item: .windowTopLeftQuarter, action: .topLeftQuarter),
-            WindowLayoutProvider(item: .windowTopRightQuarter, action: .topRightQuarter),
-            WindowLayoutProvider(item: .windowBottomLeftQuarter, action: .bottomLeftQuarter),
-            WindowLayoutProvider(item: .windowBottomRightQuarter, action: .bottomRightQuarter),
-            WindowLayoutProvider(item: .windowLeftThird, action: .leftThird),
-            WindowLayoutProvider(item: .windowCenterThird, action: .centerThird),
-            WindowLayoutProvider(item: .windowRightThird, action: .rightThird),
-            WindowLayoutProvider(item: .windowLeftTwoThirds, action: .leftTwoThirds),
-            WindowLayoutProvider(item: .windowRightTwoThirds, action: .rightTwoThirds),
-            WindowLayoutProvider(item: .windowMoveNextDisplay, action: .moveToNextDisplay),
-            WindowLayoutProvider(item: .windowMovePreviousDisplay, action: .moveToPreviousDisplay),
-            ClipboardWallProvider(),
-            TranslateProvider(),
-            ScreenshotTranslateProvider(),
-            TranslateSelectionProvider(),
-            ImageConversionProvider(),
-        ]
+        let providers = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
+            PanelStore.shared.onKeepAwakeStateChange(state)
+        })
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
+        HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
 
         // Translation history: give the store the shared container, then point
@@ -188,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Wire HotkeyService dispatcher
         HotkeyService.shared.setDispatcher { action in
-            PanelStore.shared.dispatch(action)
+            HotkeyCoordinator.shared.dispatch(action)
         }
 
         HotkeyService.shared.setQuickPressDispatcher { @MainActor action in
@@ -200,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         HotkeyService.shared.start()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
 
         // Hyper Key Phase 1: unconditional reconcile of last-known mapping.
         // Phase 2: tap-gated apply, handled inside HyperKeyService.bootstrapAfterTap.
@@ -422,7 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func refreshBindings() {
         PanelStore.shared.rebuild()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     // MARK: - Legacy store migration (unchanged behavior, just preserved)

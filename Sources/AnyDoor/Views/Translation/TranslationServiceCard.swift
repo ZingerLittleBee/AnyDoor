@@ -174,10 +174,7 @@ struct TranslationServiceCard: View {
     /// Copy and suppress clipboard-history capture, matching every other
     /// internal copy path (Calc / PickColor / OCR / QRCode / Screenshot).
     private func copyToPasteboard(_ text: String) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
-        ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
+        ClipboardWatcher.selfWrite(string: text)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 }

@@ -351,28 +351,6 @@ final class PanelStore {
         }
     }
 
-    // MARK: - Hotkey dispatch + snapshot rebuild
-
-    /// Handle a matched hotkey. Called on the main thread by HotkeyService.
-    func dispatch(_ action: HotkeyAction) {
-        switch action {
-        case .launchApp(let bundleID, let path):
-            AppSwitcher.toggle(bundleID: bundleID, appPath: path)
-        case .toggleBuiltin(let key):
-            guard let item = BuiltinItem(rawValue: key) else { return }
-            Task { await self.toggle(item) }
-        case .runBuiltin(let key):
-            guard let item = BuiltinItem(rawValue: key) else { return }
-            Task { await self.run(item) }
-        case .brightnessUp:
-            DisplayBrightnessService.shared.bump(+1.0 / 16.0, target: .displayUnderMouse)
-        case .brightnessDown:
-            DisplayBrightnessService.shared.bump(-1.0 / 16.0, target: .displayUnderMouse)
-        case .showCommandPalette:
-            CommandPaletteWindowController.shared.toggle()
-        }
-    }
-
     /// Watches `LocalizationManager.preference` so cached, localized fields
     /// (e.g. `PanelEntry.subtitle`) refresh the moment the user switches
     /// language. `withObservationTracking` fires once per change; the loop
@@ -393,68 +371,8 @@ final class PanelStore {
                 }
                 guard !Task.isCancelled, let self else { return }
                 self.rebuild()
-                self.rebuildHotkeySnapshots()
             }
         }
-    }
-
-    /// Build a snapshot list for HotkeyService from current SwiftData state.
-    /// Called whenever bindings or preferences change.
-    func rebuildHotkeySnapshots() {
-        guard let container = modelContainer else { return }
-        let context = container.mainContext
-
-        var out: [HotkeySnapshot] = []
-
-        if let bindings = try? context.fetch(
-            FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.isEnabled })
-        ) {
-            for binding in bindings {
-                out.append(HotkeySnapshot(
-                    keyCode: binding.keyCode,
-                    modifierFlags: binding.modifierFlags,
-                    action: .launchApp(bundleID: binding.appBundleID, path: binding.appPath)
-                ))
-            }
-        }
-
-        if let prefs = try? context.fetch(FetchDescriptor<BuiltinPreference>()) {
-            for pref in prefs {
-                guard let item = BuiltinItem(rawValue: pref.itemKey),
-                      let code = pref.keyCode,
-                      let mods = pref.modifierFlags else { continue }
-                let action: HotkeyAction
-                switch item.kind {
-                case .toggle:
-                    action = .toggleBuiltin(itemKey: item.rawValue)
-                case .action:
-                    action = .runBuiltin(itemKey: item.rawValue)
-                case .submenu, .brightnessControl:
-                    continue   // hover-opened items don't bind a top-level hotkey
-                case .hiddenHotkey:
-                    switch item {
-                    case .brightnessUp:   action = .brightnessUp
-                    case .brightnessDown: action = .brightnessDown
-                    default: continue
-                    }
-                }
-                out.append(HotkeySnapshot(
-                    keyCode: code,
-                    modifierFlags: mods,
-                    action: action
-                ))
-            }
-        }
-
-        if let descriptor = CommandPaletteService.shared.hotkey {
-            out.append(HotkeySnapshot(
-                keyCode: descriptor.keyCode,
-                modifierFlags: descriptor.modifierFlags,
-                action: .showCommandPalette
-            ))
-        }
-
-        HotkeyService.shared.updateSnapshots(out)
     }
 
     /// Look up a KeyBinding by id from the SwiftData store.
@@ -491,7 +409,7 @@ final class PanelStore {
             pref.isVisible = isVisible
             try? context.save()
             rebuild()
-            rebuildHotkeySnapshots()
+            HotkeyCoordinator.shared.refresh()
         }
     }
 
@@ -507,7 +425,7 @@ final class PanelStore {
             pref.modifierFlags = hotkey?.modifierFlags
             try? context.save()
             rebuild()
-            rebuildHotkeySnapshots()
+            HotkeyCoordinator.shared.refresh()
         }
     }
 
@@ -526,7 +444,7 @@ final class PanelStore {
         }
         try? container.mainContext.save()
         rebuild()
-        rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     /// Reorder the top-level entries as one flat list. Reassigns a global
@@ -547,7 +465,7 @@ final class PanelStore {
         }
         try? context.save()
         rebuild()
-        rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     /// Reorder app shortcuts by new id array (ordered).
@@ -585,7 +503,7 @@ final class PanelStore {
         }
         try? context.save()
         rebuild()
-        rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     /// Find which entry currently owns a given hotkey (used for conflict detection).
@@ -651,7 +569,7 @@ final class PanelStore {
         context.insert(new)
         try? context.save()
         rebuild()
-        rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     /// Delete an app shortcut by id.
@@ -660,6 +578,6 @@ final class PanelStore {
         container.mainContext.delete(binding)
         try? container.mainContext.save()
         rebuild()
-        rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 }

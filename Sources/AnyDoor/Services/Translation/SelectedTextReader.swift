@@ -90,9 +90,10 @@ enum SelectedTextReader {
 
         // Restore the caller's pasteboard only when the synthetic copy actually
         // changed it. Preserve every pasteboard item/type, not just plain text.
+        // No explicit noteSelfWrite here: the deferred endSelfWrite above runs
+        // after this restore and records the final changeCount.
         if pasteboard.changeCount != beforeCount {
             previous.restore(to: pasteboard)
-            ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
         }
         return result
     }

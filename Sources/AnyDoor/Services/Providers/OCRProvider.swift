@@ -22,15 +22,9 @@ actor OCRProvider: ActionProvider {
                 return
             }
             let text = lines.joined(separator: "\n")
-            await MainActor.run {
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(text, forType: .string)
-                // Suppress the watcher so it doesn't re-capture this OCR result as
-                // a generic text entry. Done in the same synchronous MainActor block
-                // as the write to stay race-free against the 0.5s poll.
-                ClipboardWatcher.shared?.noteSelfWrite(changeCount: pasteboard.changeCount)
-            }
+            // Self-write so the watcher doesn't re-capture this OCR result as
+            // a generic text entry.
+            await ClipboardWatcher.selfWrite(string: text)
             await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text)
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
             await ToastPresenter.shared.show(.success(successMsg))

@@ -5,7 +5,7 @@ import Observation
 /// Stores the global hotkey that summons the command palette.
 ///
 /// The hotkey lives in `UserDefaults` (no SwiftData migration cost) and is
-/// observed by `PanelStore.rebuildHotkeySnapshots` so updates flow into the
+/// merged by `HotkeyCoordinator.refresh()` so updates flow into the
 /// CGEvent tap automatically.
 @MainActor
 @Observable
@@ -33,14 +33,14 @@ final class CommandPaletteService {
             defaults.removeObject(forKey: Self.keyCodeDefaultsKey)
             defaults.removeObject(forKey: Self.modifiersDefaultsKey)
         }
-        PanelStore.shared.rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     /// Re-read the hotkey from UserDefaults after an external write (config import)
     /// and rebuild the hotkey snapshots so the CGEvent tap picks it up.
     func reloadFromDefaults() {
         hotkey = Self.readFromDefaults()
-        PanelStore.shared.rebuildHotkeySnapshots()
+        HotkeyCoordinator.shared.refresh()
     }
 
     private static func readFromDefaults() -> HotkeyDescriptor? {

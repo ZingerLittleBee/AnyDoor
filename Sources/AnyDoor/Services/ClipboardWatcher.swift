@@ -80,6 +80,37 @@ final class ClipboardWatcher {
         noteSelfWrite(changeCount: changeCount)
     }
 
+    /// Perform an AnyDoor-originated pasteboard write and suppress the watcher
+    /// so the write isn't re-captured as a history entry.
+    ///
+    /// The body and the suppression run in the same synchronous MainActor turn,
+    /// so the 0.5s poll can never observe the write before the suppression is
+    /// recorded — callers don't need to re-derive that argument at every site.
+    /// The body owns `clearContents()` (some callers delegate the whole write to
+    /// `ClipboardPasteService.writePayload`, which clears internally; Clear
+    /// Clipboard writes nothing after clearing).
+    ///
+    /// Suppression is recorded in a `defer` so a throwing body — e.g. a history
+    /// row with a missing payload, discovered after `clearContents()` already
+    /// bumped the changeCount — still suppresses the partial write.
+    @discardableResult
+    static func selfWrite<T>(
+        to pasteboard: NSPasteboard = .general,
+        _ body: (NSPasteboard) throws -> T
+    ) rethrows -> T {
+        defer { shared?.noteSelfWrite(changeCount: pasteboard.changeCount) }
+        return try body(pasteboard)
+    }
+
+    /// Convenience for the most common self-write: replace the pasteboard
+    /// contents with a plain string.
+    static func selfWrite(string: String, to pasteboard: NSPasteboard = .general) {
+        selfWrite(to: pasteboard) { pb in
+            pb.clearContents()
+            pb.setString(string, forType: .string)
+        }
+    }
+
     func poll() async {
         let current = pasteboard.changeCount
         guard current != lastChangeCount else { return }
