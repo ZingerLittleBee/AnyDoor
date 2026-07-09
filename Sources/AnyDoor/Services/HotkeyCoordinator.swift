@@ -7,6 +7,7 @@ import Foundation
 /// Sources merged by `refresh()`:
 /// - `KeyBinding` rows (app shortcuts) from SwiftData
 /// - `BuiltinPreference` rows (builtin hotkeys, incl. hidden brightness ±)
+/// - `Quicklink` rows with recorded hotkeys
 /// - the Command Palette hotkey (`CommandPaletteService.shared.hotkey`)
 ///
 /// PanelStore mutations, config import (`BackupService`), and the palette
@@ -19,8 +20,21 @@ final class HotkeyCoordinator {
     static let shared = HotkeyCoordinator()
 
     private var modelContainer: ModelContainer?
+    private let quicklinkResolver: @MainActor (UUID) -> Quicklink?
+    private let quicklinkOpener: @MainActor (Quicklink) -> Void
+    private let quicklinkArgumentPresenter: @MainActor (UUID, String, String) -> Void
 
-    private init() {}
+    init(
+        quicklinkResolver: @escaping @MainActor (UUID) -> Quicklink? = { QuicklinkStore.shared.quicklink(id: $0) },
+        quicklinkOpener: @escaping @MainActor (Quicklink) -> Void = { QuicklinkOpener.shared.open($0) },
+        quicklinkArgumentPresenter: @escaping @MainActor (UUID, String, String) -> Void = {
+            CommandPaletteWindowController.shared.showArgumentInput(quicklinkID: $0, title: $1, link: $2)
+        }
+    ) {
+        self.quicklinkResolver = quicklinkResolver
+        self.quicklinkOpener = quicklinkOpener
+        self.quicklinkArgumentPresenter = quicklinkArgumentPresenter
+    }
 
     func bootstrap(modelContainer: ModelContainer) {
         self.modelContainer = modelContainer
@@ -36,9 +50,11 @@ final class HotkeyCoordinator {
             FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.isEnabled })
         )) ?? []
         let prefs = (try? context.fetch(FetchDescriptor<BuiltinPreference>())) ?? []
+        let quicklinks = (try? context.fetch(FetchDescriptor<Quicklink>())) ?? []
         let snapshots = Self.compile(
             bindings: bindings,
             prefs: prefs,
+            quicklinks: quicklinks,
             paletteHotkey: CommandPaletteService.shared.hotkey
         )
         HotkeyService.shared.updateSnapshots(snapshots)
@@ -49,6 +65,7 @@ final class HotkeyCoordinator {
     static func compile(
         bindings: [KeyBinding],
         prefs: [BuiltinPreference],
+        quicklinks: [Quicklink],
         paletteHotkey: HotkeyDescriptor?
     ) -> [HotkeySnapshot] {
         var out: [HotkeySnapshot] = []
@@ -87,6 +104,15 @@ final class HotkeyCoordinator {
             ))
         }
 
+        for quicklink in quicklinks {
+            guard let descriptor = quicklink.hotkeyDescriptor else { continue }
+            out.append(HotkeySnapshot(
+                keyCode: descriptor.keyCode,
+                modifierFlags: descriptor.modifierFlags,
+                action: .openQuicklink(id: quicklink.id)
+            ))
+        }
+
         if let descriptor = paletteHotkey {
             out.append(HotkeySnapshot(
                 keyCode: descriptor.keyCode,
@@ -115,6 +141,13 @@ final class HotkeyCoordinator {
             DisplayBrightnessService.shared.bump(-1.0 / 16.0, target: .displayUnderMouse)
         case .showCommandPalette:
             CommandPaletteWindowController.shared.toggle()
+        case .openQuicklink(let id):
+            guard let quicklink = quicklinkResolver(id) else { return }
+            if QuicklinkDestination.isSearchTemplate(link: quicklink.link) {
+                quicklinkArgumentPresenter(quicklink.id, quicklink.displayName, quicklink.link)
+            } else {
+                quicklinkOpener(quicklink)
+            }
         }
     }
 }

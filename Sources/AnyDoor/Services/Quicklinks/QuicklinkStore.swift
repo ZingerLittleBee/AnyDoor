@@ -60,7 +60,13 @@ final class QuicklinkStore {
     }
 
     @discardableResult
-    func add(name: String, link: String, keyword: String? = nil, isVisible: Bool = true) throws -> Quicklink {
+    func add(
+        name: String,
+        link: String,
+        keyword: String? = nil,
+        hotkey: HotkeyDescriptor? = nil,
+        isVisible: Bool = true
+    ) throws -> Quicklink {
         guard let modelContext else { throw QuicklinkStoreError.notConfigured }
         let sanitizedLink = try validate(link: link)
         let sanitizedKeyword = try validate(keyword: keyword, excluding: nil)
@@ -68,6 +74,8 @@ final class QuicklinkStore {
             name: name,
             keyword: sanitizedKeyword,
             link: sanitizedLink,
+            keyCode: hotkey?.keyCode,
+            modifierFlags: hotkey?.modifierFlags,
             isVisible: isVisible,
             displayOrder: nextDisplayOrder()
         )
@@ -76,13 +84,21 @@ final class QuicklinkStore {
         return row
     }
 
-    func update(id: UUID, name: String, link: String, keyword: String? = nil, isVisible: Bool) throws {
+    func update(
+        id: UUID,
+        name: String,
+        link: String,
+        keyword: String? = nil,
+        hotkey: HotkeyDescriptor?,
+        isVisible: Bool
+    ) throws {
         guard let row = quicklink(id: id) else { return }
         let sanitizedLink = try validate(link: link)
         let sanitizedKeyword = try validate(keyword: keyword, excluding: id)
         row.name = name
         row.keyword = sanitizedKeyword
         row.link = sanitizedLink
+        row.hotkeyDescriptor = hotkey
         row.isVisible = isVisible
         try saveRebuildRefresh()
     }
@@ -121,7 +137,7 @@ final class QuicklinkStore {
                 source: source,
                 displayOrder: row.displayOrder,
                 isVisible: row.isVisible,
-                hotkey: nil,
+                hotkey: row.hotkeyDescriptor,
                 title: row.displayName,
                 subtitle: row.link,
                 searchAliases: paletteSearchAliases(for: row),

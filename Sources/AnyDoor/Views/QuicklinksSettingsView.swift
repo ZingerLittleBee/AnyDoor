@@ -269,9 +269,22 @@ struct QuicklinksSettingsView: View {
 
     private func save(_ draft: QuicklinkEditorDraft) throws {
         if let id = draft.quicklinkID {
-            try store.update(id: id, name: draft.name, link: draft.link, keyword: draft.keyword, isVisible: draft.isVisible)
+            try store.update(
+                id: id,
+                name: draft.name,
+                link: draft.link,
+                keyword: draft.keyword,
+                hotkey: draft.hotkey,
+                isVisible: draft.isVisible
+            )
         } else {
-            try store.add(name: draft.name, link: draft.link, keyword: draft.keyword, isVisible: draft.isVisible)
+            try store.add(
+                name: draft.name,
+                link: draft.link,
+                keyword: draft.keyword,
+                hotkey: draft.hotkey,
+                isVisible: draft.isVisible
+            )
         }
     }
 }
@@ -282,6 +295,7 @@ private struct QuicklinkEditorDraft: Identifiable {
     var name: String
     var link: String
     var keyword: String
+    var hotkey: HotkeyDescriptor?
     var isVisible: Bool
 
     init() {
@@ -289,6 +303,7 @@ private struct QuicklinkEditorDraft: Identifiable {
         self.name = ""
         self.link = ""
         self.keyword = ""
+        self.hotkey = nil
         self.isVisible = true
     }
 
@@ -297,6 +312,7 @@ private struct QuicklinkEditorDraft: Identifiable {
         self.name = quicklink.name
         self.link = quicklink.link
         self.keyword = quicklink.keyword ?? ""
+        self.hotkey = quicklink.hotkeyDescriptor
         self.isVisible = quicklink.isVisible
     }
 }
@@ -309,6 +325,7 @@ private struct QuicklinkEditorSheet: View {
     @State private var name: String
     @State private var link: String
     @State private var keyword: String
+    @State private var hotkey: HotkeyDescriptor?
     @State private var isVisible: Bool
     @State private var errorMessage: String?
 
@@ -318,6 +335,7 @@ private struct QuicklinkEditorSheet: View {
         _name = State(initialValue: draft.name)
         _link = State(initialValue: draft.link)
         _keyword = State(initialValue: draft.keyword)
+        _hotkey = State(initialValue: draft.hotkey)
         _isVisible = State(initialValue: draft.isVisible)
     }
 
@@ -335,6 +353,14 @@ private struct QuicklinkEditorSheet: View {
                 }
                 TextField(text: $keyword) {
                     LocalizedText(.settingsQuicklinksKeyword)
+                }
+                HStack {
+                    LocalizedText(.settingsQuicklinksHotkey)
+                    Spacer()
+                    HotkeyRecorder(hotkey: $hotkey) { newValue in
+                        hotkey = newValue
+                    }
+                    .frame(width: 150, alignment: .trailing)
                 }
                 Toggle(isOn: hidden) {
                     LocalizedText(.settingsQuicklinksHidden)
@@ -373,6 +399,7 @@ private struct QuicklinkEditorSheet: View {
                 name: name,
                 link: link,
                 keyword: keyword,
+                hotkey: hotkey,
                 isVisible: isVisible
             ))
             dismiss()
@@ -387,11 +414,19 @@ private struct QuicklinkEditorSheet: View {
 }
 
 private extension QuicklinkEditorDraft {
-    init(quicklinkID: UUID?, name: String, link: String, keyword: String, isVisible: Bool) {
+    init(
+        quicklinkID: UUID?,
+        name: String,
+        link: String,
+        keyword: String,
+        hotkey: HotkeyDescriptor?,
+        isVisible: Bool
+    ) {
         self.quicklinkID = quicklinkID
         self.name = name
         self.link = link
         self.keyword = keyword
+        self.hotkey = hotkey
         self.isVisible = isVisible
     }
 }

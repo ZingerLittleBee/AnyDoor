@@ -1,3 +1,4 @@
+import CoreGraphics
 import SwiftData
 import XCTest
 @testable import AnyDoor
@@ -109,11 +110,11 @@ final class QuicklinkOpenerPlanTests: XCTestCase {
 final class QuicklinkStoreTests: XCTestCase {
     private var container: ModelContainer?
 
-    private func makeStore() throws -> QuicklinkStore {
+    private func makeStore(refreshHotkeys: @escaping @MainActor () -> Void = {}) throws -> QuicklinkStore {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: Quicklink.self, configurations: config)
         self.container = container
-        return QuicklinkStore(modelContext: container.mainContext, refreshHotkeys: {})
+        return QuicklinkStore(modelContext: container.mainContext, refreshHotkeys: refreshHotkeys)
     }
 
     func testCRUDPersistsRows() throws {
@@ -123,7 +124,7 @@ final class QuicklinkStoreTests: XCTestCase {
         XCTAssertEqual(store.quicklinks.map(\.name), ["AnyDoor 仓库"])
         XCTAssertEqual(store.quicklinks.first?.link, "~/Bee/AnyDoor")
 
-        try store.update(id: row.id, name: "AnyDoor", link: "https://github.com", isVisible: false)
+        try store.update(id: row.id, name: "AnyDoor", link: "https://github.com", hotkey: nil, isVisible: false)
         XCTAssertEqual(store.quicklinks.first?.name, "AnyDoor")
         XCTAssertEqual(store.quicklinks.first?.link, "https://github.com")
         XCTAssertEqual(store.quicklinks.first?.isVisible, false)
@@ -198,16 +199,55 @@ final class QuicklinkStoreTests: XCTestCase {
             name: "GitHub Search",
             link: "https://github.com/search?q={query}",
             keyword: "GH",
+            hotkey: nil,
             isVisible: true
         )
         XCTAssertEqual(store.quicklinks.first?.keyword, "GH")
 
         let other = try store.add(name: "Other", link: "https://example.com", keyword: nil)
         XCTAssertThrowsError(
-            try store.update(id: other.id, name: "Other", link: "https://example.com", keyword: " gh ", isVisible: true)
+            try store.update(
+                id: other.id,
+                name: "Other",
+                link: "https://example.com",
+                keyword: " gh ",
+                hotkey: nil,
+                isVisible: true
+            )
         ) { error in
             XCTAssertEqual(error as? QuicklinkStoreError, .keywordAlreadyUsed)
         }
+    }
+
+    func testHotkeyFieldsPersistAndRefreshOnMutation() throws {
+        var refreshCount = 0
+        let store = try makeStore {
+            refreshCount += 1
+        }
+        let hotkey = HotkeyDescriptor(
+            keyCode: 5,
+            modifierFlags: Int(CGEventFlags.maskControl.rawValue | CGEventFlags.maskAlternate.rawValue)
+        )
+
+        let row = try store.add(name: "Docs", link: "https://example.com", hotkey: hotkey)
+        XCTAssertEqual(refreshCount, 1)
+        XCTAssertEqual(store.quicklinks.first?.hotkeyDescriptor, hotkey)
+
+        try store.update(
+            id: row.id,
+            name: "Docs",
+            link: "https://example.com/docs",
+            keyword: nil,
+            hotkey: nil,
+            isVisible: false
+        )
+        XCTAssertEqual(refreshCount, 2)
+        XCTAssertNil(store.quicklinks.first?.hotkeyDescriptor)
+        XCTAssertFalse(try XCTUnwrap(store.quicklinks.first).isVisible)
+
+        store.delete(id: row.id)
+        XCTAssertEqual(refreshCount, 3)
+        XCTAssertTrue(store.quicklinks.isEmpty)
     }
 
     func testReorderPersistsThroughReloadedStore() throws {

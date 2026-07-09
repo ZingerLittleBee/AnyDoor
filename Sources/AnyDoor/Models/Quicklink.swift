@@ -46,4 +46,15 @@ final class Quicklink: Identifiable {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmedName.isEmpty ? link : trimmedName
     }
+
+    var hotkeyDescriptor: HotkeyDescriptor? {
+        get {
+            guard let keyCode, let modifierFlags else { return nil }
+            return HotkeyDescriptor(keyCode: keyCode, modifierFlags: modifierFlags)
+        }
+        set {
+            keyCode = newValue?.keyCode
+            modifierFlags = newValue?.modifierFlags
+        }
+    }
 }

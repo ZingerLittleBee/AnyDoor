@@ -7957,6 +7957,23 @@
         }
       }
     },
+    "settings.quicklinks.hotkey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hotkey"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "快捷键"
+          }
+        }
+      }
+    },
     "settings.quicklinks.keyword": {
       "extractionState": "manual",
       "localizations": {

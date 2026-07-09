@@ -1,7 +1,7 @@
 ---
 id: 010
 title: "Quicklinks: global hotkeys, template hotkey summons argument mode"
-status: open
+status: done
 prd: docs/prds/2026-07-09-quicklinks.md
 ---
 

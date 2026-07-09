@@ -12,7 +12,9 @@ versioning.
   that open plain web URLs, deeplinks, files, or folders, with visibility
   toggles and drag reorder. Search Templates now appear in palette results,
   drill into argument mode, and support exact keyword/full-name inline
-  arguments such as `gh AnyDoor`.
+  arguments such as `gh AnyDoor`; Quicklinks can also record global hotkeys,
+  with plain links opening directly and Search Templates summoning argument
+  mode.
 - Onboarding: a new App Shortcuts step demos the product's core interaction —
   a bound hotkey presses down on a mock desktop and the target app's window
   springs to the front over the dimmed previous window, a second press hides

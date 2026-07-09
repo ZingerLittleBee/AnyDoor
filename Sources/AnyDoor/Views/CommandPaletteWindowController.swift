@@ -53,7 +53,26 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func show() {
+    func showArgumentInput(quicklinkID: UUID, title: String, link: String) {
+        show(initialMode: .argumentInput(quicklinkID: quicklinkID, title: title, link: link))
+    }
+
+    private enum InitialMode {
+        case root
+        case argumentInput(quicklinkID: UUID, title: String, link: String)
+
+        @MainActor
+        func apply(to state: CommandPaletteState) {
+            switch self {
+            case .root:
+                break
+            case .argumentInput(let quicklinkID, let title, let link):
+                state.enterArgumentInput(quicklinkID: quicklinkID, title: title, link: link)
+            }
+        }
+    }
+
+    private func show(initialMode: InitialMode = .root) {
         let sections = collectSections(installedApps: cachedApps)
         prewarmIcons(for: sections)
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -62,6 +81,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             hyperFlags: hyperFlags,
             quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
         )
+        initialMode.apply(to: pickerState)
         self.state = pickerState
 
         let view = CommandPalettePicker(
