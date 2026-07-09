@@ -282,12 +282,25 @@ private struct SwatchDot: View {
                 ctx.stroke(dot, with: .color(.gray.opacity(0.5)), lineWidth: 1)
             }
             // Concentric selection ring with a 2pt gap, sharing the dot's center.
-            // Neutral (not accent blue): a saturated blue ring around a saturated
-            // red dot triggers chromostereopsis — the dot reads as off-center even
-            // though the geometry is exact.
+            // The ring is stroked in the swatch's OWN color (Apple Markup / iOS
+            // palette style): with dot and ring edges the same hue, the eye has no
+            // cross-color edge pair to misjudge — a contrasting ring (accent blue,
+            // even neutral white) makes the perfectly centered dot read as
+            // off-center via chromostereopsis / vernier gap sensitivity.
             if selected {
                 let ring = Path(ellipseIn: CGRect(x: c.x - 12, y: c.y - 12, width: 24, height: 24))
-                ctx.stroke(ring, with: .color(.primary.opacity(0.9)), lineWidth: 2)
+                switch fill {
+                case let .solid(color):
+                    ctx.stroke(ring, with: .color(color), lineWidth: 2)
+                case .rainbow:
+                    ctx.stroke(ring, with: .conicGradient(Self.rainbow, center: c), lineWidth: 2)
+                }
+                // Same hairline treatment as the dot so a black/white ring still
+                // reads against a matching bar background.
+                if needsEdge {
+                    let outer = Path(ellipseIn: CGRect(x: c.x - 13, y: c.y - 13, width: 26, height: 26))
+                    ctx.stroke(outer, with: .color(.gray.opacity(0.5)), lineWidth: 1)
+                }
             }
         }
         .frame(width: 28, height: 28)
