@@ -10,21 +10,20 @@ versioning.
 
 - Quicklinks: a new Settings tab manages user-defined command-palette entries
   that open plain web URLs, deeplinks, files, or folders, with visibility
-  toggles and drag reorder. Search Templates now appear in palette results,
-  drill into argument mode, and support exact keyword/full-name inline
-  arguments such as `gh AnyDoor`. Typing a Search Template's keyword and
-  pressing Tab now collapses it into a badge (Raycast-style), so you type just
-  the query next; Backspace on the empty field sheds the badge. Quicklinks can
-  also record global hotkeys,
-  with plain links opening directly and Search Templates summoning argument
-  mode. Entries can pin an Open With app override, falling back to the system
-  default if that app disappears, and their icons are derived from the pinned
-  app, file/folder metadata, deeplink handlers, or cached web favicons. The
-  full Quicklinks configuration now participates in backup/sync, and a new
-  "New Quicklink" built-in opens Settings directly to the Quicklinks tab. A set
-  of common search templates (Google, GitHub, Stack Overflow, Google Translate,
-  and more) is seeded out of the box as ready-to-use entries you can edit or
-  delete like any other.
+  toggles and drag reorder. Search Templates appear in palette results and
+  support exact keyword/full-name inline arguments such as `gh AnyDoor`;
+  alternatively, typing a template's keyword and pressing Tab collapses it into
+  a badge (Raycast-style) so you type just the query next, and Backspace on the
+  empty field sheds the badge. Quicklinks can also record global hotkeys, with
+  plain links opening directly and Search Templates summoning argument mode.
+  Entries can pin an Open With app override, falling back to the system default
+  if that app disappears, and their icons are derived from the pinned app,
+  file/folder metadata, deeplink handlers, or cached web favicons. The full
+  Quicklinks configuration participates in backup/sync, and a new "New
+  Quicklink" built-in opens Settings directly to the Quicklinks tab. A set of
+  common search templates (Google, GitHub, YouTube, Stack Overflow, npm, MDN,
+  Google Translate, and ChatGPT) is seeded out of the box as ready-to-use
+  entries you can edit or delete like any other.
 - Onboarding: a new App Shortcuts step demos the product's core interaction —
   a bound hotkey presses down on a mock desktop and the target app's window
   springs to the front over the dimmed previous window, a second press hides
