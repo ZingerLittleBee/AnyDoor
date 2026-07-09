@@ -282,9 +282,12 @@ private struct SwatchDot: View {
                 ctx.stroke(dot, with: .color(.gray.opacity(0.5)), lineWidth: 1)
             }
             // Concentric selection ring with a 2pt gap, sharing the dot's center.
+            // Neutral (not accent blue): a saturated blue ring around a saturated
+            // red dot triggers chromostereopsis — the dot reads as off-center even
+            // though the geometry is exact.
             if selected {
                 let ring = Path(ellipseIn: CGRect(x: c.x - 12, y: c.y - 12, width: 24, height: 24))
-                ctx.stroke(ring, with: .color(.accentColor), lineWidth: 2)
+                ctx.stroke(ring, with: .color(.primary.opacity(0.9)), lineWidth: 2)
             }
         }
         .frame(width: 28, height: 28)
