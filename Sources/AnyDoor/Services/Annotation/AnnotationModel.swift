@@ -21,7 +21,7 @@ enum AnnotationTool: String, CaseIterable, Sendable {
     /// Whether the tool creates a rectangular element by dragging a bounding box.
     var isRectDrag: Bool {
         switch self {
-        case .rectangle, .ellipse, .blur, .pixelate, .redaction, .crop: return true
+        case .rectangle, .ellipse, .blur, .pixelate, .redaction: return true
         default: return false
         }
     }

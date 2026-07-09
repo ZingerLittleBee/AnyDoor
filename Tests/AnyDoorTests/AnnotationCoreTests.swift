@@ -18,7 +18,7 @@ final class AnnotationCoreTests: XCTestCase {
 
     func testToolClassification() {
         XCTAssertTrue(AnnotationTool.rectangle.isRectDrag)
-        XCTAssertTrue(AnnotationTool.crop.isRectDrag)
+        XCTAssertFalse(AnnotationTool.crop.isRectDrag)
         XCTAssertTrue(AnnotationTool.arrow.isTwoPoint)
         XCTAssertTrue(AnnotationTool.freehand.isPath)
         XCTAssertFalse(AnnotationTool.text.isPath)
@@ -93,13 +93,18 @@ final class AnnotationCoreTests: XCTestCase {
     // MARK: - Document (MainActor)
 
     @MainActor
-    private func makeDoc(_ w: Int = 100, _ h: Int = 80) -> AnnotationDocument {
+    private func makeImage(_ w: Int = 100, _ h: Int = 80) -> CGImage {
         let cs = CGColorSpaceCreateDeviceRGB()
         let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                             space: cs, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         ctx.setFillColor(CGColor(red: 0.5, green: 0.5, blue: 0.5, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-        return AnnotationDocument(baseImage: ctx.makeImage()!)
+        return ctx.makeImage()!
+    }
+
+    @MainActor
+    private func makeDoc(_ w: Int = 100, _ h: Int = 80) -> AnnotationDocument {
+        AnnotationDocument(baseImage: makeImage(w, h))
     }
 
     @MainActor
@@ -151,6 +156,23 @@ final class AnnotationCoreTests: XCTestCase {
         XCTAssertTrue(doc.canUndo)
         doc.undo() // undoing the first crop returns to the full, uncropped image
         XCTAssertNil(doc.cropRect)
+    }
+
+    @MainActor
+    func testCropSessionCommitReappliesCropAfterUndoDuringSession() {
+        let model = AnnotationEditorModel(image: makeImage(100, 100))
+        let crop = CGRect(x: 10, y: 10, width: 40, height: 30)
+        model.document.setCrop(crop)
+
+        model.setTool(.crop)
+        XCTAssertEqual(model.cropSession?.rect, crop)
+
+        model.undo()
+        XCTAssertNil(model.document.cropRect)
+
+        model.commitCropSession()
+        XCTAssertEqual(model.document.cropRect, crop)
+        XCTAssertFalse(model.isCropSessionActive)
     }
 
     @MainActor

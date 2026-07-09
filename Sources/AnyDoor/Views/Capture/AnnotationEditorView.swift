@@ -31,10 +31,16 @@ struct AnnotationEditorView: View {
             Divider()
             styleBar
             Divider()
-            AnnotationCanvasView(model: model)
-                .frame(minWidth: 360, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
-                .padding(16)
-                .background(Color(nsColor: .underPageBackgroundColor))
+            ZStack(alignment: .bottom) {
+                AnnotationCanvasView(model: model)
+                    .frame(minWidth: 360, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
+                if model.isCropSessionActive {
+                    cropOptionsBar
+                        .padding(.bottom, 18)
+                }
+            }
+            .padding(16)
+            .background(Color(nsColor: .underPageBackgroundColor))
         }
         .frame(minWidth: 760, minHeight: 520)
         // Suppress the blue keyboard-focus ring on the toolbar buttons and color
@@ -72,7 +78,7 @@ struct AnnotationEditorView: View {
                     Text(L(.captureEditorDone)).fontWeight(.semibold).padding(.horizontal, 4)
                 }
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(model.isCropSessionActive ? nil : .defaultAction)
             }
         }
         .padding(.horizontal, 12)
@@ -81,7 +87,7 @@ struct AnnotationEditorView: View {
 
     private func toolButton(_ tool: AnnotationTool) -> some View {
         let selected = model.tool == tool
-        return Button { model.tool = tool } label: {
+        return Button { model.setTool(tool) } label: {
             Image(systemName: symbol(for: tool))
                 .font(.system(size: 15))
                 .frame(width: 30, height: 28)
@@ -94,6 +100,48 @@ struct AnnotationEditorView: View {
         }
         .buttonStyle(.plain)
         .help(L(helpKey(for: tool)))
+    }
+
+    private var cropOptionsBar: some View {
+        HStack(spacing: 8) {
+            Picker(selection: cropAspectPreset) {
+                LocalizedText(.captureEditorCropFreeform).tag(CropAspectPreset.freeform)
+                LocalizedText(.captureEditorCropOriginal).tag(CropAspectPreset.original)
+                Text("1:1").tag(CropAspectPreset.square)
+                Text("4:3").tag(CropAspectPreset.fourThree)
+                Text("3:2").tag(CropAspectPreset.threeTwo)
+                Text("16:9").tag(CropAspectPreset.sixteenNine)
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.menu)
+            .frame(width: 118)
+
+            iconButton("arrow.left.arrow.right", help: L(.captureEditorCropFlip), enabled: model.canFlipCropAspect) {
+                model.flipCropAspectOrientation()
+            }
+
+            Divider().frame(height: 20)
+
+            Button { model.cancelCropSession() } label: {
+                LocalizedText(.captureEditorCropCancel)
+            }
+            .buttonStyle(.borderless)
+
+            Button { model.commitCropSession() } label: {
+                LocalizedText(.captureEditorCropApply).fontWeight(.semibold)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
     }
 
     private func iconButton(_ symbol: String, help: String, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
@@ -180,6 +228,12 @@ struct AnnotationEditorView: View {
         Binding(
             get: { model.style.fillColor != nil },
             set: { model.style.fillColor = $0 ? model.style.strokeColor.withAlpha(0.25) : nil }
+        )
+    }
+    private var cropAspectPreset: Binding<CropAspectPreset> {
+        Binding(
+            get: { model.cropAspectPreset },
+            set: { model.setCropAspectPreset($0) }
         )
     }
 
