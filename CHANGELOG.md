@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.6.0] - 2026-07-10
+
 ### Added
 
 - Quicklinks: a new Settings tab manages user-defined command-palette entries

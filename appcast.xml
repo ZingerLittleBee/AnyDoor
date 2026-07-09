@@ -3,37 +3,51 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>3.6.0</title>
+            <pubDate>Fri, 10 Jul 2026 00:12:35 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>3.6.0</sparkle:version>
+            <sparkle:shortVersionString>3.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Quicklinks: a new Settings tab manages user-defined command-palette entries
+  that open plain web URLs, deeplinks, files, or folders, with visibility
+  toggles and drag reorder. Search Templates appear in palette results and
+  support exact keyword/full-name inline arguments such as `gh AnyDoor`;
+  alternatively, typing a template's keyword and pressing Tab collapses it into
+  a badge (Raycast-style) so you type just the query next, and Backspace on the
+  empty field sheds the badge. Quicklinks can also record global hotkeys, with
+  plain links opening directly and Search Templates summoning argument mode.
+  Entries can pin an Open With app override, falling back to the system default
+  if that app disappears, and their icons are derived from the pinned app,
+  file/folder metadata, deeplink handlers, or cached web favicons. The full
+  Quicklinks configuration participates in backup/sync, and a new "New
+  Quicklink" built-in opens Settings directly to the Quicklinks tab. A set of
+  common search templates (Google, GitHub, YouTube, Stack Overflow, npm, MDN,
+  Google Translate, and ChatGPT) is seeded out of the box as ready-to-use
+  entries you can edit or delete like any other.
+- Onboarding: a new App Shortcuts step demos the product's core interaction —
+  a bound hotkey presses down on a mock desktop and the target app's window
+  springs to the front over the dimmed previous window, a second press hides
+  it; chips cycle through example apps.
+- Onboarding: two new steps demo Translation and Image Conversion with
+  animated mocks of the real UI — the translation panel auto-types a sentence,
+  detects the language, and streams results from two services in parallel; the
+  conversion window replays a drag-in, one-click convert, and the output
+  landing in history. Both honor Reduce Motion.
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.6.0/AnyDoor-3.6.0.zip" length="11379451" type="application/octet-stream" sparkle:edSignature="z8xnUb1rUNYL970G1MvUFr+1wXsHevrQNsuj9bIAMVZt7DJK8iqwWGsYNM5XFeTU0fg6ey/kzRsU0g9PwObYBw=="/>
+        </item>
+        <item>
             <title>3.5.0</title>
             <pubDate>Mon, 06 Jul 2026 19:53:49 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>3.5.0</sparkle:version>
             <sparkle:shortVersionString>3.5.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Image Conversion: a new built-in action opens a floating conversion window
-  where images can be batch-converted through ImageIO to PNG, JPEG, HEIC, AVIF,
-  TIFF, GIF, BMP, PDF, or ICO when the system encoder supports the target
-  format. Images enter the basket by dragging files in, pressing ⌘V (copied
-  files or a copied bitmap), summoning the window with images selected in
-  Finder (the selection is echoed in; the hotkey is a strict open/close
-  toggle), or right-clicking an image/screenshot/file card on the clipboard
-  wall. File sources convert next to the original (never overwriting — name
-  collisions get a Finder-style counter); clipboard bitmaps convert into
-  Downloads with a timestamped name; outputs land on the clipboard as files,
-  ready to paste.
-- Image Conversion: a quality slider (1–100%, default 85%) applies to lossy
-  targets (JPEG/HEIC/AVIF); the last-used format and quality persist and are
-  included in config backup/sync.
-- Image Conversion: the window keeps the last 50 conversion records with
-  thumbnails, Reveal in Finder, copy-as-file, and a clear-all action.
-- Screenshot "Save As" can now save in any supported image format (PNG, JPEG,
-  HEIC, AVIF, TIFF, GIF, BMP, PDF, ICO) — the chosen filename extension picks
-  the format and lossy saves honor the Image Conversion quality setting. The
-  capture pipeline itself still records PNG.
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.5.0/AnyDoor-3.5.0.zip" length="10490946" type="application/octet-stream" sparkle:edSignature="QgBa6Mi9XxAEQWwYAlVVCcp/qt/sV4q6cJQ6FP/2UK4RtkjbUCzA9QP59oIEi+yb6ApQitKbnRdJhnoqujMhDw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.5.0/AnyDoor-3.5.0.zip" length="10490946" type="application/octet-stream" sparkle:edSignature="QgBa6Mi9XxAEQWwYAlVVCcp/qt/sV4q6cJQ6FP/2UK4RtkjbUCzA9QP59oIEi+yb6ApQitKbnRdJhnoqujMhDw=="/>
         </item>
         <item>
             <title>3.4.1</title>
@@ -43,15 +57,6 @@
             <sparkle:shortVersionString>3.4.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.1/AnyDoor-3.4.1.zip" length="10194237" type="application/octet-stream" sparkle:edSignature="fP/NbicOVfq/MdqzRUG+XTUMkdI9l5j6SomINE0yCu5DqZ7QWic9VXJYeEmwb/I1VZ8mFl+IrdadI1opuX5nBQ=="/>
-        </item>
-        <item>
-            <title>3.4.0</title>
-            <pubDate>Mon, 29 Jun 2026 21:46:04 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>3.4.0</sparkle:version>
-            <sparkle:shortVersionString>3.4.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.4.0/AnyDoor-3.4.0.zip" length="10258940" type="application/octet-stream" sparkle:edSignature="EuKlpwGoZWgkQkz5vUk2z+yf7f9GnRIDLqwIKOJvP2DQP20XxS3yeaub/wkAZI2fGgL8fC1SsHbBrRlog6gCAw=="/>
         </item>
         <item>
             <title>1.2.0</title>
