@@ -289,6 +289,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             return true
         }
 
+        // While the input method is composing (marked text — e.g. typing
+        // Chinese pinyin), every key belongs to the IME: Return commits the
+        // composition, arrows navigate candidates, Esc cancels it. Pass the
+        // event through so the field editor handles it instead of the palette.
+        if window.hasIMEComposition { return false }
+
         switch keyCode {
         case 125:
             state.moveDown()

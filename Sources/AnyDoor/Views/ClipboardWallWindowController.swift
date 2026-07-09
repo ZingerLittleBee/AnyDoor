@@ -321,17 +321,21 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             switch event.keyCode {
             case 53:
                 // Esc mid-composition cancels the IME marked text, not the dialog.
-                if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
+                if window.hasIMEComposition { return false }
                 cancelTagDialog(); return true
             case 36, 76:
                 // Let Return commit an in-flight IME composition instead of
                 // the dialog; the composed text lands in the field first.
-                if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
+                if window.hasIMEComposition { return false }
                 commitTagDialog(); return true
             default: return false
             }
         }
         if let consumed = routeToTextWindow(event) { return consumed }
+        // Same IME rule as the tag dialog above, for the search field: while
+        // a composition is in flight, Return / Esc / Tab belong to the input
+        // method, not to paste / staged-exit / tab-cycling.
+        if window.isKeyWindow, window.hasIMEComposition { return false }
         // ⌘K opens the source-filter menu, in both input and card-navigation
         // modes (intercepted before the input-mode passthrough below).
         if event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,

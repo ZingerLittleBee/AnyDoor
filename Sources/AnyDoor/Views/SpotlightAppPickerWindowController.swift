@@ -114,6 +114,11 @@ final class SpotlightAppPickerWindowController: NSWindowController, NSWindowDele
         guard let window, window.isVisible, window.isKeyWindow else { return false }
         guard let state else { return false }
 
+        // While the input method is composing (marked text — e.g. typing
+        // Chinese pinyin), Return / arrows / Esc belong to the IME; let the
+        // event reach the field editor instead of committing a row.
+        if window.hasIMEComposition { return false }
+
         switch keyCode {
         case 125: // arrow down
             state.moveDown()
