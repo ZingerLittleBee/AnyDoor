@@ -545,6 +545,23 @@
         }
       }
     },
+    "builtin.newQuicklink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New Quicklink"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建快速入口"
+          }
+        }
+      }
+    },
     "builtin.ocr": {
       "extractionState": "manual",
       "localizations": {
@@ -8456,13 +8473,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Imported %1$d shortcuts and %2$d preferences."
+            "value": "Imported %1$d shortcuts, %2$d preferences, and %3$d Quicklinks."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "已导入 %1$d 个快捷键和 %2$d 个偏好。"
+            "value": "已导入 %1$d 个快捷键、%2$d 个偏好和 %3$d 个快速入口。"
           }
         }
       }

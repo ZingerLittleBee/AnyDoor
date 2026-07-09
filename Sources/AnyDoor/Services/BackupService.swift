@@ -7,6 +7,8 @@ struct ImportSummary: Equatable {
     var shortcutsUpdated: Int
     var shortcutsInserted: Int
     var preferencesUpdated: Int
+    var quicklinksUpdated: Int
+    var quicklinksInserted: Int
     var settingsApplied: Int
 }
 
@@ -62,6 +64,29 @@ final class BackupService {
             )
         }
 
+        let quicklinkRows = try context.fetch(
+            FetchDescriptor<Quicklink>(
+                sortBy: [
+                    SortDescriptor(\.displayOrder),
+                    SortDescriptor(\.createdAt),
+                ]
+            )
+        )
+        let quicklinks = quicklinkRows.map { row in
+            QuicklinkDTO(
+                id: row.id,
+                name: row.name,
+                keyword: row.keyword,
+                link: row.link,
+                openWithBundleID: row.openWithBundleID,
+                keyCode: row.keyCode,
+                modifierFlags: row.modifierFlags,
+                isVisible: row.isVisible,
+                displayOrder: row.displayOrder,
+                createdAt: row.createdAt
+            )
+        }
+
         let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
 
         return BackupSnapshot(
@@ -71,6 +96,7 @@ final class BackupService {
             deviceName: Host.current().localizedName,
             appShortcuts: shortcuts,
             builtinPreferences: preferences,
+            quicklinks: quicklinks,
             settings: SyncSettingsRegistry.read(from: defaults)
         )
     }
@@ -80,7 +106,8 @@ final class BackupService {
     @discardableResult
     func importSnapshot(_ snapshot: BackupSnapshot) throws -> ImportSummary {
         var summary = ImportSummary(shortcutsUpdated: 0, shortcutsInserted: 0,
-                                    preferencesUpdated: 0, settingsApplied: 0)
+                                    preferencesUpdated: 0, quicklinksUpdated: 0,
+                                    quicklinksInserted: 0, settingsApplied: 0)
 
         // App shortcuts — match by appBundleID.
         let existingBindings = try context.fetch(FetchDescriptor<KeyBinding>())
@@ -130,6 +157,45 @@ final class BackupService {
             summary.preferencesUpdated += 1
         }
 
+        // Quicklinks — match by stable row id. Imported rows own their keyword:
+        // a differently-id'd local row with the same keyword is kept, but its
+        // keyword is cleared so palette inline matching stays deterministic.
+        var existingQuicklinks = try context.fetch(FetchDescriptor<Quicklink>())
+        var quicklinksByID = Dictionary(
+            existingQuicklinks.map { ($0.id, $0) },
+            uniquingKeysWith: { _, last in last }
+        )
+        for dto in snapshot.quicklinks {
+            guard let link = sanitizedQuicklinkLink(dto.link) else { continue }
+            let keyword = sanitizedQuicklinkKeyword(dto.keyword)
+            clearConflictingQuicklinkKeywords(
+                keyword: keyword,
+                ownerID: dto.id,
+                rows: existingQuicklinks
+            )
+            if let existing = quicklinksByID[dto.id] {
+                applyQuicklinkDTO(dto, link: link, keyword: keyword, to: existing)
+                summary.quicklinksUpdated += 1
+            } else {
+                let row = Quicklink(
+                    id: dto.id,
+                    name: dto.name,
+                    keyword: keyword,
+                    link: link,
+                    openWithBundleID: QuicklinkOpenWith.normalizedBundleID(dto.openWithBundleID),
+                    keyCode: dto.keyCode,
+                    modifierFlags: dto.modifierFlags,
+                    isVisible: dto.isVisible,
+                    displayOrder: dto.displayOrder,
+                    createdAt: dto.createdAt
+                )
+                context.insert(row)
+                existingQuicklinks.append(row)
+                quicklinksByID[dto.id] = row
+                summary.quicklinksInserted += 1
+            }
+        }
+
         try context.save()
 
         // Settings — whitelisted UserDefaults.
@@ -155,7 +221,49 @@ final class BackupService {
             validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
         )
         await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
+        QuicklinkStore.shared.rebuild()
         PanelStore.shared.rebuild()
         HotkeyCoordinator.shared.refresh()
+    }
+
+    private func sanitizedQuicklinkLink(_ link: String) -> String? {
+        let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func sanitizedQuicklinkKeyword(_ keyword: String?) -> String? {
+        let trimmed = keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func clearConflictingQuicklinkKeywords(
+        keyword: String?,
+        ownerID: UUID,
+        rows: [Quicklink]
+    ) {
+        guard let keyword else { return }
+        for row in rows where row.id != ownerID {
+            guard let existing = sanitizedQuicklinkKeyword(row.keyword),
+                  existing.compare(keyword, options: [.caseInsensitive]) == .orderedSame
+            else { continue }
+            row.keyword = nil
+        }
+    }
+
+    private func applyQuicklinkDTO(
+        _ dto: QuicklinkDTO,
+        link: String,
+        keyword: String?,
+        to row: Quicklink
+    ) {
+        row.name = dto.name
+        row.keyword = keyword
+        row.link = link
+        row.openWithBundleID = QuicklinkOpenWith.normalizedBundleID(dto.openWithBundleID)
+        row.keyCode = dto.keyCode
+        row.modifierFlags = dto.modifierFlags
+        row.isVisible = dto.isVisible
+        row.displayOrder = dto.displayOrder
+        row.createdAt = dto.createdAt
     }
 }

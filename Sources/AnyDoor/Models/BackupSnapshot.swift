@@ -60,9 +60,23 @@ struct BuiltinPreferenceDTO: Codable, Equatable, Sendable {
     var modifierFlags: Int?
 }
 
+/// One user-defined Quicklink. Machine-local icon/favicon caches are omitted.
+struct QuicklinkDTO: Codable, Equatable, Sendable {
+    var id: UUID
+    var name: String
+    var keyword: String?
+    var link: String
+    var openWithBundleID: String?
+    var keyCode: Int?
+    var modifierFlags: Int?
+    var isVisible: Bool
+    var displayOrder: Double
+    var createdAt: Date
+}
+
 /// The portable backup payload. `schemaVersion` gates future format migrations.
 struct BackupSnapshot: Codable, Equatable, Sendable {
-    static let currentSchemaVersion = 1
+    static let currentSchemaVersion = 2
 
     var schemaVersion: Int
     var exportedAt: Date
@@ -70,5 +84,49 @@ struct BackupSnapshot: Codable, Equatable, Sendable {
     var deviceName: String?
     var appShortcuts: [AppShortcutDTO]
     var builtinPreferences: [BuiltinPreferenceDTO]
+    var quicklinks: [QuicklinkDTO]
     var settings: [String: SettingValue]
+
+    init(
+        schemaVersion: Int,
+        exportedAt: Date,
+        appVersion: String,
+        deviceName: String?,
+        appShortcuts: [AppShortcutDTO],
+        builtinPreferences: [BuiltinPreferenceDTO],
+        quicklinks: [QuicklinkDTO] = [],
+        settings: [String: SettingValue]
+    ) {
+        self.schemaVersion = schemaVersion
+        self.exportedAt = exportedAt
+        self.appVersion = appVersion
+        self.deviceName = deviceName
+        self.appShortcuts = appShortcuts
+        self.builtinPreferences = builtinPreferences
+        self.quicklinks = quicklinks
+        self.settings = settings
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case exportedAt
+        case appVersion
+        case deviceName
+        case appShortcuts
+        case builtinPreferences
+        case quicklinks
+        case settings
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
+        exportedAt = try c.decode(Date.self, forKey: .exportedAt)
+        appVersion = try c.decode(String.self, forKey: .appVersion)
+        deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName)
+        appShortcuts = try c.decode([AppShortcutDTO].self, forKey: .appShortcuts)
+        builtinPreferences = try c.decode([BuiltinPreferenceDTO].self, forKey: .builtinPreferences)
+        quicklinks = try c.decodeIfPresent([QuicklinkDTO].self, forKey: .quicklinks) ?? []
+        settings = try c.decode([String: SettingValue].self, forKey: .settings)
+    }
 }

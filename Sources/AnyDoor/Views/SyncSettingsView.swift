@@ -74,7 +74,8 @@ struct SyncSettingsView: View {
             Task { await service.reconcileAfterImport() }
             statusMessage = L(.settingsSyncImportSuccess,
                               summary.shortcutsUpdated + summary.shortcutsInserted,
-                              summary.preferencesUpdated)
+                              summary.preferencesUpdated,
+                              summary.quicklinksUpdated + summary.quicklinksInserted)
             isError = false
         } catch {
             logger.error("Import failed: \(error)")

@@ -1,6 +1,6 @@
 # PRD: Quicklinks
 
-- **Status:** ready-for-agent
+- **Status:** done (issues 008–012 delivered)
 - **Date:** 2026-07-09
 - **Tracker:** local (`docs/prds/`, issues under `docs/issues/`)
 - **Glossary:** see `CONTEXT.md` (Quicklink, Link, Search Template, Keyword, Open With)

@@ -16,7 +16,9 @@ versioning.
   with plain links opening directly and Search Templates summoning argument
   mode. Entries can pin an Open With app override, falling back to the system
   default if that app disappears, and their icons are derived from the pinned
-  app, file/folder metadata, deeplink handlers, or cached web favicons.
+  app, file/folder metadata, deeplink handlers, or cached web favicons. The
+  full Quicklinks configuration now participates in backup/sync, and a new
+  "New Quicklink" built-in opens Settings directly to the Quicklinks tab.
 - Onboarding: a new App Shortcuts step demos the product's core interaction —
   a bound hotkey presses down on a mock desktop and the target app's window
   springs to the front over the dimmed previous window, a second press hides

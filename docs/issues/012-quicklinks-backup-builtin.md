@@ -1,7 +1,7 @@
 ---
 id: 012
 title: "Quicklinks: config backup/sync and 「新建快速入口」 builtin"
-status: open
+status: done
 prd: docs/prds/2026-07-09-quicklinks.md
 ---
 

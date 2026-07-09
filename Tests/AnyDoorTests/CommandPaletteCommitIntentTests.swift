@@ -35,6 +35,10 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
             CommandPaletteCommitIntent.classify(.builtin(.lockScreen)),
             .runBuiltin(.lockScreen)
         )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.builtin(.newQuicklink)),
+            .runBuiltin(.newQuicklink)
+        )
     }
 
     @MainActor
