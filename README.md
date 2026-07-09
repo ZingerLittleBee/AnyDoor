@@ -184,6 +184,24 @@ when you need them.
   Unix epoch renders local / UTC / ISO 8601. A Raycast-style scope badge turns a
   keyword into a search-bar pill so the list stays exclusive to that tool.
 
+### Quicklinks
+
+- User-defined command-palette entries that open a web URL, a file or folder, an
+  app deeplink, or a search template with a `{query}` placeholder. The editor's
+  Type picker adapts the field hint per kind and offers a native folder / file
+  picker so a directory can be chosen without typing a path.
+- Search Templates take inline arguments (`gh AnyDoor`); typing a template's
+  keyword and pressing Tab collapses it into a badge in the search field so you
+  type just the query next, and Backspace on the empty field sheds it.
+- Assign a keyword for direct palette invocation or a global hotkey — plain
+  links open immediately, Search Templates summon argument mode.
+- Pin an Open With app to override the default handler (falls back to the system
+  default if that app is gone); icons derive from the pinned app, file / folder
+  metadata, the deeplink handler, or a cached web favicon.
+- Drag to reorder, toggle visibility, and the whole configuration participates
+  in backup / sync. A set of common templates (Google, GitHub, YouTube, Stack
+  Overflow, npm, MDN, Google Translate, ChatGPT) is seeded out of the box.
+
 ### Menu bar panel
 
 - Click the menu bar icon to open a Liquid Glass panel listing every
@@ -197,6 +215,8 @@ when you need them.
 - **Panel** tab: drag-to-reorder (top-level items and app-shortcut /
   window-layout children alike), per-item visibility, inline hotkey
   recorder, type badges (toggle / action / submenu).
+- **Quicklinks** tab: create / edit command-palette entries with a link type
+  picker, keyword, Open With override, hotkey, and visibility; drag to reorder.
 - **Clipboard** tab: history monitoring, copy-only capture, retention
   window, per-source app exclusions, and clear-all history.
 - **Screenshot** tab: save location, filename template, auto-save /
