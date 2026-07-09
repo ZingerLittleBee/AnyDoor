@@ -18,7 +18,9 @@ versioning.
   default if that app disappears, and their icons are derived from the pinned
   app, file/folder metadata, deeplink handlers, or cached web favicons. The
   full Quicklinks configuration now participates in backup/sync, and a new
-  "New Quicklink" built-in opens Settings directly to the Quicklinks tab.
+  "New Quicklink" built-in opens Settings directly to the Quicklinks tab. The
+  add control also offers built-in templates (Google, GitHub, Baidu, Bilibili,
+  Stack Overflow, Google Translate, and more) that pre-fill the editor.
 - Onboarding: a new App Shortcuts step demos the product's core interaction —
   a bound hotkey presses down on a mock desktop and the target app's window
   springs to the front over the dimmed previous window, a second press hides

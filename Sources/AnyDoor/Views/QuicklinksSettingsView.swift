@@ -65,13 +65,12 @@ struct QuicklinksSettingsView: View {
     private var header: some View {
         HStack {
             Spacer()
-            Button {
-                editorDraft = QuicklinkEditorDraft()
-            } label: {
+            addMenu {
                 Label { LocalizedText(.settingsQuicklinksAdd) } icon: { Image(systemName: "plus") }
                     .font(.body)
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .fixedSize()
             .foregroundStyle(.tint)
             .hoverCursor(.pointingHand)
         }
@@ -79,6 +78,30 @@ struct QuicklinksSettingsView: View {
         .offset(y: -21)
         .padding(.top, 8)
         .padding(.bottom, 2)
+    }
+
+    /// Add control shared by the header and the empty state: clicking the body
+    /// (or "空白快速入口") opens a blank editor; the "从模板新建" section
+    /// pre-fills the editor from a common preset the user can still tweak.
+    private func addMenu<Label: View>(@ViewBuilder label: () -> Label) -> some View {
+        Menu {
+            Button {
+                editorDraft = QuicklinkEditorDraft()
+            } label: {
+                SwiftUI.Label(L(.settingsQuicklinksAddBlank), systemImage: "plus")
+            }
+            Section(L(.settingsQuicklinksTemplatesSection)) {
+                ForEach(QuicklinkTemplateCatalog.all) { template in
+                    Button {
+                        editorDraft = QuicklinkEditorDraft(template: template)
+                    } label: {
+                        SwiftUI.Label(L(template.nameKey), systemImage: template.symbol)
+                    }
+                }
+            }
+        } label: {
+            label()
+        }
     }
 
     private var emptyState: some View {
@@ -90,12 +113,11 @@ struct QuicklinksSettingsView: View {
             LocalizedText(.settingsQuicklinksEmpty)
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-            Button {
-                editorDraft = QuicklinkEditorDraft()
-            } label: {
+            addMenu {
                 Label { LocalizedText(.settingsQuicklinksAdd) } icon: { Image(systemName: "plus") }
             }
-            .buttonStyle(.bordered)
+            .menuStyle(.button)
+            .fixedSize()
             Spacer()
         }
         .frame(maxWidth: .infinity, minHeight: 320)
@@ -324,6 +346,20 @@ private struct QuicklinkEditorDraft: Identifiable {
         self.openWithBundleID = quicklink.openWithBundleID
         self.hotkey = quicklink.hotkeyDescriptor
         self.isVisible = quicklink.isVisible
+    }
+
+    /// New draft pre-filled from a built-in template; every field stays editable
+    /// before saving, so a suggested keyword can be cleared to avoid a clash.
+    /// MainActor-isolated because the localized name is resolved via `L`.
+    @MainActor
+    init(template: QuicklinkTemplate) {
+        self.quicklinkID = nil
+        self.name = L(template.nameKey)
+        self.link = template.link
+        self.keyword = template.keyword ?? ""
+        self.openWithBundleID = nil
+        self.hotkey = nil
+        self.isVisible = true
     }
 }
 
