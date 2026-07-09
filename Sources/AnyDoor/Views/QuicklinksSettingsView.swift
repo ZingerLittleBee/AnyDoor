@@ -577,7 +577,7 @@ private enum QuicklinkLinkKind: CaseIterable {
         switch self {
         case .web: return "https://github.com"
         case .fileOrFolder: return "~/Downloads"
-        case .app: return "raycast://"
+        case .app: return "slack://open"
         case .searchTemplate: return "https://github.com/search?q={query}"
         }
     }

@@ -8303,13 +8303,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enter an app URL scheme such as slack:// or raycast://."
+            "value": "Enter an app URL scheme such as slack:// or zoommtg://."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "输入 App 的 URL scheme，例如 slack:// 或 raycast://。"
+            "value": "输入 App 的 URL scheme，例如 slack:// 或 zoommtg://。"
           }
         }
       }
