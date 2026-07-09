@@ -353,70 +353,86 @@ private struct QuicklinkEditorSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 0) {
             Text(draft.quicklinkID == nil ? L(.settingsQuicklinksNewTitle) : L(.settingsQuicklinksEditTitle))
                 .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 4)
 
-            VStack(alignment: .leading, spacing: 10) {
-                TextField(text: $name) {
-                    LocalizedText(.settingsQuicklinksName)
-                }
-                TextField(text: $link) {
-                    LocalizedText(.settingsQuicklinksLink)
-                }
-                TextField(text: $keyword) {
-                    LocalizedText(.settingsQuicklinksKeyword)
-                }
-                HStack {
-                    LocalizedText(.settingsQuicklinksOpenWith)
-                    Spacer()
-                    openWithPicker
-                        .frame(width: 230)
-                }
-                HStack {
-                    LocalizedText(.settingsQuicklinksHotkey)
-                    Spacer()
-                    HotkeyRecorder(hotkey: $hotkey) { newValue in
-                        hotkey = newValue
+            Form {
+                Section {
+                    TextField(text: $name) {
+                        LocalizedText(.settingsQuicklinksName)
                     }
-                    .frame(width: 150, alignment: .trailing)
+                    TextField(text: $link) {
+                        LocalizedText(.settingsQuicklinksLink)
+                    }
+                } header: {
+                    LocalizedText(.settingsQuicklinksBasicsSection)
                 }
-                Toggle(isOn: hidden) {
-                    LocalizedText(.settingsQuicklinksHidden)
+
+                Section {
+                    TextField(text: $keyword) {
+                        LocalizedText(.settingsQuicklinksKeyword)
+                    }
+                    Picker(selection: $openWithBundleID) {
+                        Text(L(.settingsQuicklinksOpenWithDefault)).tag("")
+                        if selectedOpenWithIsMissing {
+                            Text(openWithBundleID).tag(openWithBundleID)
+                        }
+                        ForEach(installedApps) { app in
+                            Text(app.displayName).tag(app.bundleID)
+                        }
+                    } label: {
+                        LocalizedText(.settingsQuicklinksOpenWith)
+                    }
+                    LabeledContent {
+                        HotkeyRecorder(hotkey: $hotkey) { _ in }
+                            .frame(maxWidth: 180, alignment: .trailing)
+                    } label: {
+                        LocalizedText(.settingsQuicklinksHotkey)
+                    }
+                    Toggle(isOn: hidden) {
+                        LocalizedText(.settingsQuicklinksHidden)
+                    }
+                } header: {
+                    LocalizedText(.settingsQuicklinksPaletteSection)
+                } footer: {
+                    LocalizedText(.settingsQuicklinksPaletteFooter)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
+            .formStyle(.grouped)
 
-            if let errorMessage {
-                Text(errorMessage)
+            Divider()
+
+            VStack(spacing: 10) {
+                if let errorMessage {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(errorMessage)
+                        Spacer()
+                    }
                     .font(.caption)
                     .foregroundStyle(.red)
+                }
+                HStack(spacing: 10) {
+                    Spacer()
+                    Button(L(.settingsQuicklinksCancel)) { dismiss() }
+                        .keyboardShortcut(.cancelAction)
+                    Button(L(.settingsQuicklinksSave)) { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
-
-            HStack {
-                Spacer()
-                Button(L(.settingsQuicklinksCancel)) { dismiss() }
-                Button(L(.settingsQuicklinksSave)) { save() }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
         }
-        .padding(20)
-        .frame(width: 420)
+        .frame(width: 480, height: 540)
         .task { await loadInstalledApps() }
-    }
-
-    private var openWithPicker: some View {
-        Picker("", selection: $openWithBundleID) {
-            Text(L(.settingsQuicklinksOpenWithDefault)).tag("")
-            if selectedOpenWithIsMissing {
-                Text(openWithBundleID).tag(openWithBundleID)
-            }
-            ForEach(installedApps) { app in
-                Text(app.displayName).tag(app.bundleID)
-            }
-        }
-        .labelsHidden()
-        .pickerStyle(.menu)
     }
 
     private var hidden: Binding<Bool> {

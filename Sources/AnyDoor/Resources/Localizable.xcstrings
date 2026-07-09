@@ -8127,6 +8127,57 @@
         }
       }
     },
+    "settings.quicklinks.basicsSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Basics"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "基本信息"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.paletteSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Command Palette"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "命令面板"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.paletteFooter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A link containing {query} becomes a search template you fill in when triggered. The keyword invokes it directly in the command palette; a hidden quicklink is kept out of search results while its hotkey keeps working."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "链接中包含 {query} 时即为搜索模板，触发时输入内容替换。触发词可在命令面板中直接唤起；隐藏后不出现在搜索结果，但快捷键仍然生效。"
+          }
+        }
+      }
+    },
     "settings.quicklinks.save": {
       "extractionState": "manual",
       "localizations": {
