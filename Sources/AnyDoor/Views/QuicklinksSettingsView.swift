@@ -363,18 +363,22 @@ private struct QuicklinkEditorSheet: View {
 
             Form {
                 Section {
-                    TextField(text: $name) {
+                    TextField(text: $name, prompt: Text(L(.settingsQuicklinksNamePrompt))) {
                         LocalizedText(.settingsQuicklinksName)
                     }
-                    TextField(text: $link) {
+                    TextField(text: $link, prompt: Text(L(.settingsQuicklinksLinkPrompt))) {
                         LocalizedText(.settingsQuicklinksLink)
                     }
                 } header: {
                     LocalizedText(.settingsQuicklinksBasicsSection)
+                } footer: {
+                    LocalizedText(.settingsQuicklinksLinkFooter)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section {
-                    TextField(text: $keyword) {
+                    TextField(text: $keyword, prompt: Text(L(.settingsQuicklinksKeywordPrompt))) {
                         LocalizedText(.settingsQuicklinksKeyword)
                     }
                     Picker(selection: $openWithBundleID) {
@@ -431,7 +435,7 @@ private struct QuicklinkEditorSheet: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
         }
-        .frame(width: 480, height: 540)
+        .frame(width: 480, height: 600)
         .task { await loadInstalledApps() }
     }
 

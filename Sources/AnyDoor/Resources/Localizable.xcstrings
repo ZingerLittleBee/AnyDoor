@@ -8127,6 +8127,74 @@
         }
       }
     },
+    "settings.quicklinks.namePrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. GitHub Search"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例如 GitHub 搜索"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "https://github.com/search?q={query}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "https://github.com/search?q={query}"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.keywordPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. gh"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "例如 gh"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkFooter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The link can be a web URL, a folder or file path, or an app link like slack://. Include {query} to turn it into a search template you fill in when triggered."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "链接可以是网址、文件夹或文件路径，或 slack:// 这类 App 链接。包含 {query} 时即为搜索模板，触发时输入内容替换其中的 {query}。"
+          }
+        }
+      }
+    },
     "settings.quicklinks.basicsSection": {
       "extractionState": "manual",
       "localizations": {
@@ -8150,13 +8218,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Command Palette"
+            "value": "Command Palette (optional)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "命令面板"
+            "value": "命令面板（可选）"
           }
         }
       }
@@ -8167,13 +8235,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "A link containing {query} becomes a search template you fill in when triggered. The keyword invokes it directly in the command palette; a hidden quicklink is kept out of search results while its hotkey keeps working."
+            "value": "The keyword invokes this quicklink directly in the command palette. A hidden quicklink stays out of search results while its hotkey keeps working."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "链接中包含 {query} 时即为搜索模板，触发时输入内容替换。触发词可在命令面板中直接唤起；隐藏后不出现在搜索结果，但快捷键仍然生效。"
+            "value": "触发词可在命令面板中直接唤起该入口。隐藏后不出现在搜索结果，但快捷键仍然生效。"
           }
         }
       }
