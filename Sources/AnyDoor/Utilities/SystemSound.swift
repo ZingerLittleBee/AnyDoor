@@ -9,6 +9,8 @@ enum SystemSound {
     case emptyTrash
     /// The shutter sound macOS plays for native screenshots (⌘⇧3/4/5).
     case screenCapture
+    /// Completion chime for an explicit user-initiated save (e.g. Save As).
+    case saveSuccess
 
     /// Plays asynchronously. Safe to call from any actor; NSSound dispatches internally.
     func play() {
@@ -30,6 +32,10 @@ enum SystemSound {
                 "\(Self.systemDir)/Shutter.aif",
                 "\(Self.systemDir)/Grab.aif",
             ])
+        case .saveSuccess:
+            // The classic Glass alert reads as "operation finished"; it ships in
+            // /System/Library/Sounds on every supported macOS.
+            return NSSound(named: NSSound.Name("Glass"))
         }
     }
 
