@@ -74,6 +74,10 @@ struct AnnotationEditorView: View {
                 iconButton("doc.on.doc", help: L(.captureOverlayCopy)) { export(.copy) }
                 iconButton("square.and.arrow.down", help: L(.captureOverlaySave)) { export(.save) }
                 iconButton("pin", help: L(.captureOverlayPin)) { export(.pin) }
+                Button { export(.save) } label: {
+                    Text(L(.captureOverlaySaveAs)).padding(.horizontal, 2)
+                }
+                .buttonStyle(.bordered)
                 Button { export(.done) } label: {
                     Text(L(.captureEditorDone)).fontWeight(.semibold).padding(.horizontal, 4)
                 }
