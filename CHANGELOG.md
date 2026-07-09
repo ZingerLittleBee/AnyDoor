@@ -12,7 +12,10 @@ versioning.
   that open plain web URLs, deeplinks, files, or folders, with visibility
   toggles and drag reorder. Search Templates now appear in palette results,
   drill into argument mode, and support exact keyword/full-name inline
-  arguments such as `gh AnyDoor`; Quicklinks can also record global hotkeys,
+  arguments such as `gh AnyDoor`. Typing a Search Template's keyword and
+  pressing Tab now collapses it into a badge (Raycast-style), so you type just
+  the query next; Backspace on the empty field sheds the badge. Quicklinks can
+  also record global hotkeys,
   with plain links opening directly and Search Templates summoning argument
   mode. Entries can pin an Open With app override, falling back to the system
   default if that app disappears, and their icons are derived from the pinned

@@ -349,9 +349,11 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 commit(entry)
             }
             return true
-        case 48: // Tab: absorb a bare dev-tool keyword into a scope badge.
+        case 48: // Tab: absorb a bare keyword into a badge (dev-tool scope, else Quicklink argument).
             if state.isAtRoot {
-                state.tryAbsorbDevToolScope()
+                if !state.tryAbsorbDevToolScope() {
+                    state.tryAbsorbQuicklinkKeyword()
+                }
                 return true // swallow Tab either way so focus doesn't jump
             }
             return false
@@ -416,7 +418,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 quicklinkID: id,
                 title: quicklink.displayName,
                 link: quicklink.link,
-                openWithBundleID: quicklink.openWithBundleID
+                openWithBundleID: quicklink.openWithBundleID,
+                keyword: quicklink.keyword
             )
         case .launchAppShortcut(let id):
             close()

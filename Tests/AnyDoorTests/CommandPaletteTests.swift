@@ -356,6 +356,74 @@ final class CommandPaletteTests: XCTestCase {
     }
 
     @MainActor
+    func testTabAbsorbsQuicklinkKeywordIntoArgumentBadge() {
+        let id = UUID()
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            quicklinkTemplateCandidates: [
+                templateCandidate(
+                    id: id,
+                    title: "GitHub 搜索",
+                    link: "https://github.com/search?q={query}",
+                    keyword: "gh"
+                )
+            ]
+        )
+
+        // A bare, case-insensitive keyword is absorbed into a badge; the body clears.
+        state.query = "GH"
+        XCTAssertTrue(state.tryAbsorbQuicklinkKeyword())
+        XCTAssertTrue(state.isInArgumentInput)
+        XCTAssertEqual(state.argumentBadge, "gh")
+        XCTAssertEqual(state.argumentInputTitle, "GitHub 搜索")
+        XCTAssertEqual(state.query, "")
+
+        // Typing the argument now yields the synthesized open row.
+        state.query = "AnyDoor"
+        XCTAssertEqual(state.flatEntries.first?.source, .quicklinkArgument(id: id, argument: "AnyDoor"))
+    }
+
+    @MainActor
+    func testTabDoesNotAbsorbNonKeywordOrArgumentedQuery() {
+        let id = UUID()
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            quicklinkTemplateCandidates: [
+                templateCandidate(
+                    id: id,
+                    title: "GitHub 搜索",
+                    link: "https://github.com/search?q={query}",
+                    keyword: "gh"
+                )
+            ]
+        )
+
+        // Unknown keyword: no absorb, stays at root.
+        state.query = "nope"
+        XCTAssertFalse(state.tryAbsorbQuicklinkKeyword())
+        XCTAssertTrue(state.isAtRoot)
+
+        // Keyword plus an argument is not a bare keyword: no absorb (inline
+        // resolution handles that case instead).
+        state.query = "gh AnyDoor"
+        XCTAssertFalse(state.tryAbsorbQuicklinkKeyword())
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testArgumentBadgeFallsBackToTitleWithoutKeyword() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterArgumentInput(
+            quicklinkID: UUID(),
+            title: "GitHub 搜索",
+            link: "https://github.com/search?q={query}"
+        )
+        XCTAssertEqual(state.argumentBadge, "GitHub 搜索")
+    }
+
+    @MainActor
     func testProfileNameQueryShowsMatchingHostsProfile() throws {
         let previousLanguage = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .en

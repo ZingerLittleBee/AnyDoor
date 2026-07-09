@@ -20,7 +20,7 @@ final class CommandPaletteState {
     enum Level: Equatable {
         case root
         case options(parentTitle: String)
-        case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?)
+        case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?, badge: String)
     }
 
     private(set) var level: Level = .root
@@ -33,7 +33,15 @@ final class CommandPaletteState {
         return false
     }
     var argumentInputTitle: String? {
-        if case .argumentInput(_, let title, _, _) = level { return title }
+        if case .argumentInput(_, let title, _, _, _) = level { return title }
+        return nil
+    }
+
+    /// The pill label shown in the search field while in argument-input mode —
+    /// the Quicklink's keyword when known (what the user typed before Tab),
+    /// otherwise its title. Nil at every other level.
+    var argumentBadge: String? {
+        if case .argumentInput(_, _, _, _, let badge) = level { return badge }
         return nil
     }
 
@@ -61,20 +69,25 @@ final class CommandPaletteState {
         selectedIndex = 0
     }
 
-    /// Push argument-input mode for a Search Template Quicklink.
+    /// Push argument-input mode for a Search Template Quicklink. `keyword`, when
+    /// present, becomes the search-field badge (so a Tab-absorbed keyword stays
+    /// visible); otherwise the title is badged.
     func enterArgumentInput(
         quicklinkID: UUID,
         title: String,
         link: String,
-        openWithBundleID: String? = nil
+        openWithBundleID: String? = nil,
+        keyword: String? = nil
     ) {
         optionsByID = [:]
         optionEntries = []
+        let trimmedKeyword = keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         level = .argumentInput(
             quicklinkID: quicklinkID,
             title: title,
             link: link,
-            openWithBundleID: openWithBundleID
+            openWithBundleID: openWithBundleID,
+            badge: trimmedKeyword.isEmpty ? title : trimmedKeyword
         )
         activeDevToolScope = nil
         query = ""
@@ -143,6 +156,32 @@ final class CommandPaletteState {
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
+    }
+
+    // MARK: - Quicklink keyword badge (Raycast-style)
+
+    /// Tab trigger: when the whole query is exactly a Search Template Quicklink's
+    /// keyword, absorb it into an argument-input badge so the user types only the
+    /// query next. Returns whether one was absorbed. Mirrors
+    /// `tryAbsorbDevToolScope`; call it only after the dev-tool attempt so a
+    /// dev-tool keyword still wins a collision.
+    @discardableResult
+    func tryAbsorbQuicklinkKeyword() -> Bool {
+        guard isAtRoot, activeDevToolScope == nil else { return false }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        guard let candidate = quicklinkTemplateCandidates.first(where: { candidate in
+            guard let keyword = candidate.keyword else { return false }
+            return keyword.compare(trimmed, options: .caseInsensitive) == .orderedSame
+        }) else { return false }
+        enterArgumentInput(
+            quicklinkID: candidate.id,
+            title: candidate.title,
+            link: candidate.link,
+            openWithBundleID: candidate.openWithBundleID,
+            keyword: candidate.keyword
+        )
+        return true
     }
 
     /// Scoped tools whose keyword starts with the current (unscoped) query — the
@@ -590,7 +629,7 @@ final class CommandPaletteState {
     }
 
     private func argumentInputEntry() -> PanelEntry? {
-        guard case .argumentInput(let quicklinkID, let title, let link, let openWithBundleID) = level else {
+        guard case .argumentInput(let quicklinkID, let title, let link, let openWithBundleID, _) = level else {
             return nil
         }
         let argument = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -642,7 +681,9 @@ struct CommandPalettePicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !state.isAtRoot { backHeader }
+            // Argument-input mode carries its own search-field badge (Raycast
+            // style), so only the options level shows the back header.
+            if case .options = state.level { backHeader }
 
             searchField
 
@@ -809,6 +850,8 @@ struct CommandPalettePicker: View {
         HStack(spacing: 12) {
             if let scope = state.activeDevToolScope {
                 scopeBadge(scope.badgeLabel)
+            } else if let badge = state.argumentBadge {
+                scopeBadge(badge)
             } else {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 22, weight: .regular))
@@ -956,10 +999,6 @@ struct CommandPalettePicker: View {
                     .font(.system(size: 13, weight: .semibold))
                 if case let .options(parentTitle) = state.level {
                     Text(parentTitle)
-                        .font(.system(size: 13, weight: .semibold))
-                        .lineLimit(1)
-                } else if case let .argumentInput(_, title, _, _) = state.level {
-                    Text(title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                 }
