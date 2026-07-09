@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -334,6 +335,7 @@ private struct QuicklinkEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var link: String
+    @State private var kind: QuicklinkLinkKind
     @State private var keyword: String
     @State private var openWithBundleID: String
     @State private var hotkey: HotkeyDescriptor?
@@ -346,6 +348,7 @@ private struct QuicklinkEditorSheet: View {
         self.onSave = onSave
         _name = State(initialValue: draft.name)
         _link = State(initialValue: draft.link)
+        _kind = State(initialValue: QuicklinkLinkKind.infer(from: draft.link))
         _keyword = State(initialValue: draft.keyword)
         _openWithBundleID = State(initialValue: draft.openWithBundleID ?? "")
         _hotkey = State(initialValue: draft.hotkey)
@@ -366,13 +369,30 @@ private struct QuicklinkEditorSheet: View {
                     TextField(text: $name, prompt: Text(L(.settingsQuicklinksNamePrompt))) {
                         LocalizedText(.settingsQuicklinksName)
                     }
-                    TextField(text: $link, prompt: Text(L(.settingsQuicklinksLinkPrompt))) {
+                    Picker(selection: $kind) {
+                        ForEach(QuicklinkLinkKind.allCases, id: \.self) { linkKind in
+                            LocalizedText(linkKind.titleKey).tag(linkKind)
+                        }
+                    } label: {
+                        LocalizedText(.settingsQuicklinksLinkKind)
+                    }
+                    LabeledContent {
+                        HStack(spacing: 8) {
+                            TextField(text: $link, prompt: Text(kind.placeholder)) {
+                                LocalizedText(.settingsQuicklinksLink)
+                            }
+                            .labelsHidden()
+                            if kind == .fileOrFolder {
+                                Button(L(.settingsQuicklinksBrowse)) { browse() }
+                            }
+                        }
+                    } label: {
                         LocalizedText(.settingsQuicklinksLink)
                     }
                 } header: {
                     LocalizedText(.settingsQuicklinksBasicsSection)
                 } footer: {
-                    LocalizedText(.settingsQuicklinksLinkFooter)
+                    LocalizedText(kind.footerKey)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -457,6 +477,16 @@ private struct QuicklinkEditorSheet: View {
         installedApps = apps
     }
 
+    private func browse() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = L(.settingsQuicklinksBrowse)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        link = (url.path as NSString).abbreviatingWithTildeInPath
+    }
+
     private func save() {
         do {
             try onSave(QuicklinkEditorDraft(
@@ -496,6 +526,60 @@ private extension QuicklinkEditorDraft {
         self.openWithBundleID = QuicklinkOpenWith.normalizedBundleID(openWithBundleID)
         self.hotkey = hotkey
         self.isVisible = isVisible
+    }
+}
+
+/// A user-facing grouping of `QuicklinkDestination` used only to guide the
+/// editor UI (placeholder, help text, folder picker). The saved `link` stays an
+/// untyped string classified at open time — this kind is never persisted.
+private enum QuicklinkLinkKind: CaseIterable {
+    case web
+    case fileOrFolder
+    case app
+    case searchTemplate
+
+    /// Derive the kind of an existing link so editing pre-selects the picker.
+    static func infer(from link: String) -> QuicklinkLinkKind {
+        let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .web }
+        switch QuicklinkDestination.classify(link: trimmed) {
+        case .searchTemplate:
+            return .searchTemplate
+        case .deeplink:
+            return .app
+        case .file, .folder, .missingFileSystem:
+            return .fileOrFolder
+        case .web, .unsupported:
+            return .web
+        }
+    }
+
+    var titleKey: L10n.Key {
+        switch self {
+        case .web: return .settingsQuicklinksLinkKindWeb
+        case .fileOrFolder: return .settingsQuicklinksLinkKindFile
+        case .app: return .settingsQuicklinksLinkKindApp
+        case .searchTemplate: return .settingsQuicklinksLinkKindSearch
+        }
+    }
+
+    var footerKey: L10n.Key {
+        switch self {
+        case .web: return .settingsQuicklinksLinkFooterWeb
+        case .fileOrFolder: return .settingsQuicklinksLinkFooterFile
+        case .app: return .settingsQuicklinksLinkFooterApp
+        case .searchTemplate: return .settingsQuicklinksLinkFooterSearch
+        }
+    }
+
+    /// Language-neutral example shown as the link field placeholder.
+    var placeholder: String {
+        switch self {
+        case .web: return "https://github.com"
+        case .fileOrFolder: return "~/Downloads"
+        case .app: return "raycast://"
+        case .searchTemplate: return "https://github.com/search?q={query}"
+        }
     }
 }
 

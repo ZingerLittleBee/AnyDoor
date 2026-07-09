@@ -8144,19 +8144,104 @@
         }
       }
     },
-    "settings.quicklinks.linkPrompt": {
+    "settings.quicklinks.browse": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "https://github.com/search?q={query}"
+            "value": "Choose…"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "https://github.com/search?q={query}"
+            "value": "选择…"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkKind": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "类型"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkKind.web": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Web"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "网址"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkKind.file": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File or Folder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件或文件夹"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkKind.app": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App Link"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App 链接"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkKind.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search Template"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索模板"
           }
         }
       }
@@ -8178,19 +8263,70 @@
         }
       }
     },
-    "settings.quicklinks.linkFooter": {
+    "settings.quicklinks.linkFooter.web": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "The link can be a web URL, a folder or file path, or an app link like slack://. Include {query} to turn it into a search template you fill in when triggered."
+            "value": "Enter a web address. You can omit https:// (e.g. github.com)."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "链接可以是网址、文件夹或文件路径，或 slack:// 这类 App 链接。包含 {query} 时即为搜索模板，触发时输入内容替换其中的 {query}。"
+            "value": "输入网址，可省略 https://（例如 github.com）。"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkFooter.file": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a file or folder path, or click Choose. Opens in Finder or the default app when triggered."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入文件或文件夹路径，或点「选择…」。触发时在访达或默认 App 中打开。"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkFooter.app": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter an app URL scheme such as slack:// or raycast://."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输入 App 的 URL scheme，例如 slack:// 或 raycast://。"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.linkFooter.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use {query} as a placeholder; it is replaced by the text you type when triggered. e.g. https://google.com/search?q={query}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用 {query} 作占位符，触发时输入内容替换它。例如 https://google.com/search?q={query}"
           }
         }
       }
