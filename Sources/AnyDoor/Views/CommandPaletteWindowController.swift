@@ -57,7 +57,11 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         let sections = collectSections(installedApps: cachedApps)
         prewarmIcons(for: sections)
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
-        let pickerState = CommandPaletteState(sections: sections, hyperFlags: hyperFlags)
+        let pickerState = CommandPaletteState(
+            sections: sections,
+            hyperFlags: hyperFlags,
+            quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+        )
         self.state = pickerState
 
         let view = CommandPalettePicker(
@@ -117,7 +121,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             self.cachedApps = apps
             guard let pickerState, self.state === pickerState, self.window?.isVisible == true else { return }
             let refreshed = self.collectSections(installedApps: apps)
-            pickerState.updateSections(refreshed)
+            pickerState.updateSections(
+                refreshed,
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+            )
             self.prewarmIcons(for: refreshed)
         }
     }
@@ -130,7 +137,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink: return nil
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+                return nil
             }
         })
     }
@@ -370,6 +378,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             }
         case .enterDevToolScope(let scope):
             state?.enterDevToolScope(scope)
+        case .enterQuicklinkArgument(let id):
+            guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { close(); return }
+            state?.enterArgumentInput(quicklinkID: id, title: quicklink.displayName, link: quicklink.link)
         case .launchAppShortcut(let id):
             close()
             guard let binding = PanelStore.shared.binding(id: id) else { return }
@@ -403,6 +414,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             close()
             guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
             QuicklinkOpener.shared.open(quicklink)
+        case .openQuicklinkArgument(let id, let argument):
+            close()
+            guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
+            QuicklinkOpener.shared.open(quicklink, argument: argument)
         case .dismiss:
             close()
         }

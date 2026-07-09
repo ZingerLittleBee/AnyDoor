@@ -1,7 +1,7 @@
 ---
 id: 009
 title: "Quicklinks: search templates, argument mode, keyword inline arguments"
-status: open
+status: done
 prd: docs/prds/2026-07-09-quicklinks.md
 ---
 

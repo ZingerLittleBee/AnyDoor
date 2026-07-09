@@ -119,6 +119,18 @@ struct QuicklinksSettingsView: View {
                     .truncationMode(.middle)
             }
             Spacer()
+            if let keyword = quicklink.keyword?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !keyword.isEmpty {
+                Text(keyword)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color.secondary.opacity(0.12))
+                    )
+            }
             if !quicklink.isVisible {
                 Label {
                     LocalizedText(.settingsQuicklinksHiddenBadge)
@@ -257,9 +269,9 @@ struct QuicklinksSettingsView: View {
 
     private func save(_ draft: QuicklinkEditorDraft) throws {
         if let id = draft.quicklinkID {
-            try store.update(id: id, name: draft.name, link: draft.link, isVisible: draft.isVisible)
+            try store.update(id: id, name: draft.name, link: draft.link, keyword: draft.keyword, isVisible: draft.isVisible)
         } else {
-            try store.add(name: draft.name, link: draft.link, isVisible: draft.isVisible)
+            try store.add(name: draft.name, link: draft.link, keyword: draft.keyword, isVisible: draft.isVisible)
         }
     }
 }
@@ -269,12 +281,14 @@ private struct QuicklinkEditorDraft: Identifiable {
     let quicklinkID: UUID?
     var name: String
     var link: String
+    var keyword: String
     var isVisible: Bool
 
     init() {
         self.quicklinkID = nil
         self.name = ""
         self.link = ""
+        self.keyword = ""
         self.isVisible = true
     }
 
@@ -282,6 +296,7 @@ private struct QuicklinkEditorDraft: Identifiable {
         self.quicklinkID = quicklink.id
         self.name = quicklink.name
         self.link = quicklink.link
+        self.keyword = quicklink.keyword ?? ""
         self.isVisible = quicklink.isVisible
     }
 }
@@ -293,6 +308,7 @@ private struct QuicklinkEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
     @State private var link: String
+    @State private var keyword: String
     @State private var isVisible: Bool
     @State private var errorMessage: String?
 
@@ -301,6 +317,7 @@ private struct QuicklinkEditorSheet: View {
         self.onSave = onSave
         _name = State(initialValue: draft.name)
         _link = State(initialValue: draft.link)
+        _keyword = State(initialValue: draft.keyword)
         _isVisible = State(initialValue: draft.isVisible)
     }
 
@@ -315,6 +332,9 @@ private struct QuicklinkEditorSheet: View {
                 }
                 TextField(text: $link) {
                     LocalizedText(.settingsQuicklinksLink)
+                }
+                TextField(text: $keyword) {
+                    LocalizedText(.settingsQuicklinksKeyword)
                 }
                 Toggle(isOn: hidden) {
                     LocalizedText(.settingsQuicklinksHidden)
@@ -352,11 +372,14 @@ private struct QuicklinkEditorSheet: View {
                 quicklinkID: draft.quicklinkID,
                 name: name,
                 link: link,
+                keyword: keyword,
                 isVisible: isVisible
             ))
             dismiss()
         } catch QuicklinkStoreError.linkRequired {
             errorMessage = L(.settingsQuicklinksLinkRequired)
+        } catch QuicklinkStoreError.keywordAlreadyUsed {
+            errorMessage = L(.settingsQuicklinksKeywordDuplicate)
         } catch {
             errorMessage = L(.settingsQuicklinksSaveFailed)
         }
@@ -364,10 +387,11 @@ private struct QuicklinkEditorSheet: View {
 }
 
 private extension QuicklinkEditorDraft {
-    init(quicklinkID: UUID?, name: String, link: String, isVisible: Bool) {
+    init(quicklinkID: UUID?, name: String, link: String, keyword: String, isVisible: Bool) {
         self.quicklinkID = quicklinkID
         self.name = name
         self.link = link
+        self.keyword = keyword
         self.isVisible = isVisible
     }
 }

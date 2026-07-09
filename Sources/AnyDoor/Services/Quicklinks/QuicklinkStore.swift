@@ -4,7 +4,15 @@ import SwiftData
 
 enum QuicklinkStoreError: Error, Equatable {
     case linkRequired
+    case keywordAlreadyUsed
     case notConfigured
+}
+
+struct QuicklinkTemplateCandidate: Equatable {
+    let id: UUID
+    let title: String
+    let keyword: String?
+    let link: String
 }
 
 @MainActor
@@ -52,12 +60,14 @@ final class QuicklinkStore {
     }
 
     @discardableResult
-    func add(name: String, link: String, isVisible: Bool = true) throws -> Quicklink {
+    func add(name: String, link: String, keyword: String? = nil, isVisible: Bool = true) throws -> Quicklink {
         guard let modelContext else { throw QuicklinkStoreError.notConfigured }
-        let sanitized = try validate(link: link)
+        let sanitizedLink = try validate(link: link)
+        let sanitizedKeyword = try validate(keyword: keyword, excluding: nil)
         let row = Quicklink(
             name: name,
-            link: sanitized,
+            keyword: sanitizedKeyword,
+            link: sanitizedLink,
             isVisible: isVisible,
             displayOrder: nextDisplayOrder()
         )
@@ -66,10 +76,13 @@ final class QuicklinkStore {
         return row
     }
 
-    func update(id: UUID, name: String, link: String, isVisible: Bool) throws {
+    func update(id: UUID, name: String, link: String, keyword: String? = nil, isVisible: Bool) throws {
         guard let row = quicklink(id: id) else { return }
+        let sanitizedLink = try validate(link: link)
+        let sanitizedKeyword = try validate(keyword: keyword, excluding: id)
         row.name = name
-        row.link = try validate(link: link)
+        row.keyword = sanitizedKeyword
+        row.link = sanitizedLink
         row.isVisible = isVisible
         try saveRebuildRefresh()
     }
@@ -97,17 +110,21 @@ final class QuicklinkStore {
     }
 
     func paletteEntries() -> [PanelEntry] {
-        quicklinks.compactMap { row in
+        quicklinks.compactMap { row -> PanelEntry? in
             guard row.isVisible else { return nil }
-            guard !QuicklinkDestination.isSearchTemplate(link: row.link) else { return nil }
+            let isTemplate = QuicklinkDestination.isSearchTemplate(link: row.link)
+            let source: PanelEntry.Source = isTemplate
+                ? .quicklinkTemplate(id: row.id)
+                : .quicklink(id: row.id)
             return PanelEntry(
-                id: PanelEntry.id(for: .quicklink(id: row.id)),
-                source: .quicklink(id: row.id),
+                id: PanelEntry.id(for: source),
+                source: source,
                 displayOrder: row.displayOrder,
                 isVisible: row.isVisible,
                 hotkey: nil,
                 title: row.displayName,
                 subtitle: row.link,
+                searchAliases: paletteSearchAliases(for: row),
                 symbol: "link",
                 kind: .action,
                 toggleState: nil,
@@ -116,10 +133,46 @@ final class QuicklinkStore {
         }
     }
 
+    func templateCandidates() -> [QuicklinkTemplateCandidate] {
+        quicklinks.compactMap { row -> QuicklinkTemplateCandidate? in
+            guard row.isVisible,
+                  QuicklinkDestination.isSearchTemplate(link: row.link) else { return nil }
+            return QuicklinkTemplateCandidate(
+                id: row.id,
+                title: row.displayName,
+                keyword: normalizedKeyword(for: row),
+                link: row.link
+            )
+        }
+    }
+
     private func validate(link: String) throws -> String {
         let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw QuicklinkStoreError.linkRequired }
         return trimmed
+    }
+
+    private func validate(keyword: String?, excluding excludedID: UUID?) throws -> String? {
+        let trimmed = keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { return nil }
+        let duplicate = quicklinks.contains { row in
+            if let excludedID, row.id == excludedID { return false }
+            guard let existing = row.keyword?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !existing.isEmpty else { return false }
+            return existing.compare(trimmed, options: [.caseInsensitive]) == .orderedSame
+        }
+        guard !duplicate else { throw QuicklinkStoreError.keywordAlreadyUsed }
+        return trimmed
+    }
+
+    private func paletteSearchAliases(for row: Quicklink) -> [String] {
+        normalizedKeyword(for: row).map { [$0] } ?? []
+    }
+
+    private func normalizedKeyword(for row: Quicklink) -> String? {
+        guard let keyword = row.keyword?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !keyword.isEmpty else { return nil }
+        return keyword
     }
 
     private func nextDisplayOrder() -> Double {

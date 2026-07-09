@@ -56,10 +56,10 @@ final class QuicklinkOpener {
 
         let plannedLink: String
         if QuicklinkDestination.isSearchTemplate(link: trimmed) {
-            guard let encoded = encodedArgument(argument), !encoded.isEmpty else {
+            guard let substituted = substitutedTemplateLink(link: trimmed, argument: argument) else {
                 return .fail(.missingArgument)
             }
-            plannedLink = trimmed.replacingOccurrences(of: "{query}", with: encoded)
+            plannedLink = substituted
         } else {
             plannedLink = trimmed
         }
@@ -116,6 +116,13 @@ final class QuicklinkOpener {
             return .open(url, warning: .openWithAppMissing(bundleID))
         }
         return .openWithApplication(url, applicationURL: applicationURL)
+    }
+
+    nonisolated static func substitutedTemplateLink(link: String, argument: String?) -> String? {
+        let trimmed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard QuicklinkDestination.isSearchTemplate(link: trimmed) else { return nil }
+        guard let encoded = encodedArgument(argument), !encoded.isEmpty else { return nil }
+        return trimmed.replacingOccurrences(of: "{query}", with: encoded)
     }
 
     nonisolated private static func encodedArgument(_ argument: String?) -> String? {

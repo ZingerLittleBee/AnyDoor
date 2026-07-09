@@ -132,11 +132,19 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
     }
 
     @MainActor
-    func testQuicklinkOpensAndCloses() {
+    func testQuicklinkIntentsDeclarePlainTemplateAndArgumentRows() {
         let id = UUID()
         XCTAssertEqual(
             CommandPaletteCommitIntent.classify(.quicklink(id: id)),
             .openQuicklink(id: id)
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.quicklinkTemplate(id: id)),
+            .enterQuicklinkArgument(id: id)
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.quicklinkArgument(id: id, argument: "AnyDoor")),
+            .openQuicklinkArgument(id: id, argument: "AnyDoor")
         )
     }
 }

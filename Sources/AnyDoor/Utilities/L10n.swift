@@ -284,6 +284,8 @@ enum L10n {
         case settingsQuicklinksEmpty = "settings.quicklinks.empty"
         case settingsQuicklinksHidden = "settings.quicklinks.hidden"
         case settingsQuicklinksHiddenBadge = "settings.quicklinks.hiddenBadge"
+        case settingsQuicklinksKeyword = "settings.quicklinks.keyword"
+        case settingsQuicklinksKeywordDuplicate = "settings.quicklinks.keywordDuplicate"
         case settingsQuicklinksLink = "settings.quicklinks.link"
         case settingsQuicklinksLinkRequired = "settings.quicklinks.linkRequired"
         case settingsQuicklinksName = "settings.quicklinks.name"

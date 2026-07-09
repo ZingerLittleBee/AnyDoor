@@ -24,6 +24,8 @@ enum CommandPaletteCommitIntent: Equatable {
     case confirmPortKill(PortRecord)
     /// A dev-tool keyword hint: absorb it into a scope badge and keep typing.
     case enterDevToolScope(DevToolScope)
+    /// A Search Template Quicklink: enter argument-input mode.
+    case enterQuicklinkArgument(id: UUID)
 
     // Close-then-act intents — the palette dismisses first.
     case launchAppShortcut(id: UUID)
@@ -33,6 +35,7 @@ enum CommandPaletteCommitIntent: Equatable {
     case copyToClipboard(text: String, toast: CopyToast)
     case toggleHostProfile(id: UUID)
     case openQuicklink(id: UUID)
+    case openQuicklinkArgument(id: UUID, argument: String)
     /// Close without acting (a submenu/brightness builtin that isn't an
     /// option parent, or a hiddenHotkey row that should never be listed).
     case dismiss
@@ -78,6 +81,10 @@ enum CommandPaletteCommitIntent: Equatable {
             return .toggleHostProfile(id: id)
         case .quicklink(let id):
             return .openQuicklink(id: id)
+        case .quicklinkTemplate(let id):
+            return .enterQuicklinkArgument(id: id)
+        case .quicklinkArgument(let id, let argument):
+            return .openQuicklinkArgument(id: id, argument: argument)
         }
     }
 }

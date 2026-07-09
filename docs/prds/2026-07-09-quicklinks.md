@@ -91,9 +91,11 @@ team sharing, tags, manual icon selection.
   declares templates stay-open (drill to argument mode) and plain links
   close-then-act — the compiler forces this when the case is added.
 - **Inline arguments are exact-match only.** A pure resolver
-  (`(query, entries) → (quicklink, argument)?`) fires when the first
-  whitespace-delimited token equals (case-insensitively) a Search Template's
-  keyword or full name; the remainder is the argument. On hit, a synthesized
+  (`(query, entries) → (quicklink, argument)?`) fires when the query starts
+  with a Search Template's trigger followed by whitespace (case-insensitive):
+  the trigger is either the keyword (single token) or the full display name
+  (which may itself contain spaces — matched as a whitespace-bounded prefix);
+  the remainder is the argument. The longest matching trigger wins. On hit, a synthesized
   argument-carrying row is pinned atop results (Ports-section precedent) with
   the substituted URL as subtitle. No fuzzy-match argument splitting, ever.
 - **Argument mode is a new palette stack state** alongside `.root` ⇄

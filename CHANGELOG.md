@@ -10,8 +10,9 @@ versioning.
 
 - Quicklinks: a new Settings tab manages user-defined command-palette entries
   that open plain web URLs, deeplinks, files, or folders, with visibility
-  toggles and drag reorder. Search Templates are classified now but hidden from
-  palette results until argument mode lands.
+  toggles and drag reorder. Search Templates now appear in palette results,
+  drill into argument mode, and support exact keyword/full-name inline
+  arguments such as `gh AnyDoor`.
 - Onboarding: a new App Shortcuts step demos the product's core interaction —
   a bound hotkey presses down on a mock desktop and the target app's window
   springs to the front over the dimmed previous window, a second press hides

@@ -87,13 +87,21 @@ final class QuicklinkOpenerPlanTests: XCTestCase {
     func testTemplateArgumentIsPercentEncodedAndReplacedEverywhere() throws {
         let planned = QuicklinkOpener.plan(
             link: "https://example.com/search?q={query}#{query}",
-            argument: "AnyDoor repo"
+            argument: "任意 门"
         )
 
         XCTAssertEqual(
             planned,
-            .open(try XCTUnwrap(URL(string: "https://example.com/search?q=AnyDoor%20repo#AnyDoor%20repo")))
+            .open(try XCTUnwrap(URL(string: "https://example.com/search?q=%E4%BB%BB%E6%84%8F%20%E9%97%A8#%E4%BB%BB%E6%84%8F%20%E9%97%A8")))
         )
+    }
+
+    func testTemplateRejectsMissingAndEmptyArguments() {
+        let link = "https://example.com/search?q={query}"
+
+        XCTAssertEqual(QuicklinkOpener.plan(link: link), .fail(.missingArgument))
+        XCTAssertEqual(QuicklinkOpener.plan(link: link, argument: "   "), .fail(.missingArgument))
+        XCTAssertNil(QuicklinkOpener.substitutedTemplateLink(link: link, argument: ""))
     }
 }
 
@@ -141,20 +149,65 @@ final class QuicklinkStoreTests: XCTestCase {
         }
     }
 
-    func testHiddenAndTemplateRowsDoNotEnterPaletteButRemainStored() throws {
+    func testHiddenRowsDoNotEnterPaletteButTemplatesDo() throws {
         let store = try makeStore()
 
         let visible = try store.add(name: "AnyDoor 仓库", link: "~/Bee/AnyDoor")
         let hidden = try store.add(name: "Hidden", link: "https://example.com", isVisible: false)
-        let template = try store.add(name: "GitHub 搜索", link: "https://github.com/search?q={query}")
+        let template = try store.add(
+            name: "GitHub 搜索",
+            link: "https://github.com/search?q={query}",
+            keyword: "gh"
+        )
 
-        XCTAssertEqual(store.paletteEntries().map(\.title), ["AnyDoor 仓库"])
+        XCTAssertEqual(store.paletteEntries().map(\.title), ["AnyDoor 仓库", "GitHub 搜索"])
         XCTAssertEqual(store.paletteEntries().first?.source, .quicklink(id: visible.id))
+        XCTAssertEqual(store.paletteEntries().last?.source, .quicklinkTemplate(id: template.id))
+        XCTAssertEqual(store.paletteEntries().last?.searchAliases, ["gh"])
+        XCTAssertEqual(
+            store.templateCandidates(),
+            [
+                QuicklinkTemplateCandidate(
+                    id: template.id,
+                    title: "GitHub 搜索",
+                    keyword: "gh",
+                    link: "https://github.com/search?q={query}"
+                )
+            ]
+        )
 
         store.setVisibility(id: visible.id, isVisible: false)
-        XCTAssertTrue(store.paletteEntries().isEmpty)
+        XCTAssertEqual(store.paletteEntries().map(\.title), ["GitHub 搜索"])
+        XCTAssertEqual(store.templateCandidates().map(\.id), [template.id])
         let storedIDs = store.quicklinks.map { $0.id }
         XCTAssertEqual(Set(storedIDs), Set([visible.id, hidden.id, template.id]))
+    }
+
+    func testKeywordMustBeUniqueCaseInsensitively() throws {
+        let store = try makeStore()
+        let github = try store.add(name: "GitHub 搜索", link: "https://github.com/search?q={query}", keyword: "gh")
+
+        XCTAssertThrowsError(
+            try store.add(name: "GitHub Issues", link: "https://github.com/issues?q={query}", keyword: "GH")
+        ) { error in
+            XCTAssertEqual(error as? QuicklinkStoreError, .keywordAlreadyUsed)
+        }
+
+        try store.update(
+            id: github.id,
+            name: "GitHub Search",
+            link: "https://github.com/search?q={query}",
+            keyword: "GH",
+            isVisible: true
+        )
+        XCTAssertEqual(store.quicklinks.first?.keyword, "GH")
+
+        let other = try store.add(name: "Other", link: "https://example.com", keyword: nil)
+        XCTAssertThrowsError(
+            try store.update(id: other.id, name: "Other", link: "https://example.com", keyword: " gh ", isVisible: true)
+        ) { error in
+            XCTAssertEqual(error as? QuicklinkStoreError, .keywordAlreadyUsed)
+        }
     }
 
     func testReorderPersistsThroughReloadedStore() throws {

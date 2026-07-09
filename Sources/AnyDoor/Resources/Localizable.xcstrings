@@ -7957,6 +7957,40 @@
         }
       }
     },
+    "settings.quicklinks.keyword": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyword"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "触发词"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.keywordDuplicate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keyword is already used by another Quicklink."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "触发词已被另一个快速入口使用。"
+          }
+        }
+      }
+    },
     "settings.quicklinks.link": {
       "extractionState": "manual",
       "localizations": {
