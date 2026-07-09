@@ -130,4 +130,13 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
             .toggleHostProfile(id: id)
         )
     }
+
+    @MainActor
+    func testQuicklinkOpensAndCloses() {
+        let id = UUID()
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.quicklink(id: id)),
+            .openQuicklink(id: id)
+        )
+    }
 }

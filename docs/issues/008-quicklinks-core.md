@@ -1,7 +1,7 @@
 ---
 id: 008
 title: "Quicklinks: model, opener, Settings CRUD, palette row (tracer bullet)"
-status: open
+status: done
 prd: docs/prds/2026-07-09-quicklinks.md
 ---
 

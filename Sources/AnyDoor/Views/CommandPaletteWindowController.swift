@@ -130,7 +130,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return nil
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink: return nil
             }
         })
     }
@@ -185,10 +185,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             guard let item = builtin(entry) else { return true }
             return !grouped.contains(item)
         }
-        if !generalCommands.isEmpty {
+        let quicklinks = QuicklinkStore.shared.paletteEntries()
+        let generalEntries = generalCommands + quicklinks
+        if !generalEntries.isEmpty {
             sections.append(CommandPaletteSection(
                 titleKey: .commandPaletteSectionCommands,
-                entries: generalCommands
+                entries: generalEntries
             ))
         }
         for (titleKey, items) in groups {
@@ -397,6 +399,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
                 Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
             }
+        case .openQuicklink(let id):
+            close()
+            guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
+            QuicklinkOpener.shared.open(quicklink)
         case .dismiss:
             close()
         }

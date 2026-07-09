@@ -807,7 +807,7 @@ struct CommandPalettePicker: View {
     /// "Open Command").
     private func primaryActionTitle(for entry: PanelEntry) -> String {
         switch entry.source {
-        case .appShortcut, .installedApp:
+        case .appShortcut, .installedApp, .quicklink:
             return L(.commandPaletteActionOpen)
         case .portRecord:
             return L(.commandPaletteActionQuit)
@@ -1141,7 +1141,7 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile:
+        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink:
             return nil
         }
     }
@@ -1153,7 +1153,7 @@ private struct CommandPaletteRow: View {
     /// the host profile's entry summary, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return true
+        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink: return true
         default: return false
         }
     }

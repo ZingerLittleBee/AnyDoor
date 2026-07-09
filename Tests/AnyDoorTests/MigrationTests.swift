@@ -23,6 +23,68 @@ final class MigrationTests: XCTestCase {
         XCTAssertTrue(fetched[0].isVisible)
         XCTAssertEqual(fetched[0].displayOrder, 0)
     }
+
+    @MainActor
+    func testAddingQuicklinkModelPreservesExistingStoreRows() throws {
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AnyDoorMigration-\(UUID().uuidString).store")
+        defer { removeStoreFiles(at: storeURL) }
+
+        do {
+            let oldSchema = Schema([
+                KeyBinding.self,
+                BuiltinPreference.self,
+                ClipboardHistoryItem.self,
+                HostProfile.self,
+                TranslationRecord.self,
+                ImageConversionRecord.self,
+            ])
+            let container = try ModelContainer(
+                for: oldSchema,
+                configurations: [ModelConfiguration(url: storeURL)]
+            )
+            let context = container.mainContext
+            context.insert(KeyBinding(
+                keyCode: 122,
+                modifierFlags: 0,
+                appBundleID: "com.apple.finder",
+                appName: "Finder",
+                appPath: "/System/Library/CoreServices/Finder.app"
+            ))
+            try context.save()
+        }
+
+        do {
+            let newSchema = Schema([
+                KeyBinding.self,
+                BuiltinPreference.self,
+                ClipboardHistoryItem.self,
+                HostProfile.self,
+                TranslationRecord.self,
+                ImageConversionRecord.self,
+                Quicklink.self,
+            ])
+            let container = try ModelContainer(
+                for: newSchema,
+                configurations: [ModelConfiguration(url: storeURL)]
+            )
+            let context = container.mainContext
+
+            let bindings = try context.fetch(FetchDescriptor<KeyBinding>())
+            XCTAssertEqual(bindings.map(\.appBundleID), ["com.apple.finder"])
+            XCTAssertTrue(try context.fetch(FetchDescriptor<Quicklink>()).isEmpty)
+
+            context.insert(Quicklink(name: "AnyDoor", link: "~/Bee/AnyDoor"))
+            try context.save()
+            XCTAssertEqual(try context.fetch(FetchDescriptor<Quicklink>()).count, 1)
+        }
+    }
+
+    private func removeStoreFiles(at url: URL) {
+        for suffix in ["", "-shm", "-wal"] {
+            try? FileManager.default.removeItem(atPath: url.path + suffix)
+        }
+    }
 }
 
 final class BuiltinItemTests: XCTestCase {

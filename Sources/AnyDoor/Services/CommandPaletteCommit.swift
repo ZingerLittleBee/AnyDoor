@@ -32,6 +32,7 @@ enum CommandPaletteCommitIntent: Equatable {
     case runBuiltin(BuiltinItem)
     case copyToClipboard(text: String, toast: CopyToast)
     case toggleHostProfile(id: UUID)
+    case openQuicklink(id: UUID)
     /// Close without acting (a submenu/brightness builtin that isn't an
     /// option parent, or a hiddenHotkey row that should never be listed).
     case dismiss
@@ -75,6 +76,8 @@ enum CommandPaletteCommitIntent: Equatable {
             return .copyToClipboard(text: result.copyText, toast: .generic)
         case .hostProfile(let id):
             return .toggleHostProfile(id: id)
+        case .quicklink(let id):
+            return .openQuicklink(id: id)
         }
     }
 }

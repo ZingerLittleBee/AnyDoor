@@ -7,6 +7,7 @@ import SwiftUI
 /// whatever pane was last open.
 enum SettingsTab: String, Hashable, CaseIterable {
     case panel
+    case quicklinks
     case clipboard
     case capture
     case translation

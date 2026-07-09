@@ -65,10 +65,10 @@ final class CommandPaletteTests: XCTestCase {
         defer { LocalizationManager.shared.preference = previousLanguage }
 
         LocalizationManager.shared.preference = .en
-        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "Search commands, apps, ports")
+        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "Search commands, apps, quicklinks, ports")
 
         LocalizationManager.shared.preference = .zh
-        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "搜索命令、应用、端口")
+        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "搜索命令、应用、快速入口、端口")
     }
 
     @MainActor
@@ -141,6 +141,39 @@ final class CommandPaletteTests: XCTestCase {
     func testHostProfileSourceMakesStableID() {
         let id = UUID()
         XCTAssertEqual(PanelEntry.id(for: .hostProfile(id: id)), "hostProfile:\(id.uuidString)")
+    }
+
+    @MainActor
+    func testQuicklinkSourceMakesStableID() {
+        let id = UUID()
+        XCTAssertEqual(PanelEntry.id(for: .quicklink(id: id)), "quicklink:\(id.uuidString)")
+    }
+
+    @MainActor
+    func testQuicklinkNameQueryShowsMatchingRootEntry() throws {
+        let id = UUID()
+        let quicklink = PanelEntry(
+            id: PanelEntry.id(for: .quicklink(id: id)),
+            source: .quicklink(id: id),
+            displayOrder: 100,
+            isVisible: true,
+            hotkey: nil,
+            title: "AnyDoor 仓库",
+            subtitle: "~/Bee/AnyDoor",
+            symbol: "link",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
+        let state = CommandPaletteState(
+            sections: [CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [quicklink])],
+            hyperFlags: 0
+        )
+        state.query = "any"
+
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertEqual(entry.source, .quicklink(id: id))
+        XCTAssertEqual(entry.title, "AnyDoor 仓库")
     }
 
     @MainActor
