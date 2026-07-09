@@ -55,6 +55,9 @@ struct PanelEntry: Identifiable, Hashable {
         case conversion(ConversionResult)              // Command-palette-only: unit/time-zone/currency conversion
         case paletteOption(id: String)                 // Command-palette-only: a drilled-in second-level option
         case hostProfile(id: UUID)                     // Command-palette-only: a hosts profile, toggled by name
+        case quicklink(id: UUID)                       // Command-palette-only: user-defined Link
+        case quicklinkTemplate(id: UUID)               // Command-palette-only: user-defined Search Template
+        case quicklinkArgument(id: UUID, argument: String) // Command-palette-only: synthesized template+argument row
     }
 
     let id: String
@@ -64,10 +67,42 @@ struct PanelEntry: Identifiable, Hashable {
     let hotkey: HotkeyDescriptor?
     let title: String
     let subtitle: String?
+    let searchAliases: [String]
     let symbol: String
+    let quicklinkIcon: QuicklinkIconRequest?
     let kind: BuiltinItem.Kind
     let toggleState: Bool?             // .toggle only
     let permission: PermissionStatus
+
+    init(
+        id: String,
+        source: Source,
+        displayOrder: Double,
+        isVisible: Bool,
+        hotkey: HotkeyDescriptor?,
+        title: String,
+        subtitle: String?,
+        searchAliases: [String] = [],
+        symbol: String,
+        quicklinkIcon: QuicklinkIconRequest? = nil,
+        kind: BuiltinItem.Kind,
+        toggleState: Bool?,
+        permission: PermissionStatus
+    ) {
+        self.id = id
+        self.source = source
+        self.displayOrder = displayOrder
+        self.isVisible = isVisible
+        self.hotkey = hotkey
+        self.title = title
+        self.subtitle = subtitle
+        self.searchAliases = searchAliases
+        self.symbol = symbol
+        self.quicklinkIcon = quicklinkIcon
+        self.kind = kind
+        self.toggleState = toggleState
+        self.permission = permission
+    }
 
     static func id(for source: Source) -> String {
         switch source {
@@ -81,6 +116,10 @@ struct PanelEntry: Identifiable, Hashable {
         case .conversion(let result):             return "conversion:\(result.kind.rawValue):\(result.copyText):\(result.display)"
         case .paletteOption(let id):              return "option:\(id)"
         case .hostProfile(let id):                return "hostProfile:\(id.uuidString)"
+        case .quicklink(let id):                  return "quicklink:\(id.uuidString)"
+        case .quicklinkTemplate(let id):          return "quicklinkTemplate:\(id.uuidString)"
+        case .quicklinkArgument(let id, let argument):
+            return "quicklinkArgument:\(id.uuidString):\(argument)"
         }
     }
 
@@ -100,6 +139,9 @@ struct PanelEntry: Identifiable, Hashable {
         case .conversion(let result): return result.display
         case .paletteOption: return title
         case .hostProfile: return title
+        case .quicklink: return title
+        case .quicklinkTemplate: return title
+        case .quicklinkArgument: return title
         }
     }
 }

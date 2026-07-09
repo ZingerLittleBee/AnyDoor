@@ -65,10 +65,41 @@ final class CommandPaletteTests: XCTestCase {
         defer { LocalizationManager.shared.preference = previousLanguage }
 
         LocalizationManager.shared.preference = .en
-        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "Search commands, apps, ports")
+        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "Search commands, apps, quicklinks, ports")
 
         LocalizationManager.shared.preference = .zh
-        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "搜索命令、应用、端口")
+        XCTAssertEqual(L(.commandPaletteSearchPlaceholder), "搜索命令、应用、快速入口、端口")
+    }
+
+    @MainActor
+    func testNewQuicklinkBuiltinMatchesChineseNewQuery() throws {
+        let previousLanguage = LocalizationManager.shared.preference
+        defer { LocalizationManager.shared.preference = previousLanguage }
+        LocalizationManager.shared.preference = .zh
+
+        let entry = PanelEntry(
+            id: PanelEntry.id(for: .builtin(.newQuicklink)),
+            source: .builtin(.newQuicklink),
+            displayOrder: BuiltinItem.newQuicklink.defaultOrder,
+            isVisible: true,
+            hotkey: nil,
+            title: "",
+            subtitle: nil,
+            symbol: BuiltinItem.newQuicklink.symbol,
+            kind: BuiltinItem.newQuicklink.kind,
+            toggleState: nil,
+            permission: .notRequired
+        )
+        let state = CommandPaletteState(
+            sections: [CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [entry])],
+            hyperFlags: 0
+        )
+        state.query = "新建"
+
+        let result = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertEqual(result.source, .builtin(.newQuicklink))
+        XCTAssertEqual(result.localizedTitle(), "新建快速入口")
+        XCTAssertEqual(CommandPaletteCommitIntent.classify(result.source), .runBuiltin(.newQuicklink))
     }
 
     @MainActor
@@ -141,6 +172,255 @@ final class CommandPaletteTests: XCTestCase {
     func testHostProfileSourceMakesStableID() {
         let id = UUID()
         XCTAssertEqual(PanelEntry.id(for: .hostProfile(id: id)), "hostProfile:\(id.uuidString)")
+    }
+
+    @MainActor
+    func testQuicklinkSourceMakesStableID() {
+        let id = UUID()
+        XCTAssertEqual(PanelEntry.id(for: .quicklink(id: id)), "quicklink:\(id.uuidString)")
+        XCTAssertEqual(PanelEntry.id(for: .quicklinkTemplate(id: id)), "quicklinkTemplate:\(id.uuidString)")
+        XCTAssertEqual(
+            PanelEntry.id(for: .quicklinkArgument(id: id, argument: "AnyDoor")),
+            "quicklinkArgument:\(id.uuidString):AnyDoor"
+        )
+    }
+
+    @MainActor
+    func testQuicklinkNameQueryShowsMatchingRootEntry() throws {
+        let id = UUID()
+        let quicklink = PanelEntry(
+            id: PanelEntry.id(for: .quicklink(id: id)),
+            source: .quicklink(id: id),
+            displayOrder: 100,
+            isVisible: true,
+            hotkey: nil,
+            title: "AnyDoor 仓库",
+            subtitle: "~/Bee/AnyDoor",
+            symbol: "link",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
+        let state = CommandPaletteState(
+            sections: [CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [quicklink])],
+            hyperFlags: 0
+        )
+        state.query = "any"
+
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertEqual(entry.source, .quicklink(id: id))
+        XCTAssertEqual(entry.title, "AnyDoor 仓库")
+    }
+
+    @MainActor
+    func testQuicklinkKeywordQueryShowsMatchingRootEntry() throws {
+        let id = UUID()
+        let quicklink = quicklinkEntry(
+            id: id,
+            title: "GitHub 搜索",
+            link: "https://github.com/search?q={query}",
+            keyword: "gh",
+            isTemplate: true
+        )
+        let state = CommandPaletteState(
+            sections: [CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [quicklink])],
+            hyperFlags: 0
+        )
+        state.query = "gh"
+
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertEqual(entry.source, .quicklinkTemplate(id: id))
+        XCTAssertEqual(entry.title, "GitHub 搜索")
+    }
+
+    @MainActor
+    func testInlineQuicklinkArgumentResolverHitAndMissMatrix() throws {
+        let id = UUID()
+        let template = templateCandidate(
+            id: id,
+            title: "GitHub 搜索",
+            link: "https://github.com/search?q={query}",
+            keyword: "gh"
+        )
+        let plain = QuicklinkTemplateCandidate(
+            id: UUID(),
+            title: "Plain",
+            keyword: "plain",
+            link: "https://example.com"
+        )
+
+        let keyword = try XCTUnwrap(
+            QuicklinkInlineArgumentResolver.resolve(query: "GH 任意 门", candidates: [template, plain])
+        )
+        XCTAssertEqual(keyword.quicklinkID, id)
+        XCTAssertEqual(keyword.argument, "任意 门")
+        XCTAssertEqual(keyword.substitutedLink, "https://github.com/search?q=%E4%BB%BB%E6%84%8F%20%E9%97%A8")
+
+        let displayName = try XCTUnwrap(
+            QuicklinkInlineArgumentResolver.resolve(query: "GitHub 搜索 AnyDoor", candidates: [template])
+        )
+        XCTAssertEqual(displayName.argument, "AnyDoor")
+
+        XCTAssertNil(QuicklinkInlineArgumentResolver.resolve(query: "ghx AnyDoor", candidates: [template]))
+        XCTAssertNil(QuicklinkInlineArgumentResolver.resolve(query: "plain AnyDoor", candidates: [plain]))
+        XCTAssertNil(QuicklinkInlineArgumentResolver.resolve(query: "gh   ", candidates: [template]))
+    }
+
+    @MainActor
+    func testInlineQuicklinkArgumentPinsSynthesizedRowAtTop() throws {
+        let id = UUID()
+        let template = quicklinkEntry(
+            id: id,
+            title: "GitHub 搜索",
+            link: "https://github.com/search?q={query}",
+            keyword: "gh",
+            isTemplate: true,
+            displaySubtitle: "Search GitHub"
+        )
+        let state = CommandPaletteState(
+            sections: [CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [template])],
+            hyperFlags: 0,
+            quicklinkTemplateCandidates: [
+                templateCandidate(
+                    id: id,
+                    title: "GitHub 搜索",
+                    link: "https://github.com/search?q={query}",
+                    keyword: "gh"
+                )
+            ]
+        )
+        state.query = "gh AnyDoor"
+
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        XCTAssertEqual(entry.title, "GitHub 搜索 — AnyDoor")
+        XCTAssertEqual(entry.subtitle, "https://github.com/search?q=AnyDoor")
+        guard case .quicklinkArgument(let quicklinkID, let argument) = entry.source else {
+            return XCTFail("Expected a synthesized Quicklink argument row")
+        }
+        XCTAssertEqual(quicklinkID, id)
+        XCTAssertEqual(argument, "AnyDoor")
+    }
+
+    @MainActor
+    func testArgumentModeTransitionPolicyAndCommitEntry() throws {
+        let id = UUID()
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "stale"
+        state.selectedIndex = 3
+
+        state.enterArgumentInput(
+            quicklinkID: id,
+            title: "GitHub 搜索",
+            link: "https://github.com/search?q={query}",
+            openWithBundleID: "com.apple.Safari"
+        )
+
+        XCTAssertFalse(state.isAtRoot)
+        XCTAssertTrue(state.isInArgumentInput)
+        XCTAssertEqual(state.argumentInputTitle, "GitHub 搜索")
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertTrue(state.flatEntries.isEmpty)
+
+        state.query = "AnyDoor"
+        let entry = try XCTUnwrap(state.commitSelection())
+        XCTAssertEqual(entry.title, "GitHub 搜索 — AnyDoor")
+        XCTAssertEqual(entry.subtitle, "https://github.com/search?q=AnyDoor")
+        XCTAssertEqual(entry.source, .quicklinkArgument(id: id, argument: "AnyDoor"))
+        XCTAssertEqual(
+            entry.quicklinkIcon,
+            QuicklinkIconRequest(link: "https://github.com/search?q=AnyDoor", openWithBundleID: "com.apple.Safari")
+        )
+
+        state.query = "   "
+        XCTAssertNil(state.commitSelection())
+    }
+
+    @MainActor
+    func testArgumentModeEscapeAndPopPolicy() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let id = UUID()
+        state.enterArgumentInput(quicklinkID: id, title: "GitHub 搜索", link: "https://github.com/search?q={query}")
+        state.query = "AnyDoor"
+
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertFalse(state.isAtRoot)
+        XCTAssertEqual(state.query, "")
+
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertTrue(state.isAtRoot)
+
+        state.enterArgumentInput(quicklinkID: id, title: "GitHub 搜索", link: "https://github.com/search?q={query}")
+        state.popToRoot()
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testTabAbsorbsQuicklinkKeywordIntoArgumentBadge() {
+        let id = UUID()
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            quicklinkTemplateCandidates: [
+                templateCandidate(
+                    id: id,
+                    title: "GitHub 搜索",
+                    link: "https://github.com/search?q={query}",
+                    keyword: "gh"
+                )
+            ]
+        )
+
+        // A bare, case-insensitive keyword is absorbed into a badge; the body clears.
+        state.query = "GH"
+        XCTAssertTrue(state.tryAbsorbQuicklinkKeyword())
+        XCTAssertTrue(state.isInArgumentInput)
+        XCTAssertEqual(state.argumentBadge, "gh")
+        XCTAssertEqual(state.argumentInputTitle, "GitHub 搜索")
+        XCTAssertEqual(state.query, "")
+
+        // Typing the argument now yields the synthesized open row.
+        state.query = "AnyDoor"
+        XCTAssertEqual(state.flatEntries.first?.source, .quicklinkArgument(id: id, argument: "AnyDoor"))
+    }
+
+    @MainActor
+    func testTabDoesNotAbsorbNonKeywordOrArgumentedQuery() {
+        let id = UUID()
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            quicklinkTemplateCandidates: [
+                templateCandidate(
+                    id: id,
+                    title: "GitHub 搜索",
+                    link: "https://github.com/search?q={query}",
+                    keyword: "gh"
+                )
+            ]
+        )
+
+        // Unknown keyword: no absorb, stays at root.
+        state.query = "nope"
+        XCTAssertFalse(state.tryAbsorbQuicklinkKeyword())
+        XCTAssertTrue(state.isAtRoot)
+
+        // Keyword plus an argument is not a bare keyword: no absorb (inline
+        // resolution handles that case instead).
+        state.query = "gh AnyDoor"
+        XCTAssertFalse(state.tryAbsorbQuicklinkKeyword())
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testArgumentBadgeFallsBackToTitleWithoutKeyword() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterArgumentInput(
+            quicklinkID: UUID(),
+            title: "GitHub 搜索",
+            link: "https://github.com/search?q={query}"
+        )
+        XCTAssertEqual(state.argumentBadge, "GitHub 搜索")
     }
 
     @MainActor
@@ -515,6 +795,40 @@ final class CommandPaletteTests: XCTestCase {
 
     private func isolatedDefaults() -> UserDefaults {
         UserDefaults(suiteName: "CommandPaletteTests-\(UUID().uuidString)")!
+    }
+
+    private func quicklinkEntry(
+        id: UUID,
+        title: String,
+        link: String,
+        keyword: String?,
+        isTemplate: Bool,
+        displaySubtitle: String? = nil
+    ) -> PanelEntry {
+        let source: PanelEntry.Source = isTemplate ? .quicklinkTemplate(id: id) : .quicklink(id: id)
+        return PanelEntry(
+            id: PanelEntry.id(for: source),
+            source: source,
+            displayOrder: 100,
+            isVisible: true,
+            hotkey: nil,
+            title: title,
+            subtitle: displaySubtitle ?? link,
+            searchAliases: keyword.map { [$0] } ?? [],
+            symbol: "link",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
+    }
+
+    private func templateCandidate(
+        id: UUID,
+        title: String,
+        link: String,
+        keyword: String?
+    ) -> QuicklinkTemplateCandidate {
+        QuicklinkTemplateCandidate(id: id, title: title, keyword: keyword, link: link)
     }
 
     private func portRecord(port: UInt16, pid: pid_t, processName: String) -> PortRecord {

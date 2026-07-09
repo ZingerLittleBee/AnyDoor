@@ -92,6 +92,7 @@ struct SettingsView: View {
     private var detailView: some View {
         switch selectedTab {
         case .panel: PanelSettingsView()
+        case .quicklinks: QuicklinksSettingsView()
         case .clipboard: ClipboardSettingsView()
         case .capture: CaptureSettingsView()
         case .translation: TranslationSettingsView()
@@ -261,6 +262,7 @@ private extension SettingsTab {
     var titleKey: L10n.Key {
         switch self {
         case .panel: .settingsTabPanel
+        case .quicklinks: .settingsTabQuicklinks
         case .clipboard: .settingsTabClipboard
         case .capture: .settingsTabCapture
         case .translation: .settingsTabTranslation
@@ -271,6 +273,7 @@ private extension SettingsTab {
     var systemImage: String {
         switch self {
         case .panel: "rectangle.stack"
+        case .quicklinks: "link"
         case .clipboard: "doc.on.clipboard"
         case .capture: "camera.viewfinder"
         case .translation: "character.bubble"

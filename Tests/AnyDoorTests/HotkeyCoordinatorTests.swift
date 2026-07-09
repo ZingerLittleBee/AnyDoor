@@ -6,6 +6,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
 
     private let command = Int(CGEventFlags.maskCommand.rawValue)
     private let control = Int(CGEventFlags.maskControl.rawValue)
+    private let option = Int(CGEventFlags.maskAlternate.rawValue)
 
     private func makeBinding(keyCode: Int = 1, modifierFlags: Int? = nil) -> KeyBinding {
         KeyBinding(
@@ -25,6 +26,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let snapshots = HotkeyCoordinator.compile(
             bindings: [makeBinding(keyCode: 11, modifierFlags: control)],
             prefs: [],
+            quicklinks: [],
             paletteHotkey: nil
         )
         XCTAssertEqual(snapshots.count, 1)
@@ -44,7 +46,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
             keyCode: 2,
             modifierFlags: command
         )
-        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
+        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], quicklinks: [], paletteHotkey: nil)
         XCTAssertEqual(snapshots.count, 1)
         guard case .toggleBuiltin(let key) = snapshots[0].action else {
             return XCTFail("expected toggleBuiltin, got \(snapshots[0].action)")
@@ -59,7 +61,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
             keyCode: 3,
             modifierFlags: command
         )
-        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
+        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], quicklinks: [], paletteHotkey: nil)
         XCTAssertEqual(snapshots.count, 1)
         guard case .runBuiltin(let key) = snapshots[0].action else {
             return XCTFail("expected runBuiltin, got \(snapshots[0].action)")
@@ -79,7 +81,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
             keyCode: 5,
             modifierFlags: command
         )
-        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [up, down], paletteHotkey: nil)
+        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [up, down], quicklinks: [], paletteHotkey: nil)
         XCTAssertEqual(snapshots.map(\.action), [.brightnessUp, .brightnessDown])
     }
 
@@ -98,6 +100,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let snapshots = HotkeyCoordinator.compile(
             bindings: [],
             prefs: [submenu, control],
+            quicklinks: [],
             paletteHotkey: nil
         )
         XCTAssertTrue(snapshots.isEmpty)
@@ -106,14 +109,14 @@ final class HotkeyCoordinatorTests: XCTestCase {
     @MainActor
     func testPrefWithoutHotkeyIsSkipped() {
         let pref = BuiltinPreference(itemKey: BuiltinItem.keepAwake.rawValue)
-        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
+        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], quicklinks: [], paletteHotkey: nil)
         XCTAssertTrue(snapshots.isEmpty)
     }
 
     @MainActor
     func testOrphanPrefKeyIsSkipped() {
         let pref = BuiltinPreference(itemKey: "noSuchBuiltin", keyCode: 8, modifierFlags: command)
-        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
+        let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], quicklinks: [], paletteHotkey: nil)
         XCTAssertTrue(snapshots.isEmpty)
     }
 
@@ -123,10 +126,85 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let snapshots = HotkeyCoordinator.compile(
             bindings: [makeBinding()],
             prefs: [],
+            quicklinks: [],
             paletteHotkey: descriptor
         )
         XCTAssertEqual(snapshots.count, 2)
         XCTAssertEqual(snapshots[1].keyCode, 49)
         XCTAssertEqual(snapshots[1].action, .showCommandPalette)
+    }
+
+    @MainActor
+    func testQuicklinkHotkeyCompilesEvenWhenHidden() {
+        let hidden = Quicklink(
+            id: UUID(),
+            name: "Hidden",
+            link: "https://example.com",
+            keyCode: 5,
+            modifierFlags: control | option | command,
+            isVisible: false
+        )
+        let unbound = Quicklink(
+            id: UUID(),
+            name: "Unbound",
+            link: "https://example.com/unbound",
+            isVisible: true
+        )
+
+        let snapshots = HotkeyCoordinator.compile(
+            bindings: [],
+            prefs: [],
+            quicklinks: [hidden, unbound],
+            paletteHotkey: nil
+        )
+
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[0].keyCode, 5)
+        XCTAssertEqual(snapshots[0].modifierFlags, control | option | command)
+        XCTAssertEqual(snapshots[0].action, .openQuicklink(id: hidden.id))
+    }
+
+    @MainActor
+    func testDispatchPlainQuicklinkOpensDirectly() {
+        let quicklink = Quicklink(id: UUID(), name: "Docs", link: "https://example.com")
+        var openedID: UUID?
+        var presentedID: UUID?
+        let coordinator = HotkeyCoordinator(
+            quicklinkResolver: { id in id == quicklink.id ? quicklink : nil },
+            quicklinkOpener: { openedID = $0.id },
+            quicklinkArgumentPresenter: { quicklinkID, _, _, _ in presentedID = quicklinkID }
+        )
+
+        coordinator.dispatch(.openQuicklink(id: quicklink.id))
+
+        XCTAssertEqual(openedID, quicklink.id)
+        XCTAssertNil(presentedID)
+    }
+
+    @MainActor
+    func testDispatchTemplateQuicklinkShowsArgumentInput() {
+        let quicklink = Quicklink(
+            id: UUID(),
+            name: "GitHub 搜索",
+            link: "https://github.com/search?q={query}",
+            openWithBundleID: "com.apple.Safari"
+        )
+        var openedID: UUID?
+        var presented: (id: UUID, title: String, link: String, openWithBundleID: String?)?
+        let coordinator = HotkeyCoordinator(
+            quicklinkResolver: { id in id == quicklink.id ? quicklink : nil },
+            quicklinkOpener: { openedID = $0.id },
+            quicklinkArgumentPresenter: { quicklinkID, title, link, openWithBundleID in
+                presented = (quicklinkID, title, link, openWithBundleID)
+            }
+        )
+
+        coordinator.dispatch(.openQuicklink(id: quicklink.id))
+
+        XCTAssertNil(openedID)
+        XCTAssertEqual(presented?.id, quicklink.id)
+        XCTAssertEqual(presented?.title, "GitHub 搜索")
+        XCTAssertEqual(presented?.link, "https://github.com/search?q={query}")
+        XCTAssertEqual(presented?.openWithBundleID, "com.apple.Safari")
     }
 }

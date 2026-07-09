@@ -45,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let config = ModelConfiguration(url: storeURL)
             modelContainer = try ModelContainer(
                 for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, HostProfile.self,
-                TranslationRecord.self, ImageConversionRecord.self,
+                TranslationRecord.self, ImageConversionRecord.self, Quicklink.self,
                 configurations: config
             )
 
@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let context = modelContainer.mainContext
         KeyBindingOrderBackfill.runIfNeeded(in: context)
         BuiltinPreferenceSeeder.seedIfNeeded(in: context)
+        QuicklinkSeeder.seedIfNeeded(in: context)
 
         // Bootstrap clipboard history store so providers can record entries.
         ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
@@ -98,6 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
         HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
+        QuicklinkStore.shared.bootstrap(modelContainer: modelContainer)
 
         // Translation history: give the store the shared container, then point
         // the coordinator at it so successful translations get recorded.

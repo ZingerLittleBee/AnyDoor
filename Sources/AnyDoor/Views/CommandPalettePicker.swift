@@ -17,13 +17,33 @@ final class CommandPaletteState {
     var query: String = ""
     var selectedIndex: Int = 0
 
-    enum Level: Equatable { case root; case options(parentTitle: String) }
+    enum Level: Equatable {
+        case root
+        case options(parentTitle: String)
+        case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?, badge: String)
+    }
 
     private(set) var level: Level = .root
     private var optionsByID: [String: CommandPaletteOption] = [:]
     private var optionEntries: [PanelEntry] = []
 
     var isAtRoot: Bool { level == .root }
+    var isInArgumentInput: Bool {
+        if case .argumentInput = level { return true }
+        return false
+    }
+    var argumentInputTitle: String? {
+        if case .argumentInput(_, let title, _, _, _) = level { return title }
+        return nil
+    }
+
+    /// The pill label shown in the search field while in argument-input mode —
+    /// the Quicklink's keyword when known (what the user typed before Tab),
+    /// otherwise its title. Nil at every other level.
+    var argumentBadge: String? {
+        if case .argumentInput(_, _, _, _, let badge) = level { return badge }
+        return nil
+    }
 
     /// Push a second level built from `options`; resets the search + selection.
     func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
@@ -49,6 +69,31 @@ final class CommandPaletteState {
         selectedIndex = 0
     }
 
+    /// Push argument-input mode for a Search Template Quicklink. `keyword`, when
+    /// present, becomes the search-field badge (so a Tab-absorbed keyword stays
+    /// visible); otherwise the title is badged.
+    func enterArgumentInput(
+        quicklinkID: UUID,
+        title: String,
+        link: String,
+        openWithBundleID: String? = nil,
+        keyword: String? = nil
+    ) {
+        optionsByID = [:]
+        optionEntries = []
+        let trimmedKeyword = keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        level = .argumentInput(
+            quicklinkID: quicklinkID,
+            title: title,
+            link: link,
+            openWithBundleID: openWithBundleID,
+            badge: trimmedKeyword.isEmpty ? title : trimmedKeyword
+        )
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
+    }
+
     /// Return to the root level, clearing the option state + search + selection.
     func popToRoot() {
         level = .root
@@ -64,8 +109,14 @@ final class CommandPaletteState {
     /// Replace the root sections after the off-main installed-apps scan resolves.
     /// `@Observable` re-renders the picker; `query`/`selectedIndex`/drill-in state
     /// are intentionally left untouched so a typing/drilling user isn't disturbed.
-    func updateSections(_ sections: [CommandPaletteSection]) {
+    func updateSections(
+        _ sections: [CommandPaletteSection],
+        quicklinkTemplateCandidates: [QuicklinkTemplateCandidate]? = nil
+    ) {
         allSections = sections
+        if let quicklinkTemplateCandidates {
+            self.quicklinkTemplateCandidates = quicklinkTemplateCandidates
+        }
     }
 
     // MARK: - Dev-tool scope badge (Raycast-style)
@@ -107,6 +158,32 @@ final class CommandPaletteState {
         selectedIndex = 0
     }
 
+    // MARK: - Quicklink keyword badge (Raycast-style)
+
+    /// Tab trigger: when the whole query is exactly a Search Template Quicklink's
+    /// keyword, absorb it into an argument-input badge so the user types only the
+    /// query next. Returns whether one was absorbed. Mirrors
+    /// `tryAbsorbDevToolScope`; call it only after the dev-tool attempt so a
+    /// dev-tool keyword still wins a collision.
+    @discardableResult
+    func tryAbsorbQuicklinkKeyword() -> Bool {
+        guard isAtRoot, activeDevToolScope == nil else { return false }
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        guard let candidate = quicklinkTemplateCandidates.first(where: { candidate in
+            guard let keyword = candidate.keyword else { return false }
+            return keyword.compare(trimmed, options: .caseInsensitive) == .orderedSame
+        }) else { return false }
+        enterArgumentInput(
+            quicklinkID: candidate.id,
+            title: candidate.title,
+            link: candidate.link,
+            openWithBundleID: candidate.openWithBundleID,
+            keyword: candidate.keyword
+        )
+        return true
+    }
+
     /// Scoped tools whose keyword starts with the current (unscoped) query — the
     /// completion hints shown while the user is still typing a keyword.
     func devToolScopeSuggestions(matching query: String) -> [DevToolScope] {
@@ -121,6 +198,7 @@ final class CommandPaletteState {
     /// currency-shaped expression with no rate table yet (so the user can refresh
     /// to recover). Unit / time-zone / plain search keep the toolbar hidden.
     var isCurrencyContext: Bool {
+        guard isAtRoot else { return false }
         let hasCurrencyRow = flatEntries.contains { entry in
             if case .conversion(let result) = entry.source { return result.kind == .currency }
             return false
@@ -194,6 +272,7 @@ final class CommandPaletteState {
     }
 
     private(set) var allSections: [CommandPaletteSection]
+    private(set) var quicklinkTemplateCandidates: [QuicklinkTemplateCandidate]
     let hyperFlags: Int
     private let portInventory: PortInventory
     private var portRefreshTask: Task<Void, Never>?
@@ -207,11 +286,13 @@ final class CommandPaletteState {
     init(
         sections: [CommandPaletteSection],
         hyperFlags: Int,
+        quicklinkTemplateCandidates: [QuicklinkTemplateCandidate] = [],
         portInventory: PortInventory = .shared,
         hostProfilesProvider: @escaping () -> [HostProfile] = { HostsManager.shared.profiles },
         currencyRatesProvider: @escaping () -> RateTable? = { CurrencyRatesService.shared.rateTable }
     ) {
         self.allSections = sections
+        self.quicklinkTemplateCandidates = quicklinkTemplateCandidates
         self.hyperFlags = hyperFlags
         self.portInventory = portInventory
         self.hostProfilesProvider = hostProfilesProvider
@@ -231,14 +312,13 @@ final class CommandPaletteState {
         guard !trimmed.isEmpty else { return allSections }
         var sections = allSections.compactMap { section in
             let matched = section.entries.filter { entry in
-                entry.localizedTitle().localizedCaseInsensitiveContains(trimmed)
-                    || entry.title.localizedCaseInsensitiveContains(trimmed)
+                rootEntry(entry, matches: trimmed)
             }
             return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
         }
         // Insert special sections at index 0 in reverse priority order, so the
-        // last inserted ends up on top. Final order: calc, conversion, ports,
-        // hosts, dev tools (with the keyword-completion hint above all).
+        // last inserted ends up on top. Final order: quicklink argument, dev-tool
+        // keyword-completion hint, calc, conversion, ports, hosts, dev tools.
         if let dev = devToolsSection(matching: trimmed) {
             sections.insert(dev, at: 0)
         }
@@ -259,7 +339,16 @@ final class CommandPaletteState {
         if let suggestions = devToolSuggestionSection(matching: trimmed) {
             sections.insert(suggestions, at: 0)
         }
+        if let quicklinkArgument = quicklinkArgumentSection(matching: trimmed) {
+            sections.insert(quicklinkArgument, at: 0)
+        }
         return sections
+    }
+
+    private func rootEntry(_ entry: PanelEntry, matches query: String) -> Bool {
+        entry.localizedTitle().localizedCaseInsensitiveContains(query)
+            || entry.title.localizedCaseInsensitiveContains(query)
+            || entry.searchAliases.contains { $0.localizedCaseInsensitiveContains(query) }
     }
 
     /// Builds a "Hosts" section listing every profile whose name contains the
@@ -286,6 +375,51 @@ final class CommandPaletteState {
             title: profile.name,
             subtitle: profile.isActive ? L(.commandPaletteHostsActive) : nil,
             symbol: profile.isActive ? "checkmark.circle.fill" : "circle",
+            kind: .action,
+            toggleState: nil,
+            permission: .notRequired
+        )
+    }
+
+    private func quicklinkArgumentSection(matching query: String) -> CommandPaletteSection? {
+        guard let match = QuicklinkInlineArgumentResolver.resolve(
+            query: query,
+            candidates: quicklinkTemplateCandidates
+        ) else { return nil }
+        return CommandPaletteSection(
+            titleKey: .commandPaletteSectionCommands,
+            entries: [
+                Self.quicklinkArgumentEntry(
+                    quicklinkID: match.quicklinkID,
+                    title: match.title,
+                    argument: match.argument,
+                    substitutedLink: match.substitutedLink,
+                    openWithBundleID: match.openWithBundleID
+                )
+            ]
+        )
+    }
+
+    private static func quicklinkArgumentEntry(
+        quicklinkID: UUID,
+        title: String,
+        argument: String,
+        substitutedLink: String?,
+        openWithBundleID: String?
+    ) -> PanelEntry {
+        let source = PanelEntry.Source.quicklinkArgument(id: quicklinkID, argument: argument)
+        return PanelEntry(
+            id: PanelEntry.id(for: source),
+            source: source,
+            displayOrder: 0,
+            isVisible: true,
+            hotkey: nil,
+            title: "\(title) — \(argument)",
+            subtitle: substitutedLink,
+            symbol: "link",
+            quicklinkIcon: substitutedLink.map {
+                QuicklinkIconRequest(link: $0, openWithBundleID: openWithBundleID)
+            },
             kind: .action,
             toggleState: nil,
             permission: .notRequired
@@ -429,6 +563,7 @@ final class CommandPaletteState {
     func refreshPortsIfNeeded() {
         // In dev-tool scope mode the list is exclusive to that tool, so ports can
         // never surface — skip the scan even if the body looks like a port number.
+        guard isAtRoot else { return }
         guard activeDevToolScope == nil else { return }
         guard Self.portSearchNeedle(from: query) != nil else { return }
         guard !portInventory.isRefreshing, portRefreshTask == nil else { return }
@@ -487,9 +622,25 @@ final class CommandPaletteState {
     /// selection index is global across all visible entries.
     var flatEntries: [PanelEntry] {
         switch level {
-        case .root:    return filteredSections.flatMap(\.entries)
+        case .root: return filteredSections.flatMap(\.entries)
         case .options: return filteredOptionEntries
+        case .argumentInput: return argumentInputEntry().map { [$0] } ?? []
         }
+    }
+
+    private func argumentInputEntry() -> PanelEntry? {
+        guard case .argumentInput(let quicklinkID, let title, let link, let openWithBundleID, _) = level else {
+            return nil
+        }
+        let argument = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !argument.isEmpty else { return nil }
+        return Self.quicklinkArgumentEntry(
+            quicklinkID: quicklinkID,
+            title: title,
+            argument: argument,
+            substitutedLink: QuicklinkOpener.substitutedTemplateLink(link: link, argument: argument),
+            openWithBundleID: openWithBundleID
+        )
     }
 
     func moveDown() {
@@ -530,7 +681,9 @@ struct CommandPalettePicker: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !state.isAtRoot { backHeader }
+            // Argument-input mode carries its own search-field badge (Raycast
+            // style), so only the options level shows the back header.
+            if case .options = state.level { backHeader }
 
             searchField
 
@@ -697,6 +850,8 @@ struct CommandPalettePicker: View {
         HStack(spacing: 12) {
             if let scope = state.activeDevToolScope {
                 scopeBadge(scope.badgeLabel)
+            } else if let badge = state.argumentBadge {
+                scopeBadge(badge)
             } else {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 22, weight: .regular))
@@ -730,9 +885,12 @@ struct CommandPalettePicker: View {
         .padding(.vertical, 16)
     }
 
-    /// Placeholder text: prompts for the conversion body while scoped, otherwise
-    /// the usual root / second-level search hint.
+    /// Placeholder text: prompts for an argument or scoped conversion body when
+    /// needed, otherwise the usual root / second-level search hint.
     private var searchFieldPlaceholder: String {
+        if let title = state.argumentInputTitle {
+            return title
+        }
         if state.activeDevToolScope != nil {
             return L(.commandPaletteDevToolScopePlaceholder)
         }
@@ -807,8 +965,10 @@ struct CommandPalettePicker: View {
     /// "Open Command").
     private func primaryActionTitle(for entry: PanelEntry) -> String {
         switch entry.source {
-        case .appShortcut, .installedApp:
+        case .appShortcut, .installedApp, .quicklink, .quicklinkArgument:
             return L(.commandPaletteActionOpen)
+        case .quicklinkTemplate:
+            return L(.commandPaletteActionEnter)
         case .portRecord:
             return L(.commandPaletteActionQuit)
         case .calcResult, .devTool, .conversion:
@@ -1084,7 +1244,14 @@ private struct CommandPaletteRow: View {
 
     @ViewBuilder
     private var icon: some View {
-        if iconPath != nil {
+        if let request = entry.quicklinkIcon {
+            QuicklinkIconView(
+                request: request,
+                fallbackSymbol: entry.symbol,
+                size: Self.iconSize,
+                symbolPointSize: 13
+            )
+        } else if iconPath != nil {
             // App-backed row: render the cached icon loaded in `.task`. Never
             // resolve it inside `body` — see the .task comment above.
             Group {
@@ -1141,7 +1308,7 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile:
+        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
             return nil
         }
     }
@@ -1153,7 +1320,7 @@ private struct CommandPaletteRow: View {
     /// the host profile's entry summary, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return true
+        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument: return true
         default: return false
         }
     }

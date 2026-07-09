@@ -30,6 +30,20 @@ final class BackupCodecTests: XCTestCase {
                 BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
                                      displayOrder: 200, keyCode: 2, modifierFlags: 256)
             ],
+            quicklinks: [
+                QuicklinkDTO(
+                    id: UUID(uuidString: "11111111-1111-1111-1111-111111111111")!,
+                    name: "GitHub Search",
+                    keyword: "gh",
+                    link: "https://github.com/search?q={query}",
+                    openWithBundleID: "com.apple.Safari",
+                    keyCode: 5,
+                    modifierFlags: 786_432,
+                    isVisible: true,
+                    displayOrder: 300,
+                    createdAt: Date(timeIntervalSince1970: 1_700_000_100)
+                )
+            ],
             settings: ["menuBar.iconVisible": .bool(true)]
         )
     }
@@ -39,6 +53,23 @@ final class BackupCodecTests: XCTestCase {
         let data = try BackupCodec.encode(original)
         let decoded = try BackupCodec.decode(data)
         XCTAssertEqual(decoded, original)
+    }
+
+    func testDecodeOldSchemaDefaultsMissingQuicklinksToEmpty() throws {
+        let json = """
+        {
+          "appShortcuts": [],
+          "appVersion": "1.0",
+          "builtinPreferences": [],
+          "deviceName": "Old-Mac",
+          "exportedAt": "2023-11-14T22:13:20Z",
+          "schemaVersion": 1,
+          "settings": {}
+        }
+        """
+        let decoded = try BackupCodec.decode(Data(json.utf8))
+        XCTAssertEqual(decoded.schemaVersion, 1)
+        XCTAssertTrue(decoded.quicklinks.isEmpty)
     }
 
     func testDecodeRejectsUnsupportedSchemaVersion() throws {

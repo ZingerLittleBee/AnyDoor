@@ -2,8 +2,8 @@ import Foundation
 import SwiftData
 
 /// One completed Image Conversion, written per successful output when a run
-/// finishes. Powers the window's history section. The sixth `@Model` in the
-/// app's ModelContainer schema; all fields keep inline scalar defaults so
+/// finishes. Powers the window's history section. One of the `@Model` types in
+/// the app's ModelContainer schema; all fields keep inline scalar defaults so
 /// SwiftData lightweight migration can backfill existing stores. No thumbnail is
 /// stored — the preview resolves from `outputPath` at render time and degrades to
 /// a placeholder when the file is gone.

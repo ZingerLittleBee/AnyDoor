@@ -3,7 +3,7 @@ import Cocoa
 /// Global hotkey listener service.
 ///
 /// Owns the CGEvent tap at the HID level. On match, dispatches the associated `HotkeyAction`
-/// to the main thread for execution by `PanelStore.shared`.
+/// to the main thread through the injected dispatcher.
 ///
 /// - Note: The C callback `hotkeyCallback` runs off the main thread. Snapshots are shared
 ///   via `nonisolated(unsafe)` storage; HotkeySnapshot is Sendable.

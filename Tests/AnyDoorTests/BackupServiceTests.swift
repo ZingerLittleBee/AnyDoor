@@ -9,6 +9,7 @@ final class BackupServiceTests: XCTestCase {
             KeyBinding.self,
             BuiltinPreference.self,
             ClipboardHistoryItem.self,
+            Quicklink.self,
         ])
         let config = ModelConfiguration(isStoredInMemoryOnly: true, allowsSave: true)
         let container = try ModelContainer(for: schema, configurations: [config])
@@ -44,6 +45,7 @@ final class BackupServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.appShortcuts.count, 1)
         XCTAssertEqual(snapshot.appShortcuts.first?.appBundleID, "com.apple.Safari")
         XCTAssertEqual(snapshot.builtinPreferences.first?.itemKey, "darkMode")
+        XCTAssertTrue(snapshot.quicklinks.isEmpty)
         XCTAssertEqual(snapshot.settings["dev.bybee.AnyDoor.language"], .string("zh"))
     }
 
@@ -72,18 +74,59 @@ final class BackupServiceTests: XCTestCase {
         XCTAssertFalse(json.contains("Applications/Safari.app"))
     }
 
+    @MainActor
+    func testExportCollectsQuicklinksWithoutFaviconCache() throws {
+        let context = try makeContext()
+        let id = UUID()
+        let createdAt = Date(timeIntervalSince1970: 1_700_000_123)
+        context.insert(Quicklink(
+            id: id,
+            name: "GitHub Search",
+            keyword: "gh",
+            link: "https://github.com/search?q={query}",
+            openWithBundleID: "com.apple.Safari",
+            keyCode: 5,
+            modifierFlags: 786_432,
+            isVisible: false,
+            displayOrder: 300,
+            createdAt: createdAt
+        ))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        let snapshot = try service.exportSnapshot()
+
+        let quicklink = try XCTUnwrap(snapshot.quicklinks.first)
+        XCTAssertEqual(quicklink.id, id)
+        XCTAssertEqual(quicklink.name, "GitHub Search")
+        XCTAssertEqual(quicklink.keyword, "gh")
+        XCTAssertEqual(quicklink.link, "https://github.com/search?q={query}")
+        XCTAssertEqual(quicklink.openWithBundleID, "com.apple.Safari")
+        XCTAssertEqual(quicklink.keyCode, 5)
+        XCTAssertEqual(quicklink.modifierFlags, 786_432)
+        XCTAssertEqual(quicklink.isVisible, false)
+        XCTAssertEqual(quicklink.displayOrder, 300)
+        XCTAssertEqual(quicklink.createdAt, createdAt)
+
+        let json = try XCTUnwrap(String(data: BackupCodec.encode(snapshot), encoding: .utf8))
+        XCTAssertFalse(json.contains("favicon"))
+    }
+
     // MARK: - Import tests
 
     private func snapshot(
         shortcuts: [AppShortcutDTO] = [],
         prefs: [BuiltinPreferenceDTO] = [],
+        quicklinks: [QuicklinkDTO] = [],
         settings: [String: SettingValue] = [:]
     ) -> BackupSnapshot {
         BackupSnapshot(
             schemaVersion: BackupSnapshot.currentSchemaVersion,
             exportedAt: Date(timeIntervalSince1970: 1_700_000_000),
             appVersion: "1.0", deviceName: nil,
-            appShortcuts: shortcuts, builtinPreferences: prefs, settings: settings
+            appShortcuts: shortcuts, builtinPreferences: prefs,
+            quicklinks: quicklinks, settings: settings
         )
     }
 
@@ -203,6 +246,179 @@ final class BackupServiceTests: XCTestCase {
         ]))
         XCTAssertEqual(summary.preferencesUpdated, 0)
         XCTAssertEqual(try context.fetch(FetchDescriptor<BuiltinPreference>()).count, 0)
+    }
+
+    @MainActor
+    func testImportUpdatesExistingQuicklinkByIDAndKeepsLocalOnlyRows() throws {
+        let context = try makeContext()
+        let importedID = UUID()
+        let localOnlyID = UUID()
+        let importedCreatedAt = Date(timeIntervalSince1970: 1_700_000_200)
+        context.insert(Quicklink(
+            id: importedID,
+            name: "Old",
+            keyword: "old",
+            link: "https://old.example",
+            openWithBundleID: nil,
+            keyCode: nil,
+            modifierFlags: nil,
+            isVisible: true,
+            displayOrder: 999,
+            createdAt: Date(timeIntervalSince1970: 1)
+        ))
+        context.insert(Quicklink(
+            id: localOnlyID,
+            name: "Local Only",
+            keyword: "local",
+            link: "https://local.example",
+            openWithBundleID: nil,
+            keyCode: nil,
+            modifierFlags: nil,
+            isVisible: true,
+            displayOrder: 200,
+            createdAt: Date(timeIntervalSince1970: 2)
+        ))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        let summary = try service.importSnapshot(snapshot(quicklinks: [
+            QuicklinkDTO(
+                id: importedID,
+                name: "GitHub Search",
+                keyword: "gh",
+                link: "https://github.com/search?q={query}",
+                openWithBundleID: "com.apple.Safari",
+                keyCode: 5,
+                modifierFlags: 786_432,
+                isVisible: false,
+                displayOrder: 100,
+                createdAt: importedCreatedAt
+            )
+        ]))
+
+        XCTAssertEqual(summary.quicklinksUpdated, 1)
+        XCTAssertEqual(summary.quicklinksInserted, 0)
+        let rows = try context.fetch(FetchDescriptor<Quicklink>())
+        XCTAssertEqual(rows.count, 2)
+        let imported = try XCTUnwrap(rows.first { $0.id == importedID })
+        XCTAssertEqual(imported.name, "GitHub Search")
+        XCTAssertEqual(imported.keyword, "gh")
+        XCTAssertEqual(imported.link, "https://github.com/search?q={query}")
+        XCTAssertEqual(imported.openWithBundleID, "com.apple.Safari")
+        XCTAssertEqual(imported.keyCode, 5)
+        XCTAssertEqual(imported.modifierFlags, 786_432)
+        XCTAssertFalse(imported.isVisible)
+        XCTAssertEqual(imported.displayOrder, 100)
+        XCTAssertEqual(imported.createdAt, importedCreatedAt)
+        let localOnly = try XCTUnwrap(rows.first { $0.id == localOnlyID })
+        XCTAssertEqual(localOnly.name, "Local Only")
+        XCTAssertEqual(localOnly.keyword, "local")
+    }
+
+    @MainActor
+    func testImportQuicklinkKeywordCollisionClearsLocalKeywordAndKeepsBothRows() throws {
+        let context = try makeContext()
+        let importedID = UUID()
+        let localID = UUID()
+        context.insert(Quicklink(
+            id: localID,
+            name: "Local",
+            keyword: "GH",
+            link: "https://local.example",
+            displayOrder: 100
+        ))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        let summary = try service.importSnapshot(snapshot(quicklinks: [
+            QuicklinkDTO(
+                id: importedID,
+                name: "Imported",
+                keyword: "gh",
+                link: "https://imported.example",
+                openWithBundleID: nil,
+                keyCode: nil,
+                modifierFlags: nil,
+                isVisible: true,
+                displayOrder: 200,
+                createdAt: Date(timeIntervalSince1970: 3)
+            )
+        ]))
+
+        XCTAssertEqual(summary.quicklinksInserted, 1)
+        let rows = try context.fetch(FetchDescriptor<Quicklink>())
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.first { $0.id == importedID }?.keyword, "gh")
+        XCTAssertNil(rows.first { $0.id == localID }?.keyword)
+    }
+
+    @MainActor
+    func testImportedQuicklinkHotkeyCompilesWithoutRelaunch() throws {
+        let context = try makeContext()
+        let id = UUID()
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        _ = try service.importSnapshot(snapshot(quicklinks: [
+            QuicklinkDTO(
+                id: id,
+                name: "Docs",
+                keyword: nil,
+                link: "https://docs.example",
+                openWithBundleID: nil,
+                keyCode: 11,
+                modifierFlags: 786_432,
+                isVisible: false,
+                displayOrder: 100,
+                createdAt: Date(timeIntervalSince1970: 4)
+            )
+        ]))
+
+        let quicklinks = try context.fetch(FetchDescriptor<Quicklink>())
+        let snapshots = HotkeyCoordinator.compile(
+            bindings: [],
+            prefs: [],
+            quicklinks: quicklinks,
+            paletteHotkey: nil
+        )
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots.first?.action, .openQuicklink(id: id))
+    }
+
+    @MainActor
+    func testOldSchemaImportLeavesLocalQuicklinksUntouched() throws {
+        let context = try makeContext()
+        let localID = UUID()
+        context.insert(Quicklink(
+            id: localID,
+            name: "Local",
+            keyword: "local",
+            link: "https://local.example",
+            displayOrder: 100
+        ))
+        try context.save()
+
+        let json = """
+        {
+          "appShortcuts": [],
+          "appVersion": "1.0",
+          "builtinPreferences": [],
+          "deviceName": "Old-Mac",
+          "exportedAt": "2023-11-14T22:13:20Z",
+          "schemaVersion": 1,
+          "settings": {}
+        }
+        """
+        let oldSnapshot = try BackupCodec.decode(Data(json.utf8))
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil })
+        _ = try service.importSnapshot(oldSnapshot)
+
+        let rows = try context.fetch(FetchDescriptor<Quicklink>())
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?.id, localID)
+        XCTAssertEqual(rows.first?.keyword, "local")
     }
 
     @MainActor

@@ -31,10 +31,16 @@ struct AnnotationEditorView: View {
             Divider()
             styleBar
             Divider()
-            AnnotationCanvasView(model: model)
-                .frame(minWidth: 360, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
-                .padding(16)
-                .background(Color(nsColor: .underPageBackgroundColor))
+            ZStack(alignment: .bottom) {
+                AnnotationCanvasView(model: model)
+                    .frame(minWidth: 360, maxWidth: .infinity, minHeight: 240, maxHeight: .infinity)
+                if model.isCropSessionActive {
+                    cropOptionsBar
+                        .padding(.bottom, 18)
+                }
+            }
+            .padding(16)
+            .background(Color(nsColor: .underPageBackgroundColor))
         }
         .frame(minWidth: 760, minHeight: 520)
         // Suppress the blue keyboard-focus ring on the toolbar buttons and color
@@ -68,11 +74,15 @@ struct AnnotationEditorView: View {
                 iconButton("doc.on.doc", help: L(.captureOverlayCopy)) { export(.copy) }
                 iconButton("square.and.arrow.down", help: L(.captureOverlaySave)) { export(.save) }
                 iconButton("pin", help: L(.captureOverlayPin)) { export(.pin) }
+                Button { export(.save) } label: {
+                    Text(L(.captureOverlaySaveAs)).padding(.horizontal, 2)
+                }
+                .buttonStyle(.bordered)
                 Button { export(.done) } label: {
                     Text(L(.captureEditorDone)).fontWeight(.semibold).padding(.horizontal, 4)
                 }
                 .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
+                .keyboardShortcut(model.isCropSessionActive ? nil : .defaultAction)
             }
         }
         .padding(.horizontal, 12)
@@ -81,7 +91,7 @@ struct AnnotationEditorView: View {
 
     private func toolButton(_ tool: AnnotationTool) -> some View {
         let selected = model.tool == tool
-        return Button { model.tool = tool } label: {
+        return Button { model.setTool(tool) } label: {
             Image(systemName: symbol(for: tool))
                 .font(.system(size: 15))
                 .frame(width: 30, height: 28)
@@ -94,6 +104,48 @@ struct AnnotationEditorView: View {
         }
         .buttonStyle(.plain)
         .help(L(helpKey(for: tool)))
+    }
+
+    private var cropOptionsBar: some View {
+        HStack(spacing: 8) {
+            Picker(selection: cropAspectPreset) {
+                LocalizedText(.captureEditorCropFreeform).tag(CropAspectPreset.freeform)
+                LocalizedText(.captureEditorCropOriginal).tag(CropAspectPreset.original)
+                Text("1:1").tag(CropAspectPreset.square)
+                Text("4:3").tag(CropAspectPreset.fourThree)
+                Text("3:2").tag(CropAspectPreset.threeTwo)
+                Text("16:9").tag(CropAspectPreset.sixteenNine)
+            } label: {
+                EmptyView()
+            }
+            .pickerStyle(.menu)
+            .frame(width: 118)
+
+            iconButton("arrow.left.arrow.right", help: L(.captureEditorCropFlip), enabled: model.canFlipCropAspect) {
+                model.flipCropAspectOrientation()
+            }
+
+            Divider().frame(height: 20)
+
+            Button { model.cancelCropSession() } label: {
+                LocalizedText(.captureEditorCropCancel)
+            }
+            .buttonStyle(.borderless)
+
+            Button { model.commitCropSession() } label: {
+                LocalizedText(.captureEditorCropApply).fontWeight(.semibold)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule(style: .continuous))
+        .overlay {
+            Capsule(style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.28), radius: 14, y: 6)
     }
 
     private func iconButton(_ symbol: String, help: String, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
@@ -180,6 +232,12 @@ struct AnnotationEditorView: View {
         Binding(
             get: { model.style.fillColor != nil },
             set: { model.style.fillColor = $0 ? model.style.strokeColor.withAlpha(0.25) : nil }
+        )
+    }
+    private var cropAspectPreset: Binding<CropAspectPreset> {
+        Binding(
+            get: { model.cropAspectPreset },
+            set: { model.setCropAspectPreset($0) }
         )
     }
 
@@ -282,9 +340,25 @@ private struct SwatchDot: View {
                 ctx.stroke(dot, with: .color(.gray.opacity(0.5)), lineWidth: 1)
             }
             // Concentric selection ring with a 2pt gap, sharing the dot's center.
+            // The ring is stroked in the swatch's OWN color (Apple Markup / iOS
+            // palette style): with dot and ring edges the same hue, the eye has no
+            // cross-color edge pair to misjudge — a contrasting ring (accent blue,
+            // even neutral white) makes the perfectly centered dot read as
+            // off-center via chromostereopsis / vernier gap sensitivity.
             if selected {
                 let ring = Path(ellipseIn: CGRect(x: c.x - 12, y: c.y - 12, width: 24, height: 24))
-                ctx.stroke(ring, with: .color(.accentColor), lineWidth: 2)
+                switch fill {
+                case let .solid(color):
+                    ctx.stroke(ring, with: .color(color), lineWidth: 2)
+                case .rainbow:
+                    ctx.stroke(ring, with: .conicGradient(Self.rainbow, center: c), lineWidth: 2)
+                }
+                // Same hairline treatment as the dot so a black/white ring still
+                // reads against a matching bar background.
+                if needsEdge {
+                    let outer = Path(ellipseIn: CGRect(x: c.x - 13, y: c.y - 13, width: 26, height: 26))
+                    ctx.stroke(outer, with: .color(.gray.opacity(0.5)), lineWidth: 1)
+                }
             }
         }
         .frame(width: 28, height: 28)

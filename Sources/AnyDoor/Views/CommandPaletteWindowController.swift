@@ -53,11 +53,45 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    private func show() {
+    func showArgumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?) {
+        show(initialMode: .argumentInput(
+            quicklinkID: quicklinkID,
+            title: title,
+            link: link,
+            openWithBundleID: openWithBundleID
+        ))
+    }
+
+    private enum InitialMode {
+        case root
+        case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?)
+
+        @MainActor
+        func apply(to state: CommandPaletteState) {
+            switch self {
+            case .root:
+                break
+            case .argumentInput(let quicklinkID, let title, let link, let openWithBundleID):
+                state.enterArgumentInput(
+                    quicklinkID: quicklinkID,
+                    title: title,
+                    link: link,
+                    openWithBundleID: openWithBundleID
+                )
+            }
+        }
+    }
+
+    private func show(initialMode: InitialMode = .root) {
         let sections = collectSections(installedApps: cachedApps)
         prewarmIcons(for: sections)
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
-        let pickerState = CommandPaletteState(sections: sections, hyperFlags: hyperFlags)
+        let pickerState = CommandPaletteState(
+            sections: sections,
+            hyperFlags: hyperFlags,
+            quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+        )
+        initialMode.apply(to: pickerState)
         self.state = pickerState
 
         let view = CommandPalettePicker(
@@ -117,7 +151,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             self.cachedApps = apps
             guard let pickerState, self.state === pickerState, self.window?.isVisible == true else { return }
             let refreshed = self.collectSections(installedApps: apps)
-            pickerState.updateSections(refreshed)
+            pickerState.updateSections(
+                refreshed,
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+            )
             self.prewarmIcons(for: refreshed)
         }
     }
@@ -126,13 +163,16 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// first scroll into the Applications section finds resolved icons instead of
     /// cold-cache disk hits. Mirrors CommandPaletteRow.iconPath.
     private func prewarmIcons(for sections: [CommandPaletteSection]) {
-        AppIconCache.prewarm(sections.flatMap(\.entries).compactMap { entry in
+        let entries = sections.flatMap(\.entries)
+        AppIconCache.prewarm(entries.compactMap { entry in
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile: return nil
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+                return nil
             }
         })
+        QuicklinkIconProvider.prewarm(entries.compactMap(\.quicklinkIcon))
     }
 
     /// Build the section groups shown in the palette. Sections with no
@@ -185,10 +225,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             guard let item = builtin(entry) else { return true }
             return !grouped.contains(item)
         }
-        if !generalCommands.isEmpty {
+        let quicklinks = QuicklinkStore.shared.paletteEntries()
+        let generalEntries = generalCommands + quicklinks
+        if !generalEntries.isEmpty {
             sections.append(CommandPaletteSection(
                 titleKey: .commandPaletteSectionCommands,
-                entries: generalCommands
+                entries: generalEntries
             ))
         }
         for (titleKey, items) in groups {
@@ -289,6 +331,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             return true
         }
 
+        // While the input method is composing (marked text — e.g. typing
+        // Chinese pinyin), every key belongs to the IME: Return commits the
+        // composition, arrows navigate candidates, Esc cancels it. Pass the
+        // event through so the field editor handles it instead of the palette.
+        if window.hasIMEComposition { return false }
+
         switch keyCode {
         case 125:
             state.moveDown()
@@ -301,9 +349,11 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 commit(entry)
             }
             return true
-        case 48: // Tab: absorb a bare dev-tool keyword into a scope badge.
+        case 48: // Tab: absorb a bare keyword into a badge (dev-tool scope, else Quicklink argument).
             if state.isAtRoot {
-                state.tryAbsorbDevToolScope()
+                if !state.tryAbsorbDevToolScope() {
+                    state.tryAbsorbQuicklinkKeyword()
+                }
                 return true // swallow Tab either way so focus doesn't jump
             }
             return false
@@ -362,6 +412,15 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             }
         case .enterDevToolScope(let scope):
             state?.enterDevToolScope(scope)
+        case .enterQuicklinkArgument(let id):
+            guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { close(); return }
+            state?.enterArgumentInput(
+                quicklinkID: id,
+                title: quicklink.displayName,
+                link: quicklink.link,
+                openWithBundleID: quicklink.openWithBundleID,
+                keyword: quicklink.keyword
+            )
         case .launchAppShortcut(let id):
             close()
             guard let binding = PanelStore.shared.binding(id: id) else { return }
@@ -391,6 +450,14 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
                 Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
             }
+        case .openQuicklink(let id):
+            close()
+            guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
+            QuicklinkOpener.shared.open(quicklink)
+        case .openQuicklinkArgument(let id, let argument):
+            close()
+            guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
+            QuicklinkOpener.shared.open(quicklink, argument: argument)
         case .dismiss:
             close()
         }

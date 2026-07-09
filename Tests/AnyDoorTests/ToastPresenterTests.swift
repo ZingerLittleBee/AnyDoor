@@ -4,6 +4,11 @@ import XCTest
 @testable import AnyDoor
 
 final class ToastPresenterTests: XCTestCase {
+    func testInfoToastUsesNonFailureDuration() {
+        XCTAssertEqual(ToastStyle.info("Fallback").message, "Fallback")
+        XCTAssertEqual(ToastStyle.info("Fallback").displayDuration, ToastStyle.success("Fallback").displayDuration)
+    }
+
     @MainActor
     func testToastDoesNotLetHostingViewResizeItsWindow() throws {
         let presenter = ToastPresenter.shared

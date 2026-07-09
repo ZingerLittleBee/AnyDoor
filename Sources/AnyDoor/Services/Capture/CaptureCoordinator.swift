@@ -394,7 +394,12 @@ final class CaptureCoordinator {
         // PNG is the capture pipeline's native format: write the original bytes
         // unchanged so a plain ".png" Save As never round-trips through the encoder.
         guard format != .png else {
-            try? png.write(to: url, options: .atomic)
+            do {
+                try png.write(to: url, options: .atomic)
+                SystemSound.saveSuccess.play()
+            } catch {
+                ToastPresenter.shared.show(.failure(L(.captureToastSaveAsFailed)))
+            }
             return
         }
 
@@ -404,6 +409,7 @@ final class CaptureCoordinator {
         let quality = Double(ImageConversionPreferences.qualityPercent()) / 100
         do {
             try Self.transcode(png: png, to: url, format: format, quality: quality)
+            SystemSound.saveSuccess.play()
         } catch {
             ToastPresenter.shared.show(.failure(L(.captureToastSaveAsFailed)))
         }

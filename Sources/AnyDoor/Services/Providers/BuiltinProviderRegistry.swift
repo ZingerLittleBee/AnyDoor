@@ -66,6 +66,7 @@ enum BuiltinProviderRegistry {
             ScreenshotTranslateProvider(),
             TranslateSelectionProvider(),
             ImageConversionProvider(),
+            NewQuicklinkProvider(),
         ]
     }
 }

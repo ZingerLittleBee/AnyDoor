@@ -11,6 +11,7 @@ enum HotkeyAction: Sendable, Hashable {
     case brightnessUp
     case brightnessDown
     case showCommandPalette
+    case openQuicklink(id: UUID)
 }
 
 /// Sendable snapshot passed across the CGEvent tap boundary.

@@ -78,7 +78,7 @@ struct BuiltinCatalogInvariantTests {
         for item in BuiltinItem.allCases where item.kind == .hiddenHotkey {
             let pref = BuiltinPreference(itemKey: item.rawValue, keyCode: 1,
                                          modifierFlags: Int(CGEventFlags.maskCommand.rawValue))
-            let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], paletteHotkey: nil)
+            let snapshots = HotkeyCoordinator.compile(bindings: [], prefs: [pref], quicklinks: [], paletteHotkey: nil)
             #expect(snapshots.count == 1,
                     "\(item) is hiddenHotkey-kind but HotkeyCoordinator.compile drops its binding")
         }
