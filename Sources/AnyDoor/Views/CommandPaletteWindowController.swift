@@ -53,21 +53,31 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    func showArgumentInput(quicklinkID: UUID, title: String, link: String) {
-        show(initialMode: .argumentInput(quicklinkID: quicklinkID, title: title, link: link))
+    func showArgumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?) {
+        show(initialMode: .argumentInput(
+            quicklinkID: quicklinkID,
+            title: title,
+            link: link,
+            openWithBundleID: openWithBundleID
+        ))
     }
 
     private enum InitialMode {
         case root
-        case argumentInput(quicklinkID: UUID, title: String, link: String)
+        case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?)
 
         @MainActor
         func apply(to state: CommandPaletteState) {
             switch self {
             case .root:
                 break
-            case .argumentInput(let quicklinkID, let title, let link):
-                state.enterArgumentInput(quicklinkID: quicklinkID, title: title, link: link)
+            case .argumentInput(let quicklinkID, let title, let link, let openWithBundleID):
+                state.enterArgumentInput(
+                    quicklinkID: quicklinkID,
+                    title: title,
+                    link: link,
+                    openWithBundleID: openWithBundleID
+                )
             }
         }
     }
@@ -153,7 +163,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// first scroll into the Applications section finds resolved icons instead of
     /// cold-cache disk hits. Mirrors CommandPaletteRow.iconPath.
     private func prewarmIcons(for sections: [CommandPaletteSection]) {
-        AppIconCache.prewarm(sections.flatMap(\.entries).compactMap { entry in
+        let entries = sections.flatMap(\.entries)
+        AppIconCache.prewarm(entries.compactMap { entry in
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
@@ -161,6 +172,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 return nil
             }
         })
+        QuicklinkIconProvider.prewarm(entries.compactMap(\.quicklinkIcon))
     }
 
     /// Build the section groups shown in the palette. Sections with no
@@ -400,7 +412,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             state?.enterDevToolScope(scope)
         case .enterQuicklinkArgument(let id):
             guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { close(); return }
-            state?.enterArgumentInput(quicklinkID: id, title: quicklink.displayName, link: quicklink.link)
+            state?.enterArgumentInput(
+                quicklinkID: id,
+                title: quicklink.displayName,
+                link: quicklink.link,
+                openWithBundleID: quicklink.openWithBundleID
+            )
         case .launchAppShortcut(let id):
             close()
             guard let binding = PanelStore.shared.binding(id: id) else { return }

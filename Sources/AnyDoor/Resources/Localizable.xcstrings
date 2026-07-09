@@ -8076,6 +8076,40 @@
         }
       }
     },
+    "settings.quicklinks.openWith": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open With"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开方式"
+          }
+        }
+      }
+    },
+    "settings.quicklinks.openWith.default": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System Default"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "系统默认"
+          }
+        }
+      }
+    },
     "settings.quicklinks.save": {
       "extractionState": "manual",
       "localizations": {

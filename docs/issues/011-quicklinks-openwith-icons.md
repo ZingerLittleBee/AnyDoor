@@ -1,7 +1,7 @@
 ---
 id: 011
 title: "Quicklinks: Open With override and derived icons"
-status: open
+status: done
 prd: docs/prds/2026-07-09-quicklinks.md
 ---
 

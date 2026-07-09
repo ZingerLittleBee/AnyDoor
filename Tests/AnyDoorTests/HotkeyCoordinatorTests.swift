@@ -172,7 +172,7 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let coordinator = HotkeyCoordinator(
             quicklinkResolver: { id in id == quicklink.id ? quicklink : nil },
             quicklinkOpener: { openedID = $0.id },
-            quicklinkArgumentPresenter: { quicklinkID, _, _ in presentedID = quicklinkID }
+            quicklinkArgumentPresenter: { quicklinkID, _, _, _ in presentedID = quicklinkID }
         )
 
         coordinator.dispatch(.openQuicklink(id: quicklink.id))
@@ -186,15 +186,16 @@ final class HotkeyCoordinatorTests: XCTestCase {
         let quicklink = Quicklink(
             id: UUID(),
             name: "GitHub 搜索",
-            link: "https://github.com/search?q={query}"
+            link: "https://github.com/search?q={query}",
+            openWithBundleID: "com.apple.Safari"
         )
         var openedID: UUID?
-        var presented: (id: UUID, title: String, link: String)?
+        var presented: (id: UUID, title: String, link: String, openWithBundleID: String?)?
         let coordinator = HotkeyCoordinator(
             quicklinkResolver: { id in id == quicklink.id ? quicklink : nil },
             quicklinkOpener: { openedID = $0.id },
-            quicklinkArgumentPresenter: { quicklinkID, title, link in
-                presented = (quicklinkID, title, link)
+            quicklinkArgumentPresenter: { quicklinkID, title, link, openWithBundleID in
+                presented = (quicklinkID, title, link, openWithBundleID)
             }
         )
 
@@ -204,5 +205,6 @@ final class HotkeyCoordinatorTests: XCTestCase {
         XCTAssertEqual(presented?.id, quicklink.id)
         XCTAssertEqual(presented?.title, "GitHub 搜索")
         XCTAssertEqual(presented?.link, "https://github.com/search?q={query}")
+        XCTAssertEqual(presented?.openWithBundleID, "com.apple.Safari")
     }
 }

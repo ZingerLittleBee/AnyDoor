@@ -20,7 +20,7 @@ final class CommandPaletteState {
     enum Level: Equatable {
         case root
         case options(parentTitle: String)
-        case argumentInput(quicklinkID: UUID, title: String, link: String)
+        case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?)
     }
 
     private(set) var level: Level = .root
@@ -33,7 +33,7 @@ final class CommandPaletteState {
         return false
     }
     var argumentInputTitle: String? {
-        if case .argumentInput(_, let title, _) = level { return title }
+        if case .argumentInput(_, let title, _, _) = level { return title }
         return nil
     }
 
@@ -62,10 +62,20 @@ final class CommandPaletteState {
     }
 
     /// Push argument-input mode for a Search Template Quicklink.
-    func enterArgumentInput(quicklinkID: UUID, title: String, link: String) {
+    func enterArgumentInput(
+        quicklinkID: UUID,
+        title: String,
+        link: String,
+        openWithBundleID: String? = nil
+    ) {
         optionsByID = [:]
         optionEntries = []
-        level = .argumentInput(quicklinkID: quicklinkID, title: title, link: link)
+        level = .argumentInput(
+            quicklinkID: quicklinkID,
+            title: title,
+            link: link,
+            openWithBundleID: openWithBundleID
+        )
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
@@ -344,7 +354,8 @@ final class CommandPaletteState {
                     quicklinkID: match.quicklinkID,
                     title: match.title,
                     argument: match.argument,
-                    substitutedLink: match.substitutedLink
+                    substitutedLink: match.substitutedLink,
+                    openWithBundleID: match.openWithBundleID
                 )
             ]
         )
@@ -354,7 +365,8 @@ final class CommandPaletteState {
         quicklinkID: UUID,
         title: String,
         argument: String,
-        substitutedLink: String?
+        substitutedLink: String?,
+        openWithBundleID: String?
     ) -> PanelEntry {
         let source = PanelEntry.Source.quicklinkArgument(id: quicklinkID, argument: argument)
         return PanelEntry(
@@ -365,7 +377,10 @@ final class CommandPaletteState {
             hotkey: nil,
             title: "\(title) — \(argument)",
             subtitle: substitutedLink,
-            symbol: "magnifyingglass",
+            symbol: "link",
+            quicklinkIcon: substitutedLink.map {
+                QuicklinkIconRequest(link: $0, openWithBundleID: openWithBundleID)
+            },
             kind: .action,
             toggleState: nil,
             permission: .notRequired
@@ -575,14 +590,17 @@ final class CommandPaletteState {
     }
 
     private func argumentInputEntry() -> PanelEntry? {
-        guard case .argumentInput(let quicklinkID, let title, let link) = level else { return nil }
+        guard case .argumentInput(let quicklinkID, let title, let link, let openWithBundleID) = level else {
+            return nil
+        }
         let argument = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !argument.isEmpty else { return nil }
         return Self.quicklinkArgumentEntry(
             quicklinkID: quicklinkID,
             title: title,
             argument: argument,
-            substitutedLink: QuicklinkOpener.substitutedTemplateLink(link: link, argument: argument)
+            substitutedLink: QuicklinkOpener.substitutedTemplateLink(link: link, argument: argument),
+            openWithBundleID: openWithBundleID
         )
     }
 
@@ -940,7 +958,7 @@ struct CommandPalettePicker: View {
                     Text(parentTitle)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                } else if case let .argumentInput(_, title, _) = state.level {
+                } else if case let .argumentInput(_, title, _, _) = state.level {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
@@ -1187,7 +1205,14 @@ private struct CommandPaletteRow: View {
 
     @ViewBuilder
     private var icon: some View {
-        if iconPath != nil {
+        if let request = entry.quicklinkIcon {
+            QuicklinkIconView(
+                request: request,
+                fallbackSymbol: entry.symbol,
+                size: Self.iconSize,
+                symbolPointSize: 13
+            )
+        } else if iconPath != nil {
             // App-backed row: render the cached icon loaded in `.task`. Never
             // resolve it inside `body` — see the .task comment above.
             Group {

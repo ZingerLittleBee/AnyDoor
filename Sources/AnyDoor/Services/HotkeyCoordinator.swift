@@ -22,13 +22,18 @@ final class HotkeyCoordinator {
     private var modelContainer: ModelContainer?
     private let quicklinkResolver: @MainActor (UUID) -> Quicklink?
     private let quicklinkOpener: @MainActor (Quicklink) -> Void
-    private let quicklinkArgumentPresenter: @MainActor (UUID, String, String) -> Void
+    private let quicklinkArgumentPresenter: @MainActor (UUID, String, String, String?) -> Void
 
     init(
         quicklinkResolver: @escaping @MainActor (UUID) -> Quicklink? = { QuicklinkStore.shared.quicklink(id: $0) },
         quicklinkOpener: @escaping @MainActor (Quicklink) -> Void = { QuicklinkOpener.shared.open($0) },
-        quicklinkArgumentPresenter: @escaping @MainActor (UUID, String, String) -> Void = {
-            CommandPaletteWindowController.shared.showArgumentInput(quicklinkID: $0, title: $1, link: $2)
+        quicklinkArgumentPresenter: @escaping @MainActor (UUID, String, String, String?) -> Void = {
+            CommandPaletteWindowController.shared.showArgumentInput(
+                quicklinkID: $0,
+                title: $1,
+                link: $2,
+                openWithBundleID: $3
+            )
         }
     ) {
         self.quicklinkResolver = quicklinkResolver
@@ -144,7 +149,12 @@ final class HotkeyCoordinator {
         case .openQuicklink(let id):
             guard let quicklink = quicklinkResolver(id) else { return }
             if QuicklinkDestination.isSearchTemplate(link: quicklink.link) {
-                quicklinkArgumentPresenter(quicklink.id, quicklink.displayName, quicklink.link)
+                quicklinkArgumentPresenter(
+                    quicklink.id,
+                    quicklink.displayName,
+                    quicklink.link,
+                    quicklink.openWithBundleID
+                )
             } else {
                 quicklinkOpener(quicklink)
             }

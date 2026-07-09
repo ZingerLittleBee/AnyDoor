@@ -85,6 +85,33 @@ final class QuicklinkOpenerPlanTests: XCTestCase {
         XCTAssertEqual(QuicklinkOpener.plan(link: "slack://open"), .open(slack))
     }
 
+    func testOpenWithHitPlansApplicationOpen() throws {
+        let github = try XCTUnwrap(URL(string: "https://github.com"))
+        let code = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
+
+        XCTAssertEqual(
+            QuicklinkOpener.plan(
+                link: "https://github.com",
+                openWithBundleID: "com.microsoft.VSCode",
+                applicationURLForBundleID: { $0 == "com.microsoft.VSCode" ? code : nil }
+            ),
+            .openWithApplication(github, applicationURL: code)
+        )
+    }
+
+    func testOpenWithMissingPlansDefaultOpenWithWarning() throws {
+        let github = try XCTUnwrap(URL(string: "https://github.com"))
+
+        XCTAssertEqual(
+            QuicklinkOpener.plan(
+                link: "https://github.com",
+                openWithBundleID: "com.microsoft.VSCode",
+                applicationURLForBundleID: { _ in nil }
+            ),
+            .open(github, warning: .openWithAppMissing("com.microsoft.VSCode"))
+        )
+    }
+
     func testTemplateArgumentIsPercentEncodedAndReplacedEverywhere() throws {
         let planned = QuicklinkOpener.plan(
             link: "https://example.com/search?q={query}#{query}",
@@ -106,6 +133,109 @@ final class QuicklinkOpenerPlanTests: XCTestCase {
     }
 }
 
+final class QuicklinkIconProviderSourceTests: XCTestCase {
+    func testPinnedOpenWithAppWinsOverDestinationIcon() {
+        let source = QuicklinkIconProvider.source(
+            for: QuicklinkIconRequest(
+                link: "https://github.com",
+                openWithBundleID: "com.microsoft.VSCode"
+            ),
+            lookup: lookup(
+                bundleApps: [
+                    "com.microsoft.VSCode": URL(fileURLWithPath: "/Applications/Visual Studio Code.app"),
+                ]
+            )
+        )
+
+        XCTAssertEqual(source, .appBundleID("com.microsoft.VSCode"))
+    }
+
+    func testMissingPinnedAppFallsThroughToFileSystemIcon() {
+        let folder = URL(fileURLWithPath: "/tmp/AnyDoor")
+
+        let source = QuicklinkIconProvider.source(
+            for: QuicklinkIconRequest(link: folder.path, openWithBundleID: "missing.app"),
+            lookup: lookup(fileExistence: [folder.path: .directory])
+        )
+
+        XCTAssertEqual(source, .fileSystem(path: folder.path))
+    }
+
+    func testFileSystemIconWinsForExistingFilesAndFolders() {
+        let file = URL(fileURLWithPath: "/tmp/AnyDoor/README.md")
+        let folder = URL(fileURLWithPath: "/tmp/AnyDoor")
+        let lookup = lookup(fileExistence: [
+            file.path: .file,
+            folder.path: .directory,
+        ])
+
+        XCTAssertEqual(
+            QuicklinkIconProvider.source(
+                for: QuicklinkIconRequest(link: file.path, openWithBundleID: nil),
+                lookup: lookup
+            ),
+            .fileSystem(path: file.path)
+        )
+        XCTAssertEqual(
+            QuicklinkIconProvider.source(
+                for: QuicklinkIconRequest(link: folder.path, openWithBundleID: nil),
+                lookup: lookup
+            ),
+            .fileSystem(path: folder.path)
+        )
+    }
+
+    func testDeeplinkHandlerIconAndUnhandledFallback() throws {
+        let slackURL = try XCTUnwrap(URL(string: "slack://open"))
+        let slackApp = URL(fileURLWithPath: "/Applications/Slack.app")
+        let handled = lookup(handlers: [slackURL: slackApp])
+
+        XCTAssertEqual(
+            QuicklinkIconProvider.source(
+                for: QuicklinkIconRequest(link: "slack://open", openWithBundleID: nil),
+                lookup: handled
+            ),
+            .applicationURL(slackApp)
+        )
+        XCTAssertEqual(
+            QuicklinkIconProvider.source(
+                for: QuicklinkIconRequest(link: "unknownscheme://open", openWithBundleID: nil),
+                lookup: lookup()
+            ),
+            .symbol("link")
+        )
+    }
+
+    func testWebAndSearchTemplateUseFaviconHost() {
+        XCTAssertEqual(
+            QuicklinkIconProvider.source(
+                for: QuicklinkIconRequest(link: "https://github.com", openWithBundleID: nil),
+                lookup: lookup()
+            ),
+            .favicon(host: "github.com")
+        )
+        XCTAssertEqual(
+            QuicklinkIconProvider.source(
+                for: QuicklinkIconRequest(link: "https://github.com/search?q={query}", openWithBundleID: nil),
+                lookup: lookup()
+            ),
+            .favicon(host: "github.com")
+        )
+    }
+
+    private func lookup(
+        fileExistence: [String: QuicklinkDestination.FileExistence] = [:],
+        bundleApps: [String: URL] = [:],
+        handlers: [URL: URL] = [:]
+    ) -> QuicklinkIconLookup {
+        QuicklinkIconLookup(
+            fileExists: { path in fileExistence[path] ?? .none },
+            applicationURLForBundleID: { bundleApps[$0] },
+            applicationURLToOpen: { handlers[$0] }
+        )
+    }
+}
+
 @MainActor
 final class QuicklinkStoreTests: XCTestCase {
     private var container: ModelContainer?
@@ -124,9 +254,17 @@ final class QuicklinkStoreTests: XCTestCase {
         XCTAssertEqual(store.quicklinks.map(\.name), ["AnyDoor 仓库"])
         XCTAssertEqual(store.quicklinks.first?.link, "~/Bee/AnyDoor")
 
-        try store.update(id: row.id, name: "AnyDoor", link: "https://github.com", hotkey: nil, isVisible: false)
+        try store.update(
+            id: row.id,
+            name: "AnyDoor",
+            link: "https://github.com",
+            openWithBundleID: "com.apple.Safari",
+            hotkey: nil,
+            isVisible: false
+        )
         XCTAssertEqual(store.quicklinks.first?.name, "AnyDoor")
         XCTAssertEqual(store.quicklinks.first?.link, "https://github.com")
+        XCTAssertEqual(store.quicklinks.first?.openWithBundleID, "com.apple.Safari")
         XCTAssertEqual(store.quicklinks.first?.isVisible, false)
 
         store.delete(id: row.id)
@@ -150,6 +288,32 @@ final class QuicklinkStoreTests: XCTestCase {
         }
     }
 
+    func testOpenWithBundleIDIsNormalized() throws {
+        let store = try makeStore()
+        let row = try store.add(
+            name: "Docs",
+            link: "https://example.com",
+            openWithBundleID: "  com.apple.Safari\n"
+        )
+
+        XCTAssertEqual(store.quicklinks.first?.openWithBundleID, "com.apple.Safari")
+
+        try store.update(
+            id: row.id,
+            name: "Docs",
+            link: "https://example.com",
+            openWithBundleID: "   ",
+            hotkey: nil,
+            isVisible: true
+        )
+
+        XCTAssertNil(store.quicklinks.first?.openWithBundleID)
+        XCTAssertEqual(
+            QuicklinkIconRequest(link: "https://example.com", openWithBundleID: "  com.apple.Safari\n"),
+            QuicklinkIconRequest(link: "https://example.com", openWithBundleID: "com.apple.Safari")
+        )
+    }
+
     func testHiddenRowsDoNotEnterPaletteButTemplatesDo() throws {
         let store = try makeStore()
 
@@ -166,13 +330,18 @@ final class QuicklinkStoreTests: XCTestCase {
         XCTAssertEqual(store.paletteEntries().last?.source, .quicklinkTemplate(id: template.id))
         XCTAssertEqual(store.paletteEntries().last?.searchAliases, ["gh"])
         XCTAssertEqual(
+            store.paletteEntries().last?.quicklinkIcon,
+            QuicklinkIconRequest(link: "https://github.com/search?q={query}", openWithBundleID: nil)
+        )
+        XCTAssertEqual(
             store.templateCandidates(),
             [
                 QuicklinkTemplateCandidate(
                     id: template.id,
                     title: "GitHub 搜索",
                     keyword: "gh",
-                    link: "https://github.com/search?q={query}"
+                    link: "https://github.com/search?q={query}",
+                    openWithBundleID: nil
                 )
             ]
         )

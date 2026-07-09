@@ -14,7 +14,9 @@ versioning.
   drill into argument mode, and support exact keyword/full-name inline
   arguments such as `gh AnyDoor`; Quicklinks can also record global hotkeys,
   with plain links opening directly and Search Templates summoning argument
-  mode.
+  mode. Entries can pin an Open With app override, falling back to the system
+  default if that app disappears, and their icons are derived from the pinned
+  app, file/folder metadata, deeplink handlers, or cached web favicons.
 - Onboarding: a new App Shortcuts step demos the product's core interaction —
   a bound hotkey presses down on a mock desktop and the target app's window
   springs to the front over the dimmed previous window, a second press hides

@@ -291,6 +291,8 @@ enum L10n {
         case settingsQuicklinksLinkRequired = "settings.quicklinks.linkRequired"
         case settingsQuicklinksName = "settings.quicklinks.name"
         case settingsQuicklinksNewTitle = "settings.quicklinks.newTitle"
+        case settingsQuicklinksOpenWith = "settings.quicklinks.openWith"
+        case settingsQuicklinksOpenWithDefault = "settings.quicklinks.openWith.default"
         case settingsQuicklinksSave = "settings.quicklinks.save"
         case settingsQuicklinksSaveFailed = "settings.quicklinks.saveFailed"
         case settingsCaptureAutoCopy = "settings.capture.autoCopy"

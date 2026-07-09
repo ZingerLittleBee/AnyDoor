@@ -13,6 +13,21 @@ struct QuicklinkTemplateCandidate: Equatable {
     let title: String
     let keyword: String?
     let link: String
+    let openWithBundleID: String?
+
+    init(
+        id: UUID,
+        title: String,
+        keyword: String?,
+        link: String,
+        openWithBundleID: String? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.keyword = keyword
+        self.link = link
+        self.openWithBundleID = openWithBundleID
+    }
 }
 
 @MainActor
@@ -64,16 +79,19 @@ final class QuicklinkStore {
         name: String,
         link: String,
         keyword: String? = nil,
+        openWithBundleID: String? = nil,
         hotkey: HotkeyDescriptor? = nil,
         isVisible: Bool = true
     ) throws -> Quicklink {
         guard let modelContext else { throw QuicklinkStoreError.notConfigured }
         let sanitizedLink = try validate(link: link)
         let sanitizedKeyword = try validate(keyword: keyword, excluding: nil)
+        let normalizedOpenWith = QuicklinkOpenWith.normalizedBundleID(openWithBundleID)
         let row = Quicklink(
             name: name,
             keyword: sanitizedKeyword,
             link: sanitizedLink,
+            openWithBundleID: normalizedOpenWith,
             keyCode: hotkey?.keyCode,
             modifierFlags: hotkey?.modifierFlags,
             isVisible: isVisible,
@@ -89,15 +107,18 @@ final class QuicklinkStore {
         name: String,
         link: String,
         keyword: String? = nil,
+        openWithBundleID: String? = nil,
         hotkey: HotkeyDescriptor?,
         isVisible: Bool
     ) throws {
         guard let row = quicklink(id: id) else { return }
         let sanitizedLink = try validate(link: link)
         let sanitizedKeyword = try validate(keyword: keyword, excluding: id)
+        let normalizedOpenWith = QuicklinkOpenWith.normalizedBundleID(openWithBundleID)
         row.name = name
         row.keyword = sanitizedKeyword
         row.link = sanitizedLink
+        row.openWithBundleID = normalizedOpenWith
         row.hotkeyDescriptor = hotkey
         row.isVisible = isVisible
         try saveRebuildRefresh()
@@ -142,6 +163,10 @@ final class QuicklinkStore {
                 subtitle: row.link,
                 searchAliases: paletteSearchAliases(for: row),
                 symbol: "link",
+                quicklinkIcon: QuicklinkIconRequest(
+                    link: row.link,
+                    openWithBundleID: row.openWithBundleID
+                ),
                 kind: .action,
                 toggleState: nil,
                 permission: .notRequired
@@ -157,7 +182,8 @@ final class QuicklinkStore {
                 id: row.id,
                 title: row.displayName,
                 keyword: normalizedKeyword(for: row),
-                link: row.link
+                link: row.link,
+                openWithBundleID: row.openWithBundleID
             )
         }
     }

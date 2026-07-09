@@ -280,7 +280,8 @@ final class CommandPaletteTests: XCTestCase {
         state.enterArgumentInput(
             quicklinkID: id,
             title: "GitHub 搜索",
-            link: "https://github.com/search?q={query}"
+            link: "https://github.com/search?q={query}",
+            openWithBundleID: "com.apple.Safari"
         )
 
         XCTAssertFalse(state.isAtRoot)
@@ -295,6 +296,10 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(entry.title, "GitHub 搜索 — AnyDoor")
         XCTAssertEqual(entry.subtitle, "https://github.com/search?q=AnyDoor")
         XCTAssertEqual(entry.source, .quicklinkArgument(id: id, argument: "AnyDoor"))
+        XCTAssertEqual(
+            entry.quicklinkIcon,
+            QuicklinkIconRequest(link: "https://github.com/search?q=AnyDoor", openWithBundleID: "com.apple.Safari")
+        )
 
         state.query = "   "
         XCTAssertNil(state.commitSelection())

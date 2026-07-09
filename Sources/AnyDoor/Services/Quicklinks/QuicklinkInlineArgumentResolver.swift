@@ -6,6 +6,7 @@ struct QuicklinkInlineArgumentResolver {
         let title: String
         let argument: String
         let substitutedLink: String
+        let openWithBundleID: String?
     }
 
     static func resolve(query: String, candidates: [QuicklinkTemplateCandidate]) -> Match? {
@@ -26,7 +27,8 @@ struct QuicklinkInlineArgumentResolver {
                     quicklinkID: template.id,
                     title: template.title,
                     argument: candidate.argument,
-                    substitutedLink: substituted
+                    substitutedLink: substituted,
+                    openWithBundleID: template.openWithBundleID
                 )
                 if best.map({ candidate.triggerLength > $0.triggerLength }) ?? true {
                     best = (match, candidate.triggerLength)

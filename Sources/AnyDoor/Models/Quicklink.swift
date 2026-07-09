@@ -58,3 +58,10 @@ final class Quicklink: Identifiable {
         }
     }
 }
+
+enum QuicklinkOpenWith {
+    static func normalizedBundleID(_ bundleID: String?) -> String? {
+        let trimmed = bundleID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}

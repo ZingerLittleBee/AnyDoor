@@ -69,6 +69,7 @@ struct PanelEntry: Identifiable, Hashable {
     let subtitle: String?
     let searchAliases: [String]
     let symbol: String
+    let quicklinkIcon: QuicklinkIconRequest?
     let kind: BuiltinItem.Kind
     let toggleState: Bool?             // .toggle only
     let permission: PermissionStatus
@@ -83,6 +84,7 @@ struct PanelEntry: Identifiable, Hashable {
         subtitle: String?,
         searchAliases: [String] = [],
         symbol: String,
+        quicklinkIcon: QuicklinkIconRequest? = nil,
         kind: BuiltinItem.Kind,
         toggleState: Bool?,
         permission: PermissionStatus
@@ -96,6 +98,7 @@ struct PanelEntry: Identifiable, Hashable {
         self.subtitle = subtitle
         self.searchAliases = searchAliases
         self.symbol = symbol
+        self.quicklinkIcon = quicklinkIcon
         self.kind = kind
         self.toggleState = toggleState
         self.permission = permission

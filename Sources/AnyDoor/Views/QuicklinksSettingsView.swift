@@ -104,10 +104,15 @@ struct QuicklinksSettingsView: View {
     private func row(for quicklink: Quicklink) -> some View {
         HStack(spacing: 10) {
             dragHandle(for: quicklink)
-            Image(systemName: "link")
-                .font(.system(size: 14))
-                .foregroundStyle(.secondary)
-                .frame(width: 20, height: 20)
+            QuicklinkIconView(
+                request: QuicklinkIconRequest(
+                    link: quicklink.link,
+                    openWithBundleID: quicklink.openWithBundleID
+                ),
+                fallbackSymbol: "link",
+                size: 20,
+                symbolPointSize: 14
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(quicklink.displayName)
                     .font(.body)
@@ -274,6 +279,7 @@ struct QuicklinksSettingsView: View {
                 name: draft.name,
                 link: draft.link,
                 keyword: draft.keyword,
+                openWithBundleID: draft.openWithBundleID,
                 hotkey: draft.hotkey,
                 isVisible: draft.isVisible
             )
@@ -282,6 +288,7 @@ struct QuicklinksSettingsView: View {
                 name: draft.name,
                 link: draft.link,
                 keyword: draft.keyword,
+                openWithBundleID: draft.openWithBundleID,
                 hotkey: draft.hotkey,
                 isVisible: draft.isVisible
             )
@@ -295,6 +302,7 @@ private struct QuicklinkEditorDraft: Identifiable {
     var name: String
     var link: String
     var keyword: String
+    var openWithBundleID: String?
     var hotkey: HotkeyDescriptor?
     var isVisible: Bool
 
@@ -303,6 +311,7 @@ private struct QuicklinkEditorDraft: Identifiable {
         self.name = ""
         self.link = ""
         self.keyword = ""
+        self.openWithBundleID = nil
         self.hotkey = nil
         self.isVisible = true
     }
@@ -312,6 +321,7 @@ private struct QuicklinkEditorDraft: Identifiable {
         self.name = quicklink.name
         self.link = quicklink.link
         self.keyword = quicklink.keyword ?? ""
+        self.openWithBundleID = quicklink.openWithBundleID
         self.hotkey = quicklink.hotkeyDescriptor
         self.isVisible = quicklink.isVisible
     }
@@ -325,8 +335,10 @@ private struct QuicklinkEditorSheet: View {
     @State private var name: String
     @State private var link: String
     @State private var keyword: String
+    @State private var openWithBundleID: String
     @State private var hotkey: HotkeyDescriptor?
     @State private var isVisible: Bool
+    @State private var installedApps: [InstalledApp] = []
     @State private var errorMessage: String?
 
     init(draft: QuicklinkEditorDraft, onSave: @escaping (QuicklinkEditorDraft) throws -> Void) {
@@ -335,6 +347,7 @@ private struct QuicklinkEditorSheet: View {
         _name = State(initialValue: draft.name)
         _link = State(initialValue: draft.link)
         _keyword = State(initialValue: draft.keyword)
+        _openWithBundleID = State(initialValue: draft.openWithBundleID ?? "")
         _hotkey = State(initialValue: draft.hotkey)
         _isVisible = State(initialValue: draft.isVisible)
     }
@@ -353,6 +366,12 @@ private struct QuicklinkEditorSheet: View {
                 }
                 TextField(text: $keyword) {
                     LocalizedText(.settingsQuicklinksKeyword)
+                }
+                HStack {
+                    LocalizedText(.settingsQuicklinksOpenWith)
+                    Spacer()
+                    openWithPicker
+                        .frame(width: 230)
                 }
                 HStack {
                     LocalizedText(.settingsQuicklinksHotkey)
@@ -383,6 +402,21 @@ private struct QuicklinkEditorSheet: View {
         }
         .padding(20)
         .frame(width: 420)
+        .task { await loadInstalledApps() }
+    }
+
+    private var openWithPicker: some View {
+        Picker("", selection: $openWithBundleID) {
+            Text(L(.settingsQuicklinksOpenWithDefault)).tag("")
+            if selectedOpenWithIsMissing {
+                Text(openWithBundleID).tag(openWithBundleID)
+            }
+            ForEach(installedApps) { app in
+                Text(app.displayName).tag(app.bundleID)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
     }
 
     private var hidden: Binding<Bool> {
@@ -392,6 +426,17 @@ private struct QuicklinkEditorSheet: View {
         )
     }
 
+    private var selectedOpenWithIsMissing: Bool {
+        !openWithBundleID.isEmpty && !installedApps.contains { $0.bundleID == openWithBundleID }
+    }
+
+    private func loadInstalledApps() async {
+        let apps = await Task.detached(priority: .userInitiated) {
+            InstalledAppsScanner.scan()
+        }.value
+        installedApps = apps
+    }
+
     private func save() {
         do {
             try onSave(QuicklinkEditorDraft(
@@ -399,6 +444,7 @@ private struct QuicklinkEditorSheet: View {
                 name: name,
                 link: link,
                 keyword: keyword,
+                openWithBundleID: openWithBundleID,
                 hotkey: hotkey,
                 isVisible: isVisible
             ))
@@ -419,6 +465,7 @@ private extension QuicklinkEditorDraft {
         name: String,
         link: String,
         keyword: String,
+        openWithBundleID: String?,
         hotkey: HotkeyDescriptor?,
         isVisible: Bool
     ) {
@@ -426,6 +473,7 @@ private extension QuicklinkEditorDraft {
         self.name = name
         self.link = link
         self.keyword = keyword
+        self.openWithBundleID = QuicklinkOpenWith.normalizedBundleID(openWithBundleID)
         self.hotkey = hotkey
         self.isVisible = isVisible
     }
