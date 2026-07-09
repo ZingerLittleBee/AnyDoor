@@ -8331,40 +8331,6 @@
         }
       }
     },
-    "quicklink.template.baidu": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Baidu Search"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "百度搜索"
-          }
-        }
-      }
-    },
-    "quicklink.template.bilibili": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bilibili Search"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Bilibili 搜索"
-          }
-        }
-      }
-    },
     "quicklink.template.stackoverflow": {
       "extractionState": "manual",
       "localizations": {

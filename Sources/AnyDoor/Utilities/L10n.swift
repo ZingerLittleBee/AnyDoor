@@ -306,8 +306,6 @@ enum L10n {
         case quicklinkTemplateGoogle = "quicklink.template.google"
         case quicklinkTemplateGitHub = "quicklink.template.github"
         case quicklinkTemplateYouTube = "quicklink.template.youtube"
-        case quicklinkTemplateBaidu = "quicklink.template.baidu"
-        case quicklinkTemplateBilibili = "quicklink.template.bilibili"
         case quicklinkTemplateStackOverflow = "quicklink.template.stackoverflow"
         case quicklinkTemplateNpm = "quicklink.template.npm"
         case quicklinkTemplateMDN = "quicklink.template.mdn"

@@ -44,20 +44,6 @@ enum QuicklinkTemplateCatalog {
             keyword: "yt"
         ),
         QuicklinkTemplate(
-            id: "baidu",
-            uuid: uuid("A11CE100-0000-4000-8000-000000000004"),
-            nameKey: .quicklinkTemplateBaidu,
-            link: "https://www.baidu.com/s?wd={query}",
-            keyword: "bd"
-        ),
-        QuicklinkTemplate(
-            id: "bilibili",
-            uuid: uuid("A11CE100-0000-4000-8000-000000000005"),
-            nameKey: .quicklinkTemplateBilibili,
-            link: "https://search.bilibili.com/all?keyword={query}",
-            keyword: "bili"
-        ),
-        QuicklinkTemplate(
             id: "stackoverflow",
             uuid: uuid("A11CE100-0000-4000-8000-000000000006"),
             nameKey: .quicklinkTemplateStackOverflow,
