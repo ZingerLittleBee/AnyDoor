@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let context = modelContainer.mainContext
         KeyBindingOrderBackfill.runIfNeeded(in: context)
         BuiltinPreferenceSeeder.seedIfNeeded(in: context)
+        QuicklinkSeeder.seedIfNeeded(in: context)
 
         // Bootstrap clipboard history store so providers can record entries.
         ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
