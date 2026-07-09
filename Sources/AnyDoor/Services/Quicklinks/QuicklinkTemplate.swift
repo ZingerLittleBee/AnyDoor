@@ -69,7 +69,7 @@ enum QuicklinkTemplateCatalog {
             uuid: uuid("A11CE100-0000-4000-8000-000000000009"),
             nameKey: .quicklinkTemplateGoogleTranslate,
             link: "https://translate.google.com/?sl=auto&tl=zh-CN&text={query}",
-            keyword: "fy"
+            keyword: "tr"
         ),
         QuicklinkTemplate(
             id: "chatgpt",
