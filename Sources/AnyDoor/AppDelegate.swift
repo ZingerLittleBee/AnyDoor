@@ -110,6 +110,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // conversions get recorded from the conversion view model.
         ImageConversionHistoryStore.shared.configure(modelContainer: modelContainer)
 
+        // Sweep candidate session directories a previous process left behind:
+        // deinit/reset cleanup never runs on process exit or crash.
+        Task.detached(priority: .background) {
+            CandidateArtifactStore.cleanupStaleSessions()
+        }
+
         // Scheduled Shutdown: push state to the panel and re-arm any persisted
         // schedule (or cancel a deadline missed while the app was quit).
         ScheduledShutdownService.shared.onChange = { state in

@@ -119,9 +119,9 @@ final class CandidateArtifactStore {
 
     // MARK: - Startup janitor
 
-    /// Remove session directories a crashed process left behind. Anything
-    /// older than `maxAge` cannot belong to a live session; a normal shutdown
-    /// already removed its own directory in `deinit`/`reset`.
+    /// Remove session directories previous processes left behind. Called at
+    /// launch: `deinit`/`reset` cleanup never runs on process exit or crash,
+    /// and anything older than `maxAge` cannot belong to a live session.
     static func cleanupStaleSessions(
         maxAge: TimeInterval = 24 * 60 * 60,
         now: Date = Date(),
