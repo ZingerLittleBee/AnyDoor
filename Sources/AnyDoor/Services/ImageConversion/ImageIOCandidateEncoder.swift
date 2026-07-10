@@ -19,8 +19,10 @@ final class ImageIOCandidateEncoder {
 
     private let source: CGImageSource
     private let originalImage: CGImage
-    private let orientation: UInt32?
-    private let sourceHasAlpha: Bool
+    /// Raw `kCGImagePropertyOrientation` of the source, for the final audit.
+    let orientation: UInt32?
+    /// Whether the source's first image carries an alpha channel.
+    let sourceHasAlpha: Bool
 
     /// UTI of the source container (e.g. `public.jpeg`), for same-format
     /// pass-through eligibility.
