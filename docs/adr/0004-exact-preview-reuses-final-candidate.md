@@ -1,6 +1,6 @@
 # Exact previews reuse final conversion candidates
 
-- **Status:** proposed
+- **Status:** accepted
 
 Both Image Conversion modes use a full-resolution result produced by the same
 engine and configuration as the final output. When the source fingerprint and

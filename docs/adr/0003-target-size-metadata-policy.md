@@ -1,6 +1,6 @@
 # Target Size Compression strips ancillary metadata consistently
 
-- **Status:** proposed
+- **Status:** accepted
 
 Target Size Compression preserves display-critical metadata such as
 orientation, color profiles, and supported HDR data, while removing GPS,

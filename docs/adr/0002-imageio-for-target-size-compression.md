@@ -1,6 +1,6 @@
 # Target Size Compression remains on Image I/O
 
-- **Status:** proposed
+- **Status:** accepted
 
 Target Size Compression will use the existing Image I/O backend for JPEG,
 HEIC, and AVIF. We are not bundling format-specific encoders in V1 because

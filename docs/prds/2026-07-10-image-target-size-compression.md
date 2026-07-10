@@ -1,6 +1,6 @@
 # PRD: Target Size Compression and Image Comparison Workspace
 
-- **Status:** proposed — awaiting unified review
+- **Status:** approved — unified review passed 2026-07-10
 - **Date:** 2026-07-10
 - **Extends:** [Image Conversion](2026-07-06-image-conversion.md)
 - **Technical design:** [Target Size Compression Technical Design](../superpowers/specs/2026-07-10-image-target-size-compression-design.md)

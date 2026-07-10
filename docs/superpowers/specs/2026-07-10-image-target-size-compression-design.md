@@ -1,6 +1,6 @@
 # Target Size Compression Technical Design
 
-- **Status:** proposed — accompanies unified product review
+- **Status:** approved — unified review passed 2026-07-10
 - **Date:** 2026-07-10
 - **Product contract:** [Target Size Compression PRD](../../prds/2026-07-10-image-target-size-compression.md)
 - **Research:** [Market and Image I/O research](../../research/2026-07-10-image-target-size-compression-market-research.md)

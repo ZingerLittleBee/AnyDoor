@@ -1,6 +1,6 @@
 # PRD: Image Conversion
 
-- **Status:** implemented — [proposed amendment under review](2026-07-10-image-target-size-compression.md)
+- **Status:** implemented — [amended by the approved extension](2026-07-10-image-target-size-compression.md)
 - **Date:** 2026-07-06
 - **Tracker:** local (`docs/prds/`, issues under `docs/issues/`)
 - **Glossary:** [Ubiquitous Language](../../CONTEXT.md#image-conversion)
