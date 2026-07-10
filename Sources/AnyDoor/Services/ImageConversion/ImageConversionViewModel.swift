@@ -334,6 +334,7 @@ final class ImageConversionViewModel {
             }
         }
         let target = selectedFormat
+        let frozenQualityPercent = qualityPercent
         let quality = Double(qualityPercent) / 100.0
 
         runTask = Task { [weak self] in
@@ -343,18 +344,30 @@ final class ImageConversionViewModel {
                 quality: quality,
                 downloadsDirectory: ImageConversionSession.defaultDownloadsDirectory
             )
-            self?.finish(summary, frozenItems: frozenItems)
+            self?.finish(
+                summary,
+                frozenItems: frozenItems,
+                target: target,
+                qualityPercent: frozenQualityPercent
+            )
         }
     }
 
     private func finish(
         _ summary: ImageConversionSummary,
-        frozenItems: [ImageConversionBasketItem]
+        frozenItems: [ImageConversionBasketItem],
+        target: ImageConversionFormat,
+        qualityPercent: Int
     ) {
         isConverting = false
         runTask = nil
+        var historyWarnings = 0
         if summary.converted > 0 {
-            recordHistory(summary.outputs)
+            historyWarnings = recordHistory(
+                summary.outputs,
+                target: target,
+                qualityPercent: qualityPercent
+            )
             let completedIDs = Set(summary.outputs.compactMap { output in
                 frozenItems.indices.contains(output.inputIndex)
                     ? frozenItems[output.inputIndex].id
@@ -364,26 +377,29 @@ final class ImageConversionViewModel {
             copyOutputsToPasteboard(summary.outputURLs)
         }
         pruneIdlePreviewArtifactsIfNeeded()
-        ToastPresenter.shared.show(.success(L(
-            .imageConversionToastSummary,
-            summary.converted,
-            summary.skipped
-        )))
+        showConversionSummary(
+            converted: summary.converted,
+            skipped: summary.skipped,
+            historyWarnings: historyWarnings
+        )
     }
 
     /// Write one Conversion Record per produced output. The target format and
     /// quality are the whole run's config (one config per run).
-    private func recordHistory(_ outputs: [ImageConversionOutput]) {
-        let target = selectedFormat
-        let quality = qualityPercent
-        for output in outputs {
-            ImageConversionHistoryStore.shared.record(
+    private func recordHistory(
+        _ outputs: [ImageConversionOutput],
+        target: ImageConversionFormat,
+        qualityPercent: Int
+    ) -> Int {
+        outputs.reduce(into: 0) { warnings, output in
+            let saved = ImageConversionHistoryStore.shared.record(
                 sourceName: output.sourceName,
                 sourceKind: output.sourceKind,
                 targetFormat: target,
-                qualityPercent: quality,
+                qualityPercent: qualityPercent,
                 outputPath: output.outputURL.path
             )
+            if !saved { warnings += 1 }
         }
     }
 
@@ -441,13 +457,15 @@ final class ImageConversionViewModel {
 
         // A success here is always a within-limit result; a Best-Effort
         // candidate arrives as targetMiss and commits nothing.
+        var historyWarnings = 0
         for (item, conversion) in successes {
-            recordTargetSizeHistory(
+            let saved = recordTargetSizeHistory(
                 conversion.output,
                 candidate: conversion.candidate,
                 item: item,
                 outcome: .targetReached
             )
+            if !saved { historyWarnings += 1 }
         }
 
         // Successful items leave the basket together, in basket order, and
@@ -458,11 +476,11 @@ final class ImageConversionViewModel {
         pruneIdlePreviewArtifactsIfNeeded()
 
         if !successes.isEmpty || !interrupted {
-            ToastPresenter.shared.show(.success(L(
-                .imageConversionToastSummary,
-                successes.count,
-                itemStatuses.count
-            )))
+            showConversionSummary(
+                converted: successes.count,
+                skipped: itemStatuses.count,
+                historyWarnings: historyWarnings
+            )
         }
     }
 
@@ -483,11 +501,13 @@ final class ImageConversionViewModel {
                     destination: destination
                 )
                 guard let self else { return }
-                self.recordTargetSizeHistory(
+                let historySaved = self.recordTargetSizeHistory(
                     output, candidate: candidate, item: item, outcome: .targetUnattainable
                 )
                 self.remove(item)
-                ToastPresenter.shared.show(.success(L(.imageConversionSavedAnyway)))
+                ToastPresenter.shared.show(historySaved
+                    ? .success(L(.imageConversionSavedAnyway))
+                    : .info(L(.imageConversionHistorySaveFailed)))
             } catch {
                 ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
             }
@@ -602,6 +622,23 @@ final class ImageConversionViewModel {
         Task { await engine.pruneDisplayed(keepingItem: nil) }
     }
 
+    private func showConversionSummary(converted: Int, skipped: Int, historyWarnings: Int) {
+        if historyWarnings > 0 {
+            ToastPresenter.shared.show(.info(L(
+                .imageConversionToastSummaryWithHistoryWarnings,
+                converted,
+                skipped,
+                historyWarnings
+            )))
+        } else {
+            ToastPresenter.shared.show(.success(L(
+                .imageConversionToastSummary,
+                converted,
+                skipped
+            )))
+        }
+    }
+
     private func releaseEngineArtifacts(for itemID: String) {
         guard let engineID = engineIDs.removeValue(forKey: itemID), let engine else { return }
         Task { await engine.removeItem(engineID) }
@@ -647,9 +684,9 @@ final class ImageConversionViewModel {
         candidate: PreparedCandidate,
         item: ImageConversionBasketItem,
         outcome: ImageConversionOutcome
-    ) {
+    ) -> Bool {
         let sourceKind: ImageConversionSourceKind = item.fileURL != nil ? .file : .bitmap
-        ImageConversionHistoryStore.shared.recordTargetSize(
+        return ImageConversionHistoryStore.shared.recordTargetSize(
             sourceName: item.displayName,
             sourceKind: sourceKind,
             targetFormat: candidate.configuration.format,

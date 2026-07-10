@@ -4540,6 +4540,23 @@
         }
       }
     },
+    "imageConversion.history.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "File saved, but conversion history could not be recorded"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件已保存，但转换记录写入失败"
+          }
+        }
+      }
+    },
     "imageConversion.history.title": {
       "extractionState": "manual",
       "localizations": {
@@ -4825,6 +4842,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已转换 %lld 张，跳过 %lld 项"
+          }
+        }
+      }
+    },
+    "imageConversion.toast.summaryWithHistoryWarnings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Converted %lld, skipped %lld; %lld history records not saved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已转换 %lld 张，跳过 %lld 项，%lld 条转换记录写入失败"
           }
         }
       }

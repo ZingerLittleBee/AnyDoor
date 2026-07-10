@@ -6,7 +6,8 @@ import SwiftData
 /// `@MainActor` and context-backed, mirroring `TranslationHistoryStore`: a single
 /// shared `mainContext` is captured in `configure` after the ModelContainer is
 /// ready (`ImageConversionHistoryStore.shared.configure(modelContainer:)` from the
-/// app). Every method no-ops when no context is wired (unit tests / pre-bootstrap).
+/// app). Reads no-op and writes report failure when no context is wired
+/// (unit tests / pre-bootstrap).
 ///
 /// `@Observable` so a SwiftUI list re-renders when history changes: mutations bump
 /// `revision`, which the history view observes to re-fetch — the same "publish a
@@ -34,7 +35,9 @@ final class ImageConversionHistoryStore {
         modelContext = modelContainer.mainContext
     }
 
-    /// Write one completed conversion, then trim to the 50-record cap.
+    /// Write one completed conversion and trim to the 50-record cap in the
+    /// same save transaction.
+    @discardableResult
     func record(
         sourceName: String,
         sourceKind: ImageConversionSourceKind,
@@ -42,8 +45,8 @@ final class ImageConversionHistoryStore {
         qualityPercent: Int,
         outputPath: String,
         createdAt: Date = Date()
-    ) {
-        guard let modelContext else { return }
+    ) -> Bool {
+        guard let modelContext else { return false }
         let record = ImageConversionRecord(
             sourceName: sourceName,
             sourceKind: sourceKind,
@@ -53,14 +56,13 @@ final class ImageConversionHistoryStore {
             createdAt: createdAt
         )
         modelContext.insert(record)
-        try? modelContext.save()
-        trim()
-        revision &+= 1
+        return saveRecordAndTrim(using: modelContext)
     }
 
     /// Write one Target Size conversion with its candidate metrics. Called
     /// only when a final file exists (target reached, or an explicit Save
     /// Anyway of a Best-Effort artifact).
+    @discardableResult
     func recordTargetSize(
         sourceName: String,
         sourceKind: ImageConversionSourceKind,
@@ -71,8 +73,8 @@ final class ImageConversionHistoryStore {
         candidate: PreparedCandidate,
         outputByteCount: Int64,
         createdAt: Date = Date()
-    ) {
-        guard let modelContext else { return }
+    ) -> Bool {
+        guard let modelContext else { return false }
         let record = ImageConversionRecord(
             sourceName: sourceName,
             sourceKind: sourceKind,
@@ -93,9 +95,7 @@ final class ImageConversionHistoryStore {
         record.resizeFallbackApplied = candidate.resizeFallbackApplied
         record.displayDowngradeRaw = candidate.hdrToSDR ? "hdrToSDR" : nil
         modelContext.insert(record)
-        try? modelContext.save()
-        trim()
-        revision &+= 1
+        return saveRecordAndTrim(using: modelContext)
     }
 
     /// Newest-first, capped at `limit`.
@@ -111,29 +111,47 @@ final class ImageConversionHistoryStore {
     func delete(_ record: ImageConversionRecord) {
         guard let modelContext else { return }
         modelContext.delete(record)
-        try? modelContext.save()
-        revision &+= 1
+        savePendingChanges(using: modelContext)
     }
 
     /// Remove every record (the history header's clear action).
     func clear() {
         guard let modelContext else { return }
-        let rows = (try? modelContext.fetch(FetchDescriptor<ImageConversionRecord>())) ?? []
-        guard !rows.isEmpty else { return }
-        for row in rows { modelContext.delete(row) }
-        try? modelContext.save()
-        revision &+= 1
+        do {
+            let rows = try modelContext.fetch(FetchDescriptor<ImageConversionRecord>())
+            guard !rows.isEmpty else { return }
+            for row in rows { modelContext.delete(row) }
+            savePendingChanges(using: modelContext)
+        } catch {
+            modelContext.rollback()
+        }
     }
 
-    /// Keep the newest `capacity` records, deleting the overflow oldest.
-    private func trim() {
-        guard let modelContext else { return }
-        let descriptor = FetchDescriptor<ImageConversionRecord>(
-            sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
-        )
-        let rows = (try? modelContext.fetch(descriptor)) ?? []
-        guard rows.count > Self.capacity else { return }
-        for row in rows[Self.capacity...] { modelContext.delete(row) }
-        try? modelContext.save()
+    private func saveRecordAndTrim(using modelContext: ModelContext) -> Bool {
+        do {
+            let descriptor = FetchDescriptor<ImageConversionRecord>(
+                sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
+            )
+            let rows = try modelContext.fetch(descriptor)
+            if rows.count > Self.capacity {
+                for row in rows[Self.capacity...] { modelContext.delete(row) }
+            }
+            return savePendingChanges(using: modelContext)
+        } catch {
+            modelContext.rollback()
+            return false
+        }
+    }
+
+    @discardableResult
+    private func savePendingChanges(using modelContext: ModelContext) -> Bool {
+        do {
+            try modelContext.save()
+            revision &+= 1
+            return true
+        } catch {
+            modelContext.rollback()
+            return false
+        }
     }
 }

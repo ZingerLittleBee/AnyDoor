@@ -15,7 +15,8 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
         return ImageConversionHistoryStore(modelContext: container.mainContext)
     }
 
-    private func record(_ store: ImageConversionHistoryStore, name: String, at date: Date) {
+    @discardableResult
+    private func record(_ store: ImageConversionHistoryStore, name: String, at date: Date) -> Bool {
         store.record(
             sourceName: name,
             sourceKind: .file,
@@ -89,7 +90,7 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
 
     func testNoOpsWithoutContext() {
         let store = ImageConversionHistoryStore(modelContext: nil)
-        record(store, name: "a", at: Date(timeIntervalSinceReferenceDate: 100))
+        XCTAssertFalse(record(store, name: "a", at: Date(timeIntervalSinceReferenceDate: 100)))
         XCTAssertTrue(store.recent().isEmpty)
         XCTAssertEqual(store.revision, 0)
     }
