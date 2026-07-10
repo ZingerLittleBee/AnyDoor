@@ -6,9 +6,19 @@ import SwiftUI
 final class ImageConversionWindowController: NSWindowController, NSWindowDelegate {
     static let shared = ImageConversionWindowController()
     static let windowFrameKey = "imageConversion.windowFrame"
+    /// Tracks whether the lazy singleton exists so import reconciliation can
+    /// reload a live view model without instantiating the window.
+    private static var sharedExists = false
 
     private let viewModel = ImageConversionViewModel()
     private var keyMonitor: Any?
+
+    /// A backup import rewrote the conversion preferences; push them into the
+    /// live view model. A no-op when the window was never created.
+    static func reconcilePreferencesAfterImport() {
+        guard sharedExists else { return }
+        shared.viewModel.reloadFromDefaults()
+    }
 
     private init() {
         let panel = ImageConversionPanel(
@@ -41,6 +51,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
 
         super.init(window: panel)
         panel.delegate = self
+        Self.sharedExists = true
     }
 
     @available(*, unavailable)

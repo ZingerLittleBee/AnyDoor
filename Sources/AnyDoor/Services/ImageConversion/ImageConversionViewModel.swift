@@ -166,6 +166,29 @@ final class ImageConversionViewModel {
         self.engine = try? ImageConversionEngine()
     }
 
+    /// Re-read every persisted conversion preference so a backup import
+    /// applies to an already-open window without relaunching. Skipped during
+    /// a run: the run froze its configuration at start, and the property
+    /// observers would race the frozen state.
+    func reloadFromDefaults() {
+        guard !isConverting else { return }
+        selectedFormat = ImageConversionPreferences.targetFormat(
+            availableFormats: availableFormats,
+            defaults: defaults
+        )
+        qualityPercent = ImageConversionPreferences.qualityPercent(defaults: defaults)
+        mode = ImageConversionPreferences.mode(defaults: defaults)
+        targetSizeFormat = ImageConversionPreferences.targetSizeFormat(
+            availableFormats: availableFormats,
+            defaults: defaults
+        )
+        targetLimit = ImageConversionPreferences.targetSizeLimit(defaults: defaults)
+        targetText = targetLimit.displayValue(locale: .current)
+        targetParseError = nil
+        allowResize = ImageConversionPreferences.targetSizeAllowResize(defaults: defaults)
+        schedulePreview()
+    }
+
     /// Lossy formats the Target Size mode may offer on this runtime.
     var targetSizeFormats: [ImageConversionFormat] {
         availableFormats.filter(\.isLossy)
