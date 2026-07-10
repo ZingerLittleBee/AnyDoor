@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Image Conversion: added a Target Size mode with bounded, cancellable
+  compression and explicit Best-Effort saves, plus a three-column workspace
+  for basket/history navigation, original/result comparison, and conversion
+  settings.
+
 ## [3.6.0] - 2026-07-10
 
 ### Added

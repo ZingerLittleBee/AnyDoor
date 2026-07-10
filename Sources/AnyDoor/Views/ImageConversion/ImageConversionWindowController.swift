@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 
 @MainActor
@@ -11,7 +12,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
 
     private init() {
         let panel = ImageConversionPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 1_200, height: 740),
             styleMask: [.titled, .closable, .fullSizeContentView, .resizable],
             backing: .buffered,
             defer: false
@@ -36,7 +37,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isRestorable = false
-        panel.minSize = NSSize(width: 440, height: 360)
+        panel.minSize = NSSize(width: 960, height: 600)
 
         super.init(window: panel)
         panel.delegate = self
@@ -72,6 +73,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     func show() {
         guard let window else { return }
         window.title = L(.imageConversionTitle)
+        viewModel.resetSidebarForPresentation()
         mountContentIfNeeded()
         restoreFrame()
         installKeyMonitor()
@@ -125,9 +127,13 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     private func restoreFrame() {
         guard let window else { return }
         if let saved = UserDefaults.standard.string(forKey: Self.windowFrameKey) {
-            let rect = NSRectFromString(saved)
-            if rect.width > 0, rect.height > 0, NSScreen.screens.contains(where: { $0.visibleFrame.intersects(rect) }) {
-                window.setFrame(rect, display: false)
+            var rect = NSRectFromString(saved)
+            if rect.width > 0,
+               rect.height > 0,
+               let screen = NSScreen.screens.first(where: { $0.visibleFrame.intersects(rect) }) {
+                rect.size.width = max(rect.width, window.minSize.width)
+                rect.size.height = max(rect.height, window.minSize.height)
+                window.setFrame(window.constrainFrameRect(rect, to: screen), display: false)
                 return
             }
         }
@@ -160,12 +166,26 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             close()
             return true
         }
-        if event.keyCode == 13, event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard modifiers.contains(.command) else { return false }
+        if event.keyCode == 13 {
             close()
             return true
         }
-        if event.keyCode == 9, event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command) {
+        if event.keyCode == 9 {
             pasteFromClipboard()
+            return true
+        }
+        if event.keyCode == kVK_Return {
+            viewModel.convert()
+            return true
+        }
+        if event.keyCode == kVK_ANSI_Period {
+            viewModel.stopConversion()
+            return true
+        }
+        if event.keyCode == kVK_ANSI_O {
+            viewModel.presentOpenPanel()
             return true
         }
         return false

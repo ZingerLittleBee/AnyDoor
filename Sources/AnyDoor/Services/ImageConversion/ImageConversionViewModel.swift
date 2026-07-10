@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 struct ImageConversionBasketItem: Identifiable, Equatable, Sendable {
     /// A basket entry is either an on-disk file (output beside it) or an
@@ -49,6 +50,11 @@ enum ImageConversionItemStatus: Equatable, Sendable {
     case failed
 }
 
+enum ImageConversionSidebarTab: Hashable {
+    case basket
+    case history
+}
+
 @MainActor
 @Observable
 final class ImageConversionViewModel {
@@ -63,6 +69,7 @@ final class ImageConversionViewModel {
     }
     var isConverting = false
     var isDropTargeted = false
+    var sidebarTab: ImageConversionSidebarTab = .basket
 
     // MARK: Target Size state
 
@@ -218,6 +225,22 @@ final class ImageConversionViewModel {
         selectFirstIfNeeded()
     }
 
+    /// Sidebar Add / ⌘O: non-modal open panel appending image files to the
+    /// basket. The async `begin()` keeps the floating conversion panel usable
+    /// while the picker is up.
+    func presentOpenPanel() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.image]
+        Task { @MainActor in
+            let response = await panel.begin()
+            guard response == .OK else { return }
+            self.addFiles(panel.urls)
+        }
+    }
+
     /// Adds a pasted bitmap (e.g. a fresh screenshot) with a generic display name.
     func addBitmap(_ data: Data) {
         items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
@@ -238,18 +261,7 @@ final class ImageConversionViewModel {
     }
 
     func remove(_ item: ImageConversionBasketItem) {
-        let removedIndex = items.firstIndex { $0.id == item.id }
-        items.removeAll { $0.id == item.id }
-        itemStatuses[item.id] = nil
-        releaseEngineArtifacts(for: item.id)
-        // Removal selects the nearest remaining item.
-        if selectedItemID == item.id {
-            if let index = removedIndex, !items.isEmpty {
-                selectedItemID = items[min(index, items.count - 1)].id
-            } else {
-                selectedItemID = nil
-            }
-        }
+        removeItems(withIDs: [item.id])
     }
 
     func clear() {
@@ -268,6 +280,10 @@ final class ImageConversionViewModel {
         }
     }
 
+    func resetSidebarForPresentation() {
+        sidebarTab = .basket
+    }
+
     /// Request Stop: takes effect at the current candidate/commit boundary.
     /// Completed outputs remain valid; there is no batch rollback.
     func stopConversion() {
@@ -284,7 +300,8 @@ final class ImageConversionViewModel {
 
     private func convertQuality() {
         isConverting = true
-        let inputs: [ImageConversionInput] = items.map { item in
+        let frozenItems = items
+        let inputs: [ImageConversionInput] = frozenItems.map { item in
             switch item.payload {
             case let .file(url): return .file(url)
             case let .bitmap(data): return .bitmap(data)
@@ -293,22 +310,31 @@ final class ImageConversionViewModel {
         let target = selectedFormat
         let quality = Double(qualityPercent) / 100.0
 
-        Task {
+        runTask = Task { [weak self] in
             let summary = await ImageConversionSession().convertAll(
                 inputs: inputs,
                 target: target,
                 quality: quality,
                 downloadsDirectory: ImageConversionSession.defaultDownloadsDirectory
             )
-            finish(summary)
+            self?.finish(summary, frozenItems: frozenItems)
         }
     }
 
-    private func finish(_ summary: ImageConversionSummary) {
+    private func finish(
+        _ summary: ImageConversionSummary,
+        frozenItems: [ImageConversionBasketItem]
+    ) {
         isConverting = false
+        runTask = nil
         if summary.converted > 0 {
             recordHistory(summary.outputs)
-            items.removeAll()
+            let completedIDs = Set(summary.outputs.compactMap { output in
+                frozenItems.indices.contains(output.inputIndex)
+                    ? frozenItems[output.inputIndex].id
+                    : nil
+            })
+            removeItems(withIDs: completedIDs)
             copyOutputsToPasteboard(summary.outputURLs)
         }
         ToastPresenter.shared.show(.success(L(
@@ -406,8 +432,7 @@ final class ImageConversionViewModel {
         // Successful items leave the basket together, in basket order, and
         // only their URLs reach the clipboard. Everything else stays.
         let succeededIDs = Set(successes.map(\.item.id))
-        items.removeAll { succeededIDs.contains($0.id) }
-        for id in succeededIDs { releaseEngineArtifacts(for: id) }
+        removeItems(withIDs: succeededIDs)
         copyOutputsToPasteboard(successes.map(\.conversion.output.url))
 
         if !successes.isEmpty || !interrupted {
@@ -434,9 +459,7 @@ final class ImageConversionViewModel {
                 self.recordTargetSizeHistory(
                     output, candidate: candidate, item: item, outcome: .targetUnattainable
                 )
-                self.items.removeAll { $0.id == item.id }
-                self.itemStatuses[item.id] = nil
-                self.releaseEngineArtifacts(for: item.id)
+                self.remove(item)
                 ToastPresenter.shared.show(.success(L(.imageConversionSavedAnyway)))
             } catch {
                 ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
@@ -534,6 +557,41 @@ final class ImageConversionViewModel {
     private func releaseEngineArtifacts(for itemID: String) {
         guard let engineID = engineIDs.removeValue(forKey: itemID), let engine else { return }
         Task { await engine.removeItem(engineID) }
+    }
+
+    /// Remove a completed set as one basket mutation and keep selection on the
+    /// nearest surviving row when the selected item leaves.
+    private func removeItems(withIDs ids: Set<String>) {
+        guard !ids.isEmpty else { return }
+        let previousItems = items
+        let selectedIndex = selectedItemID.flatMap { selectedID in
+            previousItems.firstIndex { $0.id == selectedID }
+        }
+        let selectedWasRemoved = selectedItemID.map(ids.contains) ?? false
+
+        items.removeAll { ids.contains($0.id) }
+        for id in ids {
+            itemStatuses[id] = nil
+            releaseEngineArtifacts(for: id)
+        }
+
+        if selectedWasRemoved {
+            selectedItemID = selectedIndex.flatMap { index in
+                previousItems.enumerated()
+                    .filter { !ids.contains($0.element.id) }
+                    .min { lhs, rhs in
+                        let lhsDistance = abs(lhs.offset - index)
+                        let rhsDistance = abs(rhs.offset - index)
+                        if lhsDistance == rhsDistance {
+                            return lhs.offset > rhs.offset
+                        }
+                        return lhsDistance < rhsDistance
+                    }?
+                    .element.id
+            } ?? items.first?.id
+        } else if selectedItem == nil {
+            selectedItemID = items.first?.id
+        }
     }
 
     private func recordTargetSizeHistory(

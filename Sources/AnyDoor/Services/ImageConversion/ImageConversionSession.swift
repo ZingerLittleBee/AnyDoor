@@ -16,6 +16,7 @@ enum ImageConversionSourceKind: String, Sendable {
 
 /// One produced output, carrying the metadata a history record needs.
 struct ImageConversionOutput: Equatable, Sendable {
+    let inputIndex: Int
     let sourceName: String
     let sourceKind: ImageConversionSourceKind
     let outputURL: URL
@@ -46,7 +47,7 @@ struct ImageConversionSession: Sendable {
         now: Date = Date()
     ) async -> ImageConversionSummary {
         let bitmapBaseName = ImageConversionNaming.bitmapBaseName(timestamp: now, calendar: calendar)
-        return await Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: .userInitiated) {
             convertAllSynchronously(
                 inputs: inputs,
                 target: target,
@@ -54,7 +55,12 @@ struct ImageConversionSession: Sendable {
                 downloadsDirectory: downloadsDirectory,
                 bitmapBaseName: bitmapBaseName
             )
-        }.value
+        }
+        return await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// File-only convenience preserved for callers that never handle bitmaps.
@@ -84,7 +90,8 @@ private func convertAllSynchronously(
     var skipped = 0
     var outputs: [ImageConversionOutput] = []
 
-    for input in inputs {
+    for (inputIndex, input) in inputs.enumerated() {
+        guard !Task.isCancelled else { break }
         switch input {
         case let .file(fileURL):
             guard ImageConverter.canDecodeFile(at: fileURL) else {
@@ -96,6 +103,7 @@ private func convertAllSynchronously(
                 try converter.convertFile(at: fileURL, to: outputURL, format: target, quality: quality)
                 converted += 1
                 outputs.append(ImageConversionOutput(
+                    inputIndex: inputIndex,
                     sourceName: fileURL.lastPathComponent,
                     sourceKind: .file,
                     outputURL: outputURL
@@ -119,6 +127,7 @@ private func convertAllSynchronously(
                 // A bitmap has no source filename; the output's base name is the
                 // most meaningful label ("Clipboard <timestamp>").
                 outputs.append(ImageConversionOutput(
+                    inputIndex: inputIndex,
                     sourceName: outputURL.deletingPathExtension().lastPathComponent,
                     sourceKind: .bitmap,
                     outputURL: outputURL

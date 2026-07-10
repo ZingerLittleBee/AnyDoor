@@ -9,304 +9,168 @@ struct ImageConversionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            toolbar
+            titleRow
             Divider()
             ZStack {
-                if model.items.isEmpty {
-                    emptyState
-                } else {
-                    basketList
+                HStack(spacing: 0) {
+                    sidebar
+                    Divider()
+                    comparisonWorkspace
+                    Divider()
+                    inspector
                 }
                 if model.isDropTargeted {
                     dropOverlay
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            historySection
         }
         .adaptivePanelSurface(cornerRadius: 16)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        // Fill the whole window: without this the hosting view treats the
-        // transparent titlebar as a safe-area inset and the card gets pushed
-        // below it, leaving an invisible-but-draggable strip above the card
-        // with the traffic light floating in it.
+        // The content extends under the transparent title bar so the traffic
+        // lights sit inside the title row rather than above the panel surface.
         .ignoresSafeArea()
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $model.isDropTargeted, perform: handleDrop)
-        .focusEffectDisabled()
     }
 
-    // Two rows: the first shares the traffic-light line — AppKit draws the
-    // buttons over the card's top-left, the title sits beside them and the
-    // actions right-align; the second row carries the conversion config,
-    // right-aligned. Splitting also keeps the long English labels from
-    // hyphen-wrapping the title in one row.
-    private var toolbar: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                LocalizedText(.imageConversionTitle)
-                    .font(.headline)
-                    .lineLimit(1)
-                    // Clear the three traffic lights overlaying the card's
-                    // top-left corner (their rightmost edge is ≈61pt from the
-                    // window edge; the toolbar already pads 16pt).
-                    .padding(.leading, 70)
-                Spacer()
+    private var titleRow: some View {
+        HStack(spacing: 10) {
+            LocalizedText(.imageConversionTitle)
+                .font(.headline)
+                .lineLimit(1)
+                .padding(.leading, 70)
+            Spacer()
+            if model.isConverting {
+                ProgressView()
+                    .controlSize(.small)
+                LocalizedText(.imageConversionConverting)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+    }
+
+    // MARK: - Sidebar
+
+    private var sidebar: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $model.sidebarTab) {
+                LocalizedText(.imageConversionSidebarBasket).tag(ImageConversionSidebarTab.basket)
+                LocalizedText(.imageConversionHistoryTitle).tag(ImageConversionSidebarTab.history)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(12)
+
+            Divider()
+
+            switch model.sidebarTab {
+            case .basket:
+                basketSidebar
+            case .history:
+                historySidebar
+            }
+        }
+        .frame(width: 220)
+        .background(.regularMaterial)
+    }
+
+    private var basketSidebar: some View {
+        VStack(spacing: 0) {
+            if model.items.isEmpty {
+                emptyBasket
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(model.items) { item in
+                            ImageConversionSidebarRow(
+                                item: item,
+                                status: model.itemStatuses[item.id],
+                                isSelected: model.selectedItemID == item.id,
+                                isRemovalDisabled: model.isConverting,
+                                select: { model.selectedItemID = item.id },
+                                remove: { model.remove(item) }
+                            )
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+
+            Text(L(.imageConversionBasketCount, model.items.count))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+
+            Divider()
+
+            HStack(spacing: 8) {
+                Button {
+                    model.presentOpenPanel()
+                } label: {
+                    Label(L(.commandPaletteActionOpen), systemImage: "plus")
+                        .lineLimit(1)
+                }
+                .disabled(model.isConverting)
+                .help(L(.commandPaletteActionOpen))
+
+                Spacer(minLength: 0)
+
                 Button {
                     model.clear()
                 } label: {
                     Image(systemName: "trash")
-                        .frame(width: 22, height: 22)
+                        .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
                 .disabled(model.items.isEmpty || model.isConverting)
                 .accessibilityLabel(L(.imageConversionClear))
                 .help(L(.imageConversionClear))
-
-                if model.isConverting, model.mode == .targetSize {
-                    // Target Size runs are cancellable at candidate boundaries.
-                    Button {
-                        model.stopConversion()
-                    } label: {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .frame(width: 14, height: 14)
-                            Text(L(.imageConversionStop))
-                        }
-                        .frame(minWidth: 86)
-                    }
-                } else {
-                    Button {
-                        model.convert()
-                    } label: {
-                        HStack(spacing: 6) {
-                            if model.isConverting {
-                                ProgressView()
-                                    .controlSize(.small)
-                                    .frame(width: 14, height: 14)
-                            } else {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                            }
-                            Text(L(model.isConverting ? .imageConversionConverting : .imageConversionConvert))
-                        }
-                        .frame(minWidth: 86)
-                    }
-                    .disabled(!model.canConvert)
-                }
             }
-
-            HStack(spacing: 14) {
-                Picker("", selection: $model.mode) {
-                    LocalizedText(.imageConversionQuality).tag(ImageConversionMode.quality)
-                    LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .disabled(model.isConverting)
-
-                if model.mode == .quality, model.isQualityAdjustable {
-                    qualityControl
-                }
-                if model.mode == .targetSize {
-                    targetSizeControls
-                }
-                Spacer()
-                if model.availableFormats.isEmpty {
-                    LocalizedText(.imageConversionNoFormats)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    formatPicker
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-    /// Quality mode offers the full whitelist; Target Size offers only the
-    /// runtime-available lossy targets.
-    @ViewBuilder
-    private var formatPicker: some View {
-        HStack(spacing: 6) {
-            LocalizedText(.imageConversionTargetFormat)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if model.mode == .quality {
-                Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
-                    ForEach(model.availableFormats) { format in
-                        Text(format.displayName).tag(format)
-                    }
-                }
-                .labelsHidden()
-                // Trailing-aligned inside the fixed slot so the popup's
-                // right edge lines up with the Convert button above.
-                .frame(width: 112, alignment: .trailing)
-            } else {
-                Picker(L(.imageConversionTargetFormat), selection: $model.targetSizeFormat) {
-                    ForEach(model.targetSizeFormats) { format in
-                        Text(format.displayName).tag(format)
-                    }
-                }
-                .labelsHidden()
-                .frame(width: 112, alignment: .trailing)
-            }
-        }
-        .help(L(.imageConversionTargetFormat))
-        .disabled(model.isConverting)
-    }
-
-    private var targetSizeControls: some View {
-        HStack(spacing: 6) {
-            TextField("1", text: $model.targetText)
-                .textFieldStyle(.roundedBorder)
-                .controlSize(.small)
-                .frame(width: 64)
-                .multilineTextAlignment(.trailing)
-                .onSubmit { model.commitTargetText() }
-                .onChange(of: model.targetText) { model.commitTargetText() }
-                .accessibilityLabel(L(.imageConversionModeTargetSize))
-            Picker("", selection: Binding(
-                get: { model.targetLimit.unit },
-                set: { model.switchTargetUnit(to: $0) }
-            )) {
-                Text("KB").tag(TargetSizeUnit.kb)
-                Text("MB").tag(TargetSizeUnit.mb)
-            }
-            .labelsHidden()
-            .fixedSize()
-            Toggle(isOn: $model.allowResize) {
-                LocalizedText(.imageConversionAllowResize)
-                    .font(.caption)
-            }
-            .toggleStyle(.checkbox)
             .controlSize(.small)
-            if model.targetParseError != nil {
-                LocalizedText(.imageConversionTargetInvalid)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
+            .padding(10)
         }
-        .disabled(model.isConverting)
     }
 
-    private var qualityControl: some View {
-        HStack(spacing: 6) {
-            LocalizedText(.imageConversionQuality)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Slider(
-                value: Binding(
-                    get: { Double(model.qualityPercent) },
-                    set: { model.qualityPercent = Int($0.rounded()) }
-                ),
-                in: Double(ImageConversionPreferences.minQualityPercent)...Double(ImageConversionPreferences.maxQualityPercent)
-            )
-            .controlSize(.small)
-            .frame(width: 96)
-            Text("\(model.qualityPercent)%")
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .trailing)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(L(.imageConversionQuality))
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 10) {
+    private var emptyBasket: some View {
+        VStack(spacing: 8) {
+            Spacer()
             Image(systemName: "photo.stack")
-                .font(.system(size: 38, weight: .regular))
+                .font(.system(size: 30))
                 .foregroundStyle(.secondary)
             LocalizedText(.imageConversionDropTitle)
-                .font(.headline)
+                .font(.caption.weight(.medium))
             LocalizedText(.imageConversionDropSubtitle)
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
+            Spacer()
         }
         .multilineTextAlignment(.center)
-        .padding(28)
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private var basketList: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Text(L(.imageConversionBasketCount, model.items.count))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
-
-            ScrollView {
-                LazyVStack(spacing: 6) {
-                    ForEach(model.items) { item in
-                        ImageConversionRow(
-                            item: item,
-                            status: model.itemStatuses[item.id],
-                            allowResize: model.allowResize,
-                            remove: { model.remove(item) },
-                            saveAnyway: { model.saveBestEffort(item) },
-                            enableResize: { model.allowResize = true }
-                        )
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-            }
-        }
-    }
-
-    private var dropOverlay: some View {
-        RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .fill(Color.accentColor.opacity(0.12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.accentColor.opacity(0.65), style: StrokeStyle(lineWidth: 2, dash: [8, 5]))
-            )
-            .overlay {
-                LocalizedText(.imageConversionDropTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-            }
-            .padding(14)
-    }
-
-    // Reading `store.revision` here (during body evaluation) establishes an
-    // @Observable dependency so the section re-fetches on every store write —
-    // the same idiom `TranslationHistoryView` uses.
-    private var historySection: some View {
+    // Reading `store.revision` during body evaluation establishes the
+    // observation dependency that makes this fetched list update after writes.
+    private var historySidebar: some View {
         _ = store.revision
         let records = store.recent()
         return VStack(spacing: 0) {
-            Divider()
-            HStack {
-                LocalizedText(.imageConversionHistoryTitle)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    store.clear()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.plain)
-                .disabled(records.isEmpty)
-                .accessibilityLabel(L(.imageConversionHistoryClear))
-                .help(L(.imageConversionHistoryClear))
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-
             if records.isEmpty {
-                historyEmpty
+                VStack {
+                    Spacer()
+                    LocalizedText(.imageConversionHistoryEmpty)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(spacing: 4) {
@@ -314,27 +178,329 @@ struct ImageConversionView: View {
                             ImageConversionHistoryRow(record: record)
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
+                    .padding(8)
                 }
             }
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button {
+                    store.clear()
+                } label: {
+                    Label(L(.imageConversionHistoryClear), systemImage: "trash")
+                }
+                .disabled(records.isEmpty)
+            }
+            .controlSize(.small)
+            .padding(10)
         }
-        .frame(height: 168)
     }
 
-    private var historyEmpty: some View {
-        VStack {
-            Spacer()
-            LocalizedText(.imageConversionHistoryEmpty)
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-            Spacer()
+    // MARK: - Comparison workspace
+
+    private var comparisonWorkspace: some View {
+        HStack(spacing: 0) {
+            comparisonPane(title: .imageConversionCompareOriginal) {
+                originalPreview
+            }
+            Divider()
+            comparisonPane(title: .imageConversionCompareResult) {
+                resultPreview
+            }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private func comparisonPane<Content: View>(
+        title: L10n.Key,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) {
+            LocalizedText(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .frame(height: 36)
+            Divider()
+            content()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var originalPreview: some View {
+        if let item = model.selectedItem {
+            ImageComparisonPreview(source: .basket(item))
+        } else {
+            comparisonMessage(.imageConversionCompareEmpty)
+        }
+    }
+
+    @ViewBuilder
+    private var resultPreview: some View {
+        switch model.previewState {
+        case .empty:
+            comparisonMessage(.imageConversionCompareEmpty)
+        case .updating:
+            VStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                LocalizedText(.imageConversionCompareUpdating)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .ready(let candidate):
+            ImageComparisonPreview(
+                source: .file(candidate.artifact.artifactURL),
+                caption: ComparisonCaption(
+                    byteCount: candidate.artifact.byteCount,
+                    dimensions: candidate.dimensions
+                ),
+                showsBestEffortBadge: candidate.isBestEffort
+            )
+        case .unsupported(let issue):
+            comparisonMessage(issue == .sourceMissing
+                ? .imageConversionSourceMissing
+                : .imageConversionStatusUnsupported)
+        case .invalidConfiguration:
+            comparisonMessage(.imageConversionTargetInvalid)
+        case .failed:
+            comparisonMessage(.imageConversionStatusFailed)
+        }
+    }
+
+    private func comparisonMessage(_ key: L10n.Key) -> some View {
+        LocalizedText(key)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Inspector
+
+    private var inspector: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    Picker("", selection: $model.mode) {
+                        LocalizedText(.imageConversionQuality).tag(ImageConversionMode.quality)
+                        LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+
+                    formatPicker
+
+                    if model.mode == .quality {
+                        if model.isQualityAdjustable {
+                            qualityControl
+                        }
+                    } else {
+                        targetSizeControls
+                    }
+
+                    if let item = model.selectedItem,
+                       case .targetMiss(let candidate) = model.itemStatuses[item.id] {
+                        targetMissSummary(candidate, item: item)
+                    }
+                }
+                .disabled(model.isConverting)
+                .padding(16)
+            }
+
+            Divider()
+            primaryAction
+                .padding(16)
+        }
+        .frame(width: 280)
+        .background(.regularMaterial)
+    }
+
+    private var formatPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LocalizedText(.imageConversionTargetFormat)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if model.availableFormats.isEmpty {
+                LocalizedText(.imageConversionNoFormats)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if model.mode == .quality {
+                Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
+                    ForEach(model.availableFormats) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+            } else {
+                Picker(L(.imageConversionTargetFormat), selection: $model.targetSizeFormat) {
+                    ForEach(model.targetSizeFormats) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .labelsHidden()
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+
+    private var qualityControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                LocalizedText(.imageConversionQuality)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(model.qualityPercent)%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            Slider(
+                value: Binding(
+                    get: { Double(model.qualityPercent) },
+                    set: { model.qualityPercent = Int($0.rounded()) }
+                ),
+                in: Double(ImageConversionPreferences.minQualityPercent)...Double(ImageConversionPreferences.maxQualityPercent)
+            )
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(L(.imageConversionQuality))
+    }
+
+    private var targetSizeControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                TextField("1", text: $model.targetText)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .onSubmit { model.commitTargetText() }
+                    .onChange(of: model.targetText) { model.commitTargetText() }
+                    .accessibilityLabel(L(.imageConversionModeTargetSize))
+                Picker("", selection: Binding(
+                    get: { model.targetLimit.unit },
+                    set: { model.switchTargetUnit(to: $0) }
+                )) {
+                    Text("KB").tag(TargetSizeUnit.kb)
+                    Text("MB").tag(TargetSizeUnit.mb)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+
+            Toggle(isOn: $model.allowResize) {
+                LocalizedText(.imageConversionAllowResize)
+                    .font(.caption)
+            }
+            .toggleStyle(.checkbox)
+
+            if model.targetParseError != nil {
+                LocalizedText(.imageConversionTargetInvalid)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func targetMissSummary(
+        _ candidate: PreparedCandidate,
+        item: ImageConversionBasketItem
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LocalizedText(.imageConversionStatusTargetMiss)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.orange)
+
+            if case .bestEffort(let reason) = candidate.kind,
+               reason == .qualityFloorReached,
+               !model.allowResize {
+                Button {
+                    model.allowResize = true
+                } label: {
+                    LocalizedText(.imageConversionEnableResizeHint)
+                        .font(.caption)
+                        .multilineTextAlignment(.leading)
+                }
+                .buttonStyle(.link)
+            } else {
+                LocalizedText(.imageConversionUnattainableHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text(candidate.caption)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+
+            Button {
+                model.saveBestEffort(item)
+            } label: {
+                LocalizedText(.imageConversionSaveAnyway)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    @ViewBuilder
+    private var primaryAction: some View {
+        if model.isConverting {
+            Button {
+                model.stopConversion()
+            } label: {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    LocalizedText(.imageConversionStop)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .keyboardShortcut(".", modifiers: .command)
+        } else {
+            Button {
+                model.convert()
+            } label: {
+                HStack(spacing: 8) {
+                    if model.isConverting {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    LocalizedText(model.isConverting
+                        ? .imageConversionConverting
+                        : .imageConversionConvertAll)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(!model.canConvert)
+            .keyboardShortcut(.return, modifiers: .command)
+        }
+    }
+
+    private var dropOverlay: some View {
+        RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .fill(Color.accentColor.opacity(0.14))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 2, dash: [8, 5]))
+            )
+            .overlay {
+                LocalizedText(.imageConversionDropTitle)
+                    .font(.headline)
+            }
+            .padding(14)
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !model.isConverting else { return false }
         var accepted = false
         for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
             accepted = true
@@ -349,52 +515,49 @@ struct ImageConversionView: View {
     }
 }
 
-private struct ImageConversionRow: View {
+private struct ImageConversionSidebarRow: View {
     let item: ImageConversionBasketItem
     var status: ImageConversionItemStatus?
-    var allowResize = false
+    var isSelected: Bool
+    var isRemovalDisabled: Bool
+    let select: () -> Void
     let remove: () -> Void
-    var saveAnyway: () -> Void = {}
-    var enableResize: () -> Void = {}
+
     @State private var thumbnail: NSImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Image(nsImage: resolvedThumbnail)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 30, height: 30)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.displayName)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                    if !item.subtitle.isEmpty {
-                        Text(item.subtitle)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                statusBadge
-                Button(action: remove) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(L(.imageConversionRemove))
-                .help(L(.imageConversionRemove))
+        HStack(spacing: 8) {
+            Image(nsImage: resolvedThumbnail)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            Text(item.displayName)
+                .font(.system(size: 12, weight: .medium))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            statusBadge
+
+            Button(action: remove) {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
             }
-            if case .targetMiss(let candidate) = status {
-                targetMissDetail(candidate)
-            }
+            .buttonStyle(.plain)
+            .disabled(isRemovalDisabled)
+            .accessibilityLabel(L(.imageConversionRemove))
+            .help(L(.imageConversionRemove))
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.2) : Color.primary.opacity(0.04),
+            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
         .task(id: item.id) {
             thumbnail = await loadThumbnail()
         }
@@ -417,46 +580,13 @@ private struct ImageConversionRow: View {
     private func badge(_ text: String, color: Color) -> some View {
         Text(text)
             .font(.caption2.weight(.medium))
+            .lineLimit(1)
             .foregroundStyle(color)
-            .padding(.horizontal, 6)
+            .padding(.horizontal, 5)
             .padding(.vertical, 2)
             .background(color.opacity(0.12), in: Capsule())
     }
 
-    /// The actionable Best-Effort summary: what stopped the search, what to
-    /// do next, and the explicit Save Anyway action.
-    private func targetMissDetail(_ candidate: PreparedCandidate) -> some View {
-        HStack(spacing: 8) {
-            if case .bestEffort(let reason) = candidate.kind {
-                if reason == .qualityFloorReached && !allowResize {
-                    Button(action: enableResize) {
-                        LocalizedText(.imageConversionEnableResizeHint)
-                            .font(.caption)
-                    }
-                    .buttonStyle(.link)
-                } else {
-                    LocalizedText(.imageConversionUnattainableHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Text(ByteCountFormatter.string(
-                fromByteCount: candidate.artifact.byteCount, countStyle: .file
-            ))
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-            Button(action: saveAnyway) {
-                LocalizedText(.imageConversionSaveAnyway)
-                    .font(.caption)
-            }
-            .controlSize(.small)
-        }
-        .padding(.leading, 40)
-    }
-
-    /// Async-decoded image preview, with a synchronous cache fast path for file
-    /// items and a file-type icon while the decode is in flight.
     private var resolvedThumbnail: NSImage {
         if let thumbnail { return thumbnail }
         if let url = item.fileURL {
@@ -475,30 +605,174 @@ private struct ImageConversionRow: View {
     }
 }
 
-/// Downsampled thumbnails for in-memory bitmap basket items — the Data twin of
-/// `ClipboardThumbnail`, without a cache (bitmap items are few and short-lived).
-private enum BitmapThumbnail {
-    /// Carries the non-Sendable `NSImage` produced off-main back to the main
-    /// actor. `@unchecked` is sound because the image is freshly created in the
-    /// detached task and never mutated afterwards — only read while drawing.
-    private struct SendableImage: @unchecked Sendable {
-        let image: NSImage
+private struct ComparisonCaption: Hashable, Sendable {
+    var byteCount: Int64?
+    var dimensions: PixelDimensions
+
+    var text: String {
+        let dimensionsText = "\(dimensions.width) × \(dimensions.height)"
+        guard let byteCount else { return dimensionsText }
+        return "\(ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)) · \(dimensionsText)"
+    }
+}
+
+private enum ImageComparisonSource: Hashable, Sendable {
+    case file(URL)
+    case bitmap(id: String, data: Data)
+
+    static func basket(_ item: ImageConversionBasketItem) -> ImageComparisonSource {
+        switch item.payload {
+        case .file(let url):
+            return .file(url)
+        case .bitmap(let data):
+            return .bitmap(id: item.id, data: data)
+        }
+    }
+}
+
+private struct ImageComparisonPreview: View {
+    let source: ImageComparisonSource
+    var caption: ComparisonCaption?
+    var showsBestEffortBadge = false
+
+    @State private var loaded: ComparisonImageLoader.LoadedImage?
+    @State private var didFail = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                if let loaded {
+                    Image(nsImage: loaded.image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .padding(16)
+                } else if didFail {
+                    LocalizedText(.imageConversionSourceMissing)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(24)
+                } else {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if let resolvedCaption {
+                Divider()
+                HStack(spacing: 8) {
+                    Text(resolvedCaption.text)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if showsBestEffortBadge {
+                        Text(L(.imageConversionStatusTargetMiss))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.12), in: Capsule())
+                    }
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+            }
+        }
+        .task(id: source) {
+            loaded = nil
+            didFail = false
+            let image = await ComparisonImageLoader.load(source)
+            guard !Task.isCancelled else { return }
+            loaded = image
+            didFail = image == nil
+        }
     }
 
-    static func decode(_ data: Data) async -> NSImage? {
-        let task = Task.detached(priority: .userInitiated) { () -> SendableImage? in
-            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-            let options: [CFString: Any] = [
-                kCGImageSourceCreateThumbnailFromImageAlways: true,
-                kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 96,
-            ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                return nil
-            }
-            return SendableImage(image: NSImage(cgImage: cgImage, size: .zero))
+    private var resolvedCaption: ComparisonCaption? {
+        caption ?? loaded?.caption
+    }
+}
+
+private enum ComparisonImageLoader {
+    /// The image is created once in the detached decode and is immutable after
+    /// crossing back to the main actor, matching the thumbnail cache invariant.
+    struct LoadedImage: @unchecked Sendable {
+        let image: NSImage
+        let caption: ComparisonCaption
+    }
+
+    static func load(
+        _ source: ImageComparisonSource,
+        maxPixelSize: Int = 2_560
+    ) async -> LoadedImage? {
+        let task = Task.detached(priority: .userInitiated) {
+            decode(source, maxPixelSize: maxPixelSize)
         }
-        return await task.value?.image
+        return await task.value
+    }
+
+    private nonisolated static func decode(
+        _ input: ImageComparisonSource,
+        maxPixelSize: Int
+    ) -> LoadedImage? {
+        let source: CGImageSource
+        let byteCount: Int64?
+        switch input {
+        case .file(let url):
+            guard let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+            source = imageSource
+            byteCount = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+        case .bitmap(_, let data):
+            guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            source = imageSource
+            byteCount = Int64(data.count)
+        }
+
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+              width > 0,
+              height > 0 else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+            return nil
+        }
+        return LoadedImage(
+            image: NSImage(cgImage: cgImage, size: .zero),
+            caption: ComparisonCaption(
+                byteCount: byteCount,
+                dimensions: PixelDimensions(width: width, height: height)
+            )
+        )
+    }
+}
+
+private extension PreparedCandidate {
+    var isBestEffort: Bool {
+        if case .bestEffort = kind { return true }
+        return false
+    }
+
+    var caption: String {
+        ComparisonCaption(byteCount: artifact.byteCount, dimensions: dimensions).text
+    }
+}
+
+/// Downsampled thumbnails for in-memory bitmap basket items. The Data payload
+/// is short-lived, so no cache is needed.
+private enum BitmapThumbnail {
+    static func decode(_ data: Data) async -> NSImage? {
+        await ComparisonImageLoader.load(
+            .bitmap(id: "thumbnail", data: data),
+            maxPixelSize: 96
+        )?.image
     }
 }
 
@@ -507,7 +781,7 @@ private struct ImageConversionHistoryRow: View {
     @State private var preview: NSImage?
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(nsImage: resolvedPreview)
                 .resizable()
                 .aspectRatio(contentMode: .fit)
@@ -525,10 +799,10 @@ private struct ImageConversionHistoryRow: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             }
-            Spacer()
+            Spacer(minLength: 0)
             Button(action: reveal) {
                 Image(systemName: "folder")
-                    .frame(width: 22, height: 22)
+                    .frame(width: 18, height: 18)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(L(.clipboardActionRevealInFinder))
@@ -536,24 +810,21 @@ private struct ImageConversionHistoryRow: View {
 
             Button(action: copyAsFile) {
                 Image(systemName: "doc.on.doc")
-                    .frame(width: 22, height: 22)
+                    .frame(width: 18, height: 18)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(L(.imageConversionCopyAsFile))
             .help(L(.imageConversionCopyAsFile))
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .task(id: record.outputPath) {
             guard FileManager.default.fileExists(atPath: record.outputPath) else { return }
             preview = await ClipboardThumbnail.thumbnail(at: record.outputURL)
         }
     }
 
-    /// Resolves the preview from the output path at render time (downsampled and
-    /// cached via `ClipboardThumbnail`); a deleted file degrades to a generic
-    /// placeholder rather than a broken image.
     private var resolvedPreview: NSImage {
         if let preview { return preview }
         if let cached = ClipboardThumbnail.cached(at: record.outputURL) { return cached }
@@ -561,8 +832,6 @@ private struct ImageConversionHistoryRow: View {
             ?? NSWorkspace.shared.icon(for: .image)
     }
 
-    /// Selects the output in Finder; a missing file shows a toast instead of a
-    /// broken reveal.
     private func reveal() {
         let url = record.outputURL
         guard FileManager.default.fileExists(atPath: url.path) else {
@@ -572,17 +841,15 @@ private struct ImageConversionHistoryRow: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    /// Puts the output on the pasteboard as a file URL (with self-write
-    /// suppression so AnyDoor's own clipboard history ignores it), ready to paste.
     private func copyAsFile() {
         let url = record.outputURL
         guard FileManager.default.fileExists(atPath: url.path) else {
             ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
             return
         }
-        ClipboardWatcher.selfWrite { pb in
-            pb.clearContents()
-            pb.writeObjects([url as NSURL])
+        ClipboardWatcher.selfWrite { pasteboard in
+            pasteboard.clearContents()
+            pasteboard.writeObjects([url as NSURL])
         }
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
@@ -590,18 +857,10 @@ private struct ImageConversionHistoryRow: View {
 
 private enum ImageConversionDropSupport {
     static func url(from item: NSSecureCoding?) -> URL? {
-        if let url = item as? URL {
-            return url
-        }
-        if let url = item as? NSURL {
-            return url as URL
-        }
-        if let data = item as? Data {
-            return URL(dataRepresentation: data, relativeTo: nil)
-        }
-        if let string = item as? String {
-            return URL(string: string)
-        }
+        if let url = item as? URL { return url }
+        if let url = item as? NSURL { return url as URL }
+        if let data = item as? Data { return URL(dataRepresentation: data, relativeTo: nil) }
+        if let string = item as? String { return URL(string: string) }
         return nil
     }
 }

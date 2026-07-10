@@ -57,6 +57,7 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertEqual(summary.converted, 1)
         XCTAssertEqual(summary.skipped, 1)
         XCTAssertEqual(summary.outputURLs, [output])
+        XCTAssertEqual(summary.outputs.map(\.inputIndex), [0])
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
         XCTAssertEqual(try Data(contentsOf: image), original)
     }
@@ -93,6 +94,7 @@ final class ImageConversionSessionTests: XCTestCase {
 
         XCTAssertEqual(summary.converted, 2)
         XCTAssertEqual(summary.skipped, 0)
+        XCTAssertEqual(summary.outputs.map(\.inputIndex), [0, 1])
         XCTAssertEqual(
             summary.outputURLs.map(\.lastPathComponent),
             ["Clipboard 2024-07-03 09.46.40.jpg", "Clipboard 2024-07-03 09.46.40 2.jpg"]
@@ -115,6 +117,40 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertEqual(summary.converted, 0)
         XCTAssertEqual(summary.skipped, 1)
         XCTAssertTrue(summary.outputURLs.isEmpty)
+    }
+
+    func testOutputsRetainTheirInputIndicesWhenEarlierItemsAreSkipped() async throws {
+        let downloads = try tempDirectory()
+        let bitmap = try pngData()
+
+        let summary = await ImageConversionSession().convertAll(
+            inputs: [.bitmap(Data("not an image".utf8)), .bitmap(bitmap)],
+            target: .jpeg,
+            downloadsDirectory: downloads
+        )
+
+        XCTAssertEqual(summary.converted, 1)
+        XCTAssertEqual(summary.skipped, 1)
+        XCTAssertEqual(summary.outputs.map(\.inputIndex), [1])
+    }
+
+    func testCancellationStopsBeforeCompletingTheRemainingBatch() async throws {
+        let downloads = try tempDirectory()
+        let bitmap = try pngData()
+        let inputs = [ImageConversionInput](repeating: .bitmap(bitmap), count: 100)
+
+        let task = Task {
+            await ImageConversionSession().convertAll(
+                inputs: inputs,
+                target: .jpeg,
+                downloadsDirectory: downloads
+            )
+        }
+        task.cancel()
+        let summary = await task.value
+
+        XCTAssertLessThan(summary.converted, inputs.count)
+        XCTAssertEqual(summary.converted, summary.outputs.count)
     }
 
     /// A noisy image (rather than a flat fill) so JPEG's lossy quantization
