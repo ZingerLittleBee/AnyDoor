@@ -86,6 +86,10 @@ private func convertAllSynchronously(
     bitmapBaseName: String
 ) -> ImageConversionSummary {
     let converter = ImageConverter()
+    guard let artifactStore = try? CandidateArtifactStore() else {
+        return ImageConversionSummary(converted: 0, skipped: inputs.count, outputs: [])
+    }
+    let writer = AtomicOutputWriter()
     var converted = 0
     var skipped = 0
     var outputs: [ImageConversionOutput] = []
@@ -98,15 +102,28 @@ private func convertAllSynchronously(
                 skipped += 1
                 continue
             }
-            let outputURL = ImageConversionNaming.outputURL(forFileSource: fileURL, target: target)
             do {
-                try converter.convertFile(at: fileURL, to: outputURL, format: target, quality: quality)
+                let data = try converter.candidateData(
+                    fileAt: fileURL,
+                    format: target,
+                    quality: quality
+                )
+                let artifact = try artifactStore.materialize(data)
+                let output = try writer.commit(
+                    artifact,
+                    to: AtomicOutputWriter.DestinationPolicy(
+                        directory: fileURL.deletingLastPathComponent(),
+                        baseName: fileURL.deletingPathExtension().lastPathComponent,
+                        fileExtension: target.fileExtension
+                    ),
+                    isCancelled: { Task.isCancelled }
+                )
                 converted += 1
                 outputs.append(ImageConversionOutput(
                     inputIndex: inputIndex,
                     sourceName: fileURL.lastPathComponent,
                     sourceKind: .file,
-                    outputURL: outputURL
+                    outputURL: output.url
                 ))
             } catch {
                 skipped += 1
@@ -116,21 +133,30 @@ private func convertAllSynchronously(
                 skipped += 1
                 continue
             }
-            let outputURL = ImageConversionNaming.outputURL(
-                forBitmapInDownloads: downloadsDirectory,
-                baseName: bitmapBaseName,
-                target: target
-            )
             do {
-                try converter.convert(data: data, to: outputURL, format: target, quality: quality)
+                let encoded = try converter.candidateData(
+                    bitmapData: data,
+                    format: target,
+                    quality: quality
+                )
+                let artifact = try artifactStore.materialize(encoded)
+                let output = try writer.commit(
+                    artifact,
+                    to: AtomicOutputWriter.DestinationPolicy(
+                        directory: downloadsDirectory,
+                        baseName: bitmapBaseName,
+                        fileExtension: target.fileExtension
+                    ),
+                    isCancelled: { Task.isCancelled }
+                )
                 converted += 1
                 // A bitmap has no source filename; the output's base name is the
                 // most meaningful label ("Clipboard <timestamp>").
                 outputs.append(ImageConversionOutput(
                     inputIndex: inputIndex,
-                    sourceName: outputURL.deletingPathExtension().lastPathComponent,
+                    sourceName: output.url.deletingPathExtension().lastPathComponent,
                     sourceKind: .bitmap,
-                    outputURL: outputURL
+                    outputURL: output.url
                 ))
             } catch {
                 skipped += 1

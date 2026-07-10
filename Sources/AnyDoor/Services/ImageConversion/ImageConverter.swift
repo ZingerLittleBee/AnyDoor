@@ -11,45 +11,67 @@ struct ImageConverter: Sendable {
     static let defaultQuality = 0.85
     private static let iconMaxPixel = 256
 
+    @discardableResult
     func convertFile(
         at sourceURL: URL,
         to outputURL: URL,
         format: ImageConversionFormat,
         quality: Double = ImageConverter.defaultQuality
-    ) throws {
-        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
-              CGImageSourceGetCount(source) > 0 else {
-            throw ImageConversionError.unreadableSource(sourceURL)
-        }
-        try encode(source: source, to: outputURL, format: format, quality: quality)
+    ) throws -> CommittedOutput {
+        let data = try candidateData(fileAt: sourceURL, format: format, quality: quality)
+        return try commit(data, toRequestedURL: outputURL)
     }
 
     /// Converts an in-memory bitmap (e.g. a pasted screenshot) to `outputURL`.
+    @discardableResult
     func convert(
         data: Data,
         to outputURL: URL,
         format: ImageConversionFormat,
         quality: Double = ImageConverter.defaultQuality
-    ) throws {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+    ) throws -> CommittedOutput {
+        let encoded = try candidateData(bitmapData: data, format: format, quality: quality)
+        return try commit(encoded, toRequestedURL: outputURL)
+    }
+
+    func candidateData(
+        fileAt sourceURL: URL,
+        format: ImageConversionFormat,
+        quality: Double = ImageConverter.defaultQuality
+    ) throws -> Data {
+        guard let source = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
               CGImageSourceGetCount(source) > 0 else {
-            throw ImageConversionError.encodingFailed(outputURL)
+            throw ImageConversionError.unreadableSource(sourceURL)
         }
-        try encode(source: source, to: outputURL, format: format, quality: quality)
+        return try encode(source: source, format: format, quality: quality, failureURL: sourceURL)
+    }
+
+    func candidateData(
+        bitmapData: Data,
+        format: ImageConversionFormat,
+        quality: Double = ImageConverter.defaultQuality
+    ) throws -> Data {
+        guard let source = CGImageSourceCreateWithData(bitmapData as CFData, nil),
+              CGImageSourceGetCount(source) > 0 else {
+            throw ImageConversionError.encodingFailed(URL(fileURLWithPath: "bitmap"))
+        }
+        return try encode(
+            source: source,
+            format: format,
+            quality: quality,
+            failureURL: URL(fileURLWithPath: "bitmap")
+        )
     }
 
     private func encode(
         source: CGImageSource,
-        to outputURL: URL,
         format: ImageConversionFormat,
-        quality: Double
-    ) throws {
-        try FileManager.default.createDirectory(
-            at: outputURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        guard let destination = CGImageDestinationCreateWithURL(
-            outputURL as CFURL,
+        quality: Double,
+        failureURL: URL
+    ) throws -> Data {
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            encoded,
             format.typeIdentifier as CFString,
             1,
             nil
@@ -60,7 +82,7 @@ struct ImageConverter: Sendable {
         let properties = destinationProperties(format: format, quality: quality)
         if format == .ico {
             guard let icon = makeIconImage(from: source) else {
-                throw ImageConversionError.encodingFailed(outputURL)
+                throw ImageConversionError.encodingFailed(failureURL)
             }
             CGImageDestinationAddImage(destination, icon, properties as CFDictionary)
         } else {
@@ -68,9 +90,20 @@ struct ImageConverter: Sendable {
         }
 
         guard CGImageDestinationFinalize(destination) else {
-            try? FileManager.default.removeItem(at: outputURL)
-            throw ImageConversionError.encodingFailed(outputURL)
+            throw ImageConversionError.encodingFailed(failureURL)
         }
+        return encoded as Data
+    }
+
+    private func commit(_ data: Data, toRequestedURL outputURL: URL) throws -> CommittedOutput {
+        let store = try CandidateArtifactStore()
+        let artifact = try store.materialize(data)
+        let destination = AtomicOutputWriter.DestinationPolicy(
+            directory: outputURL.deletingLastPathComponent(),
+            baseName: outputURL.deletingPathExtension().lastPathComponent,
+            fileExtension: outputURL.pathExtension
+        )
+        return try AtomicOutputWriter().commit(artifact, to: destination)
     }
 
     static func canDecodeFile(at url: URL) -> Bool {

@@ -77,6 +77,20 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Photo 2.jpg").path))
     }
 
+    func testConvertAllNeverReplacesAPreexistingOutput() async throws {
+        let dir = try tempDirectory()
+        let image = dir.appendingPathComponent("Photo.png")
+        let occupied = dir.appendingPathComponent("Photo.jpg")
+        try writePNG(to: image)
+        let originalOutput = Data("preexisting output".utf8)
+        try originalOutput.write(to: occupied)
+
+        let summary = await ImageConversionSession().convertAll(fileURLs: [image], target: .jpeg)
+
+        XCTAssertEqual(summary.outputURLs.map(\.lastPathComponent), ["Photo 2.jpg"])
+        XCTAssertEqual(try Data(contentsOf: occupied), originalOutput)
+    }
+
     func testConvertAllWritesBitmapOutputsToInjectedDownloadsWithTimestampAndCollisionSuffix() async throws {
         let downloads = try tempDirectory()
         var calendar = Calendar(identifier: .gregorian)
