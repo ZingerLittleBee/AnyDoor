@@ -135,6 +135,13 @@ actor ImageConversionEngine {
 
     // MARK: - Preview / preparation
 
+    func preflight(
+        item: ImageConversionItemSnapshot,
+        configuration: TargetSizeJobConfiguration
+    ) -> Result<ImageConversionPreflight, ImageConversionPreflightIssue> {
+        inspector.preflight(input: item.input, target: configuration.format)
+    }
+
     /// Prepare (or reuse) the exact full-resolution candidate for one item.
     /// A completed candidate whose fingerprints match returns with zero
     /// additional encodes.

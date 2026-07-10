@@ -32,6 +32,18 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertTrue(CGImageDestinationFinalize(destination))
     }
 
+    private func writeAnimatedGIF(to url: URL) throws {
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL,
+            ImageConversionFormat.gif.typeIdentifier as CFString,
+            2,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, makePNGImage(), nil)
+        CGImageDestinationAddImage(destination, makePNGImage(), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+
     private func pngData() throws -> Data {
         let data = NSMutableData()
         let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
@@ -89,6 +101,17 @@ final class ImageConversionSessionTests: XCTestCase {
 
         XCTAssertEqual(summary.outputURLs.map(\.lastPathComponent), ["Photo 2.jpg"])
         XCTAssertEqual(try Data(contentsOf: occupied), originalOutput)
+    }
+
+    func testQualityPreflightRecordsMultiFrameInputAsFirstFrameOnly() async throws {
+        let dir = try tempDirectory()
+        let source = dir.appendingPathComponent("animated.gif")
+        try writeAnimatedGIF(to: source)
+
+        let summary = await ImageConversionSession().convertAll(fileURLs: [source], target: .png)
+
+        XCTAssertEqual(summary.converted, 1)
+        XCTAssertTrue(try XCTUnwrap(summary.outputs.first).firstFrameOnly)
     }
 
     func testConvertAllWritesBitmapOutputsToInjectedDownloadsWithTimestampAndCollisionSuffix() async throws {

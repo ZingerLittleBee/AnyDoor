@@ -81,6 +81,19 @@ final class ImageConversionViewModelTests: XCTestCase {
         model.clear()
     }
 
+    @MainActor
+    func testQualityBasketShowsFirstFrameOnlyNoticeBeforeRun() throws {
+        let source = try writeAnimatedGIF()
+        defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+        let model = ImageConversionViewModel(availableFormats: [.png])
+
+        model.addFiles([source])
+
+        let item = try XCTUnwrap(model.items.first)
+        XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.contains(item.id))
+        model.clear()
+    }
+
     private func writePNG() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ImageConversionViewModelTests-\(UUID().uuidString)", isDirectory: true)
@@ -105,6 +118,27 @@ final class ImageConversionViewModelTests: XCTestCase {
             nil
         ))
         CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
+    private func writeAnimatedGIF() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ImageConversionViewModelTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("animated.gif")
+        let frameURL = try writePNG()
+        defer { try? FileManager.default.removeItem(at: frameURL.deletingLastPathComponent()) }
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(frameURL as CFURL, nil))
+        let frame = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL,
+            ImageConversionFormat.gif.typeIdentifier as CFString,
+            2,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, frame, nil)
+        CGImageDestinationAddImage(destination, frame, nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         return url
     }

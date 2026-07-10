@@ -88,6 +88,8 @@ struct ImageConversionView: View {
                             ImageConversionSidebarRow(
                                 item: item,
                                 status: model.itemStatuses[item.id],
+                                showsFirstFrameOnly: model.mode == .quality
+                                    && model.qualityFirstFrameOnlyItemIDs.contains(item.id),
                                 isSelected: model.selectedItemID == item.id,
                                 isRemovalDisabled: model.isConverting,
                                 select: { model.selectedItemID = item.id },
@@ -516,6 +518,7 @@ struct ImageConversionView: View {
 private struct ImageConversionSidebarRow: View {
     let item: ImageConversionBasketItem
     var status: ImageConversionItemStatus?
+    var showsFirstFrameOnly: Bool
     var isSelected: Bool
     var isRemovalDisabled: Bool
     let select: () -> Void
@@ -571,7 +574,9 @@ private struct ImageConversionSidebarRow: View {
         case .failed:
             badge(L(.imageConversionStatusFailed), color: .red)
         case nil:
-            EmptyView()
+            if showsFirstFrameOnly {
+                badge(L(.imageConversionStatusFirstFrameOnly), color: .secondary)
+            }
         }
     }
 

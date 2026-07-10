@@ -4727,6 +4727,23 @@
         }
       }
     },
+    "imageConversion.status.firstFrameOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First frame only"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅转换第一帧"
+          }
+        }
+      }
+    },
     "imageConversion.status.targetMiss": {
       "extractionState": "manual",
       "localizations": {

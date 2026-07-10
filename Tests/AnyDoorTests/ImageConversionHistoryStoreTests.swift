@@ -55,6 +55,21 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
         XCTAssertEqual(item.outputPath, "/tmp/out.heic")
     }
 
+    func testRecordPersistsFirstFrameOnlyNotice() throws {
+        let store = try makeStore()
+
+        XCTAssertTrue(store.record(
+            sourceName: "animated.gif",
+            sourceKind: .file,
+            targetFormat: .png,
+            qualityPercent: 85,
+            outputPath: "/tmp/animated.png",
+            firstFrameOnly: true
+        ))
+
+        XCTAssertTrue(try XCTUnwrap(store.recent().first).firstFrameOnly)
+    }
+
     func testTrimsToFiftyOnWriteKeepingNewest() throws {
         let store = try makeStore()
         for index in 0..<55 {

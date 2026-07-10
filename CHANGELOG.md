@@ -15,9 +15,9 @@ versioning.
 
 ### Fixed
 
-- Image Conversion: hardened Target Size cancellation, frozen run state,
-  candidate metadata validation, preview artifact cleanup, and transactional
-  history writes with visible persistence warnings.
+- Image Conversion: hardened basket preflight, cancellation, frozen run state,
+  atomic output commits, candidate metadata validation, preview artifact
+  cleanup, and transactional history writes with visible persistence warnings.
 
 ## [3.6.0] - 2026-07-10
 

@@ -104,6 +104,7 @@ final class ImageConversionViewModel {
     /// Per-item outcome of the last run (miss/unsupported/failed items stay
     /// in the basket with their status; successes leave).
     private(set) var itemStatuses: [String: ImageConversionItemStatus] = [:]
+    private(set) var qualityFirstFrameOnlyItemIDs: Set<String> = []
 
     // MARK: Selection & exact preview
 
@@ -232,6 +233,7 @@ final class ImageConversionViewModel {
             next.append(.file(url))
         }
         items = next.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        refreshQualityPreflightNotices()
         selectFirstIfNeeded()
     }
 
@@ -256,6 +258,7 @@ final class ImageConversionViewModel {
     func addBitmap(_ data: Data) {
         guard !isConverting else { return }
         items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
+        refreshQualityPreflightNotices()
         selectFirstIfNeeded()
     }
 
@@ -270,6 +273,7 @@ final class ImageConversionViewModel {
             next.append(item)
         }
         items = next
+        refreshQualityPreflightNotices()
         selectFirstIfNeeded()
     }
 
@@ -283,6 +287,7 @@ final class ImageConversionViewModel {
         let removed = items
         items.removeAll()
         itemStatuses.removeAll()
+        qualityFirstFrameOnlyItemIDs.removeAll()
         for item in removed { releaseEngineArtifacts(for: item.id) }
         selectedItemID = nil
     }
@@ -397,7 +402,8 @@ final class ImageConversionViewModel {
                 sourceKind: output.sourceKind,
                 targetFormat: target,
                 qualityPercent: qualityPercent,
-                outputPath: output.outputURL.path
+                outputPath: output.outputURL.path,
+                firstFrameOnly: output.firstFrameOnly
             )
             if !saved { warnings += 1 }
         }
@@ -426,23 +432,35 @@ final class ImageConversionViewModel {
         runTask = Task { [weak self] in
             var successes: [(item: ImageConversionBasketItem, conversion: CommittedConversion)] = []
             var interrupted = false
+            var eligible: [(item: ImageConversionBasketItem, snapshot: ImageConversionItemSnapshot)] = []
             for entry in frozen {
                 if Task.isCancelled { interrupted = true; break }
-                let outcome = await engine.convertItem(entry.snapshot, configuration: configuration)
-                guard let self else { return }
-                switch outcome {
-                case .success(let conversion):
-                    successes.append((entry.item, conversion))
-                case .targetMiss(let candidate):
-                    self.itemStatuses[entry.item.id] = .targetMiss(candidate)
-                case .unsupported(let issue):
-                    self.itemStatuses[entry.item.id] = .unsupported(issue)
-                case .failed:
-                    self.itemStatuses[entry.item.id] = .failed
-                case .cancelled:
-                    interrupted = true
+                switch await engine.preflight(item: entry.snapshot, configuration: configuration) {
+                case .success:
+                    eligible.append(entry)
+                case .failure(let issue):
+                    self?.itemStatuses[entry.item.id] = .unsupported(issue)
                 }
-                if interrupted { break }
+            }
+            if !interrupted {
+                for entry in eligible {
+                    if Task.isCancelled { interrupted = true; break }
+                    let outcome = await engine.convertItem(entry.snapshot, configuration: configuration)
+                    guard let self else { return }
+                    switch outcome {
+                    case .success(let conversion):
+                        successes.append((entry.item, conversion))
+                    case .targetMiss(let candidate):
+                        self.itemStatuses[entry.item.id] = .targetMiss(candidate)
+                    case .unsupported(let issue):
+                        self.itemStatuses[entry.item.id] = .unsupported(issue)
+                    case .failed:
+                        self.itemStatuses[entry.item.id] = .failed
+                    case .cancelled:
+                        interrupted = true
+                    }
+                    if interrupted { break }
+                }
             }
             self?.finishTargetSize(successes, interrupted: interrupted)
         }
@@ -617,6 +635,21 @@ final class ImageConversionViewModel {
         itemStatuses.removeAll()
     }
 
+    private func refreshQualityPreflightNotices() {
+        let inspector = ImageIOSourceInspector(rejectsMultiImage: false)
+        qualityFirstFrameOnlyItemIDs = Set(items.compactMap { item in
+            let input: ImageConversionInput = switch item.payload {
+            case .file(let url): .file(url)
+            case .bitmap(let data): .bitmap(data)
+            }
+            guard case .success(let preflight) = inspector.preflight(
+                input: input,
+                target: selectedFormat
+            ), preflight.firstFrameOnly else { return nil }
+            return item.id
+        })
+    }
+
     private func pruneIdlePreviewArtifactsIfNeeded() {
         guard !isWindowPresented, !isConverting, let engine else { return }
         Task { await engine.pruneDisplayed(keepingItem: nil) }
@@ -657,6 +690,7 @@ final class ImageConversionViewModel {
         items.removeAll { ids.contains($0.id) }
         for id in ids {
             itemStatuses[id] = nil
+            qualityFirstFrameOnlyItemIDs.remove(id)
             releaseEngineArtifacts(for: id)
         }
 

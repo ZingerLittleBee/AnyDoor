@@ -20,6 +20,7 @@ struct ImageConversionOutput: Equatable, Sendable {
     let sourceName: String
     let sourceKind: ImageConversionSourceKind
     let outputURL: URL
+    let firstFrameOnly: Bool
 }
 
 struct ImageConversionSummary: Equatable, Sendable {
@@ -94,7 +95,25 @@ private func convertAllSynchronously(
     var skipped = 0
     var outputs: [ImageConversionOutput] = []
 
+    let inspector = ImageIOSourceInspector(rejectsMultiImage: false)
+    var eligible: [(
+        inputIndex: Int,
+        input: ImageConversionInput,
+        preflight: ImageConversionPreflight
+    )] = []
     for (inputIndex, input) in inputs.enumerated() {
+        guard !Task.isCancelled else {
+            return ImageConversionSummary(converted: 0, skipped: 0, outputs: [])
+        }
+        switch inspector.preflight(input: input, target: target) {
+        case .success(let preflight):
+            eligible.append((inputIndex, input, preflight))
+        case .failure:
+            skipped += 1
+        }
+    }
+
+    for (inputIndex, input, preflight) in eligible {
         guard !Task.isCancelled else { break }
         switch input {
         case let .file(fileURL):
@@ -123,7 +142,8 @@ private func convertAllSynchronously(
                     inputIndex: inputIndex,
                     sourceName: fileURL.lastPathComponent,
                     sourceKind: .file,
-                    outputURL: output.url
+                    outputURL: output.url,
+                    firstFrameOnly: preflight.firstFrameOnly
                 ))
             } catch {
                 skipped += 1
@@ -156,7 +176,8 @@ private func convertAllSynchronously(
                     inputIndex: inputIndex,
                     sourceName: output.url.deletingPathExtension().lastPathComponent,
                     sourceKind: .bitmap,
-                    outputURL: output.url
+                    outputURL: output.url,
+                    firstFrameOnly: preflight.firstFrameOnly
                 ))
             } catch {
                 skipped += 1

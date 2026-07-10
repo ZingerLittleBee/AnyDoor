@@ -44,6 +44,7 @@ final class ImageConversionHistoryStore {
         targetFormat: ImageConversionFormat,
         qualityPercent: Int,
         outputPath: String,
+        firstFrameOnly: Bool = false,
         createdAt: Date = Date()
     ) -> Bool {
         guard let modelContext else { return false }
@@ -55,6 +56,7 @@ final class ImageConversionHistoryStore {
             outputPath: outputPath,
             createdAt: createdAt
         )
+        record.firstFrameOnly = firstFrameOnly
         modelContext.insert(record)
         return saveRecordAndTrim(using: modelContext)
     }

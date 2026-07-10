@@ -174,6 +174,7 @@ enum L10n {
         case imageConversionSavedAnyway = "imageConversion.savedAnyway"
         case imageConversionSourceMissing = "imageConversion.sourceMissing"
         case imageConversionStatusFailed = "imageConversion.status.failed"
+        case imageConversionStatusFirstFrameOnly = "imageConversion.status.firstFrameOnly"
         case imageConversionStatusTargetMiss = "imageConversion.status.targetMiss"
         case imageConversionStatusUnsupported = "imageConversion.status.unsupported"
         case imageConversionStop = "imageConversion.stop"
