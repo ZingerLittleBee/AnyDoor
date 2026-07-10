@@ -90,6 +90,41 @@ final class ImageIOCandidateEncoderTests: XCTestCase {
         XCTAssertEqual(report.pixelDimensions, PixelDimensions(width: 256, height: 192))
     }
 
+    func test_metadataPolicyRejectsGenericCommentsXMPAndEmbeddedThumbnails() {
+        let commentedProperties: [CFString: Any] = [
+            kCGImagePropertyTIFFDictionary: [
+                kCGImagePropertyTIFFImageDescription: "private workflow note",
+            ],
+        ]
+
+        XCTAssertFalse(TargetMetadataPolicy.ancillaryMetadataAbsent(in: commentedProperties))
+        XCTAssertFalse(TargetMetadataPolicy.ancillaryMetadataAbsent(
+            in: [:],
+            hasForbiddenMetadataTags: true
+        ))
+        XCTAssertFalse(TargetMetadataPolicy.ancillaryMetadataAbsent(
+            in: [:],
+            hasEmbeddedThumbnails: true
+        ))
+
+        let xmp = CGImageMetadataCreateMutable()
+        var registrationError: Unmanaged<CFError>?
+        XCTAssertTrue(CGImageMetadataRegisterNamespaceForPrefix(
+            xmp,
+            "http://ns.adobe.com/xap/1.0/" as CFString,
+            "xmp" as CFString,
+            &registrationError
+        ))
+        XCTAssertNil(registrationError)
+        XCTAssertTrue(CGImageMetadataSetValueWithPath(
+            xmp,
+            nil,
+            "xmp:Label" as CFString,
+            "private label" as CFString
+        ))
+        XCTAssertTrue(TargetMetadataPolicy.metadataContainsAncillaryTags(xmp))
+    }
+
     func test_reencode_preservesOrientation() throws {
         let source = makeSourceData(
             makeGradientImage(), format: .jpeg, withAncillaryMetadata: true, orientation: 6

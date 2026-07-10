@@ -48,11 +48,29 @@ enum TargetMetadataPolicy {
         kCGImagePropertyTIFFDateTime,
         kCGImagePropertyTIFFArtist,
         kCGImagePropertyTIFFCopyright,
+        kCGImagePropertyTIFFDocumentName,
+        kCGImagePropertyTIFFImageDescription,
+        kCGImagePropertyTIFFSoftware,
+        kCGImagePropertyTIFFHostComputer,
+    ] }
+
+    /// Free-form PNG text chunks are ancillary and may carry ownership,
+    /// workflow, or private user comments.
+    private static var forbiddenPNGKeys: [CFString] { [
+        kCGImagePropertyPNGAuthor,
+        kCGImagePropertyPNGComment,
+        kCGImagePropertyPNGDescription,
+        kCGImagePropertyPNGTitle,
     ] }
 
     /// Whether a decoded candidate's property tree is free of ancillary
     /// metadata under this policy.
-    static func ancillaryMetadataAbsent(in properties: [CFString: Any]) -> Bool {
+    static func ancillaryMetadataAbsent(
+        in properties: [CFString: Any],
+        hasForbiddenMetadataTags: Bool = false,
+        hasEmbeddedThumbnails: Bool = false
+    ) -> Bool {
+        if hasForbiddenMetadataTags || hasEmbeddedThumbnails { return false }
         if properties[kCGImagePropertyGPSDictionary] != nil { return false }
         if properties[kCGImagePropertyIPTCDictionary] != nil { return false }
         if properties[kCGImagePropertyMakerAppleDictionary] != nil { return false }
@@ -62,7 +80,38 @@ enum TargetMetadataPolicy {
         if let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any] {
             for key in forbiddenTIFFKeys where tiff[key] != nil { return false }
         }
+        if let png = properties[kCGImagePropertyPNGDictionary] as? [CFString: Any] {
+            for key in forbiddenPNGKeys where png[key] != nil { return false }
+        }
         return true
+    }
+
+    /// Image I/O exposes structural EXIF fields through `CGImageMetadata` even
+    /// for a clean re-encode. Reject every tag except the small display/shape
+    /// set the encoder may synthesize itself.
+    static func metadataContainsAncillaryTags(_ metadata: CGImageMetadata?) -> Bool {
+        guard let metadata,
+              let tags = CGImageMetadataCopyTags(metadata) as? [CGImageMetadataTag] else {
+            return false
+        }
+        let allowedTags: Set<String> = [
+            "exif:ColorSpace",
+            "exif:PixelXDimension",
+            "exif:PixelYDimension",
+            "tiff:ImageLength",
+            "tiff:ImageWidth",
+            "tiff:Orientation",
+            "tiff:ResolutionUnit",
+            "tiff:XResolution",
+            "tiff:YResolution",
+        ]
+        return tags.contains { tag in
+            guard let prefix = CGImageMetadataTagCopyPrefix(tag) as String?,
+                  let name = CGImageMetadataTagCopyName(tag) as String? else {
+                return true
+            }
+            return !allowedTags.contains("\(prefix):\(name)")
+        }
     }
 }
 
@@ -106,11 +155,23 @@ enum CandidateAuditor {
             hasHDRGainMap =
                 CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeISOGainMap) != nil
         }
+        let metadata = CGImageSourceCopyMetadataAtIndex(source, 0, nil)
+        let hasForbiddenMetadataTags = TargetMetadataPolicy.metadataContainsAncillaryTags(metadata)
+        let containerProperties = CGImageSourceCopyProperties(source, nil) as? [CFString: Any]
+        let hasEmbeddedThumbnails = {
+            guard let thumbnails = containerProperties?[kCGImagePropertyThumbnailImages] else { return false }
+            if let array = thumbnails as? [Any] { return !array.isEmpty }
+            return true
+        }()
 
         return CandidateAuditReport(
             decodable: true,
             pixelDimensions: PixelDimensions(width: width, height: height),
-            ancillaryMetadataAbsent: TargetMetadataPolicy.ancillaryMetadataAbsent(in: properties),
+            ancillaryMetadataAbsent: TargetMetadataPolicy.ancillaryMetadataAbsent(
+                in: properties,
+                hasForbiddenMetadataTags: hasForbiddenMetadataTags,
+                hasEmbeddedThumbnails: hasEmbeddedThumbnails
+            ),
             orientation: (properties[kCGImagePropertyOrientation] as? UInt32)
                 ?? (properties[kCGImagePropertyOrientation] as? Int).map(UInt32.init)
                 ?? 1,
