@@ -65,7 +65,15 @@ struct SourceFingerprint: Hashable, Sendable {
 
         var hasher = SHA256()
         while true {
-            guard let chunk = try? handle.read(upToCount: 1 << 20), !chunk.isEmpty else { break }
+            let chunk: Data?
+            do {
+                chunk = try handle.read(upToCount: 1 << 20)
+            } catch {
+                // A digest over a partial read must never masquerade as the
+                // file's fingerprint; surface the failure instead.
+                throw FingerprintError.unreadable(url.path)
+            }
+            guard let chunk, !chunk.isEmpty else { break }
             hasher.update(data: chunk)
         }
         return hex(hasher.finalize())
