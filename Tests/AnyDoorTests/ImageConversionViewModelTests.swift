@@ -49,6 +49,38 @@ final class ImageConversionViewModelTests: XCTestCase {
         model.clear()
     }
 
+    @MainActor
+    func testHidingWindowDeletesTheDisplayedPreviewArtifact() async throws {
+        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let source = try writePNG()
+        defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+
+        let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
+        model.mode = .targetSize
+        model.addFiles([source])
+        model.resetSidebarForPresentation()
+
+        let deadline = ContinuousClock.now + .seconds(5)
+        while model.previewState == .updating, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard case .ready(let candidate) = model.previewState else {
+            return XCTFail("expected an exact preview candidate")
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: candidate.artifact.artifactURL.path))
+
+        model.windowDidHide()
+        let cleanupDeadline = ContinuousClock.now + .seconds(5)
+        while FileManager.default.fileExists(atPath: candidate.artifact.artifactURL.path),
+              ContinuousClock.now < cleanupDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: candidate.artifact.artifactURL.path))
+        model.clear()
+    }
+
     private func writePNG() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ImageConversionViewModelTests-\(UUID().uuidString)", isDirectory: true)

@@ -275,6 +275,11 @@ actor ImageConversionEngine {
     }
 
     func pruneDisplayed(keepingItem selected: UUID?) {
+        let staleIDs = completed.keys.filter { $0 != selected }
+        for id in staleIDs {
+            completed[id] = nil
+            store.setDisplayed(nil, forItem: id)
+        }
         store.pruneDisplayed(keepingItem: selected)
     }
 
@@ -331,13 +336,20 @@ actor ImageConversionEngine {
         // 1. Same-format pass-through when the source already fits.
         if let sourceBytes = preflight.sourceByteCount,
            sourceBytes <= configuration.targetBytes,
+           backgroundHex == nil,
            encoder.sourceTypeIdentifier == configuration.format.typeIdentifier,
            let rewritten = encoder.losslessPassThrough(as: configuration.format),
            Int64(rewritten.count) <= configuration.targetBytes {
             let report = CandidateAuditor.audit(rewritten)
             if report.decodable,
                report.pixelDimensions == sourceDimensions,
-               report.ancillaryMetadataAbsent {
+               report.ancillaryMetadataAbsent,
+               report.orientation == (encoder.orientation ?? 1),
+               ImageColorProfileSignature.matches(
+                   expected: encoder.sourceColorProfile,
+                   actual: report.colorProfile
+               ),
+               report.hasAlpha == preflight.hasAlpha {
                 try checkBoundary()
                 let artifact = try store.materialize(rewritten)
                 return PreparedCandidate(
@@ -443,7 +455,16 @@ actor ImageConversionEngine {
             throw ImageConversionFailure.encodingFailed
         }
         guard report.ancillaryMetadataAbsent,
-              report.orientation == (encoder.orientation ?? 1) else {
+              report.orientation == (encoder.orientation ?? 1),
+              ImageColorProfileSignature.matches(
+                  expected: encoder.intendedColorProfile(for: .init(
+                      format: configuration.format,
+                      quality: winner.quality,
+                      dimensions: winner.dimensions,
+                      transparencyBackgroundHex: backgroundHex
+                  )),
+                  actual: report.colorProfile
+              ) else {
             throw ImageConversionFailure.policyAuditFailed
         }
         let expectedAlpha = preflight.hasAlpha && backgroundHex == nil

@@ -106,6 +106,25 @@ final class ImageIOCandidateEncoderTests: XCTestCase {
                        "orientation is display-critical and must survive the strip")
     }
 
+    func test_reencode_preservesTheIntendedColorProfile() throws {
+        let source = makeSourceData(makeGradientImage(), format: .png, withAncillaryMetadata: false)
+        let encoder = try ImageIOCandidateEncoder(input: .bitmap(source))
+        let spec = ImageIOCandidateEncoder.EncodeSpec(
+            format: .jpeg,
+            quality: 85,
+            dimensions: PixelDimensions(width: 128, height: 96),
+            transparencyBackgroundHex: nil
+        )
+
+        let output = try encoder.encode(spec)
+        let report = CandidateAuditor.audit(output)
+
+        XCTAssertTrue(ImageColorProfileSignature.matches(
+            expected: encoder.intendedColorProfile(for: spec),
+            actual: report.colorProfile
+        ))
+    }
+
     // MARK: - Quality and resize
 
     func test_lowerQualityProducesSmallerBytes() throws {
@@ -194,6 +213,12 @@ final class ImageIOCandidateEncoderTests: XCTestCase {
         XCTAssertTrue(report.decodable)
         XCTAssertEqual(report.pixelDimensions, PixelDimensions(width: 256, height: 192))
         XCTAssertTrue(report.ancillaryMetadataAbsent)
+        XCTAssertEqual(report.orientation, encoder.orientation ?? 1)
+        XCTAssertTrue(ImageColorProfileSignature.matches(
+            expected: encoder.sourceColorProfile,
+            actual: report.colorProfile
+        ))
+        XCTAssertEqual(report.hasAlpha, encoder.sourceHasAlpha)
     }
 
     func test_passThrough_requiresMatchingSourceFormat() throws {

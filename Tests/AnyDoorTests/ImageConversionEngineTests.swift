@@ -139,6 +139,36 @@ final class ImageConversionEngineTests: XCTestCase {
         await engine.reset()
     }
 
+    func test_pruningPreviewInvalidatesItsCacheButKeepsTheSelectedArtifact() async throws {
+        let engine = try ImageConversionEngine()
+        let firstItem = makeItem(try writeSourcePNG(name: "first.png"), base: "first-output")
+        let secondItem = makeItem(try writeSourcePNG(name: "second.png"), base: "second-output")
+        let config = configuration(targetBytes: 40_000)
+        let first = try await engine.prepareCandidate(
+            item: firstItem,
+            configuration: config,
+            consumer: .preview
+        )
+        let second = try await engine.prepareCandidate(
+            item: secondItem,
+            configuration: config,
+            consumer: .preview
+        )
+
+        await engine.pruneDisplayed(keepingItem: secondItem.id)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: first.artifact.artifactURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.artifact.artifactURL.path))
+        let regenerated = try await engine.prepareCandidate(
+            item: firstItem,
+            configuration: config,
+            consumer: .preview
+        )
+        XCTAssertNotEqual(regenerated.artifact, first.artifact)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: regenerated.artifact.artifactURL.path))
+        await engine.reset()
+    }
+
     // MARK: - Best effort and Save Anyway
 
     func test_unattainableTarget_returnsTargetMiss_withoutWritingAnyFile() async throws {

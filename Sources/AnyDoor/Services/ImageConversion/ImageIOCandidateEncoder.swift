@@ -23,6 +23,9 @@ final class ImageIOCandidateEncoder {
     let orientation: UInt32?
     /// Whether the source's first image carries an alpha channel.
     let sourceHasAlpha: Bool
+    var sourceColorProfile: ImageColorProfileSignature? {
+        ImageColorProfileSignature(originalImage.colorSpace)
+    }
 
     /// UTI of the source container (e.g. `public.jpeg`), for same-format
     /// pass-through eligibility.
@@ -101,6 +104,13 @@ final class ImageIOCandidateEncoder {
         return encoded as Data
     }
 
+    func intendedColorProfile(for spec: EncodeSpec) -> ImageColorProfileSignature? {
+        ImageColorProfileSignature(outputColorSpace(
+            dimensions: spec.dimensions,
+            backgroundHex: spec.transparencyBackgroundHex
+        ))
+    }
+
     /// The lossless container rewrite with the Target Size metadata policy.
     /// Returns nil when Image I/O rejects the operation for this source; a
     /// returned result still has to pass the full audit and the byte limit.
@@ -125,8 +135,10 @@ final class ImageIOCandidateEncoder {
             || dimensions.height != originalImage.height
         guard needsComposite || needsResize else { return originalImage }
 
-        let colorSpace = originalImage.colorSpace.flatMap { $0.model == .rgb ? $0 : nil }
-            ?? CGColorSpace(name: CGColorSpace.sRGB)!
+        guard let colorSpace = outputColorSpace(
+            dimensions: dimensions,
+            backgroundHex: backgroundHex
+        ) else { throw EncoderError.encodingFailed }
         let alphaInfo: CGImageAlphaInfo = needsComposite ? .noneSkipLast : .premultipliedLast
         guard let context = CGContext(
             data: nil,
@@ -150,6 +162,20 @@ final class ImageIOCandidateEncoder {
 
         guard let rendered = context.makeImage() else { throw EncoderError.encodingFailed }
         return rendered
+    }
+
+    private func outputColorSpace(
+        dimensions: PixelDimensions,
+        backgroundHex: String?
+    ) -> CGColorSpace? {
+        let needsComposite = backgroundHex != nil && sourceHasAlpha
+        let needsResize = dimensions.width != originalImage.width
+            || dimensions.height != originalImage.height
+        if !needsComposite, !needsResize {
+            return originalImage.colorSpace
+        }
+        return originalImage.colorSpace.flatMap { $0.model == .rgb ? $0 : nil }
+            ?? CGColorSpace(name: CGColorSpace.sRGB)
     }
 
     /// `#RRGGBB` → sRGB CGColor. Invalid input returns nil so a caller bug

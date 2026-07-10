@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import ImageIO
 
@@ -74,6 +75,7 @@ struct CandidateAuditReport: Hashable, Sendable {
     var ancillaryMetadataAbsent: Bool
     /// Raw `kCGImagePropertyOrientation` (1 when absent, the EXIF default).
     var orientation: UInt32
+    var colorProfile: ImageColorProfileSignature?
     var hasAlpha: Bool
     var hasHDRGainMap: Bool
 }
@@ -84,6 +86,7 @@ enum CandidateAuditor {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil),
               CGImageSourceGetCount(source) >= 1,
               let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
               let width = properties[kCGImagePropertyPixelWidth] as? Int,
               let height = properties[kCGImagePropertyPixelHeight] as? Int else {
             return CandidateAuditReport(
@@ -91,6 +94,7 @@ enum CandidateAuditor {
                 pixelDimensions: nil,
                 ancillaryMetadataAbsent: false,
                 orientation: 1,
+                colorProfile: nil,
                 hasAlpha: false,
                 hasHDRGainMap: false
             )
@@ -110,8 +114,49 @@ enum CandidateAuditor {
             orientation: (properties[kCGImagePropertyOrientation] as? UInt32)
                 ?? (properties[kCGImagePropertyOrientation] as? Int).map(UInt32.init)
                 ?? 1,
+            colorProfile: ImageColorProfileSignature(image.colorSpace),
             hasAlpha: properties[kCGImagePropertyHasAlpha] as? Bool ?? false,
             hasHDRGainMap: hasHDRGainMap
         )
+    }
+}
+/// Stable, Sendable evidence for the decoded color space of a source or
+/// candidate. Named ICC profiles must remain byte-identical; unprofiled spaces
+/// fall back to matching their Core Graphics color model.
+struct ImageColorProfileSignature: Hashable, Sendable {
+    var model: String
+    var name: String?
+    var iccSHA256: String?
+
+    init?(_ colorSpace: CGColorSpace?) {
+        guard let colorSpace else { return nil }
+        model = String(describing: colorSpace.model)
+        name = colorSpace.name as String?
+        iccSHA256 = colorSpace.copyICCData().map { data in
+            SHA256.hash(data: data as Data)
+                .map { String(format: "%02x", $0) }
+                .joined()
+        }
+    }
+
+    static func matches(
+        expected: ImageColorProfileSignature?,
+        actual: ImageColorProfileSignature?
+    ) -> Bool {
+        switch (expected, actual) {
+        case (nil, nil):
+            return true
+        case let (expected?, actual?):
+            guard expected.model == actual.model else { return false }
+            if let expectedICC = expected.iccSHA256 {
+                return actual.iccSHA256 == expectedICC
+            }
+            if let expectedName = expected.name, let actualName = actual.name {
+                return expectedName == actualName
+            }
+            return true
+        default:
+            return false
+        }
     }
 }

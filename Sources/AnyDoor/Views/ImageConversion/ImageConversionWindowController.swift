@@ -118,6 +118,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     override func close() {
         saveFrame()
         removeKeyMonitor()
+        viewModel.windowDidHide()
         window?.orderOut(nil)
     }
 
@@ -228,6 +229,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     func windowWillClose(_ notification: Notification) {
         saveFrame()
         removeKeyMonitor()
+        viewModel.windowDidHide()
     }
 }
 

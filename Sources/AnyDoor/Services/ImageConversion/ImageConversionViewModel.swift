@@ -125,6 +125,7 @@ final class ImageConversionViewModel {
     private(set) var previewState: PreviewState = .empty
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var previewGeneration = 0
+    @ObservationIgnored private var isWindowPresented = false
 
     var selectedItem: ImageConversionBasketItem? {
         items.first { $0.id == selectedItemID }
@@ -296,6 +297,17 @@ final class ImageConversionViewModel {
 
     func resetSidebarForPresentation() {
         sidebarTab = .basket
+        isWindowPresented = true
+        schedulePreview()
+    }
+
+    func windowDidHide() {
+        isWindowPresented = false
+        previewGeneration += 1
+        previewTask?.cancel()
+        previewTask = nil
+        previewState = .empty
+        pruneIdlePreviewArtifactsIfNeeded()
     }
 
     /// Request Stop: takes effect at the current candidate/commit boundary.
@@ -351,6 +363,7 @@ final class ImageConversionViewModel {
             removeItems(withIDs: completedIDs)
             copyOutputsToPasteboard(summary.outputURLs)
         }
+        pruneIdlePreviewArtifactsIfNeeded()
         ToastPresenter.shared.show(.success(L(
             .imageConversionToastSummary,
             summary.converted,
@@ -442,6 +455,7 @@ final class ImageConversionViewModel {
         let succeededIDs = Set(successes.map(\.item.id))
         removeItems(withIDs: succeededIDs)
         copyOutputsToPasteboard(successes.map(\.conversion.output.url))
+        pruneIdlePreviewArtifactsIfNeeded()
 
         if !successes.isEmpty || !interrupted {
             ToastPresenter.shared.show(.success(L(
@@ -489,17 +503,21 @@ final class ImageConversionViewModel {
         previewGeneration += 1
         let generation = previewGeneration
         previewTask?.cancel()
+        previewTask = nil
 
-        guard mode == .targetSize, let engine else {
+        guard isWindowPresented, mode == .targetSize, let engine else {
             previewState = .empty
+            pruneIdlePreviewArtifactsIfNeeded()
             return
         }
         guard let item = selectedItem else {
             previewState = .empty
+            Task { await engine.pruneDisplayed(keepingItem: nil) }
             return
         }
         guard targetParseError == nil, targetSizeFormats.contains(targetSizeFormat) else {
             previewState = .invalidConfiguration
+            Task { await engine.pruneDisplayed(keepingItem: nil) }
             return
         }
 
@@ -507,6 +525,7 @@ final class ImageConversionViewModel {
         let configuration = currentTargetSizeConfiguration()
         let snapshot = snapshot(for: item)
         previewTask = Task { [weak self] in
+            await engine.pruneDisplayed(keepingItem: snapshot.id)
             try? await Task.sleep(nanoseconds: UInt64(TargetSizePolicy.previewDebounce * 1_000_000_000))
             guard !Task.isCancelled else { return }
             do {
@@ -576,6 +595,11 @@ final class ImageConversionViewModel {
 
     private func invalidateTargetSizeOutcomes() {
         itemStatuses.removeAll()
+    }
+
+    private func pruneIdlePreviewArtifactsIfNeeded() {
+        guard !isWindowPresented, !isConverting, let engine else { return }
+        Task { await engine.pruneDisplayed(keepingItem: nil) }
     }
 
     private func releaseEngineArtifacts(for itemID: String) {
