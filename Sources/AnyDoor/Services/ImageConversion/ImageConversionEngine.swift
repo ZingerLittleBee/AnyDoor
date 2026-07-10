@@ -86,15 +86,41 @@ actor ImageConversionEngine {
         var configuration: TargetSizeJobConfiguration
     }
 
+    /// Synchronous cancellation state shared with `onCancel`, which runs
+    /// outside actor isolation. The lock protects the complete mutable state;
+    /// no consumer token is read or written without it.
+    private final class ConsumerGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var tokens: Set<UUID> = []
+
+        func attach() -> UUID {
+            lock.lock()
+            defer { lock.unlock() }
+            let token = UUID()
+            tokens.insert(token)
+            return token
+        }
+
+        /// Returns true when the detached token was the final consumer.
+        @discardableResult
+        func detach(_ token: UUID) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            tokens.remove(token)
+            return tokens.isEmpty
+        }
+
+        var isEmpty: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return tokens.isEmpty
+        }
+    }
+
     private final class JobState {
+        let id = UUID()
+        let consumers = ConsumerGate()
         var task: Task<PreparedCandidate, Error>?
-        /// Idempotent preview-consumer tokens: cancellation and normal
-        /// completion may both remove one without double counting.
-        var previewConsumers: Set<UUID> = []
-        /// Sticky: once a run attaches, the job survives every disappearing
-        /// preview consumer.
-        var runAttached = false
-        var abandoned: Bool { previewConsumers.isEmpty && !runAttached }
     }
 
     private var jobs: [JobKey: JobState] = [:]
@@ -132,36 +158,46 @@ actor ImageConversionEngine {
         } else {
             state = JobState()
             jobs[key] = state
+        }
+
+        let token = state.consumers.attach()
+        if state.task == nil {
+            let stateID = state.id
+            let consumers = state.consumers
             state.task = Task {
                 // Inherits actor isolation: preview and batch work stay serial.
-                try await self.performPipeline(key: key, item: item, preflight: preflight)
+                defer { self.finishJob(key: key, stateID: stateID) }
+                let candidate = try await self.performPipeline(
+                    key: key,
+                    item: item,
+                    preflight: preflight,
+                    isAbandoned: { consumers.isEmpty }
+                )
+                self.completed[item.id] = (key, candidate)
+                self.store.setDisplayed(candidate.artifact, forItem: item.id)
+                if case .bestEffort = candidate.kind {
+                    self.store.setRetainedBestEffort(candidate.artifact, forItem: item.id)
+                }
+                return candidate
             }
         }
 
-        let token = UUID()
-        switch consumer {
-        case .preview: state.previewConsumers.insert(token)
-        case .run: state.runAttached = true
+        guard let pipelineTask = state.task else {
+            state.consumers.detach(token)
+            throw ImageConversionFailure.encodingFailed
         }
-        defer {
-            if consumer == .preview { state.previewConsumers.remove(token) }
-        }
+        let consumers = state.consumers
+        defer { consumers.detach(token) }
 
-        // A cancelled consumer abandons only its own wait, never the shared
-        // job; once no consumer remains, the pipeline stops at its next
-        // candidate boundary via the abandoned check.
-        let candidate = try await withTaskCancellationHandler {
-            try await state.task!.value
+        // Cancel the shared task only when this was its final consumer. A run
+        // and a preview may safely share one candidate preparation.
+        return try await withTaskCancellationHandler {
+            try await pipelineTask.value
         } onCancel: {
-            Task { await self.removePreviewConsumer(token, key: key) }
+            if consumers.detach(token) {
+                pipelineTask.cancel()
+            }
         }
-        completed[item.id] = (key, candidate)
-        jobs[key] = nil
-        store.setDisplayed(candidate.artifact, forItem: item.id)
-        if case .bestEffort = candidate.kind {
-            store.setRetainedBestEffort(candidate.artifact, forItem: item.id)
-        }
-        return candidate
     }
 
     // MARK: - Run
@@ -244,8 +280,13 @@ actor ImageConversionEngine {
         store.reset()
     }
 
-    private func removePreviewConsumer(_ token: UUID, key: JobKey) {
-        jobs[key]?.previewConsumers.remove(token)
+    /// Diagnostics used by lifecycle tests; production behavior never branches
+    /// on this value.
+    var activeJobCount: Int { jobs.count }
+
+    private func finishJob(key: JobKey, stateID: UUID) {
+        guard jobs[key]?.id == stateID else { return }
+        jobs[key] = nil
     }
 
     private func invalidateCompleted(itemID: UUID) {
@@ -267,7 +308,8 @@ actor ImageConversionEngine {
     private func performPipeline(
         key: JobKey,
         item: ImageConversionItemSnapshot,
-        preflight: ImageConversionPreflight
+        preflight: ImageConversionPreflight,
+        isAbandoned: @Sendable () -> Bool
     ) async throws -> PreparedCandidate {
         let configuration = key.configuration
         let encoder = try ImageIOCandidateEncoder(input: item.input)
@@ -276,7 +318,7 @@ actor ImageConversionEngine {
             ? configuration.transparencyBackgroundHex : nil
 
         func checkBoundary() throws {
-            if jobs[key]?.abandoned == true { throw CancellationError() }
+            if isAbandoned() { throw CancellationError() }
             try Task.checkCancellation()
         }
 

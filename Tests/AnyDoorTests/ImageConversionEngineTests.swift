@@ -38,12 +38,16 @@ final class ImageConversionEngineTests: XCTestCase {
         return context.makeImage()!
     }
 
-    private func writeSourcePNG(name: String = "source.png") throws -> URL {
+    private func writeSourcePNG(
+        name: String = "source.png",
+        width: Int = 320,
+        height: Int = 240
+    ) throws -> URL {
         let data = NSMutableData()
         let destination = CGImageDestinationCreateWithData(
             data, ImageConversionFormat.png.typeIdentifier as CFString, 1, nil
         )!
-        CGImageDestinationAddImage(destination, makeGradientImage(), [
+        CGImageDestinationAddImage(destination, makeGradientImage(width: width, height: height), [
             kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 1.0],
         ] as CFDictionary)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
@@ -232,6 +236,62 @@ final class ImageConversionEngineTests: XCTestCase {
     }
 
     // MARK: - Contract failures
+
+    func test_failedPreparationRemovesJobSoTheSameFingerprintCanRetry() async throws {
+        let engine = try ImageConversionEngine()
+        let item = makeItem(try writeSourcePNG())
+        var config = configuration(targetBytes: 40_000)
+        config.format = .png
+
+        let first = await engine.convertItem(item, configuration: config)
+        guard case .failed(.encodingFailed) = first else {
+            return XCTFail("expected encoding failure, got \(first)")
+        }
+        let jobsAfterFirstFailure = await engine.activeJobCount
+        XCTAssertEqual(jobsAfterFirstFailure, 0)
+
+        let second = await engine.convertItem(item, configuration: config)
+        guard case .failed(.encodingFailed) = second else {
+            return XCTFail("expected a fresh retry to reach the same failure, got \(second)")
+        }
+        let jobsAfterSecondFailure = await engine.activeJobCount
+        XCTAssertEqual(jobsAfterSecondFailure, 0)
+        await engine.reset()
+    }
+
+    func test_cancelledConsumerCancelsUnderlyingPreparationAndAllowsRetry() async throws {
+        let engine = try ImageConversionEngine()
+        let item = makeItem(try writeSourcePNG(width: 1_600, height: 1_200))
+        let config = configuration(targetBytes: 500, allowResize: true)
+
+        let preparation = Task {
+            try await engine.prepareCandidate(
+                item: item,
+                configuration: config,
+                consumer: .preview
+            )
+        }
+        await Task.yield()
+        preparation.cancel()
+
+        do {
+            _ = try await preparation.value
+            XCTFail("expected cancellation")
+        } catch is CancellationError {
+            // Expected: the final consumer cancels the underlying preparation.
+        }
+        let jobsAfterCancellation = await engine.activeJobCount
+        XCTAssertEqual(jobsAfterCancellation, 0)
+
+        _ = try await engine.prepareCandidate(
+            item: item,
+            configuration: config,
+            consumer: .preview
+        )
+        let jobsAfterRetry = await engine.activeJobCount
+        XCTAssertEqual(jobsAfterRetry, 0)
+        await engine.reset()
+    }
 
     func test_multiFrameSource_isUnsupported() async throws {
         let data = NSMutableData()
