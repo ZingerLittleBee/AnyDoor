@@ -18,6 +18,11 @@ versioning.
 - Image Conversion: hardened basket preflight, cancellation, frozen run state,
   atomic output commits, candidate metadata validation, preview artifact
   cleanup, and transactional history writes with visible persistence warnings.
+- Importing a settings backup now applies the Image Conversion preferences to
+  an already-open conversion window. The window previously kept its cached
+  values, so toggling any control wrote the stale state back over the
+  just-imported settings (this affected the format/quality keys synced since
+  3.5.0 as well as the new Target Size keys).
 
 ## [3.6.0] - 2026-07-10
 
@@ -1295,6 +1300,8 @@ versioning.
 
 ## [1.0.0] - 2026-05-23
 
+Initial release.
+
 ### Added
 
 - Auto-update via Sparkle 2 with assets published to GitHub Releases.
@@ -1307,7 +1314,3 @@ versioning.
   Liquid Glass effects on macOS 26+ only. OCR now uses the legacy
   VNRecognizeTextRequest path, and Settings falls back to the classic
   TabView/tabItem API.
-
-## [1.0.0] - 2026-05-23
-
-- Initial release.
