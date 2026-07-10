@@ -1,9 +1,18 @@
 # PRD: Image Conversion
 
-- **Status:** ready-for-agent
+- **Status:** implemented — [proposed amendment under review](2026-07-10-image-target-size-compression.md)
 - **Date:** 2026-07-06
 - **Tracker:** local (`docs/prds/`, issues under `docs/issues/`)
-- **Glossary:** see `CONTEXT.md` (Image Conversion, Conversion Basket, Target Format Whitelist, Conversion Record)
+- **Glossary:** [Ubiquitous Language](../../CONTEXT.md#image-conversion)
+
+> **Proposed amendment:** If approved, the 2026-07-10 extension supersedes this
+> document's clear-the-whole-basket, list-only window, quality-only
+> configuration, non-cancellable run, and Target Size metadata assumptions.
+> First-frame conversion remains for Quality mode (with an explicit notice) and
+> is rejected only in Target Size mode. This document remains the source for
+> the original entry points, additive naming/output locations,
+> clipboard-history integration, and format whitelist unless the extension
+> explicitly says otherwise.
 
 ## Problem Statement
 
