@@ -22,6 +22,9 @@ struct PreparedCandidate: Hashable, Sendable {
     }
 
     var kind: Kind
+    /// Frozen configuration that produced this exact artifact. Save Anyway and
+    /// history must never reread mutable UI preferences.
+    var configuration: TargetSizeJobConfiguration
     var artifact: AtomicOutputWriter.CandidateArtifact
     /// Whole-percent encoder quality; 100 for a pass-through copy.
     var quality: Int
@@ -254,9 +257,11 @@ actor ImageConversionEngine {
     /// Conversion Record become appropriate.
     func saveBestEffort(
         itemID: UUID,
+        expectedArtifact: AtomicOutputWriter.CandidateArtifact,
         destination: AtomicOutputWriter.DestinationPolicy
     ) throws -> CommittedOutput {
-        guard let artifact = store.retainedBestEffort(forItem: itemID) else {
+        guard let artifact = store.retainedBestEffort(forItem: itemID),
+              artifact == expectedArtifact else {
             throw ImageConversionFailure.sourceChanged
         }
         return try AtomicOutputWriter().commit(artifact, to: destination)
@@ -292,6 +297,7 @@ actor ImageConversionEngine {
     private func invalidateCompleted(itemID: UUID) {
         guard completed.removeValue(forKey: itemID) != nil else { return }
         store.setDisplayed(nil, forItem: itemID)
+        store.setRetainedBestEffort(nil, forItem: itemID)
     }
 
     private func fingerprint(for item: ImageConversionItemSnapshot) throws -> SourceFingerprint {
@@ -336,6 +342,7 @@ actor ImageConversionEngine {
                 let artifact = try store.materialize(rewritten)
                 return PreparedCandidate(
                     kind: .passThrough,
+                    configuration: configuration,
                     artifact: artifact,
                     quality: 100,
                     dimensions: sourceDimensions,
@@ -449,6 +456,7 @@ actor ImageConversionEngine {
         let artifact = try store.materialize(data)
         return PreparedCandidate(
             kind: kind,
+            configuration: configuration,
             artifact: artifact,
             quality: winner.quality,
             dimensions: winner.dimensions,

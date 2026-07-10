@@ -56,6 +56,10 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             close()
             return
         }
+        if viewModel.isConverting {
+            show()
+            return
+        }
         let urls = await FinderSelectionReader.read()
         viewModel.addFiles(urls)
         show()
@@ -66,7 +70,9 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     /// selection and never closes an already-open window — it merges the items
     /// into the current basket and brings the window forward.
     func present(items: [ImageConversionBasketItem]) {
-        viewModel.add(items)
+        if !viewModel.isConverting {
+            viewModel.add(items)
+        }
         show()
     }
 
@@ -173,6 +179,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             return true
         }
         if event.keyCode == 9 {
+            guard !viewModel.isConverting else { return true }
             pasteFromClipboard()
             return true
         }
@@ -185,6 +192,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             return true
         }
         if event.keyCode == kVK_ANSI_O {
+            guard !viewModel.isConverting else { return true }
             viewModel.presentOpenPanel()
             return true
         }

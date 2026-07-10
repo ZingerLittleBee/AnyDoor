@@ -76,12 +76,14 @@ final class ImageConversionViewModel {
     var mode: ImageConversionMode {
         didSet {
             ImageConversionPreferences.setMode(mode, defaults: defaults)
+            if mode != oldValue { invalidateTargetSizeOutcomes() }
             schedulePreview()
         }
     }
     var targetSizeFormat: ImageConversionFormat {
         didSet {
             ImageConversionPreferences.setTargetSizeFormat(targetSizeFormat, defaults: defaults)
+            if targetSizeFormat != oldValue { invalidateTargetSizeOutcomes() }
             schedulePreview()
         }
     }
@@ -95,6 +97,7 @@ final class ImageConversionViewModel {
     var allowResize: Bool {
         didSet {
             ImageConversionPreferences.setTargetSizeAllowResize(allowResize, defaults: defaults)
+            if allowResize != oldValue { invalidateTargetSizeOutcomes() }
             schedulePreview()
         }
     }
@@ -188,12 +191,17 @@ final class ImageConversionViewModel {
             targetLimit = parsed
             targetParseError = nil
             ImageConversionPreferences.setTargetSizeLimit(parsed, defaults: defaults)
-            if changed { schedulePreview() }
+            if changed {
+                invalidateTargetSizeOutcomes()
+                schedulePreview()
+            }
         } catch let error as TargetSizeLimitParseError {
             targetParseError = error
+            invalidateTargetSizeOutcomes()
             schedulePreview()
         } catch {
             targetParseError = .malformed
+            invalidateTargetSizeOutcomes()
             schedulePreview()
         }
     }
@@ -210,6 +218,7 @@ final class ImageConversionViewModel {
     }
 
     func addFiles(_ urls: [URL]) {
+        guard !isConverting else { return }
         let imageURLs = urls
             .map { $0.standardizedFileURL }
             .filter { ImageConverter.isImageFile(at: $0) }
@@ -229,6 +238,7 @@ final class ImageConversionViewModel {
     /// basket. The async `begin()` keeps the floating conversion panel usable
     /// while the picker is up.
     func presentOpenPanel() {
+        guard !isConverting else { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
@@ -236,13 +246,14 @@ final class ImageConversionViewModel {
         panel.allowedContentTypes = [.image]
         Task { @MainActor in
             let response = await panel.begin()
-            guard response == .OK else { return }
+            guard response == .OK, !self.isConverting else { return }
             self.addFiles(panel.urls)
         }
     }
 
     /// Adds a pasted bitmap (e.g. a fresh screenshot) with a generic display name.
     func addBitmap(_ data: Data) {
+        guard !isConverting else { return }
         items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
         selectFirstIfNeeded()
     }
@@ -251,6 +262,7 @@ final class ImageConversionViewModel {
     /// deduping by id and preserving insertion order so a bitmap keeps its
     /// history-derived display name.
     func add(_ newItems: [ImageConversionBasketItem]) {
+        guard !isConverting else { return }
         var existing = Set(items.map(\.id))
         var next = items
         for item in newItems where existing.insert(item.id).inserted {
@@ -261,10 +273,12 @@ final class ImageConversionViewModel {
     }
 
     func remove(_ item: ImageConversionBasketItem) {
+        guard !isConverting else { return }
         removeItems(withIDs: [item.id])
     }
 
     func clear() {
+        guard !isConverting else { return }
         let removed = items
         items.removeAll()
         itemStatuses.removeAll()
@@ -377,13 +391,7 @@ final class ImageConversionViewModel {
 
         // Freeze configuration and item snapshots: config edits and basket
         // mutations are disabled until completion or Stop.
-        let configuration = TargetSizeJobConfiguration(
-            format: targetSizeFormat,
-            targetBytes: targetLimit.bytes,
-            allowResize: allowResize,
-            transparencyBackgroundHex: ImageConversionPreferences
-                .transparencyBackgroundHex(defaults: defaults)
-        )
+        let configuration = currentTargetSizeConfiguration()
         let frozen = items.map { (item: $0, snapshot: snapshot(for: $0)) }
 
         runTask = Task { [weak self] in
@@ -448,13 +456,18 @@ final class ImageConversionViewModel {
     /// Best-Effort artifact byte-identically, writes its Conversion Record
     /// only then, and lets the item leave the basket.
     func saveBestEffort(_ item: ImageConversionBasketItem) {
-        guard let engine,
+        guard !isConverting,
+              let engine,
               case .targetMiss(let candidate) = itemStatuses[item.id],
               let engineID = engineIDs[item.id] else { return }
-        let destination = destinationPolicy(for: item)
+        let destination = destinationPolicy(for: item, format: candidate.configuration.format)
         Task { [weak self] in
             do {
-                let output = try await engine.saveBestEffort(itemID: engineID, destination: destination)
+                let output = try await engine.saveBestEffort(
+                    itemID: engineID,
+                    expectedArtifact: candidate.artifact,
+                    destination: destination
+                )
                 guard let self else { return }
                 self.recordTargetSizeHistory(
                     output, candidate: candidate, item: item, outcome: .targetUnattainable
@@ -491,13 +504,7 @@ final class ImageConversionViewModel {
         }
 
         previewState = .updating
-        let configuration = TargetSizeJobConfiguration(
-            format: targetSizeFormat,
-            targetBytes: targetLimit.bytes,
-            allowResize: allowResize,
-            transparencyBackgroundHex: ImageConversionPreferences
-                .transparencyBackgroundHex(defaults: defaults)
-        )
+        let configuration = currentTargetSizeConfiguration()
         let snapshot = snapshot(for: item)
         previewTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(TargetSizePolicy.previewDebounce * 1_000_000_000))
@@ -535,23 +542,40 @@ final class ImageConversionViewModel {
         return ImageConversionItemSnapshot(
             id: engineID,
             input: input,
-            destination: destinationPolicy(for: item)
+            destination: destinationPolicy(for: item, format: targetSizeFormat)
         )
     }
 
-    private func destinationPolicy(for item: ImageConversionBasketItem) -> AtomicOutputWriter.DestinationPolicy {
+    private func destinationPolicy(
+        for item: ImageConversionBasketItem,
+        format: ImageConversionFormat
+    ) -> AtomicOutputWriter.DestinationPolicy {
         if let url = item.fileURL {
             return AtomicOutputWriter.DestinationPolicy(
                 directory: url.deletingLastPathComponent(),
                 baseName: url.deletingPathExtension().lastPathComponent,
-                fileExtension: targetSizeFormat.fileExtension
+                fileExtension: format.fileExtension
             )
         }
         return AtomicOutputWriter.DestinationPolicy(
             directory: ImageConversionSession.defaultDownloadsDirectory,
             baseName: ImageConversionNaming.bitmapBaseName(timestamp: Date()),
-            fileExtension: targetSizeFormat.fileExtension
+            fileExtension: format.fileExtension
         )
+    }
+
+    private func currentTargetSizeConfiguration() -> TargetSizeJobConfiguration {
+        TargetSizeJobConfiguration(
+            format: targetSizeFormat,
+            targetBytes: targetLimit.bytes,
+            allowResize: allowResize,
+            transparencyBackgroundHex: ImageConversionPreferences
+                .transparencyBackgroundHex(defaults: defaults)
+        )
+    }
+
+    private func invalidateTargetSizeOutcomes() {
+        itemStatuses.removeAll()
     }
 
     private func releaseEngineArtifacts(for itemID: String) {
@@ -604,10 +628,10 @@ final class ImageConversionViewModel {
         ImageConversionHistoryStore.shared.recordTargetSize(
             sourceName: item.displayName,
             sourceKind: sourceKind,
-            targetFormat: targetSizeFormat,
+            targetFormat: candidate.configuration.format,
             outputPath: output.url.path,
             outcome: outcome,
-            targetByteCount: targetLimit.bytes,
+            targetByteCount: candidate.configuration.targetBytes,
             candidate: candidate,
             outputByteCount: output.byteCount
         )

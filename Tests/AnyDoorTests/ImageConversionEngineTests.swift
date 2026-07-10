@@ -169,14 +169,48 @@ final class ImageConversionEngineTests: XCTestCase {
         guard case .targetMiss(let candidate) = outcome else {
             return XCTFail("expected targetMiss, got \(outcome)")
         }
+        XCTAssertEqual(candidate.configuration, configuration(targetBytes: 500))
 
         let committed = try await engine.saveBestEffort(
-            itemID: item.id, destination: item.destination
+            itemID: item.id,
+            expectedArtifact: candidate.artifact,
+            destination: item.destination
         )
         XCTAssertEqual(committed.sha256, candidate.artifact.sha256)
         XCTAssertEqual(
             try Data(contentsOf: committed.url).count, Int(candidate.artifact.byteCount)
         )
+        await engine.reset()
+    }
+
+    func test_saveBestEffortRejectsAStaleCandidateAfterConfigurationChanges() async throws {
+        let engine = try ImageConversionEngine()
+        let item = makeItem(try writeSourcePNG())
+        let firstConfig = configuration(targetBytes: 500)
+        let secondConfig = configuration(targetBytes: 600)
+
+        let first = try await engine.prepareCandidate(
+            item: item,
+            configuration: firstConfig,
+            consumer: .preview
+        )
+        let second = try await engine.prepareCandidate(
+            item: item,
+            configuration: secondConfig,
+            consumer: .preview
+        )
+        XCTAssertNotEqual(first.artifact, second.artifact)
+
+        do {
+            _ = try await engine.saveBestEffort(
+                itemID: item.id,
+                expectedArtifact: first.artifact,
+                destination: item.destination
+            )
+            XCTFail("expected stale candidate rejection")
+        } catch {
+            XCTAssertEqual(error as? ImageConversionFailure, .sourceChanged)
+        }
         await engine.reset()
     }
 
