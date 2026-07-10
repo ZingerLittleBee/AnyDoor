@@ -135,15 +135,12 @@ actor ImageConversionEngine {
 
     // MARK: - Preview / preparation
 
-    enum Consumer: Sendable { case preview, run }
-
     /// Prepare (or reuse) the exact full-resolution candidate for one item.
     /// A completed candidate whose fingerprints match returns with zero
     /// additional encodes.
     func prepareCandidate(
         item: ImageConversionItemSnapshot,
-        configuration: TargetSizeJobConfiguration,
-        consumer: Consumer
+        configuration: TargetSizeJobConfiguration
     ) async throws -> PreparedCandidate {
         let preflight = try inspector.preflight(input: item.input, target: configuration.format).get()
         let source = try fingerprint(for: item)
@@ -214,7 +211,7 @@ actor ImageConversionEngine {
         do {
             try Task.checkCancellation()
             let candidate = try await prepareCandidate(
-                item: item, configuration: configuration, consumer: .run
+                item: item, configuration: configuration
             )
 
             // Revalidate the source immediately before the irreversible

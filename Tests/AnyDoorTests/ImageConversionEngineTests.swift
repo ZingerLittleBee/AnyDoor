@@ -105,11 +105,11 @@ final class ImageConversionEngineTests: XCTestCase {
         let config = configuration(targetBytes: 40_000)
 
         let preview = try await engine.prepareCandidate(
-            item: item, configuration: config, consumer: .preview
+            item: item, configuration: config
         )
         // Matching fingerprints: the second preparation is a pure cache hit.
         let again = try await engine.prepareCandidate(
-            item: item, configuration: config, consumer: .preview
+            item: item, configuration: config
         )
         XCTAssertEqual(preview, again)
 
@@ -129,10 +129,10 @@ final class ImageConversionEngineTests: XCTestCase {
         let item = makeItem(try writeSourcePNG())
 
         let first = try await engine.prepareCandidate(
-            item: item, configuration: configuration(targetBytes: 40_000), consumer: .preview
+            item: item, configuration: configuration(targetBytes: 40_000)
         )
         let second = try await engine.prepareCandidate(
-            item: item, configuration: configuration(targetBytes: 20_000), consumer: .preview
+            item: item, configuration: configuration(targetBytes: 20_000)
         )
         XCTAssertNotEqual(first.artifact, second.artifact,
                           "a changed limit must produce a fresh candidate")
@@ -146,13 +146,11 @@ final class ImageConversionEngineTests: XCTestCase {
         let config = configuration(targetBytes: 40_000)
         let first = try await engine.prepareCandidate(
             item: firstItem,
-            configuration: config,
-            consumer: .preview
+            configuration: config
         )
         let second = try await engine.prepareCandidate(
             item: secondItem,
-            configuration: config,
-            consumer: .preview
+            configuration: config
         )
 
         await engine.pruneDisplayed(keepingItem: secondItem.id)
@@ -161,8 +159,7 @@ final class ImageConversionEngineTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.artifact.artifactURL.path))
         let regenerated = try await engine.prepareCandidate(
             item: firstItem,
-            configuration: config,
-            consumer: .preview
+            configuration: config
         )
         XCTAssertNotEqual(regenerated.artifact, first.artifact)
         XCTAssertTrue(FileManager.default.fileExists(atPath: regenerated.artifact.artifactURL.path))
@@ -221,13 +218,11 @@ final class ImageConversionEngineTests: XCTestCase {
 
         let first = try await engine.prepareCandidate(
             item: item,
-            configuration: firstConfig,
-            consumer: .preview
+            configuration: firstConfig
         )
         let second = try await engine.prepareCandidate(
             item: item,
-            configuration: secondConfig,
-            consumer: .preview
+            configuration: secondConfig
         )
         XCTAssertNotEqual(first.artifact, second.artifact)
 
@@ -331,8 +326,7 @@ final class ImageConversionEngineTests: XCTestCase {
         let preparation = Task {
             try await engine.prepareCandidate(
                 item: item,
-                configuration: config,
-                consumer: .preview
+                configuration: config
             )
         }
         await Task.yield()
@@ -349,8 +343,7 @@ final class ImageConversionEngineTests: XCTestCase {
 
         _ = try await engine.prepareCandidate(
             item: item,
-            configuration: config,
-            consumer: .preview
+            configuration: config
         )
         let jobsAfterRetry = await engine.activeJobCount
         XCTAssertEqual(jobsAfterRetry, 0)
@@ -387,7 +380,7 @@ final class ImageConversionEngineTests: XCTestCase {
 
         // Prepare from the original source, then mutate the file so the
         // commit-time revalidation must reject the cached candidate.
-        _ = try await engine.prepareCandidate(item: item, configuration: config, consumer: .preview)
+        _ = try await engine.prepareCandidate(item: item, configuration: config)
         try Data("corrupted".utf8).write(to: url)
 
         let outcome = await engine.convertItem(item, configuration: config)

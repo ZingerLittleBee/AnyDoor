@@ -550,7 +550,7 @@ final class ImageConversionViewModel {
             guard !Task.isCancelled else { return }
             do {
                 let candidate = try await engine.prepareCandidate(
-                    item: snapshot, configuration: configuration, consumer: .preview
+                    item: snapshot, configuration: configuration
                 )
                 guard let self, self.previewGeneration == generation else { return }
                 self.previewState = .ready(candidate)

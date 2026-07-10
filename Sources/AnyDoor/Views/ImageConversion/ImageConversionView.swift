@@ -463,7 +463,6 @@ struct ImageConversionView: View {
                 }
                 .frame(maxWidth: .infinity)
             }
-            .keyboardShortcut(".", modifiers: .command)
         } else {
             Button {
                 model.convert()
@@ -481,7 +480,6 @@ struct ImageConversionView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(!model.canConvert)
-            .keyboardShortcut(.return, modifiers: .command)
         }
     }
 

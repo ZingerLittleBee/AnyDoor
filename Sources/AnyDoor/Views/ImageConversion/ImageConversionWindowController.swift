@@ -169,6 +169,12 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
 
     private func handle(_ event: NSEvent) -> Bool {
         guard window?.isVisible == true, window?.isKeyWindow == true else { return false }
+        if Self.shouldDeferToFocusedControl(
+            keyCode: Int(event.keyCode),
+            firstResponder: window?.firstResponder
+        ) {
+            return false
+        }
         if event.keyCode == 53 {
             close()
             return true
@@ -198,6 +204,16 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             return true
         }
         return false
+    }
+
+    static func shouldDeferToFocusedControl(
+        keyCode: Int,
+        firstResponder: NSResponder?
+    ) -> Bool {
+        guard keyCode == 53 || keyCode == kVK_ANSI_V else { return false }
+        return firstResponder is NSTextView
+            || firstResponder is NSControl
+            || firstResponder is NSCollectionView
     }
 
     /// ⌘V: copied image files enter as file references (like drag & drop); a
