@@ -40,11 +40,13 @@ struct TargetSizeCandidate: Hashable, Sendable {
 /// Why a Best-Effort search stopped, so the inspector can offer the inline
 /// Resize Fallback control only when enabling it could still help.
 enum TargetSizeStopReason: Hashable, Sendable {
-    /// Quality search hit the Quality Floor and resizing was off or
-    /// unavailable for this image.
+    /// Quality search hit the Quality Floor with resizing off, and enabling
+    /// the Resize Fallback could still help (the image sits above the Pixel
+    /// Floor).
     case qualityFloorReached
-    /// Resizing was on and was exhausted (Pixel Floor, level cap, or attempt
-    /// budget) without finding a qualifier.
+    /// Resizing cannot help further: it was exhausted (Pixel Floor, level
+    /// cap, or attempt budget), or the image is already at or below the
+    /// Pixel Floor.
     case pixelFloorReached
 }
 
@@ -117,9 +119,17 @@ struct TargetSizeSearch {
         func budgetRemaining() -> Bool { attemptsUsed < attemptBudget }
 
         func bestEffort() -> TargetSizeSearchResult {
-            // At least one probe always precedes this point.
-            let reason: TargetSizeStopReason = allowResize ? .pixelFloorReached : .qualityFloorReached
-            return .bestEffort(smallest!, reason: reason)
+            // At least one probe always precedes this point. Report
+            // `qualityFloorReached` (which the inspector maps to the inline
+            // enable-resize hint) only when turning resize on could actually
+            // change the outcome: an image already at or below the Pixel
+            // Floor would miss identically.
+            let resizeCouldHelp = !allowResize
+                && originalDimensions.longestEdge > TargetSizePolicy.pixelFloorLongestEdge
+            return .bestEffort(
+                smallest!,
+                reason: resizeCouldHelp ? .qualityFloorReached : .pixelFloorReached
+            )
         }
 
         // Bounded whole-percent search maximizing measured quality at one

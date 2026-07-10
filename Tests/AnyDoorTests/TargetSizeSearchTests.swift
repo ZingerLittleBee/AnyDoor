@@ -167,6 +167,17 @@ final class TargetSizeSearchTests: XCTestCase {
         XCTAssertTrue(recorder.requests.allSatisfy { $0.dimensions == original })
     }
 
+    func test_resizeOff_originalAtPixelFloor_pixelFloorReason() {
+        // Enabling resize cannot help an image already at the Pixel Floor,
+        // so the miss must not suggest it via qualityFloorReached.
+        let original = PixelDimensions(width: 640, height: 480)
+        let recorder = Recorder { _ in 99_000_000 }
+        let result = makeSearch(targetBytes: 1_000, original: original).run(measure: recorder.measure)
+
+        guard case .bestEffort(_, let reason) = result else { return XCTFail("expected bestEffort") }
+        XCTAssertEqual(reason, .pixelFloorReached)
+    }
+
     func test_resizeOn_originalAtPixelFloor_noResizeProbes_pixelFloorReason() {
         let original = PixelDimensions(width: 640, height: 480)
         let recorder = Recorder { _ in 99_000_000 }

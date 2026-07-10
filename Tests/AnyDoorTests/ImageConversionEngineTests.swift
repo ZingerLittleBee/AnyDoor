@@ -181,7 +181,10 @@ final class ImageConversionEngineTests: XCTestCase {
         guard case .bestEffort(let reason) = candidate.kind else {
             return XCTFail("expected bestEffort kind")
         }
-        XCTAssertEqual(reason, .qualityFloorReached, "resize was off")
+        XCTAssertEqual(
+            reason, .pixelFloorReached,
+            "a 320px image sits below the Pixel Floor, so enabling resize could not help"
+        )
         XCTAssertGreaterThan(candidate.artifact.byteCount, 500)
         let outputs = try FileManager.default.contentsOfDirectory(atPath: tempDirectory.path)
             .filter { $0.hasSuffix(".jpg") }
