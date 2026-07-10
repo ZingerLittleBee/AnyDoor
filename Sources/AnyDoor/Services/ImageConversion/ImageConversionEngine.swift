@@ -153,56 +153,70 @@ actor ImageConversionEngine {
         let source = try fingerprint(for: item)
         let key = JobKey(itemID: item.id, source: source, configuration: configuration)
 
-        if let cached = completed[item.id], cached.key == key {
-            return cached.candidate
-        }
-        // A changed source or configuration invalidates the stale candidate.
-        invalidateCompleted(itemID: item.id)
-
-        let state: JobState
-        if let existing = jobs[key], existing.task != nil {
-            state = existing
-        } else {
-            state = JobState()
-            jobs[key] = state
-        }
-
-        let token = state.consumers.attach()
-        if state.task == nil {
-            let stateID = state.id
-            let consumers = state.consumers
-            state.task = Task {
-                // Inherits actor isolation: preview and batch work stay serial.
-                defer { self.finishJob(key: key, stateID: stateID) }
-                let candidate = try await self.performPipeline(
-                    key: key,
-                    item: item,
-                    preflight: preflight,
-                    isAbandoned: { consumers.isEmpty }
-                )
-                self.completed[item.id] = (key, candidate)
-                self.store.setDisplayed(candidate.artifact, forItem: item.id)
-                if case .bestEffort = candidate.kind {
-                    self.store.setRetainedBestEffort(candidate.artifact, forItem: item.id)
-                }
-                return candidate
+        while true {
+            if let cached = completed[item.id], cached.key == key {
+                return cached.candidate
             }
-        }
+            // A changed source or configuration invalidates the stale candidate.
+            invalidateCompleted(itemID: item.id)
 
-        guard let pipelineTask = state.task else {
-            state.consumers.detach(token)
-            throw ImageConversionFailure.encodingFailed
-        }
-        let consumers = state.consumers
-        defer { consumers.detach(token) }
+            let state: JobState
+            // Never attach to a job whose task is already cancelled: the last
+            // previous consumer's onCancel may have killed it before this
+            // consumer arrived, and inheriting its CancellationError would
+            // misreport a user Stop.
+            if let existing = jobs[key], let task = existing.task, !task.isCancelled {
+                state = existing
+            } else {
+                state = JobState()
+                jobs[key] = state
+            }
 
-        // Cancel the shared task only when this was its final consumer. A run
-        // and a preview may safely share one candidate preparation.
-        return try await withTaskCancellationHandler {
-            try await pipelineTask.value
-        } onCancel: {
-            if consumers.detach(token) {
-                pipelineTask.cancel()
+            let token = state.consumers.attach()
+            if state.task == nil {
+                let stateID = state.id
+                let consumers = state.consumers
+                state.task = Task {
+                    // Inherits actor isolation: preview and batch work stay serial.
+                    defer { self.finishJob(key: key, stateID: stateID) }
+                    let candidate = try await self.performPipeline(
+                        key: key,
+                        item: item,
+                        preflight: preflight,
+                        isAbandoned: { consumers.isEmpty }
+                    )
+                    self.completed[item.id] = (key, candidate)
+                    self.store.setDisplayed(candidate.artifact, forItem: item.id)
+                    if case .bestEffort = candidate.kind {
+                        self.store.setRetainedBestEffort(candidate.artifact, forItem: item.id)
+                    }
+                    return candidate
+                }
+            }
+
+            guard let pipelineTask = state.task else {
+                state.consumers.detach(token)
+                throw ImageConversionFailure.encodingFailed
+            }
+            let consumers = state.consumers
+            defer { consumers.detach(token) }
+
+            do {
+                // Cancel the shared task only when this was its final consumer.
+                // A run and a preview may safely share one candidate preparation.
+                return try await withTaskCancellationHandler {
+                    try await pipelineTask.value
+                } onCancel: {
+                    if consumers.detach(token) {
+                        pipelineTask.cancel()
+                    }
+                }
+            } catch is CancellationError {
+                // Rethrow when this consumer itself was cancelled. Otherwise
+                // the shared job lost its previous consumers in the narrow
+                // window between the isCancelled check and the attach; retry
+                // on a fresh job.
+                try Task.checkCancellation()
             }
         }
     }
