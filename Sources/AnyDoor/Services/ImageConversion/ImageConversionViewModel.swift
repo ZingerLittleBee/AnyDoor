@@ -395,6 +395,10 @@ final class ImageConversionViewModel {
             skipped: summary.skipped,
             historyWarnings: historyWarnings
         )
+
+        // Preview scheduling was suspended for the whole run; refresh the
+        // workspace for the current selection now.
+        schedulePreview()
     }
 
     /// Write one Conversion Record per produced output. The target format and
@@ -437,7 +441,15 @@ final class ImageConversionViewModel {
         let configuration = currentTargetSizeConfiguration()
         let frozen = items.map { (item: $0, snapshot: snapshot(for: $0)) }
 
+        // Retire the in-flight preview completely before any run work: its
+        // pruneDisplayed must never interleave with the run's completion
+        // state on the engine actor.
+        previewTask?.cancel()
+        let retiringPreview = previewTask
+        previewTask = nil
+
         runTask = Task { [weak self] in
+            await retiringPreview?.value
             var successes: [(item: ImageConversionBasketItem, conversion: CommittedConversion)] = []
             var interrupted = false
             var eligible: [(item: ImageConversionBasketItem, snapshot: ImageConversionItemSnapshot)] = []
@@ -508,6 +520,10 @@ final class ImageConversionViewModel {
                 historyWarnings: historyWarnings
             )
         }
+
+        // Preview scheduling was suspended for the whole run; refresh the
+        // workspace for the current selection now.
+        schedulePreview()
     }
 
     /// Explicit Save Anyway for a target-missed item: commits the retained
@@ -546,6 +562,10 @@ final class ImageConversionViewModel {
     /// Only the selected basket item is previewed; obsolete work can never
     /// replace a newer state thanks to the generation token.
     func schedulePreview() {
+        // A run froze the basket, and its completion state lives on the engine
+        // actor: preview work (including artifact pruning) must not interleave
+        // with it. The finish path reschedules the preview.
+        guard !isConverting else { return }
         previewGeneration += 1
         let generation = previewGeneration
         previewTask?.cancel()
@@ -571,6 +591,9 @@ final class ImageConversionViewModel {
         let configuration = currentTargetSizeConfiguration()
         let snapshot = snapshot(for: item)
         previewTask = Task { [weak self] in
+            // A cancellation issued before this task first ran (e.g. by a run
+            // starting) must also skip the prune, not just the preparation.
+            guard !Task.isCancelled else { return }
             await engine.pruneDisplayed(keepingItem: snapshot.id)
             try? await Task.sleep(nanoseconds: UInt64(TargetSizePolicy.previewDebounce * 1_000_000_000))
             guard !Task.isCancelled else { return }
