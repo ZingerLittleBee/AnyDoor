@@ -42,6 +42,12 @@ enum SyncSettingsRegistry {
         Entry(key: "translation.services", type: .string),
         Entry(key: "imageConversion.targetFormat", type: .string),
         Entry(key: "imageConversion.quality", type: .int),
+        Entry(key: "imageConversion.mode", type: .string),
+        Entry(key: "imageConversion.targetSize.targetFormat", type: .string),
+        Entry(key: "imageConversion.targetSize.bytes", type: .int),
+        Entry(key: "imageConversion.targetSize.unit", type: .string),
+        Entry(key: "imageConversion.targetSize.allowResize", type: .bool),
+        Entry(key: "imageConversion.transparencyBackgroundHex", type: .string),
     ]
 
     private static let entriesByKey: [String: Entry] =
