@@ -4302,6 +4302,74 @@
         }
       }
     },
+    "imageConversion.compare.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Select an item to compare"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在左侧选择图片以对比"
+          }
+        }
+      }
+    },
+    "imageConversion.compare.original": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Original"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原图"
+          }
+        }
+      }
+    },
+    "imageConversion.compare.result": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Result"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "结果"
+          }
+        }
+      }
+    },
+    "imageConversion.compare.updating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updating…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在生成预览…"
+          }
+        }
+      }
+    },
     "imageConversion.convert": {
       "extractionState": "manual",
       "localizations": {
@@ -4315,6 +4383,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "转换"
+          }
+        }
+      }
+    },
+    "imageConversion.convertAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Convert All"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全部转换"
           }
         }
       }
@@ -4570,6 +4655,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已保存最小候选"
+          }
+        }
+      }
+    },
+    "imageConversion.sidebar.basket": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Basket"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待转"
           }
         }
       }

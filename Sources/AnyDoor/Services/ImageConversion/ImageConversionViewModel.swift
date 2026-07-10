@@ -67,10 +67,16 @@ final class ImageConversionViewModel {
     // MARK: Target Size state
 
     var mode: ImageConversionMode {
-        didSet { ImageConversionPreferences.setMode(mode, defaults: defaults) }
+        didSet {
+            ImageConversionPreferences.setMode(mode, defaults: defaults)
+            schedulePreview()
+        }
     }
     var targetSizeFormat: ImageConversionFormat {
-        didSet { ImageConversionPreferences.setTargetSizeFormat(targetSizeFormat, defaults: defaults) }
+        didSet {
+            ImageConversionPreferences.setTargetSizeFormat(targetSizeFormat, defaults: defaults)
+            schedulePreview()
+        }
     }
     /// The Per-Output Limit currently applied to conversion. Only a valid
     /// committed field edit changes it.
@@ -80,11 +86,39 @@ final class ImageConversionViewModel {
     var targetText: String = ""
     private(set) var targetParseError: TargetSizeLimitParseError?
     var allowResize: Bool {
-        didSet { ImageConversionPreferences.setTargetSizeAllowResize(allowResize, defaults: defaults) }
+        didSet {
+            ImageConversionPreferences.setTargetSizeAllowResize(allowResize, defaults: defaults)
+            schedulePreview()
+        }
     }
     /// Per-item outcome of the last run (miss/unsupported/failed items stay
     /// in the basket with their status; successes leave).
     private(set) var itemStatuses: [String: ImageConversionItemStatus] = [:]
+
+    // MARK: Selection & exact preview
+
+    /// What the Comparison Workspace shows for the selected item. Stale
+    /// metrics are never presented as current: any change flips to
+    /// `.updating` before new bytes appear.
+    enum PreviewState: Equatable {
+        case empty
+        case updating
+        case ready(PreparedCandidate)
+        case unsupported(ImageConversionPreflightIssue)
+        case invalidConfiguration
+        case failed
+    }
+
+    var selectedItemID: String? {
+        didSet { schedulePreview() }
+    }
+    private(set) var previewState: PreviewState = .empty
+    @ObservationIgnored private var previewTask: Task<Void, Never>?
+    @ObservationIgnored private var previewGeneration = 0
+
+    var selectedItem: ImageConversionBasketItem? {
+        items.first { $0.id == selectedItemID }
+    }
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private var engine: ImageConversionEngine?
@@ -143,13 +177,17 @@ final class ImageConversionViewModel {
     func commitTargetText(locale: Locale = .current) {
         do {
             let parsed = try TargetSizeLimit.parse(targetText, unit: targetLimit.unit, locale: locale)
+            let changed = parsed != targetLimit || targetParseError != nil
             targetLimit = parsed
             targetParseError = nil
             ImageConversionPreferences.setTargetSizeLimit(parsed, defaults: defaults)
+            if changed { schedulePreview() }
         } catch let error as TargetSizeLimitParseError {
             targetParseError = error
+            schedulePreview()
         } catch {
             targetParseError = .malformed
+            schedulePreview()
         }
     }
 
@@ -161,6 +199,7 @@ final class ImageConversionViewModel {
         targetText = targetLimit.displayValue(locale: locale)
         targetParseError = nil
         ImageConversionPreferences.setTargetSizeLimit(targetLimit, defaults: defaults)
+        // Bytes are unchanged, so the preview candidate stays valid.
     }
 
     func addFiles(_ urls: [URL]) {
@@ -176,11 +215,13 @@ final class ImageConversionViewModel {
             next.append(.file(url))
         }
         items = next.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        selectFirstIfNeeded()
     }
 
     /// Adds a pasted bitmap (e.g. a fresh screenshot) with a generic display name.
     func addBitmap(_ data: Data) {
         items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
+        selectFirstIfNeeded()
     }
 
     /// Merges preloaded basket items (e.g. from a clipboard-history entry),
@@ -193,12 +234,22 @@ final class ImageConversionViewModel {
             next.append(item)
         }
         items = next
+        selectFirstIfNeeded()
     }
 
     func remove(_ item: ImageConversionBasketItem) {
+        let removedIndex = items.firstIndex { $0.id == item.id }
         items.removeAll { $0.id == item.id }
         itemStatuses[item.id] = nil
         releaseEngineArtifacts(for: item.id)
+        // Removal selects the nearest remaining item.
+        if selectedItemID == item.id {
+            if let index = removedIndex, !items.isEmpty {
+                selectedItemID = items[min(index, items.count - 1)].id
+            } else {
+                selectedItemID = nil
+            }
+        }
     }
 
     func clear() {
@@ -206,6 +257,15 @@ final class ImageConversionViewModel {
         items.removeAll()
         itemStatuses.removeAll()
         for item in removed { releaseEngineArtifacts(for: item.id) }
+        selectedItemID = nil
+    }
+
+    /// The first item added to an empty basket becomes selected; later
+    /// additions never steal selection.
+    private func selectFirstIfNeeded() {
+        if selectedItemID == nil || selectedItem == nil {
+            selectedItemID = items.first?.id
+        }
     }
 
     /// Request Stop: takes effect at the current candidate/commit boundary.
@@ -380,6 +440,59 @@ final class ImageConversionViewModel {
                 ToastPresenter.shared.show(.success(L(.imageConversionSavedAnyway)))
             } catch {
                 ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
+            }
+        }
+    }
+
+    // MARK: - Exact preview
+
+    /// Regenerate the selected item's exact preview after a short debounce.
+    /// Only the selected basket item is previewed; obsolete work can never
+    /// replace a newer state thanks to the generation token.
+    func schedulePreview() {
+        previewGeneration += 1
+        let generation = previewGeneration
+        previewTask?.cancel()
+
+        guard mode == .targetSize, let engine else {
+            previewState = .empty
+            return
+        }
+        guard let item = selectedItem else {
+            previewState = .empty
+            return
+        }
+        guard targetParseError == nil, targetSizeFormats.contains(targetSizeFormat) else {
+            previewState = .invalidConfiguration
+            return
+        }
+
+        previewState = .updating
+        let configuration = TargetSizeJobConfiguration(
+            format: targetSizeFormat,
+            targetBytes: targetLimit.bytes,
+            allowResize: allowResize,
+            transparencyBackgroundHex: ImageConversionPreferences
+                .transparencyBackgroundHex(defaults: defaults)
+        )
+        let snapshot = snapshot(for: item)
+        previewTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(TargetSizePolicy.previewDebounce * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            do {
+                let candidate = try await engine.prepareCandidate(
+                    item: snapshot, configuration: configuration, consumer: .preview
+                )
+                guard let self, self.previewGeneration == generation else { return }
+                self.previewState = .ready(candidate)
+            } catch let issue as ImageConversionPreflightIssue {
+                guard let self, self.previewGeneration == generation else { return }
+                self.previewState = .unsupported(issue)
+            } catch is CancellationError {
+                // A newer preview superseded this one; its state already shows.
+            } catch {
+                guard let self, self.previewGeneration == generation else { return }
+                self.previewState = .failed
             }
         }
     }
