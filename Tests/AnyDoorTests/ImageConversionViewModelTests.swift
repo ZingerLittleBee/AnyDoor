@@ -82,7 +82,7 @@ final class ImageConversionViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testQualityBasketShowsFirstFrameOnlyNoticeBeforeRun() throws {
+    func testQualityBasketShowsFirstFrameOnlyNoticeBeforeRun() async throws {
         let source = try writeAnimatedGIF()
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
         let model = ImageConversionViewModel(availableFormats: [.png])
@@ -90,8 +90,15 @@ final class ImageConversionViewModelTests: XCTestCase {
         model.addFiles([source])
 
         let item = try XCTUnwrap(model.items.first)
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !model.qualityFirstFrameOnlyItemIDs.contains(item.id),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.contains(item.id))
         model.clear()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.isEmpty)
     }
 
     private func writePNG() throws -> URL {

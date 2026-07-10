@@ -61,7 +61,10 @@ final class ImageConversionViewModel {
     private(set) var items: [ImageConversionBasketItem] = []
     private(set) var availableFormats: [ImageConversionFormat]
     var selectedFormat: ImageConversionFormat {
-        didSet { ImageConversionPreferences.setTargetFormat(selectedFormat, defaults: defaults) }
+        didSet {
+            ImageConversionPreferences.setTargetFormat(selectedFormat, defaults: defaults)
+            scheduleQualityPreflightNotices()
+        }
     }
     /// Whole-percent quality (1–100) applied to lossy targets for the whole run.
     var qualityPercent: Int {
@@ -127,6 +130,8 @@ final class ImageConversionViewModel {
     @ObservationIgnored private var previewTask: Task<Void, Never>?
     @ObservationIgnored private var previewGeneration = 0
     @ObservationIgnored private var isWindowPresented = false
+    @ObservationIgnored private var qualityPreflightTask: Task<Void, Never>?
+    @ObservationIgnored private var qualityPreflightGeneration = 0
 
     var selectedItem: ImageConversionBasketItem? {
         items.first { $0.id == selectedItemID }
@@ -233,7 +238,7 @@ final class ImageConversionViewModel {
             next.append(.file(url))
         }
         items = next.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-        refreshQualityPreflightNotices()
+        scheduleQualityPreflightNotices()
         selectFirstIfNeeded()
     }
 
@@ -258,7 +263,7 @@ final class ImageConversionViewModel {
     func addBitmap(_ data: Data) {
         guard !isConverting else { return }
         items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
-        refreshQualityPreflightNotices()
+        scheduleQualityPreflightNotices()
         selectFirstIfNeeded()
     }
 
@@ -273,7 +278,7 @@ final class ImageConversionViewModel {
             next.append(item)
         }
         items = next
-        refreshQualityPreflightNotices()
+        scheduleQualityPreflightNotices()
         selectFirstIfNeeded()
     }
 
@@ -288,6 +293,9 @@ final class ImageConversionViewModel {
         items.removeAll()
         itemStatuses.removeAll()
         qualityFirstFrameOnlyItemIDs.removeAll()
+        qualityPreflightGeneration += 1
+        qualityPreflightTask?.cancel()
+        qualityPreflightTask = nil
         for item in removed { releaseEngineArtifacts(for: item.id) }
         selectedItemID = nil
     }
@@ -635,19 +643,39 @@ final class ImageConversionViewModel {
         itemStatuses.removeAll()
     }
 
-    private func refreshQualityPreflightNotices() {
-        let inspector = ImageIOSourceInspector(rejectsMultiImage: false)
-        qualityFirstFrameOnlyItemIDs = Set(items.compactMap { item in
-            let input: ImageConversionInput = switch item.payload {
-            case .file(let url): .file(url)
-            case .bitmap(let data): .bitmap(data)
+    private func scheduleQualityPreflightNotices() {
+        qualityPreflightGeneration += 1
+        let generation = qualityPreflightGeneration
+        qualityPreflightTask?.cancel()
+        let frozenItems = items
+        let target = selectedFormat
+        let worker = Task.detached(priority: .utility) {
+            let inspector = ImageIOSourceInspector(rejectsMultiImage: false)
+            var notices: Set<String> = []
+            for item in frozenItems {
+                guard !Task.isCancelled else { return notices }
+                let input: ImageConversionInput = switch item.payload {
+                case .file(let url): .file(url)
+                case .bitmap(let data): .bitmap(data)
+                }
+                if case .success(let preflight) = inspector.preflight(input: input, target: target),
+                   preflight.firstFrameOnly {
+                    notices.insert(item.id)
+                }
             }
-            guard case .success(let preflight) = inspector.preflight(
-                input: input,
-                target: selectedFormat
-            ), preflight.firstFrameOnly else { return nil }
-            return item.id
-        })
+            return notices
+        }
+        qualityPreflightTask = Task { [weak self] in
+            let notices = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  self.qualityPreflightGeneration == generation else { return }
+            self.qualityFirstFrameOnlyItemIDs = notices
+        }
     }
 
     private func pruneIdlePreviewArtifactsIfNeeded() {
@@ -711,6 +739,7 @@ final class ImageConversionViewModel {
         } else if selectedItem == nil {
             selectedItemID = items.first?.id
         }
+        scheduleQualityPreflightNotices()
     }
 
     private func recordTargetSizeHistory(
