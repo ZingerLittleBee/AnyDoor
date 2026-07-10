@@ -4234,6 +4234,23 @@
         }
       }
     },
+    "imageConversion.allowResize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow resizing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "允许缩小尺寸"
+          }
+        }
+      }
+    },
     "imageConversion.basket.count": {
       "extractionState": "manual",
       "localizations": {
@@ -4370,6 +4387,23 @@
         }
       }
     },
+    "imageConversion.enableResizeHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quality floor reached — enabling resize may fit the target"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "质量已到下限仍超出目标，开启缩小尺寸后可能达标"
+          }
+        }
+      }
+    },
     "imageConversion.fileMissing": {
       "extractionState": "manual",
       "localizations": {
@@ -4438,6 +4472,23 @@
         }
       }
     },
+    "imageConversion.mode.targetSize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Target Size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目标体积"
+          }
+        }
+      }
+    },
     "imageConversion.noFormats": {
       "extractionState": "manual",
       "localizations": {
@@ -4489,6 +4540,40 @@
         }
       }
     },
+    "imageConversion.saveAnyway": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save Anyway"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仍要保存"
+          }
+        }
+      }
+    },
+    "imageConversion.savedAnyway": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Best-effort result saved"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已保存最小候选"
+          }
+        }
+      }
+    },
     "imageConversion.sourceMissing": {
       "extractionState": "manual",
       "localizations": {
@@ -4506,6 +4591,74 @@
         }
       }
     },
+    "imageConversion.status.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "转换失败"
+          }
+        }
+      }
+    },
+    "imageConversion.status.targetMiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Target missed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未达目标"
+          }
+        }
+      }
+    },
+    "imageConversion.status.unsupported": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsupported"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持"
+          }
+        }
+      }
+    },
+    "imageConversion.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "停止"
+          }
+        }
+      }
+    },
     "imageConversion.targetFormat": {
       "extractionState": "manual",
       "localizations": {
@@ -4519,6 +4672,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "目标格式"
+          }
+        }
+      }
+    },
+    "imageConversion.targetInvalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter a valid target size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请输入有效的目标体积"
           }
         }
       }
@@ -4553,6 +4723,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已转换 %lld 张，跳过 %lld 项"
+          }
+        }
+      }
+    },
+    "imageConversion.unattainableHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Minimum size reached — this target is unattainable"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已达最小尺寸，无法达成此目标"
           }
         }
       }

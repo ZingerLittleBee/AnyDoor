@@ -62,27 +62,54 @@ struct ImageConversionView: View {
                 .accessibilityLabel(L(.imageConversionClear))
                 .help(L(.imageConversionClear))
 
-                Button {
-                    model.convert()
-                } label: {
-                    HStack(spacing: 6) {
-                        if model.isConverting {
+                if model.isConverting, model.mode == .targetSize {
+                    // Target Size runs are cancellable at candidate boundaries.
+                    Button {
+                        model.stopConversion()
+                    } label: {
+                        HStack(spacing: 6) {
                             ProgressView()
                                 .controlSize(.small)
                                 .frame(width: 14, height: 14)
-                        } else {
-                            Image(systemName: "arrow.triangle.2.circlepath")
+                            Text(L(.imageConversionStop))
                         }
-                        Text(L(model.isConverting ? .imageConversionConverting : .imageConversionConvert))
+                        .frame(minWidth: 86)
                     }
-                    .frame(minWidth: 86)
+                } else {
+                    Button {
+                        model.convert()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if model.isConverting {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .frame(width: 14, height: 14)
+                            } else {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                            }
+                            Text(L(model.isConverting ? .imageConversionConverting : .imageConversionConvert))
+                        }
+                        .frame(minWidth: 86)
+                    }
+                    .disabled(!model.canConvert)
                 }
-                .disabled(!model.canConvert)
             }
 
             HStack(spacing: 14) {
-                if model.isQualityAdjustable {
+                Picker("", selection: $model.mode) {
+                    LocalizedText(.imageConversionQuality).tag(ImageConversionMode.quality)
+                    LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .disabled(model.isConverting)
+
+                if model.mode == .quality, model.isQualityAdjustable {
                     qualityControl
+                }
+                if model.mode == .targetSize {
+                    targetSizeControls
                 }
                 Spacer()
                 if model.availableFormats.isEmpty {
@@ -90,26 +117,78 @@ struct ImageConversionView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    HStack(spacing: 6) {
-                        LocalizedText(.imageConversionTargetFormat)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
-                            ForEach(model.availableFormats) { format in
-                                Text(format.displayName).tag(format)
-                            }
-                        }
-                        .labelsHidden()
-                        // Trailing-aligned inside the fixed slot so the popup's
-                        // right edge lines up with the Convert button above.
-                        .frame(width: 112, alignment: .trailing)
-                    }
-                    .help(L(.imageConversionTargetFormat))
+                    formatPicker
                 }
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+    }
+
+    /// Quality mode offers the full whitelist; Target Size offers only the
+    /// runtime-available lossy targets.
+    @ViewBuilder
+    private var formatPicker: some View {
+        HStack(spacing: 6) {
+            LocalizedText(.imageConversionTargetFormat)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if model.mode == .quality {
+                Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
+                    ForEach(model.availableFormats) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .labelsHidden()
+                // Trailing-aligned inside the fixed slot so the popup's
+                // right edge lines up with the Convert button above.
+                .frame(width: 112, alignment: .trailing)
+            } else {
+                Picker(L(.imageConversionTargetFormat), selection: $model.targetSizeFormat) {
+                    ForEach(model.targetSizeFormats) { format in
+                        Text(format.displayName).tag(format)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 112, alignment: .trailing)
+            }
+        }
+        .help(L(.imageConversionTargetFormat))
+        .disabled(model.isConverting)
+    }
+
+    private var targetSizeControls: some View {
+        HStack(spacing: 6) {
+            TextField("1", text: $model.targetText)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.small)
+                .frame(width: 64)
+                .multilineTextAlignment(.trailing)
+                .onSubmit { model.commitTargetText() }
+                .onChange(of: model.targetText) { model.commitTargetText() }
+                .accessibilityLabel(L(.imageConversionModeTargetSize))
+            Picker("", selection: Binding(
+                get: { model.targetLimit.unit },
+                set: { model.switchTargetUnit(to: $0) }
+            )) {
+                Text("KB").tag(TargetSizeUnit.kb)
+                Text("MB").tag(TargetSizeUnit.mb)
+            }
+            .labelsHidden()
+            .fixedSize()
+            Toggle(isOn: $model.allowResize) {
+                LocalizedText(.imageConversionAllowResize)
+                    .font(.caption)
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+            if model.targetParseError != nil {
+                LocalizedText(.imageConversionTargetInvalid)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .disabled(model.isConverting)
     }
 
     private var qualityControl: some View {
@@ -165,9 +244,14 @@ struct ImageConversionView: View {
             ScrollView {
                 LazyVStack(spacing: 6) {
                     ForEach(model.items) { item in
-                        ImageConversionRow(item: item) {
-                            model.remove(item)
-                        }
+                        ImageConversionRow(
+                            item: item,
+                            status: model.itemStatuses[item.id],
+                            allowResize: model.allowResize,
+                            remove: { model.remove(item) },
+                            saveAnyway: { model.saveBestEffort(item) },
+                            enableResize: { model.allowResize = true }
+                        )
                     }
                 }
                 .padding(.horizontal, 12)
@@ -267,36 +351,46 @@ struct ImageConversionView: View {
 
 private struct ImageConversionRow: View {
     let item: ImageConversionBasketItem
+    var status: ImageConversionItemStatus?
+    var allowResize = false
     let remove: () -> Void
+    var saveAnyway: () -> Void = {}
+    var enableResize: () -> Void = {}
     @State private var thumbnail: NSImage?
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(nsImage: resolvedThumbnail)
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 30, height: 30)
-                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.displayName)
-                    .font(.system(size: 13, weight: .medium))
-                    .lineLimit(1)
-                if !item.subtitle.isEmpty {
-                    Text(item.subtitle)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Image(nsImage: resolvedThumbnail)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 30, height: 30)
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayName)
+                        .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
+                    if !item.subtitle.isEmpty {
+                        Text(item.subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
+                Spacer()
+                statusBadge
+                Button(action: remove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L(.imageConversionRemove))
+                .help(L(.imageConversionRemove))
             }
-            Spacer()
-            Button(action: remove) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-                    .frame(width: 24, height: 24)
+            if case .targetMiss(let candidate) = status {
+                targetMissDetail(candidate)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L(.imageConversionRemove))
-            .help(L(.imageConversionRemove))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -304,6 +398,61 @@ private struct ImageConversionRow: View {
         .task(id: item.id) {
             thumbnail = await loadThumbnail()
         }
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        switch status {
+        case .targetMiss:
+            badge(L(.imageConversionStatusTargetMiss), color: .orange)
+        case .unsupported:
+            badge(L(.imageConversionStatusUnsupported), color: .secondary)
+        case .failed:
+            badge(L(.imageConversionStatusFailed), color: .red)
+        case nil:
+            EmptyView()
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12), in: Capsule())
+    }
+
+    /// The actionable Best-Effort summary: what stopped the search, what to
+    /// do next, and the explicit Save Anyway action.
+    private func targetMissDetail(_ candidate: PreparedCandidate) -> some View {
+        HStack(spacing: 8) {
+            if case .bestEffort(let reason) = candidate.kind {
+                if reason == .qualityFloorReached && !allowResize {
+                    Button(action: enableResize) {
+                        LocalizedText(.imageConversionEnableResizeHint)
+                            .font(.caption)
+                    }
+                    .buttonStyle(.link)
+                } else {
+                    LocalizedText(.imageConversionUnattainableHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Text(ByteCountFormatter.string(
+                fromByteCount: candidate.artifact.byteCount, countStyle: .file
+            ))
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.secondary)
+            Button(action: saveAnyway) {
+                LocalizedText(.imageConversionSaveAnyway)
+                    .font(.caption)
+            }
+            .controlSize(.small)
+        }
+        .padding(.leading, 40)
     }
 
     /// Async-decoded image preview, with a synchronous cache fast path for file

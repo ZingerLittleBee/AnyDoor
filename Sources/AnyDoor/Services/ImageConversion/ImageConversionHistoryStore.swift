@@ -58,6 +58,46 @@ final class ImageConversionHistoryStore {
         revision &+= 1
     }
 
+    /// Write one Target Size conversion with its candidate metrics. Called
+    /// only when a final file exists (target reached, or an explicit Save
+    /// Anyway of a Best-Effort artifact).
+    func recordTargetSize(
+        sourceName: String,
+        sourceKind: ImageConversionSourceKind,
+        targetFormat: ImageConversionFormat,
+        outputPath: String,
+        outcome: ImageConversionOutcome,
+        targetByteCount: Int64,
+        candidate: PreparedCandidate,
+        outputByteCount: Int64,
+        createdAt: Date = Date()
+    ) {
+        guard let modelContext else { return }
+        let record = ImageConversionRecord(
+            sourceName: sourceName,
+            sourceKind: sourceKind,
+            targetFormat: targetFormat,
+            qualityPercent: 0,
+            outputPath: outputPath,
+            createdAt: createdAt
+        )
+        record.modeRaw = ImageConversionMode.targetSize.rawValue
+        record.outcomeRaw = outcome.rawValue
+        record.targetByteCount = targetByteCount
+        record.sourceByteCount = candidate.sourceByteCount
+        record.outputByteCount = outputByteCount
+        record.sourcePixelWidth = candidate.sourceDimensions.width
+        record.sourcePixelHeight = candidate.sourceDimensions.height
+        record.outputPixelWidth = candidate.dimensions.width
+        record.outputPixelHeight = candidate.dimensions.height
+        record.resizeFallbackApplied = candidate.resizeFallbackApplied
+        record.displayDowngradeRaw = candidate.hdrToSDR ? "hdrToSDR" : nil
+        modelContext.insert(record)
+        try? modelContext.save()
+        trim()
+        revision &+= 1
+    }
+
     /// Newest-first, capped at `limit`.
     func recent(limit: Int = capacity) -> [ImageConversionRecord] {
         guard let modelContext else { return [] }
