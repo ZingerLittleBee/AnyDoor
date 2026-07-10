@@ -37,9 +37,11 @@ final class ImageConversionViewModelTests: XCTestCase {
         let item = try XCTUnwrap(model.items.first)
 
         model.convert()
-        while model.isConverting {
+        let runDeadline = ContinuousClock.now + .seconds(10)
+        while model.isConverting, ContinuousClock.now < runDeadline {
             try await Task.sleep(for: .milliseconds(10))
         }
+        XCTAssertFalse(model.isConverting, "the run must finish within the deadline")
         guard case .targetMiss = model.itemStatuses[item.id] else {
             return XCTFail("expected a retained target miss")
         }
