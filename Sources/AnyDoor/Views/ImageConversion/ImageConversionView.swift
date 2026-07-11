@@ -311,32 +311,14 @@ struct ImageConversionView: View {
 
     private var controlBar: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Top row: only the active mode's own controls.
             HStack(spacing: 14) {
-                Picker("", selection: $model.mode) {
-                    LocalizedText(.imageConversionModeFormat).tag(ImageConversionMode.quality)
-                    LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-
                 if model.mode == .quality {
                     qualityModeControls
                 } else {
                     targetSizeModeControls
                 }
 
-                Spacer(minLength: 0)
-            }
-            .disabled(model.isConverting)
-            // Both modes' controls resolve to slightly different intrinsic
-            // heights; pin the row so the mode switch cannot move the bar.
-            .frame(minHeight: 28)
-
-            // Bottom row: footnote notes on the left (Target Size only — the
-            // slot is part of the row, so mode switches never change the bar
-            // height), primary action pinned to the trailing edge.
-            HStack(spacing: 6) {
                 Group {
                     if model.mode == .targetSize {
                         LocalizedText(.imageConversionTargetSizeSameFormat)
@@ -347,6 +329,25 @@ struct ImageConversionView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+
+                Spacer(minLength: 0)
+            }
+            .disabled(model.isConverting)
+            // Both modes' controls resolve to slightly different intrinsic
+            // heights; pin the row so the mode switch cannot move the bar.
+            .frame(minHeight: 28)
+
+            // Bottom row: mode switch on the left, primary action pinned to
+            // the trailing edge.
+            HStack(spacing: 14) {
+                Picker("", selection: $model.mode) {
+                    LocalizedText(.imageConversionModeFormat).tag(ImageConversionMode.quality)
+                    LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .disabled(model.isConverting)
 
                 Spacer(minLength: 12)
 
