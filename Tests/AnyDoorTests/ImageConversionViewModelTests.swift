@@ -29,6 +29,9 @@ final class ImageConversionViewModelTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
 
         let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
+        // Bypass the modal output-folder panel.
+        let outputDirectory = source.deletingLastPathComponent()
+        model.outputDirectoryPicker = { _ in outputDirectory }
         model.mode = .targetSize
         model.switchTargetUnit(to: .kb)
         model.targetText = "0.01"
@@ -36,15 +39,20 @@ final class ImageConversionViewModelTests: XCTestCase {
         model.addFiles([source])
         let item = try XCTUnwrap(model.items.first)
 
+        // The run starts asynchronously after the folder pick resolves; wait
+        // for the terminal per-item status rather than the transient flag.
         model.convert()
         let runDeadline = ContinuousClock.now + .seconds(10)
-        while model.isConverting, ContinuousClock.now < runDeadline {
+        while model.itemStatuses[item.id] == nil, ContinuousClock.now < runDeadline {
             try await Task.sleep(for: .milliseconds(10))
         }
-        XCTAssertFalse(model.isConverting, "the run must finish within the deadline")
         guard case .targetMiss = model.itemStatuses[item.id] else {
             return XCTFail("expected a retained target miss")
         }
+        XCTAssertEqual(
+            ImageConversionPreferences.outputDirectory(defaults: defaults), outputDirectory,
+            "a confirmed pick must be remembered"
+        )
 
         model.targetText = "0.02"
         model.commitTargetText()

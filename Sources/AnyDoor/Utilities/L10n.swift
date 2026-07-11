@@ -167,6 +167,8 @@ enum L10n {
         case imageConversionModeFormat = "imageConversion.mode.format"
         case imageConversionModeTargetSize = "imageConversion.mode.targetSize"
         case imageConversionNoFormats = "imageConversion.noFormats"
+        case imageConversionOutputPanelMessage = "imageConversion.output.panelMessage"
+        case imageConversionOutputPanelPrompt = "imageConversion.output.panelPrompt"
         case imageConversionQuality = "imageConversion.quality"
         case imageConversionRemove = "imageConversion.remove"
         case imageConversionSaveAnyway = "imageConversion.saveAnyway"

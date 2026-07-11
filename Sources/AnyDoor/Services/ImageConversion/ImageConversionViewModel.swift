@@ -334,15 +334,49 @@ final class ImageConversionViewModel {
         runTask?.cancel()
     }
 
+    /// Injectable folder picker (given the remembered directory, returns the
+    /// chosen one or nil on cancel) so tests can bypass the modal panel.
+    @ObservationIgnored var outputDirectoryPicker: (@MainActor (URL?) async -> URL?)?
+
+    /// 全部转换 first asks where to save; the last confirmed choice is
+    /// remembered as the panel's starting directory. The run starts only
+    /// after a confirmed pick — cancel converts nothing.
     func convert() {
         guard canConvert else { return }
-        switch mode {
-        case .quality: convertQuality()
-        case .targetSize: convertTargetSize()
+        let remembered = ImageConversionPreferences.outputDirectory(defaults: defaults)
+        Task { @MainActor in
+            let directory: URL?
+            if let picker = outputDirectoryPicker {
+                directory = await picker(remembered)
+            } else {
+                directory = await Self.presentOutputDirectoryPanel(startingAt: remembered)
+            }
+            guard let directory, self.canConvert else { return }
+            ImageConversionPreferences.setOutputDirectory(directory, defaults: self.defaults)
+            switch self.mode {
+            case .quality: self.convertQuality(outputDirectory: directory)
+            case .targetSize: self.convertTargetSize(outputDirectory: directory)
+            }
         }
     }
 
-    private func convertQuality() {
+    private static func presentOutputDirectoryPanel(startingAt remembered: URL?) async -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = L(.imageConversionOutputPanelPrompt)
+        panel.message = L(.imageConversionOutputPanelMessage)
+        if let remembered {
+            panel.directoryURL = remembered
+        }
+        let response = await panel.begin()
+        guard response == .OK else { return nil }
+        return panel.url
+    }
+
+    private func convertQuality(outputDirectory: URL) {
         isConverting = true
         let frozenItems = items
         let inputs: [ImageConversionInput] = frozenItems.map { item in
@@ -360,6 +394,7 @@ final class ImageConversionViewModel {
                 inputs: inputs,
                 target: target,
                 quality: quality,
+                outputDirectory: outputDirectory,
                 downloadsDirectory: ImageConversionSession.defaultDownloadsDirectory
             )
             self?.finish(
@@ -436,7 +471,7 @@ final class ImageConversionViewModel {
 
     // MARK: - Target Size run
 
-    private func convertTargetSize() {
+    private func convertTargetSize(outputDirectory: URL) {
         guard let engine else { return }
         isConverting = true
         itemStatuses.removeAll()
@@ -444,7 +479,9 @@ final class ImageConversionViewModel {
         // Freeze configuration and item snapshots: config edits and basket
         // mutations are disabled until completion or Stop.
         let request = currentTargetSizeRequest()
-        let frozen = items.map { (item: $0, snapshot: snapshot(for: $0)) }
+        let frozen = items.map {
+            (item: $0, snapshot: snapshot(for: $0, outputDirectory: outputDirectory))
+        }
 
         // Retire the in-flight preview completely before any run work: its
         // pruneDisplayed must never interleave with the run's completion
@@ -671,7 +708,13 @@ final class ImageConversionViewModel {
 
     // MARK: - Target Size helpers
 
-    private func snapshot(for item: ImageConversionBasketItem) -> ImageConversionItemSnapshot {
+    /// `outputDirectory` overrides the destination folder for a run; the
+    /// preview path leaves it nil (destination is commit-time state, not part
+    /// of the engine's job identity).
+    private func snapshot(
+        for item: ImageConversionBasketItem,
+        outputDirectory: URL? = nil
+    ) -> ImageConversionItemSnapshot {
         let engineID = engineIDs[item.id] ?? {
             let fresh = UUID()
             engineIDs[item.id] = fresh
@@ -681,10 +724,14 @@ final class ImageConversionViewModel {
         case .file(let url): .file(url)
         case .bitmap(let data): .bitmap(data)
         }
+        var destination = provisionalDestinationPolicy(for: item)
+        if let outputDirectory {
+            destination.directory = outputDirectory
+        }
         return ImageConversionItemSnapshot(
             id: engineID,
             input: input,
-            destination: provisionalDestinationPolicy(for: item)
+            destination: destination
         )
     }
 
@@ -708,19 +755,22 @@ final class ImageConversionViewModel {
         )
     }
 
+    /// Save Anyway destination: the remembered run directory, falling back to
+    /// the legacy per-item placement when none was ever chosen.
     private func destinationPolicy(
         for item: ImageConversionBasketItem,
         format: ImageConversionFormat
     ) -> AtomicOutputWriter.DestinationPolicy {
+        let remembered = ImageConversionPreferences.outputDirectory(defaults: defaults)
         if let url = item.fileURL {
             return AtomicOutputWriter.DestinationPolicy(
-                directory: url.deletingLastPathComponent(),
+                directory: remembered ?? url.deletingLastPathComponent(),
                 baseName: url.deletingPathExtension().lastPathComponent,
                 fileExtension: format.fileExtension
             )
         }
         return AtomicOutputWriter.DestinationPolicy(
-            directory: ImageConversionSession.defaultDownloadsDirectory,
+            directory: remembered ?? ImageConversionSession.defaultDownloadsDirectory,
             baseName: ImageConversionNaming.bitmapBaseName(timestamp: Date()),
             fileExtension: format.fileExtension
         )

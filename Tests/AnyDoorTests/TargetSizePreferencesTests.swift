@@ -134,6 +134,39 @@ final class TargetSizePreferencesTests: XCTestCase {
         )
     }
 
+    // MARK: - Output directory
+
+    func testOutputDirectoryDefaultsToNil() {
+        XCTAssertNil(ImageConversionPreferences.outputDirectory(defaults: defaults))
+    }
+
+    func testOutputDirectoryRoundTripsForAnExistingDirectory() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OutputDirTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        ImageConversionPreferences.setOutputDirectory(dir, defaults: defaults)
+        XCTAssertEqual(ImageConversionPreferences.outputDirectory(defaults: defaults)?.path, dir.path)
+    }
+
+    func testOutputDirectoryVanishedOnDiskReadsAsNil() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OutputDirTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        ImageConversionPreferences.setOutputDirectory(dir, defaults: defaults)
+        try FileManager.default.removeItem(at: dir)
+
+        XCTAssertNil(ImageConversionPreferences.outputDirectory(defaults: defaults))
+    }
+
+    func testOutputDirectoryIsNotExportedBySyncRegistry() {
+        ImageConversionPreferences.setOutputDirectory(FileManager.default.temporaryDirectory, defaults: defaults)
+        let snapshot = SyncSettingsRegistry.read(from: defaults)
+        // Machine-specific path: must never travel in a backup.
+        XCTAssertNil(snapshot[ImageConversionPreferences.outputDirectoryKey])
+    }
+
     // MARK: - Transparency background fallback
 
     func testHexWithoutHashFallsBackToWhite() {

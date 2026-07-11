@@ -15,6 +15,7 @@ enum ImageConversionPreferences {
     static let targetSizeBytesKey = "imageConversion.targetSize.bytes"
     static let targetSizeUnitKey = "imageConversion.targetSize.unit"
     static let transparencyBackgroundHexKey = "imageConversion.transparencyBackgroundHex"
+    static let outputDirectoryKey = "imageConversion.outputDirectory"
 
     static let defaultMode: ImageConversionMode = .quality
     static let defaultTargetSizeBytes = 1_000_000
@@ -37,6 +38,25 @@ enum ImageConversionPreferences {
 
     static func setTargetFormat(_ format: ImageConversionFormat, defaults: UserDefaults = .standard) {
         defaults.set(format.rawValue, forKey: targetFormatKey)
+    }
+
+    /// The last output directory the user picked for a run. Machine-specific
+    /// (a local filesystem path), so it is deliberately not in the sync
+    /// registry. Returns nil when nothing was stored or the directory is gone.
+    static func outputDirectory(defaults: UserDefaults = .standard) -> URL? {
+        guard let path = defaults.string(forKey: outputDirectoryKey), !path.isEmpty else {
+            return nil
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+              isDirectory.boolValue else {
+            return nil
+        }
+        return URL(fileURLWithPath: path, isDirectory: true)
+    }
+
+    static func setOutputDirectory(_ url: URL, defaults: UserDefaults = .standard) {
+        defaults.set(url.path, forKey: outputDirectoryKey)
     }
 
     /// The persisted quality percentage, clamped to the valid range. A missing or

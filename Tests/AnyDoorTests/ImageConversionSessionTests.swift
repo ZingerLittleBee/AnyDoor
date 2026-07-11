@@ -74,6 +74,30 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: image), original)
     }
 
+    func testConvertAllRoutesEveryOutputToAnExplicitDirectory() async throws {
+        let sourceDir = try tempDirectory()
+        let outputDir = try tempDirectory()
+        let image = sourceDir.appendingPathComponent("Photo.png")
+        try writePNG(to: image)
+
+        let summary = await ImageConversionSession().convertAll(
+            inputs: [.file(image), .bitmap(try pngData())],
+            target: .jpeg,
+            outputDirectory: outputDir,
+            downloadsDirectory: sourceDir
+        )
+
+        XCTAssertEqual(summary.converted, 2)
+        XCTAssertTrue(
+            summary.outputURLs.allSatisfy { $0.deletingLastPathComponent() == outputDir },
+            "both file and bitmap outputs must land in the chosen folder, got \(summary.outputURLs)"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: sourceDir.appendingPathComponent("Photo.jpg").path),
+            "nothing may be written beside the source when a directory was chosen"
+        )
+    }
+
     func testConvertAllSuffixesRepeatedRunsWithoutOverwritingPriorOutput() async throws {
         let dir = try tempDirectory()
         let image = dir.appendingPathComponent("Photo.png")

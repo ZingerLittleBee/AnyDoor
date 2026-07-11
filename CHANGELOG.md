@@ -23,6 +23,10 @@ versioning.
 - Image Conversion: Format mode now shows an exact result preview for the
   selected item — the same bytes a run would produce for the chosen format
   and quality — updating live as the quality slider moves.
+- Image Conversion: Convert All first asks where to save the outputs and
+  remembers the last chosen folder; Save Anyway commits to the same place.
+  The conversion window is a normal window instead of an always-on-top
+  panel.
 
 ### Fixed
 

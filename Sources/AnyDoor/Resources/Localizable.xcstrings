@@ -4591,6 +4591,40 @@
         }
       }
     },
+    "imageConversion.output.panelMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose where to save the converted files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择转换结果的保存位置"
+          }
+        }
+      }
+    },
+    "imageConversion.output.panelPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Convert"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开始转换"
+          }
+        }
+      }
+    },
     "imageConversion.quality": {
       "extractionState": "manual",
       "localizations": {

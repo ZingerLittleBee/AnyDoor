@@ -39,10 +39,14 @@ struct ImageConversionSession: Sendable {
             ?? FileManager.default.temporaryDirectory
     }
 
+    /// `outputDirectory` routes every output to one user-chosen folder; nil
+    /// keeps the legacy per-input placement (beside the source file, bitmaps
+    /// to `downloadsDirectory`).
     func convertAll(
         inputs: [ImageConversionInput],
         target: ImageConversionFormat,
         quality: Double = ImageConverter.defaultQuality,
+        outputDirectory: URL? = nil,
         downloadsDirectory: URL,
         calendar: Calendar = .current,
         now: Date = Date()
@@ -53,6 +57,7 @@ struct ImageConversionSession: Sendable {
                 inputs: inputs,
                 target: target,
                 quality: quality,
+                outputDirectory: outputDirectory,
                 downloadsDirectory: downloadsDirectory,
                 bitmapBaseName: bitmapBaseName
             )
@@ -83,6 +88,7 @@ private func convertAllSynchronously(
     inputs: [ImageConversionInput],
     target: ImageConversionFormat,
     quality: Double,
+    outputDirectory: URL?,
     downloadsDirectory: URL,
     bitmapBaseName: String
 ) -> ImageConversionSummary {
@@ -131,7 +137,7 @@ private func convertAllSynchronously(
                 let output = try writer.commit(
                     artifact,
                     to: AtomicOutputWriter.DestinationPolicy(
-                        directory: fileURL.deletingLastPathComponent(),
+                        directory: outputDirectory ?? fileURL.deletingLastPathComponent(),
                         baseName: fileURL.deletingPathExtension().lastPathComponent,
                         fileExtension: target.fileExtension
                     ),
@@ -163,7 +169,7 @@ private func convertAllSynchronously(
                 let output = try writer.commit(
                     artifact,
                     to: AtomicOutputWriter.DestinationPolicy(
-                        directory: downloadsDirectory,
+                        directory: outputDirectory ?? downloadsDirectory,
                         baseName: bitmapBaseName,
                         fileExtension: target.fileExtension
                     ),
