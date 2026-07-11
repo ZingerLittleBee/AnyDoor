@@ -24,10 +24,12 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         // A standard-chrome workspace window: system title bar, working
         // minimize/zoom, normal level. It yields to other apps and relies on
         // RegularWindowCoordinator (see `show()`) to stay reachable under the
-        // accessory activation policy.
+        // accessory activation policy. `.fullSizeContentView` lets the
+        // NavigationSplitView sidebar run full height — up to the window top,
+        // wrapping the traffic lights, like Finder/Notes.
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1_200, height: 740),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
