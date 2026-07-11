@@ -15,9 +15,7 @@ struct ImageConversionView: View {
                 HStack(spacing: 0) {
                     sidebar
                     Divider()
-                    comparisonWorkspace
-                    Divider()
-                    inspector
+                    workspaceColumn
                 }
                 if model.isDropTargeted {
                     dropOverlay
@@ -200,7 +198,25 @@ struct ImageConversionView: View {
         }
     }
 
-    // MARK: - Comparison workspace
+    // MARK: - Workspace (comparison + bottom control bar)
+
+    /// The main column right of the sidebar: the full-width comparison on
+    /// top, an optional target-miss banner, and the control bar at the
+    /// bottom (the former right-hand inspector, flattened into one strip so
+    /// the comparison gets all the width).
+    private var workspaceColumn: some View {
+        VStack(spacing: 0) {
+            comparisonWorkspace
+            if let item = model.selectedItem,
+               case .targetMiss(let candidate) = model.itemStatuses[item.id] {
+                Divider()
+                targetMissBanner(candidate, item: item)
+            }
+            Divider()
+            controlBar
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
     private var comparisonWorkspace: some View {
         HStack(spacing: 0) {
@@ -291,153 +307,150 @@ struct ImageConversionView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Inspector
+    // MARK: - Control bar
 
-    private var inspector: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+    private var controlBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 14) {
+                Group {
                     Picker("", selection: $model.mode) {
                         LocalizedText(.imageConversionModeFormat).tag(ImageConversionMode.quality)
                         LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-
-                    formatPicker
+                    .fixedSize()
 
                     if model.mode == .quality {
-                        if model.isQualityAdjustable {
-                            qualityControl
-                        }
+                        qualityModeControls
                     } else {
-                        targetSizeControls
-                    }
-
-                    if let item = model.selectedItem,
-                       case .targetMiss(let candidate) = model.itemStatuses[item.id] {
-                        targetMissSummary(candidate, item: item)
+                        targetSizeModeControls
                     }
                 }
                 .disabled(model.isConverting)
-                .padding(16)
+
+                Spacer(minLength: 12)
+
+                primaryAction
+                    .frame(width: 132)
             }
 
-            Divider()
-            primaryAction
-                .padding(16)
+            if model.mode == .targetSize {
+                // Behavior notes for the same-format contract; kept to one
+                // line so the bar's height stays stable.
+                HStack(spacing: 6) {
+                    LocalizedText(.imageConversionTargetSizeSameFormat)
+                    Text("·")
+                    LocalizedText(.imageConversionTargetSizePNGNote)
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+            }
         }
-        .frame(width: 280)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(.regularMaterial)
     }
 
-    private var formatPicker: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            LocalizedText(.imageConversionTargetFormat)
+    @ViewBuilder
+    private var qualityModeControls: some View {
+        if model.availableFormats.isEmpty {
+            LocalizedText(.imageConversionNoFormats)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if model.mode == .targetSize {
-                // Target Size keeps the source format; there is nothing to pick.
-                LocalizedText(.imageConversionTargetSizeSameFormat)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if model.availableFormats.isEmpty {
-                LocalizedText(.imageConversionNoFormats)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
-                    ForEach(model.availableFormats) { format in
-                        Text(format.displayName).tag(format)
-                    }
+        } else {
+            Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
+                ForEach(model.availableFormats) { format in
+                    Text(format.displayName).tag(format)
                 }
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
+            }
+            .labelsHidden()
+            .fixedSize()
+
+            if model.isQualityAdjustable {
+                HStack(spacing: 8) {
+                    LocalizedText(.imageConversionQuality)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Slider(
+                        value: Binding(
+                            get: { Double(model.qualityPercent) },
+                            set: { model.qualityPercent = Int($0.rounded()) }
+                        ),
+                        in: Double(ImageConversionPreferences.minQualityPercent)...Double(ImageConversionPreferences.maxQualityPercent)
+                    )
+                    .frame(width: 170)
+                    Text("\(model.qualityPercent)%")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 38, alignment: .trailing)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(L(.imageConversionQuality))
             }
         }
     }
 
-    private var qualityControl: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                LocalizedText(.imageConversionQuality)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("\(model.qualityPercent)%")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+    private var targetSizeModeControls: some View {
+        HStack(spacing: 8) {
+            TextField("1", text: $model.targetText)
+                .textFieldStyle(.roundedBorder)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 90)
+                .onSubmit { model.commitTargetText() }
+                .onChange(of: model.targetText) { model.commitTargetText() }
+                .accessibilityLabel(L(.imageConversionModeTargetSize))
+            Picker("", selection: Binding(
+                get: { model.targetLimit.unit },
+                set: { model.switchTargetUnit(to: $0) }
+            )) {
+                Text("KB").tag(TargetSizeUnit.kb)
+                Text("MB").tag(TargetSizeUnit.mb)
             }
-            Slider(
-                value: Binding(
-                    get: { Double(model.qualityPercent) },
-                    set: { model.qualityPercent = Int($0.rounded()) }
-                ),
-                in: Double(ImageConversionPreferences.minQualityPercent)...Double(ImageConversionPreferences.maxQualityPercent)
-            )
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(L(.imageConversionQuality))
-    }
-
-    private var targetSizeControls: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                TextField("1", text: $model.targetText)
-                    .textFieldStyle(.roundedBorder)
-                    .multilineTextAlignment(.trailing)
-                    .onSubmit { model.commitTargetText() }
-                    .onChange(of: model.targetText) { model.commitTargetText() }
-                    .accessibilityLabel(L(.imageConversionModeTargetSize))
-                Picker("", selection: Binding(
-                    get: { model.targetLimit.unit },
-                    set: { model.switchTargetUnit(to: $0) }
-                )) {
-                    Text("KB").tag(TargetSizeUnit.kb)
-                    Text("MB").tag(TargetSizeUnit.mb)
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-
-            LocalizedText(.imageConversionTargetSizePNGNote)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+            .labelsHidden()
+            .fixedSize()
 
             if model.targetParseError != nil {
                 LocalizedText(.imageConversionTargetInvalid)
                     .font(.caption)
                     .foregroundStyle(.red)
+                    .lineLimit(1)
             }
         }
     }
 
-    private func targetMissSummary(
+    /// Compact strip between the comparison and the control bar for the
+    /// selected item's retained Best-Effort miss: status, metrics, and the
+    /// explicit Save Anyway commit.
+    private func targetMissBanner(
         _ candidate: PreparedCandidate,
         item: ImageConversionBasketItem
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(spacing: 10) {
             LocalizedText(.imageConversionStatusTargetMiss)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.orange)
-
             LocalizedText(.imageConversionUnattainableHint)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
+                .lineLimit(1)
             Text(candidate.caption)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-
+                .lineLimit(1)
+            Spacer(minLength: 8)
             Button {
                 model.saveBestEffort(item)
             } label: {
                 LocalizedText(.imageConversionSaveAnyway)
-                    .frame(maxWidth: .infinity)
             }
+            .controlSize(.small)
+            .disabled(model.isConverting)
         }
-        .padding(12)
-        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.08))
     }
 
     @ViewBuilder
