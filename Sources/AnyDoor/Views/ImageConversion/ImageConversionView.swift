@@ -220,9 +220,11 @@ struct ImageConversionView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Canvas-tier background (one step below the window chrome), so the
-        // compared images read as content on a stage — the Preview.app look.
-        .background(Color(nsColor: .underPageBackgroundColor))
+        // One window tone (the Finder/Notes convention): the canvas shares
+        // the chrome color and hairline dividers carry the hierarchy. A
+        // darker stage tier (underPageBackgroundColor) clashed with the
+        // light sidebar and bottom bar in light mode.
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func comparisonPane<Content: View>(
