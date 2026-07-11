@@ -110,7 +110,7 @@ struct ImageIOSourceInspector: Sendable {
             return .failure(.multiImageUnsupported)
         }
 
-        guard ImageConversionFormat.availableTargets().contains(effectiveTarget) else {
+        guard effectiveTarget.encoderAvailable else {
             return .failure(.encoderUnavailable(effectiveTarget))
         }
 

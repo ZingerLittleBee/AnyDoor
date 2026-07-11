@@ -4886,13 +4886,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Output keeps the source format (JPEG, HEIC, AVIF, PNG)"
+            "value": "Output keeps the source format (JPEG, HEIC, AVIF, WebP, PNG)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "输出保持原格式（支持 JPEG、HEIC、AVIF、PNG）"
+            "value": "输出保持原格式（支持 JPEG、HEIC、AVIF、WebP、PNG）"
           }
         }
       }

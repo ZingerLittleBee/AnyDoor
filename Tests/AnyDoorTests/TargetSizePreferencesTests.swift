@@ -62,6 +62,7 @@ final class TargetSizePreferencesTests: XCTestCase {
         XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.heic"), .heic)
         XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.heif"), .heic)
         XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.avif"), .avif)
+        XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "org.webmproject.webp"), .webp)
         XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.png"), .png)
     }
 

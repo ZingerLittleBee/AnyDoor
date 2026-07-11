@@ -19,6 +19,10 @@ enum ImageIOCapabilityCache {
         switch format {
         case .png, .tiff, .gif, .ico:
             return true
+        // WebP is encoded by the bundled libwebp, whose alpha support does
+        // not vary with the OS encoder set.
+        case .webp:
+            return true
         case .jpeg, .bmp, .pdf:
             return false
         case .heic, .avif:

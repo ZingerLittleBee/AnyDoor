@@ -7,6 +7,11 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
     case jpeg
     case heic
     case avif
+    /// Encoded by the bundled libwebp — ImageIO decodes WebP but has no
+    /// encoder, so `availableTargets()` (ImageIO-based) never lists it and the
+    /// Quality-mode picker never offers it. Only Target Size's same-format
+    /// path produces WebP output.
+    case webp
     case tiff
     case gif
     case bmp
@@ -21,6 +26,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         case .jpeg: return "public.jpeg"
         case .heic: return "public.heic"
         case .avif: return "public.avif"
+        case .webp: return "org.webmproject.webp"
         case .tiff: return "public.tiff"
         case .gif: return "com.compuserve.gif"
         case .bmp: return "com.microsoft.bmp"
@@ -35,6 +41,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         case .jpeg: return "jpg"
         case .heic: return "heic"
         case .avif: return "avif"
+        case .webp: return "webp"
         case .tiff: return "tiff"
         case .gif: return "gif"
         case .bmp: return "bmp"
@@ -47,7 +54,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
     /// UI only offers the quality slider for these.
     var isLossy: Bool {
         switch self {
-        case .jpeg, .heic, .avif: return true
+        case .jpeg, .heic, .avif, .webp: return true
         case .png, .tiff, .gif, .bmp, .pdf, .ico: return false
         }
     }
@@ -58,12 +65,20 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         case .jpeg: return "JPEG"
         case .heic: return "HEIC"
         case .avif: return "AVIF"
+        case .webp: return "WebP"
         case .tiff: return "TIFF"
         case .gif: return "GIF"
         case .bmp: return "BMP"
         case .pdf: return "PDF"
         case .ico: return "ICO"
         }
+    }
+
+    /// Whether this runtime can encode the format. ImageIO formats depend on
+    /// the system encoder set (e.g. AVIF needs an OS AV1 encoder); WebP is
+    /// encoded by the bundled libwebp and is always available.
+    var encoderAvailable: Bool {
+        self == .webp || Self.availableTargets().contains(self)
     }
 
     /// The system UTType for this format, used to widen the screenshot Save As
@@ -79,7 +94,9 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
     static func forSaveExtension(_ ext: String) -> ImageConversionFormat {
         let normalized = ext.lowercased()
         if normalized == "jpg" || normalized == "jpeg" { return .jpeg }
-        return allCases.first { $0.fileExtension == normalized } ?? .png
+        // The Save As pipeline encodes through ImageIO, which cannot write
+        // WebP; a typed ".webp" falls back to PNG like any unknown extension.
+        return allCases.first { $0.fileExtension == normalized && $0 != .webp } ?? .png
     }
 
     /// Target Size output format for a source container: same-format in/out.
@@ -91,6 +108,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         case ImageConversionFormat.jpeg.typeIdentifier: return .jpeg
         case ImageConversionFormat.heic.typeIdentifier, "public.heif": return .heic
         case ImageConversionFormat.avif.typeIdentifier: return .avif
+        case ImageConversionFormat.webp.typeIdentifier: return .webp
         case ImageConversionFormat.png.typeIdentifier: return .png
         default: return nil
         }

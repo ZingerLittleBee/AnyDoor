@@ -1,3 +1,4 @@
+import Accelerate
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -66,6 +67,9 @@ final class ImageIOCandidateEncoder {
     }
 
     func encode(_ spec: EncodeSpec) throws -> Data {
+        if spec.format == .webp {
+            return try encodeWebP(spec)
+        }
         let pixels = try renderPixels(
             dimensions: spec.dimensions,
             backgroundHex: spec.transparencyBackgroundHex
@@ -105,10 +109,90 @@ final class ImageIOCandidateEncoder {
     }
 
     func intendedColorProfile(for spec: EncodeSpec) -> ImageColorProfileSignature? {
-        ImageColorProfileSignature(outputColorSpace(
+        // The WebP path renders into sRGB unconditionally: libwebp's simple
+        // encode embeds no ICC profile, so pixels must already be in the space
+        // an untagged decode assumes.
+        if spec.format == .webp {
+            return ImageColorProfileSignature(CGColorSpace(name: CGColorSpace.sRGB))
+        }
+        return ImageColorProfileSignature(outputColorSpace(
             dimensions: spec.dimensions,
             backgroundHex: spec.transparencyBackgroundHex
         ))
+    }
+
+    // MARK: - WebP encode (bundled libwebp)
+
+    private func encodeWebP(_ spec: EncodeSpec) throws -> Data {
+        // The simple WebP encode cannot carry an EXIF orientation tag. An
+        // orientation-bearing WebP source is vanishingly rare; refuse rather
+        // than commit a wrongly rotated output.
+        if let orientation, orientation != 1 {
+            throw EncoderError.encodingFailed
+        }
+        let keepsAlpha = sourceHasAlpha && spec.transparencyBackgroundHex == nil
+        let rgba = try renderSRGBAPixels(
+            dimensions: spec.dimensions,
+            backgroundHex: spec.transparencyBackgroundHex,
+            unpremultiply: keepsAlpha
+        )
+        return try WebPEncoderCore.encode(
+            rgba: rgba,
+            width: spec.dimensions.width,
+            height: spec.dimensions.height,
+            quality: spec.quality,
+            hasAlpha: keepsAlpha
+        )
+    }
+
+    /// Straight-alpha RGBA8 in sRGB, rendered unconditionally (unlike
+    /// `renderPixels`, which passes the original through untouched) so a
+    /// tagged wide-gamut source is converted before the untagged WebP encode.
+    private func renderSRGBAPixels(
+        dimensions: PixelDimensions,
+        backgroundHex: String?,
+        unpremultiply: Bool
+    ) throws -> [UInt8] {
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            throw EncoderError.encodingFailed
+        }
+        let needsComposite = backgroundHex != nil && sourceHasAlpha
+        var pixels = [UInt8](repeating: 0, count: dimensions.width * dimensions.height * 4)
+        try pixels.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: dimensions.width,
+                height: dimensions.height,
+                bitsPerComponent: 8,
+                bytesPerRow: dimensions.width * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else {
+                throw EncoderError.encodingFailed
+            }
+            context.interpolationQuality = .high
+            let rect = CGRect(x: 0, y: 0, width: dimensions.width, height: dimensions.height)
+            if needsComposite, let hex = backgroundHex, let background = Self.color(fromHex: hex) {
+                context.setFillColor(background)
+                context.fill(rect)
+            }
+            context.draw(originalImage, in: rect)
+
+            if unpremultiply {
+                var vBuffer = vImage_Buffer(
+                    data: buffer.baseAddress,
+                    height: vImagePixelCount(dimensions.height),
+                    width: vImagePixelCount(dimensions.width),
+                    rowBytes: dimensions.width * 4
+                )
+                guard vImageUnpremultiplyData_RGBA8888(
+                    &vBuffer, &vBuffer, vImage_Flags(kvImageNoFlags)
+                ) == kvImageNoError else {
+                    throw EncoderError.encodingFailed
+                }
+            }
+        }
+        return pixels
     }
 
     /// The lossless container rewrite with the Target Size metadata policy.

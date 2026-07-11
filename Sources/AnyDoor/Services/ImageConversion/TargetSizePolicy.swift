@@ -15,7 +15,7 @@ enum TargetSizePolicy {
     /// at one pixel size. `nil` for formats whose strategy has no quality knob.
     static func qualityFloor(for format: ImageConversionFormat) -> Int? {
         switch format {
-        case .jpeg: return 40
+        case .jpeg, .webp: return 40
         case .heic, .avif: return 45
         case .png, .tiff, .gif, .bmp, .pdf, .ico: return nil
         }

@@ -460,6 +460,48 @@ final class ImageConversionEngineTests: XCTestCase {
         await engine.reset()
     }
 
+    // MARK: - WebP same-format (bundled libwebp on the quality search)
+
+    func test_webpSource_sameFormat_reachesTargetAndCommitsWebP() async throws {
+        // Fixture: seed a WebP file through the app's own encoder (ImageIO
+        // cannot write WebP).
+        let seedURL = try writeSourcePNG(name: "seed.png", width: 800, height: 600)
+        let seed = try ImageIOCandidateEncoder(input: .file(seedURL))
+        let dimensions = PixelDimensions(width: 800, height: 600)
+        let webpData = try seed.encode(.init(
+            format: .webp, quality: 95, dimensions: dimensions, transparencyBackgroundHex: nil
+        ))
+        let url = tempDirectory.appendingPathComponent("source.webp")
+        try webpData.write(to: url)
+
+        // A target between the floor-quality and top-quality re-encodes,
+        // derived from real measurements.
+        let probe = try ImageIOCandidateEncoder(input: .file(url))
+        let atFloor = try probe.encode(.init(
+            format: .webp, quality: 40, dimensions: dimensions, transparencyBackgroundHex: nil
+        ))
+        let atTop = try probe.encode(.init(
+            format: .webp, quality: 100, dimensions: dimensions, transparencyBackgroundHex: nil
+        ))
+        let target = Int64(atFloor.count) * 12 / 10
+        try XCTSkipUnless(Int64(atTop.count) > target && Int64(webpData.count) > target,
+                          "fixture no longer separates floor from top quality")
+
+        let engine = try ImageConversionEngine()
+        let outcome = await engine.convertItem(
+            makeItem(url, base: "webp-out"), request: request(targetBytes: target)
+        )
+        guard case .success(let conversion) = outcome else {
+            return XCTFail("expected success, got \(outcome)")
+        }
+        XCTAssertLessThanOrEqual(conversion.output.byteCount, target)
+        XCTAssertEqual(conversion.output.url.pathExtension, "webp",
+                       "same-format in/out: a WebP source commits a WebP output")
+        XCTAssertEqual(conversion.candidate.configuration.format, .webp)
+        XCTAssertGreaterThanOrEqual(conversion.candidate.quality, 40)
+        await engine.reset()
+    }
+
     // MARK: - PNG same-format (resize-only strategy)
 
     func test_pngSource_reachesTargetByScalingDown_regardlessOfAllowResize() async throws {
