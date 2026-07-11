@@ -266,9 +266,12 @@ struct ImageConversionView: View {
                 showsBestEffortBadge: candidate.isBestEffort
             )
         case .unsupported(let issue):
-            comparisonMessage(issue == .sourceMissing
-                ? .imageConversionSourceMissing
-                : .imageConversionStatusUnsupported)
+            let key: L10n.Key = switch issue {
+            case .sourceMissing: .imageConversionSourceMissing
+            case .targetSizeUnsupportedFormat: .imageConversionStatusUnsupportedFormat
+            default: .imageConversionStatusUnsupported
+            }
+            comparisonMessage(key)
         case .invalidConfiguration:
             comparisonMessage(.imageConversionTargetInvalid)
         case .failed:
@@ -330,21 +333,18 @@ struct ImageConversionView: View {
             LocalizedText(.imageConversionTargetFormat)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            if model.availableFormats.isEmpty {
+            if model.mode == .targetSize {
+                // Target Size keeps the source format; there is nothing to pick.
+                LocalizedText(.imageConversionTargetSizeSameFormat)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if model.availableFormats.isEmpty {
                 LocalizedText(.imageConversionNoFormats)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if model.mode == .quality {
+            } else {
                 Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
                     ForEach(model.availableFormats) { format in
-                        Text(format.displayName).tag(format)
-                    }
-                }
-                .labelsHidden()
-                .frame(maxWidth: .infinity)
-            } else {
-                Picker(L(.imageConversionTargetFormat), selection: $model.targetSizeFormat) {
-                    ForEach(model.targetSizeFormats) { format in
                         Text(format.displayName).tag(format)
                     }
                 }
@@ -402,6 +402,10 @@ struct ImageConversionView: View {
                     .font(.caption)
             }
             .toggleStyle(.checkbox)
+
+            LocalizedText(.imageConversionTargetSizePNGNote)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             if model.targetParseError != nil {
                 LocalizedText(.imageConversionTargetInvalid)

@@ -1,8 +1,17 @@
 import Foundation
 
-/// Frozen Target Size configuration for one preview/run job. Policy versions
-/// are part of the fingerprint so a policy change can never reuse a stale
-/// candidate.
+/// The UI-facing Target Size configuration: everything except the output
+/// format, which the engine resolves per item from the source container
+/// (same-format in/out).
+struct TargetSizeRequest: Hashable, Sendable {
+    var targetBytes: Int64
+    var allowResize: Bool
+    var transparencyBackgroundHex: String
+}
+
+/// Frozen Target Size configuration for one preview/run job, including the
+/// resolved same-format output. Policy versions are part of the fingerprint
+/// so a policy change can never reuse a stale candidate.
 struct TargetSizeJobConfiguration: Hashable, Sendable {
     var format: ImageConversionFormat
     var targetBytes: Int64
@@ -10,6 +19,25 @@ struct TargetSizeJobConfiguration: Hashable, Sendable {
     var transparencyBackgroundHex: String
     var compressionPolicyVersion: Int = TargetSizePolicy.version
     var metadataPolicyVersion: Int = TargetMetadataPolicy.version
+
+    init(format: ImageConversionFormat, request: TargetSizeRequest) {
+        self.format = format
+        self.targetBytes = request.targetBytes
+        self.allowResize = request.allowResize
+        self.transparencyBackgroundHex = request.transparencyBackgroundHex
+    }
+
+    init(
+        format: ImageConversionFormat,
+        targetBytes: Int64,
+        allowResize: Bool,
+        transparencyBackgroundHex: String
+    ) {
+        self.format = format
+        self.targetBytes = targetBytes
+        self.allowResize = allowResize
+        self.transparencyBackgroundHex = transparencyBackgroundHex
+    }
 }
 
 /// One immutable prepared candidate: the exact artifact a matching run
@@ -81,7 +109,10 @@ enum ImageConversionItemOutcome: Sendable {
 /// boundary.
 actor ImageConversionEngine {
     private let store: CandidateArtifactStore
-    private let inspector = ImageIOSourceInspector(rejectsMultiImage: true)
+    private let inspector = ImageIOSourceInspector(
+        rejectsMultiImage: true,
+        resolvesSameFormatTarget: true
+    )
 
     private struct JobKey: Hashable {
         var itemID: UUID
@@ -136,20 +167,25 @@ actor ImageConversionEngine {
     // MARK: - Preview / preparation
 
     func preflight(
-        item: ImageConversionItemSnapshot,
-        configuration: TargetSizeJobConfiguration
+        item: ImageConversionItemSnapshot
     ) -> Result<ImageConversionPreflight, ImageConversionPreflightIssue> {
-        inspector.preflight(input: item.input, target: configuration.format)
+        inspector.preflight(input: item.input, target: nil)
     }
 
     /// Prepare (or reuse) the exact full-resolution candidate for one item.
-    /// A completed candidate whose fingerprints match returns with zero
-    /// additional encodes.
+    /// The output format is resolved from the source container (same-format
+    /// in/out). A completed candidate whose fingerprints match returns with
+    /// zero additional encodes.
     func prepareCandidate(
         item: ImageConversionItemSnapshot,
-        configuration: TargetSizeJobConfiguration
+        request: TargetSizeRequest
     ) async throws -> PreparedCandidate {
-        let preflight = try inspector.preflight(input: item.input, target: configuration.format).get()
+        let preflight = try inspector.preflight(input: item.input, target: nil).get()
+        // The same-format inspector always resolves a format on success.
+        guard let format = preflight.sameFormatTarget else {
+            throw ImageConversionFailure.encodingFailed
+        }
+        let configuration = TargetSizeJobConfiguration(format: format, request: request)
         let source = try fingerprint(for: item)
         let key = JobKey(itemID: item.id, source: source, configuration: configuration)
 
@@ -227,12 +263,12 @@ actor ImageConversionEngine {
     /// loops the basket in order and checks cancellation between items.
     func convertItem(
         _ item: ImageConversionItemSnapshot,
-        configuration: TargetSizeJobConfiguration
+        request: TargetSizeRequest
     ) async -> ImageConversionItemOutcome {
         do {
             try Task.checkCancellation()
             let candidate = try await prepareCandidate(
-                item: item, configuration: configuration
+                item: item, request: request
             )
 
             // Revalidate the source immediately before the irreversible
@@ -245,9 +281,13 @@ actor ImageConversionEngine {
 
             switch candidate.kind {
             case .targetReached, .passThrough:
+                // The snapshot's destination predates format resolution; the
+                // extension always comes from the resolved output format.
+                var destination = item.destination
+                destination.fileExtension = candidate.configuration.format.fileExtension
                 let output = try AtomicOutputWriter().commit(
                     candidate.artifact,
-                    to: item.destination,
+                    to: destination,
                     isCancelled: { Task.isCancelled }
                 )
                 return .success(CommittedConversion(output: output, candidate: candidate))
@@ -390,10 +430,6 @@ actor ImageConversionEngine {
         // retention so at most one best-qualifier and one smallest artifact
         // exist; the winning request's encoded bytes are reused, never
         // re-encoded.
-        guard let floor = TargetSizePolicy.qualityFloor(for: configuration.format) else {
-            throw ImageConversionFailure.encodingFailed
-        }
-
         var encodedByRequest: [TargetSizeCandidateRequest: Data] = [:]
         var bestQualifier: (request: TargetSizeCandidateRequest, bytes: Int64)?
         var smallest: (request: TargetSizeCandidateRequest, bytes: Int64)?
@@ -423,13 +459,7 @@ actor ImageConversionEngine {
             }
         }
 
-        let search = TargetSizeSearch(
-            targetBytes: configuration.targetBytes,
-            qualityFloor: floor,
-            originalDimensions: sourceDimensions,
-            allowResize: configuration.allowResize
-        )
-        let result = try search.run { request in
+        func measure(_ request: TargetSizeCandidateRequest) throws -> Int64 {
             try checkBoundary()
             let data = try encoder.encode(ImageIOCandidateEncoder.EncodeSpec(
                 format: configuration.format,
@@ -439,6 +469,27 @@ actor ImageConversionEngine {
             ))
             retain(request, data)
             return Int64(data.count)
+        }
+
+        // Per-format strategy: PNG has no encoder quality knob, so its search
+        // moves only pixel dimensions (inherently — the Resize Fallback
+        // preference gates just the lossy formats' optional fallback).
+        let result: TargetSizeSearchResult
+        if let floor = TargetSizePolicy.qualityFloor(for: configuration.format) {
+            result = try TargetSizeSearch(
+                targetBytes: configuration.targetBytes,
+                qualityFloor: floor,
+                originalDimensions: sourceDimensions,
+                allowResize: configuration.allowResize
+            ).run(measure: measure)
+        } else if configuration.format == .png {
+            result = try TargetSizeResizeSearch(
+                targetBytes: configuration.targetBytes,
+                originalDimensions: sourceDimensions
+            ).run(measure: measure)
+        } else {
+            // Unreachable: preflight resolves only strategy-backed formats.
+            throw ImageConversionFailure.encodingFailed
         }
 
         let winner: TargetSizeCandidateRequest

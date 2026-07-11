@@ -56,6 +56,28 @@ final class ImageConversionEngineTests: XCTestCase {
         return url
     }
 
+    /// The quality-search-path fixture: same-format resolution keeps JPEG on
+    /// the lossy strategy.
+    private func writeSourceJPEG(
+        name: String = "source.jpg",
+        width: Int = 320,
+        height: Int = 240,
+        quality: Double = 0.9
+    ) throws -> URL {
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(
+            data, ImageConversionFormat.jpeg.typeIdentifier as CFString, 1, nil
+        )!
+        CGImageDestinationAddImage(destination, makeGradientImage(width: width, height: height), [
+            kCGImageDestinationLossyCompressionQuality: quality,
+            kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 1.0],
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let url = tempDirectory.appendingPathComponent(name)
+        try (data as Data).write(to: url)
+        return url
+    }
+
     private func makeItem(_ url: URL, base: String = "output") -> ImageConversionItemSnapshot {
         ImageConversionItemSnapshot(
             id: UUID(),
@@ -66,12 +88,11 @@ final class ImageConversionEngineTests: XCTestCase {
         )
     }
 
-    private func configuration(
+    private func request(
         targetBytes: Int64,
         allowResize: Bool = false
-    ) -> TargetSizeJobConfiguration {
-        TargetSizeJobConfiguration(
-            format: .jpeg,
+    ) -> TargetSizeRequest {
+        TargetSizeRequest(
             targetBytes: targetBytes,
             allowResize: allowResize,
             transparencyBackgroundHex: "#FFFFFF"
@@ -82,10 +103,10 @@ final class ImageConversionEngineTests: XCTestCase {
 
     func test_convertItem_reachableTarget_commitsWithinLimit() async throws {
         let engine = try ImageConversionEngine()
-        let item = makeItem(try writeSourcePNG())
-        let config = configuration(targetBytes: 40_000)
+        let item = makeItem(try writeSourceJPEG())
+        let config = request(targetBytes: 40_000)
 
-        let outcome = await engine.convertItem(item, configuration: config)
+        let outcome = await engine.convertItem(item, request: config)
 
         guard case .success(let conversion) = outcome else {
             return XCTFail("expected success, got \(outcome)")
@@ -101,19 +122,19 @@ final class ImageConversionEngineTests: XCTestCase {
 
     func test_previewThenRun_commitsTheExactPreviewArtifact() async throws {
         let engine = try ImageConversionEngine()
-        let item = makeItem(try writeSourcePNG())
-        let config = configuration(targetBytes: 40_000)
+        let item = makeItem(try writeSourceJPEG())
+        let config = request(targetBytes: 40_000)
 
         let preview = try await engine.prepareCandidate(
-            item: item, configuration: config
+            item: item, request: config
         )
         // Matching fingerprints: the second preparation is a pure cache hit.
         let again = try await engine.prepareCandidate(
-            item: item, configuration: config
+            item: item, request: config
         )
         XCTAssertEqual(preview, again)
 
-        let outcome = await engine.convertItem(item, configuration: config)
+        let outcome = await engine.convertItem(item, request: config)
         guard case .success(let conversion) = outcome else {
             return XCTFail("expected success, got \(outcome)")
         }
@@ -126,13 +147,13 @@ final class ImageConversionEngineTests: XCTestCase {
 
     func test_changedConfiguration_invalidatesCachedCandidate() async throws {
         let engine = try ImageConversionEngine()
-        let item = makeItem(try writeSourcePNG())
+        let item = makeItem(try writeSourceJPEG())
 
         let first = try await engine.prepareCandidate(
-            item: item, configuration: configuration(targetBytes: 40_000)
+            item: item, request: request(targetBytes: 40_000)
         )
         let second = try await engine.prepareCandidate(
-            item: item, configuration: configuration(targetBytes: 20_000)
+            item: item, request: request(targetBytes: 20_000)
         )
         XCTAssertNotEqual(first.artifact, second.artifact,
                           "a changed limit must produce a fresh candidate")
@@ -141,16 +162,16 @@ final class ImageConversionEngineTests: XCTestCase {
 
     func test_pruningPreviewInvalidatesItsCacheButKeepsTheSelectedArtifact() async throws {
         let engine = try ImageConversionEngine()
-        let firstItem = makeItem(try writeSourcePNG(name: "first.png"), base: "first-output")
-        let secondItem = makeItem(try writeSourcePNG(name: "second.png"), base: "second-output")
-        let config = configuration(targetBytes: 40_000)
+        let firstItem = makeItem(try writeSourceJPEG(name: "first.jpg"), base: "first-output")
+        let secondItem = makeItem(try writeSourceJPEG(name: "second.jpg"), base: "second-output")
+        let config = request(targetBytes: 40_000)
         let first = try await engine.prepareCandidate(
             item: firstItem,
-            configuration: config
+            request: config
         )
         let second = try await engine.prepareCandidate(
             item: secondItem,
-            configuration: config
+            request: config
         )
 
         await engine.pruneDisplayed(keepingItem: secondItem.id)
@@ -159,7 +180,7 @@ final class ImageConversionEngineTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: second.artifact.artifactURL.path))
         let regenerated = try await engine.prepareCandidate(
             item: firstItem,
-            configuration: config
+            request: config
         )
         XCTAssertNotEqual(regenerated.artifact, first.artifact)
         XCTAssertTrue(FileManager.default.fileExists(atPath: regenerated.artifact.artifactURL.path))
@@ -170,10 +191,10 @@ final class ImageConversionEngineTests: XCTestCase {
 
     func test_unattainableTarget_returnsTargetMiss_withoutWritingAnyFile() async throws {
         let engine = try ImageConversionEngine()
-        let item = makeItem(try writeSourcePNG())
-        let config = configuration(targetBytes: 500) // impossible
+        let item = makeItem(try writeSourceJPEG())
+        let config = request(targetBytes: 500) // impossible
 
-        let outcome = await engine.convertItem(item, configuration: config)
+        let outcome = await engine.convertItem(item, request: config)
 
         guard case .targetMiss(let candidate) = outcome else {
             return XCTFail("expected targetMiss, got \(outcome)")
@@ -187,19 +208,23 @@ final class ImageConversionEngineTests: XCTestCase {
         )
         XCTAssertGreaterThan(candidate.artifact.byteCount, 500)
         let outputs = try FileManager.default.contentsOfDirectory(atPath: tempDirectory.path)
-            .filter { $0.hasSuffix(".jpg") }
+            .filter { $0.hasSuffix(".jpg") && $0 != "source.jpg" }
         XCTAssertEqual(outputs, [], "a Best-Effort Result is never auto-saved")
         await engine.reset()
     }
 
     func test_saveBestEffort_commitsRetainedArtifactByteIdentically() async throws {
         let engine = try ImageConversionEngine()
-        let item = makeItem(try writeSourcePNG())
-        let outcome = await engine.convertItem(item, configuration: configuration(targetBytes: 500))
+        let item = makeItem(try writeSourceJPEG())
+        let outcome = await engine.convertItem(item, request: request(targetBytes: 500))
         guard case .targetMiss(let candidate) = outcome else {
             return XCTFail("expected targetMiss, got \(outcome)")
         }
-        XCTAssertEqual(candidate.configuration, configuration(targetBytes: 500))
+        // The frozen configuration carries the resolved same-format output.
+        XCTAssertEqual(
+            candidate.configuration,
+            TargetSizeJobConfiguration(format: .jpeg, request: request(targetBytes: 500))
+        )
 
         let committed = try await engine.saveBestEffort(
             itemID: item.id,
@@ -215,17 +240,17 @@ final class ImageConversionEngineTests: XCTestCase {
 
     func test_saveBestEffortRejectsAStaleCandidateAfterConfigurationChanges() async throws {
         let engine = try ImageConversionEngine()
-        let item = makeItem(try writeSourcePNG())
-        let firstConfig = configuration(targetBytes: 500)
-        let secondConfig = configuration(targetBytes: 600)
+        let item = makeItem(try writeSourceJPEG())
+        let firstConfig = request(targetBytes: 500)
+        let secondConfig = request(targetBytes: 600)
 
         let first = try await engine.prepareCandidate(
             item: item,
-            configuration: firstConfig
+            request: firstConfig
         )
         let second = try await engine.prepareCandidate(
             item: item,
-            configuration: secondConfig
+            request: secondConfig
         )
         XCTAssertNotEqual(first.artifact, second.artifact)
 
@@ -246,15 +271,7 @@ final class ImageConversionEngineTests: XCTestCase {
         // A source larger than the 640px Pixel Floor, with a target derived
         // from real measurements: unattainable at original dimensions, but
         // comfortably attainable once resized.
-        let large = makeGradientImage(width: 1600, height: 1200)
-        let pngData = NSMutableData()
-        let pngDest = CGImageDestinationCreateWithData(
-            pngData, ImageConversionFormat.png.typeIdentifier as CFString, 1, nil
-        )!
-        CGImageDestinationAddImage(pngDest, large, nil)
-        XCTAssertTrue(CGImageDestinationFinalize(pngDest))
-        let url = tempDirectory.appendingPathComponent("large.png")
-        try (pngData as Data).write(to: url)
+        let url = try writeSourceJPEG(name: "large.jpg", width: 1600, height: 1200)
 
         let probe = try ImageIOCandidateEncoder(input: .file(url))
         let floorAtOriginal = try probe.encode(.init(
@@ -273,7 +290,7 @@ final class ImageConversionEngineTests: XCTestCase {
 
         let engine = try ImageConversionEngine()
         let missOutcome = await engine.convertItem(
-            makeItem(url, base: "miss"), configuration: configuration(targetBytes: target, allowResize: false)
+            makeItem(url, base: "miss"), request: request(targetBytes: target, allowResize: false)
         )
         guard case .targetMiss(let missed) = missOutcome else {
             return XCTFail("expected miss without resize, got \(missOutcome)")
@@ -283,7 +300,7 @@ final class ImageConversionEngineTests: XCTestCase {
         }
 
         let hitOutcome = await engine.convertItem(
-            makeItem(url, base: "hit"), configuration: configuration(targetBytes: target, allowResize: true)
+            makeItem(url, base: "hit"), request: request(targetBytes: target, allowResize: true)
         )
         guard case .success(let conversion) = hitOutcome else {
             return XCTFail("expected success with resize, got \(hitOutcome)")
@@ -299,37 +316,15 @@ final class ImageConversionEngineTests: XCTestCase {
 
     // MARK: - Contract failures
 
-    func test_failedPreparationRemovesJobSoTheSameFingerprintCanRetry() async throws {
-        let engine = try ImageConversionEngine()
-        let item = makeItem(try writeSourcePNG())
-        var config = configuration(targetBytes: 40_000)
-        config.format = .png
-
-        let first = await engine.convertItem(item, configuration: config)
-        guard case .failed(.encodingFailed) = first else {
-            return XCTFail("expected encoding failure, got \(first)")
-        }
-        let jobsAfterFirstFailure = await engine.activeJobCount
-        XCTAssertEqual(jobsAfterFirstFailure, 0)
-
-        let second = await engine.convertItem(item, configuration: config)
-        guard case .failed(.encodingFailed) = second else {
-            return XCTFail("expected a fresh retry to reach the same failure, got \(second)")
-        }
-        let jobsAfterSecondFailure = await engine.activeJobCount
-        XCTAssertEqual(jobsAfterSecondFailure, 0)
-        await engine.reset()
-    }
-
     func test_cancelledConsumerCancelsUnderlyingPreparationAndAllowsRetry() async throws {
         let engine = try ImageConversionEngine()
         let item = makeItem(try writeSourcePNG(width: 1_600, height: 1_200))
-        let config = configuration(targetBytes: 500, allowResize: true)
+        let config = request(targetBytes: 500, allowResize: true)
 
         let preparation = Task {
             try await engine.prepareCandidate(
                 item: item,
-                configuration: config
+                request: config
             )
         }
         await Task.yield()
@@ -346,14 +341,16 @@ final class ImageConversionEngineTests: XCTestCase {
 
         _ = try await engine.prepareCandidate(
             item: item,
-            configuration: config
+            request: config
         )
         let jobsAfterRetry = await engine.activeJobCount
         XCTAssertEqual(jobsAfterRetry, 0)
         await engine.reset()
     }
 
-    func test_multiFrameSource_isUnsupported() async throws {
+    func test_gifSource_isUnsupportedForTargetSize() async throws {
+        // Same-format resolution rejects GIF before any frame-count detail:
+        // GIF has no size-compression strategy regardless of animation.
         let data = NSMutableData()
         let destination = CGImageDestinationCreateWithData(
             data, ImageConversionFormat.gif.typeIdentifier as CFString, 2, nil
@@ -367,7 +364,38 @@ final class ImageConversionEngineTests: XCTestCase {
 
         let engine = try ImageConversionEngine()
         let outcome = await engine.convertItem(
-            makeItem(url), configuration: configuration(targetBytes: 40_000)
+            makeItem(url), request: request(targetBytes: 40_000)
+        )
+        guard case .unsupported(.targetSizeUnsupportedFormat) = outcome else {
+            return XCTFail("expected unsupported(targetSizeUnsupportedFormat), got \(outcome)")
+        }
+        await engine.reset()
+    }
+
+    func test_multiFrameSupportedFormat_isUnsupported() async throws {
+        // An animated PNG resolves to a supported format but keeps the
+        // Multi-Image rejection.
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(
+            data, ImageConversionFormat.png.typeIdentifier as CFString, 2, nil
+        )!
+        let frame = makeGradientImage(width: 32, height: 32)
+        let frameProperties = [
+            kCGImagePropertyPNGDictionary: [kCGImagePropertyAPNGDelayTime: 0.1],
+        ] as CFDictionary
+        CGImageDestinationAddImage(destination, frame, frameProperties)
+        CGImageDestinationAddImage(destination, frame, frameProperties)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let url = tempDirectory.appendingPathComponent("animated.png")
+        try (data as Data).write(to: url)
+        try XCTSkipUnless(
+            CGImageSourceCreateWithURL(url as CFURL, nil).map(CGImageSourceGetCount) ?? 0 > 1,
+            "runtime did not produce a multi-frame APNG"
+        )
+
+        let engine = try ImageConversionEngine()
+        let outcome = await engine.convertItem(
+            makeItem(url), request: request(targetBytes: 40_000)
         )
         guard case .unsupported(.multiImageUnsupported) = outcome else {
             return XCTFail("expected unsupported(multiImageUnsupported), got \(outcome)")
@@ -377,16 +405,16 @@ final class ImageConversionEngineTests: XCTestCase {
 
     func test_sourceChangedDuringRun_discardsCandidate() async throws {
         let engine = try ImageConversionEngine()
-        let url = try writeSourcePNG()
+        let url = try writeSourceJPEG()
         let item = makeItem(url)
-        let config = configuration(targetBytes: 40_000)
+        let config = request(targetBytes: 40_000)
 
         // Prepare from the original source, then mutate the file so the
         // commit-time revalidation must reject the cached candidate.
-        _ = try await engine.prepareCandidate(item: item, configuration: config)
+        _ = try await engine.prepareCandidate(item: item, request: config)
         try Data("corrupted".utf8).write(to: url)
 
-        let outcome = await engine.convertItem(item, configuration: config)
+        let outcome = await engine.convertItem(item, request: config)
         switch outcome {
         case .failed(.sourceChanged), .unsupported(.undecodable):
             break // Both prove the stale candidate was never committed.
@@ -394,7 +422,7 @@ final class ImageConversionEngineTests: XCTestCase {
             XCTFail("expected sourceChanged/undecodable, got \(outcome)")
         }
         let outputs = try FileManager.default.contentsOfDirectory(atPath: tempDirectory.path)
-            .filter { $0.hasSuffix(".jpg") }
+            .filter { $0.hasSuffix(".jpg") && $0 != "source.jpg" }
         XCTAssertEqual(outputs, [], "no output may exist for a changed source")
         await engine.reset()
     }
@@ -416,7 +444,7 @@ final class ImageConversionEngineTests: XCTestCase {
         let engine = try ImageConversionEngine()
         let item = makeItem(url, base: "copy")
         let outcome = await engine.convertItem(
-            item, configuration: configuration(targetBytes: Int64(jpegData.length) + 100_000)
+            item, request: request(targetBytes: Int64(jpegData.length) + 100_000)
         )
 
         guard case .success(let conversion) = outcome else {
@@ -429,6 +457,65 @@ final class ImageConversionEngineTests: XCTestCase {
         }
         // A re-encoded fallback is also a valid outcome when the runtime
         // cannot rewrite losslessly; the audit above only binds pass-through.
+        await engine.reset()
+    }
+
+    // MARK: - PNG same-format (resize-only strategy)
+
+    func test_pngSource_reachesTargetByScalingDown_regardlessOfAllowResize() async throws {
+        // Derive a target that is unattainable at original dimensions but
+        // attainable at the Pixel Floor, from real measurements.
+        let url = try writeSourcePNG(name: "large.png", width: 1_600, height: 1_200)
+        let probe = try ImageIOCandidateEncoder(input: .file(url))
+        let atOriginal = try probe.encode(.init(
+            format: .png, quality: 100,
+            dimensions: PixelDimensions(width: 1_600, height: 1_200),
+            transparencyBackgroundHex: nil
+        ))
+        let atFloor = try probe.encode(.init(
+            format: .png, quality: 100,
+            dimensions: PixelDimensions(width: 640, height: 480),
+            transparencyBackgroundHex: nil
+        ))
+        let target = Int64(atFloor.count) * 12 / 10
+        try XCTSkipUnless(Int64(atOriginal.count) > target,
+                          "fixture no longer separates original from floor")
+
+        let engine = try ImageConversionEngine()
+        // PNG's only lever is resizing, so the strategy applies even with the
+        // Resize Fallback preference off.
+        let outcome = await engine.convertItem(
+            makeItem(url, base: "shrunk"), request: request(targetBytes: target, allowResize: false)
+        )
+        guard case .success(let conversion) = outcome else {
+            return XCTFail("expected success, got \(outcome)")
+        }
+        XCTAssertLessThanOrEqual(conversion.output.byteCount, target)
+        XCTAssertEqual(conversion.output.url.pathExtension, "png",
+                       "same-format in/out: a PNG source commits a PNG output")
+        XCTAssertEqual(conversion.candidate.configuration.format, .png)
+        XCTAssertTrue(conversion.candidate.resizeFallbackApplied)
+        XCTAssertGreaterThanOrEqual(
+            conversion.candidate.dimensions.longestEdge,
+            TargetSizePolicy.pixelFloorLongestEdge
+        )
+        await engine.reset()
+    }
+
+    func test_pngSource_belowPixelFloor_missesWithPixelFloorReason() async throws {
+        // 320px sits below the Pixel Floor: no smaller size may be produced,
+        // so an unattainable target is a miss with the resize hint suppressed.
+        let engine = try ImageConversionEngine()
+        let item = makeItem(try writeSourcePNG())
+        let outcome = await engine.convertItem(item, request: request(targetBytes: 500))
+
+        guard case .targetMiss(let candidate) = outcome else {
+            return XCTFail("expected targetMiss, got \(outcome)")
+        }
+        guard case .bestEffort(.pixelFloorReached) = candidate.kind else {
+            return XCTFail("expected pixelFloorReached, got \(candidate.kind)")
+        }
+        XCTAssertEqual(candidate.configuration.format, .png)
         await engine.reset()
     }
 }

@@ -20,19 +20,10 @@ final class TargetSizePreferencesTests: XCTestCase {
         super.tearDown()
     }
 
-    private let lossyFormats: [ImageConversionFormat] = [.jpeg, .heic, .avif]
-
     // MARK: - Defaults
 
     func testModeDefaultsToQuality() {
         XCTAssertEqual(ImageConversionPreferences.mode(defaults: defaults), .quality)
-    }
-
-    func testTargetSizeFormatDefaultsToJPEG() {
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: lossyFormats, defaults: defaults),
-            .jpeg
-        )
     }
 
     func testTargetSizeLimitDefaultsToOneMegabyte() {
@@ -64,63 +55,22 @@ final class TargetSizePreferencesTests: XCTestCase {
         XCTAssertEqual(ImageConversionPreferences.mode(defaults: defaults), .targetSize)
     }
 
-    // MARK: - Target format fallback
+    // MARK: - Same-format resolution
 
-    func testUnavailableStoredFormatFallsBackToJPEG() {
-        defaults.set(ImageConversionFormat.heic.rawValue, forKey: ImageConversionPreferences.targetSizeFormatKey)
-        // HEIC is stored but not available; JPEG is available so it wins.
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: [.jpeg, .avif], defaults: defaults),
-            .jpeg
-        )
+    func testTargetSizeFormatResolvesFromSourceContainer() {
+        XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.jpeg"), .jpeg)
+        XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.heic"), .heic)
+        XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.heif"), .heic)
+        XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.avif"), .avif)
+        XCTAssertEqual(ImageConversionFormat.targetSizeFormat(forSourceType: "public.png"), .png)
     }
 
-    func testLosslessStoredFormatFallsBackToJPEG() {
-        defaults.set(ImageConversionFormat.png.rawValue, forKey: ImageConversionPreferences.targetSizeFormatKey)
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: [.png, .jpeg, .heic], defaults: defaults),
-            .jpeg
-        )
-    }
-
-    func testFallsBackToFirstLossyWhenJPEGUnavailable() {
-        defaults.set("garbage", forKey: ImageConversionPreferences.targetSizeFormatKey)
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: [.png, .heic, .avif], defaults: defaults),
-            .heic
-        )
-    }
-
-    func testFallsBackToJPEGWhenNoLossyAvailable() {
-        defaults.set("garbage", forKey: ImageConversionPreferences.targetSizeFormatKey)
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: [.png, .tiff], defaults: defaults),
-            .jpeg
-        )
-    }
-
-    func testValidStoredFormatIsReturned() {
-        defaults.set(ImageConversionFormat.avif.rawValue, forKey: ImageConversionPreferences.targetSizeFormatKey)
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: lossyFormats, defaults: defaults),
-            .avif
-        )
-    }
-
-    func testSetTargetSizeFormatNormalizesLosslessToDefault() {
-        ImageConversionPreferences.setTargetSizeFormat(.png, defaults: defaults)
-        XCTAssertEqual(
-            defaults.string(forKey: ImageConversionPreferences.targetSizeFormatKey),
-            ImageConversionFormat.jpeg.rawValue
-        )
-    }
-
-    func testSetTargetSizeFormatRoundTrips() {
-        ImageConversionPreferences.setTargetSizeFormat(.heic, defaults: defaults)
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: lossyFormats, defaults: defaults),
-            .heic
-        )
+    func testTargetSizeFormatRejectsStrategylessContainers() {
+        XCTAssertNil(ImageConversionFormat.targetSizeFormat(forSourceType: "com.compuserve.gif"))
+        XCTAssertNil(ImageConversionFormat.targetSizeFormat(forSourceType: "public.tiff"))
+        XCTAssertNil(ImageConversionFormat.targetSizeFormat(forSourceType: "com.microsoft.bmp"))
+        XCTAssertNil(ImageConversionFormat.targetSizeFormat(forSourceType: "com.microsoft.ico"))
+        XCTAssertNil(ImageConversionFormat.targetSizeFormat(forSourceType: "com.adobe.pdf"))
     }
 
     // MARK: - Target limit fallback
@@ -242,9 +192,8 @@ final class TargetSizePreferencesTests: XCTestCase {
 
     // MARK: - Registry round-trip
 
-    func testRegistryCarriesAllSixNewKeys() {
+    func testRegistryCarriesAllTargetSizeKeys() {
         ImageConversionPreferences.setMode(.targetSize, defaults: defaults)
-        ImageConversionPreferences.setTargetSizeFormat(.heic, defaults: defaults)
         ImageConversionPreferences.setTargetSizeLimit(TargetSizeLimit(bytes: 750_000, unit: .kb), defaults: defaults)
         ImageConversionPreferences.setTargetSizeAllowResize(true, defaults: defaults)
         ImageConversionPreferences.setTransparencyBackgroundHex("#101010", defaults: defaults)
@@ -252,11 +201,12 @@ final class TargetSizePreferencesTests: XCTestCase {
         let snapshot = SyncSettingsRegistry.read(from: defaults)
 
         XCTAssertEqual(snapshot[ImageConversionPreferences.modeKey], .string("targetSize"))
-        XCTAssertEqual(snapshot[ImageConversionPreferences.targetSizeFormatKey], .string("heic"))
         XCTAssertEqual(snapshot[ImageConversionPreferences.targetSizeBytesKey], .int(750_000))
         XCTAssertEqual(snapshot[ImageConversionPreferences.targetSizeUnitKey], .string("kb"))
         XCTAssertEqual(snapshot[ImageConversionPreferences.targetSizeAllowResizeKey], .bool(true))
         XCTAssertEqual(snapshot[ImageConversionPreferences.transparencyBackgroundHexKey], .string("#101010"))
+        // The retired per-mode target-format key must no longer be exported.
+        XCTAssertNil(snapshot["imageConversion.targetSize.targetFormat"])
 
         let destinationSuite = "TargetSizePreferencesTests-dest-\(UUID().uuidString)"
         let destination = UserDefaults(suiteName: destinationSuite)!
@@ -264,13 +214,9 @@ final class TargetSizePreferencesTests: XCTestCase {
         defer { destination.removePersistentDomain(forName: destinationSuite) }
 
         let applied = SyncSettingsRegistry.write(snapshot, to: destination)
-        XCTAssertGreaterThanOrEqual(applied, 6)
+        XCTAssertGreaterThanOrEqual(applied, 5)
 
         XCTAssertEqual(ImageConversionPreferences.mode(defaults: destination), .targetSize)
-        XCTAssertEqual(
-            ImageConversionPreferences.targetSizeFormat(availableFormats: lossyFormats, defaults: destination),
-            .heic
-        )
         let limit = ImageConversionPreferences.targetSizeLimit(defaults: destination)
         XCTAssertEqual(limit.bytes, 750_000)
         XCTAssertEqual(limit.unit, .kb)

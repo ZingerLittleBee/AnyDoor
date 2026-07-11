@@ -82,6 +82,20 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         return allCases.first { $0.fileExtension == normalized } ?? .png
     }
 
+    /// Target Size output format for a source container: same-format in/out.
+    /// `nil` for containers Target Size cannot compress — they have neither an
+    /// encoder quality knob nor a meaningful resize contract (GIF/TIFF/BMP/
+    /// ICO/PDF). HEIF sources normalize to the HEIC encoder.
+    static func targetSizeFormat(forSourceType typeIdentifier: String) -> ImageConversionFormat? {
+        switch typeIdentifier {
+        case ImageConversionFormat.jpeg.typeIdentifier: return .jpeg
+        case ImageConversionFormat.heic.typeIdentifier, "public.heif": return .heic
+        case ImageConversionFormat.avif.typeIdentifier: return .avif
+        case ImageConversionFormat.png.typeIdentifier: return .png
+        default: return nil
+        }
+    }
+
     static func availableTargets() -> [ImageConversionFormat] {
         let identifiers = (CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []
         return availableTargets(encoderTypeIdentifiers: identifiers)

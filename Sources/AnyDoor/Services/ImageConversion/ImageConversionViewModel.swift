@@ -83,13 +83,6 @@ final class ImageConversionViewModel {
             schedulePreview()
         }
     }
-    var targetSizeFormat: ImageConversionFormat {
-        didSet {
-            ImageConversionPreferences.setTargetSizeFormat(targetSizeFormat, defaults: defaults)
-            if targetSizeFormat != oldValue { invalidateTargetSizeOutcomes() }
-            schedulePreview()
-        }
-    }
     /// The Per-Output Limit currently applied to conversion. Only a valid
     /// committed field edit changes it.
     private(set) var targetLimit: TargetSizeLimit
@@ -156,10 +149,6 @@ final class ImageConversionViewModel {
         )
         self.qualityPercent = ImageConversionPreferences.qualityPercent(defaults: defaults)
         self.mode = ImageConversionPreferences.mode(defaults: defaults)
-        self.targetSizeFormat = ImageConversionPreferences.targetSizeFormat(
-            availableFormats: availableFormats,
-            defaults: defaults
-        )
         self.targetLimit = ImageConversionPreferences.targetSizeLimit(defaults: defaults)
         self.allowResize = ImageConversionPreferences.targetSizeAllowResize(defaults: defaults)
         self.targetText = targetLimit.displayValue(locale: .current)
@@ -178,20 +167,11 @@ final class ImageConversionViewModel {
         )
         qualityPercent = ImageConversionPreferences.qualityPercent(defaults: defaults)
         mode = ImageConversionPreferences.mode(defaults: defaults)
-        targetSizeFormat = ImageConversionPreferences.targetSizeFormat(
-            availableFormats: availableFormats,
-            defaults: defaults
-        )
         targetLimit = ImageConversionPreferences.targetSizeLimit(defaults: defaults)
         targetText = targetLimit.displayValue(locale: .current)
         targetParseError = nil
         allowResize = ImageConversionPreferences.targetSizeAllowResize(defaults: defaults)
         schedulePreview()
-    }
-
-    /// Lossy formats the Target Size mode may offer on this runtime.
-    var targetSizeFormats: [ImageConversionFormat] {
-        availableFormats.filter(\.isLossy)
     }
 
     /// The quality slider is only meaningful for lossy targets.
@@ -203,9 +183,7 @@ final class ImageConversionViewModel {
         case .quality:
             return availableFormats.contains(selectedFormat)
         case .targetSize:
-            return engine != nil
-                && targetSizeFormats.contains(targetSizeFormat)
-                && targetParseError == nil
+            return engine != nil && targetParseError == nil
         }
     }
 
@@ -461,7 +439,7 @@ final class ImageConversionViewModel {
 
         // Freeze configuration and item snapshots: config edits and basket
         // mutations are disabled until completion or Stop.
-        let configuration = currentTargetSizeConfiguration()
+        let request = currentTargetSizeRequest()
         let frozen = items.map { (item: $0, snapshot: snapshot(for: $0)) }
 
         // Retire the in-flight preview completely before any run work: its
@@ -478,7 +456,7 @@ final class ImageConversionViewModel {
             var eligible: [(item: ImageConversionBasketItem, snapshot: ImageConversionItemSnapshot)] = []
             for entry in frozen {
                 if Task.isCancelled { interrupted = true; break }
-                switch await engine.preflight(item: entry.snapshot, configuration: configuration) {
+                switch await engine.preflight(item: entry.snapshot) {
                 case .success:
                     eligible.append(entry)
                 case .failure(let issue):
@@ -488,7 +466,7 @@ final class ImageConversionViewModel {
             if !interrupted {
                 for entry in eligible {
                     if Task.isCancelled { interrupted = true; break }
-                    let outcome = await engine.convertItem(entry.snapshot, configuration: configuration)
+                    let outcome = await engine.convertItem(entry.snapshot, request: request)
                     guard let self else { return }
                     switch outcome {
                     case .success(let conversion):
@@ -604,14 +582,14 @@ final class ImageConversionViewModel {
             Task { await engine.pruneDisplayed(keepingItem: nil) }
             return
         }
-        guard targetParseError == nil, targetSizeFormats.contains(targetSizeFormat) else {
+        guard targetParseError == nil else {
             previewState = .invalidConfiguration
             Task { await engine.pruneDisplayed(keepingItem: nil) }
             return
         }
 
         previewState = .updating
-        let configuration = currentTargetSizeConfiguration()
+        let request = currentTargetSizeRequest()
         let snapshot = snapshot(for: item)
         previewTask = Task { [weak self] in
             // A cancellation issued before this task first ran (e.g. by a run
@@ -622,7 +600,7 @@ final class ImageConversionViewModel {
             guard !Task.isCancelled else { return }
             do {
                 let candidate = try await engine.prepareCandidate(
-                    item: snapshot, configuration: configuration
+                    item: snapshot, request: request
                 )
                 guard let self, self.previewGeneration == generation else { return }
                 self.previewState = .ready(candidate)
@@ -653,7 +631,27 @@ final class ImageConversionViewModel {
         return ImageConversionItemSnapshot(
             id: engineID,
             input: input,
-            destination: destinationPolicy(for: item, format: targetSizeFormat)
+            destination: provisionalDestinationPolicy(for: item)
+        )
+    }
+
+    /// Directory and base name for a snapshot. The commit path replaces the
+    /// extension with the engine-resolved same-format output, so the extension
+    /// here is only a provisional source-derived value.
+    private func provisionalDestinationPolicy(
+        for item: ImageConversionBasketItem
+    ) -> AtomicOutputWriter.DestinationPolicy {
+        if let url = item.fileURL {
+            return AtomicOutputWriter.DestinationPolicy(
+                directory: url.deletingLastPathComponent(),
+                baseName: url.deletingPathExtension().lastPathComponent,
+                fileExtension: url.pathExtension.lowercased()
+            )
+        }
+        return AtomicOutputWriter.DestinationPolicy(
+            directory: ImageConversionSession.defaultDownloadsDirectory,
+            baseName: ImageConversionNaming.bitmapBaseName(timestamp: Date()),
+            fileExtension: ImageConversionFormat.png.fileExtension
         )
     }
 
@@ -675,9 +673,8 @@ final class ImageConversionViewModel {
         )
     }
 
-    private func currentTargetSizeConfiguration() -> TargetSizeJobConfiguration {
-        TargetSizeJobConfiguration(
-            format: targetSizeFormat,
+    private func currentTargetSizeRequest() -> TargetSizeRequest {
+        TargetSizeRequest(
             targetBytes: targetLimit.bytes,
             allowResize: allowResize,
             transparencyBackgroundHex: ImageConversionPreferences

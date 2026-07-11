@@ -4795,6 +4795,23 @@
         }
       }
     },
+    "imageConversion.status.unsupportedFormat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This format cannot be compressed to a target size"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该格式不支持体积压缩"
+          }
+        }
+      }
+    },
     "imageConversion.stop": {
       "extractionState": "manual",
       "localizations": {
@@ -4842,6 +4859,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "请输入有效的目标体积"
+          }
+        }
+      }
+    },
+    "imageConversion.targetSize.pngNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PNG has no quality setting; the target is met by scaling down"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PNG 无质量参数，会通过缩小尺寸达到目标体积"
+          }
+        }
+      }
+    },
+    "imageConversion.targetSize.sameFormat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Output keeps the source format (JPEG, HEIC, AVIF, PNG)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "输出保持原格式（支持 JPEG、HEIC、AVIF、PNG）"
           }
         }
       }

@@ -12,14 +12,12 @@ enum ImageConversionPreferences {
     static let qualityKey = "imageConversion.quality"
 
     static let modeKey = "imageConversion.mode"
-    static let targetSizeFormatKey = "imageConversion.targetSize.targetFormat"
     static let targetSizeBytesKey = "imageConversion.targetSize.bytes"
     static let targetSizeUnitKey = "imageConversion.targetSize.unit"
     static let targetSizeAllowResizeKey = "imageConversion.targetSize.allowResize"
     static let transparencyBackgroundHexKey = "imageConversion.transparencyBackgroundHex"
 
     static let defaultMode: ImageConversionMode = .quality
-    static let defaultTargetSizeFormat: ImageConversionFormat = .jpeg
     static let defaultTargetSizeBytes = 1_000_000
     static let defaultTargetSizeUnit: TargetSizeUnit = .mb
     static let defaultTargetSizeAllowResize = false
@@ -75,30 +73,6 @@ enum ImageConversionPreferences {
 
     static func setMode(_ mode: ImageConversionMode, defaults: UserDefaults = .standard) {
         defaults.set(mode.rawValue, forKey: modeKey)
-    }
-
-    /// The Target Size destination format. Only the lossy formats (JPEG/HEIC/AVIF)
-    /// are valid targets, and the stored value must also be currently available.
-    /// An invalid or unavailable value falls back to JPEG when available, then to
-    /// the first available lossy format, and finally to JPEG so a target format is
-    /// always returned.
-    static func targetSizeFormat(availableFormats: [ImageConversionFormat], defaults: UserDefaults = .standard) -> ImageConversionFormat {
-        if let raw = defaults.string(forKey: targetSizeFormatKey),
-           let stored = ImageConversionFormat(rawValue: raw),
-           stored.isLossy,
-           availableFormats.contains(stored) {
-            return stored
-        }
-        if availableFormats.contains(.jpeg) { return .jpeg }
-        if let firstLossy = availableFormats.first(where: { $0.isLossy }) { return firstLossy }
-        return .jpeg
-    }
-
-    static func setTargetSizeFormat(_ format: ImageConversionFormat, defaults: UserDefaults = .standard) {
-        // Only a lossy format is a meaningful Target Size destination; normalize
-        // anything else to the default so a stray write can't poison the reader.
-        let normalized = format.isLossy ? format : defaultTargetSizeFormat
-        defaults.set(normalized.rawValue, forKey: targetSizeFormatKey)
     }
 
     /// The Per-Output Limit as an exact byte budget plus its presentation unit.

@@ -11,6 +11,10 @@ enum ImageConversionPreflightIssue: Error, Hashable, Sendable {
     /// Target Size rejects Multi-Image Sources; Quality mode never raises this.
     case multiImageUnsupported
     case encoderUnavailable(ImageConversionFormat)
+    /// Target Size keeps the source format, and this source's container has no
+    /// size-compression strategy (GIF/TIFF/BMP/ICO). Quality mode never raises
+    /// this.
+    case targetSizeUnsupportedFormat
 }
 
 /// Lightweight inspection of one source. Preflight never creates conversion
@@ -29,6 +33,9 @@ struct ImageConversionPreflight: Hashable, Sendable {
     /// Transparency Background control applies to this item.
     var requiresTransparencyBackground: Bool
     var sourceByteCount: Int64?
+    /// The same-format Target Size output resolved from the source container.
+    /// Populated only by a same-format-resolving inspector; nil in Quality mode.
+    var sameFormatTarget: ImageConversionFormat?
 }
 
 /// Per-mode source inspection over Image I/O.
@@ -37,10 +44,14 @@ struct ImageIOSourceInspector: Sendable {
     /// first-frame contract. The caller maps the Conversion Mode to this flag
     /// so the inspector stays independent of preference types.
     var rejectsMultiImage: Bool
+    /// Target Size resolves its output format from the source container
+    /// (same-format in/out) and ignores the `target` parameter; Quality mode
+    /// keeps the explicit target.
+    var resolvesSameFormatTarget: Bool = false
 
     func preflight(
         input: ImageConversionInput,
-        target: ImageConversionFormat
+        target: ImageConversionFormat?
     ) -> Result<ImageConversionPreflight, ImageConversionPreflightIssue> {
         switch input {
         case .file(let url):
@@ -68,7 +79,7 @@ struct ImageIOSourceInspector: Sendable {
 
     private func inspect(
         _ source: CGImageSource,
-        target: ImageConversionFormat,
+        target: ImageConversionFormat?,
         sourceByteCount: Int64?
     ) -> Result<ImageConversionPreflight, ImageConversionPreflightIssue> {
         if let type = CGImageSourceGetType(source) as String?,
@@ -78,12 +89,29 @@ struct ImageIOSourceInspector: Sendable {
 
         let frameCount = CGImageSourceGetCount(source)
         guard frameCount >= 1 else { return .failure(.undecodable) }
+
+        // Same-format resolution precedes the multi-image check so an animated
+        // GIF reports the format contract, not the frame-count detail.
+        let effectiveTarget: ImageConversionFormat
+        if resolvesSameFormatTarget {
+            guard let type = CGImageSourceGetType(source) as String?,
+                  let resolved = ImageConversionFormat.targetSizeFormat(forSourceType: type) else {
+                return .failure(.targetSizeUnsupportedFormat)
+            }
+            effectiveTarget = resolved
+        } else if let target {
+            effectiveTarget = target
+        } else {
+            // A Quality-mode caller must supply its target explicitly.
+            return .failure(.undecodable)
+        }
+
         if frameCount > 1, rejectsMultiImage {
             return .failure(.multiImageUnsupported)
         }
 
-        guard ImageConversionFormat.availableTargets().contains(target) else {
-            return .failure(.encoderUnavailable(target))
+        guard ImageConversionFormat.availableTargets().contains(effectiveTarget) else {
+            return .failure(.encoderUnavailable(effectiveTarget))
         }
 
         guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -108,8 +136,9 @@ struct ImageIOSourceInspector: Sendable {
             hasAlpha: hasAlpha,
             hasHDRGainMap: hasHDRGainMap,
             requiresTransparencyBackground: hasAlpha
-                && !ImageIOCapabilityCache.targetPreservesAlpha(target),
-            sourceByteCount: sourceByteCount
+                && !ImageIOCapabilityCache.targetPreservesAlpha(effectiveTarget),
+            sourceByteCount: sourceByteCount,
+            sameFormatTarget: resolvesSameFormatTarget ? effectiveTarget : nil
         ))
     }
 }

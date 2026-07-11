@@ -7,10 +7,12 @@ import Foundation
 /// review and a `version` bump so cached candidates cannot be reused across
 /// policy changes.
 enum TargetSizePolicy {
-    static let version = 1
+    /// V2: same-format in/out with per-format strategies (quality search for
+    /// lossy formats, resize-only search for PNG).
+    static let version = 2
 
     /// Lowest encoder quality (whole percent) the bounded search may request
-    /// at one pixel size. `nil` for formats Target Size does not support.
+    /// at one pixel size. `nil` for formats whose strategy has no quality knob.
     static func qualityFloor(for format: ImageConversionFormat) -> Int? {
         switch format {
         case .jpeg: return 40
@@ -18,6 +20,14 @@ enum TargetSizePolicy {
         case .png, .tiff, .gif, .bmp, .pdf, .ico: return nil
         }
     }
+
+    /// Nominal quality recorded for candidates of lossless per-level encodes
+    /// (the PNG resize-only strategy); the encoder ignores it.
+    static let losslessQuality = 100
+
+    /// Total measure budget for one resize-only search: an original probe, a
+    /// floor probe, and up to six bisection steps.
+    static let maxResizeOnlyAttempts = 8
 
     /// Minimum longest-edge dimension Resize Fallback may produce.
     static let pixelFloorLongestEdge = 640
