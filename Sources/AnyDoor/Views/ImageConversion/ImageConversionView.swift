@@ -8,46 +8,18 @@ struct ImageConversionView: View {
     var store: ImageConversionHistoryStore = .shared
 
     var body: some View {
-        VStack(spacing: 0) {
-            titleRow
-            Divider()
-            ZStack {
-                HStack(spacing: 0) {
-                    sidebar
-                    Divider()
-                    workspaceColumn
-                }
-                if model.isDropTargeted {
-                    dropOverlay
-                }
+        ZStack {
+            HStack(spacing: 0) {
+                sidebar
+                Divider()
+                workspaceColumn
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if model.isDropTargeted {
+                dropOverlay
+            }
         }
-        .adaptivePanelSurface(cornerRadius: 16)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        // The content extends under the transparent title bar so the traffic
-        // lights sit inside the title row rather than above the panel surface.
-        .ignoresSafeArea()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $model.isDropTargeted, perform: handleDrop)
-    }
-
-    private var titleRow: some View {
-        HStack(spacing: 10) {
-            LocalizedText(.imageConversionTitle)
-                .font(.headline)
-                .lineLimit(1)
-                .padding(.leading, 70)
-            Spacer()
-            if model.isConverting {
-                ProgressView()
-                    .controlSize(.small)
-                LocalizedText(.imageConversionConverting)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.horizontal, 16)
-        .frame(height: 44)
     }
 
     // MARK: - Sidebar
