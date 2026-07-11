@@ -175,10 +175,8 @@ struct ImageConversionView: View {
 
     /// The main column right of the sidebar: the full-width comparison on
     /// top and an attached, edge-to-edge bottom bar (optional target-miss
-    /// strip + the control rows). The bar is window chrome, so it stays
-    /// rectangular to match the comparison grid; only its surface changes
-    /// with the OS (translucent titlebar-style glass on macOS 26+, solid
-    /// chrome color earlier — see `bottomBarSurface`).
+    /// strip + the control rows) over a solid chrome color — the bar is
+    /// window chrome, rectangular to match the comparison grid.
     private var workspaceColumn: some View {
         VStack(spacing: 0) {
             comparisonWorkspace
@@ -202,22 +200,7 @@ struct ImageConversionView: View {
             Divider()
             controlBar
         }
-        .background { bottomBarSurface }
-    }
-
-    /// macOS 26+: behind-window vibrancy matching the system title bar, so
-    /// the top and bottom chrome of the window read as one glass frame.
-    /// SwiftUI materials are within-window blurs and collapse to a flat
-    /// tone here (nothing renders behind an attached bar), so this needs
-    /// the AppKit behind-window material. Earlier systems keep the solid
-    /// chrome color.
-    @ViewBuilder
-    private var bottomBarSurface: some View {
-        if #available(macOS 26.0, *) {
-            BehindWindowBarBackground()
-        } else {
-            Color(nsColor: .windowBackgroundColor)
-        }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var comparisonWorkspace: some View {
@@ -531,22 +514,6 @@ struct ImageConversionView: View {
         }
         return accepted
     }
-}
-
-/// Behind-window vibrancy for the bottom bar: `.titlebar` material so the
-/// bar matches the window's top chrome (which macOS 26 renders as glass).
-/// `followsWindowActiveState` keeps it dimming with the title bar when the
-/// window resigns key.
-private struct BehindWindowBarBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        view.blendingMode = .behindWindow
-        view.material = .titlebar
-        view.state = .followsWindowActiveState
-        return view
-    }
-
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 private struct ImageConversionSidebarRow: View {
