@@ -185,6 +185,11 @@ struct ImageConversionView: View {
             bottomBar
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Drop the toolbar's own chrome fill over the detail column so the
+        // canvas background (a ShapeStyle background, which bleeds into the
+        // top safe area) runs up to the window edge — otherwise the title
+        // strip paints a band that mismatches the canvas color.
+        .toolbarBackground(.hidden, for: .windowToolbar)
     }
 
     private var bottomBar: some View {

@@ -34,6 +34,10 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             defer: false
         )
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        // The detail toolbar background is hidden (the canvas color runs to
+        // the window top), so the titlebar separator would read as a stray
+        // hairline across the canvas.
+        window.titlebarSeparatorStyle = .none
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
         window.isRestorable = false
