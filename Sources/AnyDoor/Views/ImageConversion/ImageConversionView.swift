@@ -34,12 +34,15 @@ struct ImageConversionView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            Picker("", selection: $model.sidebarTab) {
-                LocalizedText(.imageConversionSidebarBasket).tag(ImageConversionSidebarTab.basket)
-                LocalizedText(.imageConversionHistoryTitle).tag(ImageConversionSidebarTab.history)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            // AppKit-backed so the segments stretch across the sidebar —
+            // SwiftUI's segmented picker keeps its intrinsic width on macOS
+            // and merely centers inside any wider frame.
+            SidebarTabPicker(
+                selection: $model.sidebarTab,
+                basketLabel: L(.imageConversionSidebarBasket),
+                historyLabel: L(.imageConversionHistoryTitle)
+            )
+            .fixedSize(horizontal: false, vertical: true)
             .padding(12)
 
             Divider()
@@ -534,6 +537,52 @@ struct ImageConversionView: View {
             }
         }
         return accepted
+    }
+}
+
+/// Full-width sidebar tab switch. NSSegmentedControl with `.fillEqually`
+/// distribution stretches to the proposed width, which SwiftUI's segmented
+/// picker cannot do on macOS. Labels come in as plain strings so language
+/// changes re-render through the SwiftUI parent.
+private struct SidebarTabPicker: NSViewRepresentable {
+    @Binding var selection: ImageConversionSidebarTab
+    let basketLabel: String
+    let historyLabel: String
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection)
+    }
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(
+            labels: [basketLabel, historyLabel],
+            trackingMode: .selectOne,
+            target: context.coordinator,
+            action: #selector(Coordinator.didChange(_:))
+        )
+        control.segmentDistribution = .fillEqually
+        control.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return control
+    }
+
+    func updateNSView(_ control: NSSegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        control.setLabel(basketLabel, forSegment: 0)
+        control.setLabel(historyLabel, forSegment: 1)
+        control.selectedSegment = selection == .basket ? 0 : 1
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var selection: Binding<ImageConversionSidebarTab>
+
+        init(selection: Binding<ImageConversionSidebarTab>) {
+            self.selection = selection
+        }
+
+        @objc func didChange(_ sender: NSSegmentedControl) {
+            selection.wrappedValue = sender.selectedSegment == 0 ? .basket : .history
+        }
     }
 }
 
