@@ -374,6 +374,16 @@ actor ImageConversionEngine {
 
     // MARK: - Pipeline
 
+    /// The unmodified source bytes, for the raw pass-through candidate.
+    private func rawSourceBytes(of input: ImageConversionInput) -> Data? {
+        switch input {
+        case .file(let url):
+            return try? Data(contentsOf: url)
+        case .bitmap(let data):
+            return data
+        }
+    }
+
     private func performPipeline(
         key: JobKey,
         item: ImageConversionItemSnapshot,
@@ -391,25 +401,35 @@ actor ImageConversionEngine {
             try Task.checkCancellation()
         }
 
-        // 1. Same-format pass-through when the source already fits.
+        // 1. Same-format pass-through when the source already fits. The raw
+        // source bytes go first — they are the smallest possible qualifying
+        // output and the only pass-through for formats Image I/O cannot
+        // rewrite (WebP, AVIF) — then the metadata-stripping rewrite covers
+        // sources that carry ancillary metadata. Both must pass the same
+        // audit; a re-encode can only inflate an already-fitting source.
         if let sourceBytes = preflight.sourceByteCount,
            sourceBytes <= configuration.targetBytes,
            backgroundHex == nil,
-           encoder.sourceTypeIdentifier == configuration.format.typeIdentifier,
-           let rewritten = encoder.losslessPassThrough(as: configuration.format),
-           Int64(rewritten.count) <= configuration.targetBytes {
-            let report = CandidateAuditor.audit(rewritten)
-            if report.decodable,
-               report.pixelDimensions == sourceDimensions,
-               report.ancillaryMetadataAbsent,
-               report.orientation == (encoder.orientation ?? 1),
-               ImageColorProfileSignature.matches(
-                   expected: encoder.sourceColorProfile,
-                   actual: report.colorProfile
-               ),
-               report.hasAlpha == preflight.hasAlpha {
+           encoder.sourceTypeIdentifier == configuration.format.typeIdentifier {
+            let candidates: [Data?] = [
+                rawSourceBytes(of: item.input),
+                encoder.losslessPassThrough(as: configuration.format),
+            ]
+            for candidate in candidates {
+                guard let candidate,
+                      Int64(candidate.count) <= configuration.targetBytes else { continue }
+                let report = CandidateAuditor.audit(candidate)
+                guard report.decodable,
+                      report.pixelDimensions == sourceDimensions,
+                      report.ancillaryMetadataAbsent,
+                      report.orientation == (encoder.orientation ?? 1),
+                      ImageColorProfileSignature.matches(
+                          expected: encoder.sourceColorProfile,
+                          actual: report.colorProfile
+                      ),
+                      report.hasAlpha == preflight.hasAlpha else { continue }
                 try checkBoundary()
-                let artifact = try store.materialize(rewritten)
+                let artifact = try store.materialize(candidate)
                 return PreparedCandidate(
                     kind: .passThrough,
                     configuration: configuration,
@@ -423,7 +443,7 @@ actor ImageConversionEngine {
                     firstFrameOnly: false
                 )
             }
-            // Unsupported or ineffective rewrite: fall through to the search.
+            // No qualifying rewrite: fall through to the search.
         }
 
         // 2. Bounded search. The measure closure mirrors the search's

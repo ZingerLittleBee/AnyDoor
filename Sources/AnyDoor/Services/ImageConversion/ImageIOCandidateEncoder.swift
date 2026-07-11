@@ -206,7 +206,8 @@ final class ImageIOCandidateEncoder {
         ) else { return nil }
         // CGImageDestinationCopyImageSource finalizes internally.
         guard CGImageDestinationCopyImageSource(
-            destination, source, TargetMetadataPolicy.passThroughOptions(), nil
+            destination, source,
+            TargetMetadataPolicy.passThroughOptions(orientation: orientation), nil
         ) else { return nil }
         return rewritten as Data
     }

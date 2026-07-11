@@ -9,20 +9,29 @@ import ImageIO
 /// from decoded pixels plus explicit display properties and never inherit the
 /// source's metadata dictionary. Lossless pass-through applies the policy via
 /// copy options, and only the audit decides whether the result qualifies.
+///
+/// V2: HEIF structural tile tags are recognized as non-ancillary, the
+/// pass-through rewrite preserves orientation, and a policy-clean source that
+/// already fits the target is emitted unchanged.
 enum TargetMetadataPolicy {
-    static let version = 1
+    static let version = 2
 
     /// Options for `CGImageDestinationCopyImageSource` that request the
     /// policy losslessly. Empirically JPEG honors this; HEIC may leave GPS
     /// behind and AVIF may reject the operation entirely — the audit, not the
-    /// format name, decides.
-    static func passThroughOptions() -> CFDictionary {
+    /// format name, decides. Replacing the metadata also drops the EXIF
+    /// orientation tag, so a non-default source orientation must be re-stated
+    /// explicitly or the copy displays wrongly rotated.
+    static func passThroughOptions(orientation: UInt32?) -> CFDictionary {
         let emptyMetadata = CGImageMetadataCreateMutable()
-        let options: [CFString: Any] = [
+        var options: [CFString: Any] = [
             kCGImageDestinationMetadata: emptyMetadata,
             kCGImageDestinationMergeMetadata: false,
             kCGImageMetadataShouldExcludeGPS: true,
         ]
+        if let orientation, orientation != 1 {
+            options[kCGImageDestinationOrientation] = orientation
+        }
         return options as CFDictionary
     }
 
@@ -104,6 +113,10 @@ enum TargetMetadataPolicy {
             "tiff:ResolutionUnit",
             "tiff:XResolution",
             "tiff:YResolution",
+            // HEIF grid tiling geometry; ImageIO surfaces these for every
+            // HEIC on macOS 26, including its own fresh encodes.
+            "tiff:TileLength",
+            "tiff:TileWidth",
         ]
         return tags.contains { tag in
             guard let prefix = CGImageMetadataTagCopyPrefix(tag) as String?,

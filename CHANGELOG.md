@@ -30,6 +30,14 @@ versioning.
   values, so toggling any control wrote the stale state back over the
   just-imported settings (this affected the format/quality keys synced since
   3.5.0 as well as the new Target Size keys).
+- Target Size no longer inflates a source that already fits the target: a
+  metadata-clean source is emitted byte-identical (the only pass-through
+  possible for WebP/AVIF, which Image I/O cannot rewrite), and the lossless
+  rewrite now preserves EXIF orientation instead of being rejected by the
+  audit and falling back to a larger re-encode.
+- HEIC Target Size conversion no longer fails the metadata audit on macOS 26,
+  which surfaces HEIF structural tile tags (`tiff:TileLength`/`TileWidth`)
+  on every HEIC, including freshly encoded ones.
 
 ## [3.6.0] - 2026-07-10
 

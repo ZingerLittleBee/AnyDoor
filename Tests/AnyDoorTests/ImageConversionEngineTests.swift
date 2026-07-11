@@ -460,6 +460,122 @@ final class ImageConversionEngineTests: XCTestCase {
         await engine.reset()
     }
 
+    func test_webpSource_underTarget_passesThroughByteIdentical() async throws {
+        // Image I/O cannot rewrite WebP, so a metadata-clean source that
+        // already fits must be emitted unchanged — a re-encode of an already
+        // compressed source can only inflate it.
+        let seedURL = try writeSourcePNG(name: "seed.png", width: 400, height: 300)
+        let seed = try ImageIOCandidateEncoder(input: .file(seedURL))
+        let webpData = try seed.encode(.init(
+            format: .webp, quality: 60,
+            dimensions: PixelDimensions(width: 400, height: 300),
+            transparencyBackgroundHex: nil
+        ))
+        let url = tempDirectory.appendingPathComponent("source.webp")
+        try webpData.write(to: url)
+
+        let engine = try ImageConversionEngine()
+        let outcome = await engine.convertItem(
+            makeItem(url, base: "copy"),
+            request: request(targetBytes: Int64(webpData.count) + 100_000)
+        )
+        guard case .success(let conversion) = outcome else {
+            return XCTFail("expected success, got \(outcome)")
+        }
+        guard case .passThrough = conversion.candidate.kind else {
+            return XCTFail("expected passThrough, got \(conversion.candidate.kind)")
+        }
+        XCTAssertEqual(try Data(contentsOf: conversion.output.url), webpData)
+        await engine.reset()
+    }
+
+    func test_orientedJPEGSource_underTarget_passesThroughKeepingOrientation() async throws {
+        // The rewrite must re-state a non-default EXIF orientation while
+        // stripping ancillary metadata, or the audit rejects it and the item
+        // falls to a potentially inflating re-encode.
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(
+            data, ImageConversionFormat.jpeg.typeIdentifier as CFString, 1, nil
+        )!
+        CGImageDestinationAddImage(destination, makeGradientImage(), [
+            kCGImageDestinationLossyCompressionQuality: 0.5,
+            kCGImagePropertyOrientation: UInt32(6),
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFOrientation: 6],
+            kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 1.0],
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let url = tempDirectory.appendingPathComponent("oriented.jpg")
+        try (data as Data).write(to: url)
+
+        let engine = try ImageConversionEngine()
+        let outcome = await engine.convertItem(
+            makeItem(url, base: "oriented-out"),
+            request: request(targetBytes: Int64(data.length) + 100_000)
+        )
+        guard case .success(let conversion) = outcome else {
+            return XCTFail("expected success, got \(outcome)")
+        }
+        guard case .passThrough = conversion.candidate.kind else {
+            return XCTFail("expected passThrough, got \(conversion.candidate.kind)")
+        }
+        let report = CandidateAuditor.audit(try Data(contentsOf: conversion.output.url))
+        XCTAssertEqual(report.orientation, 6, "pass-through must keep the source orientation")
+        XCTAssertTrue(report.ancillaryMetadataAbsent, "pass-through must still strip GPS")
+        await engine.reset()
+    }
+
+    // MARK: - HEIC (structural tile tags must not fail the audit)
+
+    private func writeSourceHEIC(
+        name: String = "source.heic",
+        quality: Double = 0.6
+    ) throws -> (url: URL, byteCount: Int)? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, ImageConversionFormat.heic.typeIdentifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, makeGradientImage(width: 640, height: 480), [
+            kCGImageDestinationLossyCompressionQuality: quality,
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination), data.length > 0 else { return nil }
+        let url = tempDirectory.appendingPathComponent(name)
+        try (data as Data).write(to: url)
+        return (url, data.length)
+    }
+
+    func test_freshHEICEncode_auditAcceptsStructuralTileTags() throws {
+        guard let heic = try writeSourceHEIC() else {
+            throw XCTSkip("runtime has no HEIC encoder")
+        }
+        let report = CandidateAuditor.audit(try Data(contentsOf: heic.url))
+        XCTAssertTrue(
+            report.ancillaryMetadataAbsent,
+            "HEIF tile geometry (tiff:TileLength/TileWidth) is structural, not ancillary"
+        )
+    }
+
+    func test_heicSource_overTarget_reachesTargetViaSearch() async throws {
+        guard let heic = try writeSourceHEIC() else {
+            throw XCTSkip("runtime has no HEIC encoder")
+        }
+        // Force the search path (source over target) so the final audit of a
+        // re-encoded HEIC candidate is exercised.
+        let target = Int64(heic.byteCount) / 2
+        let engine = try ImageConversionEngine()
+        let outcome = await engine.convertItem(
+            makeItem(heic.url, base: "heic-out"), request: request(targetBytes: target)
+        )
+        switch outcome {
+        case .success, .targetMiss:
+            // A best-effort miss is acceptable for an aggressive target; the
+            // regression under test is the audit rejecting every candidate.
+            break
+        default:
+            XCTFail("expected success or targetMiss, got \(outcome)")
+        }
+        await engine.reset()
+    }
+
     // MARK: - WebP same-format (bundled libwebp on the quality search)
 
     func test_webpSource_sameFormat_reachesTargetAndCommitsWebP() async throws {
