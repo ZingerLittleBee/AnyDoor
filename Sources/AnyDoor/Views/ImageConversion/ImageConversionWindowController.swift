@@ -38,6 +38,12 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         // the window top), so the titlebar separator would read as a stray
         // hairline across the canvas.
         window.titlebarSeparatorStyle = .none
+        // Hiding the SwiftUI toolbar fill is not enough on this manually
+        // managed window: the titlebar's own material still paints a strip
+        // that mismatches the canvas (near-white over gray in light mode).
+        // Drop it; the sidebar draws its own full-height surface and the
+        // title text is unaffected.
+        window.titlebarAppearsTransparent = true
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
         window.isRestorable = false
