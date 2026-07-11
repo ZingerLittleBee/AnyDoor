@@ -310,49 +310,50 @@ struct ImageConversionView: View {
     // MARK: - Control bar
 
     private var controlBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 14) {
-                Group {
-                    Picker("", selection: $model.mode) {
-                        LocalizedText(.imageConversionModeFormat).tag(ImageConversionMode.quality)
-                        LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+                Picker("", selection: $model.mode) {
+                    LocalizedText(.imageConversionModeFormat).tag(ImageConversionMode.quality)
+                    LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
 
-                    if model.mode == .quality {
-                        qualityModeControls
-                    } else {
-                        targetSizeModeControls
+                if model.mode == .quality {
+                    qualityModeControls
+                } else {
+                    targetSizeModeControls
+                }
+
+                Spacer(minLength: 0)
+            }
+            .disabled(model.isConverting)
+            // Both modes' controls resolve to slightly different intrinsic
+            // heights; pin the row so the mode switch cannot move the bar.
+            .frame(minHeight: 28)
+
+            // Bottom row: footnote notes on the left (Target Size only — the
+            // slot is part of the row, so mode switches never change the bar
+            // height), primary action pinned to the trailing edge.
+            HStack(spacing: 6) {
+                Group {
+                    if model.mode == .targetSize {
+                        LocalizedText(.imageConversionTargetSizeSameFormat)
+                        Text("·")
+                        LocalizedText(.imageConversionTargetSizePNGNote)
                     }
                 }
-                .disabled(model.isConverting)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
 
                 Spacer(minLength: 12)
 
                 primaryAction
                     .frame(width: 132)
             }
-            // Both modes' controls resolve to slightly different intrinsic
-            // heights; pin the row so the mode switch cannot move the bar.
             .frame(minHeight: 28)
-
-            // Fixed-height footnote slot: the notes only show in Target Size
-            // mode, but the slot is always reserved so switching modes never
-            // changes the bar height (and never jolts the comparison above).
-            HStack(spacing: 6) {
-                if model.mode == .targetSize {
-                    LocalizedText(.imageConversionTargetSizeSameFormat)
-                    Text("·")
-                    LocalizedText(.imageConversionTargetSizePNGNote)
-                }
-            }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
-            .lineLimit(1)
-            .frame(height: 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
