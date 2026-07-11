@@ -44,7 +44,8 @@ struct ImageConversionView: View {
             }
         }
         .frame(width: 220)
-        .background(.regularMaterial)
+        // True sidebar vibrancy (desktop shows through), like Finder/Mail.
+        .background(VisualEffectBackground(material: .sidebar))
     }
 
     private var basketSidebar: some View {
@@ -201,7 +202,9 @@ struct ImageConversionView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .controlBackgroundColor))
+        // Canvas-tier background (one step below the window chrome), so the
+        // compared images read as content on a stage — the Preview.app look.
+        .background(Color(nsColor: .underPageBackgroundColor))
     }
 
     private func comparisonPane<Content: View>(
@@ -330,7 +333,9 @@ struct ImageConversionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.regularMaterial)
+        // Solid chrome color, continuous with the system title bar; a bottom
+        // bar is window chrome, not a floating material panel.
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     @ViewBuilder
@@ -430,7 +435,7 @@ struct ImageConversionView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.08))
+        .background(Color.orange.opacity(0.08).background(Color(nsColor: .windowBackgroundColor)))
     }
 
     @ViewBuilder
