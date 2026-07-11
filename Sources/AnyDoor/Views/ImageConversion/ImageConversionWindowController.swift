@@ -41,10 +41,11 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        // A normal-level workspace window, not an always-on-top panel: it
+        // yields to other apps and relies on RegularWindowCoordinator (see
+        // `show()`) to stay reachable under the accessory activation policy.
+        panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.isReleasedWhenClosed = false
-        panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isRestorable = false
         panel.minSize = NSSize(width: 960, height: 600)
@@ -94,6 +95,9 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         mountContentIfNeeded()
         restoreFrame()
         installKeyMonitor()
+        // Normal-level window of an accessory app: adopt .regular policy while
+        // it is open so it stays reachable (untracked on willClose).
+        RegularWindowCoordinator.shared.track(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         // Drop the initial first responder so no control renders a focus ring
@@ -127,10 +131,10 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     }
 
     override func close() {
-        saveFrame()
-        removeKeyMonitor()
-        viewModel.windowDidHide()
-        window?.orderOut(nil)
+        // `NSWindow.close()` (not `orderOut`) so willClose fires: cleanup in
+        // `windowWillClose` and RegularWindowCoordinator's untracking both
+        // depend on it, and the traffic-light path already goes through it.
+        window?.close()
     }
 
     private func mountContentIfNeeded() {
@@ -262,5 +266,5 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
 
 private final class ImageConversionPanel: NSPanel {
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
+    override var canBecomeMain: Bool { true }
 }
