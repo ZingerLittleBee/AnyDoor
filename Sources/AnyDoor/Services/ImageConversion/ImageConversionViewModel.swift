@@ -64,11 +64,15 @@ final class ImageConversionViewModel {
         didSet {
             ImageConversionPreferences.setTargetFormat(selectedFormat, defaults: defaults)
             scheduleQualityPreflightNotices()
+            schedulePreview()
         }
     }
     /// Whole-percent quality (1–100) applied to lossy targets for the whole run.
     var qualityPercent: Int {
-        didSet { ImageConversionPreferences.setQualityPercent(qualityPercent, defaults: defaults) }
+        didSet {
+            ImageConversionPreferences.setQualityPercent(qualityPercent, defaults: defaults)
+            schedulePreview()
+        }
     }
     var isConverting = false
     var isDropTargeted = false
@@ -107,10 +111,19 @@ final class ImageConversionViewModel {
     /// What the Comparison Workspace shows for the selected item. Stale
     /// metrics are never presented as current: any change flips to
     /// `.updating` before new bytes appear.
+    /// Exact result of the quality-mode encode for the selected item: the
+    /// same `ImageConverter.candidateData` bytes a run would commit.
+    struct QualityPreviewCandidate: Equatable {
+        /// Reload identity for the view: item + format + quality.
+        var id: String
+        var data: Data
+    }
+
     enum PreviewState: Equatable {
         case empty
         case updating
         case ready(PreparedCandidate)
+        case readyQuality(QualityPreviewCandidate)
         case unsupported(ImageConversionPreflightIssue)
         case invalidConfiguration
         case failed
@@ -572,9 +585,58 @@ final class ImageConversionViewModel {
         previewTask?.cancel()
         previewTask = nil
 
-        guard isWindowPresented, mode == .targetSize, let engine else {
+        guard isWindowPresented else {
             previewState = .empty
             pruneIdlePreviewArtifactsIfNeeded()
+            return
+        }
+        switch mode {
+        case .quality:
+            // Displayed engine artifacts are Target Size state; this mode
+            // previews in memory and keeps none of them.
+            if let engine { Task { await engine.pruneDisplayed(keepingItem: nil) } }
+            scheduleQualityPreview(generation: generation)
+        case .targetSize:
+            scheduleTargetSizePreview(generation: generation)
+        }
+    }
+
+    /// Quality-mode exact preview: encode the selected item with the frozen
+    /// format/quality through the same converter the run uses.
+    private func scheduleQualityPreview(generation: Int) {
+        guard let item = selectedItem else {
+            previewState = .empty
+            return
+        }
+        previewState = .updating
+        let format = selectedFormat
+        let qualityPercent = qualityPercent
+        let payload = item.payload
+        let previewID = "\(item.id)|\(format.fileExtension)|\(qualityPercent)"
+        previewTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(TargetSizePolicy.previewDebounce * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            let worker = Task.detached(priority: .userInitiated) { () -> Data? in
+                let converter = ImageConverter()
+                let quality = Double(qualityPercent) / 100.0
+                switch payload {
+                case .file(let url):
+                    return try? converter.candidateData(fileAt: url, format: format, quality: quality)
+                case .bitmap(let data):
+                    return try? converter.candidateData(bitmapData: data, format: format, quality: quality)
+                }
+            }
+            let encoded = await worker.value
+            guard let self, self.previewGeneration == generation else { return }
+            self.previewState = encoded.map {
+                .readyQuality(QualityPreviewCandidate(id: previewID, data: $0))
+            } ?? .failed
+        }
+    }
+
+    private func scheduleTargetSizePreview(generation: Int) {
+        guard let engine else {
+            previewState = .empty
             return
         }
         guard let item = selectedItem else {

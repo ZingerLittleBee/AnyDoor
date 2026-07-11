@@ -103,6 +103,49 @@ final class ImageConversionViewModelTests: XCTestCase {
         XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.isEmpty)
     }
 
+    @MainActor
+    func testQualityModeProducesAnExactResultPreview() async throws {
+        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let source = try writePNG()
+        defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+
+        let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
+        model.selectedFormat = .jpeg
+        model.mode = .quality
+        model.addFiles([source])
+        model.resetSidebarForPresentation()
+
+        func awaitPreview() async throws -> ImageConversionViewModel.QualityPreviewCandidate {
+            let deadline = ContinuousClock.now + .seconds(5)
+            while ContinuousClock.now < deadline {
+                if case .readyQuality(let preview) = model.previewState { return preview }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            XCTFail("preview did not settle: \(model.previewState)")
+            throw CancellationError()
+        }
+
+        let preview = try await awaitPreview()
+        // The preview bytes are the exact run output: same converter, same
+        // format and quality.
+        let expected = try ImageConverter().candidateData(
+            fileAt: source, format: .jpeg, quality: Double(model.qualityPercent) / 100.0
+        )
+        XCTAssertEqual(preview.data, expected)
+
+        // A quality change must supersede the preview identity.
+        let previousID = preview.id
+        model.qualityPercent = max(1, model.qualityPercent - 30)
+        let updated = try await awaitPreview()
+        XCTAssertNotEqual(updated.id, previousID)
+
+        model.windowDidHide()
+        XCTAssertEqual(model.previewState, .empty)
+        model.clear()
+    }
+
     private func writePNG() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ImageConversionViewModelTests-\(UUID().uuidString)", isDirectory: true)

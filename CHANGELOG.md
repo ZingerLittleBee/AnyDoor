@@ -19,6 +19,9 @@ versioning.
   640 px). WebP output is encoded by the bundled libwebp (BSD-3-Clause),
   since macOS can decode but not encode WebP. Formats without a compression
   strategy (GIF/TIFF/BMP/ICO) are reported as unsupported per item.
+- Image Conversion: Format mode now shows an exact result preview for the
+  selected item — the same bytes a run would produce for the chosen format
+  and quality — updating live as the quality slider moves.
 
 ### Fixed
 

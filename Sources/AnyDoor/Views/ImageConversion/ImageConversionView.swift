@@ -265,6 +265,9 @@ struct ImageConversionView: View {
                 ),
                 showsBestEffortBadge: candidate.isBestEffort
             )
+        case .readyQuality(let preview):
+            // The caption self-computes from the encoded bytes.
+            ImageComparisonPreview(source: .bitmap(id: preview.id, data: preview.data))
         case .unsupported(let issue):
             let key: L10n.Key = switch issue {
             case .sourceMissing: .imageConversionSourceMissing
