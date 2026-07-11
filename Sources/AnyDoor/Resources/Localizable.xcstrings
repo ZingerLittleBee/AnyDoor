@@ -4574,6 +4574,23 @@
         }
       }
     },
+    "imageConversion.mode.format": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Format"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "格式"
+          }
+        }
+      }
+    },
     "imageConversion.mode.targetSize": {
       "extractionState": "manual",
       "localizations": {

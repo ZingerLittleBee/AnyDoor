@@ -292,7 +292,7 @@ struct ImageConversionView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     Picker("", selection: $model.mode) {
-                        LocalizedText(.imageConversionQuality).tag(ImageConversionMode.quality)
+                        LocalizedText(.imageConversionModeFormat).tag(ImageConversionMode.quality)
                         LocalizedText(.imageConversionModeTargetSize).tag(ImageConversionMode.targetSize)
                     }
                     .pickerStyle(.segmented)

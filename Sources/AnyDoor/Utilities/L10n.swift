@@ -166,6 +166,7 @@ enum L10n {
         case imageConversionHistoryEmpty = "imageConversion.history.empty"
         case imageConversionHistorySaveFailed = "imageConversion.history.saveFailed"
         case imageConversionHistoryTitle = "imageConversion.history.title"
+        case imageConversionModeFormat = "imageConversion.mode.format"
         case imageConversionModeTargetSize = "imageConversion.mode.targetSize"
         case imageConversionNoFormats = "imageConversion.noFormats"
         case imageConversionQuality = "imageConversion.quality"
