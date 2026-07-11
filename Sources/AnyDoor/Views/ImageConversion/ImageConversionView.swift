@@ -174,60 +174,45 @@ struct ImageConversionView: View {
     // MARK: - Workspace (comparison + bottom control bar)
 
     /// The main column right of the sidebar: the full-width comparison on
-    /// top, an optional target-miss banner, and the control bar at the
-    /// bottom (the former right-hand inspector, flattened into one strip so
-    /// the comparison gets all the width). On macOS 26+ the banner and the
-    /// control bar float over the canvas as Liquid Glass cards; earlier
-    /// systems keep the attached solid-chrome layout.
-    @ViewBuilder
+    /// top and an attached, edge-to-edge bottom bar (optional target-miss
+    /// strip + the control rows). The bar is window chrome, so it stays
+    /// rectangular to match the comparison grid; only its surface changes
+    /// with the OS (translucent titlebar-style glass on macOS 26+, solid
+    /// chrome color earlier — see `bottomBarSurface`).
     private var workspaceColumn: some View {
-        if #available(macOS 26.0, *) {
+        VStack(spacing: 0) {
             comparisonWorkspace
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    floatingGlassControls
-                }
-        } else {
-            VStack(spacing: 0) {
-                comparisonWorkspace
-                if let item = model.selectedItem,
-                   case .targetMiss(let candidate) = model.itemStatuses[item.id] {
-                    Divider()
-                    targetMissBanner(candidate, item: item)
-                }
-                Divider()
-                controlBar
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            bottomBar
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// macOS 26+: the controls live in one `GlassEffectContainer` so the
-    /// target-miss banner morphs in and out of the control bar's glass when
-    /// it appears. `safeAreaInset` keeps the comparison captions above the
-    /// cards while the canvas background (a ShapeStyle background, which
-    /// bleeds into the safe area) still runs underneath the glass.
-    @available(macOS 26.0, *)
-    private var floatingGlassControls: some View {
-        GlassEffectContainer(spacing: 12) {
-            VStack(spacing: 10) {
-                if let item = model.selectedItem,
-                   case .targetMiss(let candidate) = model.itemStatuses[item.id] {
-                    targetMissBannerContent(candidate, item: item)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .glassEffect(
-                            .regular.tint(.orange.opacity(0.18)),
-                            in: .rect(cornerRadius: 14)
-                        )
-                }
-                controlBarContent
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .glassEffect(.regular, in: .rect(cornerRadius: 16))
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            if let item = model.selectedItem,
+               case .targetMiss(let candidate) = model.itemStatuses[item.id] {
+                Divider()
+                targetMissBanner(candidate, item: item)
             }
+            Divider()
+            controlBar
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 14)
+        .background { bottomBarSurface }
+    }
+
+    /// macOS 26+: behind-window vibrancy matching the system title bar, so
+    /// the top and bottom chrome of the window read as one glass frame.
+    /// SwiftUI materials are within-window blurs and collapse to a flat
+    /// tone here (nothing renders behind an attached bar), so this needs
+    /// the AppKit behind-window material. Earlier systems keep the solid
+    /// chrome color.
+    @ViewBuilder
+    private var bottomBarSurface: some View {
+        if #available(macOS 26.0, *) {
+            BehindWindowBarBackground()
+        } else {
+            Color(nsColor: .windowBackgroundColor)
+        }
     }
 
     private var comparisonWorkspace: some View {
@@ -323,19 +308,13 @@ struct ImageConversionView: View {
 
     // MARK: - Control bar
 
-    /// Pre-macOS 26 chrome wrapper: the shared control content attached to
-    /// the window bottom over a solid chrome color, continuous with the
-    /// system title bar.
+    /// The control rows; the bar surface is painted once by `bottomBar`.
     private var controlBar: some View {
         controlBarContent
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    /// The control rows themselves, shared by the legacy attached bar and
-    /// the macOS 26 floating glass card (which apply their own padding and
-    /// surface).
     private var controlBarContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Top row: only the active mode's own controls.
@@ -452,22 +431,11 @@ struct ImageConversionView: View {
         }
     }
 
-    /// Pre-macOS 26 chrome wrapper for the target-miss strip, attached
-    /// between the comparison and the control bar.
+    /// Compact strip between the comparison and the control bar for the
+    /// selected item's retained Best-Effort miss: status, metrics, and the
+    /// explicit Save Anyway commit. The orange wash tints the shared bar
+    /// surface painted by `bottomBar`.
     private func targetMissBanner(
-        _ candidate: PreparedCandidate,
-        item: ImageConversionBasketItem
-    ) -> some View {
-        targetMissBannerContent(candidate, item: item)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color.orange.opacity(0.08).background(Color(nsColor: .windowBackgroundColor)))
-    }
-
-    /// The selected item's retained Best-Effort miss: status, metrics, and
-    /// the explicit Save Anyway commit. Shared by the legacy attached strip
-    /// and the macOS 26 floating glass card.
-    private func targetMissBannerContent(
         _ candidate: PreparedCandidate,
         item: ImageConversionBasketItem
     ) -> some View {
@@ -492,6 +460,9 @@ struct ImageConversionView: View {
             .controlSize(.small)
             .disabled(model.isConverting)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.08))
     }
 
     @ViewBuilder
@@ -555,6 +526,22 @@ struct ImageConversionView: View {
         }
         return accepted
     }
+}
+
+/// Behind-window vibrancy for the bottom bar: `.titlebar` material so the
+/// bar matches the window's top chrome (which macOS 26 renders as glass).
+/// `followsWindowActiveState` keeps it dimming with the title bar when the
+/// window resigns key.
+private struct BehindWindowBarBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.blendingMode = .behindWindow
+        view.material = .titlebar
+        view.state = .followsWindowActiveState
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
 }
 
 private struct ImageConversionSidebarRow: View {

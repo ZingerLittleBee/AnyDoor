@@ -27,9 +27,10 @@ versioning.
   remembers the last chosen folder; Save Anyway commits to the same place.
   The conversion window is a normal window instead of an always-on-top
   panel.
-- Image Conversion: on macOS 26+ the window adopts Liquid Glass — the
-  control bar and the target-miss banner float over the comparison canvas
-  as glass cards; earlier systems keep the attached solid-chrome layout.
+- Image Conversion: on macOS 26+ the bottom control bar (and the
+  target-miss strip) renders as translucent titlebar-style glass, so the
+  window's top and bottom chrome read as one frame; earlier systems keep
+  the solid chrome color.
 
 ### Fixed
 
