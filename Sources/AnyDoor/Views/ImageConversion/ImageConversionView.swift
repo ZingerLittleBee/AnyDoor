@@ -6,19 +6,21 @@ import UniformTypeIdentifiers
 struct ImageConversionView: View {
     @Bindable var model: ImageConversionViewModel
     var store: ImageConversionHistoryStore = .shared
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        ZStack {
-            HStack(spacing: 0) {
-                sidebar
-                Divider()
-                workspaceColumn
-            }
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
+        } detail: {
+            workspaceColumn
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay {
             if model.isDropTargeted {
                 dropOverlay
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onDrop(of: [UTType.fileURL.identifier], isTargeted: $model.isDropTargeted, perform: handleDrop)
     }
 
@@ -43,9 +45,6 @@ struct ImageConversionView: View {
                 historySidebar
             }
         }
-        .frame(width: 220)
-        // True sidebar vibrancy (desktop shows through), like Finder/Mail.
-        .background(VisualEffectBackground(material: .sidebar))
     }
 
     private var basketSidebar: some View {

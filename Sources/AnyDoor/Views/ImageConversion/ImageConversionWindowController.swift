@@ -103,6 +103,9 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         guard let window, window.contentView == nil || !(window.contentView is NSHostingView<ImageConversionView>) else { return }
         let view = ImageConversionView(model: viewModel)
         let host = NSHostingView(rootView: view)
+        // Let SwiftUI install the NavigationSplitView toolbar (the sidebar
+        // toggle) onto this manually managed window.
+        host.sceneBridgingOptions = [.toolbars]
         host.frame = window.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         window.contentView = host
