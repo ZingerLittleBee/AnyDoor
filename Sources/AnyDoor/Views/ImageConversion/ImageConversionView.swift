@@ -334,19 +334,25 @@ struct ImageConversionView: View {
                 primaryAction
                     .frame(width: 132)
             }
+            // Both modes' controls resolve to slightly different intrinsic
+            // heights; pin the row so the mode switch cannot move the bar.
+            .frame(minHeight: 28)
 
-            if model.mode == .targetSize {
-                // Behavior notes for the same-format contract; kept to one
-                // line so the bar's height stays stable.
-                HStack(spacing: 6) {
+            // Fixed-height footnote slot: the notes only show in Target Size
+            // mode, but the slot is always reserved so switching modes never
+            // changes the bar height (and never jolts the comparison above).
+            HStack(spacing: 6) {
+                if model.mode == .targetSize {
                     LocalizedText(.imageConversionTargetSizeSameFormat)
                     Text("·")
                     LocalizedText(.imageConversionTargetSizePNGNote)
                 }
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
             }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .lineLimit(1)
+            .frame(height: 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
