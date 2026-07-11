@@ -191,8 +191,9 @@ struct ImageConversionView: View {
         // Drop the toolbar's own chrome fill over the detail column so the
         // canvas background (a ShapeStyle background, which bleeds into the
         // top safe area) runs up to the window edge — otherwise the title
-        // strip paints a band that mismatches the canvas color.
-        .toolbarBackground(.hidden, for: .windowToolbar)
+        // strip paints a band that mismatches the canvas color. Glaring in
+        // light mode: near-white strip over the gray canvas.
+        .modifier(HideDetailToolbarBackground())
     }
 
     private var bottomBar: some View {
@@ -531,6 +532,21 @@ struct ImageConversionView: View {
             }
         }
         return accepted
+    }
+}
+
+/// On macOS 26 the older `.toolbarBackground(.hidden, for: .windowToolbar)`
+/// does not hide the unified toolbar's fill (and can collapse the toolbar —
+/// see the identical note in SettingsView); Tahoe needs
+/// `toolbarBackgroundVisibility`. Earlier systems keep the system toolbar
+/// appearance, matching the Settings window's approach.
+private struct HideDetailToolbarBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content.toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        } else {
+            content
+        }
     }
 }
 
