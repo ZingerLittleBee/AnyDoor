@@ -6,6 +6,11 @@ import UniformTypeIdentifiers
 struct ImageConversionView: View {
     @Bindable var model: ImageConversionViewModel
     var store: ImageConversionHistoryStore = .shared
+    /// Measured width of the mode switch (the segmented control keeps its
+    /// intrinsic size — a `.frame` would only center it); the target-size
+    /// field + unit row above adopts it so the stacked rows align on both
+    /// edges.
+    @State private var modeSwitchWidth: CGFloat?
     var body: some View {
         NavigationSplitView(columnVisibility: Binding(
             get: { model.isSidebarCollapsed ? .detailOnly : .all },
@@ -296,9 +301,8 @@ struct ImageConversionView: View {
 
     // MARK: - Control bar
 
-    /// Shared width for the stacked leading controls — the target-size
-    /// field + unit group and the mode switch beneath it — so the two rows
-    /// align on both edges instead of each hugging its own content.
+    /// Fallback width for the target-size field + unit group until the mode
+    /// switch beneath it reports its measured width (see `modeSwitchWidth`).
     private static let leadingControlWidth: CGFloat = 190
 
     /// The control rows; the bar surface is painted once by `bottomBar`.
@@ -345,7 +349,10 @@ struct ImageConversionView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: Self.leadingControlWidth)
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) {
+                    modeSwitchWidth = $0
+                }
                 .disabled(model.isConverting)
 
                 Spacer(minLength: 12)
@@ -398,8 +405,9 @@ struct ImageConversionView: View {
 
     private var targetSizeModeControls: some View {
         HStack(spacing: 8) {
-            // The field + unit group spans exactly the mode switch's width
-            // (the row below), so the stacked rows align on both edges.
+            // The field + unit group spans exactly the mode switch's
+            // measured width (the row below), so the stacked rows align on
+            // both edges.
             HStack(spacing: 8) {
                 TextField("1", text: $model.targetText)
                     .textFieldStyle(.roundedBorder)
@@ -418,7 +426,7 @@ struct ImageConversionView: View {
                 .labelsHidden()
                 .fixedSize()
             }
-            .frame(width: Self.leadingControlWidth)
+            .frame(width: modeSwitchWidth ?? Self.leadingControlWidth)
 
             if model.targetParseError != nil {
                 LocalizedText(.imageConversionTargetInvalid)
