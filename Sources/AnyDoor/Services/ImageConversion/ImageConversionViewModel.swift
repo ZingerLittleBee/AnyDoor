@@ -77,6 +77,13 @@ final class ImageConversionViewModel {
     var isConverting = false
     var isDropTargeted = false
     var sidebarTab: ImageConversionSidebarTab = .basket
+    /// Split-view sidebar collapse state, owned here so the window's ⌘B key
+    /// monitor can toggle it. Session-only, deliberately not persisted.
+    var isSidebarCollapsed = false
+
+    func toggleSidebar() {
+        isSidebarCollapsed.toggle()
+    }
 
     // MARK: Target Size state
 

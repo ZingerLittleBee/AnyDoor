@@ -185,6 +185,10 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             viewModel.presentOpenPanel()
             return true
         }
+        if event.keyCode == kVK_ANSI_B {
+            viewModel.toggleSidebar()
+            return true
+        }
         return false
     }
 

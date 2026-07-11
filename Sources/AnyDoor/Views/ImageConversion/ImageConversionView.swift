@@ -6,10 +6,11 @@ import UniformTypeIdentifiers
 struct ImageConversionView: View {
     @Bindable var model: ImageConversionViewModel
     var store: ImageConversionHistoryStore = .shared
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
-
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
+        NavigationSplitView(columnVisibility: Binding(
+            get: { model.isSidebarCollapsed ? .detailOnly : .all },
+            set: { model.isSidebarCollapsed = $0 == .detailOnly }
+        )) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 320)
         } detail: {
