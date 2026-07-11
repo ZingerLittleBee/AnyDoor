@@ -296,6 +296,11 @@ struct ImageConversionView: View {
 
     // MARK: - Control bar
 
+    /// Shared width for the stacked leading controls — the target-size
+    /// field + unit group and the mode switch beneath it — so the two rows
+    /// align on both edges instead of each hugging its own content.
+    private static let leadingControlWidth: CGFloat = 190
+
     /// The control rows; the bar surface is painted once by `bottomBar`.
     private var controlBar: some View {
         controlBarContent
@@ -340,7 +345,7 @@ struct ImageConversionView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .fixedSize()
+                .frame(width: Self.leadingControlWidth)
                 .disabled(model.isConverting)
 
                 Spacer(minLength: 12)
@@ -393,22 +398,27 @@ struct ImageConversionView: View {
 
     private var targetSizeModeControls: some View {
         HStack(spacing: 8) {
-            TextField("1", text: $model.targetText)
-                .textFieldStyle(.roundedBorder)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 90)
-                .onSubmit { model.commitTargetText() }
-                .onChange(of: model.targetText) { model.commitTargetText() }
-                .accessibilityLabel(L(.imageConversionModeTargetSize))
-            Picker("", selection: Binding(
-                get: { model.targetLimit.unit },
-                set: { model.switchTargetUnit(to: $0) }
-            )) {
-                Text("KB").tag(TargetSizeUnit.kb)
-                Text("MB").tag(TargetSizeUnit.mb)
+            // The field + unit group spans exactly the mode switch's width
+            // (the row below), so the stacked rows align on both edges.
+            HStack(spacing: 8) {
+                TextField("1", text: $model.targetText)
+                    .textFieldStyle(.roundedBorder)
+                    .multilineTextAlignment(.trailing)
+                    .frame(maxWidth: .infinity)
+                    .onSubmit { model.commitTargetText() }
+                    .onChange(of: model.targetText) { model.commitTargetText() }
+                    .accessibilityLabel(L(.imageConversionModeTargetSize))
+                Picker("", selection: Binding(
+                    get: { model.targetLimit.unit },
+                    set: { model.switchTargetUnit(to: $0) }
+                )) {
+                    Text("KB").tag(TargetSizeUnit.kb)
+                    Text("MB").tag(TargetSizeUnit.mb)
+                }
+                .labelsHidden()
+                .fixedSize()
             }
-            .labelsHidden()
-            .fixedSize()
+            .frame(width: Self.leadingControlWidth)
 
             if model.targetParseError != nil {
                 LocalizedText(.imageConversionTargetInvalid)
