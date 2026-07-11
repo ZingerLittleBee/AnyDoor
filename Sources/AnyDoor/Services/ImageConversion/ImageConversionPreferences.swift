@@ -14,13 +14,11 @@ enum ImageConversionPreferences {
     static let modeKey = "imageConversion.mode"
     static let targetSizeBytesKey = "imageConversion.targetSize.bytes"
     static let targetSizeUnitKey = "imageConversion.targetSize.unit"
-    static let targetSizeAllowResizeKey = "imageConversion.targetSize.allowResize"
     static let transparencyBackgroundHexKey = "imageConversion.transparencyBackgroundHex"
 
     static let defaultMode: ImageConversionMode = .quality
     static let defaultTargetSizeBytes = 1_000_000
     static let defaultTargetSizeUnit: TargetSizeUnit = .mb
-    static let defaultTargetSizeAllowResize = false
     static let defaultTransparencyBackgroundHex = "#FFFFFF"
 
     /// Slider range and default, expressed as a whole percentage (1–100).
@@ -104,19 +102,6 @@ enum ImageConversionPreferences {
         // Int is 64-bit on every supported platform, so this narrowing is exact.
         defaults.set(Int(clampedBytes), forKey: targetSizeBytesKey)
         defaults.set(limit.unit.rawValue, forKey: targetSizeUnitKey)
-    }
-
-    /// Whether Target Size may resize below original dimensions to meet the limit.
-    /// Absent value defaults to false (never shrink implicitly).
-    static func targetSizeAllowResize(defaults: UserDefaults = .standard) -> Bool {
-        guard defaults.object(forKey: targetSizeAllowResizeKey) != nil else {
-            return defaultTargetSizeAllowResize
-        }
-        return defaults.bool(forKey: targetSizeAllowResizeKey)
-    }
-
-    static func setTargetSizeAllowResize(_ allow: Bool, defaults: UserDefaults = .standard) {
-        defaults.set(allow, forKey: targetSizeAllowResizeKey)
     }
 
     /// The flat background composited under transparent pixels when the target

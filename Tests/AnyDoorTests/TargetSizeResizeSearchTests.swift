@@ -25,12 +25,12 @@ final class TargetSizeResizeSearchTests: XCTestCase {
         XCTAssertEqual(probes, 1, "a fitting original needs no further probes")
     }
 
-    func test_floorUnfit_reportsPixelFloorReached() throws {
+    func test_floorUnfit_missesWithTheFloorProbe() throws {
         // Even the 640px floor is oversized.
         let search = TargetSizeResizeSearch(targetBytes: 1_000, originalDimensions: original)
         let result = try search.run(measure: areaBytes(scale: 1.0))
-        guard case .bestEffort(let smallest, reason: .pixelFloorReached) = result else {
-            return XCTFail("expected bestEffort(pixelFloorReached)")
+        guard case .bestEffort(let smallest) = result else {
+            return XCTFail("expected bestEffort")
         }
         XCTAssertEqual(
             smallest.request.dimensions.longestEdge,
@@ -47,8 +47,8 @@ final class TargetSizeResizeSearchTests: XCTestCase {
             probes += 1
             return self.areaBytes(scale: 1.0)(request)
         }
-        guard case .bestEffort(_, reason: .pixelFloorReached) = result else {
-            return XCTFail("expected bestEffort(pixelFloorReached)")
+        guard case .bestEffort = result else {
+            return XCTFail("expected bestEffort")
         }
         XCTAssertEqual(probes, 1, "below the floor only the original may be probed")
     }

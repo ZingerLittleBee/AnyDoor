@@ -9,7 +9,9 @@ import Foundation
 enum TargetSizePolicy {
     /// V2: same-format in/out with per-format strategies (quality search for
     /// lossy formats, resize-only search for PNG).
-    static let version = 2
+    /// V3: the resize fallback is always on — the allow-resize preference and
+    /// the quality-floor stop reason are gone.
+    static let version = 3
 
     /// Lowest encoder quality (whole percent) the bounded search may request
     /// at one pixel size. `nil` for formats whose strategy has no quality knob.

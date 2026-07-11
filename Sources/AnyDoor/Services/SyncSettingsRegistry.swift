@@ -45,7 +45,6 @@ enum SyncSettingsRegistry {
         Entry(key: "imageConversion.mode", type: .string),
         Entry(key: "imageConversion.targetSize.bytes", type: .int),
         Entry(key: "imageConversion.targetSize.unit", type: .string),
-        Entry(key: "imageConversion.targetSize.allowResize", type: .bool),
         Entry(key: "imageConversion.transparencyBackgroundHex", type: .string),
     ]
 

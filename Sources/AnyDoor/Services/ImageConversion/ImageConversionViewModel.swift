@@ -94,13 +94,6 @@ final class ImageConversionViewModel {
     /// touching `targetLimit`.
     var targetText: String = ""
     private(set) var targetParseError: TargetSizeLimitParseError?
-    var allowResize: Bool {
-        didSet {
-            ImageConversionPreferences.setTargetSizeAllowResize(allowResize, defaults: defaults)
-            if allowResize != oldValue { invalidateTargetSizeOutcomes() }
-            schedulePreview()
-        }
-    }
     /// Per-item outcome of the last run (miss/unsupported/failed items stay
     /// in the basket with their status; successes leave).
     private(set) var itemStatuses: [String: ImageConversionItemStatus] = [:]
@@ -163,7 +156,6 @@ final class ImageConversionViewModel {
         self.qualityPercent = ImageConversionPreferences.qualityPercent(defaults: defaults)
         self.mode = ImageConversionPreferences.mode(defaults: defaults)
         self.targetLimit = ImageConversionPreferences.targetSizeLimit(defaults: defaults)
-        self.allowResize = ImageConversionPreferences.targetSizeAllowResize(defaults: defaults)
         self.targetText = targetLimit.displayValue(locale: .current)
         self.engine = try? ImageConversionEngine()
     }
@@ -183,7 +175,6 @@ final class ImageConversionViewModel {
         targetLimit = ImageConversionPreferences.targetSizeLimit(defaults: defaults)
         targetText = targetLimit.displayValue(locale: .current)
         targetParseError = nil
-        allowResize = ImageConversionPreferences.targetSizeAllowResize(defaults: defaults)
         schedulePreview()
     }
 
@@ -738,7 +729,6 @@ final class ImageConversionViewModel {
     private func currentTargetSizeRequest() -> TargetSizeRequest {
         TargetSizeRequest(
             targetBytes: targetLimit.bytes,
-            allowResize: allowResize,
             transparencyBackgroundHex: ImageConversionPreferences
                 .transparencyBackgroundHex(defaults: defaults)
         )

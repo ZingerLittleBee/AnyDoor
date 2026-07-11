@@ -400,12 +400,6 @@ struct ImageConversionView: View {
                 .fixedSize()
             }
 
-            Toggle(isOn: $model.allowResize) {
-                LocalizedText(.imageConversionAllowResize)
-                    .font(.caption)
-            }
-            .toggleStyle(.checkbox)
-
             LocalizedText(.imageConversionTargetSizePNGNote)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -427,22 +421,9 @@ struct ImageConversionView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.orange)
 
-            if case .bestEffort(let reason) = candidate.kind,
-               reason == .qualityFloorReached,
-               !model.allowResize {
-                Button {
-                    model.allowResize = true
-                } label: {
-                    LocalizedText(.imageConversionEnableResizeHint)
-                        .font(.caption)
-                        .multilineTextAlignment(.leading)
-                }
-                .buttonStyle(.link)
-            } else {
-                LocalizedText(.imageConversionUnattainableHint)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            LocalizedText(.imageConversionUnattainableHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Text(candidate.caption)
                 .font(.caption.monospacedDigit())

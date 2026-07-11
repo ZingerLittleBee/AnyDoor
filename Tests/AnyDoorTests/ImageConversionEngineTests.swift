@@ -88,13 +88,9 @@ final class ImageConversionEngineTests: XCTestCase {
         )
     }
 
-    private func request(
-        targetBytes: Int64,
-        allowResize: Bool = false
-    ) -> TargetSizeRequest {
+    private func request(targetBytes: Int64) -> TargetSizeRequest {
         TargetSizeRequest(
             targetBytes: targetBytes,
-            allowResize: allowResize,
             transparencyBackgroundHex: "#FFFFFF"
         )
     }
@@ -199,13 +195,9 @@ final class ImageConversionEngineTests: XCTestCase {
         guard case .targetMiss(let candidate) = outcome else {
             return XCTFail("expected targetMiss, got \(outcome)")
         }
-        guard case .bestEffort(let reason) = candidate.kind else {
+        guard case .bestEffort = candidate.kind else {
             return XCTFail("expected bestEffort kind")
         }
-        XCTAssertEqual(
-            reason, .pixelFloorReached,
-            "a 320px image sits below the Pixel Floor, so enabling resize could not help"
-        )
         XCTAssertGreaterThan(candidate.artifact.byteCount, 500)
         let outputs = try FileManager.default.contentsOfDirectory(atPath: tempDirectory.path)
             .filter { $0.hasSuffix(".jpg") && $0 != "source.jpg" }
@@ -289,18 +281,8 @@ final class ImageConversionEngineTests: XCTestCase {
                           "fixture no longer separates original from resized floor")
 
         let engine = try ImageConversionEngine()
-        let missOutcome = await engine.convertItem(
-            makeItem(url, base: "miss"), request: request(targetBytes: target, allowResize: false)
-        )
-        guard case .targetMiss(let missed) = missOutcome else {
-            return XCTFail("expected miss without resize, got \(missOutcome)")
-        }
-        guard case .bestEffort(.qualityFloorReached) = missed.kind else {
-            return XCTFail("resize off must stop at the quality floor")
-        }
-
         let hitOutcome = await engine.convertItem(
-            makeItem(url, base: "hit"), request: request(targetBytes: target, allowResize: true)
+            makeItem(url, base: "hit"), request: request(targetBytes: target)
         )
         guard case .success(let conversion) = hitOutcome else {
             return XCTFail("expected success with resize, got \(hitOutcome)")
@@ -319,7 +301,7 @@ final class ImageConversionEngineTests: XCTestCase {
     func test_cancelledConsumerCancelsUnderlyingPreparationAndAllowsRetry() async throws {
         let engine = try ImageConversionEngine()
         let item = makeItem(try writeSourcePNG(width: 1_600, height: 1_200))
-        let config = request(targetBytes: 500, allowResize: true)
+        let config = request(targetBytes: 500)
 
         let preparation = Task {
             try await engine.prepareCandidate(
@@ -620,7 +602,7 @@ final class ImageConversionEngineTests: XCTestCase {
 
     // MARK: - PNG same-format (resize-only strategy)
 
-    func test_pngSource_reachesTargetByScalingDown_regardlessOfAllowResize() async throws {
+    func test_pngSource_reachesTargetByScalingDown() async throws {
         // Derive a target that is unattainable at original dimensions but
         // attainable at the Pixel Floor, from real measurements.
         let url = try writeSourcePNG(name: "large.png", width: 1_600, height: 1_200)
@@ -640,10 +622,8 @@ final class ImageConversionEngineTests: XCTestCase {
                           "fixture no longer separates original from floor")
 
         let engine = try ImageConversionEngine()
-        // PNG's only lever is resizing, so the strategy applies even with the
-        // Resize Fallback preference off.
         let outcome = await engine.convertItem(
-            makeItem(url, base: "shrunk"), request: request(targetBytes: target, allowResize: false)
+            makeItem(url, base: "shrunk"), request: request(targetBytes: target)
         )
         guard case .success(let conversion) = outcome else {
             return XCTFail("expected success, got \(outcome)")
@@ -660,9 +640,9 @@ final class ImageConversionEngineTests: XCTestCase {
         await engine.reset()
     }
 
-    func test_pngSource_belowPixelFloor_missesWithPixelFloorReason() async throws {
+    func test_pngSource_belowPixelFloor_misses() async throws {
         // 320px sits below the Pixel Floor: no smaller size may be produced,
-        // so an unattainable target is a miss with the resize hint suppressed.
+        // so an unattainable target is a Best-Effort miss.
         let engine = try ImageConversionEngine()
         let item = makeItem(try writeSourcePNG())
         let outcome = await engine.convertItem(item, request: request(targetBytes: 500))
@@ -670,8 +650,8 @@ final class ImageConversionEngineTests: XCTestCase {
         guard case .targetMiss(let candidate) = outcome else {
             return XCTFail("expected targetMiss, got \(outcome)")
         }
-        guard case .bestEffort(.pixelFloorReached) = candidate.kind else {
-            return XCTFail("expected pixelFloorReached, got \(candidate.kind)")
+        guard case .bestEffort = candidate.kind else {
+            return XCTFail("expected bestEffort, got \(candidate.kind)")
         }
         XCTAssertEqual(candidate.configuration.format, .png)
         await engine.reset()

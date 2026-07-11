@@ -4234,23 +4234,6 @@
         }
       }
     },
-    "imageConversion.allowResize": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Allow resizing"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "允许缩小尺寸"
-          }
-        }
-      }
-    },
     "imageConversion.basket.count": {
       "extractionState": "manual",
       "localizations": {
@@ -4468,23 +4451,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "拖入图片开始转换"
-          }
-        }
-      }
-    },
-    "imageConversion.enableResizeHint": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quality floor reached — enabling resize may fit the target"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "质量已到下限仍超出目标，开启缩小尺寸后可能达标"
           }
         }
       }

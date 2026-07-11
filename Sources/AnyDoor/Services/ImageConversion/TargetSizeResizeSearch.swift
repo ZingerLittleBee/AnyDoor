@@ -58,13 +58,13 @@ struct TargetSizeResizeSearch {
         // 2. At or below the Pixel Floor nothing smaller may be produced.
         let floorEdge = TargetSizePolicy.pixelFloorLongestEdge
         guard originalDimensions.longestEdge > floorEdge, attemptsUsed < attemptBudget else {
-            return .bestEffort(smallest!, reason: .pixelFloorReached)
+            return .bestEffort(smallest!)
         }
 
         // 3. The Pixel Floor bounds what resizing can reach.
         let floorCandidate = try probe(longestEdge: floorEdge)
         guard fits(floorCandidate) else {
-            return .bestEffort(smallest!, reason: .pixelFloorReached)
+            return .bestEffort(smallest!)
         }
 
         // 4. Bisect the longest edge, maximizing measured fitting pixels.

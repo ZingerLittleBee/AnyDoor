@@ -32,10 +32,6 @@ final class TargetSizePreferencesTests: XCTestCase {
         XCTAssertEqual(limit.unit, .mb)
     }
 
-    func testAllowResizeDefaultsToFalse() {
-        XCTAssertFalse(ImageConversionPreferences.targetSizeAllowResize(defaults: defaults))
-    }
-
     func testTransparencyBackgroundDefaultsToWhite() {
         XCTAssertEqual(
             ImageConversionPreferences.transparencyBackgroundHex(defaults: defaults),
@@ -138,15 +134,6 @@ final class TargetSizePreferencesTests: XCTestCase {
         )
     }
 
-    // MARK: - Allow resize
-
-    func testAllowResizeRoundTrips() {
-        ImageConversionPreferences.setTargetSizeAllowResize(true, defaults: defaults)
-        XCTAssertTrue(ImageConversionPreferences.targetSizeAllowResize(defaults: defaults))
-        ImageConversionPreferences.setTargetSizeAllowResize(false, defaults: defaults)
-        XCTAssertFalse(ImageConversionPreferences.targetSizeAllowResize(defaults: defaults))
-    }
-
     // MARK: - Transparency background fallback
 
     func testHexWithoutHashFallsBackToWhite() {
@@ -196,7 +183,6 @@ final class TargetSizePreferencesTests: XCTestCase {
     func testRegistryCarriesAllTargetSizeKeys() {
         ImageConversionPreferences.setMode(.targetSize, defaults: defaults)
         ImageConversionPreferences.setTargetSizeLimit(TargetSizeLimit(bytes: 750_000, unit: .kb), defaults: defaults)
-        ImageConversionPreferences.setTargetSizeAllowResize(true, defaults: defaults)
         ImageConversionPreferences.setTransparencyBackgroundHex("#101010", defaults: defaults)
 
         let snapshot = SyncSettingsRegistry.read(from: defaults)
@@ -204,10 +190,10 @@ final class TargetSizePreferencesTests: XCTestCase {
         XCTAssertEqual(snapshot[ImageConversionPreferences.modeKey], .string("targetSize"))
         XCTAssertEqual(snapshot[ImageConversionPreferences.targetSizeBytesKey], .int(750_000))
         XCTAssertEqual(snapshot[ImageConversionPreferences.targetSizeUnitKey], .string("kb"))
-        XCTAssertEqual(snapshot[ImageConversionPreferences.targetSizeAllowResizeKey], .bool(true))
         XCTAssertEqual(snapshot[ImageConversionPreferences.transparencyBackgroundHexKey], .string("#101010"))
-        // The retired per-mode target-format key must no longer be exported.
+        // Retired keys must no longer be exported.
         XCTAssertNil(snapshot["imageConversion.targetSize.targetFormat"])
+        XCTAssertNil(snapshot["imageConversion.targetSize.allowResize"])
 
         let destinationSuite = "TargetSizePreferencesTests-dest-\(UUID().uuidString)"
         let destination = UserDefaults(suiteName: destinationSuite)!
@@ -215,13 +201,12 @@ final class TargetSizePreferencesTests: XCTestCase {
         defer { destination.removePersistentDomain(forName: destinationSuite) }
 
         let applied = SyncSettingsRegistry.write(snapshot, to: destination)
-        XCTAssertGreaterThanOrEqual(applied, 5)
+        XCTAssertGreaterThanOrEqual(applied, 4)
 
         XCTAssertEqual(ImageConversionPreferences.mode(defaults: destination), .targetSize)
         let limit = ImageConversionPreferences.targetSizeLimit(defaults: destination)
         XCTAssertEqual(limit.bytes, 750_000)
         XCTAssertEqual(limit.unit, .kb)
-        XCTAssertTrue(ImageConversionPreferences.targetSizeAllowResize(defaults: destination))
         XCTAssertEqual(ImageConversionPreferences.transparencyBackgroundHex(defaults: destination), "#101010")
     }
 }

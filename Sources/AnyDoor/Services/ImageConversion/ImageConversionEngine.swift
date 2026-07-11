@@ -5,7 +5,6 @@ import Foundation
 /// (same-format in/out).
 struct TargetSizeRequest: Hashable, Sendable {
     var targetBytes: Int64
-    var allowResize: Bool
     var transparencyBackgroundHex: String
 }
 
@@ -15,7 +14,6 @@ struct TargetSizeRequest: Hashable, Sendable {
 struct TargetSizeJobConfiguration: Hashable, Sendable {
     var format: ImageConversionFormat
     var targetBytes: Int64
-    var allowResize: Bool
     var transparencyBackgroundHex: String
     var compressionPolicyVersion: Int = TargetSizePolicy.version
     var metadataPolicyVersion: Int = TargetMetadataPolicy.version
@@ -23,19 +21,16 @@ struct TargetSizeJobConfiguration: Hashable, Sendable {
     init(format: ImageConversionFormat, request: TargetSizeRequest) {
         self.format = format
         self.targetBytes = request.targetBytes
-        self.allowResize = request.allowResize
         self.transparencyBackgroundHex = request.transparencyBackgroundHex
     }
 
     init(
         format: ImageConversionFormat,
         targetBytes: Int64,
-        allowResize: Bool,
         transparencyBackgroundHex: String
     ) {
         self.format = format
         self.targetBytes = targetBytes
-        self.allowResize = allowResize
         self.transparencyBackgroundHex = transparencyBackgroundHex
     }
 }
@@ -46,7 +41,7 @@ struct PreparedCandidate: Hashable, Sendable {
     enum Kind: Hashable, Sendable {
         case targetReached
         case passThrough
-        case bestEffort(TargetSizeStopReason)
+        case bestEffort
     }
 
     var kind: Kind
@@ -491,16 +486,15 @@ actor ImageConversionEngine {
             return Int64(data.count)
         }
 
-        // Per-format strategy: PNG has no encoder quality knob, so its search
-        // moves only pixel dimensions (inherently — the Resize Fallback
-        // preference gates just the lossy formats' optional fallback).
+        // Per-format strategy: the lossy formats search quality first and fall
+        // back to smaller pixel sizes; PNG has no encoder quality knob, so its
+        // search moves only pixel dimensions.
         let result: TargetSizeSearchResult
         if let floor = TargetSizePolicy.qualityFloor(for: configuration.format) {
             result = try TargetSizeSearch(
                 targetBytes: configuration.targetBytes,
                 qualityFloor: floor,
-                originalDimensions: sourceDimensions,
-                allowResize: configuration.allowResize
+                originalDimensions: sourceDimensions
             ).run(measure: measure)
         } else if configuration.format == .png {
             result = try TargetSizeResizeSearch(
@@ -518,9 +512,9 @@ actor ImageConversionEngine {
         case .reached(let candidate):
             winner = candidate.request
             kind = .targetReached
-        case .bestEffort(let candidate, let reason):
+        case .bestEffort(let candidate):
             winner = candidate.request
-            kind = .bestEffort(reason)
+            kind = .bestEffort
         }
 
         // The retention mirror should always hold the winner; a divergence

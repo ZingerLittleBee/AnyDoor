@@ -23,14 +23,12 @@ final class TargetSizeSearchTests: XCTestCase {
     private func makeSearch(
         targetBytes: Int64,
         qualityFloor: Int = 40,
-        original: PixelDimensions = PixelDimensions(width: 4000, height: 3000),
-        allowResize: Bool = false
+        original: PixelDimensions = PixelDimensions(width: 4000, height: 3000)
     ) -> TargetSizeSearch {
         TargetSizeSearch(
             targetBytes: targetBytes,
             qualityFloor: qualityFloor,
-            originalDimensions: original,
-            allowResize: allowResize
+            originalDimensions: original
         )
     }
 
@@ -145,53 +143,23 @@ final class TargetSizeSearchTests: XCTestCase {
         XCTAssertEqual(candidate.request.quality, bestMeasuredFit)
     }
 
-    // MARK: - Search: best effort without resize
+    // MARK: - Search: best effort
 
-    func test_floorOversized_resizeOff_bestEffortSmallest_qualityFloorReason() {
-        let recorder = Recorder { Int64($0.quality) * 10_000 }
-        let result = makeSearch(targetBytes: 100_000).run(measure: recorder.measure)
-
-        // q100 then floor, nothing smaller to try.
-        XCTAssertEqual(recorder.requests.count, 2)
-        guard case .bestEffort(let candidate, let reason) = result else { return XCTFail("expected bestEffort") }
-        XCTAssertEqual(reason, .qualityFloorReached)
-        XCTAssertEqual(candidate.request.quality, 40)
-        XCTAssertEqual(candidate.byteCount, 400_000)
-    }
-
-    func test_resizeOff_neverRequestsSmallerDimensions() {
-        let original = PixelDimensions(width: 4000, height: 3000)
-        let recorder = Recorder { _ in 99_000_000 }
-        _ = makeSearch(targetBytes: 1_000, original: original).run(measure: recorder.measure)
-
-        XCTAssertTrue(recorder.requests.allSatisfy { $0.dimensions == original })
-    }
-
-    func test_resizeOff_originalAtPixelFloor_pixelFloorReason() {
-        // Enabling resize cannot help an image already at the Pixel Floor,
-        // so the miss must not suggest it via qualityFloorReached.
+    func test_originalAtPixelFloor_noResizeProbes_bestEffort() {
+        // No smaller size may be produced for an image already at the Pixel
+        // Floor: exactly the two original-dimension probes run.
         let original = PixelDimensions(width: 640, height: 480)
         let recorder = Recorder { _ in 99_000_000 }
         let result = makeSearch(targetBytes: 1_000, original: original).run(measure: recorder.measure)
 
-        guard case .bestEffort(_, let reason) = result else { return XCTFail("expected bestEffort") }
-        XCTAssertEqual(reason, .pixelFloorReached)
-    }
-
-    func test_resizeOn_originalAtPixelFloor_noResizeProbes_pixelFloorReason() {
-        let original = PixelDimensions(width: 640, height: 480)
-        let recorder = Recorder { _ in 99_000_000 }
-        let result = makeSearch(targetBytes: 1_000, original: original, allowResize: true)
-            .run(measure: recorder.measure)
-
         XCTAssertEqual(recorder.requests.count, 2)
-        guard case .bestEffort(_, let reason) = result else { return XCTFail("expected bestEffort") }
-        XCTAssertEqual(reason, .pixelFloorReached)
+        XCTAssertTrue(recorder.requests.allSatisfy { $0.dimensions == original })
+        guard case .bestEffort = result else { return XCTFail("expected bestEffort") }
     }
 
-    // MARK: - Search: Resize Fallback
+    // MARK: - Search: Resize Fallback (always on)
 
-    func test_resizeOn_firstFittingLevelGetsQualitySearch() {
+    func test_floorOversized_firstFittingLevelGetsQualitySearch() {
         // Bytes scale with pixel area; the original floor misses the target
         // but the first resized level fits, so quality is maximized there.
         let original = PixelDimensions(width: 4000, height: 3000)
@@ -203,7 +171,7 @@ final class TargetSizeSearchTests: XCTestCase {
         // Original floor candidate measures 2.4 MB, so the target must sit
         // below it to force one resize level.
         let target: Int64 = 2_000_000
-        let result = makeSearch(targetBytes: target, original: original, allowResize: true)
+        let result = makeSearch(targetBytes: target, original: original)
             .run(measure: recorder.measure)
 
         guard case .reached(let candidate) = result else { return XCTFail("expected reached") }
@@ -220,10 +188,10 @@ final class TargetSizeSearchTests: XCTestCase {
         XCTAssertLessThanOrEqual(atWinningSize.count, TargetSizePolicy.maxQualityProbesPerSize)
     }
 
-    func test_resizeOn_levelEdgesFollowPolicyMath_andDeriveFromOriginal() {
+    func test_levelEdgesFollowPolicyMath_andDeriveFromOriginal() {
         let original = PixelDimensions(width: 4000, height: 3000)
         let recorder = Recorder { _ in 99_000_000 }
-        _ = makeSearch(targetBytes: 1_000, original: original, allowResize: true)
+        _ = makeSearch(targetBytes: 1_000, original: original)
             .run(measure: recorder.measure)
 
         // Replay the policy math over the recorded floor probes.
@@ -239,14 +207,13 @@ final class TargetSizeSearchTests: XCTestCase {
         }
     }
 
-    func test_resizeOn_unattainable_stopsAtPixelFloor_withinBudget() {
+    func test_unattainable_stopsAtPixelFloor_withinBudget() {
         let original = PixelDimensions(width: 8000, height: 6000)
         let recorder = Recorder { _ in 99_000_000 }
-        let result = makeSearch(targetBytes: 1_000, original: original, allowResize: true)
+        let result = makeSearch(targetBytes: 1_000, original: original)
             .run(measure: recorder.measure)
 
-        guard case .bestEffort(_, let reason) = result else { return XCTFail("expected bestEffort") }
-        XCTAssertEqual(reason, .pixelFloorReached)
+        guard case .bestEffort = result else { return XCTFail("expected bestEffort") }
         XCTAssertLessThanOrEqual(recorder.requests.count, TargetSizePolicy.maxTotalAttempts - 1)
         // The lower clamp shrinks 0.25× per level, so the Pixel Floor is
         // reached and the loop must stop there rather than exploring further.
@@ -259,11 +226,11 @@ final class TargetSizeSearchTests: XCTestCase {
     // MARK: - Budget and tie-breaks
 
     func test_attemptBudget_neverExceeded_acrossScenarios() {
-        for (target, resize): (Int64, Bool) in [(1_000, false), (1_000, true), (550_000, false), (10_000_000, true)] {
+        for target: Int64 in [1_000, 550_000, 10_000_000] {
             let recorder = Recorder { request in
                 Int64(Double(request.dimensions.pixelCount) * Double(request.quality) / 100.0)
             }
-            _ = makeSearch(targetBytes: target, allowResize: resize).run(measure: recorder.measure)
+            _ = makeSearch(targetBytes: target).run(measure: recorder.measure)
             XCTAssertLessThanOrEqual(recorder.requests.count, TargetSizePolicy.maxTotalAttempts - 1)
         }
     }
@@ -286,10 +253,10 @@ final class TargetSizeSearchTests: XCTestCase {
         // the most pixels and the highest quality.
         let original = PixelDimensions(width: 4000, height: 3000)
         let recorder = Recorder { _ in 42_000_000 }
-        let result = makeSearch(targetBytes: 1_000, original: original, allowResize: true)
+        let result = makeSearch(targetBytes: 1_000, original: original)
             .run(measure: recorder.measure)
 
-        guard case .bestEffort(let candidate, _) = result else { return XCTFail("expected bestEffort") }
+        guard case .bestEffort(let candidate) = result else { return XCTFail("expected bestEffort") }
         XCTAssertEqual(candidate.request.dimensions, original)
         XCTAssertEqual(candidate.request.quality, 100)
     }

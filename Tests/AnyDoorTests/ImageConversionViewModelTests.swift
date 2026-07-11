@@ -46,7 +46,8 @@ final class ImageConversionViewModelTests: XCTestCase {
             return XCTFail("expected a retained target miss")
         }
 
-        model.allowResize.toggle()
+        model.targetText = "0.02"
+        model.commitTargetText()
         XCTAssertTrue(model.itemStatuses.isEmpty)
         model.clear()
     }
