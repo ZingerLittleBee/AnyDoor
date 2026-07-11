@@ -12,6 +12,13 @@ versioning.
   compression and explicit Best-Effort saves, plus a three-column workspace
   for basket/history navigation, original/result comparison, and conversion
   settings.
+- Image Conversion: Target Size now keeps the source format instead of
+  converting (the target-format picker is gone), and supports five formats —
+  JPEG, HEIC, AVIF, and WebP on a quality search, and PNG by scaling down
+  (its only lever, applied regardless of the resize toggle, floored at
+  640 px). WebP output is encoded by the bundled libwebp (BSD-3-Clause),
+  since macOS can decode but not encode WebP. Formats without a compression
+  strategy (GIF/TIFF/BMP/ICO) are reported as unsupported per item.
 
 ### Fixed
 
