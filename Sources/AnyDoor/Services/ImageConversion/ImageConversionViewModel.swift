@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import SwiftUI
 import UniformTypeIdentifiers
 
 struct ImageConversionBasketItem: Identifiable, Equatable, Sendable {
@@ -82,7 +83,11 @@ final class ImageConversionViewModel {
     var isSidebarCollapsed = false
 
     func toggleSidebar() {
-        isSidebarCollapsed.toggle()
+        // The toolbar button animates through the split view itself; a bare
+        // state flip from the key monitor would snap instead, so match it.
+        withAnimation {
+            isSidebarCollapsed.toggle()
+        }
     }
 
     // MARK: Target Size state
