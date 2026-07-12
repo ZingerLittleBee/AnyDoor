@@ -18,28 +18,23 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
-            // The window's bare unified toolbar exists only to trigger the
-            // full-height sidebar treatment (see SettingsWindowController);
-            // don't let its empty band inset the rows. Slide the list under
-            // it and keep a fixed clearance below the traffic lights with
-            // plain padding — NOT `safeAreaInset` or `contentMargins`: the
-            // former is itself container safe area (so `ignoresSafeArea`
-            // punches through it), the latter is a no-op on macOS `List`.
-            .padding(.top, 34)
-            .ignoresSafeArea(.container, edges: .top)
             .navigationSplitViewColumnWidth(180)
             // The sidebar is the window's whole navigation — collapsing it
             // would strand the user, so drop the toggle button.
             .toolbar(removing: .sidebarToggle)
+            // Keep at least one (invisible) toolbar item: with the sidebar
+            // toggle and title both removed the bridged toolbar would install
+            // nothing, and without a toolbar the sidebar surface stops below
+            // the titlebar instead of running up to wrap the traffic lights.
+            .toolbar {
+                ToolbarItem(placement: .automatic) {
+                    Color.clear.frame(width: 1, height: 1)
+                }
+            }
         } detail: {
             detailView
                 .modifier(DetailNavigationTitle(selectedTab: selectedTab))
                 .modifier(RemoveToolbarTitleOnTahoe())
-                // Same neutralization as the sidebar list: the bare toolbar's
-                // empty band pushed every pane down; reclaim it and keep a
-                // smaller fixed clearance from the window top.
-                .padding(.top, 35)
-                .ignoresSafeArea(.container, edges: .top)
         }
         // Honor a deep-link request (e.g. the translation gear) then clear it so
         // a later plain open lands on the last-selected tab.

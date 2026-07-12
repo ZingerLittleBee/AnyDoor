@@ -46,19 +46,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // material still paints a strip over the detail column.
         window.titlebarSeparatorStyle = .none
         window.titlebarAppearsTransparent = true
-        // A toolbar must exist for the split view to get the full-height
-        // sidebar treatment (sidebar reaching the window top, wrapping the
-        // traffic lights). SettingsView removes every SwiftUI toolbar item
-        // (sidebar toggle and title), so toolbar *bridging* would install
-        // nothing — set a bare AppKit toolbar directly instead.
-        let toolbar = NSToolbar(identifier: "dev.bybee.AnyDoor.settings.toolbar")
-        toolbar.showsBaselineSeparator = false
-        window.toolbar = toolbar
-        // Must stay .unified: with .unifiedCompact the titlebar renders as a
-        // separate bar and the sidebar surface no longer wraps the traffic
-        // lights. The empty band's height is neutralized in SettingsView
-        // (the sidebar list ignores the top safe area).
-        window.toolbarStyle = .unified
+        // Hide the title text (the AppKit half of the old scene's
+        // `.windowStyle(.hiddenTitleBar)`). Note this alone does NOT make the
+        // sidebar wrap the traffic lights — that treatment needs a toolbar,
+        // bridged from SwiftUI in `mountContentIfNeeded`. Do NOT attach a
+        // bare AppKit NSToolbar for it instead: unlike the bridged one, its
+        // empty band swallows every click in the top ~52pt, making controls
+        // placed there dead.
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
         window.isRestorable = false
@@ -103,6 +98,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let host = NSHostingView(rootView: SettingsRoot(container: container))
+        // Let SwiftUI install the (item-less) NavigationSplitView toolbar —
+        // its presence is what grants the full-height sidebar treatment that
+        // wraps the traffic lights, same as the Image Conversion window.
+        host.sceneBridgingOptions = [.toolbars]
         host.frame = window.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         window.contentView = host
