@@ -67,6 +67,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Become key as soon as shown so keyboard nav / search work without
         // waiting for a control to demand it.
         panel.becomesKeyOnlyIfNeeded = false
+        // The wall opens in card-navigation mode: never let AppKit's key-view
+        // loop pick the search field as the initial first responder when the
+        // panel becomes key (Tab is intercepted for category cycling, so the
+        // loop is unused anyway).
+        panel.autorecalculatesKeyViewLoop = false
         super.init(window: panel)
         panel.delegate = self
     }
@@ -134,6 +139,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // previously active app active, so it doesn't visibly lose focus while
         // the wall is up (Paste-style). Keyboard nav and search still work.
         window.makeKeyAndOrderFront(nil)
+        // Safety net: if becoming key still handed first responder to the
+        // search field through any path we didn't defeat above, take it back —
+        // the field reports the resign so state ends up in card navigation.
+        if window.firstResponder !== window { window.makeFirstResponder(nil) }
         isAnimating = true
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Self.animationDuration
@@ -224,6 +233,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         host.frame = window?.contentLayoutRect ?? .zero
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
+        // Setting contentView can (re)assign initialFirstResponder to the first
+        // focusable view — the search field — which would auto-focus it the
+        // moment the panel becomes key. The wall must open unfocused.
+        window?.initialFirstResponder = nil
         hostingView = host
     }
 
