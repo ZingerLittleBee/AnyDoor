@@ -35,6 +35,11 @@ struct SettingsView: View {
             detailView
                 .modifier(DetailNavigationTitle(selectedTab: selectedTab))
                 .modifier(RemoveToolbarTitleOnTahoe())
+                // Same neutralization as the sidebar list: the bare toolbar's
+                // empty band pushed every pane down; reclaim it and keep a
+                // smaller fixed clearance from the window top.
+                .padding(.top, 35)
+                .ignoresSafeArea(.container, edges: .top)
         }
         // Honor a deep-link request (e.g. the translation gear) then clear it so
         // a later plain open lands on the last-selected tab.
