@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [3.7.0] - 2026-07-12
+
 ### Added
 
 - Image Conversion: added a Target Size mode with bounded, cancellable
