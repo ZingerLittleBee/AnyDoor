@@ -54,11 +54,11 @@ struct WallSearchField: NSViewRepresentable {
         }
     }
 
-    static func dismantleNSView(_ field: NSTextField, coordinator: Coordinator) {
-        // The field is going away with the rebuilt host; drop the controller's
-        // dangling reference so it never makes a stale view first responder.
-        coordinator.registerField(nil)
-    }
+    // No dismantleNSView: the controller's reference is weak, so a torn-down
+    // field nils out on its own. An explicit `registerField(nil)` here is
+    // actively harmful — the old host is deallocated *after* the rebuilt host
+    // has registered its new field (deferred teardown), so it would clobber
+    // the fresh reference and leave ⌘F focusing nothing on every reopen.
 
     func makeCoordinator() -> Coordinator { Coordinator(state: state, registerField: registerField) }
 

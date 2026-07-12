@@ -499,7 +499,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // swallow Space/Esc meant for the query, so drop it (it's stale anyway —
         // searching is about to change the selection).
         if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
-        guard let field = searchField else { return }
+        guard let field = searchField, field.window === window else {
+            // The reference can lag a host rebuild; command focus through
+            // state and let updateNSView grab first responder on the next
+            // render instead of dropping the shortcut.
+            state.isSearchFocused = true
+            return
+        }
         window?.makeFirstResponder(field)
         let end = (field.stringValue as NSString).length
         field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
