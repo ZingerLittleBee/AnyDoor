@@ -38,6 +38,9 @@ versioning.
   workspace — standard chrome with a transparent title bar, the sidebar
   running full height around the traffic lights at their default position —
   and Esc closes it. It stays fixed-size with a non-collapsible sidebar.
+- Clipboard wall: search is focused explicitly instead of by typing — ⌘F
+  toggles the field (↓ also returns to the cards, keeping the query), and
+  the shortcut is shown in the hints footer.
 
 ### Removed
 
@@ -67,6 +70,10 @@ versioning.
   app-filtered ScreenCaptureKit stream) could not start their stream: an
   invisible helper window sat outside every display, which makes
   WindowServer mark the app uncapturable. The window now stays on screen.
+- Clipboard wall: fixed search-focus desyncs — clicking into the field could
+  leave keys acting on the cards (⌫ deleted the selected card), the wall
+  could open with the field pre-focused, and reopening the wall silently
+  broke keyboard search focus.
 
 ## [3.6.0] - 2026-07-10
 

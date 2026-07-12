@@ -2602,6 +2602,23 @@
         }
       }
     },
+    "clipboard.hint.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索"
+          }
+        }
+      }
+    },
     "clipboard.hint.select": {
       "extractionState": "manual",
       "localizations": {
