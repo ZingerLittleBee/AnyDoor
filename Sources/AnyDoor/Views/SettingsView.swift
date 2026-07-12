@@ -68,11 +68,23 @@ struct SettingsView: View {
         switch selectedTab {
         case .panel: PanelSettingsView()
         case .quicklinks: QuicklinksSettingsView()
-        case .clipboard: ClipboardSettingsView()
-        case .capture: CaptureSettingsView()
-        case .translation: TranslationSettingsView()
-        case .general: GeneralSettingsView()
+        // The grouped-Form panes reclaim the toolbar band's safe area: the
+        // band is invisible (background hidden) and the bridged toolbar
+        // passes clicks through, but its 52pt inset stacked on the Form's
+        // own top margin reads as a large blank strip. A fixed padding then
+        // aligns their first header with the ScrollView panes (panel /
+        // quicklinks), which already sit right and keep the inset.
+        case .clipboard: groupedFormPane { ClipboardSettingsView() }
+        case .capture: groupedFormPane { CaptureSettingsView() }
+        case .translation: groupedFormPane { TranslationSettingsView() }
+        case .general: groupedFormPane { GeneralSettingsView() }
         }
+    }
+
+    private func groupedFormPane(@ViewBuilder _ pane: () -> some View) -> some View {
+        pane()
+            .padding(.top, 20)
+            .ignoresSafeArea(.container, edges: .top)
     }
 }
 
