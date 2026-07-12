@@ -257,14 +257,21 @@ rm -f "$ZIP"
 ditto -c -k --keepParent "$APP" "$ZIP"
 
 log "Package $DMG"
-rm -f "$DMG"
-create-dmg \
-  --volname "AnyDoor $VER" \
-  --window-size 540 320 \
-  --icon-size 96 \
-  --app-drop-link 380 170 \
-  "$DMG" \
-  "$APP"
+package_dmg() {
+  rm -f "$DMG"
+  create-dmg "$@" \
+    --volname "AnyDoor $VER" \
+    --window-size 540 320 \
+    --icon-size 96 \
+    --app-drop-link 380 170 \
+    "$DMG" \
+    "$APP"
+}
+# create-dmg's Finder-styling AppleScript fails intermittently (Finder error
+# -10006). Retry once; if it still fails, drop the styling pass
+# (--skip-jenkins) rather than kill the release after the .app has already
+# been notarized — the DMG is merely less pretty.
+package_dmg || package_dmg || package_dmg --skip-jenkins
 codesign --force --sign "$SIGNING_IDENTITY" "$DMG"
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
