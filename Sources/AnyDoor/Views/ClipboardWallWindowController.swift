@@ -356,11 +356,16 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             state.requestOpenSourceMenu()
             return true
         }
-        // ⌘F focuses the search field, in both modes (a no-op re-focus while
-        // already in input mode is harmless).
+        // ⌘F toggles input mode: focus the search field from card navigation,
+        // and hand the keyboard back to the cards when pressed again while the
+        // field is focused — keeping the query (Esc is the one that clears).
         if event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
            event.charactersIgnoringModifiers?.lowercased() == "f" {
-            focusSearchField()
+            if state.isSearchFocused {
+                window.makeFirstResponder(nil)
+            } else {
+                focusSearchField()
+            }
             return true
         }
         let inputMode = state.isSearchFocused
