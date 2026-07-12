@@ -114,6 +114,7 @@ enum L10n {
         case clipboardHintDelete = "clipboard.hint.delete"
         case clipboardHintPastePlain = "clipboard.hint.pastePlain"
         case clipboardHintPreview = "clipboard.hint.preview"
+        case clipboardHintSearch = "clipboard.hint.search"
         case clipboardHintSelect = "clipboard.hint.select"
         case clipboardSearchPlaceholder = "clipboard.search.placeholder"
         case clipboardSourceAll = "clipboard.source.all"

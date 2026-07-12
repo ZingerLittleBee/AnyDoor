@@ -16,9 +16,9 @@ import SwiftUI
 /// unrelated view update would then yank focus back out of the field.
 struct WallSearchField: NSViewRepresentable {
     @Bindable var state: ClipboardWallState
-    /// Hands the underlying field back to the controller. Type-to-focus must
+    /// Hands the underlying field back to the controller. The ⌘F shortcut must
     /// make the field first responder *synchronously* inside the key monitor so
-    /// the triggering keystroke is delivered to it (IME included); that needs a
+    /// the very next keystroke can start an IME composition in it; that needs a
     /// direct reference the controller can act on.
     let registerField: (NSTextField?) -> Void
 
@@ -89,22 +89,6 @@ struct WallSearchField: NSViewRepresentable {
         func moveCaretToEnd(_ field: NSTextField) {
             let end = (field.stringValue as NSString).length
             field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
-        }
-
-        // Intercept the rightward caret move: once the caret sits at the end of a
-        // non-empty query, a further → hands control to card navigation — the
-        // resign flows back into `state.isSearchFocused` via the field's focus
-        // report, so no direct state write here. An empty query keeps focus so
-        // the field stays usable.
-        func control(_ control: NSControl, textView: NSTextView,
-                     doCommandBy selector: Selector) -> Bool {
-            guard selector == #selector(NSResponder.moveRight(_:)) else { return false }
-            let length = (textView.string as NSString).length
-            let selection = textView.selectedRange()
-            let caretAtEnd = selection.length == 0 && selection.location >= length
-            guard caretAtEnd, !state.query.isEmpty else { return false }
-            control.window?.makeFirstResponder(nil)
-            return true
         }
     }
 }

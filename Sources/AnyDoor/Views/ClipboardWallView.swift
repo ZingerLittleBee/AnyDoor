@@ -697,6 +697,7 @@ struct ClipboardWallView: View {
             hint("←→", .clipboardHintSelect)
             hint("⌘←→", .clipboardHintJumpEnds)
             hint("⇥", .clipboardHintCategory)
+            hint("⌘F", .clipboardHintSearch)
             hint("⌘K", .clipboardHintFilterSource)
             hint("⌥", .clipboardHintEditCategories)
             hint("↵", .clipboardHintCopy)

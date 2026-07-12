@@ -305,12 +305,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     }
 
     /// Route a key press by mode. In input mode the search field owns most keys
-    /// (text editing + IME), so we only intercept Esc and Enter and let the rest
-    /// fall through to the field; the field's own delegate hands focus back to
-    /// card navigation when → is pressed at the end of a non-empty query. In card
-    /// navigation mode arrows move the selection, Enter pastes, and typing a
-    /// printable character focuses the field (type-to-search). Returns whether
-    /// the event was consumed (a returned event keeps flowing to the field).
+    /// (text editing + IME), so we only intercept Esc, Enter, and ↓ (which hands
+    /// focus back to card navigation) and let the rest fall through to the
+    /// field. In card navigation mode arrows move the selection, Enter pastes,
+    /// and ⌘F focuses the search field — the wall never focuses it implicitly.
+    /// Returns whether the event was consumed (a returned event keeps flowing
+    /// to the field).
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
         // While the tag dialog overlay is up it owns the keyboard: Return
@@ -343,6 +343,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             state.requestOpenSourceMenu()
             return true
         }
+        // ⌘F focuses the search field, in both modes (a no-op re-focus while
+        // already in input mode is harmless).
+        if event.modifierFlags.intersection([.command, .control, .option, .shift]) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "f" {
+            focusSearchField()
+            return true
+        }
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit
@@ -369,10 +376,17 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             else { state.moveLeft() }
             syncTextPreview(); return true
         case 124:                                        // → / ⌘→ (jump to last)
-            if inputMode { return false }                // field delegate may exit
+            if inputMode { return false }                // move the text caret
             if event.modifierFlags.contains(.command) { state.moveToEnd() }
             else { state.moveRight() }
             syncTextPreview(); return true
+        case 125:                                        // ↓ — leave the search field
+            guard inputMode else { return false }
+            // Hand the keyboard back to card navigation. Resign synchronously
+            // (not via state) so the very next keystroke already routes to the
+            // cards; the field reports the focus change into state itself.
+            window.makeFirstResponder(nil)
+            return true
         case 49:                                         // space
             if inputMode { return false }                // insert a space
             togglePreview(); return true
@@ -397,7 +411,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             return true
         default:
             if inputMode { return false }                // field inserts / composes
-            return focusSearchOnType(event)
+            // No type-to-search: the field is only focused explicitly (⌘F or a
+            // click). Swallow plain printable keys so stray typing in card
+            // navigation doesn't fall through to the window and beep.
+            return isPlainPrintable(event)
         }
     }
 
@@ -458,29 +475,31 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         return nil
     }
 
-    /// Type-to-search from card navigation: a printable keystroke focuses the
-    /// search field and is then delivered to it (the event is returned, not
-    /// consumed, so the same press lands in the now-first-responder field —
-    /// keeping IME composition intact). Modifier combos and control keys are
-    /// ignored. The caret is parked at the end so an existing query is appended
-    /// to rather than replaced. `state.isSearchFocused` is not written here:
-    /// the field reports the focus change itself, so a refused
-    /// `makeFirstResponder` can no longer strand the state in input mode.
-    private func focusSearchOnType(_ event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .function])
-        guard modifiers.isEmpty,
-              let characters = event.characters, !characters.isEmpty,
-              characters.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }),
-              let field = searchField
-        else { return false }
+    /// ⌘F: enter input mode. Makes the field first responder synchronously (so
+    /// the very next keystroke can start an IME composition in it) with the
+    /// caret parked at the end, appending to any existing query.
+    /// `state.isSearchFocused` is not written here: the field reports the focus
+    /// change itself, so a refused `makeFirstResponder` can never strand the
+    /// state in input mode.
+    private func focusSearchField() {
         // Focus is moving into the search field; a floating preview would now
         // swallow Space/Esc meant for the query, so drop it (it's stale anyway —
         // searching is about to change the selection).
         if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
+        guard let field = searchField else { return }
         window?.makeFirstResponder(field)
         let end = (field.stringValue as NSString).length
         field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
-        return false
+    }
+
+    /// A bare printable keystroke (no ⌘/⌃/⌥/fn, no control characters) — the
+    /// kind that used to trigger type-to-search and now gets swallowed in card
+    /// navigation.
+    private func isPlainPrintable(_ event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .function])
+        guard modifiers.isEmpty,
+              let characters = event.characters, !characters.isEmpty else { return false }
+        return characters.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
     }
 
     private func paste(_ item: ClipboardHistoryItem, plain: Bool) {
