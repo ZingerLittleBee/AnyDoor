@@ -12,7 +12,7 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 应用切换、文本翻译、系统开关或一次性动作，整个流程不需要离开键盘。
 
 按一次快捷键打开或激活应用，再按一次隐藏。同样的肌肉记忆也可以用来静音、锁屏、
-取色、对屏幕区域 OCR、翻译选中文本或屏幕文字、截图与录屏——需要时还有剪贴板历史、
+取色、对屏幕区域 OCR、翻译选中文本或屏幕文字、转换与压缩图片、截图与录屏——需要时还有剪贴板历史、
 窗口布局、`/etc/hosts` 配置、外接显示器亮度、Hyper Key，以及 Spotlight 风格的
 命令面板。
 
@@ -96,6 +96,20 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 - 翻译历史会把同一次运行中各 provider 的结果合并成一组，支持收藏、复制、重新翻译、保留数量裁剪和清空。
 - 支持朗读原文或译文，也可开启自动朗读第一个成功结果。
 - 读取选中文本的剪贴板 fallback 会保留用户完整剪贴板内容，并避免 AnyDoor 的临时复制 / 恢复写入进入剪贴板历史。
+
+### 图片转换
+
+- 独立的工作区窗口——可绑定全局快捷键，打开时会把当前 Finder 选中的图片带进待转列表；
+  可折叠侧栏（⌘B）承载待转 / 转换记录切换，中间是原图 / 结果对比画布，底部是控制条。
+- 通过拖拽、⌘O 或 ⌘V（复制的图片文件或位图）添加图片。
+- **格式模式** 可转换为 PNG、JPEG、HEIC、AVIF、WebP、TIFF、GIF、BMP、PDF 或 ICO，
+  并提供精确的实时结果预览——与实际运行产出完全相同的字节，随质量滑杆实时更新。
+- **目标体积模式** 在保持源格式不变的前提下压缩到指定体积：JPEG / HEIC / AVIF / WebP
+  通过有界的质量搜索，PNG 通过缩小尺寸，缩小也始终作为所有格式的兜底手段
+  （最长边下限 640 px）。WebP 输出由内置的 libwebp 编码。已经小于目标的源文件
+  会原样直出（字节不变）；无法达到目标时显示明确的横幅，可选择「仍然保存」尽力结果。
+- 「全部转换」会先询问保存位置并记住所选文件夹；转换过程可随时取消（⌘.）。
+- 转换记录保存每次转换的格式、输出文件体积和时间，并提供「在访达中显示」与复制操作。
 
 ### 窗口布局
 
@@ -405,6 +419,7 @@ codesign，提交 Apple 公证，打包 DMG 和 zip，重新生成 Sparkle appca
 - [MonitorControl](https://github.com/MonitorControl/MonitorControl)（MIT）—— 其 `IntelDDC` 被内置用于 Intel Mac 上外接显示器的 DDC/CI 亮度控制（本身改编自 [@reitermarkus](https://github.com/reitermarkus) 的工作）。
 - [Sparkle](https://sparkle-project.org/)（MIT）—— 应用自动更新。
 - [AskForPermission](https://github.com/riko2chen/AskForPermission)（MIT）—— macOS 辅助功能权限助手。
+- [libwebp](https://chromium.googlesource.com/webm/libwebp)（BSD-3-Clause）—— 为图片转换提供 WebP 编码（经由 SDWebImage/libwebp-Xcode）；macOS 原生只能解码 WebP，无法编码。
 
 ## 许可证
 

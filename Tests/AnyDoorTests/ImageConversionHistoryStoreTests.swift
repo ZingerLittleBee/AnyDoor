@@ -15,7 +15,8 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
         return ImageConversionHistoryStore(modelContext: container.mainContext)
     }
 
-    private func record(_ store: ImageConversionHistoryStore, name: String, at date: Date) {
+    @discardableResult
+    private func record(_ store: ImageConversionHistoryStore, name: String, at date: Date) -> Bool {
         store.record(
             sourceName: name,
             sourceKind: .file,
@@ -37,12 +38,16 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
 
     func testRecordPersistsAllFields() throws {
         let store = try makeStore()
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data(repeating: 0xAB, count: 321).write(to: outputURL)
+        defer { try? FileManager.default.removeItem(at: outputURL) }
         store.record(
             sourceName: "Photo.png",
             sourceKind: .bitmap,
             targetFormat: .heic,
             qualityPercent: 70,
-            outputPath: "/tmp/out.heic",
+            outputPath: outputURL.path,
             createdAt: Date(timeIntervalSinceReferenceDate: 100)
         )
 
@@ -51,7 +56,42 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
         XCTAssertEqual(item.sourceKind, ImageConversionSourceKind.bitmap.rawValue)
         XCTAssertEqual(item.targetFormat, ImageConversionFormat.heic.rawValue)
         XCTAssertEqual(item.qualityPercent, 70)
-        XCTAssertEqual(item.outputPath, "/tmp/out.heic")
+        XCTAssertEqual(item.outputPath, outputURL.path)
+        XCTAssertEqual(item.outputByteCount, 321)
+        XCTAssertEqual(item.resolvedOutputByteCount, 321)
+    }
+
+    func testLegacyRecordResolvesCurrentOutputSizeForDisplay() throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try Data(repeating: 0xCD, count: 654).write(to: outputURL)
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let record = ImageConversionRecord(
+            sourceName: "legacy.png",
+            sourceKind: .file,
+            targetFormat: .jpeg,
+            qualityPercent: 85,
+            outputPath: outputURL.path
+        )
+
+        XCTAssertNil(record.outputByteCount)
+        XCTAssertEqual(record.resolvedOutputByteCount, 654)
+    }
+
+    func testRecordPersistsFirstFrameOnlyNotice() throws {
+        let store = try makeStore()
+
+        XCTAssertTrue(store.record(
+            sourceName: "animated.gif",
+            sourceKind: .file,
+            targetFormat: .png,
+            qualityPercent: 85,
+            outputPath: "/tmp/animated.png",
+            firstFrameOnly: true
+        ))
+
+        XCTAssertTrue(try XCTUnwrap(store.recent().first).firstFrameOnly)
     }
 
     func testTrimsToFiftyOnWriteKeepingNewest() throws {
@@ -89,7 +129,7 @@ final class ImageConversionHistoryStoreTests: XCTestCase {
 
     func testNoOpsWithoutContext() {
         let store = ImageConversionHistoryStore(modelContext: nil)
-        record(store, name: "a", at: Date(timeIntervalSinceReferenceDate: 100))
+        XCTAssertFalse(record(store, name: "a", at: Date(timeIntervalSinceReferenceDate: 100)))
         XCTAssertTrue(store.recent().isEmpty)
         XCTAssertEqual(store.revision, 0)
     }

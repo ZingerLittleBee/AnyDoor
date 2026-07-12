@@ -6,6 +6,68 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Image Conversion: added a Target Size mode with bounded, cancellable
+  compression and explicit Best-Effort saves, plus a workspace window with a
+  collapsible sidebar (⌘B) holding the basket/history switch, an
+  original/result comparison canvas, and an attached bottom control bar —
+  all under standard window chrome that blends the title bar into the canvas.
+- Image Conversion: Target Size now keeps the source format instead of
+  converting (the target-format picker is gone), and supports five formats —
+  JPEG, HEIC, AVIF, and WebP on a quality search, and PNG by scaling down
+  (its only lever). Scaling down is always available as a fallback (no
+  opt-in toggle), floored at a 640 px longest edge. WebP output is encoded
+  by the bundled libwebp (BSD-3-Clause), since macOS can decode but not
+  encode WebP. Formats without a compression strategy (GIF/TIFF/BMP/ICO)
+  are reported as unsupported per item.
+- Image Conversion: Format mode now shows an exact result preview for the
+  selected item — the same bytes a run would produce for the chosen format
+  and quality — updating live as the quality slider moves.
+- Image Conversion: Convert All first asks where to save the outputs and
+  remembers the last chosen folder; Save Anyway commits to the same place.
+  The conversion window is a normal window instead of an always-on-top
+  panel.
+- Image Conversion: history entries now show the output file size next to
+  the format; entries recorded before this version fall back to the output
+  file's current size on disk.
+
+### Changed
+
+- The Settings window now uses the same window type as the Image Conversion
+  workspace — standard chrome with a transparent title bar, the sidebar
+  running full height around the traffic lights at their default position —
+  and Esc closes it. It stays fixed-size with a non-collapsible sidebar.
+
+### Removed
+
+- The "New Quicklink" built-in (added in 3.6.0) is gone from the panel and
+  command palette; quicklinks are created in Settings → Quicklinks, which the
+  built-in merely opened.
+
+### Fixed
+
+- Image Conversion: hardened basket preflight, cancellation, frozen run state,
+  atomic output commits, candidate metadata validation, preview artifact
+  cleanup, and transactional history writes with visible persistence warnings.
+- Importing a settings backup now applies the Image Conversion preferences to
+  an already-open conversion window. The window previously kept its cached
+  values, so toggling any control wrote the stale state back over the
+  just-imported settings (this affected the format/quality keys synced since
+  3.5.0 as well as the new Target Size keys).
+- Target Size no longer inflates a source that already fits the target: a
+  metadata-clean source is emitted byte-identical (the only pass-through
+  possible for WebP/AVIF, which Image I/O cannot rewrite), and the lossless
+  rewrite now preserves EXIF orientation instead of being rejected by the
+  audit and falling back to a larger re-encode.
+- HEIC Target Size conversion no longer fails the metadata audit on macOS 26,
+  which surfaces HEIF structural tile tags (`tiff:TileLength`/`TileWidth`)
+  on every HEIC, including freshly encoded ones.
+- Screen-share and recording tools that capture AnyDoor specifically (an
+  app-filtered ScreenCaptureKit stream) could not start their stream: an
+  invisible helper window sat outside every display, which makes
+  WindowServer mark the app uncapturable. The window now stays on screen.
+
 ## [3.6.0] - 2026-07-10
 
 ### Added
@@ -1282,6 +1344,8 @@ versioning.
 
 ## [1.0.0] - 2026-05-23
 
+Initial release.
+
 ### Added
 
 - Auto-update via Sparkle 2 with assets published to GitHub Releases.
@@ -1294,7 +1358,3 @@ versioning.
   Liquid Glass effects on macOS 26+ only. OCR now uses the legacy
   VNRecognizeTextRequest path, and Settings falls back to the classic
   TabView/tabItem API.
-
-## [1.0.0] - 2026-05-23
-
-- Initial release.

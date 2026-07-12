@@ -17,3 +17,6 @@ DerivedData/
 /scripts/sparkle-bin/
 /scripts/release-archive/
 /video/out/
+
+# testloop scratch artifacts
+.testloop/

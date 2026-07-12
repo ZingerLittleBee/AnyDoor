@@ -36,8 +36,8 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
             .runBuiltin(.lockScreen)
         )
         XCTAssertEqual(
-            CommandPaletteCommitIntent.classify(.builtin(.newQuicklink)),
-            .runBuiltin(.newQuicklink)
+            CommandPaletteCommitIntent.classify(.builtin(.imageConversion)),
+            .runBuiltin(.imageConversion)
         )
     }
 

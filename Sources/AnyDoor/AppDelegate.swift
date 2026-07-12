@@ -14,7 +14,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var defaultsObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
-    private var settingsCaptureWindow: NSWindow?
     private var clipboardWatcher: ClipboardWatcher?
 
     /// Monotonic process-launch reference (seconds since boot). Captured at
@@ -63,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         AskForPermission.configure(appName: "AnyDoor")
+        SettingsWindowController.bootstrap(modelContainer: modelContainer)
 
         // Run migrations / seeding on the main context
         let context = modelContainer.mainContext
@@ -109,6 +109,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Image Conversion history: wire the shared container so completed
         // conversions get recorded from the conversion view model.
         ImageConversionHistoryStore.shared.configure(modelContainer: modelContainer)
+
+        // Sweep candidate session directories a previous process left behind:
+        // deinit/reset cleanup never runs on process exit or crash.
+        Task.detached(priority: .background) {
+            CandidateArtifactStore.cleanupStaleSessions()
+        }
 
         // Scheduled Shutdown: push state to the panel and re-arm any persisted
         // schedule (or cancel a deadline missed while the app was quit).
@@ -184,7 +190,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainThreadIsolation.run { menuBar?.syncFromPreferences() }
         }
         bootstrapUpdater()
-        installSettingsOpenerCapture()
 
         // First-run onboarding. Shows once on a clean install; afterwards it is
         // only reachable from Settings (the window opts out of state restoration
@@ -192,27 +197,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !OnboardingState.hasCompleted() {
             OnboardingWindowController.shared.show()
         }
-    }
 
-    /// Mount an off-screen SwiftUI view that resolves `\.openSettings` and
-    /// stores the action closure into `SettingsOpener.shared`, so AppKit code
-    /// (status item right-click menu) can open the Settings window through the
-    /// same path SwiftUI uses internally.
-    @MainActor
-    private func installSettingsOpenerCapture() {
-        let window = NSWindow(
-            contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.alphaValue = 0
-        window.ignoresMouseEvents = true
-        window.isExcludedFromWindowsMenu = true
-        window.collectionBehavior = [.stationary, .ignoresCycle, .fullScreenAuxiliary]
-        window.contentView = NSHostingView(rootView: SettingsOpenerCaptureView())
-        window.orderFrontRegardless()
-        settingsCaptureWindow = window
+        // Dev-only probe: auto-open a window at launch so UI work can be
+        // verified headlessly (screenshot loops) without clicking the status
+        // item. No effect unless the env var is set.
+        if ProcessInfo.processInfo.environment["ANYDOOR_OPEN_SETTINGS"] == "1" {
+            SettingsOpener.shared.tryOpen()
+        }
     }
 
     @MainActor

@@ -1,5 +1,4 @@
 import AppKit
-import SwiftUI
 
 /// Keeps the app in `.regular` activation policy while any "real" window
 /// (Settings, the Hosts editor) is open.
@@ -45,28 +44,4 @@ final class RegularWindowCoordinator {
     private func apply() {
         NSApp.setActivationPolicy(tracked.isEmpty ? .accessory : .regular)
     }
-}
-
-/// Registers the hosting SwiftUI window with `RegularWindowCoordinator`. Attach
-/// via `.background(RegularWindowRegistrar())` on a window's root view (e.g. the
-/// Settings scene) so the app adopts `.regular` policy while that window lives.
-struct RegularWindowRegistrar: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        // The view isn't attached to its window yet during makeNSView; defer the
-        // lookup to the next runloop tick.
-        DispatchQueue.main.async {
-            if let window = view.window {
-                // Opt this window out of state restoration so macOS does not
-                // reopen Settings on the next launch. Complements the app-level
-                // opt-out in `AppDelegate` for windows restored via a per-window
-                // restoration class rather than the application state coder.
-                window.isRestorable = false
-                RegularWindowCoordinator.shared.track(window)
-            }
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
 }

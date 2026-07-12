@@ -14,50 +14,36 @@ enum SettingsTab: String, Hashable, CaseIterable {
     case general
 }
 
-/// Bridges SwiftUI's `\.openSettings` environment action into AppKit code paths
-/// (status item context menu, dock reopen handler, etc.).
+/// Single entry point for opening the Settings window from any code path
+/// (status item context menu, dock reopen handler, deep links, ⌘,).
 ///
-/// `\.openSettings` is only resolvable from inside a SwiftUI view in an app that
-/// declares a `Settings` scene; sending `showSettingsWindow:` through the
-/// responder chain from an `NSMenu` action does not reach the SwiftUI-injected
-/// target. `AppDelegate` mounts an off-screen `NSHostingView` containing
-/// `SettingsOpenerCaptureView` once at launch, which records the action closure
-/// here on first appearance.
+/// The window is a manually managed NSWindow owned by
+/// `SettingsWindowController` — not a SwiftUI `Settings` scene — so opening it
+/// is a direct call; no `\.openSettings` capture is needed. This type remains
+/// the deep-link surface: `desiredTab` carries the pane a caller wants
+/// selected, observed by `SettingsView`.
 @MainActor
 @Observable
 final class SettingsOpener {
     static let shared = SettingsOpener()
-    @ObservationIgnored var open: (() -> Void)?
+
+    /// Presents the Settings window. Injectable so tests can observe an open
+    /// request without creating a real window.
+    @ObservationIgnored var open: @MainActor () -> Void = {
+        SettingsWindowController.shared.show()
+    }
 
     /// The tab `SettingsView` should select. `nil` leaves the last-open tab.
     /// Observed by `SettingsView`'s sidebar selection binding.
     var desiredTab: SettingsTab?
 
     func tryOpen() {
-        NSApp.activate(ignoringOtherApps: true)
-        if let open {
-            open()
-            return
-        }
-        // Fallback for the (rare) case the capture view hasn't appeared yet.
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        open()
     }
 
     /// Open Settings and deep-link to `tab`.
     func tryOpen(tab: SettingsTab) {
         desiredTab = tab
         tryOpen()
-    }
-}
-
-struct SettingsOpenerCaptureView: View {
-    @Environment(\.openSettings) private var openSettings
-
-    var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .onAppear {
-                SettingsOpener.shared.open = { openSettings() }
-            }
     }
 }

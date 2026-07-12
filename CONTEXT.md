@@ -28,22 +28,90 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 
 ## Image Conversion
 
-- **Image Conversion** (图片格式转换) — Re-encoding an image into a different
-  format. Always produces a *new* file; the source is never modified or
-  deleted. Not to be confused with **Calculator Conversion**.
+- **Image Conversion** (图片格式转换) — Producing a new encoded image file in a
+  chosen target format. It may re-encode or perform an eligible lossless
+  container rewrite; the source is never modified or deleted. Not to be
+  confused with **Calculator Conversion**.
+- **Conversion Mode** (转换模式) — The mutually exclusive Quality or Target
+  Size configuration applied to one Image Conversion run. Both modes share the
+  same Conversion Basket, output flow, and history.
+  _Avoid_: Compression Mode.
+- **Comparison Workspace** (对比工作区) — The dual-pane area in the Image
+  Conversion window that compares the selected image's original with an exact
+  result candidate. Its panes share a normalized field of view, and a matching
+  Conversion Run may reuse the candidate.
+- **Conversion Inspector** (转换检查器) — The persistent right-side panel beside
+  the Comparison Workspace that groups configuration, compatibility warnings,
+  selected-candidate metrics, and the run action.
+- **Conversion Sidebar** (转换侧边栏) — The left-side panel that switches
+  between the Conversion Basket and Conversion Record history; its selection
+  determines the content shown by the workspace and inspector.
+- **Conversion Preflight** (转换预检) — A lightweight compatibility pass over
+  the Conversion Basket that separates eligible items from unsupported ones
+  without producing output candidates.
+- **Conversion Run** (转换运行) — The cancellable batch operation over all
+  preflight-compatible basket items. Completed outputs remain valid when the
+  run stops, and hiding the window does not end it.
+- **Target Size Compression** (目标体积压缩) — Selecting a candidate under a
+  user-chosen file-size limit through an eligible lossless rewrite or the
+  versioned bounded-search policy. A run succeeds only when the result stays
+  within that limit.
+  _Avoid_: Image Compression, File Compression.
+- **Resize Fallback** (缩小尺寸兜底) — An opt-in Target Size Compression policy
+  that permits proportional pixel-dimension reduction when quality adjustment
+  alone cannot meet the Per-Output Limit.
+- **Quality Floor** (质量下限) — The format-specific lowest encoder quality
+  permitted by Target Size Compression at one pixel size; it is a calibrated
+  internal policy, not a user setting.
+  _Avoid_: Minimum Quality.
+- **Pixel Floor** (像素下限) — The internal minimum longest-edge dimension that
+  Resize Fallback may produce; it is not user-configurable.
+  _Avoid_: Minimum Size.
+- **Best-Effort Result** (最小候选) — The smallest result found when Target Size
+  Compression cannot meet the Per-Output Limit under the active policy. It is
+  retained as a candidate the user may explicitly save or copy; it is never
+  written to disk automatically and never counts as target success.
+- **Pass-Through Result** (直通结果) — A new output whose compressed image data
+  is copied without re-encoding while the Target Size metadata policy is
+  applied. It is successful only when that policy can be applied losslessly and
+  the rewritten output still satisfies the Per-Output Limit.
+- **Display-Critical Metadata** (显示必需元数据) — Image information required to
+  render the intended appearance, including orientation, color profiles, and
+  supported HDR data. Target Size Compression preserves it where the Lossy
+  Target supports it.
+- **Display Downgrade** (显示能力降级) — A V1 conversion whose selected target
+  cannot preserve source HDR/gain-map content and therefore produces SDR; the
+  downgrade is visible and retained in its Conversion Record.
+- **Ancillary Metadata** (附加元数据) — Information that is not required to
+  render the intended appearance, including GPS, capture-device details,
+  embedded thumbnails, and comments. Target Size Compression removes it.
+  _Avoid_: Optional Metadata.
+- **Transparency Background** (透明背景色) — The explicit solid color used to
+  composite source alpha when the selected target cannot encode it.
+- **Per-Output Limit** (单文件体积上限) — The file-size limit applied
+  independently to every output in a Target Size Compression run; batch items
+  share the value but never pool their byte budgets.
+- **Lossy Target** (有损目标格式) — An encoder-available JPEG, HEIC, or AVIF
+  output whose quality can be varied for Target Size Compression. Target Size
+  mode offers only Lossy Targets; other formats remain available in Quality
+  mode only.
+  _Avoid_: Compressible Format.
+- **Multi-Image Source** (多图源文件) — An image container with more than one
+  frame or page. Quality mode converts the first image with a visible
+  first-frame-only notice and recorded fact; Target Size rejects it and never
+  emits a partial first-image result.
 - **Calculator Conversion** (换算) — Unit / currency / time-zone conversion
   performed inline in the command palette. Predates Image Conversion; the two
   share no concepts despite the similar English word.
 - **Conversion Basket** (待转列表) — The set of pending images shown in the
   Image Conversion window. Images enter via Finder selection echo, drag &
   drop, paste, or the clipboard-history context menu; each can be removed
-  individually before converting. One conversion run applies a single target
-  format and quality to the whole basket.
+  individually before converting. One Conversion Run uses one shared
+  configuration; only successful items leave the basket afterward.
 - **Target Format Whitelist** (目标格式白名单) — The curated set of target
   formats offered to the user (PNG, JPEG, HEIC, AVIF, TIFF, GIF, BMP, PDF,
   ICO), filtered at runtime by what the system encoder actually supports.
   Formats requiring third-party encoders (e.g. WebP output) are out of scope.
 - **Conversion Record** (转换记录) — A history entry describing one completed
-  conversion (source, target format, quality, output location). Capped in
-  number; the output file itself is not owned by the record and may be
-  deleted by the user independently.
+  Image Conversion output and its user-relevant configuration/outcome. Records
+  do not own their files and are created only when an output exists.

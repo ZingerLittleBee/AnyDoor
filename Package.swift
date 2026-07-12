@@ -14,6 +14,12 @@ let package = Package(
             url: "https://github.com/sparkle-project/Sparkle",
             exact: "2.9.2"
         ),
+        // WebP encoder (BSD-3-Clause). ImageIO decodes WebP but cannot encode
+        // it, so Target Size's same-format WebP path needs the bundled codec.
+        .package(
+            url: "https://github.com/SDWebImage/libwebp-Xcode.git",
+            from: "1.5.0"
+        ),
     ],
     targets: [
         .plugin(
@@ -26,6 +32,7 @@ let package = Package(
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "libwebp", package: "libwebp-Xcode"),
                 "HostsHelperShared",
             ],
             resources: [

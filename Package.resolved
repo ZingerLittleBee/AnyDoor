@@ -1,5 +1,5 @@
 {
-  "originHash" : "e0a24088e9ff3379ec91d6957ad82556a1ad6a9f3792ac383588f537cf24c45f",
+  "originHash" : "f0ceba53f0c22d009e3d5e9dba9595a086b3bc599d048293854a0fbc36c57639",
   "pins" : [
     {
       "identity" : "askforpermission",
@@ -7,6 +7,15 @@
       "location" : "https://github.com/riko2chen/AskForPermission.git",
       "state" : {
         "revision" : "91f4dde33f9f5dd58a89d72f3f05aa4b149a1f0e"
+      }
+    },
+    {
+      "identity" : "libwebp-xcode",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/SDWebImage/libwebp-Xcode.git",
+      "state" : {
+        "revision" : "0d60654eeefd5d7d2bef3835804892c40225e8b2",
+        "version" : "1.5.0"
       }
     },
     {

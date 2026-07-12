@@ -32,6 +32,18 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertTrue(CGImageDestinationFinalize(destination))
     }
 
+    private func writeAnimatedGIF(to url: URL) throws {
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL,
+            ImageConversionFormat.gif.typeIdentifier as CFString,
+            2,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, makePNGImage(), nil)
+        CGImageDestinationAddImage(destination, makePNGImage(), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+    }
+
     private func pngData() throws -> Data {
         let data = NSMutableData()
         let destination = try XCTUnwrap(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
@@ -57,8 +69,33 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertEqual(summary.converted, 1)
         XCTAssertEqual(summary.skipped, 1)
         XCTAssertEqual(summary.outputURLs, [output])
+        XCTAssertEqual(summary.outputs.map(\.inputIndex), [0])
         XCTAssertTrue(FileManager.default.fileExists(atPath: output.path))
         XCTAssertEqual(try Data(contentsOf: image), original)
+    }
+
+    func testConvertAllRoutesEveryOutputToAnExplicitDirectory() async throws {
+        let sourceDir = try tempDirectory()
+        let outputDir = try tempDirectory()
+        let image = sourceDir.appendingPathComponent("Photo.png")
+        try writePNG(to: image)
+
+        let summary = await ImageConversionSession().convertAll(
+            inputs: [.file(image), .bitmap(try pngData())],
+            target: .jpeg,
+            outputDirectory: outputDir,
+            downloadsDirectory: sourceDir
+        )
+
+        XCTAssertEqual(summary.converted, 2)
+        XCTAssertTrue(
+            summary.outputURLs.allSatisfy { $0.deletingLastPathComponent() == outputDir },
+            "both file and bitmap outputs must land in the chosen folder, got \(summary.outputURLs)"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: sourceDir.appendingPathComponent("Photo.jpg").path),
+            "nothing may be written beside the source when a directory was chosen"
+        )
     }
 
     func testConvertAllSuffixesRepeatedRunsWithoutOverwritingPriorOutput() async throws {
@@ -74,6 +111,31 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertEqual(second.outputURLs.map(\.lastPathComponent), ["Photo 2.jpg"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Photo.jpg").path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Photo 2.jpg").path))
+    }
+
+    func testConvertAllNeverReplacesAPreexistingOutput() async throws {
+        let dir = try tempDirectory()
+        let image = dir.appendingPathComponent("Photo.png")
+        let occupied = dir.appendingPathComponent("Photo.jpg")
+        try writePNG(to: image)
+        let originalOutput = Data("preexisting output".utf8)
+        try originalOutput.write(to: occupied)
+
+        let summary = await ImageConversionSession().convertAll(fileURLs: [image], target: .jpeg)
+
+        XCTAssertEqual(summary.outputURLs.map(\.lastPathComponent), ["Photo 2.jpg"])
+        XCTAssertEqual(try Data(contentsOf: occupied), originalOutput)
+    }
+
+    func testQualityPreflightRecordsMultiFrameInputAsFirstFrameOnly() async throws {
+        let dir = try tempDirectory()
+        let source = dir.appendingPathComponent("animated.gif")
+        try writeAnimatedGIF(to: source)
+
+        let summary = await ImageConversionSession().convertAll(fileURLs: [source], target: .png)
+
+        XCTAssertEqual(summary.converted, 1)
+        XCTAssertTrue(try XCTUnwrap(summary.outputs.first).firstFrameOnly)
     }
 
     func testConvertAllWritesBitmapOutputsToInjectedDownloadsWithTimestampAndCollisionSuffix() async throws {
@@ -93,6 +155,7 @@ final class ImageConversionSessionTests: XCTestCase {
 
         XCTAssertEqual(summary.converted, 2)
         XCTAssertEqual(summary.skipped, 0)
+        XCTAssertEqual(summary.outputs.map(\.inputIndex), [0, 1])
         XCTAssertEqual(
             summary.outputURLs.map(\.lastPathComponent),
             ["Clipboard 2024-07-03 09.46.40.jpg", "Clipboard 2024-07-03 09.46.40 2.jpg"]
@@ -115,6 +178,40 @@ final class ImageConversionSessionTests: XCTestCase {
         XCTAssertEqual(summary.converted, 0)
         XCTAssertEqual(summary.skipped, 1)
         XCTAssertTrue(summary.outputURLs.isEmpty)
+    }
+
+    func testOutputsRetainTheirInputIndicesWhenEarlierItemsAreSkipped() async throws {
+        let downloads = try tempDirectory()
+        let bitmap = try pngData()
+
+        let summary = await ImageConversionSession().convertAll(
+            inputs: [.bitmap(Data("not an image".utf8)), .bitmap(bitmap)],
+            target: .jpeg,
+            downloadsDirectory: downloads
+        )
+
+        XCTAssertEqual(summary.converted, 1)
+        XCTAssertEqual(summary.skipped, 1)
+        XCTAssertEqual(summary.outputs.map(\.inputIndex), [1])
+    }
+
+    func testCancellationStopsBeforeCompletingTheRemainingBatch() async throws {
+        let downloads = try tempDirectory()
+        let bitmap = try pngData()
+        let inputs = [ImageConversionInput](repeating: .bitmap(bitmap), count: 100)
+
+        let task = Task {
+            await ImageConversionSession().convertAll(
+                inputs: inputs,
+                target: .jpeg,
+                downloadsDirectory: downloads
+            )
+        }
+        task.cancel()
+        let summary = await task.value
+
+        XCTAssertLessThan(summary.converted, inputs.count)
+        XCTAssertEqual(summary.converted, summary.outputs.count)
     }
 
     /// A noisy image (rather than a flat fill) so JPEG's lossy quantization

@@ -214,6 +214,7 @@ final class BackupService {
         ScheduledShutdownService.shared.reloadFromDefaults()
         CaptureSettings.shared.reloadFromDefaults()
         TranslationSettings.shared.reloadFromDefaults()
+        ImageConversionWindowController.reconcilePreferencesAfterImport()
         ClipboardTagStore.shared.reload()
         // An import may remove tag definitions, leaving items tagged with ids
         // that no longer exist. Sweep those ghost ids and reclaim storage.
