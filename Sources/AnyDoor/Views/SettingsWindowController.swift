@@ -16,6 +16,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private static let contentSize = NSSize(width: 680, height: 512)
     private static let frameName = "settings.windowFrame"
 
+    /// Handed over by `AppDelegate` at launch. Do NOT read it from
+    /// `NSApp.delegate`: under `@NSApplicationDelegateAdaptor` that is
+    /// SwiftUI's own delegate wrapper, and the cast to `AppDelegate` fails —
+    /// which would leave the window mounting nothing (a bare empty shell).
+    private static var modelContainer: ModelContainer?
+
+    static func bootstrap(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
     private var keyMonitor: Any?
 
     private init() {
@@ -74,9 +84,12 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     private func mountContentIfNeeded() {
         guard let window,
-              window.contentView == nil || !(window.contentView is NSHostingView<SettingsRoot>),
-              let appDelegate = NSApp.delegate as? AppDelegate else { return }
-        let host = NSHostingView(rootView: SettingsRoot(container: appDelegate.modelContainer))
+              window.contentView == nil || !(window.contentView is NSHostingView<SettingsRoot>) else { return }
+        guard let container = Self.modelContainer else {
+            assertionFailure("SettingsWindowController.bootstrap was not called before show()")
+            return
+        }
+        let host = NSHostingView(rootView: SettingsRoot(container: container))
         host.frame = window.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         window.contentView = host

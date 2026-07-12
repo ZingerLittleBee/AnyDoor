@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         AskForPermission.configure(appName: "AnyDoor")
+        SettingsWindowController.bootstrap(modelContainer: modelContainer)
 
         // Run migrations / seeding on the main context
         let context = modelContainer.mainContext
