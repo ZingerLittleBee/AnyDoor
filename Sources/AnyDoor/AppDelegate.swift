@@ -200,14 +200,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Mount an off-screen SwiftUI view that resolves `\.openSettings` and
+    /// Mount an invisible SwiftUI view that resolves `\.openSettings` and
     /// stores the action closure into `SettingsOpener.shared`, so AppKit code
     /// (status item right-click menu) can open the Settings window through the
     /// same path SwiftUI uses internally.
     @MainActor
     private func installSettingsOpenerCapture() {
+        // Keep the transparent anchor inside a real display. WindowServer marks
+        // an ordered window outside every display as shareable, but an
+        // app-filtered ScreenCaptureKit stream then fails to start for AnyDoor.
         let window = NSWindow(
-            contentRect: NSRect(x: -10_000, y: -10_000, width: 1, height: 1),
+            contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false

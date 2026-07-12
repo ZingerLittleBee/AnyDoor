@@ -20,7 +20,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
 /// `\.openSettings` is only resolvable from inside a SwiftUI view in an app that
 /// declares a `Settings` scene; sending `showSettingsWindow:` through the
 /// responder chain from an `NSMenu` action does not reach the SwiftUI-injected
-/// target. `AppDelegate` mounts an off-screen `NSHostingView` containing
+/// target. `AppDelegate` mounts an invisible `NSHostingView` containing
 /// `SettingsOpenerCaptureView` once at launch, which records the action closure
 /// here on first appearance.
 @MainActor
