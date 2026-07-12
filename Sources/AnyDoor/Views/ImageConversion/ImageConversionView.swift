@@ -383,7 +383,7 @@ struct ImageConversionView: View {
                 }
             }
             .labelsHidden()
-            .fixedSize()
+            .frame(width: modeSwitchWidth ?? Self.leadingControlWidth)
 
             if model.isQualityAdjustable {
                 HStack(spacing: 8) {
