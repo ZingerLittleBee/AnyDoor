@@ -81,6 +81,14 @@ final class ImageConversionRecord {
     /// The output file's URL, from its stored absolute path.
     var outputURL: URL { URL(fileURLWithPath: outputPath) }
 
+    /// Prefer the immutable metric captured at conversion time. Legacy Quality
+    /// records predate that field, so read the current file size as a display
+    /// fallback when the output still exists.
+    var resolvedOutputByteCount: Int64? {
+        if let outputByteCount { return outputByteCount }
+        return (try? outputURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+    }
+
     /// The conversion mode, decoded from `modeRaw`; an unknown raw string falls
     /// back to `.quality` so a stray value can never leave the UI unbound.
     var mode: ImageConversionMode { ImageConversionMode(rawValue: modeRaw) ?? .quality }

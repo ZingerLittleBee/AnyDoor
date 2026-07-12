@@ -882,6 +882,12 @@ private struct ImageConversionHistoryRow: View {
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Text(record.targetFormat.uppercased())
+                    if let outputByteCount = record.resolvedOutputByteCount {
+                        Text(ByteCountFormatter.string(
+                            fromByteCount: outputByteCount,
+                            countStyle: .file
+                        ))
+                    }
                     Text(record.createdAt, style: .relative)
                         .lineLimit(1)
                 }

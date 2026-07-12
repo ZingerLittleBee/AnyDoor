@@ -57,6 +57,9 @@ final class ImageConversionHistoryStore {
             createdAt: createdAt
         )
         record.firstFrameOnly = firstFrameOnly
+        record.outputByteCount = (try? record.outputURL.resourceValues(
+            forKeys: [.fileSizeKey]
+        ).fileSize).map(Int64.init)
         modelContext.insert(record)
         return saveRecordAndTrim(using: modelContext)
     }
