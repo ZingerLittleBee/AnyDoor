@@ -32,6 +32,13 @@ versioning.
   the format; entries recorded before this version fall back to the output
   file's current size on disk.
 
+### Changed
+
+- The Settings window now uses the same window type as the Image Conversion
+  workspace — standard chrome with a transparent title bar, the sidebar
+  running full height around the traffic lights at their default position —
+  and Esc closes it. It stays fixed-size with a non-collapsible sidebar.
+
 ### Fixed
 
 - Image Conversion: hardened basket preflight, cancellation, frozen run state,

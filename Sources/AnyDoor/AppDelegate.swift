@@ -14,7 +14,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var defaultsObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
-    private var settingsCaptureWindow: NSWindow?
     private var clipboardWatcher: ClipboardWatcher?
 
     /// Monotonic process-launch reference (seconds since boot). Captured at
@@ -190,7 +189,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainThreadIsolation.run { menuBar?.syncFromPreferences() }
         }
         bootstrapUpdater()
-        installSettingsOpenerCapture()
 
         // First-run onboarding. Shows once on a clean install; afterwards it is
         // only reachable from Settings (the window opts out of state restoration
@@ -198,30 +196,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !OnboardingState.hasCompleted() {
             OnboardingWindowController.shared.show()
         }
-    }
-
-    /// Mount an invisible SwiftUI view that resolves `\.openSettings` and
-    /// stores the action closure into `SettingsOpener.shared`, so AppKit code
-    /// (status item right-click menu) can open the Settings window through the
-    /// same path SwiftUI uses internally.
-    @MainActor
-    private func installSettingsOpenerCapture() {
-        // Keep the transparent anchor inside a real display. WindowServer marks
-        // an ordered window outside every display as shareable, but an
-        // app-filtered ScreenCaptureKit stream then fails to start for AnyDoor.
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.alphaValue = 0
-        window.ignoresMouseEvents = true
-        window.isExcludedFromWindowsMenu = true
-        window.collectionBehavior = [.stationary, .ignoresCycle, .fullScreenAuxiliary]
-        window.contentView = NSHostingView(rootView: SettingsOpenerCaptureView())
-        window.orderFrontRegardless()
-        settingsCaptureWindow = window
     }
 
     @MainActor

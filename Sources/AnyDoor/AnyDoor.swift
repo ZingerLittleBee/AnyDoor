@@ -7,23 +7,27 @@ struct AnyDoorApp: App {
 
     var body: some Scene {
         // The menu bar item is owned by `MenuBarController` (see AppDelegate),
-        // not a SwiftUI `MenuBarExtra`. Only the Settings scene lives here.
+        // not a SwiftUI `MenuBarExtra`. The Settings window is owned by
+        // `SettingsWindowController` (a manually managed NSWindow, the same
+        // window type as the Image Conversion workspace), NOT this scene.
         //
-        // State restoration for this window is disabled in `AppDelegate`
-        // (`application(_:shouldRestoreApplicationState:)`) so macOS never
-        // reopens Settings when the app auto-launches at login — it is a
-        // menu-bar utility, the window should appear only on explicit request.
+        // This stub only exists because a SwiftUI `App` must declare at least
+        // one scene, and every alternative misbehaves for a menu-bar utility:
+        // `WindowGroup` opens a window at launch, and `MenuBarExtra` with
+        // `isInserted: false` infinite-loops the scene graph on macOS 26. The
+        // stub is unreachable — the standard "Settings…" menu item (the only
+        // thing that could open it) is replaced below to route to the real
+        // window controller.
         Settings {
-            SettingsView()
-                .modelContainer(appDelegate.modelContainer)
-                .environment(appDelegate.localizationManager)
-                .environment(\.locale, appDelegate.localizationManager.effectiveLocale)
+            EmptyView()
         }
-        // System Settings-style chrome: no title-bar strip — the sidebar spans
-        // the window's full height and the traffic lights sit on top of it.
-        // Setting the AppKit flags directly on the NSWindow does NOT achieve
-        // this (SwiftUI still reserves the title-bar safe area); only the
-        // scene-level window style extends the layout into that region.
-        .windowStyle(.hiddenTitleBar)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button(L(.panelFooterSettings)) {
+                    SettingsOpener.shared.tryOpen()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
     }
 }
