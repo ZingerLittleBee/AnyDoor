@@ -90,6 +90,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let host = NSHostingView(rootView: SettingsRoot(container: container))
+        // Bridge the NavigationSplitView toolbar onto this manually managed
+        // window. Without a toolbar the split view gets no full-height-sidebar
+        // treatment and lays out below the titlebar instead of wrapping the
+        // traffic lights.
+        host.sceneBridgingOptions = [.toolbars]
         host.frame = window.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         window.contentView = host
