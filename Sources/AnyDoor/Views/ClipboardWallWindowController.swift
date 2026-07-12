@@ -350,8 +350,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 // Nothing to step back through: close outright, in either mode.
                 dismiss(restoreFocus: true)
             } else if inputMode {
-                // A non-empty query clears first, leaving the field focused.
-                state.query = ""; searchField?.stringValue = ""
+                // A non-empty query clears first, leaving the field focused;
+                // WallSearchField syncs the field text from state.query.
+                state.query = ""
             } else {
                 // Card navigation over a search → return focus to edit/clear it.
                 state.isSearchFocused = true
@@ -462,7 +463,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// consumed, so the same press lands in the now-first-responder field —
     /// keeping IME composition intact). Modifier combos and control keys are
     /// ignored. The caret is parked at the end so an existing query is appended
-    /// to rather than replaced.
+    /// to rather than replaced. `state.isSearchFocused` is not written here:
+    /// the field reports the focus change itself, so a refused
+    /// `makeFirstResponder` can no longer strand the state in input mode.
     private func focusSearchOnType(_ event: NSEvent) -> Bool {
         let modifiers = event.modifierFlags.intersection([.command, .control, .option, .function])
         guard modifiers.isEmpty,
@@ -477,7 +480,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         window?.makeFirstResponder(field)
         let end = (field.stringValue as NSString).length
         field.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
-        state.isSearchFocused = true
         return false
     }
 

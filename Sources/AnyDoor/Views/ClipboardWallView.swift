@@ -181,6 +181,11 @@ struct ClipboardWallView: View {
             .frame(width: 160)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            // Clicking the box's chrome (the magnifier / padding, outside the
+            // NSTextField itself) focuses the field too; the field consumes
+            // clicks on itself before this gesture sees them.
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .onTapGesture { state.isSearchFocused = true }
         }
     }
 
@@ -708,8 +713,12 @@ struct ClipboardWallView: View {
     }
 
     /// Select on the first tap; treat a quick second tap on the same card as a
-    /// double-click and paste.
+    /// double-click and paste. Tapping a card also hands the keyboard back to
+    /// card navigation — a card is not focusable, so without this the search
+    /// field would keep the caret and arrows would move it instead of the
+    /// selection.
     private func handleTap(index: Int, item: ClipboardHistoryItem) {
+        state.isSearchFocused = false
         let now = Date()
         if let last = lastTap, last.index == index,
            now.timeIntervalSince(last.date) <= NSEvent.doubleClickInterval {

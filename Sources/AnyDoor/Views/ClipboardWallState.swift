@@ -61,8 +61,11 @@ final class ClipboardWallState {
     var query: String = ""
     /// Whether the search field currently owns keyboard focus (input mode). When
     /// false the wall is in card-navigation mode: arrow keys move the selection,
-    /// Enter pastes, etc. The window controller flips this to switch modes and
-    /// the `WallSearchField` follows it to grab or release first responder.
+    /// Enter pastes, etc. Two-way: the controller and views write it to command
+    /// a mode switch (WallSearchField grabs/releases first responder to match),
+    /// and the field reports real focus changes (a mouse click into it, the
+    /// editor resigning) back into it — so the flag can never diverge from
+    /// where keys actually land.
     var isSearchFocused: Bool = false
     private(set) var items: [ClipboardHistoryItem] = []
     private(set) var selectedIndex: Int = 0

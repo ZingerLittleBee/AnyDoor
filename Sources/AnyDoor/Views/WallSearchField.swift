@@ -4,9 +4,16 @@ import SwiftUI
 /// A real, focusable search field for the clipboard wall, backed by an
 /// `NSTextField` so an input method editor can compose CJK text — the previous
 /// type-to-search key monitor only saw raw key codes and could never start an
-/// IME composition. Focus is driven by `state.isSearchFocused`: the window
-/// controller decides which mode the wall is in and this view follows, grabbing
-/// or releasing first responder to match.
+/// IME composition.
+///
+/// Focus model: AppKit's first-responder status is the ground truth and
+/// `state.isSearchFocused` mirrors it. The field reports every real focus
+/// transition (a mouse click into the field, the editor resigning) through
+/// `FocusReportingTextField`, and `updateNSView` applies commanded state the
+/// other way only when the two disagree. Keeping a one-way commanded flag here
+/// used to let a mouse click desync the mode — the caret sat in the field while
+/// the controller still routed ⌫/space/arrows to card navigation, and the next
+/// unrelated view update would then yank focus back out of the field.
 struct WallSearchField: NSViewRepresentable {
     @Bindable var state: ClipboardWallState
     /// Hands the underlying field back to the controller. Type-to-focus must
@@ -16,7 +23,7 @@ struct WallSearchField: NSViewRepresentable {
     let registerField: (NSTextField?) -> Void
 
     func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
+        let field = FocusReportingTextField()
         field.delegate = context.coordinator
         field.isBordered = false
         field.drawsBackground = false
@@ -27,15 +34,17 @@ struct WallSearchField: NSViewRepresentable {
         field.usesSingleLineMode = true
         field.cell?.wraps = false
         field.cell?.isScrollable = true
+        let coordinator = context.coordinator
+        field.onFocusChange = { focused in coordinator.focusDidChange(focused) }
         registerField(field)
         return field
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
         if field.stringValue != state.query { field.stringValue = state.query }
-        // Follow the controller's focus mode. Placing the caret at the end on
-        // focus (rather than NSTextField's default select-all) keeps the query
-        // intact when the next keystroke arrives.
+        // Reconcile commanded focus with reality. Placing the caret at the end
+        // on focus (rather than NSTextField's default select-all) keeps the
+        // query intact when the next keystroke arrives.
         let editing = field.currentEditor() != nil
         if state.isSearchFocused, !editing {
             field.window?.makeFirstResponder(field)
@@ -63,6 +72,15 @@ struct WallSearchField: NSViewRepresentable {
             self.registerField = registerField
         }
 
+        /// Mirror the field's real focus into state so the controller's mode
+        /// routing always matches where keys actually land. The equality guard
+        /// also keeps the reconciliation in `updateNSView` from writing state
+        /// mid-render: by the time it commands a focus change, state already
+        /// holds the value this callback would set.
+        func focusDidChange(_ focused: Bool) {
+            if state.isSearchFocused != focused { state.isSearchFocused = focused }
+        }
+
         func controlTextDidChange(_ obj: Notification) {
             guard let field = obj.object as? NSTextField else { return }
             state.query = field.stringValue
@@ -74,8 +92,10 @@ struct WallSearchField: NSViewRepresentable {
         }
 
         // Intercept the rightward caret move: once the caret sits at the end of a
-        // non-empty query, a further → hands control to card navigation (focus
-        // leaves the field). An empty query keeps focus so the field stays usable.
+        // non-empty query, a further → hands control to card navigation — the
+        // resign flows back into `state.isSearchFocused` via the field's focus
+        // report, so no direct state write here. An empty query keeps focus so
+        // the field stays usable.
         func control(_ control: NSControl, textView: NSTextView,
                      doCommandBy selector: Selector) -> Bool {
             guard selector == #selector(NSResponder.moveRight(_:)) else { return false }
@@ -83,9 +103,29 @@ struct WallSearchField: NSViewRepresentable {
             let selection = textView.selectedRange()
             let caretAtEnd = selection.length == 0 && selection.location >= length
             guard caretAtEnd, !state.query.isEmpty else { return false }
-            state.isSearchFocused = false
             control.window?.makeFirstResponder(nil)
             return true
         }
+    }
+}
+
+/// An `NSTextField` that reports its real focus lifecycle. `becomeFirstResponder`
+/// covers every way focus arrives (the controller's `makeFirstResponder` AND a
+/// direct mouse click into the field); the end of editing is reported from
+/// `textDidEndEditing` because NSTextField hands first-responder status to the
+/// shared field editor immediately, which makes `resignFirstResponder` useless
+/// as a "focus left" signal.
+final class FocusReportingTextField: NSTextField {
+    var onFocusChange: ((Bool) -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        if accepted { onFocusChange?(true) }
+        return accepted
+    }
+
+    override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+        onFocusChange?(false)
     }
 }
