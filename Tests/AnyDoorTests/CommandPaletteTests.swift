@@ -72,37 +72,6 @@ final class CommandPaletteTests: XCTestCase {
     }
 
     @MainActor
-    func testNewQuicklinkBuiltinMatchesChineseNewQuery() throws {
-        let previousLanguage = LocalizationManager.shared.preference
-        defer { LocalizationManager.shared.preference = previousLanguage }
-        LocalizationManager.shared.preference = .zh
-
-        let entry = PanelEntry(
-            id: PanelEntry.id(for: .builtin(.newQuicklink)),
-            source: .builtin(.newQuicklink),
-            displayOrder: BuiltinItem.newQuicklink.defaultOrder,
-            isVisible: true,
-            hotkey: nil,
-            title: "",
-            subtitle: nil,
-            symbol: BuiltinItem.newQuicklink.symbol,
-            kind: BuiltinItem.newQuicklink.kind,
-            toggleState: nil,
-            permission: .notRequired
-        )
-        let state = CommandPaletteState(
-            sections: [CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [entry])],
-            hyperFlags: 0
-        )
-        state.query = "新建"
-
-        let result = try XCTUnwrap(state.flatEntries.first)
-        XCTAssertEqual(result.source, .builtin(.newQuicklink))
-        XCTAssertEqual(result.localizedTitle(), "新建快速入口")
-        XCTAssertEqual(CommandPaletteCommitIntent.classify(result.source), .runBuiltin(.newQuicklink))
-    }
-
-    @MainActor
     func testPortKillToastMentionsProcessAndPortOnSuccess() {
         let previousLanguage = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .zh

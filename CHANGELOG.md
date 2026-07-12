@@ -39,6 +39,12 @@ versioning.
   running full height around the traffic lights at their default position —
   and Esc closes it. It stays fixed-size with a non-collapsible sidebar.
 
+### Removed
+
+- The "New Quicklink" built-in (added in 3.6.0) is gone from the panel and
+  command palette; quicklinks are created in Settings → Quicklinks, which the
+  built-in merely opened.
+
 ### Fixed
 
 - Image Conversion: hardened basket preflight, cancellation, frozen run state,

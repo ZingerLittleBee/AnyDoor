@@ -31,7 +31,6 @@ enum L10n {
         case builtinKeyboardLock = "builtin.keyboardLock"
         case builtinLockScreen = "builtin.lockScreen"
         case builtinMuteAudio = "builtin.muteAudio"
-        case builtinNewQuicklink = "builtin.newQuicklink"
         case builtinOCR = "builtin.ocr"
         case builtinPickColor = "builtin.pickColor"
         case builtinPortManager = "builtin.portManager"

@@ -545,23 +545,6 @@
         }
       }
     },
-    "builtin.newQuicklink": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "New Quicklink"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "新建快速入口"
-          }
-        }
-      }
-    },
     "builtin.ocr": {
       "extractionState": "manual",
       "localizations": {
