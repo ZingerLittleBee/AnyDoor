@@ -9,9 +9,10 @@ versioning.
 ### Added
 
 - Image Conversion: added a Target Size mode with bounded, cancellable
-  compression and explicit Best-Effort saves, plus a three-column workspace
-  for basket/history navigation, original/result comparison, and conversion
-  settings.
+  compression and explicit Best-Effort saves, plus a workspace window with a
+  collapsible sidebar (⌘B) holding the basket/history switch, an
+  original/result comparison canvas, and an attached bottom control bar —
+  all under standard window chrome that blends the title bar into the canvas.
 - Image Conversion: Target Size now keeps the source format instead of
   converting (the target-format picker is gone), and supports five formats —
   JPEG, HEIC, AVIF, and WebP on a quality search, and PNG by scaling down
@@ -27,6 +28,9 @@ versioning.
   remembers the last chosen folder; Save Anyway commits to the same place.
   The conversion window is a normal window instead of an always-on-top
   panel.
+- Image Conversion: history entries now show the output file size next to
+  the format; entries recorded before this version fall back to the output
+  file's current size on disk.
 
 ### Fixed
 
@@ -46,6 +50,10 @@ versioning.
 - HEIC Target Size conversion no longer fails the metadata audit on macOS 26,
   which surfaces HEIF structural tile tags (`tiff:TileLength`/`TileWidth`)
   on every HEIC, including freshly encoded ones.
+- Screen-share and recording tools that capture AnyDoor specifically (an
+  app-filtered ScreenCaptureKit stream) could not start their stream: an
+  invisible helper window sat outside every display, which makes
+  WindowServer mark the app uncapturable. The window now stays on screen.
 
 ## [3.6.0] - 2026-07-10
 

@@ -14,7 +14,8 @@ or run one-off actions — all without leaving the keyboard.
 
 Press a shortcut to open an app. Press it again to hide it. Use the same
 muscle memory to mute audio, lock the screen, sample a color, OCR a screen
-region, translate selected or on-screen text, or capture and record the screen
+region, translate selected or on-screen text, convert and compress images, or
+capture and record the screen
 — and reach for clipboard history, window layouts, `/etc/hosts` profiles,
 external-display brightness, a Hyper Key, and a Spotlight-style command palette
 when you need them.
@@ -119,6 +120,28 @@ when you need them.
   auto-speak for the first successful result.
 - The selected-text fallback preserves the user's full pasteboard contents and
   suppresses AnyDoor's temporary copy/restore writes from clipboard history.
+
+### Image conversion
+
+- A dedicated workspace window — bindable to a hotkey, which also echoes the
+  current Finder selection into the basket — with a collapsible sidebar (⌘B)
+  holding the pending basket and conversion history, an original/result
+  comparison canvas, and a bottom control bar.
+- Add images by drag & drop, ⌘O, or ⌘V (copied image files or a copied
+  bitmap).
+- **Format mode** converts to PNG, JPEG, HEIC, AVIF, WebP, TIFF, GIF, BMP,
+  PDF, or ICO, with an exact live result preview — the same bytes a run would
+  produce — updating as the quality slider moves.
+- **Target Size mode** compresses to a byte budget while keeping the source
+  format: JPEG / HEIC / AVIF / WebP via a bounded quality search, PNG by
+  scaling down, with scaling always available as a fallback (floored at a
+  640 px longest edge). WebP output is encoded by the bundled libwebp.
+  Already-fitting sources pass through byte-identical; an unreachable target
+  shows an explicit banner with a best-effort Save Anyway.
+- Convert All asks where to save the outputs and remembers the folder; runs
+  are cancellable (⌘.).
+- History records every conversion with its format, output file size, and
+  time, plus reveal-in-Finder and copy actions.
 
 ### Window layout
 
@@ -473,6 +496,7 @@ Bundled third-party code; full license texts in [THIRD-PARTY-LICENSES.md](THIRD-
 - [MonitorControl](https://github.com/MonitorControl/MonitorControl) (MIT) — its `IntelDDC` is vendored for DDC/CI brightness control of external displays on Intel Macs (itself adapted from [@reitermarkus](https://github.com/reitermarkus)'s work).
 - [Sparkle](https://sparkle-project.org/) (MIT) — application auto-update.
 - [AskForPermission](https://github.com/riko2chen/AskForPermission) (MIT) — macOS accessibility permission helper.
+- [libwebp](https://chromium.googlesource.com/webm/libwebp) (BSD-3-Clause) — WebP encoding for Image Conversion (via SDWebImage/libwebp-Xcode); macOS decodes WebP natively but cannot encode it.
 
 ## License
 
