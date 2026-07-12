@@ -197,6 +197,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !OnboardingState.hasCompleted() {
             OnboardingWindowController.shared.show()
         }
+
+        // Dev-only probe: auto-open a window at launch so UI work can be
+        // verified headlessly (screenshot loops) without clicking the status
+        // item. No effect unless the env var is set.
+        if ProcessInfo.processInfo.environment["ANYDOOR_OPEN_SETTINGS"] == "1" {
+            SettingsOpener.shared.tryOpen()
+        }
     }
 
     @MainActor

@@ -46,6 +46,19 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // material still paints a strip over the detail column.
         window.titlebarSeparatorStyle = .none
         window.titlebarAppearsTransparent = true
+        // A toolbar must exist for the split view to get the full-height
+        // sidebar treatment (sidebar reaching the window top, wrapping the
+        // traffic lights). SettingsView removes every SwiftUI toolbar item
+        // (sidebar toggle and title), so toolbar *bridging* would install
+        // nothing — set a bare AppKit toolbar directly instead.
+        let toolbar = NSToolbar(identifier: "dev.bybee.AnyDoor.settings.toolbar")
+        toolbar.showsBaselineSeparator = false
+        window.toolbar = toolbar
+        // Must stay .unified: with .unifiedCompact the titlebar renders as a
+        // separate bar and the sidebar surface no longer wraps the traffic
+        // lights. The empty band's height is neutralized in SettingsView
+        // (the sidebar list ignores the top safe area).
+        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
         window.isRestorable = false
@@ -90,11 +103,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             return
         }
         let host = NSHostingView(rootView: SettingsRoot(container: container))
-        // Bridge the NavigationSplitView toolbar onto this manually managed
-        // window. Without a toolbar the split view gets no full-height-sidebar
-        // treatment and lays out below the titlebar instead of wrapping the
-        // traffic lights.
-        host.sceneBridgingOptions = [.toolbars]
         host.frame = window.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         window.contentView = host

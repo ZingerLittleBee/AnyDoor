@@ -18,6 +18,15 @@ struct SettingsView: View {
                 }
             }
             .listStyle(.sidebar)
+            // The window's bare unified toolbar exists only to trigger the
+            // full-height sidebar treatment (see SettingsWindowController);
+            // don't let its empty band inset the rows. Slide the list under
+            // it and keep a fixed clearance below the traffic lights with
+            // plain padding — NOT `safeAreaInset` or `contentMargins`: the
+            // former is itself container safe area (so `ignoresSafeArea`
+            // punches through it), the latter is a no-op on macOS `List`.
+            .padding(.top, 34)
+            .ignoresSafeArea(.container, edges: .top)
             .navigationSplitViewColumnWidth(180)
             // The sidebar is the window's whole navigation — collapsing it
             // would strand the user, so drop the toggle button.
