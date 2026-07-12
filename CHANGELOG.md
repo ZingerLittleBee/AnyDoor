@@ -38,6 +38,11 @@ versioning.
   workspace — standard chrome with a transparent title bar, the sidebar
   running full height around the traffic lights at their default position —
   and Esc closes it. It stays fixed-size with a non-collapsible sidebar.
+- Clipboard wall: search is now focused explicitly instead of by typing —
+  ⌘F (shown in the hints footer) or a click focuses the field, ⌘F again or ↓
+  hands the keyboard back to the cards keeping the query, and stray typing in
+  card navigation no longer starts a search. Esc remains the staged exit:
+  clear the query first, then close.
 
 ### Removed
 
@@ -67,6 +72,15 @@ versioning.
   app-filtered ScreenCaptureKit stream) could not start their stream: an
   invisible helper window sat outside every display, which makes
   WindowServer mark the app uncapturable. The window now stays on screen.
+- Clipboard wall: the search field's focus flag could diverge from where
+  keys actually landed. Clicking into the field left the wall routing keys
+  to card navigation (⌫ deleted the selected card while the caret sat in
+  the field) and any view refresh could then yank the caret away; the flag
+  now mirrors the field's real first-responder state. The wall also opens
+  reliably unfocused instead of letting AppKit hand initial focus to the
+  field, and reopening the wall no longer severs the controller's field
+  reference (which silently killed keyboard search focus on every open
+  after the first).
 
 ## [3.6.0] - 2026-07-10
 
