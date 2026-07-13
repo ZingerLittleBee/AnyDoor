@@ -669,15 +669,7 @@ struct CommandPalettePicker: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let onRefreshRates: () -> Void
-    /// Reports whether the hosting panel is still on screen. Used to keep the
-    /// focus-recovery loop below from resurrecting a palette that was just
-    /// dismissed (see the `onChange(of: searchFocused)` note).
-    let isPresented: () -> Bool
-
-    @FocusState private var searchFocused: Bool
-    // Counts consecutive failed attempts to reclaim focus. Reset whenever focus
-    // is actually regained; used to break the re-focus loop (see below).
-    @State private var refocusStrikes = 0
+    let registerSearchAnchor: (CommandPaletteSearchAnchorView, String, String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -709,9 +701,7 @@ struct CommandPalettePicker: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // Liquid Glass on macOS 26+; .thickMaterial on earlier systems.
         // Driving the whole palette from one surface keeps the search field,
-        // rows, and section headers visually consistent — on macOS 26 the
-        // TextField picks up the system glass treatment automatically, which
-        // used to clash with the per-row .thickMaterial below.
+        // rows, and section headers visually consistent.
         .adaptivePanelSurface(cornerRadius: 16)
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -723,35 +713,10 @@ struct CommandPalettePicker: View {
                 confirmCard(pending.confirmation)
             }
         }
-        .onAppear {
-            DispatchQueue.main.async { searchFocused = true }
-        }
-        .onChange(of: searchFocused) { _, focused in
-            // Keep the search field as the keyboard target — re-focus if a stray
-            // hit-test in the panel chrome steals it. Two guards on the recovery:
-            //
-            //  1. Bail after a few rapid strikes. Reasserting focus every runloop
-            //     tick pins a CPU core when the system refuses first-responder
-            //     (focus desync while the panel sits on another Space, etc.).
-            //     Regaining focus resets the counter (mirrors SpotlightAppPicker).
-            //  2. Only re-focus while the panel is still on screen. Esc/cancel
-            //     closes the window, which drops first-responder and fires this
-            //     handler; without this guard the deferred `searchFocused = true`
-            //     would make the field first responder again and reorder the just
-            //     -closed panel back in. Esc is the only dismiss path where the
-            //     app stays frontmost with no other window to take focus, so it
-            //     was the one that visibly "wouldn't close".
-            if focused {
-                refocusStrikes = 0
-                return
-            }
-            guard refocusStrikes < 3 else { return }
-            refocusStrikes += 1
-            DispatchQueue.main.async {
-                guard isPresented() else { return }
-                searchFocused = true
-            }
-        }
+        // NSHostingView inherits the full-size panel's 32-point titlebar safe
+        // area. Apply this outside the complete surface so the material and its
+        // content expand together instead of moving only the inner stack.
+        .ignoresSafeArea()
         .onChange(of: state.query) { _, _ in
             // Space trigger for the dev-tool scope badge (Tab is handled by the
             // window controller's key monitor). No-ops once a scope is active.
@@ -857,29 +822,24 @@ struct CommandPalettePicker: View {
                     .font(.system(size: 22, weight: .regular))
                     .foregroundStyle(.secondary)
             }
-            TextField(searchFieldPlaceholder, text: $state.query)
-                .textFieldStyle(.plain)
-                .font(.system(size: 22, weight: .regular))
-                .focused($searchFocused)
-                .onSubmit {
-                    // While a confirmation card is up the key monitor already
-                    // swallows Return; guard here too so onSubmit can never
-                    // commit a list row behind the card.
-                    guard !state.isConfirming else { return }
-                    if let entry = state.commitSelection() {
-                        onSelect(entry)
-                    }
-                }
-            if !state.query.isEmpty {
-                Button {
-                    state.query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
+            CommandPaletteSearchAnchor(
+                text: state.query,
+                placeholder: searchFieldPlaceholder,
+                registerAnchor: registerSearchAnchor
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: 27)
+            Button {
+                state.query = ""
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.tertiary)
             }
+            .buttonStyle(.plain)
+            .opacity(state.query.isEmpty ? 0 : 1)
+            .allowsHitTesting(!state.query.isEmpty)
+            .accessibilityHidden(state.query.isEmpty)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
