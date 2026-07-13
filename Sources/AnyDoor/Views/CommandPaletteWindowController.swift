@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate {
     static let shared = CommandPaletteWindowController()
+    private static let paletteControlKeyCodes: Set<UInt16> = [125, 126, 36, 76, 48, 51, 53]
 
     private var state: CommandPaletteState?
     private let activationGate = CommandPaletteActivationGate()
@@ -17,7 +18,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// a fresh `/Applications` walk; empty only before the very first scan returns.
     private var cachedApps: [InstalledApp] = []
 
-    private init() {
+    static func makePanel() -> NSPanel {
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 680, height: 460),
             styleMask: [.titled, .fullSizeContentView],
@@ -29,17 +30,25 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.isMovableByWindowBackground = true
-        panel.backgroundColor = .clear
+        panel.isMovableByWindowBackground = false
+        // A fully clear NSPanel loses the active NSTextField's I-beam cursor on
+        // macOS 26. A visually imperceptible alpha keeps AppKit's cursor rects
+        // intact without changing the transparent rounded-window appearance.
+        panel.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.001)
         panel.isOpaque = false
         panel.hasShadow = true
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.isReleasedWhenClosed = false
-        panel.isFloatingPanel = true
+        panel.isFloatingPanel = false
         panel.becomesKeyOnlyIfNeeded = false
         panel.hidesOnDeactivate = false
+        panel.isRestorable = false
+        return panel
+    }
 
+    private init() {
+        let panel = Self.makePanel()
         super.init(window: panel)
         panel.delegate = self
     }
@@ -390,6 +399,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             }
             return true
         }
+
+        guard Self.paletteControlKeyCodes.contains(keyCode) else { return false }
 
         // While the input method is composing (marked text — e.g. typing
         // Chinese pinyin), every key belongs to the IME: Return commits the

@@ -825,16 +825,17 @@ struct CommandPalettePicker: View {
             )
             .frame(maxWidth: .infinity)
             .frame(height: 27)
-            if !state.query.isEmpty {
-                Button {
-                    state.query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 16))
-                        .foregroundStyle(.tertiary)
-                }
-                .buttonStyle(.plain)
+            Button {
+                state.query = ""
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.tertiary)
             }
+            .buttonStyle(.plain)
+            .opacity(state.query.isEmpty ? 0 : 1)
+            .allowsHitTesting(!state.query.isEmpty)
+            .accessibilityHidden(state.query.isEmpty)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 16)

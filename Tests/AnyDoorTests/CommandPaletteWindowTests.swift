@@ -125,6 +125,16 @@ final class CommandPaletteWindowTests: XCTestCase {
         XCTAssertFalse(gate.isWaiting)
     }
 
+    func testPanelUsesCursorSafeFixedConfiguration() {
+        let panel = CommandPaletteWindowController.makePanel()
+
+        XCTAssertFalse(panel.isMovableByWindowBackground)
+        XCTAssertFalse(panel.isFloatingPanel)
+        XCTAssertFalse(panel.isRestorable)
+        XCTAssertGreaterThan(panel.backgroundColor?.alphaComponent ?? 0, 0)
+        XCTAssertLessThan(panel.backgroundColor?.alphaComponent ?? 1, 0.01)
+    }
+
     func testSearchFieldUsesAStableNativeSingleLineControl() {
         let coordinator = CommandPaletteSearchField.Coordinator()
         let field = CommandPaletteSearchField.make(coordinator: coordinator)
