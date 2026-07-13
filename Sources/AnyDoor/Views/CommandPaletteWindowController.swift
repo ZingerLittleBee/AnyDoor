@@ -47,6 +47,21 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         return panel
     }
 
+    static func makeContentContainer(
+        for window: NSWindow,
+        hostingView: NSView,
+        searchField: NSView
+    ) -> NSView {
+        let fullContentBounds = window.contentView?.bounds
+            ?? NSRect(origin: .zero, size: window.frame.size)
+        let contentView = NSView(frame: fullContentBounds)
+        hostingView.frame = contentView.bounds
+        hostingView.autoresizingMask = [.width, .height]
+        contentView.addSubview(hostingView)
+        contentView.addSubview(searchField, positioned: .above, relativeTo: hostingView)
+        return contentView
+    }
+
     private init() {
         let panel = Self.makePanel()
         super.init(window: panel)
@@ -97,6 +112,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func show(initialMode: InitialMode = .root) {
+        guard let window else { return }
         activationGate.cancel()
         removeKeyMonitor()
         searchCoordinator.onChange = { _ in }
@@ -141,13 +157,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         )
 
         let host = NSHostingView(rootView: view)
-        let contentSize = window?.contentLayoutRect.size ?? .zero
-        let contentView = NSView(frame: NSRect(origin: .zero, size: contentSize))
-        host.frame = contentView.bounds
-        host.autoresizingMask = [.width, .height]
-        contentView.addSubview(host)
-        contentView.addSubview(searchField, positioned: .above, relativeTo: host)
-        window?.contentView = contentView
+        let contentView = Self.makeContentContainer(
+            for: window,
+            hostingView: host,
+            searchField: searchField
+        )
+        window.contentView = contentView
         host.layoutSubtreeIfNeeded()
         layoutSearchField()
 

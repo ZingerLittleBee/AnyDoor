@@ -135,6 +135,24 @@ final class CommandPaletteWindowTests: XCTestCase {
         XCTAssertLessThan(panel.backgroundColor?.alphaComponent ?? 1, 0.01)
     }
 
+    func testPaletteContentCoversFullSizeTitlebar() throws {
+        let panel = CommandPaletteWindowController.makePanel()
+        let fullContentBounds = try XCTUnwrap(panel.contentView?.bounds)
+        let hostingView = NSView()
+        let searchField = NSTextField()
+
+        XCTAssertGreaterThan(fullContentBounds.height, panel.contentLayoutRect.height)
+
+        let container = CommandPaletteWindowController.makeContentContainer(
+            for: panel,
+            hostingView: hostingView,
+            searchField: searchField
+        )
+
+        XCTAssertEqual(container.frame, fullContentBounds)
+        XCTAssertEqual(hostingView.frame, container.bounds)
+    }
+
     func testSearchFieldUsesAStableNativeSingleLineControl() {
         let coordinator = CommandPaletteSearchField.Coordinator()
         let field = CommandPaletteSearchField.make(coordinator: coordinator)
