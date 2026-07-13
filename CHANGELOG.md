@@ -8,9 +8,9 @@ versioning.
 
 ### Added
 
-- Command Palette: remembers its last position across openings and app
-  launches, while falling back to the default placement when its display is
-  unavailable.
+- Command Palette now opens where you last left it, including after restarting
+  AnyDoor. If that monitor is no longer connected, the palette returns to its
+  default position.
 
 ## [3.7.0] - 2026-07-12
 
