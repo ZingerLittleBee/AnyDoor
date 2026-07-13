@@ -6,7 +6,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     static let shared = CommandPaletteWindowController()
 
     private var state: CommandPaletteState?
+    private let activationGate = CommandPaletteActivationGate()
+    private let searchCoordinator = CommandPaletteSearchField.Coordinator()
+    private var searchField: NSTextField?
+    private weak var searchAnchor: CommandPaletteSearchAnchorView?
     private var keyMonitor: Any?
+    private var isClosing = false
     /// Last installed-apps scan, refreshed off the main actor on every open. Seeds
     /// the Applications section instantly so summoning the palette never blocks on
     /// a fresh `/Applications` walk; empty only before the very first scan returns.
@@ -46,7 +51,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
     /// Toggle visibility: hide if already showing, otherwise show fresh.
     func toggle() {
-        if window?.isVisible == true {
+        if window?.isVisible == true || activationGate.isWaiting {
             close()
         } else {
             show()
@@ -83,6 +88,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func show(initialMode: InitialMode = .root) {
+        activationGate.cancel()
+        removeKeyMonitor()
+        searchCoordinator.onChange = { _ in }
+        searchAnchor?.onLayout = nil
+        searchField = nil
+        searchAnchor = nil
+
         let sections = collectSections(installedApps: cachedApps)
         prewarmIcons(for: sections)
         let hyperFlags = HyperKeyService.shared.hyperModifierFlags
@@ -93,6 +105,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         )
         initialMode.apply(to: pickerState)
         self.state = pickerState
+        searchCoordinator.onChange = { [weak pickerState] text in
+            guard let pickerState, pickerState.query != text else { return }
+            pickerState.query = text
+        }
+        let searchField = CommandPaletteSearchField.make(coordinator: searchCoordinator)
+        self.searchField = searchField
 
         let view = CommandPalettePicker(
             state: pickerState,
@@ -108,29 +126,36 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onRefreshRates: { [weak self] in
                 self?.refreshRates()
             },
-            isPresented: { [weak self] in
-                self?.window?.isVisible == true
+            registerSearchAnchor: { [weak self] anchor, text, placeholder in
+                self?.registerSearchAnchor(anchor, text: text, placeholder: placeholder)
             }
         )
 
         let host = NSHostingView(rootView: view)
-        host.frame = window?.contentLayoutRect ?? .zero
+        let contentSize = window?.contentLayoutRect.size ?? .zero
+        let contentView = NSView(frame: NSRect(origin: .zero, size: contentSize))
+        host.frame = contentView.bounds
         host.autoresizingMask = [.width, .height]
-        window?.contentView = host
+        contentView.addSubview(host)
+        contentView.addSubview(searchField, positioned: .above, relativeTo: host)
+        window?.contentView = contentView
+        host.layoutSubtreeIfNeeded()
+        layoutSearchField()
 
-        installKeyMonitor()
         positionAtTopCenter()
-        // Activate the app BEFORE keying the window. Summoned from a global
-        // hotkey, this `.accessory` app is still in the background, so
-        // `makeKeyAndOrderFront` cannot make the panel the key window until the
-        // app is frontmost. With no key window, SwiftUI's @FocusState can't
-        // hold first responder on the search field, and the onAppear/onChange
-        // re-focus path oscillates every runloop tick (visible flicker, no
-        // typing) until the user clicks the field. Activating first lets the
-        // deferred focus assignment land on an already-key window.
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        activationGate.presentWhenActive(prepareForActivation: { [weak self, weak pickerState] in
+            guard let self, let pickerState, self.state === pickerState else { return }
+            self.window?.orderFrontRegardless()
+        }) { [weak self, weak pickerState] in
+            guard let self, let pickerState, self.state === pickerState else { return }
+            self.installKeyMonitor()
+            self.window?.makeKeyAndOrderFront(nil)
+            self.focusSearchField()
+            self.refreshSections(for: pickerState)
+        }
+    }
 
+    private func refreshSections(for pickerState: CommandPaletteState) {
         // After the window is on screen, refresh state that the synchronous
         // seed above can't supply, then repopulate the sections in place (the
         // @Observable state re-renders). Two pieces, folded into one task so the
@@ -157,6 +182,41 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             )
             self.prewarmIcons(for: refreshed)
         }
+    }
+
+    private func registerSearchAnchor(
+        _ anchor: CommandPaletteSearchAnchorView,
+        text: String,
+        placeholder: String
+    ) {
+        searchAnchor = anchor
+        guard let searchField else { return }
+        searchField.placeholderString = placeholder
+        if searchField.stringValue != text {
+            searchField.stringValue = text
+            if let editor = searchField.currentEditor() as? NSTextView {
+                editor.string = text
+                editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+            }
+        }
+        layoutSearchField()
+    }
+
+    private func layoutSearchField() {
+        guard let window, let contentView = window.contentView,
+              let searchAnchor, let searchField, searchAnchor.window === window
+        else { return }
+        let frame = searchAnchor.convert(searchAnchor.bounds, to: contentView)
+        guard frame.width > 0, frame.height > 0 else { return }
+        guard searchField.frame != frame else { return }
+        searchField.frame = frame
+    }
+
+    private func focusSearchField() {
+        guard let window, window.isKeyWindow, let searchField else { return }
+        guard window.makeFirstResponder(searchField) else { return }
+        let end = (searchField.stringValue as NSString).length
+        searchField.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
     }
 
     /// Warm the icon cache for every app-backed row off the main thread, so the
@@ -489,9 +549,26 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
-    func windowWillClose(_ notification: Notification) {
+    override func close() {
+        guard !isClosing else { return }
+        isClosing = true
+        resetPresentation()
+        super.close()
+        isClosing = false
+    }
+
+    private func resetPresentation() {
+        activationGate.cancel()
         removeKeyMonitor()
+        searchCoordinator.onChange = { _ in }
+        searchAnchor?.onLayout = nil
+        searchField = nil
+        searchAnchor = nil
         state = nil
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        resetPresentation()
     }
 
     /// Close when focus moves away (Spotlight UX).
