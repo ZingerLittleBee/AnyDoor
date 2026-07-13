@@ -13,6 +13,61 @@ final class CommandPaletteWindowTests: XCTestCase {
         var text = ""
     }
 
+    private func withWindowPlacement(
+        _ body: (CommandPaletteWindowPlacement) throws -> Void
+    ) throws {
+        let suiteName = "CommandPaletteWindowPlacementTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        try body(CommandPaletteWindowPlacement(defaults: defaults))
+    }
+
+    func testWindowPlacementRoundTripsSavedOrigin() throws {
+        try withWindowPlacement { placement in
+            placement.save(origin: NSPoint(x: 321.5, y: -84.25))
+
+            XCTAssertEqual(placement.savedOrigin(), NSPoint(x: 321.5, y: -84.25))
+        }
+    }
+
+    func testWindowPlacementRestoresCurrentSizeOnSecondaryDisplay() throws {
+        try withWindowPlacement { placement in
+            placement.save(origin: NSPoint(x: 2_100, y: 120))
+
+            let restored = placement.restoredFrame(
+                windowSize: NSSize(width: 680, height: 460),
+                visibleFrames: [
+                    NSRect(x: 0, y: 0, width: 1_920, height: 1_080),
+                    NSRect(x: 1_920, y: 0, width: 1_920, height: 1_080),
+                ]
+            )
+
+            XCTAssertEqual(restored, NSRect(x: 2_100, y: 120, width: 680, height: 460))
+        }
+    }
+
+    func testWindowPlacementRejectsPositionOutsideConnectedDisplays() throws {
+        try withWindowPlacement { placement in
+            placement.save(origin: NSPoint(x: 5_000, y: 5_000))
+
+            let restored = placement.restoredFrame(
+                windowSize: NSSize(width: 680, height: 460),
+                visibleFrames: [NSRect(x: 0, y: 0, width: 1_920, height: 1_080)]
+            )
+
+            XCTAssertNil(restored)
+        }
+    }
+
+    func testWindowPlacementUsesExistingTopCenterDefault() {
+        let frame = CommandPaletteWindowPlacement.defaultFrame(
+            windowSize: NSSize(width: 680, height: 460),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_440, height: 900)
+        )
+
+        XCTAssertEqual(frame, NSRect(x: 380, y: 242, width: 680, height: 460))
+    }
+
     func testInactiveApplicationWaitsForActivationBeforePresenting() {
         let center = NotificationCenter()
         let application = NSObject()

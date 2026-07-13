@@ -8,6 +8,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
     private var state: CommandPaletteState?
     private let activationGate = CommandPaletteActivationGate()
+    private let windowPlacement = CommandPaletteWindowPlacement()
     private let searchCoordinator = CommandPaletteSearchField.Coordinator()
     private var searchField: NSTextField?
     private weak var searchAnchor: CommandPaletteSearchAnchorView?
@@ -166,7 +167,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         host.layoutSubtreeIfNeeded()
         layoutSearchField()
 
-        positionAtTopCenter()
+        restorePosition()
         activationGate.presentWhenActive(prepareForActivation: { [weak self, weak pickerState] in
             guard let self, let pickerState, self.state === pickerState else { return }
             self.window?.orderFrontRegardless()
@@ -372,14 +373,31 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         return sections
     }
 
-    private func positionAtTopCenter() {
-        guard let window, let screen = NSScreen.main else { return }
-        let visible = screen.visibleFrame
-        let size = window.frame.size
-        let x = visible.midX - size.width / 2
-        let topInset = visible.height * 0.22
-        let y = visible.maxY - size.height - topInset
-        window.setFrameOrigin(NSPoint(x: x, y: y))
+    private func restorePosition() {
+        guard let window else { return }
+        let screens = NSScreen.screens
+        let windowSize = window.frame.size
+
+        if let restoredFrame = windowPlacement.restoredFrame(
+            windowSize: windowSize,
+            visibleFrames: screens.map(\.visibleFrame)
+        ), let screen = screens.first(where: { $0.visibleFrame.intersects(restoredFrame) }) {
+            let constrainedFrame = window.constrainFrameRect(restoredFrame, to: screen)
+            window.setFrame(constrainedFrame, display: false)
+            return
+        }
+
+        guard let visibleFrame = NSScreen.main?.visibleFrame else { return }
+        let defaultFrame = CommandPaletteWindowPlacement.defaultFrame(
+            windowSize: windowSize,
+            visibleFrame: visibleFrame
+        )
+        window.setFrame(defaultFrame, display: false)
+    }
+
+    private func savePosition() {
+        guard let window, window.isVisible else { return }
+        windowPlacement.save(origin: window.frame.origin)
     }
 
     private func installKeyMonitor() {
@@ -578,6 +596,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     override func close() {
         guard !isClosing else { return }
         isClosing = true
+        savePosition()
         resetPresentation()
         super.close()
         isClosing = false
@@ -595,6 +614,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
         resetPresentation()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        savePosition()
     }
 
     /// Close when focus moves away (Spotlight UX).

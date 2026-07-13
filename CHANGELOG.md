@@ -6,6 +6,12 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Command Palette: remembers its last position across openings and app
+  launches, while falling back to the default placement when its display is
+  unavailable.
+
 ## [3.7.0] - 2026-07-12
 
 ### Added
