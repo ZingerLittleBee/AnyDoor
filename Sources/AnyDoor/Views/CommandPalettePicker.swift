@@ -713,6 +713,10 @@ struct CommandPalettePicker: View {
                 confirmCard(pending.confirmation)
             }
         }
+        // NSHostingView inherits the full-size panel's 32-point titlebar safe
+        // area. Apply this outside the complete surface so the material and its
+        // content expand together instead of moving only the inner stack.
+        .ignoresSafeArea()
         .onChange(of: state.query) { _, _ in
             // Space trigger for the dev-tool scope badge (Tab is handled by the
             // window controller's key monitor). No-ops once a scope is active.
