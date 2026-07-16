@@ -13,13 +13,32 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
         // keepAwake and scheduledShutdown are toggle-kind but must open their
         // duration list, not flip directly.
         for item: BuiltinItem in [.keepAwake, .scheduledShutdown, .brightness,
-                                  .hostsManager, .portManager, .pickColor, .captureTimer] {
+                                  .portManager, .pickColor, .captureTimer] {
             XCTAssertEqual(
                 CommandPaletteCommitIntent.classify(.builtin(item)),
                 .drillIntoOptions(item),
                 "\(item) should drill into options"
             )
         }
+    }
+
+    @MainActor
+    func testPluginRegisteredOptionParentDrillsInOnlyWhileRegistered() {
+        // hostsManager's option parent is registered by its plugin's install
+        // (not by the Core table), so classification follows the registration.
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.builtin(.hostsManager)),
+            .dismiss
+        )
+        let registry = CommandPaletteExtensions()
+        registry.registerOptionParent(for: .hostsManager, CommandPaletteOptionParent(
+            listsAtRoot: { true },
+            buildOptions: { [] }
+        ))
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.builtin(.hostsManager), extensions: registry),
+            .drillIntoOptions(.hostsManager)
+        )
     }
 
     @MainActor

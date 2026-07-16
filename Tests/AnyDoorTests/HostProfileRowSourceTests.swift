@@ -1,14 +1,28 @@
+import SwiftData
 import XCTest
 import PluginInterface
 @testable import AnyDoor
+@testable import HostsPlugin
 
 /// Pins the hosts-profile palette row source: the first descriptor-based
 /// `PluginRowSource` (ADR-0007). Rows must render and act exactly like the
 /// retired `Source.hostProfile` case did.
 final class HostProfileRowSourceTests: XCTestCase {
 
+    /// Points the plugin module's host bridge at a real CorePluginHost so
+    /// the row descriptors resolve catalog strings ("Active" / "Toggle").
     @MainActor
-    func testRowsMapProfilesSortedByDisplayOrder() {
+    private func bootstrapPluginHost() throws {
+        let container = try ModelContainer(
+            for: Schema(HostsNativePlugin.modelSchemaTypes),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        PluginHost.bootstrap(CorePluginHost(modelContainer: container))
+    }
+
+    @MainActor
+    func testRowsMapProfilesSortedByDisplayOrder() throws {
+        try bootstrapPluginHost()
         let previous = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .en
         defer { LocalizationManager.shared.preference = previous }
@@ -76,8 +90,10 @@ final class HostProfileRowSourceTests: XCTestCase {
     }
 
     @MainActor
-    func testCoreRegistryRegistersTheHostsRowSource() {
-        XCTAssertNotNil(CommandPaletteExtensions.shared.rowSource(withID: HostProfileRowSource.sourceID))
+    func testCoreRegistryDoesNotRegisterTheHostsRowSource() {
+        // The registration moved to the Hosts plugin's install lifecycle
+        // (see HostsPluginLifecycleTests); the Core declares no hosts rows.
+        XCTAssertNil(CommandPaletteExtensions.shared.rowSource(withID: HostProfileRowSource.sourceID))
     }
 
     @MainActor

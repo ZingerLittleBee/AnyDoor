@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 import SwiftData
 import OSLog
 import Observation
@@ -18,6 +19,22 @@ enum HostsManagerError: Error {
     }
 }
 
+/// Error surfaced when the plugin's transactional uninstall cannot revert
+/// its side effects (a failed `/etc/hosts` write, or a cancelled
+/// administrator authorization). The registry aborts the uninstall and the
+/// Plugins tab shows `errorDescription`.
+enum HostsUninstallError: Error, LocalizedError {
+    case deactivationFailed(String?)
+
+    var errorDescription: String? {
+        switch self {
+        case .deactivationFailed(let message):
+            // Chinese UI message, consistent with the manager's lastError strings.
+            return message ?? "写入 hosts 文件失败"
+        }
+    }
+}
+
 /// Single source of truth for host profiles. SwiftData-backed, @MainActor.
 /// Persisted state always equals what was successfully applied to the system.
 @Observable @MainActor
@@ -26,8 +43,8 @@ final class HostsManager {
         makeWriter: {
             // Re-evaluate on every write so the privileged helper is used as soon
             // as the user approves it — without requiring an app relaunch.
-            if HelperManager.shared.readiness() == .enabled {
-                return PrivilegedHelperWriter()
+            if PluginHost.helperReadiness() == .enabled {
+                return PrivilegedHostsWriter()
             }
             return AppleScriptWriter()
         },
@@ -80,8 +97,8 @@ final class HostsManager {
     }
 
     func bootstrap(modelContainer: ModelContainer) {
-        // Attempt helper registration once at startup (cheap; falls through if already registered).
-        _ = HelperManager.shared.ensureRegistered()
+        // Helper registration is an install-time act and lives in
+        // `HostsNativePlugin.activate()` — bootstrap only wires the store.
         self.modelContainer = modelContainer
         reload()
     }
@@ -207,6 +224,26 @@ final class HostsManager {
             lastError = message(for: error)
             logger.error("System hosts edit failed: \(error)")
             reload()
+        }
+    }
+
+    /// Transactional-uninstall support: deactivate every active profile
+    /// through the normal writer path in one coalesced apply. On a failed
+    /// write (or a cancelled administrator authorization) the apply's
+    /// rollback restores the profiles' active state and this throws, so the
+    /// caller aborts the uninstall with the plugin fully installed — there
+    /// is no half-uninstalled state. Profile rows are never deleted.
+    func deactivateAllForUninstall() async throws {
+        // Serialize behind any in-flight apply so we deactivate against the
+        // latest persisted state.
+        await applyTask?.value
+        reload()
+        let active = profiles.filter(\.isActive)
+        guard !active.isEmpty else { return }
+        for profile in active { profile.isActive = false }
+        let applied = await scheduleApply()
+        guard applied, active.allSatisfy({ !$0.isActive }) else {
+            throw HostsUninstallError.deactivationFailed(lastError)
         }
     }
 

@@ -1,5 +1,6 @@
 import XCTest
 @testable import AnyDoor
+@testable import HostsPlugin
 
 final class HostsWriterTests: XCTestCase {
     func test_mockRecordsLastWrite() async throws {

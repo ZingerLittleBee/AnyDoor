@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 enum HostsWriterError: Error, Equatable {
     case writeFailed(String)
@@ -6,9 +7,23 @@ enum HostsWriterError: Error, Equatable {
 }
 
 /// Abstraction over the privileged write to `/etc/hosts`. Implementations:
-/// `PrivilegedHelperWriter` (production, XPC), `AppleScriptWriter` (dev fallback).
+/// `PrivilegedHostsWriter` (production, via the Core's helper daemon),
+/// `AppleScriptWriter` (dev fallback).
 protocol HostsWriter: Sendable {
     func write(_ content: String) async throws
+}
+
+/// Production writer: sends the composed hosts content to the Core's root
+/// helper daemon through the host services (the XPC plumbing stays Core
+/// infrastructure — amended ADR-0005).
+struct PrivilegedHostsWriter: HostsWriter {
+    func write(_ content: String) async throws {
+        do {
+            try await PluginHost.writeHostsFileViaHelper(content)
+        } catch let error as PrivilegedHelperCallError {
+            throw HostsWriterError.writeFailed(error.message)
+        }
+    }
 }
 
 /// Dev / ad-hoc fallback. Writes to an unpredictable temp file then copies it
@@ -25,7 +40,7 @@ struct AppleScriptWriter: HostsWriter {
         do shell script "/bin/cp " & quoted form of "\(tmp.path)" & " /etc/hosts" with administrator privileges
         """
         do {
-            _ = try await AppleScriptRunner.run(script)
+            _ = try await PluginHost.runAppleScript(script)
         } catch {
             throw HostsWriterError.writeFailed(String(describing: error))
         }

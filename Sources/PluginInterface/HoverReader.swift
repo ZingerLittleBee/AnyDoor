@@ -1,5 +1,4 @@
 import AppKit
-import PluginInterface
 import SwiftUI
 
 /// AppKit-backed replacement for SwiftUI's `.onHover`.
@@ -105,7 +104,7 @@ extension View {
     /// Drop-in replacement for `.onHover(perform:)` that routes hover detection
     /// through AppKit (`HoverReader`) so the callback always runs on the main
     /// thread without a dynamic actor-isolation check. See `HoverReader`.
-    func onHoverSafe(perform action: @MainActor @escaping (Bool) -> Void) -> some View {
+    public func onHoverSafe(perform action: @MainActor @escaping (Bool) -> Void) -> some View {
         background { HoverReader(onChange: action) }
     }
 }

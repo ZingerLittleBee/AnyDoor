@@ -4,6 +4,7 @@ import SwiftData
 import SwiftUI
 import OSLog
 import AskForPermission
+import HostsPlugin
 import ImageConversionPlugin
 import Sparkle
 
@@ -50,8 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let schema = Schema(
                 [
                     KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
-                    HostProfile.self, TranslationRecord.self, Quicklink.self,
-                ] + ImageConversionNativePlugin.modelSchemaTypes
+                    TranslationRecord.self, Quicklink.self,
+                ]
+                + ImageConversionNativePlugin.modelSchemaTypes
+                + HostsNativePlugin.modelSchemaTypes
             )
             modelContainer = try ModelContainer(for: schema, configurations: config)
 
@@ -106,7 +109,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // (ADR-0007).
         let pluginHost = CorePluginHost(modelContainer: modelContainer)
         PluginRegistry.shared.bootstrap(
-            plugins: [ImageConversionNativePlugin(host: pluginHost)],
+            plugins: [
+                ImageConversionNativePlugin(host: pluginHost),
+                HostsNativePlugin(host: pluginHost),
+            ],
             hooks: PluginRegistry.SurfaceHooks(
                 registerProviders: { PanelStore.shared.registerProviders($0) },
                 unregisterProviders: { PanelStore.shared.unregisterProviders(for: $0) },
@@ -139,7 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             commandAvailability: { PluginRegistry.shared.isAvailable($0) }
         )
         HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
-        HostsManager.shared.bootstrap(modelContainer: modelContainer)
         QuicklinkStore.shared.bootstrap(modelContainer: modelContainer)
 
         // Translation history: give the store the shared container, then point

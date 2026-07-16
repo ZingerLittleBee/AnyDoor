@@ -1,5 +1,6 @@
 import XCTest
 @testable import AnyDoor
+@testable import HostsPlugin
 
 final class HostsFileTests: XCTestCase {
     func test_parse_noMarkers_allPrefix() {

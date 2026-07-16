@@ -1,6 +1,8 @@
+import SwiftData
 import XCTest
 import PluginInterface
 @testable import AnyDoor
+@testable import HostsPlugin
 
 final class CommandPaletteTests: XCTestCase {
     @MainActor
@@ -400,6 +402,13 @@ final class CommandPaletteTests: XCTestCase {
 
     @MainActor
     func testProfileNameQueryShowsMatchingHostsProfile() throws {
+        // Point the plugin module's bridge at a real host so the row's
+        // "Active" subtitle resolves through the shared catalog.
+        let container = try ModelContainer(
+            for: Schema(HostsNativePlugin.modelSchemaTypes),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        HostsPlugin.PluginHost.bootstrap(CorePluginHost(modelContainer: container))
         let previousLanguage = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .en
         defer { LocalizationManager.shared.preference = previousLanguage }

@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 import SwiftUI
 
 @MainActor
@@ -26,16 +27,25 @@ final class HostsEditorWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show() {
-        let view = HostsEditorView(manager: HostsManager.shared)
+    func show(manager: HostsManager = .shared) {
+        let view = HostsEditorView(manager: manager)
         let host = NSHostingView(rootView: view)
         host.frame = window?.contentLayoutRect ?? .zero
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
-        HostsManager.shared.refresh()
-        if let window { RegularWindowCoordinator.shared.track(window) }
+        manager.refresh()
+        if let window { PluginHost.trackRegularWindow(window) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.center()
+    }
+
+    /// Uninstall: tear the editor down so no plugin surface survives.
+    /// `close()` (not `orderOut`) so the host's window tracking sees a real
+    /// close and can revert the activation policy; dropping the content view
+    /// releases the SwiftUI tree.
+    func closeForUninstall() {
+        window?.close()
+        window?.contentView = nil
     }
 }

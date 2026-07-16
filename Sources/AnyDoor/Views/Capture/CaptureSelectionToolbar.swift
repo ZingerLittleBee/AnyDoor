@@ -1,3 +1,4 @@
+import PluginInterface
 import SwiftUI
 
 /// Attached capture-type toolbar shown directly below the selection rectangle.

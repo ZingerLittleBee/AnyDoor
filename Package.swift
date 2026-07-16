@@ -52,6 +52,20 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // Native Plugin pilot (ADR-0005): the Hosts feature as its own module
+        // — profiles, /etc/hosts parse+compose, the editor window, popover,
+        // and palette contributions. The privileged helper daemon (XPC
+        // plumbing, SMAppService lifecycle) stays Core infrastructure; the
+        // plugin reaches it through PluginInterface's host services.
+        .target(
+            name: "HostsPlugin",
+            dependencies: [
+                "PluginInterface",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
         .executableTarget(
             name: "AnyDoor",
             dependencies: [
@@ -60,6 +74,7 @@ let package = Package(
                 "HostsHelperShared",
                 "PluginInterface",
                 "ImageConversionPlugin",
+                "HostsPlugin",
             ],
             resources: [
                 .process("Resources"),
@@ -89,7 +104,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AnyDoorTests",
-            dependencies: ["AnyDoor", "PluginInterface", "ImageConversionPlugin"],
+            dependencies: ["AnyDoor", "PluginInterface", "ImageConversionPlugin", "HostsPlugin"],
             resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

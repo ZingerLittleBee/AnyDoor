@@ -44,9 +44,10 @@ public protocol PrivilegedHelperAccess: AnyObject {
     func openApprovalSettings()
 
     /// Writes the full `/etc/hosts` content through the root daemon.
-    /// Throws `PrivilegedHelperCallError` on failure. Nonisolated: the XPC
-    /// round-trip must not hold the MainActor.
-    nonisolated func writeHostsFile(_ content: String) async throws
+    /// Throws `PrivilegedHelperCallError` on failure. Implementations must
+    /// run the XPC round-trip off the MainActor (awaiting a nonisolated
+    /// call), never blocking it.
+    func writeHostsFile(_ content: String) async throws
 
     /// Unregisters the daemon unless another Core consumer still needs it
     /// (forced Scheduled Shutdown today) — the shared-daemon rule from the

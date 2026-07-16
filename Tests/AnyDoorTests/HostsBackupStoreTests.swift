@@ -1,5 +1,6 @@
 import XCTest
 @testable import AnyDoor
+@testable import HostsPlugin
 
 final class HostsBackupStoreTests: XCTestCase {
     private func tempDir() -> URL {

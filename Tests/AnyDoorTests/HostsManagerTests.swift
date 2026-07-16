@@ -1,6 +1,7 @@
 import XCTest
 import SwiftData
 @testable import AnyDoor
+@testable import HostsPlugin
 
 /// Test writer whose next write can be suspended until the test releases it,
 /// so a second mutation can join the coalesced applyTask mid-write.
@@ -75,6 +76,8 @@ final class HostsManagerTests: XCTestCase {
     }
 
     func test_duplicateProfileCopiesContentAsInactiveProfileWithoutSystemWrite() throws {
+        // The copy name resolves through the plugin module's host bridge.
+        PluginHost.bootstrap(CorePluginHost(modelContainer: try makeContainer()))
         let previous = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .en
         defer { LocalizationManager.shared.preference = previous }

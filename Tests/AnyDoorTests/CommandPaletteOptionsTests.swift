@@ -1,6 +1,7 @@
 import XCTest
 import PluginInterface
 @testable import AnyDoor
+@testable import HostsPlugin
 
 final class CommandPaletteOptionsTests: XCTestCase {
     @MainActor
@@ -79,31 +80,32 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
-    func testHostsOptionsCheckmarkAndEditAlwaysPresent() {
-        let previous = LocalizationManager.shared.preference
-        LocalizationManager.shared.preference = .en
-        defer { LocalizationManager.shared.preference = previous }
-
+    func testHostsPluginOptionsCheckmarkAndEditAlwaysPresent() {
+        // The hosts option builder lives in the plugin module now; ids stay
+        // "hosts.<uuid>" / "hosts.edit" exactly as before the extraction.
         let active = HostProfile(name: "Dev", isActive: true)
         let inactive = HostProfile(name: "Prod", isActive: false)
-        let options = CommandPaletteOptions.hostsOptions(profiles: [active, inactive])
+        let options = HostsPaletteOptions.options(profiles: [active, inactive])
 
         XCTAssertEqual(options.count, 3)
         XCTAssertEqual(options[0].title, "Dev")
+        XCTAssertEqual(options[0].id, "hosts.\(active.id.uuidString)")
         XCTAssertTrue(options[0].isChecked)
         XCTAssertEqual(options[1].title, "Prod")
         XCTAssertFalse(options[1].isChecked)
         XCTAssertEqual(options.last?.id, "hosts.edit")
 
-        XCTAssertEqual(CommandPaletteOptions.hostsOptions(profiles: []).map(\.id),
+        XCTAssertEqual(HostsPaletteOptions.options(profiles: []).map(\.id),
                        ["hosts.edit"])
+        XCTAssertTrue(HostsPaletteOptions.profile(for: options[0].id, in: [active, inactive]) === active)
+        XCTAssertNil(HostsPaletteOptions.profile(for: "hosts.edit", in: [active, inactive]))
     }
 
     @MainActor
     func testCoreRegistryDeclaresTodaysOptionParents() {
         let registry = CommandPaletteExtensions.shared
         for item: BuiltinItem in [.keepAwake, .scheduledShutdown, .brightness,
-                                  .hostsManager, .portManager, .pickColor, .captureTimer] {
+                                  .portManager, .pickColor, .captureTimer] {
             XCTAssertTrue(registry.isOptionParent(item), "\(item) should be an option parent")
         }
         XCTAssertFalse(registry.isOptionParent(.muteAudio))
@@ -113,9 +115,8 @@ final class CommandPaletteOptionsTests: XCTestCase {
     @MainActor
     func testCoreRegistryListsOnlySubmenuParentsAtRoot() {
         let registry = CommandPaletteExtensions.shared
-        // Hosts and Port Manager are always listed; toggle/action parents are
-        // already listed by their kind, so their root-listing answer is false.
-        XCTAssertTrue(registry.listsAtRoot(.hostsManager))
+        // Port Manager is always listed; toggle/action parents are already
+        // listed by their kind, so their root-listing answer is false.
         XCTAssertTrue(registry.listsAtRoot(.portManager))
         XCTAssertFalse(registry.listsAtRoot(.keepAwake))
         XCTAssertFalse(registry.listsAtRoot(.scheduledShutdown))
@@ -123,6 +124,8 @@ final class CommandPaletteOptionsTests: XCTestCase {
         XCTAssertFalse(registry.listsAtRoot(.captureTimer))
         // Unregistered submenu items never list through the option table.
         XCTAssertFalse(registry.listsAtRoot(.bluetoothBattery))
+        // Hosts registers through its plugin's install, not the Core table.
+        XCTAssertFalse(registry.listsAtRoot(.hostsManager))
     }
 
     @MainActor

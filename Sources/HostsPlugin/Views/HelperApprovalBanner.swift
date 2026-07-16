@@ -1,3 +1,4 @@
+import PluginInterface
 import SwiftUI
 
 /// Shown in the Hosts popover and editor when the privileged helper is
@@ -6,14 +7,14 @@ import SwiftUI
 /// builds fall back to the AppleScript writer and need no nagging).
 struct HelperApprovalBanner: View {
     var body: some View {
-        if HelperManager.shared.readiness() == .requiresApproval {
+        if PluginHost.helperReadiness() == .requiresApproval {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.shield")
                     .foregroundStyle(.orange)
                 Text("需要在系统设置中授权后台帮助程序")
                     .font(.caption2)
                 Spacer()
-                Button("授权") { HelperManager.shared.openApprovalSettings() }
+                Button("授权") { PluginHost.helper?.openApprovalSettings() }
                     .buttonStyle(.borderless)
                     .font(.caption2)
             }

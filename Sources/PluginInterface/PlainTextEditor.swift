@@ -1,4 +1,3 @@
-import PluginInterface
 import SwiftUI
 import AppKit
 
@@ -6,11 +5,16 @@ import AppKit
 /// not it is editable, so toggling edit mode never shifts the text (a plain
 /// SwiftUI `Text` and `TextEditor` use different insets and visibly jump).
 /// Monospaced, selectable, and scrollable; read-only when `isEditable` is false.
-struct PlainTextEditor: NSViewRepresentable {
+public struct PlainTextEditor: NSViewRepresentable {
     @Binding var text: String
     var isEditable: Bool
 
-    func makeNSView(context: Context) -> NSScrollView {
+    public init(text: Binding<String>, isEditable: Bool) {
+        self._text = text
+        self.isEditable = isEditable
+    }
+
+    public func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSTextView.scrollableTextView()
         scroll.drawsBackground = false
         scroll.focusRingType = .none
@@ -37,7 +41,7 @@ struct PlainTextEditor: NSViewRepresentable {
         return scroll
     }
 
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
+    public func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let textView = scroll.documentView as? NSTextView else { return }
         if textView.string != text {
             textView.string = text
@@ -45,10 +49,10 @@ struct PlainTextEditor: NSViewRepresentable {
         textView.isEditable = isEditable
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    public func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
     @MainActor
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    public final class Coordinator: NSObject, NSTextViewDelegate {
         private let text: Binding<String>
         weak var textView: NSTextView?
         init(text: Binding<String>) { self.text = text }
@@ -56,7 +60,7 @@ struct PlainTextEditor: NSViewRepresentable {
         // AppKit invokes delegate callbacks on the main thread; hop into the
         // MainActor context and read from the retained text view (not the
         // non-Sendable notification) to write back the SwiftUI binding.
-        nonisolated func textDidChange(_ notification: Notification) {
+        public nonisolated func textDidChange(_ notification: Notification) {
             MainThreadIsolation.run {
                 guard let textView else { return }
                 text.wrappedValue = textView.string

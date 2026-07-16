@@ -5,6 +5,7 @@ import Testing
 import PluginInterface
 import ImageConversionPlugin
 @testable import AnyDoor
+@testable import HostsPlugin
 
 /// Pins the implicit contracts a new `BuiltinItem` case must satisfy. Each of
 /// these used to be convention-only, with a silent failure mode:
@@ -19,14 +20,32 @@ struct BuiltinCatalogInvariantTests {
 
     /// The real production plugins, built against an in-memory container so
     /// their providers participate in the catalog invariants exactly as they
-    /// do in the app.
+    /// do in the app. The Hosts plugin takes an injected manager wired to
+    /// the sanctioned writer double so the invariants never touch the system.
     @MainActor
     static func makeProductionPlugins() throws -> [any NativePlugin] {
         let container = try ModelContainer(
-            for: Schema(ImageConversionNativePlugin.modelSchemaTypes),
+            for: Schema(
+                ImageConversionNativePlugin.modelSchemaTypes
+                    + HostsNativePlugin.modelSchemaTypes
+            ),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        return [ImageConversionNativePlugin(host: CorePluginHost(modelContainer: container))]
+        let host = CorePluginHost(modelContainer: container)
+        let live = { "127.0.0.1 localhost\n" }
+        let hostsManager = HostsManager(
+            writer: MockHostsWriter(),
+            backup: HostsBackupStore(
+                backupDirectory: FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString),
+                readLiveHosts: live
+            ),
+            readLiveHosts: live
+        )
+        return [
+            ImageConversionNativePlugin(host: host),
+            HostsNativePlugin(host: host, manager: hostsManager),
+        ]
     }
 
     /// The full production provider set: Core providers plus every plugin's.

@@ -1,5 +1,4 @@
 import AppKit
-import HostsHelperShared
 import PluginInterface
 import SwiftData
 
@@ -77,13 +76,8 @@ private final class CorePrivilegedHelper: PrivilegedHelperAccess {
         HelperManager.shared.openApprovalSettings()
     }
 
-    nonisolated func writeHostsFile(_ content: String) async throws {
-        try await PrivilegedHelperCall.run(
-            makeError: { PrivilegedHelperCallError(message: $0) },
-            request: { proxy, finish in
-                proxy.writeHosts(content) { errorMessage in finish(errorMessage) }
-            }
-        )
+    func writeHostsFile(_ content: String) async throws {
+        try await PrivilegedHelperWriter().write(content)
     }
 
     func releaseIfUnneeded() throws {

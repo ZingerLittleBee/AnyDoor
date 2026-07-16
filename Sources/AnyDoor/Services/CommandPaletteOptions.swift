@@ -130,25 +130,6 @@ enum CommandPaletteOptions {
         }
     }
 
-    /// One option per profile (checkmark = active, selecting toggles), plus an
-    /// always-present "Edit hosts…" entry that opens the editor window.
-    static func hostsOptions(profiles: [HostProfile]) -> [CommandPaletteOption] {
-        var options: [CommandPaletteOption] = profiles.map { profile in
-            CommandPaletteOption(
-                id: "hosts.\(profile.id.uuidString)",
-                title: profile.name,
-                symbol: "list.bullet.rectangle",
-                isChecked: profile.isActive,
-                perform: { await HostsManager.shared.setActive(profile, !profile.isActive) }
-            )
-        }
-        options.append(CommandPaletteOption(
-            id: "hosts.edit", title: L(.commandPaletteHostsEdit), symbol: "pencil",
-            perform: { HostsEditorWindowController.shared.show() }
-        ))
-        return options
-    }
-
     /// One option per listening port (sorted by port, then process name, then
     /// pid). Selecting a row kills the owning process and shows the standard
     /// kill toast. The id is unique because `PortRecord` identity is (pid, port).
@@ -261,13 +242,6 @@ extension CommandPaletteExtensions {
                 CommandPaletteOptions.brightnessOptions(displays: DisplayBrightnessService.shared.displays)
             }
         ))
-        registry.registerOptionParent(for: .hostsManager, CommandPaletteOptionParent(
-            listsAtRoot: { true },
-            buildOptions: {
-                HostsManager.shared.reload()
-                return CommandPaletteOptions.hostsOptions(profiles: HostsManager.shared.profiles)
-            }
-        ))
         registry.registerOptionParent(for: .portManager, CommandPaletteOptionParent(
             listsAtRoot: { true },
             buildOptions: {
@@ -285,7 +259,6 @@ extension CommandPaletteExtensions {
                 CommandPaletteOptions.captureTimerOptions()
             }
         ))
-        registry.registerRowSource(HostProfileRowSource())
         return registry
     }
 }

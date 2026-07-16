@@ -1,3 +1,4 @@
+import PluginInterface
 import SwiftUI
 
 /// Root SwiftUI view shown inside the Bluetooth Battery `HoverPopover`.

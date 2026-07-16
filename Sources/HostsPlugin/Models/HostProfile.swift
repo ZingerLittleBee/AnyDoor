@@ -4,16 +4,16 @@ import SwiftData
 /// A user-defined hosts profile. Active profiles are merged into the AnyDoor
 /// managed block in `/etc/hosts`. System hosts content is never stored here.
 @Model
-final class HostProfile {
-    @Attribute(.unique) var id: UUID
-    var name: String
-    var content: String
-    var isActive: Bool = false
-    var displayOrder: Double = 0
-    var createdAt: Date
-    var updatedAt: Date
+public final class HostProfile {
+    @Attribute(.unique) public var id: UUID
+    public var name: String
+    public var content: String
+    public var isActive: Bool = false
+    public var displayOrder: Double = 0
+    public var createdAt: Date
+    public var updatedAt: Date
 
-    init(name: String, content: String = "", isActive: Bool = false, displayOrder: Double = 0) {
+    public init(name: String, content: String = "", isActive: Bool = false, displayOrder: Double = 0) {
         self.id = UUID()
         self.name = name
         self.content = content
