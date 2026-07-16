@@ -131,7 +131,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertNotNil(f.plugin.panelPopover(for: .hostsManager))
         XCTAssertNil(f.plugin.panelPopover(for: .bluetoothBattery))
         XCTAssertEqual(
-            (f.plugin.modelTypes.map { String(describing: $0) }),
+            HostsNativePlugin.modelSchemaTypes.map { String(describing: $0) },
             ["HostProfile"]
         )
     }

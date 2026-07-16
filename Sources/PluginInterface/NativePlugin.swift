@@ -83,8 +83,10 @@ public protocol NativePlugin: AnyObject {
     /// SwiftData model types owned by this plugin. Collected once at
     /// ModelContainer creation — the schema stays static regardless of
     /// install state (ADR-0005), which is what keeps user data retained
-    /// across Uninstall and restored by a later Install.
-    var modelTypes: [any PersistentModel.Type] { get }
+    /// across Uninstall and restored by a later Install. Nonisolated and
+    /// static because the host builds the ModelContainer before any
+    /// MainActor plugin instance exists.
+    nonisolated static var modelSchemaTypes: [any PersistentModel.Type] { get }
 
     // MARK: Migration
 
@@ -135,7 +137,7 @@ extension NativePlugin {
 
     public var settingsSection: AnyView? { nil }
 
-    public var modelTypes: [any PersistentModel.Type] { [] }
+    public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] { [] }
 
     public func activate() {}
 

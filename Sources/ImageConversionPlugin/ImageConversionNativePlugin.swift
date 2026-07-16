@@ -29,14 +29,9 @@ public final class ImageConversionNativePlugin: NativePlugin {
 
     public var providers: [any BuiltinProvider] { [ImageConversionProvider()] }
 
-    /// Nonisolated so the host can register the plugin's schema when building
-    /// the ModelContainer, before any MainActor plugin instance exists
-    /// (ADR-0005: the schema is static regardless of install state).
     public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] {
         [ImageConversionRecord.self]
     }
-
-    public var modelTypes: [any PersistentModel.Type] { Self.modelSchemaTypes }
 
     public func hasUsageTrace(in context: ModelContext) throws -> Bool {
         try context.fetchCount(FetchDescriptor<ImageConversionRecord>()) > 0

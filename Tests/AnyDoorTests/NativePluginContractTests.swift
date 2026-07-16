@@ -30,7 +30,9 @@ struct NativePluginContractTests {
         #expect(plugin.paletteRowSources.isEmpty)
         #expect(plugin.panelPopover(for: .imageConversion) == nil)
         #expect(plugin.settingsSection == nil)
-        #expect(plugin.modelTypes.isEmpty)
+        // The schema surface is static (ADR-0005: collected before any
+        // MainActor instance exists) and defaults to empty.
+        #expect(BarePlugin.modelSchemaTypes.isEmpty)
         // Defaulted lifecycle hooks are no-ops; they must not trap.
         plugin.activate()
         plugin.presentWindow(for: .imageConversion)

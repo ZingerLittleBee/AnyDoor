@@ -108,14 +108,9 @@ public final class HostsNativePlugin: NativePlugin {
 
     // MARK: - Data & migration
 
-    /// Nonisolated so the host can register the plugin's schema when building
-    /// the ModelContainer, before any MainActor plugin instance exists
-    /// (ADR-0005: the schema is static regardless of install state).
     public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] {
         [HostProfile.self]
     }
-
-    public var modelTypes: [any PersistentModel.Type] { Self.modelSchemaTypes }
 
     /// Usage trace (ADR-0005): host profile rows exist OR the privileged
     /// helper daemon is registered — the helper check prevents a ghost
