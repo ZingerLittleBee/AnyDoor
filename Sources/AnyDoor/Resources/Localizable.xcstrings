@@ -4149,6 +4149,23 @@
         }
       }
     },
+    "hosts.uninstall.writeFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed to write the hosts file"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "写入 hosts 文件失败"
+          }
+        }
+      }
+    },
     "hotkey.recorder.clear": {
       "extractionState": "manual",
       "localizations": {

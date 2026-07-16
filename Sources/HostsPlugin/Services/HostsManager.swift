@@ -22,15 +22,16 @@ enum HostsManagerError: Error {
 /// Error surfaced when the plugin's transactional uninstall cannot revert
 /// its side effects (a failed `/etc/hosts` write, or a cancelled
 /// administrator authorization). The registry aborts the uninstall and the
-/// Plugins tab shows `errorDescription`.
+/// Plugins tab shows `errorDescription`. The message is resolved at the
+/// MainActor throw site (the manager's `lastError` when present, else the
+/// localized write-failure fallback) so `errorDescription` stays nonisolated.
 enum HostsUninstallError: Error, LocalizedError {
-    case deactivationFailed(String?)
+    case deactivationFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .deactivationFailed(let message):
-            // Chinese UI message, consistent with the manager's lastError strings.
-            return message ?? "写入 hosts 文件失败"
+            return message
         }
     }
 }
@@ -243,7 +244,7 @@ final class HostsManager {
         for profile in active { profile.isActive = false }
         let applied = await scheduleApply()
         guard applied, active.allSatisfy({ !$0.isActive }) else {
-            throw HostsUninstallError.deactivationFailed(lastError)
+            throw HostsUninstallError.deactivationFailed(lastError ?? L(.hostsUninstallWriteFailed))
         }
     }
 
