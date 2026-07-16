@@ -37,6 +37,7 @@ travel (existing backup policy).
 - [ ] Running the migration twice changes nothing (idempotence, seeder-style in-memory container tests)
 - [ ] Backup export contains the installed set; import installs/uninstalls accordingly and surfaces update without relaunch
 - [ ] Helper approval state does not appear in an exported backup, and an import never registers a helper by itself
+  *(Clarified 2026-07-17: "never by itself" means never independently of the plugin lifecycle. An import whose installed set adds the Hosts plugin runs the real install, which registers the helper daemon like a hands-on install — PRD US25; approval stays per-machine.)*
 - [ ] A user upgrading with an installed set already present (post-migration) keeps it unchanged across app updates
 
 ## Blocked by

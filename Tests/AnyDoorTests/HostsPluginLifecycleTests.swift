@@ -311,7 +311,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
         XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
         XCTAssertEqual(f.host.helper.ensureRegisteredCalls, 0,
-                       "an import never registers a helper by itself")
+                       "an import that doesn't install Hosts never touches helper registration")
     }
 
     // MARK: - Usage trace (migration input)

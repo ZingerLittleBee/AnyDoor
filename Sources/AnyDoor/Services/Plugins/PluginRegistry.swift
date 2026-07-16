@@ -23,7 +23,8 @@ final class PluginRegistry {
 
     /// UserDefaults key holding the installed plugin ids ([String]).
     /// Whitelisted in `SyncSettingsRegistry`, so the set travels in config
-    /// backup; nonisolated so the registry (a plain enum) can reference it.
+    /// backup; nonisolated so `SyncSettingsRegistry` (a plain enum, not
+    /// MainActor-bound like this class) can reference it.
     nonisolated static let installStateKey = "plugins.installed"
 
     /// How the registry pushes installed-set changes into the Core's

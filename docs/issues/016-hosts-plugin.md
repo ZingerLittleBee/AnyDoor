@@ -5,6 +5,13 @@ status: done
 prd: docs/prds/2026-07-16-native-plugin-architecture.md
 ---
 
+> **Superseded in part (2026-07-17).** The uninstall acceptance criteria below
+> (deactivating active profiles, clearing AnyDoor-managed hosts entries, and
+> aborting on a cancelled administrator authorization) were superseded by the
+> ADR-0005 addendum: uninstall is now side-effect-free on `/etc/hosts` —
+> active profiles stay active and no admin prompt is shown. See
+> `docs/adr/0005-native-plugins-logical-install.md`.
+
 ## Parent
 
 PRD: `docs/prds/2026-07-16-native-plugin-architecture.md` (user stories 5–6, 9, 14–20, 22)
