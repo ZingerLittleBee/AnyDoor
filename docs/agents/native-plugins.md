@@ -1,0 +1,459 @@
+# Native Plugin Playbook
+
+Audience: an agent (or developer) adding or modifying a Native Plugin without
+re-deriving the architecture. Everything here is verified against the source
+on branch `feat/native-plugins` (2026-07-17). Rationale lives in the linked
+docs; this file is the operational map.
+
+Background: [PRD](../prds/2026-07-16-native-plugin-architecture.md) ·
+[ADR-0005 logical install (+ 2026-07-17 addendum)](../adr/0005-native-plugins-logical-install.md) ·
+[ADR-0006 enum claim](../adr/0006-plugin-commands-claim-enum-cases.md) ·
+[ADR-0007 row descriptors](../adr/0007-plugin-rows-are-descriptors.md) ·
+[Glossary](../../CONTEXT.md#plugins) · implementation tickets
+`docs/issues/013`–`017`.
+
+## 1. Mental model
+
+- **Logical install.** A Native Plugin's code always ships in the binary as
+  its own SPM target. "Install" flips a state flag — the installed set is a
+  sorted `[String]` of plugin ids in UserDefaults key `plugins.installed`
+  (`PluginRegistry.installStateKey`). Never a download.
+- **Claim.** `BuiltinItem` (in `Sources/PluginInterface/BuiltinItem.swift`)
+  is the closed, code-defined command catalog. A plugin does not mint command
+  identities; it *Claims* existing cases via `claimedCommands`. Every case is
+  owned by exactly one Native Plugin or by the Core (ADR-0006), enforced by
+  `BuiltinCatalogInvariantTests.everyCommandIsClaimedByExactlyOneOwner` and an
+  `assertionFailure` in `PluginRegistry.bootstrap`. Adding a command to a
+  plugin still means adding an enum case in the shared target — by design.
+- **Uninstalled = invisible everywhere.** No panel row, no palette entry, no
+  hotkey firing, no popover, no permission prompts, no approval banners. Not
+  "greyed out" — gone (PRD US18). Every surface gates through
+  `PluginRegistry` (section 5).
+- **Data always retained.** A plugin's `@Model` types are registered in the
+  ModelContainer schema regardless of install state (ADR-0005), and its
+  `BuiltinPreference` rows (visibility/order/hotkey) survive uninstall.
+  Reinstall restores the exact previous setup without relaunch (PRD US8/US16).
+- **Core never names a plugin in control flow (ADR-0007).** Shared *catalog
+  types* may enumerate plugin-claimed commands (`BuiltinItem` is shared), but
+  Core services, intent classifiers, and window controllers must never branch
+  on a specific plugin. Plugins reach the Core only through registrations and
+  descriptors; the Core reaches plugins only through `PluginRegistry` lookups.
+  The two sanctioned exceptions are in section 2.
+- **Glossary (canonical, with the Chinese UI copy):** Native Plugin 原生插件 ·
+  Core 内核 · Claim 认领 · Install 安装 · Uninstall 卸载. UI copy uses
+  「插件 / 安装 / 卸载」; 「启用/禁用」 is reserved for per-command visibility
+  and must not be used for install state (avoid 停用 too). See
+  `CONTEXT.md#plugins`.
+
+## 2. Module layout
+
+SPM targets (see `Package.swift`), all `.swiftLanguageMode(.v6)`:
+
+```
+PluginInterface  ←─ HostsPlugin ────────┐
+      ↑          ←─ ImageConversionPlugin (+ ImageCodec, libwebp)
+      │                                 │
+      └──────────── AnyDoor (host) ─────┘   AnyDoorTests depends on all four
+ImageCodec       ←─ AnyDoor, ImageConversionPlugin
+```
+
+- **`PluginInterface`** (`Sources/PluginInterface/`) — the lean shared
+  interface: `BuiltinItem` (closed catalog), `BuiltinProvider` /
+  `ToggleProvider` / `ActionProvider` + `PermissionStatus`, `NativePlugin` +
+  `NativePluginID`, `PluginHostServices` + `PluginToast`, the `PluginHost`
+  bridge + `PluginLocalizedText`, `PluginRowDescriptor` + `PluginRowSource`,
+  `PluginPanelPopover` + `PluginPanelPopoverContext`,
+  `PrivilegedHelperAccess` + `PrivilegedHelperReadiness` +
+  `PrivilegedHelperCallError`, plus a few shared utilities/views
+  (`MainThreadIsolation`, `CaptureFilename`, `FileThumbnailCache`,
+  `FocusedControlKeyPolicy`, `PlainTextEditor`, `HoverReader`,
+  `AdaptiveGlassEffectContainer`). It must never depend on Core palette/UI
+  types such as `PanelEntry` — `Source` cases drag their payloads with them
+  and would balloon the interface target (ADR-0007).
+- **Plugin modules** (`Sources/HostsPlugin/`,
+  `Sources/ImageConversionPlugin/`) — depend **only** on `PluginInterface`
+  (Image Conversion also on `ImageCodec` + `libwebp`). This is the
+  compiler-enforced boundary: a plugin module cannot import the host, so any
+  host facility it needs must be a `PluginHostServices` capability.
+- **`ImageCodec`** — pure codec utilities shared by Core and the Image
+  Conversion plugin (`ImageConversionFormat`, `ImageEncoder`,
+  `ImageEncodingQuality`), so Core's screenshot Save As never imports the
+  plugin module.
+- **`AnyDoor`** (host) — depends on the plugin modules solely to build the
+  compile-time registry list. Core files importing a plugin module:
+  1. `Sources/AnyDoor/AppDelegate.swift` — the composition root (sanctioned):
+     schema composition and the plugin list.
+  2. `Sources/AnyDoor/Views/ClipboardWallWindowController.swift` — the
+     **registered debt** (PRD Out of Scope): the clipboard-history
+     "Convert Image Format" context menu is hardwired to
+     `ImageConversionWindowController` / `ImageConversionBasketItem`, guarded
+     by `PluginRegistry.shared.isAvailable(.imageConversion)` (line ~603).
+     Revisit when that surface is next touched; do not add a third import.
+
+## 3. The `NativePlugin` protocol, member by member
+
+`Sources/PluginInterface/NativePlugin.swift`. The protocol is `@MainActor`,
+`AnyObject`. Defaults live in the `extension NativePlugin`; only members
+marked **required** have no default.
+
+| Member | Required | Called when / by |
+|---|---|---|
+| `id: NativePluginID` | yes | Persisted in `plugins.installed` and backups. **Never change the raw value once shipped.** Pilots expose `static let pluginID` (`"hosts"`, `"imageConversion"`). |
+| `localizedName` / `localizedDescription: String` | yes | `PluginsSettingsView` rows. Resolve via the module `L(_:)` front so a language switch applies. |
+| `localizedUninstallImpact: String?` | default `nil` | Shown in the uninstall confirmation before the data-retention line. `nil` = uninstall only removes surfaces. |
+| `claimedCommands: Set<BuiltinItem>` | yes | Read once at `PluginRegistry.bootstrap` to build the claim table. |
+| `providers: [any BuiltinProvider]` | yes | Must cover **exactly** the plugin's actionable (`.toggle`/`.action`-kind) claims — no more, no less (`pluginsProvideOnlyForTheirClaimedActionableCommands`). Submenu-kind claims register no provider (Hosts: `providers = []`). |
+| `paletteOptionParents: Set<BuiltinItem>` | default `[]` | Claimed commands that drill into a second-level palette list. Registered via `CommandPaletteExtensions.registerContributions(of:)`; plugin parents always `listsAtRoot`. |
+| `paletteOptions(for:) async -> [PluginRowDescriptor]` | default `[]` | Builds the second-level rows on drill-in. Do the state fetch here (Hosts calls `manager.reload()` first). |
+| `performPaletteOption(parent:id:) async` | default no-op | Runs a committed second-level option, routed back by descriptor id — Core never sees the action. |
+| `paletteRowSources: [any PluginRowSource]` | default `[]` | Root-level palette row sources (section 5). |
+| `panelPopover(for:) -> PluginPanelPopover?` | default `nil` | Menu-panel hover popover for a claimed submenu command. Resolved per-mount through `PluginRegistry.panelPopover(for:)`. |
+| `presentWindow(for:)` | default no-op | Presents the plugin's window for a claimed window-bearing command. **Currently dormant**: no Core call site exists yet (see section 9); pilots open their windows from their own providers/popovers/palette options. |
+| `settingsSection: AnyView?` | default `nil` | **Currently dormant**: declared by the protocol, but no Core view renders it yet (section 9). |
+| `nonisolated static modelSchemaTypes: [any PersistentModel.Type]` | default `[]` | SwiftData types the plugin owns. `nonisolated static` because `AppDelegate.init()` composes the schema **before any MainActor plugin instance exists**, and unconditionally — install state never changes the schema. This is the data-retention mechanism. |
+| `hasUsageTrace(in: ModelContext) throws -> Bool` | **yes** | Evaluated once by `PluginUsageMigration` to auto-install for upgrading users. Hosts: `HostProfile` rows exist **or** `privilegedHelper.readiness() != .unavailable` (a registered daemon needs its managing UI). Image Conversion: `ImageConversionRecord` rows exist. A throw aborts the whole migration and it retries next launch. |
+| `activate()` | default no-op | On `install(_:)` and on every launch while installed (from `bootstrap`), **before** surfaces register. Wire stores to `host.modelContainer` here; install-time permission acts live here too (Hosts calls `privilegedHelper.ensureRegistered()` — an uninstalled plugin requests no permissions, PRD US14). |
+| `deactivate() async throws` | **yes, deliberately no default** | See the contract below. |
+| `reconcileAfterImport()` | default no-op | After a config-backup import, for every plugin that ends up installed: re-read imported settings, refresh internal state (Hosts: `manager.reload()`). |
+
+### The `deactivate` contract
+
+Called by `PluginRegistry.uninstall` **before any state or surface change**.
+It must:
+
+1. **Cancel in-flight work.** Image Conversion awaits cancellation of an
+   active Conversion Run (`ImageConversionWindowController.deactivateForUninstall()`).
+2. **Release shared host resources through the capabilities.** Hosts calls
+   `host.privilegedHelper.releaseIfUnneeded()` — the Core decides whether
+   another consumer (forced Scheduled Shutdown) still needs the daemon
+   (`PrivilegedHelperRelease` policy in `HelperManager.swift`, amended
+   ADR-0005).
+3. **NEVER mutate user-facing system state or prompt for authorization**
+   (ADR-0005 addendum 2026-07-17). The Hosts precedent: `deactivate()` never
+   writes `/etc/hosts` and never triggers an admin prompt. Active profiles
+   keep `isActive` and their managed block stays in the file — in effect but
+   unmanaged until reinstall, which restores the exact previous setup.
+4. **Throw to abort.** Uninstall is transactional: a thrown error leaves the
+   plugin fully installed with every surface intact — there is no
+   half-uninstalled state. A failed helper release is Hosts' only abort path.
+5. Closing the plugin's windows is fine (both pilots do).
+
+## 4. Host services
+
+### `PluginHostServices` (the only door back into the app)
+
+Implemented by `CorePluginHost`
+(`Sources/AnyDoor/Services/Plugins/CorePluginHost.swift`); one instance built
+in `AppDelegate` and handed to every plugin's `init`. Capabilities:
+
+- `modelContainer: ModelContainer` — the shared container; wire plugin stores
+  in `activate()`.
+- `effectiveLocale: Locale` — routed through the `@Observable`
+  `LocalizationManager`, so reading it in a SwiftUI `body` re-renders on a
+  language switch (pinned by `PluginLocalizationTests`).
+- `localizedString(_ key: String) -> String` — resolves against the shared
+  catalog via `LocalizationManager.shared.bundle`; returns the key when
+  missing.
+- `showToast(_ PluginToast)` — `.success/.info/.failure(String)` →
+  `ToastPresenter.shared`.
+- `trackRegularWindow(_ NSWindow)` — `RegularWindowCoordinator` flips the
+  accessory app to `.regular` while the window is open.
+- `pasteboardSelfWrite(_ body:)` — the `ClipboardWatcher.selfWrite` funnel;
+  any plugin pasteboard write must go through it so the 0.5 s history poll
+  never captures it.
+- `runAppleScript(_ source:) async throws -> String` — `AppleScriptRunner`
+  with Automation-permission handling.
+- `privilegedHelper: any PrivilegedHelperAccess` — the shared root daemon
+  (Core infrastructure): `readiness()`, `ensureRegistered()`,
+  `openApprovalSettings()`, `writeHostsFile(_:) async throws`,
+  `releaseIfUnneeded() throws`.
+
+Adding a member needs the same scrutiny as a new `NativePlugin` requirement.
+Every test host double (`RecordingPluginHost`, `MigrationPluginHost`,
+`StubLocalizationHost`) must grow the member too.
+
+### The `PluginHost` bridge (module-level access)
+
+`Sources/PluginInterface/PluginHost.swift`. Every plugin `init` calls
+`PluginHost.bootstrap(host)`; module singletons (window controllers, stores)
+and SwiftUI views reach the host through the static accessors
+(`PluginHost.showToast`, `.trackRegularWindow`, `.pasteboardSelfWrite`,
+`.helper`, `.helperReadiness()`, `.writeHostsFileViaHelper(_:)`,
+`.runAppleScript(_:)`, `.localizedString(_:arguments:)`) instead of threading
+services through every initializer. **Last bootstrap wins** — in production
+all plugins share one `CorePluginHost`; in tests the most recent fixture's
+host wins, so lifecycle assertions should go through the instance-captured
+`host`, not the bridge. Every accessor degrades safely when unset (pure unit
+tests): strings fall back to raw keys, toasts/window-tracking no-op, the
+helper reads `.unavailable`, AppleScript throws `PrivilegedHelperCallError`.
+
+### Per-module L10n pattern
+
+Each plugin module has a `HostBridge.swift` with:
+
+1. `enum L10n { enum Key: String, CaseIterable, Sendable }` — typed view of
+   the raw catalog keys the module uses (e.g. `"plugin.hosts.name"`).
+2. `func L(_ key: L10n.Key, _ args: CVarArg...) -> String` → thin front over
+   `PluginHost.localizedString(key.rawValue, arguments:)`.
+3. `struct LocalizedText: View` wrapping the shared reactive
+   `PluginLocalizedText(key:)` — a `Text` that re-renders on a host language
+   switch (the body reads `services.effectiveLocale`, registering an
+   Observation dependency).
+
+The strings themselves live in the **host's** single shared catalog,
+`Sources/AnyDoor/Resources/Localizable.xcstrings` (user story 27). Both
+`en` and `zh-Hans` values are mandatory:
+`LocalizationCoverageTests.test_everyL10nKeyHasZhHansAndEnTranslations`
+walks `AnyDoor.L10n.Key` + `ImageConversionPlugin.L10n.Key` +
+`HostsPlugin.L10n.Key` against the raw JSON and fails on any missing entry.
+Plugin lifecycle strings follow the pattern `plugin.<id>.name` /
+`.description` / `.uninstallImpact`; the Plugins tab's own strings are Core
+keys (`plugins.install`, `plugins.uninstall`, `plugins.state.installed`,
+`plugins.uninstall.confirmTitle`, `plugins.uninstall.dataRetained`,
+`plugins.uninstall.failed` in `Sources/AnyDoor/Utilities/L10n.swift`).
+
+## 5. Surfaces and how each gates on install state
+
+`PluginRegistry.isAvailable(command)` = Core-owned commands always available;
+plugin-claimed commands only while their owner is installed.
+`PluginRegistry.availableCommands` = full catalog minus uninstalled plugins'
+claims.
+
+- **Panel row.** `PanelStore.rebuild()` skips any `BuiltinPreference` row
+  whose item fails the injected `commandAvailability` closure (bound to
+  `PluginRegistry.shared.isAvailable` in `AppDelegate`). The preference row
+  itself is retained. Panel settings and the palette root both derive from
+  PanelStore, so they inherit the gate. Providers land per-item via
+  `PanelStore.registerProviders(_:)` / `unregisterProviders(for:)` (the
+  latter also clears cached toggle/permission state).
+- **Hotkeys.** `HotkeyCoordinator.refresh()` passes
+  `availableCommands: PluginRegistry.shared.availableCommands` to the pure
+  `compile(bindings:prefs:quicklinks:paletteHotkey:availableCommands:)`; a
+  binding recorded for an unavailable command never compiles — it neither
+  fires nor squats on the shortcut (PRD US15). Only `BuiltinPreference`
+  hotkeys are gated; app shortcuts / quicklinks / the palette hotkey are
+  Core-owned.
+- **Palette.** `CommandPaletteExtensions`
+  (`Sources/AnyDoor/Services/CommandPaletteExtensions.swift`) is the generic
+  registry. `registerContributions(of: plugin)` maps each
+  `paletteOptionParents` member to a `CommandPaletteOptionParent`
+  (`listsAtRoot: { true }`, options built from `paletteOptions(for:)`
+  descriptors, committing via `performPaletteOption`) and registers each
+  `paletteRowSources` element. `unregisterContributions(of:)` reverts both.
+  Fired by the registry's `registerPaletteContributions` /
+  `unregisterPaletteContributions` hooks on install/uninstall — plus one
+  manual loop in `AppDelegate` for launch (bootstrap doesn't fire hooks).
+  Root plugin rows flow through `PanelEntry.Source.pluginRow(sourceID:descriptor:)`;
+  `CommandPaletteCommitIntent.classify` maps them exhaustively by declared
+  `CommitSemantics` (`.stayOpen` → `.pluginRowStayOpen`, `.closeThenAct` →
+  `.pluginRowCloseThenAct`) and the controller performs them via
+  `CommandPaletteExtensions.rowSource(withID:)?.performRow(id:)`. A
+  `PluginRowSource` gets one `reload()` per palette open (in
+  `collectSections`); `rows()` runs per query pass and must stay cheap and
+  synchronous. Its `sectionTitleKey` is a raw catalog-key string rendered via
+  `L(raw:)` / `LocalizedText(raw:)` — no Core `L10n.Key` case needed.
+- **Panel popover.** `MenuBarView`'s generic `case .submenu(let item)` branch
+  (after all named Core submenu branches) resolves
+  `PluginRegistry.shared.panelPopover(for: item)` — which returns `nil`
+  unless the claim owner is installed, so an uninstalled plugin's popover can
+  never mount. The host mounts `makeContent(context)` with a
+  `PluginPanelPopoverContext` (`onHoverChange` / `dismissPopover` /
+  `closePanel`) and, if `refresh` is set, re-runs it off the hover tick then
+  remounts and re-anchors.
+- **Settings → 插件.** `PluginsSettingsView` lists `registry.plugins`
+  (installed or not — this is the one surface where uninstalled plugins are
+  visible, as installable entries). Install applies immediately; Uninstall
+  first shows a confirmation composed of `localizedUninstallImpact` (if any)
+  plus the `plugins.uninstall.dataRetained` promise, then runs the
+  transactional `registry.uninstall(id)`; a thrown deactivate surfaces a
+  failure toast and the plugin stays installed. The row icon is the claimed
+  command with the smallest `defaultOrder`.
+- **Window presentation.** Plugins own their windows
+  (`HostsEditorWindowController`, `ImageConversionWindowController` — both
+  module-internal singletons) and must call
+  `PluginHost.trackRegularWindow(window)` and set `isRestorable = false`.
+  Windows are reached from the plugin's own surfaces (provider `run()`,
+  popover edit button, palette option), all of which are install-gated
+  upstream; `deactivate()` closes them.
+- **Registered debt.** The clipboard-history convert action gates on
+  `PluginRegistry.shared.isAvailable(.imageConversion)` at the menu **and**
+  again in `convertImage(_:)` (menu built just before an uninstall landed).
+
+## 6. Lifecycle flows
+
+All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
+
+- **Launch.** `init()`: schema = 5 Core `@Model` types
+  `+ ImageConversionNativePlugin.modelSchemaTypes + HostsNativePlugin.modelSchemaTypes`
+  (unconditional). `applicationDidFinishLaunching`: build one
+  `CorePluginHost`, construct the plugin list
+  (`[ImageConversionNativePlugin(host:), HostsNativePlugin(host:)]`), then —
+  **order matters** — `PluginUsageMigration.runIfNeeded(plugins:in:)` first,
+  `PluginRegistry.shared.bootstrap(plugins:hooks:)` second (bootstrap reads
+  the possibly-just-migrated install state and calls `activate()` on each
+  installed plugin). Bootstrap does **not** fire the surface hooks; the
+  composition root registers initial surfaces itself: a loop over
+  `installedPlugins` calling
+  `CommandPaletteExtensions.shared.registerContributions(of:)`, and
+  `providers = BuiltinProviderRegistry.makeAll(...) + PluginRegistry.shared.installedProviders`
+  into `PanelStore.shared.bootstrap(modelContainer:providers:commandAvailability:)`.
+- **Install** (`PluginRegistry.install(id)`, idempotent): `activate()` →
+  insert into `installedIDs` → persist → `hooks.registerProviders(plugin.providers)`
+  → `hooks.registerPaletteContributions(plugin)` → `hooks.refreshSurfaces()`
+  (in the app: `PanelStore.rebuild()` + `HotkeyCoordinator.refresh()`).
+  Everything appears without relaunch.
+- **Uninstall** (`uninstall(id) async throws`, idempotent, re-entrancy
+  guarded by `transitioningIDs`): `try await plugin.deactivate()` **first**;
+  only on success remove from `installedIDs`, persist,
+  `hooks.unregisterProviders(plugin.claimedCommands)`,
+  `hooks.unregisterPaletteContributions(plugin)`, `hooks.refreshSurfaces()`.
+  A throw propagates to the UI and nothing changed.
+- **Backup import.** `plugins.installed` is whitelisted in
+  `SyncSettingsRegistry` (as `.stringArray`). `BackupService.reconcileAfterImport()`
+  awaits `PluginRegistry.shared.reconcileAfterImport()`: read the imported
+  set from defaults, run the **real lifecycle** for the delta (`install` per
+  added id — so `activate` runs and helper registration happens only as a
+  consequence of install, never from the defaults write itself; transactional
+  `uninstall` per removed id — a failed deactivate keeps the plugin and the
+  state is re-persisted to match reality), then forward
+  `reconcileAfterImport()` to the plugins that end up installed. Helper
+  *approval* is machine-local and never travels (PRD US24).
+- **Usage-trace migration** (`PluginUsageMigration.runIfNeeded`): one-shot
+  behind versioned flag `plugins.usageMigrated_v1`. If `plugins.installed`
+  already exists before migration (only possible via a config-backup import),
+  that explicit selection wins and the flag is set without inference.
+  Otherwise every plugin's `hasUsageTrace(in:)` decides its initial state;
+  fresh installs get `[]`. A throwing predicate aborts without setting the
+  flag, so the next launch retries (a transient store error must not silently
+  uninstall a feature). Once flagged, no relaunch — including Sparkle's
+  silent-update relaunch — changes the set (PRD US28).
+
+## 7. Checklist: adding plugin N+1
+
+Ordered; the invariant tests are the safety net — a missed step fails a
+named test, which is the point of them.
+
+1. **Claim a command.** Add the `BuiltinItem` case(s) in
+   `Sources/PluginInterface/BuiltinItem.swift`: `kind`, `symbol`, unique
+   `defaultOrder`, `requiresAutomation` if needed. Add the panel title key in
+   Core's `BuiltinItem+Core.swift` (`titleKey`) + catalog entries.
+   *Missed → `BuiltinCatalogInvariantTests` (provider/order invariants),
+   `BuiltinItemLocalizationTests` (title key resolves), non-exhaustive-switch
+   compile errors in `kind`/`symbol`/`defaultOrder`.*
+2. **New SPM target** in `Package.swift`: `Sources/<Name>Plugin/`, depends
+   only on `PluginInterface` (+ pure shared targets like `ImageCodec` if
+   justified), `.swiftLanguageMode(.v6)`. Add it to the `AnyDoor` and
+   `AnyDoorTests` dependency lists.
+3. **Plugin type**: `@MainActor public final class <Name>NativePlugin:
+   NativePlugin` with `public static let pluginID = NativePluginID(rawValue:
+   "<stable-id>")`, `init(host: any PluginHostServices)` calling
+   `PluginHost.bootstrap(host)` and capturing `host` for lifecycle calls.
+   Implement only the surfaces the feature has (defaults cover the rest);
+   `deactivate` must be written consciously per the section-3 contract.
+   Provide a test `init` seam if the plugin touches a system boundary
+   (Hosts' injected `HostsManager` + `MockHostsWriter` precedent).
+4. **Register in `AppDelegate`**: append `<Name>NativePlugin.modelSchemaTypes`
+   to the `Schema` in `init()` (if it owns models) and the instance to the
+   `plugins` array in `applicationDidFinishLaunching`. Nothing else — hooks,
+   migration, backup, and all surfaces are generic.
+   *Missed schema → SwiftData faults at first fetch; missed list entry → the
+   plugin simply doesn't exist (and its lifecycle test can't pass).*
+5. **Strings**: `HostBridge.swift` in the module (typed `L10n.Key` enum +
+   `L(_:)` + `LocalizedText` fronts, copied from a pilot), entries in
+   `Sources/AnyDoor/Resources/Localizable.xcstrings` with **both** `en` and
+   `zh-Hans`, including `plugin.<id>.name` / `.description` /
+   (`.uninstallImpact` when applicable).
+   *Missed → extend `LocalizationCoverageTests` with the new module's
+   `L10n.Key.allCases` (this extension is mandatory, the test can't see the
+   new enum by itself) — then it enforces coverage forever.*
+6. **Tests that MUST be extended** (grep for the pilot's name to find every
+   seam):
+   - `BuiltinCatalogInvariantTests.makeProductionPlugins()` — add the real
+     instance (with sanctioned doubles for system boundaries) so the claim /
+     provider invariants cover it.
+   - A `<Name>PluginLifecycleTests` with the **real** plugin instance against
+     a fresh `PluginRegistry` + isolated `UserDefaults` suite: install
+     surfaces appear, uninstall reverts them without side effects, failed
+     deactivate aborts transactionally, reinstall restores data
+     (`HostsPluginLifecycleTests` is the template).
+   - `PluginUsageMigrationTests` — a trace-present and trace-absent case for
+     the new `hasUsageTrace` predicate (only if upgrading users exist for the
+     feature; a brand-new feature has no trace and starts uninstalled).
+   - Hotkey availability is already generic
+     (`HotkeyCoordinatorTests.testUninstalledPluginCommandBindingNeverCompiles`);
+     extend only if the new command kind needs a new `compile` branch.
+   - Palette plumbing is pinned generically by
+     `PluginPaletteContributionTests` (fixture plugin) and
+     `CommandPaletteCommitIntentTests` (pluginRow semantics); add
+     feature-specific option/row tests like `HostProfileRowSourceTests` when
+     the plugin contributes them.
+7. **Migration**: nothing to write — `PluginUsageMigration` iterates the
+   plugin list. But note the flag is versioned: `plugins.usageMigrated_v1`
+   has already run for existing users, so a *later* plugin extracted from an
+   existing Core feature needs a **new** versioned migration pass (v2) if its
+   users must be auto-installed; a genuinely new feature needs none.
+8. **Docs**: `CHANGELOG.md` under `## [Unreleased]`; the SPM target list and
+   Native Plugins note in `CLAUDE.md`; glossary additions in `CONTEXT.md` if
+   the feature brings new terms.
+
+## 8. Testing rules
+
+(PRD Testing Decisions; the suite enforces them by example.)
+
+- **Sanctioned doubles only**: `MockHostsWriter` (the hosts-writer boundary),
+  in-memory `ModelContainer`s (`ModelConfiguration(isStoredInMemoryOnly:
+  true)`), and the helper **readiness injection point** — a scripted
+  `PrivilegedHelperAccess` inside a `PluginHostServices` test double
+  (`RecordingPluginHost.RecordingHelper` pattern); real `SMAppService`
+  registration is never exercised. Everything else runs for real.
+- **Registry lifecycle tests use real plugin instances**, a fresh
+  `PluginRegistry()` (not `.shared`), an isolated
+  `UserDefaults(suiteName:)` with `removePersistentDomain` teardown, and
+  either counting hooks or a private `CommandPaletteExtensions()` instance.
+  `SurfaceHooks.noop` exists for tests that don't care.
+- **No view-layer tests.** Policies, models, stores, and descriptors only.
+  The one end-to-end exception drives the real `PanelStore`
+  (`PluginRegistryTests.testLifecycleTogglesPanelRowThroughRealSurfaces`),
+  still headless.
+- Contract-level pins live in `NativePluginContractTests` (a `BarePlugin`
+  proves optional members default to empty/no-op and don't trap) — extend it
+  if you add a protocol member.
+- Remember `PluginHost.bootstrap` is last-wins global state: assert through
+  the instance-captured host, and don't rely on the bridge across fixtures.
+
+## 9. Known debts / gotchas
+
+- **Two registered-debt plugin imports in Core** (section 2): the AppDelegate
+  composition root (permanent, sanctioned) and the clipboard-history convert
+  context menu (`ClipboardWallWindowController`) — the latter is the PRD's
+  single carved-out debt; revisit when that surface changes.
+- **`presentWindow(for:)` and `settingsSection` are dormant surfaces.** Both
+  are declared on `NativePlugin` (PRD Implementation Decisions) but as of
+  2026-07-17 no Core code calls `presentWindow` or renders `settingsSection`
+  (verified by grep; only `NativePluginContractTests` touches them). Pilots
+  open windows through their own providers/popovers/palette options instead.
+  If you wire a Core call site, keep it generic (route via `PluginRegistry`,
+  never a named plugin).
+- **Legacy hardcoded Chinese strings in Hosts views** (pre-plugin debt):
+  `HostsEditorView`, `HostsManagerPopoverView`, `HelperApprovalBanner` still
+  contain literal Chinese UI strings that bypass the L10n pattern (they
+  predate the extraction and don't switch with the app language). Do not copy
+  this pattern — new plugin UI must use `L(_:)` / `LocalizedText`. Migrate
+  these opportunistically when touching the files.
+- **US16 reinstall hotkey-conflict edge**: while a plugin is uninstalled its
+  command's shortcut is free and can be recorded elsewhere; after reinstall
+  the retained `BuiltinPreference` hotkey compiles again alongside the newer
+  binding. `HotkeyCoordinator.compile` performs no conflict resolution — both
+  snapshots exist and dispatch order decides. The PRD wording ("unless the
+  shortcut was rebound meanwhile") is aspiration, not enforced code; treat a
+  proper conflict check as open follow-up if it bites.
+- **`HostProfileRowSource` carries a stale doc comment** ("Registered by the
+  Core while Hosts still lives in it…") from before the extraction; the Hosts
+  plugin registers it now.
+- **`PluginRegistry.bootstrap` intersects the stored set with the known
+  plugin list**, so an id from the future (or a typo) is silently dropped —
+  another reason `pluginID` raw values are frozen forever.
+- **The uninstall UI and the registry are both re-entrancy guarded**
+  (`uninstallingIDs` in `PluginsSettingsView`, `transitioningIDs` in
+  `PluginRegistry`) because `deactivate` is async; keep both if you add
+  another uninstall entry point.
