@@ -19,8 +19,11 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   permissions.
   _Avoid_: 启用 (reserved for per-command visibility).
 - **Uninstall** (卸载) — Reverting a plugin's system side effects (e.g.
-  deactivating hosts profiles, unregistering its helper) and removing all its
-  surfaces, while retaining its user data so a reinstall restores it fully.
+  deactivating hosts profiles, unregistering its helper), cancelling its
+  in-flight work, and removing all its surfaces, while retaining its user
+  data so a reinstall restores it fully. Uninstalling is transactional: if
+  reverting fails or the user cancels a required authorization, the plugin
+  remains installed — there is no half-uninstalled state.
   _Avoid_: 禁用, 停用.
 
 ## Quicklinks
