@@ -1,7 +1,7 @@
 ---
 id: 013
 title: "Native Plugins: extract the shared plugin-interface module (prefactor)"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-16-native-plugin-architecture.md
 ---
 
