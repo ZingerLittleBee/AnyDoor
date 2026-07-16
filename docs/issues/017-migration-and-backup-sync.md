@@ -1,7 +1,7 @@
 ---
 id: 017
 title: "Native Plugins: usage-trace migration + install state in backup"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-16-native-plugin-architecture.md
 ---
 
