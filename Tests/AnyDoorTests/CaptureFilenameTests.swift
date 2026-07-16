@@ -1,4 +1,5 @@
 import XCTest
+import PluginInterface
 @testable import AnyDoor
 
 final class CaptureFilenameTests: XCTestCase {

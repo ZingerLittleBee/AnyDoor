@@ -4,7 +4,7 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct ImageConversionBasketItem: Identifiable, Equatable, Sendable {
+public struct ImageConversionBasketItem: Identifiable, Equatable, Sendable {
     /// A basket entry is either an on-disk file (output beside it) or an
     /// in-memory bitmap such as a pasted screenshot (output to Downloads).
     enum Payload: Equatable, Sendable {
@@ -12,11 +12,11 @@ struct ImageConversionBasketItem: Identifiable, Equatable, Sendable {
         case bitmap(Data)
     }
 
-    let id: String
+    public let id: String
     let payload: Payload
     let displayName: String
 
-    static func file(_ url: URL) -> ImageConversionBasketItem {
+    public static func file(_ url: URL) -> ImageConversionBasketItem {
         let standardized = url.standardizedFileURL
         return ImageConversionBasketItem(
             id: standardized.path,
@@ -25,7 +25,7 @@ struct ImageConversionBasketItem: Identifiable, Equatable, Sendable {
         )
     }
 
-    static func bitmap(_ data: Data, displayName: String) -> ImageConversionBasketItem {
+    public static func bitmap(_ data: Data, displayName: String) -> ImageConversionBasketItem {
         ImageConversionBasketItem(
             id: "bitmap:\(UUID().uuidString)",
             payload: .bitmap(data),
@@ -346,6 +346,15 @@ final class ImageConversionViewModel {
         runTask?.cancel()
     }
 
+    /// Plugin `deactivate` path: cancel the in-flight run (same boundary as
+    /// Stop) and wait for it to wind down, so nothing continues in the
+    /// background once the plugin's surfaces are gone. No-op when idle.
+    func cancelActiveRun() async {
+        guard let task = runTask else { return }
+        task.cancel()
+        await task.value
+    }
+
     /// Injectable folder picker (given the remembered directory, returns the
     /// chosen one or nil on cancel) so tests can bypass the modal panel.
     @ObservationIgnored var outputDirectoryPicker: (@MainActor (URL?) async -> URL?)?
@@ -475,7 +484,7 @@ final class ImageConversionViewModel {
 
     private func copyOutputsToPasteboard(_ outputURLs: [URL]) {
         guard !outputURLs.isEmpty else { return }
-        ClipboardWatcher.selfWrite { pb in
+        PluginHost.pasteboardSelfWrite { pb in
             pb.clearContents()
             pb.writeObjects(outputURLs as [NSURL])
         }
@@ -601,11 +610,11 @@ final class ImageConversionViewModel {
                     output, candidate: candidate, item: item, outcome: .targetUnattainable
                 )
                 self.remove(item)
-                ToastPresenter.shared.show(historySaved
+                PluginHost.showToast(historySaved
                     ? .success(L(.imageConversionSavedAnyway))
                     : .info(L(.imageConversionHistorySaveFailed)))
             } catch {
-                ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
+                PluginHost.showToast(.failure(L(.imageConversionFileMissing)))
             }
         }
     }
@@ -842,14 +851,14 @@ final class ImageConversionViewModel {
 
     private func showConversionSummary(converted: Int, skipped: Int, historyWarnings: Int) {
         if historyWarnings > 0 {
-            ToastPresenter.shared.show(.info(L(
+            PluginHost.showToast(.info(L(
                 .imageConversionToastSummaryWithHistoryWarnings,
                 converted,
                 skipped,
                 historyWarnings
             )))
         } else {
-            ToastPresenter.shared.show(.success(L(
+            PluginHost.showToast(.success(L(
                 .imageConversionToastSummary,
                 converted,
                 skipped

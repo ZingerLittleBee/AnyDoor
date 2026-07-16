@@ -34,6 +34,11 @@ public protocol NativePlugin: AnyObject {
     /// One-sentence user-facing description for the Plugins settings tab.
     var localizedDescription: String { get }
 
+    /// User-facing description of the side effects an Uninstall reverts
+    /// (e.g. "active hosts profiles will be deactivated"), shown in the
+    /// uninstall confirmation. `nil` when uninstalling only removes surfaces.
+    var localizedUninstallImpact: String? { get }
+
     // MARK: Claims
 
     /// The built-in commands this plugin Claims. A Claim is exclusive: every
@@ -107,6 +112,8 @@ public protocol NativePlugin: AnyObject {
 // `deactivate` deliberately has no default — reverting side effects and
 // cancelling in-flight work must be a conscious per-plugin decision.
 extension NativePlugin {
+    public var localizedUninstallImpact: String? { nil }
+
     public var paletteOptionParents: Set<BuiltinItem> { [] }
 
     public func paletteOptions(for parent: BuiltinItem) async -> [PluginRowDescriptor] { [] }

@@ -7,7 +7,7 @@ enum ImageConversionMode: String, CaseIterable, Sendable {
     case targetSize
 }
 
-enum ImageConversionPreferences {
+public enum ImageConversionPreferences {
     static let targetFormatKey = "imageConversion.targetFormat"
     static let qualityKey = "imageConversion.quality"
 
@@ -62,7 +62,7 @@ enum ImageConversionPreferences {
     /// The persisted quality percentage, clamped to the valid range. A missing or
     /// out-of-range stored value falls back to the default so garbage can never
     /// reach the encoder.
-    static func qualityPercent(defaults: UserDefaults = .standard) -> Int {
+    public static func qualityPercent(defaults: UserDefaults = .standard) -> Int {
         guard defaults.object(forKey: qualityKey) != nil else { return defaultQualityPercent }
         let stored = defaults.integer(forKey: qualityKey)
         guard stored >= minQualityPercent, stored <= maxQualityPercent else {

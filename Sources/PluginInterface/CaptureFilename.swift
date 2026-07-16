@@ -3,10 +3,10 @@ import Foundation
 /// Pure helpers for turning a naming template + date into a filesystem-safe file
 /// name, and for de-duplicating against existing files. No I/O — callers inject
 /// the existence check so this stays unit-testable.
-enum CaptureFilename {
+public enum CaptureFilename {
     /// Expands `YYYY MM DD HH mm ss` tokens (longest-first so `MM`/`mm` are
     /// unambiguous), then strips characters illegal in a file name.
-    static func make(template: String, date: Date, calendar: Calendar) -> String {
+    public static func make(template: String, date: Date, calendar: Calendar) -> String {
         let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
         func pad(_ v: Int?, _ width: Int) -> String {
             String(format: "%0\(width)d", v ?? 0)
@@ -25,7 +25,7 @@ enum CaptureFilename {
 
     /// Returns `"<base>.<ext>"`, or `"<base> N.<ext>"` with the smallest N >= 2
     /// that is free per `exists`.
-    static func resolve(base: String, ext: String, exists: (String) -> Bool) -> String {
+    public static func resolve(base: String, ext: String, exists: (String) -> Bool) -> String {
         let first = "\(base).\(ext)"
         if !exists(first) { return first }
         var n = 2

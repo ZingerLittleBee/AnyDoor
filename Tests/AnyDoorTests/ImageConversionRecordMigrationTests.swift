@@ -1,6 +1,7 @@
 import SwiftData
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 /// Proves that `ImageConversionRecord`'s Target Size extension migrates safely.
 /// SwiftData lightweight migration only backfills scalar/optional-scalar columns

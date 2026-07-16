@@ -2,6 +2,7 @@ import CoreGraphics
 import ImageIO
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class ImageConverterTests: XCTestCase {
     private func tempDirectory() throws -> URL {

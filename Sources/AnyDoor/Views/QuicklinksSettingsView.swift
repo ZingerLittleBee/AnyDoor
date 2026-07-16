@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 import SwiftUI
 
 @MainActor

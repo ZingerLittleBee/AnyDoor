@@ -1,6 +1,7 @@
 import CryptoKit
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class AtomicOutputWriterTests: XCTestCase {
     private var directory: URL!

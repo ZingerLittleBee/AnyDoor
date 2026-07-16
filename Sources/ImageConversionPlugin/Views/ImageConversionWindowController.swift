@@ -1,10 +1,11 @@
 import AppKit
 import Carbon.HIToolbox
+import PluginInterface
 import SwiftUI
 
 @MainActor
-final class ImageConversionWindowController: NSWindowController, NSWindowDelegate {
-    static let shared = ImageConversionWindowController()
+public final class ImageConversionWindowController: NSWindowController, NSWindowDelegate {
+    public static let shared = ImageConversionWindowController()
     static let windowFrameKey = "imageConversion.windowFrame"
     /// Tracks whether the lazy singleton exists so import reconciliation can
     /// reload a live view model without instantiating the window.
@@ -15,9 +16,18 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
 
     /// A backup import rewrote the conversion preferences; push them into the
     /// live view model. A no-op when the window was never created.
-    static func reconcilePreferencesAfterImport() {
+    public static func reconcilePreferencesAfterImport() {
         guard sharedExists else { return }
         shared.viewModel.reloadFromDefaults()
+    }
+
+    /// Plugin `deactivate` path: cancel an in-flight Conversion Run (awaiting
+    /// its cancellation so nothing continues in the background) and close the
+    /// workspace window. A no-op when the window singleton was never created.
+    static func deactivateForUninstall() async {
+        guard sharedExists else { return }
+        await shared.viewModel.cancelActiveRun()
+        shared.close()
     }
 
     private init() {
@@ -80,7 +90,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
     /// clipboard-history entry). Unlike `toggle`, this never reads the Finder
     /// selection and never closes an already-open window — it merges the items
     /// into the current basket and brings the window forward.
-    func present(items: [ImageConversionBasketItem]) {
+    public func present(items: [ImageConversionBasketItem]) {
         if !viewModel.isConverting {
             viewModel.add(items)
         }
@@ -96,7 +106,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         installKeyMonitor()
         // Normal-level window of an accessory app: adopt .regular policy while
         // it is open so it stays reachable (untracked on willClose).
-        RegularWindowCoordinator.shared.track(window)
+        PluginHost.trackRegularWindow(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         // Drop the initial first responder so no control renders a focus ring
@@ -104,7 +114,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         window.makeFirstResponder(nil)
     }
 
-    override func close() {
+    public override func close() {
         // `NSWindow.close()` (not `orderOut`) so willClose fires: cleanup in
         // `windowWillClose` and RegularWindowCoordinator's untracking both
         // depend on it, and the traffic-light path already goes through it.
@@ -161,7 +171,7 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
 
     private func handle(_ event: NSEvent) -> Bool {
         guard window?.isVisible == true, window?.isKeyWindow == true else { return false }
-        if Self.shouldDeferToFocusedControl(
+        if FocusedControlKeyPolicy.shouldDefer(
             keyCode: Int(event.keyCode),
             firstResponder: window?.firstResponder
         ) {
@@ -202,16 +212,6 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
         return false
     }
 
-    static func shouldDeferToFocusedControl(
-        keyCode: Int,
-        firstResponder: NSResponder?
-    ) -> Bool {
-        guard keyCode == 53 || keyCode == kVK_ANSI_V else { return false }
-        return firstResponder is NSTextView
-            || firstResponder is NSControl
-            || firstResponder is NSCollectionView
-    }
-
     /// ⌘V: copied image files enter as file references (like drag & drop); a
     /// copied bitmap enters as a bitmap item. Non-image content is ignored.
     private func pasteFromClipboard() {
@@ -224,16 +224,23 @@ final class ImageConversionWindowController: NSWindowController, NSWindowDelegat
             return
         }
         if let image = NSImage(pasteboard: pasteboard),
-           let png = ClipboardCapture.pngData(from: image) {
+           let png = Self.pngData(from: image) {
             viewModel.addBitmap(png)
         }
     }
 
-    func windowDidMove(_ notification: Notification) { saveFrame() }
-    func windowDidResize(_ notification: Notification) { saveFrame() }
+    private static func pngData(from image: NSImage) -> Data? {
+        guard let tiff = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff),
+              let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
+        return png
+    }
+
+    public func windowDidMove(_ notification: Notification) { saveFrame() }
+    public func windowDidResize(_ notification: Notification) { saveFrame() }
     // The traffic-light close path bypasses our `close()` override, so the
     // cleanup lives in the delegate callback both paths reach.
-    func windowWillClose(_ notification: Notification) {
+    public func windowWillClose(_ notification: Notification) {
         saveFrame()
         removeKeyMonitor()
         viewModel.windowDidHide()

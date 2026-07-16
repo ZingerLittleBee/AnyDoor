@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 import SwiftUI
 
 /// Floating panel that previews (read-only) or edits (writable) the text of a

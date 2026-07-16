@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 
 enum MenuBarEventMonitorPolicy {
     enum ClickDecision: Equatable {

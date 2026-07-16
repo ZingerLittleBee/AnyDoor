@@ -7,8 +7,10 @@ enum ImageConversionError: Error, Sendable {
     case encodingFailed(URL)
 }
 
-struct ImageConverter: Sendable {
-    static let defaultQuality = 0.85
+public struct ImageConverter: Sendable {
+    public init() {}
+
+    public static let defaultQuality = 0.85
     private static let iconMaxPixel = 256
 
     @discardableResult
@@ -24,7 +26,7 @@ struct ImageConverter: Sendable {
 
     /// Converts an in-memory bitmap (e.g. a pasted screenshot) to `outputURL`.
     @discardableResult
-    func convert(
+    public func convert(
         data: Data,
         to outputURL: URL,
         format: ImageConversionFormat,

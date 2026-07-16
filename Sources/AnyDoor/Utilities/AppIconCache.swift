@@ -9,7 +9,7 @@ import AppKit
 /// memoizes the result by path, so recycled rows and both pickers reuse warm
 /// icons with no main-thread I/O.
 ///
-/// Mirrors `ClipboardThumbnail`: a `@MainActor` cache whose dictionaries are
+/// Mirrors `FileThumbnailCache`: a `@MainActor` cache whose dictionaries are
 /// only ever touched on the main actor (so they need no lock); only the disk
 /// read itself is offloaded.
 @MainActor

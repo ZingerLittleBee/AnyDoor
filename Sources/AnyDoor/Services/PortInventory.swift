@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import PluginInterface
 import os
 
 @MainActor

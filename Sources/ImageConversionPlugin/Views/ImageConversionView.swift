@@ -1,3 +1,4 @@
+import PluginInterface
 import AppKit
 import ImageIO
 import SwiftUI
@@ -679,7 +680,7 @@ private struct ImageConversionSidebarRow: View {
     private var resolvedThumbnail: NSImage {
         if let thumbnail { return thumbnail }
         if let url = item.fileURL {
-            return ClipboardThumbnail.cached(at: url) ?? NSWorkspace.shared.icon(forFile: url.path)
+            return FileThumbnailCache.cached(at: url) ?? NSWorkspace.shared.icon(forFile: url.path)
         }
         return NSWorkspace.shared.icon(for: .image)
     }
@@ -687,7 +688,7 @@ private struct ImageConversionSidebarRow: View {
     private func loadThumbnail() async -> NSImage? {
         switch item.payload {
         case .file(let url):
-            return await ClipboardThumbnail.thumbnail(at: url)
+            return await FileThumbnailCache.thumbnail(at: url)
         case .bitmap(let data):
             return await BitmapThumbnail.decode(data)
         }
@@ -916,13 +917,13 @@ private struct ImageConversionHistoryRow: View {
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
         .task(id: record.outputPath) {
             guard FileManager.default.fileExists(atPath: record.outputPath) else { return }
-            preview = await ClipboardThumbnail.thumbnail(at: record.outputURL)
+            preview = await FileThumbnailCache.thumbnail(at: record.outputURL)
         }
     }
 
     private var resolvedPreview: NSImage {
         if let preview { return preview }
-        if let cached = ClipboardThumbnail.cached(at: record.outputURL) { return cached }
+        if let cached = FileThumbnailCache.cached(at: record.outputURL) { return cached }
         return NSImage(systemSymbolName: "photo", accessibilityDescription: nil)
             ?? NSWorkspace.shared.icon(for: .image)
     }
@@ -930,7 +931,7 @@ private struct ImageConversionHistoryRow: View {
     private func reveal() {
         let url = record.outputURL
         guard FileManager.default.fileExists(atPath: url.path) else {
-            ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
+            PluginHost.showToast(.failure(L(.imageConversionFileMissing)))
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -939,14 +940,14 @@ private struct ImageConversionHistoryRow: View {
     private func copyAsFile() {
         let url = record.outputURL
         guard FileManager.default.fileExists(atPath: url.path) else {
-            ToastPresenter.shared.show(.failure(L(.imageConversionFileMissing)))
+            PluginHost.showToast(.failure(L(.imageConversionFileMissing)))
             return
         }
-        ClipboardWatcher.selfWrite { pasteboard in
+        PluginHost.pasteboardSelfWrite { pasteboard in
             pasteboard.clearContents()
             pasteboard.writeObjects([url as NSURL])
         }
-        ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        PluginHost.showToast(.success(L(.toastCopiedToClipboard)))
     }
 }
 

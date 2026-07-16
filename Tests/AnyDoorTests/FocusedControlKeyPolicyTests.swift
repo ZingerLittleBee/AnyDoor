@@ -1,29 +1,31 @@
 import AppKit
 import Carbon.HIToolbox
 import XCTest
+import PluginInterface
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 @MainActor
-final class ImageConversionWindowControllerTests: XCTestCase {
+final class FocusedControlKeyPolicyTests: XCTestCase {
     func testPasteAndEscapeDeferToFocusedTextEditing() {
         let editor = NSTextView()
 
-        XCTAssertTrue(ImageConversionWindowController.shouldDeferToFocusedControl(
+        XCTAssertTrue(FocusedControlKeyPolicy.shouldDefer(
             keyCode: kVK_ANSI_V,
             firstResponder: editor
         ))
-        XCTAssertTrue(ImageConversionWindowController.shouldDeferToFocusedControl(
+        XCTAssertTrue(FocusedControlKeyPolicy.shouldDefer(
             keyCode: kVK_Escape,
             firstResponder: editor
         ))
     }
 
     func testWindowShortcutsRemainAvailableWithoutAControlFocus() {
-        XCTAssertFalse(ImageConversionWindowController.shouldDeferToFocusedControl(
+        XCTAssertFalse(FocusedControlKeyPolicy.shouldDefer(
             keyCode: kVK_ANSI_V,
             firstResponder: nil
         ))
-        XCTAssertFalse(ImageConversionWindowController.shouldDeferToFocusedControl(
+        XCTAssertFalse(FocusedControlKeyPolicy.shouldDefer(
             keyCode: kVK_ANSI_O,
             firstResponder: NSTextView()
         ))

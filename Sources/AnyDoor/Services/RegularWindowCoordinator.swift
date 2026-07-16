@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 
 /// Keeps the app in `.regular` activation policy while any "real" window
 /// (Settings, the Hosts editor) is open.

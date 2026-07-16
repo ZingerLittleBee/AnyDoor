@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 import SwiftUI
 
 /// An always-on-top floating image for reference. Drag to move, adjust opacity,

@@ -1,3 +1,4 @@
+import PluginInterface
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -226,7 +227,7 @@ struct ClipboardCardView: View {
         UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
     }
 
-    /// Image/file-card thumbnail decoded off the main thread via `ClipboardThumbnail`:
+    /// Image/file-card thumbnail decoded off the main thread via `FileThumbnailCache`:
     /// reads the warm cache synchronously in `body`, and only kicks off the async
     /// decode on a miss, so many image cards sliding in no longer each run a
     /// full-resolution decode on the main thread. Unlike the lightweight source-app
@@ -238,7 +239,7 @@ struct ClipboardCardView: View {
 
         var body: some View {
             Group {
-                if let image = loaded ?? ClipboardThumbnail.cached(at: url) {
+                if let image = loaded ?? FileThumbnailCache.cached(at: url) {
                     // Color.clear takes the offered preview frame; the image fills it
                     // as an overlay and is clipped to those bounds, so a large image
                     // can't overflow and cover the header.
@@ -251,8 +252,8 @@ struct ClipboardCardView: View {
                 }
             }
             .task(id: url) {
-                if loaded == nil, ClipboardThumbnail.cached(at: url) == nil {
-                    loaded = await ClipboardThumbnail.thumbnail(at: url)
+                if loaded == nil, FileThumbnailCache.cached(at: url) == nil {
+                    loaded = await FileThumbnailCache.thumbnail(at: url)
                 }
             }
         }

@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import ImageConversionPlugin
 import SwiftData
 
 /// Outcome of an import, surfaced to the UI.

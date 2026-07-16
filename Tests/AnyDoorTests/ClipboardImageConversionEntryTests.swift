@@ -1,5 +1,6 @@
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 /// Behavioral tests for `ClipboardImageConversionEntry` — the pure policy
 /// deciding which clipboard-history entries expose the image-conversion action

@@ -37,14 +37,29 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // Native Plugin pilot (ADR-0005): the Image Conversion feature as its
+        // own module. It touches the host only through PluginInterface's host
+        // services; the app target depends on it to build the compile-time
+        // plugin registry list (plus the registered-debt call sites noted in
+        // the PRD: clipboard-history context menu and capture save-as).
+        .target(
+            name: "ImageConversionPlugin",
+            dependencies: [
+                .product(name: "libwebp", package: "libwebp-Xcode"),
+                "PluginInterface",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
         .executableTarget(
             name: "AnyDoor",
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "libwebp", package: "libwebp-Xcode"),
                 "HostsHelperShared",
                 "PluginInterface",
+                "ImageConversionPlugin",
             ],
             resources: [
                 .process("Resources"),
@@ -74,7 +89,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AnyDoorTests",
-            dependencies: ["AnyDoor", "PluginInterface"],
+            dependencies: ["AnyDoor", "PluginInterface", "ImageConversionPlugin"],
             resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

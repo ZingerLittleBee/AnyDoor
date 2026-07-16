@@ -1,4 +1,6 @@
 import AppKit
+import ImageConversionPlugin
+import PluginInterface
 import QuartzCore
 import QuickLookUI
 import SwiftData

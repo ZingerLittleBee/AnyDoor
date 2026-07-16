@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 import SwiftUI
 
 /// Spotlight-style floating panel hosting the translation UI. The panel can

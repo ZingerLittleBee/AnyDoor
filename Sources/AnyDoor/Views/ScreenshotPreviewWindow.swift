@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 import SwiftUI
 
 /// Standalone borderless floating panel used for previewing a screenshot

@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Reads the current Finder selection and echoes its image files into the
 /// Conversion Basket. Reading happens only at window-activation time (no live
@@ -19,9 +20,11 @@ enum FinderSelectionReader {
 
     /// Best-effort read of the current Finder selection as image-file URLs.
     /// Returns an empty array on any AppleScript failure or empty selection.
+    @MainActor
     static func read() async -> [URL] {
+        guard let services = PluginHost.services else { return [] }
         do {
-            let output = try await AppleScriptRunner.run(selectionScript)
+            let output = try await services.runAppleScript(selectionScript)
             return parse(output)
         } catch {
             // Silent by design: an unavailable Automation permission or a

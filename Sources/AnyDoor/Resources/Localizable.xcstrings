@@ -6563,6 +6563,57 @@
         }
       }
     },
+    "plugin.imageConversion.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batch-convert images between formats or compress them to a target size, with history and clipboard integration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "批量转换图片格式或压缩到目标大小，支持历史记录与剪贴板集成。"
+          }
+        }
+      }
+    },
+    "plugin.imageConversion.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image Conversion"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图片格式转换"
+          }
+        }
+      }
+    },
+    "plugin.imageConversion.uninstallImpact": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An in-progress conversion will be stopped."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在进行的转换将被停止。"
+          }
+        }
+      }
+    },
     "port.action.clearError": {
       "extractionState": "manual",
       "localizations": {

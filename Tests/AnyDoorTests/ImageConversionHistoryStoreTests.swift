@@ -1,6 +1,7 @@
 import SwiftData
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 @MainActor
 final class ImageConversionHistoryStoreTests: XCTestCase {

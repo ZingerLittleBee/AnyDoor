@@ -20,12 +20,12 @@ import Foundation
 /// do that by casting away the closure's `@MainActor` isolation and invoking it
 /// directly on the current (main) thread. A debug-only assertion enforces the
 /// "already on the main thread" contract without adding any release-build crash.
-enum MainThreadIsolation {
+public enum MainThreadIsolation {
     /// Run `body` synchronously on the current thread and return its value,
     /// assuming the caller is already on the main thread. Prefer this over
     /// `MainActor.assumeIsolated` in main-thread callbacks (see the type doc).
     @discardableResult
-    static func run<T>(_ body: @MainActor () throws -> T) rethrows -> T {
+    public static func run<T>(_ body: @MainActor () throws -> T) rethrows -> T {
         assert(Thread.isMainThread, "MainThreadIsolation.run must be called on the main thread")
         // `withoutActuallyEscaping` lets us reinterpret the non-escaping closure;
         // `unsafeBitCast` drops the `@MainActor` isolation (same calling

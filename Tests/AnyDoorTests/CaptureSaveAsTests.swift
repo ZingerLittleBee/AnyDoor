@@ -4,6 +4,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 /// Covers the pure, testable seams of the screenshot "Save As" path: the
 /// extension -> format resolution policy, the `UTType` accessor that widens the

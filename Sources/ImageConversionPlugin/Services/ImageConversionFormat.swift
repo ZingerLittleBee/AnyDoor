@@ -2,7 +2,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
+public enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
     case png
     case jpeg
     case heic
@@ -18,7 +18,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
     case pdf
     case ico
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
     var typeIdentifier: String {
         switch self {
@@ -35,7 +35,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    var fileExtension: String {
+    public var fileExtension: String {
         switch self {
         case .png: return "png"
         case .jpeg: return "jpg"
@@ -52,7 +52,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
 
     /// Lossy formats accept a quality parameter; lossless ones ignore it, so the
     /// UI only offers the quality slider for these.
-    var isLossy: Bool {
+    public var isLossy: Bool {
         switch self {
         case .jpeg, .heic, .avif, .webp: return true
         case .png, .tiff, .gif, .bmp, .pdf, .ico: return false
@@ -83,7 +83,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
 
     /// The system UTType for this format, used to widen the screenshot Save As
     /// panel's allowed content types to the whitelist.
-    var utType: UTType? {
+    public var utType: UTType? {
         UTType(typeIdentifier)
     }
 
@@ -91,7 +91,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
     /// case-insensitive and understands the common JPEG spelling aliases (`jpg` /
     /// `jpeg`); any extension outside the whitelist falls back to PNG, so a plain
     /// `.png` save writes the original bytes with no re-encode.
-    static func forSaveExtension(_ ext: String) -> ImageConversionFormat {
+    public static func forSaveExtension(_ ext: String) -> ImageConversionFormat {
         let normalized = ext.lowercased()
         if normalized == "jpg" || normalized == "jpeg" { return .jpeg }
         // The Save As pipeline encodes through ImageIO, which cannot write
@@ -114,7 +114,7 @@ enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    static func availableTargets() -> [ImageConversionFormat] {
+    public static func availableTargets() -> [ImageConversionFormat] {
         let identifiers = (CGImageDestinationCopyTypeIdentifiers() as? [String]) ?? []
         return availableTargets(encoderTypeIdentifiers: identifiers)
     }

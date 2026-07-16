@@ -1,8 +1,10 @@
 import Cocoa
+import PluginInterface
 import SwiftData
 import SwiftUI
 import OSLog
 import AskForPermission
+import ImageConversionPlugin
 import Sparkle
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
@@ -42,11 +44,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
             let config = ModelConfiguration(url: storeURL)
-            modelContainer = try ModelContainer(
-                for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, HostProfile.self,
-                TranslationRecord.self, ImageConversionRecord.self, Quicklink.self,
-                configurations: config
+            // Core-owned model types plus every plugin's (ADR-0005: plugin
+            // schema is registered unconditionally, so user data survives
+            // Uninstall and a later Install restores it).
+            let schema = Schema(
+                [
+                    KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
+                    HostProfile.self, TranslationRecord.self, Quicklink.self,
+                ] + ImageConversionNativePlugin.modelSchemaTypes
             )
+            modelContainer = try ModelContainer(for: schema, configurations: config)
 
             let legacyURL = appSupport.appendingPathComponent("default.store")
             if FileManager.default.fileExists(atPath: legacyURL.path) {
@@ -92,10 +99,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardWatcher.shared = watcher
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
-        // Register providers
+        // Native Plugins: build the compile-time plugin set. Activation is
+        // unconditional for this slice; the PluginRegistry (install state,
+        // claim lookups, transactional uninstall) lands next.
+        let pluginHost = CorePluginHost(modelContainer: modelContainer)
+        let imageConversionPlugin = ImageConversionNativePlugin(host: pluginHost)
+        imageConversionPlugin.activate()
+
+        // Register providers: Core-claimed commands plus the plugins' own.
         let providers = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
             PanelStore.shared.onKeepAwakeStateChange(state)
-        })
+        }) + imageConversionPlugin.providers
         PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
         HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
@@ -105,16 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // the coordinator at it so successful translations get recorded.
         TranslationHistoryStore.shared.configure(modelContainer: modelContainer)
         TranslationCoordinator.shared.history = TranslationHistoryStore.shared
-
-        // Image Conversion history: wire the shared container so completed
-        // conversions get recorded from the conversion view model.
-        ImageConversionHistoryStore.shared.configure(modelContainer: modelContainer)
-
-        // Sweep candidate session directories a previous process left behind:
-        // deinit/reset cleanup never runs on process exit or crash.
-        Task.detached(priority: .background) {
-            CandidateArtifactStore.cleanupStaleSessions()
-        }
 
         // Scheduled Shutdown: push state to the panel and re-arm any persisted
         // schedule (or cancel a deadline missed while the app was quit).

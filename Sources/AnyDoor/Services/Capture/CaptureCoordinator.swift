@@ -1,5 +1,7 @@
+import PluginInterface
 import AppKit
 import Foundation
+import ImageConversionPlugin
 
 /// Orchestrates a single capture: resolve mode -> (selection / countdown / direct
 /// grab) -> output policy (auto-save + auto-copy + history) -> quick-access overlay.

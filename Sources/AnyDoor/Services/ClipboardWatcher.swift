@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PluginInterface
 
 /// Polls a pasteboard for changes and records them into ClipboardHistoryStore.
 /// `poll()` is public so tests can drive it deterministically; production uses

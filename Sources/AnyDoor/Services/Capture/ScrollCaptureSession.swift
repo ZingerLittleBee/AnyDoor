@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import PluginInterface
 
 /// Interactive scrolling capture: shows a preview + Done/Cancel, observes real
 /// scroll events, grabs the viewport (below its own preview window so the session
