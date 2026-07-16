@@ -27,3 +27,19 @@ migrated by usage trace (Hosts: `HostProfile` rows exist OR the privileged
 helper is registered — the helper check prevents a ghost daemon with no
 managing UI; Image Conversion: `ImageConversionRecord` rows exist; everyone
 else, including fresh installs, starts uninstalled).
+
+## Addendum (2026-07-17): Hosts uninstall is side-effect-free on the hosts file
+
+Reversed after owner testing: uninstalling Hosts no longer deactivates
+active profiles. `deactivate()` must never write `/etc/hosts` and never
+prompt for administrator authorization — a surprise file mutation plus an
+auth prompt in the middle of an uninstall was judged worse than a window of
+temporarily unmanaged entries. Active profiles keep their `isActive` state
+and their managed block stays in the file, so a reinstall restores the exact
+previous setup (PRD US8); the uninstall confirmation states that active
+entries remain in effect and can be managed again by reinstalling. The only
+remaining uninstall side effect is releasing the shared helper daemon when
+no other consumer (forced Scheduled Shutdown) needs it, and a failed release
+still aborts the uninstall transactionally. The "profiles exist OR helper
+registered" migration trace matters even more now that active managed
+entries can survive an uninstall.

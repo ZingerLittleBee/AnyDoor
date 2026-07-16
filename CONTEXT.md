@@ -18,12 +18,15 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   everywhere — it contributes no commands, no settings, and requests no
   permissions.
   _Avoid_: 启用 (reserved for per-command visibility).
-- **Uninstall** (卸载) — Reverting a plugin's system side effects (e.g.
-  deactivating hosts profiles, unregistering its helper), cancelling its
-  in-flight work, and removing all its surfaces, while retaining its user
-  data so a reinstall restores it fully. Uninstalling is transactional: if
-  reverting fails or the user cancels a required authorization, the plugin
-  remains installed — there is no half-uninstalled state.
+- **Uninstall** (卸载) — Cancelling a plugin's in-flight work, releasing the
+  shared host resources it holds (e.g. unregistering the privileged helper
+  when nothing else needs it), and removing all its surfaces, while
+  retaining its user data so a reinstall restores it fully. An uninstall
+  never mutates user-visible system state and never prompts for
+  authorization — active hosts entries stay in effect until a reinstall
+  (ADR-0005 addendum 2026-07-17). Uninstalling is transactional: if
+  `deactivate` throws, the plugin remains installed — there is no
+  half-uninstalled state.
   _Avoid_: 禁用, 停用.
 
 ## Quicklinks

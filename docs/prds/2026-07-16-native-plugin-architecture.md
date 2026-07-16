@@ -23,9 +23,11 @@ uninstalls as one unit from a new Plugins tab in Settings. Installing is a
 logical state change — code always ships with the app (ADR-0005) — but an
 uninstalled plugin is invisible everywhere: it contributes no commands, no
 panel rows, no palette entries, no settings, and requests no permissions.
-Uninstalling reverts the plugin's system side effects, cancels its in-flight
-work, and keeps its user data so a reinstall restores everything; it is
-transactional, with no half-uninstalled state. The pilot plugins are **Hosts**
+Uninstalling cancels the plugin's in-flight work, releases shared host
+resources, and keeps its user data so a reinstall restores everything; it is
+transactional, with no half-uninstalled state, and it never mutates
+user-visible system state or prompts for authorization (ADR-0005 addendum
+2026-07-17). The pilot plugins are **Hosts**
 (heavy side effects: privileged writes, a helper daemon, an editor window) and
 **Image Conversion** (own window, own SwiftData model, no side effects) —
 two deliberately different shapes so the plugin interface cannot overfit to
@@ -39,11 +41,11 @@ trace so nobody loses a feature they were using.
 2. As a user, I want a Plugins tab in Settings listing every available Native Plugin with a localized name, description, and install state, so that optional features are discoverable in one place.
 3. As a user, I want to install a plugin with one click and see its commands, panel rows, and settings appear immediately without relaunching, so that installation feels instant.
 4. As a user, I want to uninstall a plugin and have every one of its surfaces disappear at once — panel, palette, settings, hotkeys — so that uninstalled truly means gone.
-5. As a user uninstalling Hosts while profiles are active, I want those profiles deactivated (the hosts file restored) as part of the uninstall, so that no orphaned system state survives without a managing UI.
-6. As a user who cancels the administrator authorization during a Hosts uninstall, I want the plugin to remain fully installed with a clear error message, so that I am never left in a half-uninstalled state.
+5. As a user uninstalling Hosts while profiles are active, I want the hosts file left completely untouched — no write, no administrator prompt — with active entries staying in effect until I reinstall, so that an uninstall never mutates system state behind my back. *(Reversed 2026-07-17 after owner testing; see the ADR-0005 addendum — previously the uninstall deactivated active profiles.)*
+6. As a user whose Hosts uninstall fails to release the privileged helper, I want the plugin to remain fully installed with a clear error message, so that I am never left in a half-uninstalled state.
 7. As a user uninstalling Image Conversion during an active Conversion Run, I want the run cancelled cleanly before the plugin goes away, so that no work continues invisibly.
 8. As a user who uninstalls a plugin, I want its data (host profiles, Conversion Records, per-command preferences, recorded hotkeys) retained, so that reinstalling restores my exact previous setup.
-9. As a user, I want an uninstall confirmation that states what will be reverted (e.g. "active hosts profiles will be deactivated"), so that side-effect reversal never surprises me.
+9. As a user, I want an uninstall confirmation that states what happens and what remains (e.g. "active hosts entries stay in the hosts file and remain in effect; reinstall the plugin to manage them again"), so that nothing about the uninstall surprises me.
 10. As an upgrading user with host profiles, I want the Hosts plugin auto-installed after the update, so that the upgrade changes nothing I can perceive.
 11. As an upgrading user who enabled the privileged helper but later deleted all profiles, I want Hosts auto-installed anyway, so that the registered daemon always has a managing UI.
 12. As an upgrading user with Conversion Records, I want Image Conversion auto-installed, so that my history and workflow survive.
@@ -84,13 +86,14 @@ trace so nobody loses a feature they were using.
   section, its SwiftData model types (collected at container creation — the
   schema stays static regardless of install state), a usage-trace predicate
   for migration, and lifecycle hooks: `activate`, `deactivate` (throwing;
-  must revert side effects and cancel in-flight work), and
+  must cancel in-flight work and release shared host resources, without
+  mutating user-visible system state or prompting for authorization), and
   reconcile-after-import.
 - **PluginRegistry.** The single new seam. Owns the compile-time plugin list
   and the install-state store; exposes the installed set and claim lookups;
   enforces exclusive claims; performs transactional uninstall — `deactivate`
-  must succeed before any surface is unregistered, and a thrown error or
-  cancelled authorization leaves the plugin installed and reports the error.
+  must succeed before any surface is unregistered, and a thrown error
+  leaves the plugin installed and reports the error.
 - **Extension points, zero named branches.** Every host surface the pilots
   touch becomes generic: the provider registry, panel entry building, the
   palette option-parent table (today a hardcoded five), palette row sections,
@@ -108,20 +111,21 @@ trace so nobody loses a feature they were using.
   excluded, consistent with existing backup policy.
 - **Privileged helper stays Core infrastructure.** The helper daemon is
   shared: Hosts writes through it, and forced Scheduled Shutdown (a Core
-  feature) shuts down through it. Hosts' `deactivate` therefore deactivates
-  profiles unconditionally but unregisters the helper only when no other
-  consumer needs it (forced shutdown not enabled). The migration trace
-  "helper registered → install Hosts" stands, because the Hosts UI is the
-  only enablement path and installing Hosts restores the daemon's managing
-  UI.
+  feature) shuts down through it. Hosts' `deactivate` never touches the
+  hosts file (ADR-0005 addendum 2026-07-17) and unregisters the helper only
+  when no other consumer needs it (forced shutdown not enabled). The
+  migration trace "helper registered → install Hosts" stands, because the
+  Hosts UI is the only enablement path and installing Hosts restores the
+  daemon's managing UI.
 - **Migration.** A one-time, versioned backfill in the launch sequence
   (following the existing seeder precedent): Hosts installs if host profile
   rows exist or the helper is registered; Image Conversion installs if
   Conversion Records exist; everything else — including fresh installs —
   starts uninstalled.
 - **Uninstall confirmation.** Uninstalling from the Plugins tab shows a
-  confirmation describing the side effects that will be reverted before
-  `deactivate` runs.
+  confirmation describing the uninstall's impact — for Hosts, that active
+  entries stay in the hosts file and remain in effect until the plugin is
+  reinstalled — plus the data-retention promise, before `deactivate` runs.
 
 ## Testing Decisions
 
@@ -131,8 +135,9 @@ trace so nobody loses a feature they were using.
   doubles remain the existing hosts-writer boundary double and in-memory
   ModelContainers.
 - **PluginRegistry lifecycle** (the one new seam) is tested with the real
-  pilot plugin instances: install surfaces appear, uninstall reverts and
-  unregisters, a failing or cancelled side-effect revert leaves the plugin
+  pilot plugin instances: install surfaces appear, uninstall unregisters
+  surfaces while leaving the hosts file untouched (writer never called,
+  active profiles stay active), a failed helper release leaves the plugin
   installed (transactionality), and an in-flight conversion run is cancelled
   by deactivate.
 - **Catalog claim invariant** extends the existing builtin-catalog invariant
