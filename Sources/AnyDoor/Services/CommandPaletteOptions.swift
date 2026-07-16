@@ -285,10 +285,7 @@ extension CommandPaletteExtensions {
                 CommandPaletteOptions.captureTimerOptions()
             }
         ))
-        registry.registerRowSource(
-            HostProfileRowSource(),
-            sectionTitleKey: .commandPaletteSectionHosts
-        )
+        registry.registerRowSource(HostProfileRowSource())
         return registry
     }
 }

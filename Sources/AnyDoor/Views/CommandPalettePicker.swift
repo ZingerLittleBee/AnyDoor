@@ -4,9 +4,22 @@ import PluginInterface
 
 /// One labelled group of rows in the command palette.
 struct CommandPaletteSection: Identifiable {
-    let titleKey: L10n.Key
+    /// Raw string-catalog key for the header. Raw (not `L10n.Key`) because
+    /// plugin row sources declare their section title as a catalog key
+    /// string; Core sections keep the typed convenience initializer.
+    let titleKey: String
     let entries: [PanelEntry]
-    var id: String { titleKey.rawValue }
+    var id: String { titleKey }
+
+    init(titleKey: L10n.Key, entries: [PanelEntry]) {
+        self.titleKey = titleKey.rawValue
+        self.entries = entries
+    }
+
+    init(rawTitleKey: String, entries: [PanelEntry]) {
+        self.titleKey = rawTitleKey
+        self.entries = entries
+    }
 }
 
 /// Mutable state shared between the SwiftUI command palette view and the
@@ -315,7 +328,7 @@ final class CommandPaletteState {
             let matched = section.entries.filter { entry in
                 rootEntry(entry, matches: trimmed)
             }
-            return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
+            return matched.isEmpty ? nil : CommandPaletteSection(rawTitleKey: section.titleKey, entries: matched)
         }
         // Insert special sections at index 0 in reverse priority order, so the
         // last inserted ends up on top. Final order: quicklink argument, dev-tool
@@ -373,7 +386,7 @@ final class CommandPaletteState {
                     )
                 }
             guard !entries.isEmpty else { return nil }
-            return CommandPaletteSection(titleKey: registration.sectionTitleKey, entries: entries)
+            return CommandPaletteSection(rawTitleKey: registration.sectionTitleKey, entries: entries)
         }
     }
 
@@ -1135,8 +1148,8 @@ struct CommandPalettePicker: View {
         }
     }
 
-    private func sectionHeader(titleKey: L10n.Key) -> some View {
-        LocalizedText(titleKey)
+    private func sectionHeader(titleKey: String) -> some View {
+        LocalizedText(raw: titleKey)
             .font(.system(size: 11, weight: .semibold))
             .textCase(.uppercase)
             .foregroundStyle(.secondary)

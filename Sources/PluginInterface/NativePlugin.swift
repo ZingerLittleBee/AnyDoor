@@ -59,13 +59,18 @@ public protocol NativePlugin: AnyObject {
     /// registered palette option parents.
     func paletteOptions(for parent: BuiltinItem) async -> [PluginRowDescriptor]
 
+    /// Runs the action behind a committed second-level option (mirroring
+    /// `PluginRowSource.performRow`): the host routes the option back by its
+    /// descriptor id, so its control flow never names the plugin.
+    func performPaletteOption(parent: BuiltinItem, id: String) async
+
     /// Root-level command-palette row sources (e.g. hosts profile rows),
     /// descriptor-based per ADR-0007.
     var paletteRowSources: [any PluginRowSource] { get }
 
     /// The menu-panel popover contributed for a claimed submenu command, or
     /// nil when that command has no popover.
-    func panelPopover(for command: BuiltinItem) -> AnyView?
+    func panelPopover(for command: BuiltinItem) -> PluginPanelPopover?
 
     /// Presents the plugin's window for a claimed window-bearing command
     /// (e.g. an editor window); does nothing for commands without one.
@@ -118,9 +123,11 @@ extension NativePlugin {
 
     public func paletteOptions(for parent: BuiltinItem) async -> [PluginRowDescriptor] { [] }
 
+    public func performPaletteOption(parent: BuiltinItem, id: String) async {}
+
     public var paletteRowSources: [any PluginRowSource] { [] }
 
-    public func panelPopover(for command: BuiltinItem) -> AnyView? { nil }
+    public func panelPopover(for command: BuiltinItem) -> PluginPanelPopover? { nil }
 
     public func presentWindow(for command: BuiltinItem) {}
 

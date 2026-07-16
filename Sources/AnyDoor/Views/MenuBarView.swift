@@ -433,9 +433,37 @@ struct MenuBarView: View {
             }
             Task { await BluetoothBatteryService.shared.refresh() }
             anchorPopover(popover, to: target)
-        case .submenu:
-            // Other builtin submenu items (none today) — nothing to mount.
-            break
+        case .submenu(let item):
+            // Any other submenu command belongs to an installed Native Plugin
+            // (Core rows all have named branches above); mount its contributed
+            // popover generically so Core control flow never names a plugin.
+            guard let spec = PluginRegistry.shared.panelPopover(for: item) else { break }
+            popover.needsKeyFocus = spec.needsKeyFocus
+            let context = PluginPanelPopoverContext(
+                onHoverChange: { gate.popoverHover($0) },
+                dismissPopover: {
+                    gate.reset()
+                    popover.hide()
+                },
+                closePanel: { onRequestClose() }
+            )
+            func mountPluginContent() {
+                popover.updateContent { spec.makeContent(context) }
+            }
+            mountPluginContent()
+            anchorPopover(popover, to: target)
+            if let refresh = spec.refresh {
+                // Refresh off the hover tick, then remount and re-anchor so the
+                // popover resizes to the fresh data (mirrors the hosts flow).
+                Task { @MainActor in
+                    await refresh()
+                    guard activeHoverTarget == target else { return }
+                    mountPluginContent()
+                    if let frame = convertedTriggerFrame(for: target) {
+                        popover.show(anchoredTo: frame)
+                    }
+                }
+            }
         case .history(let item):
             // Content is keyed by the kind (several items share `.screenshot`);
             // the anchor is keyed by the item so each row anchors to itself.

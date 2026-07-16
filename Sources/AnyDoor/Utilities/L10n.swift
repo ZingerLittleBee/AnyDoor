@@ -681,14 +681,34 @@ func L(_ key: L10n.Key, _ args: CVarArg...) -> String {
     return String(format: template, locale: manager.effectiveLocale, arguments: args)
 }
 
+/// Raw-key variant of `L(_:)` for keys arriving from outside Core's typed
+/// catalog view (plugin-declared palette section titles). Falls back to the
+/// key itself when the catalog has no entry.
+@MainActor
+func L(raw rawKey: String) -> String {
+    NSLocalizedString(
+        rawKey,
+        tableName: nil,
+        bundle: LocalizationManager.shared.bundle,
+        value: rawKey,
+        comment: ""
+    )
+}
+
 /// SwiftUI Text wrapper that re-renders on `LocalizationManager` changes.
 /// Replaces raw `Text("中文")` everywhere in the view tree.
 @MainActor
 struct LocalizedText: View {
-    let key: L10n.Key
+    let rawKey: String
 
     init(_ key: L10n.Key) {
-        self.key = key
+        self.rawKey = key.rawValue
+    }
+
+    /// Raw-key variant for keys arriving from outside Core's typed catalog
+    /// view (plugin-declared palette section titles).
+    init(raw rawKey: String) {
+        self.rawKey = rawKey
     }
 
     var body: some View {
@@ -698,6 +718,6 @@ struct LocalizedText: View {
         // than via @Environment) keeps the view usable in test fixtures
         // that introspect `view.body` without an injected environment.
         _ = LocalizationManager.shared.preference
-        return Text(L(key))
+        return Text(L(raw: rawKey))
     }
 }

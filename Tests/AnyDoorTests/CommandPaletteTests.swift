@@ -45,7 +45,7 @@ final class CommandPaletteTests: XCTestCase {
         )
         state.query = "3000"
 
-        XCTAssertEqual(state.filteredSections.map(\.titleKey.rawValue), ["commandPalette.section.ports"])
+        XCTAssertEqual(state.filteredSections.map(\.titleKey), ["commandPalette.section.ports"])
         XCTAssertEqual(state.flatEntries.count, 1)
 
         let entry = try XCTUnwrap(state.flatEntries.first)
@@ -105,7 +105,7 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         state.query = "1+2"
 
-        XCTAssertEqual(state.filteredSections.first?.titleKey, .commandPaletteSectionCalculator)
+        XCTAssertEqual(state.filteredSections.first?.titleKey, L10n.Key.commandPaletteSectionCalculator.rawValue)
         let entry = try XCTUnwrap(state.flatEntries.first)
         guard case .calcResult(let result) = entry.source else {
             return XCTFail("Expected a calc result entry")
@@ -133,7 +133,7 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         state.query = "8080"
 
-        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionCalculator })
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == L10n.Key.commandPaletteSectionCalculator.rawValue })
     }
 
     // MARK: - Plugin row root search (hosts profiles, #4 / ADR-0007)
@@ -413,7 +413,7 @@ final class CommandPaletteTests: XCTestCase {
         )
         state.query = "Dev"
 
-        XCTAssertEqual(state.filteredSections.first?.titleKey, .commandPaletteSectionHosts)
+        XCTAssertEqual(state.filteredSections.first?.titleKey, "commandPalette.section.hosts")
         let entry = try XCTUnwrap(state.flatEntries.first)
         XCTAssertEqual(entry.title, "Dev")
         XCTAssertEqual(entry.subtitle, "Active")
@@ -453,7 +453,7 @@ final class CommandPaletteTests: XCTestCase {
         profiles: [HostProfile]
     ) -> CommandPaletteExtensions.RowSourceRegistration {
         CommandPaletteExtensions.RowSourceRegistration(
-            sectionTitleKey: .commandPaletteSectionHosts,
+            sectionTitleKey: "commandPalette.section.hosts",
             source: HostProfileRowSource(
                 profiles: { profiles },
                 reload: {},
@@ -480,7 +480,7 @@ final class CommandPaletteTests: XCTestCase {
         state.query = "md5 abc"
 
         let section = try XCTUnwrap(
-            state.filteredSections.first { $0.titleKey == .commandPaletteSectionDevTools }
+            state.filteredSections.first { $0.titleKey == L10n.Key.commandPaletteSectionDevTools.rawValue }
         )
         let entry = try XCTUnwrap(section.entries.first { $0.subtitle == "MD5" })
         XCTAssertEqual(entry.title, "900150983cd24fb0d6963f7d28e17f72")
@@ -494,7 +494,7 @@ final class CommandPaletteTests: XCTestCase {
     func testPlainTextDoesNotShowDeveloperToolsSection() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         state.query = "hello"
-        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionDevTools })
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == L10n.Key.commandPaletteSectionDevTools.rawValue })
     }
 
     // MARK: - Dev-tool scope badge
@@ -559,7 +559,7 @@ final class CommandPaletteTests: XCTestCase {
         state.query = "hello"
 
         let sections = state.filteredSections
-        XCTAssertEqual(sections.map(\.titleKey), [.commandPaletteSectionDevTools])
+        XCTAssertEqual(sections.map(\.titleKey), [L10n.Key.commandPaletteSectionDevTools.rawValue])
         let entry = try XCTUnwrap(sections.first?.entries.first { $0.subtitle == "Base64 Encode" || $0.subtitle == "Base64 编码" })
         XCTAssertEqual(entry.title, "aGVsbG8=")
     }
@@ -660,7 +660,7 @@ final class CommandPaletteTests: XCTestCase {
         state.query = "3 ft to m"
 
         let section = try XCTUnwrap(state.filteredSections.first)
-        XCTAssertEqual(section.titleKey, .commandPaletteSectionConversion)
+        XCTAssertEqual(section.titleKey, L10n.Key.commandPaletteSectionConversion.rawValue)
         let entry = try XCTUnwrap(state.flatEntries.first)
         XCTAssertEqual(entry.title, "0.9144 m")
         XCTAssertEqual(entry.subtitle, "3 ft")
@@ -696,7 +696,7 @@ final class CommandPaletteTests: XCTestCase {
         state.query = "100 usd to eur"
 
         let entry = try XCTUnwrap(
-            state.filteredSections.first { $0.titleKey == .commandPaletteSectionConversion }?.entries.first
+            state.filteredSections.first { $0.titleKey == L10n.Key.commandPaletteSectionConversion.rawValue }?.entries.first
         )
         XCTAssertEqual(entry.title, "92.50 EUR")
         XCTAssertEqual(entry.subtitle, "as of 2026-06-13")
@@ -715,14 +715,14 @@ final class CommandPaletteTests: XCTestCase {
             currencyRatesProvider: { nil }
         )
         state.query = "100 usd to eur"
-        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionConversion })
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == L10n.Key.commandPaletteSectionConversion.rawValue })
     }
 
     @MainActor
     func testPlainSearchDoesNotShowConversionSection() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: [])
         state.query = "settings"
-        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionConversion })
+        XCTAssertFalse(state.filteredSections.contains { $0.titleKey == L10n.Key.commandPaletteSectionConversion.rawValue })
     }
 
     // MARK: - Currency toolbar visibility

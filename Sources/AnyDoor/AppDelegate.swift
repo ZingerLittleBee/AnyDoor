@@ -110,12 +110,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hooks: PluginRegistry.SurfaceHooks(
                 registerProviders: { PanelStore.shared.registerProviders($0) },
                 unregisterProviders: { PanelStore.shared.unregisterProviders(for: $0) },
+                registerPaletteContributions: {
+                    CommandPaletteExtensions.shared.registerContributions(of: $0)
+                },
+                unregisterPaletteContributions: {
+                    CommandPaletteExtensions.shared.unregisterContributions(of: $0)
+                },
                 refreshSurfaces: {
                     PanelStore.shared.rebuild()
                     HotkeyCoordinator.shared.refresh()
                 }
             )
         )
+        // Initial surface composition: bootstrap does not fire the hooks, so
+        // register the already-installed plugins' palette contributions here
+        // (their providers join the PanelStore bootstrap below).
+        for plugin in PluginRegistry.shared.installedPlugins {
+            CommandPaletteExtensions.shared.registerContributions(of: plugin)
+        }
 
         // Register providers: Core-claimed commands plus installed plugins'.
         let providers = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in

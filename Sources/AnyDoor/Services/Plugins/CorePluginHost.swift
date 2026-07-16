@@ -1,4 +1,5 @@
 import AppKit
+import HostsHelperShared
 import PluginInterface
 import SwiftData
 
@@ -48,5 +49,47 @@ final class CorePluginHost: PluginHostServices {
 
     func runAppleScript(_ source: String) async throws -> String {
         try await AppleScriptRunner.run(source)
+    }
+
+    let privilegedHelper: any PrivilegedHelperAccess = CorePrivilegedHelper()
+}
+
+/// Adapter exposing the Core's shared privileged helper daemon to plugin
+/// modules. Registration/approval delegate to `HelperManager`; release is
+/// gated by `PrivilegedHelperRelease` so uninstalling Hosts never strands
+/// forced Scheduled Shutdown (amended ADR-0005).
+@MainActor
+private final class CorePrivilegedHelper: PrivilegedHelperAccess {
+
+    func readiness() -> PrivilegedHelperReadiness {
+        switch HelperManager.shared.readiness() {
+        case .enabled: return .enabled
+        case .requiresApproval: return .requiresApproval
+        case .unavailable: return .unavailable
+        }
+    }
+
+    func ensureRegistered() -> Bool {
+        HelperManager.shared.ensureRegistered()
+    }
+
+    func openApprovalSettings() {
+        HelperManager.shared.openApprovalSettings()
+    }
+
+    nonisolated func writeHostsFile(_ content: String) async throws {
+        try await PrivilegedHelperCall.run(
+            makeError: { PrivilegedHelperCallError(message: $0) },
+            request: { proxy, finish in
+                proxy.writeHosts(content) { errorMessage in finish(errorMessage) }
+            }
+        )
+    }
+
+    func releaseIfUnneeded() throws {
+        try PrivilegedHelperRelease(
+            otherConsumersActive: { ScheduledShutdownService.shared.forced },
+            unregister: { try HelperManager.shared.unregister() }
+        ).releaseIfUnneeded()
     }
 }

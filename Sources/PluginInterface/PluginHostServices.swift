@@ -51,4 +51,8 @@ public protocol PluginHostServices: AnyObject {
     /// Runs an AppleScript through the host's runner (Automation permission
     /// handling included) and returns its string result.
     func runAppleScript(_ source: String) async throws -> String
+
+    /// The host's shared privileged helper daemon (Core infrastructure,
+    /// amended ADR-0005). See `PrivilegedHelperAccess`.
+    var privilegedHelper: any PrivilegedHelperAccess { get }
 }

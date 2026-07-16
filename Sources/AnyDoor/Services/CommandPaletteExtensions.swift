@@ -34,10 +34,11 @@ final class CommandPaletteExtensions {
     /// (see `CommandPaletteExtensions.core()` next to the option builders).
     static let shared = CommandPaletteExtensions.core()
 
-    /// One registered root-level plugin row source paired with the section
-    /// title its rows appear under (hosts profiles today).
+    /// One registered root-level plugin row source paired with the raw
+    /// string-catalog key of the section title its rows appear under
+    /// (hosts profiles today).
     struct RowSourceRegistration {
-        let sectionTitleKey: L10n.Key
+        let sectionTitleKey: String
         let source: any PluginRowSource
     }
 
@@ -75,11 +76,13 @@ final class CommandPaletteExtensions {
     // MARK: - Plugin row sources
 
     /// Registers a root-level row source; its rows surface in a section
-    /// titled `sectionTitleKey` when they match the query. Re-registering
-    /// the same source id replaces the previous registration.
-    func registerRowSource(_ source: any PluginRowSource, sectionTitleKey: L10n.Key) {
+    /// titled by the source's `sectionTitleKey` when they match the query.
+    /// Re-registering the same source id replaces the previous registration.
+    func registerRowSource(_ source: any PluginRowSource) {
         rowSources.removeAll { $0.source.id == source.id }
-        rowSources.append(RowSourceRegistration(sectionTitleKey: sectionTitleKey, source: source))
+        rowSources.append(
+            RowSourceRegistration(sectionTitleKey: source.sectionTitleKey, source: source)
+        )
     }
 
     func unregisterRowSource(id: String) {
@@ -89,5 +92,46 @@ final class CommandPaletteExtensions {
     /// The source owning `id`, used to perform a committed plugin row.
     func rowSource(withID id: String) -> (any PluginRowSource)? {
         rowSources.first { $0.source.id == id }?.source
+    }
+
+    // MARK: - Plugin contributions (one registration unit per plugin)
+
+    /// Registers everything a freshly installed Native Plugin contributes to
+    /// the palette: its option parents (each mapped through the generic
+    /// descriptor → option bridge, committing back via
+    /// `performPaletteOption`) and its row sources. Plugin option parents
+    /// always list at the root — a toggle/action parent is already listed by
+    /// its own kind, and a submenu parent has no other way in.
+    func registerContributions(of plugin: any NativePlugin) {
+        for parent in plugin.paletteOptionParents {
+            registerOptionParent(for: parent, CommandPaletteOptionParent(
+                listsAtRoot: { true },
+                buildOptions: {
+                    await plugin.paletteOptions(for: parent).map { descriptor in
+                        CommandPaletteOption(
+                            id: descriptor.id,
+                            title: descriptor.title,
+                            subtitle: descriptor.subtitle,
+                            symbol: descriptor.symbol,
+                            isChecked: descriptor.isChecked,
+                            perform: { await plugin.performPaletteOption(parent: parent, id: descriptor.id) }
+                        )
+                    }
+                }
+            ))
+        }
+        for source in plugin.paletteRowSources {
+            registerRowSource(source)
+        }
+    }
+
+    /// Drops every palette contribution of an uninstalled Native Plugin.
+    func unregisterContributions(of plugin: any NativePlugin) {
+        for parent in plugin.paletteOptionParents {
+            unregisterOptionParent(for: parent)
+        }
+        for source in plugin.paletteRowSources {
+            unregisterRowSource(id: source.id)
+        }
     }
 }

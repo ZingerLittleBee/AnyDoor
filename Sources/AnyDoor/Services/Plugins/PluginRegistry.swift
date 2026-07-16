@@ -32,6 +32,12 @@ final class PluginRegistry {
     struct SurfaceHooks {
         var registerProviders: @MainActor ([any BuiltinProvider]) -> Void
         var unregisterProviders: @MainActor (Set<BuiltinItem>) -> Void
+        /// Register a freshly installed plugin's palette contributions
+        /// (option parents and row sources) with the palette registry.
+        /// Defaulted no-op so provider-only test hooks stay terse.
+        var registerPaletteContributions: @MainActor (any NativePlugin) -> Void = { _ in }
+        /// Drop an uninstalled plugin's palette contributions.
+        var unregisterPaletteContributions: @MainActor (any NativePlugin) -> Void = { _ in }
         var refreshSurfaces: @MainActor () -> Void
 
         static let noop = SurfaceHooks(
@@ -121,12 +127,26 @@ final class PluginRegistry {
         return commands
     }
 
+    /// Every installed plugin, in registration order (initial surface
+    /// composition at launch — providers, palette contributions).
+    var installedPlugins: [any NativePlugin] {
+        plugins.filter { installedIDs.contains($0.id) }
+    }
+
     /// Providers contributed by every installed plugin (initial surface
     /// composition at launch).
     var installedProviders: [any BuiltinProvider] {
-        plugins
-            .filter { installedIDs.contains($0.id) }
-            .flatMap(\.providers)
+        installedPlugins.flatMap(\.providers)
+    }
+
+    /// The panel popover for a claimed submenu command, or nil when the Core
+    /// owns the command or its plugin is not installed — an uninstalled
+    /// plugin's popover must never mount.
+    func panelPopover(for command: BuiltinItem) -> PluginPanelPopover? {
+        guard let owner = claims[command],
+              installedIDs.contains(owner),
+              let plugin = plugin(withID: owner) else { return nil }
+        return plugin.panelPopover(for: command)
     }
 
     // MARK: - Lifecycle
@@ -141,6 +161,7 @@ final class PluginRegistry {
         installedIDs.insert(id)
         persistInstalledIDs()
         hooks.registerProviders(plugin.providers)
+        hooks.registerPaletteContributions(plugin)
         hooks.refreshSurfaces()
         logger.info("Installed plugin \(id.rawValue)")
     }
@@ -162,6 +183,7 @@ final class PluginRegistry {
         installedIDs.remove(id)
         persistInstalledIDs()
         hooks.unregisterProviders(plugin.claimedCommands)
+        hooks.unregisterPaletteContributions(plugin)
         hooks.refreshSurfaces()
         logger.info("Uninstalled plugin \(id.rawValue)")
     }

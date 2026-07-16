@@ -12,6 +12,7 @@ final class HostProfileRowSource: PluginRowSource {
     static let sourceID = "hosts.profiles"
 
     let id = HostProfileRowSource.sourceID
+    let sectionTitleKey = "commandPalette.section.hosts"
 
     private let profilesProvider: @MainActor () -> [HostProfile]
     private let reloadAction: @MainActor () -> Void

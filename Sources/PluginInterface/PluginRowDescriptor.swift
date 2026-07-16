@@ -28,6 +28,9 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     /// Localized label for the row's primary action, shown in the palette's
     /// footer (e.g. "Toggle"). Nil falls back to the host's generic label.
     public let actionLabel: String?
+    /// Whether the row shows a leading checkmark (second-level option lists
+    /// only — e.g. the active hosts profile, the current color format).
+    public let isChecked: Bool
     public let commit: CommitSemantics
 
     public init(
@@ -36,6 +39,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         subtitle: String? = nil,
         symbol: String,
         actionLabel: String? = nil,
+        isChecked: Bool = false,
         commit: CommitSemantics
     ) {
         self.id = id
@@ -43,6 +47,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         self.subtitle = subtitle
         self.symbol = symbol
         self.actionLabel = actionLabel
+        self.isChecked = isChecked
         self.commit = commit
     }
 }
@@ -56,6 +61,11 @@ public protocol PluginRowSource: AnyObject {
     /// Stable identity of this row source; commit routing and
     /// unregistration key on it.
     var id: String { get }
+
+    /// String-catalog key for the palette section header this source's rows
+    /// appear under (user story 27: plugin strings live in the shared
+    /// catalog; the host resolves the key against the active language).
+    var sectionTitleKey: String { get }
 
     /// One refresh at palette open (e.g. re-fetch the backing rows).
     /// `rows()` runs on every query pass and must stay cheap, so any real

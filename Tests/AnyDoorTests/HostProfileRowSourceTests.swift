@@ -86,7 +86,7 @@ final class HostProfileRowSourceTests: XCTestCase {
         XCTAssertTrue(registry.rowSources.isEmpty)
 
         let source = HostProfileRowSource(profiles: { [] }, reload: {}, setActive: { _, _ in })
-        registry.registerRowSource(source, sectionTitleKey: .commandPaletteSectionHosts)
+        registry.registerRowSource(source)
 
         XCTAssertEqual(registry.rowSources.count, 1)
         XCTAssertTrue(registry.rowSource(withID: HostProfileRowSource.sourceID) === source)
