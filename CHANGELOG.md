@@ -15,6 +15,15 @@ versioning.
   uninstalling cancels an in-progress conversion first. Conversion history,
   preferences, and hotkeys are kept, so reinstalling restores your exact
   previous setup.
+- Plugins: Hosts management is now the second Native Plugin. Uninstalling it
+  first deactivates any active hosts profiles (removing the managed block from
+  `/etc/hosts`, which may ask for administrator authorization) and unregisters
+  the privileged helper when nothing else needs it (forced Scheduled Shutdown
+  shares the helper daemon); a failed write or cancelled authorization aborts
+  the uninstall, leaving the plugin fully installed. While uninstalled the
+  panel popover, palette entries, profile rows, hotkey, and helper approval
+  banner all disappear. Host profiles and hosts backups are kept, so
+  reinstalling restores everything without a relaunch.
 - Command Palette now opens where you last left it, including after restarting
   AnyDoor. If that monitor is no longer connected, the palette returns to its
   default position.
