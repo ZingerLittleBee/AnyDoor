@@ -8,6 +8,13 @@ versioning.
 
 ### Added
 
+- Plugins: new 「插件」 tab in Settings. Image Conversion is the first Native
+  Plugin — install or uninstall it with one click, no relaunch. While
+  uninstalled it disappears everywhere (panel row, command palette, recorded
+  hotkeys, the workspace window, and the clipboard-history convert action);
+  uninstalling cancels an in-progress conversion first. Conversion history,
+  preferences, and hotkeys are kept, so reinstalling restores your exact
+  previous setup.
 - Command Palette now opens where you last left it, including after restarting
   AnyDoor. If that monitor is no longer connected, the palette returns to its
   default position.
