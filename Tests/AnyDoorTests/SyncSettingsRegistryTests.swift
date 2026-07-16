@@ -25,6 +25,21 @@ final class SyncSettingsRegistryTests: XCTestCase {
         XCTAssertTrue(keys.contains("clipboard.excludedBundleIDs"))
     }
 
+    func testIncludesInstalledPluginSet() {
+        let entry = SyncSettingsRegistry.entries.first {
+            $0.key == PluginRegistry.installStateKey
+        }
+        XCTAssertEqual(entry?.type, .stringArray,
+                       "the installed-plugin set travels in config backup")
+    }
+
+    func testExcludesPrivilegedHelperState() {
+        // Helper registration/approval is machine-local security state and
+        // must never travel in a backup (PRD user story 24).
+        let keys = SyncSettingsRegistry.entries.map(\.key)
+        XCTAssertFalse(keys.contains { $0.localizedCaseInsensitiveContains("helper") })
+    }
+
     func testReadCollectsOnlyPresentKeysWithCorrectTypes() {
         let d = makeDefaults()
         d.set(false, forKey: "menuBar.iconVisible")

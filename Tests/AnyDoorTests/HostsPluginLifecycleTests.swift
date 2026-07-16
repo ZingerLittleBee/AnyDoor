@@ -287,6 +287,37 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertFalse(f.manager.profiles[0].isActive)
     }
 
+    // MARK: - Backup import
+
+    func testImportInstallingHostsActivatesLikeHandsOnInstall() async throws {
+        let f = try makeFixture()
+        defer { f.teardown() }
+        XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
+
+        // A backup exported from a machine with Hosts installed: the settings
+        // import wrote the set; reconcile must behave like a hands-on install.
+        f.defaults.set(["hosts"], forKey: PluginRegistry.installStateKey)
+        await f.registry.reconcileAfterImport()
+
+        XCTAssertTrue(f.registry.isInstalled(f.plugin.id))
+        XCTAssertEqual(f.host.helper.ensureRegisteredCalls, 1,
+                       "importing an installed plugin runs activate, not just a defaults write")
+        XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
+        XCTAssertNotNil(f.registry.panelPopover(for: .hostsManager))
+    }
+
+    func testImportWithoutHostsNeverTouchesTheHelper() async throws {
+        let f = try makeFixture()
+        defer { f.teardown() }
+
+        f.defaults.set([String](), forKey: PluginRegistry.installStateKey)
+        await f.registry.reconcileAfterImport()
+
+        XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
+        XCTAssertEqual(f.host.helper.ensureRegisteredCalls, 0,
+                       "an import never registers a helper by itself")
+    }
+
     // MARK: - Usage trace (migration input)
 
     func testUsageTraceSeesProfileRowsOrRegisteredHelper() throws {

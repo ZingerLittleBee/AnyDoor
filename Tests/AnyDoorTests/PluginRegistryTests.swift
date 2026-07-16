@@ -172,6 +172,86 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertTrue(relaunched.isInstalled(plugin.id))
     }
 
+    // MARK: - Backup import (reconcile adopts the imported install state)
+
+    @MainActor
+    func testReconcileAfterImportInstallsFromImportedState() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let plugin = try makeImageConversionPlugin()
+
+        var registered: [BuiltinItem] = []
+        var refreshes = 0
+        let registry = PluginRegistry()
+        registry.bootstrap(
+            plugins: [plugin],
+            defaults: defaults,
+            hooks: PluginRegistry.SurfaceHooks(
+                registerProviders: { registered.append(contentsOf: $0.map(\.itemKey)) },
+                unregisterProviders: { _ in XCTFail("an import that installs must not unregister") },
+                refreshSurfaces: { refreshes += 1 }
+            )
+        )
+        XCTAssertFalse(registry.isInstalled(plugin.id))
+
+        // The settings import wrote the installed set into defaults; reconcile
+        // must run the real install lifecycle so surfaces appear sans relaunch.
+        defaults.set([plugin.id.rawValue], forKey: PluginRegistry.installStateKey)
+        await registry.reconcileAfterImport()
+
+        XCTAssertTrue(registry.isInstalled(plugin.id))
+        XCTAssertEqual(registered, [.imageConversion])
+        XCTAssertEqual(refreshes, 1)
+    }
+
+    @MainActor
+    func testReconcileAfterImportUninstallsRemovedPlugins() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let plugin = try makeImageConversionPlugin()
+
+        var unregistered: [Set<BuiltinItem>] = []
+        let registry = PluginRegistry()
+        registry.bootstrap(
+            plugins: [plugin],
+            defaults: defaults,
+            hooks: PluginRegistry.SurfaceHooks(
+                registerProviders: { _ in },
+                unregisterProviders: { unregistered.append($0) },
+                refreshSurfaces: {}
+            )
+        )
+        registry.install(plugin.id)
+
+        defaults.set([String](), forKey: PluginRegistry.installStateKey)
+        await registry.reconcileAfterImport()
+
+        XCTAssertFalse(registry.isInstalled(plugin.id))
+        XCTAssertEqual(unregistered, [[.imageConversion]])
+        XCTAssertEqual(defaults.stringArray(forKey: PluginRegistry.installStateKey), [])
+    }
+
+    @MainActor
+    func testReconcileAfterImportFailedUninstallKeepsPluginAndRepersists() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let plugin = ThrowingDeactivatePlugin()
+
+        let registry = PluginRegistry()
+        registry.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        registry.install(plugin.id)
+
+        defaults.set([String](), forKey: PluginRegistry.installStateKey)
+        await registry.reconcileAfterImport()
+
+        XCTAssertEqual(plugin.deactivateCalls, 1)
+        XCTAssertTrue(registry.isInstalled(plugin.id),
+                      "a failed deactivate keeps the plugin installed, import or not")
+        XCTAssertEqual(defaults.stringArray(forKey: PluginRegistry.installStateKey),
+                       [plugin.id.rawValue],
+                       "the stored state is re-persisted to match reality")
+    }
+
     // MARK: - End-to-end surfaces through the real PanelStore
 
     @MainActor

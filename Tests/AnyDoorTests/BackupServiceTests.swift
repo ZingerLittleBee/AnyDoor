@@ -437,6 +437,35 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testExportIncludesInstalledPluginSet() throws {
+        let context = try makeContext()
+        let defaults = makeDefaults()
+        defaults.set(["hosts"], forKey: PluginRegistry.installStateKey)
+
+        let service = BackupService(context: context, defaults: defaults,
+                                    appPathResolver: { _ in nil })
+        let snapshot = try service.exportSnapshot()
+
+        XCTAssertEqual(snapshot.settings[PluginRegistry.installStateKey],
+                       .stringArray(["hosts"]))
+    }
+
+    @MainActor
+    func testImportWritesInstalledPluginSet() throws {
+        let context = try makeContext()
+        let defaults = makeDefaults()
+        let service = BackupService(context: context, defaults: defaults,
+                                    appPathResolver: { _ in nil })
+
+        _ = try service.importSnapshot(snapshot(
+            settings: [PluginRegistry.installStateKey: .stringArray(["hosts"])]
+        ))
+
+        XCTAssertEqual(defaults.stringArray(forKey: PluginRegistry.installStateKey),
+                       ["hosts"])
+    }
+
+    @MainActor
     func testImportSettingsAppliedCountExcludesNonWhitelistedKeys() throws {
         let context = try makeContext()
         let defaults = makeDefaults()

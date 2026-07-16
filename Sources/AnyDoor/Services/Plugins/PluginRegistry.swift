@@ -23,8 +23,9 @@ final class PluginRegistry {
     static let shared = PluginRegistry()
 
     /// UserDefaults key holding the installed plugin ids ([String]).
-    /// Joins the settings-sync whitelist with the migration slice.
-    static let installStateKey = "plugins.installed"
+    /// Whitelisted in `SyncSettingsRegistry`, so the set travels in config
+    /// backup; nonisolated so the registry (a plain enum) can reference it.
+    nonisolated static let installStateKey = "plugins.installed"
 
     /// How the registry pushes installed-set changes into the Core's
     /// surfaces. Injected at bootstrap so the lifecycle stays testable
@@ -188,9 +189,34 @@ final class PluginRegistry {
         logger.info("Uninstalled plugin \(id.rawValue)")
     }
 
-    /// Forward a config-backup import to every installed plugin so imported
-    /// settings apply without a relaunch.
-    func reconcileAfterImport() {
+    /// Adopt an imported install state, then forward the import to the
+    /// plugins that end up installed.
+    ///
+    /// The settings import only wrote the installed set into defaults;
+    /// installing/uninstalling here runs the real lifecycle (activate /
+    /// deactivate plus the surface hooks), so an imported selection behaves
+    /// like hands-on installs — surfaces appear or disappear without a
+    /// relaunch. A failed deactivate keeps its plugin installed (the usual
+    /// transactional rule) and the stored state is re-persisted to match
+    /// reality.
+    func reconcileAfterImport() async {
+        let importedIDs = Set(
+            (defaults.stringArray(forKey: Self.installStateKey) ?? [])
+                .map(NativePluginID.init(rawValue:))
+        ).intersection(Set(plugins.map(\.id)))
+
+        for id in importedIDs.subtracting(installedIDs) {
+            install(id)
+        }
+        for id in installedIDs.subtracting(importedIDs) {
+            do {
+                try await uninstall(id)
+            } catch {
+                logger.error("Import-driven uninstall of \(id.rawValue) failed: \(error)")
+            }
+        }
+        persistInstalledIDs()
+
         for plugin in plugins where installedIDs.contains(plugin.id) {
             plugin.reconcileAfterImport()
         }

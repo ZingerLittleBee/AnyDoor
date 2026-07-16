@@ -14,6 +14,11 @@ enum SyncSettingsRegistry {
     }
 
     static let entries: [Entry] = [
+        // Installed Native Plugin ids. Import applies it through
+        // `PluginRegistry.reconcileAfterImport()`, which runs the real
+        // install/uninstall lifecycle; helper approval and other
+        // machine-local security state never travel.
+        Entry(key: PluginRegistry.installStateKey, type: .stringArray),
         Entry(key: "menuBar.iconVisible", type: .bool),
         Entry(key: "menuBar.iconName", type: .string),
         Entry(key: "commandPalette.hotkey.keyCode", type: .int),
