@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 
 @MainActor
 final class ImageConversionProvider: ActionProvider {

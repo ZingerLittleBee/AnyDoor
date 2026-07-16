@@ -1,6 +1,7 @@
 import SwiftData
 import OSLog
 import Foundation
+import PluginInterface
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "seeder")
 

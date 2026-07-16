@@ -27,6 +27,16 @@ let package = Package(
             capability: .buildTool(),
             path: "Plugins/XCStringsCompiler"
         ),
+        // Shared plugin interface (ADR-0005/0006/0007): the closed command
+        // catalog, the Native Plugin protocol surface, and the palette row
+        // descriptors. Lean by design — it must never depend on Core
+        // palette/UI types such as PanelEntry.
+        .target(
+            name: "PluginInterface",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
         .executableTarget(
             name: "AnyDoor",
             dependencies: [
@@ -34,6 +44,7 @@ let package = Package(
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "libwebp", package: "libwebp-Xcode"),
                 "HostsHelperShared",
+                "PluginInterface",
             ],
             resources: [
                 .process("Resources"),
@@ -63,7 +74,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AnyDoorTests",
-            dependencies: ["AnyDoor"],
+            dependencies: ["AnyDoor", "PluginInterface"],
             resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

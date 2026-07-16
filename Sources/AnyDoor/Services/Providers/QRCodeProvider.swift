@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PluginInterface
 
 /// Captures a screen region, decodes any QR codes inside it with Vision, copies
 /// the payload(s) to the clipboard, and shows a bottom-center toast reporting

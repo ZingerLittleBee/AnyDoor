@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import PluginInterface
 @testable import AnyDoor
 
 /// An ActionProvider whose first `run()` re-enters `PanelStore.shared.run(.ocr)`

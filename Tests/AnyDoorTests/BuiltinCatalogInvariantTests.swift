@@ -1,5 +1,6 @@
 import CoreGraphics
 import Testing
+import PluginInterface
 @testable import AnyDoor
 
 /// Pins the implicit contracts a new `BuiltinItem` case must satisfy. Each of

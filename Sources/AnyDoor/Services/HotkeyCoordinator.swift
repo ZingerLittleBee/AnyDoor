@@ -1,5 +1,6 @@
 import SwiftData
 import Foundation
+import PluginInterface
 
 /// Owns the hotkey side of the panel subsystem: compiles `HotkeySnapshot`s from
 /// every hotkey source and routes matched `HotkeyAction`s to their targets.

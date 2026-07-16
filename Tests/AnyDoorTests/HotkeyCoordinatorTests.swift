@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+import PluginInterface
 @testable import AnyDoor
 
 final class HotkeyCoordinatorTests: XCTestCase {

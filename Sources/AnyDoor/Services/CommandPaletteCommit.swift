@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// What committing a command-palette row means, declared in one place.
 ///

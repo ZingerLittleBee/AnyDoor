@@ -1,6 +1,7 @@
 import SwiftData
 import SwiftUI
 import OSLog
+import PluginInterface
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "panel")
 

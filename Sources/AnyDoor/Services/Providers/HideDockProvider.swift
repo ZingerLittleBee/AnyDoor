@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Toggles `com.apple.dock.autohide`. autohide=true hides the Dock (auto-hide mode).
 ///

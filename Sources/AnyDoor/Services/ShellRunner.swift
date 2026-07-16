@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Spawn a subprocess, capture stdout/stderr, enforce a timeout.
 ///

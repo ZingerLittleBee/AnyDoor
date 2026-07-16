@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import PluginInterface
 
 @MainActor
 final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate {

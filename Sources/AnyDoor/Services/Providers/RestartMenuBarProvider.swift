@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Restart the menu bar by killing both SystemUIServer and ControlCenter; launchd relaunches them.
 ///

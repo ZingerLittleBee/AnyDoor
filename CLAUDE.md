@@ -44,7 +44,7 @@ Release tooling lives in the `Makefile`: `make sparkle-tools` (downloads the Spa
 
 ## Project Structure
 
-The codebase is large; the layout below is organized by subsystem (not a file-by-file listing). SPM targets: `AnyDoor` (main app), `HostsHelperShared` (shared XPC-contract library), `XPCAuditToken` (ObjC shim exposing the XPC peer audit token), `AnyDoorHostsHelper` (privileged helper executable), `AnyDoorTests`, and `XCStringsCompilerPlugin` (a `.buildTool()` plugin at `Plugins/XCStringsCompiler`, attached to `AnyDoor`, that compiles `.xcstrings` string catalogs via `xcrun xcstringstool` at build time — this is why localization works under plain `swift build` without Xcode).
+The codebase is large; the layout below is organized by subsystem (not a file-by-file listing). SPM targets: `AnyDoor` (main app), `PluginInterface` (lean shared plugin-interface library — the closed `BuiltinItem` command catalog, the `BuiltinProvider`/`ToggleProvider`/`ActionProvider` protocols + `PermissionStatus`, the `NativePlugin` protocol, and the `PluginRowDescriptor` palette row descriptor; it must never depend on Core palette/UI types such as `PanelEntry` — see ADR-0005/0006/0007), `HostsHelperShared` (shared XPC-contract library), `XPCAuditToken` (ObjC shim exposing the XPC peer audit token), `AnyDoorHostsHelper` (privileged helper executable), `AnyDoorTests`, and `XCStringsCompilerPlugin` (a `.buildTool()` plugin at `Plugins/XCStringsCompiler`, attached to `AnyDoor`, that compiles `.xcstrings` string catalogs via `xcrun xcstringstool` at build time — this is why localization works under plain `swift build` without Xcode).
 
 ```
 Sources/AnyDoor/
@@ -53,7 +53,9 @@ Sources/AnyDoor/
 ├── Models/                     # SwiftData @Model (exactly these 7 = the ModelContainer schema):
 │                               #   KeyBinding / BuiltinPreference / ClipboardHistoryItem / HostProfile /
 │                               #   TranslationRecord / ImageConversionRecord / Quicklink.
-│                               #   Value types: BuiltinItem / PanelEntry (+ HotkeyDescriptor) /
+│                               #   Value types: BuiltinItem+Core (L10n/history/sound extensions on the
+│                               #   shared catalog; BuiltinItem itself lives in PluginInterface) /
+│                               #   PanelEntry (+ HotkeyDescriptor) /
 │                               #   HotkeyAction (+ HotkeySnapshot) / HyperKey.swift (HyperKeyTrigger /
 │                               #   HyperKeyQuickPress / HyperKeyVirtualKey) / PortRecord / MenuBarIcon /
 │                               #   BackupSnapshot (Codable backup DTO, NOT a SwiftData @Model)

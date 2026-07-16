@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Builds the full production provider set — one provider per actionable
 /// (toggle/action-kind) `BuiltinItem`.

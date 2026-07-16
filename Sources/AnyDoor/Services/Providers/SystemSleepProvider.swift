@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Put the entire system to sleep via `pmset sleepnow`.
 ///

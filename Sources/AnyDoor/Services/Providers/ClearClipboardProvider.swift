@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Clears the current general pasteboard without recording that clear as a
 /// clipboard-history event.

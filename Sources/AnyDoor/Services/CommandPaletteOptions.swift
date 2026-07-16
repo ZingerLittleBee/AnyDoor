@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import PluginInterface
 
 /// One selectable entry on the command palette's second level. `perform` runs the
 /// action (delegating to the relevant service); it is not `Sendable`, so options

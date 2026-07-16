@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Safely executes an AppleScript on a background thread and reports errors.
 ///

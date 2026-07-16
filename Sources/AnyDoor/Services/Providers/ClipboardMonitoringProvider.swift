@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Toggles clipboard-history monitoring through the same UserDefaults key used
 /// by Settings, so the panel row and settings switch stay in sync.

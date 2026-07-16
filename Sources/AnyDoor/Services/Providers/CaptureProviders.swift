@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Action providers that drive the capture subsystem. Each one hops to the main
 /// actor to call `CaptureCoordinator` (which is `@MainActor`); the coordinator

@@ -1,4 +1,5 @@
 import XCTest
+import PluginInterface
 @testable import AnyDoor
 
 /// Pins the Source → commit-intent mapping so the palette's four commit

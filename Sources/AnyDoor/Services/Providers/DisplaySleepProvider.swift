@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Put the display(s) to sleep immediately via `/usr/bin/pmset displaysleepnow`.
 ///

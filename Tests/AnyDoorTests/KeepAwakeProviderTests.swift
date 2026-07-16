@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import PluginInterface
 @testable import AnyDoor
 
 /// Backend that fails the first N acquires, then behaves normally. Lets tests

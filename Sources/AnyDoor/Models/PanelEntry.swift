@@ -1,13 +1,6 @@
 import Foundation
 import AppKit
-
-/// Permission state for a built-in item that requires external authorization.
-enum PermissionStatus: Sendable, Hashable {
-    case granted
-    case denied
-    case undetermined
-    case notRequired
-}
+import PluginInterface
 
 /// A hotkey binding for display and comparison.
 struct HotkeyDescriptor: Hashable, Sendable {

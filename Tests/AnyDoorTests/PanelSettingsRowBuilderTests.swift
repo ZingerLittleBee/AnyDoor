@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import PluginInterface
 @testable import AnyDoor
 
 /// `PanelSettingsRowBuilder` flattens Panel entries into one ordered list of rows

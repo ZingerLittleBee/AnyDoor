@@ -2,7 +2,11 @@ import Foundation
 
 /// Code-defined catalog of all built-in panel items. The set of cases is the product spec;
 /// users cannot add new built-ins, only customize visibility / order / hotkey via BuiltinPreference.
-enum BuiltinItem: String, CaseIterable, Sendable {
+///
+/// The catalog is closed and shared (ADR-0006): a Native Plugin does not mint
+/// its own command identities — it Claims cases of this enum, and every case
+/// is owned by exactly one Native Plugin or by the Core.
+public enum BuiltinItem: String, CaseIterable, Sendable {
     case appShortcuts
     case keepAwake
     case muteAudio
@@ -64,7 +68,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     case translateSelection
     case imageConversion
 
-    enum Kind: Sendable {
+    public enum Kind: Sendable {
         case toggle
         case action
         case submenu
@@ -72,7 +76,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         case hiddenHotkey
     }
 
-    var kind: Kind {
+    public var kind: Kind {
         switch self {
         case .appShortcuts, .portManager, .windowLayout, .hostsManager, .bluetoothBattery: return .submenu
         case .keepAwake, .muteAudio, .microphoneMute, .hideDesktopIcons, .showHiddenFiles, .darkMode,
@@ -96,72 +100,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         }
     }
 
-    var titleKey: L10n.Key {
-        switch self {
-        case .appShortcuts:      return .builtinAppShortcuts
-        case .keepAwake:         return .builtinKeepAwake
-        case .muteAudio:         return .builtinMuteAudio
-        case .microphoneMute:    return .builtinMicrophoneMute
-        case .hideDesktopIcons:  return .builtinHideDesktopIcons
-        case .showHiddenFiles:   return .builtinShowHiddenFiles
-        case .darkMode:          return .builtinDarkMode
-        case .lockScreen:        return .builtinLockScreen
-        case .emptyTrash:        return .builtinEmptyTrash
-        case .screenshot:        return .builtinScreenshot
-        case .captureWindow:     return .builtinCaptureWindow
-        case .captureFullscreen: return .builtinCaptureFullscreen
-        case .captureTimer:      return .builtinCaptureTimer
-        case .captureModeBar:    return .builtinCaptureModeBar
-        case .recordScreen:      return .builtinRecordScreen
-        case .captureScrolling:  return .builtinCaptureScrolling
-        case .clearClipboard:    return .builtinClearClipboard
-        case .ocr:               return .builtinOCR
-        case .pickColor:         return .builtinPickColor
-        case .clipboardWall:     return .builtinClipboardWall
-        case .clipboardMonitoring: return .builtinClipboardMonitoring
-        case .displaySleep:      return .builtinDisplaySleep
-        case .systemSleep:       return .builtinSystemSleep
-        case .scheduledShutdown: return .builtinScheduledShutdown
-        case .hideDock:          return .builtinHideDock
-        case .autoHideMenuBar:   return .builtinAutoHideMenuBar
-        case .restartFinder:     return .builtinRestartFinder
-        case .restartDock:       return .builtinRestartDock
-        case .restartMenuBar:    return .builtinRestartMenuBar
-        case .flushDNS:          return .builtinFlushDNS
-        case .keyboardLock:      return .builtinKeyboardLock
-        case .portManager:       return .builtinPortManager
-        case .qrcode:            return .builtinQRCode
-        case .brightness:        return .builtinBrightness
-        case .brightnessUp:      return .builtinBrightnessUp
-        case .brightnessDown:    return .builtinBrightnessDown
-        case .windowLeftHalf:    return .builtinWindowLeftHalf
-        case .windowRightHalf:   return .builtinWindowRightHalf
-        case .windowMaximize:    return .builtinWindowMaximize
-        case .windowCenter:      return .builtinWindowCenter
-        case .windowTopHalf:            return .builtinWindowTopHalf
-        case .windowBottomHalf:         return .builtinWindowBottomHalf
-        case .windowTopLeftQuarter:     return .builtinWindowTopLeftQuarter
-        case .windowTopRightQuarter:    return .builtinWindowTopRightQuarter
-        case .windowBottomLeftQuarter:  return .builtinWindowBottomLeftQuarter
-        case .windowBottomRightQuarter: return .builtinWindowBottomRightQuarter
-        case .windowLeftThird:          return .builtinWindowLeftThird
-        case .windowCenterThird:        return .builtinWindowCenterThird
-        case .windowRightThird:         return .builtinWindowRightThird
-        case .windowLeftTwoThirds:      return .builtinWindowLeftTwoThirds
-        case .windowRightTwoThirds:     return .builtinWindowRightTwoThirds
-        case .windowMoveNextDisplay:    return .builtinWindowMoveNextDisplay
-        case .windowMovePreviousDisplay: return .builtinWindowMovePreviousDisplay
-        case .windowLayout:      return .builtinWindowLayout
-        case .hostsManager:      return .builtinHostsManager
-        case .bluetoothBattery:  return .builtinBluetoothBattery
-        case .translate:           return .builtinTranslate
-        case .screenshotTranslate: return .builtinScreenshotTranslate
-        case .translateSelection:  return .builtinTranslateSelection
-        case .imageConversion:     return .builtinImageConversion
-        }
-    }
-
-    var symbol: String {
+    public var symbol: String {
         switch self {
         case .appShortcuts: return "keyboard"
         case .keepAwake: return "cup.and.saucer.fill"
@@ -227,7 +166,7 @@ enum BuiltinItem: String, CaseIterable, Sendable {
     }
 
     /// Initial sort weight when seeding. After seeding, users may reorder freely.
-    var defaultOrder: Double {
+    public var defaultOrder: Double {
         switch self {
         case .keepAwake: return 100
         case .appShortcuts: return 200
@@ -292,40 +231,17 @@ enum BuiltinItem: String, CaseIterable, Sendable {
         }
     }
 
-    /// The clipboard history bucket this built-in writes into, if any.
-    /// Non-history items (toggles, submenus, system actions) return nil.
-    var historyKind: ClipboardHistoryKind? {
-        switch self {
-        case .ocr: return .ocr
-        case .pickColor: return .color
-        case .qrcode: return .qrcode
-        case .screenshot: return .screenshot
-        case .captureWindow, .captureFullscreen, .captureTimer: return .screenshot
-        default: return nil
-        }
-    }
-
     /// True if the item requires macOS Automation permission (NSAppleEventsUsage).
-    var requiresAutomation: Bool {
+    public var requiresAutomation: Bool {
         switch self {
         case .darkMode, .emptyTrash: return true
         default: return false
         }
     }
 
-    /// Optional auditory feedback played the moment the user activates this item.
-    /// Lock screen is intentionally silent: macOS transitions to the login window
-    /// immediately and the system already provides its own auditory transition.
-    var feedbackSound: SystemSound? {
-        switch self {
-        case .emptyTrash: return .emptyTrash
-        default: return nil
-        }
-    }
-
     /// Whether this item should default to being shown in the menu bar panel when first seeded.
     /// False only for hidden-hotkey items (brightness ± live on the brightness row only).
-    var defaultVisibility: Bool {
+    public var defaultVisibility: Bool {
         switch self.kind {
         case .toggle, .action, .submenu, .brightnessControl: return true
         case .hiddenHotkey:                                   return false
