@@ -1,7 +1,7 @@
 ---
 id: 016
 title: "Native Plugins: Hosts becomes a plugin with transactional uninstall"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-16-native-plugin-architecture.md
 ---
 
