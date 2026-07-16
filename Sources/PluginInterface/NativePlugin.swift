@@ -34,8 +34,8 @@ public protocol NativePlugin: AnyObject {
     /// One-sentence user-facing description for the Plugins settings tab.
     var localizedDescription: String { get }
 
-    /// User-facing description of the side effects an Uninstall reverts
-    /// (e.g. "active hosts profiles will be deactivated"), shown in the
+    /// User-facing description of what an Uninstall does or leaves behind
+    /// (e.g. "active hosts entries stay in the hosts file"), shown in the
     /// uninstall confirmation. `nil` when uninstalling only removes surfaces.
     var localizedUninstallImpact: String? { get }
 
@@ -100,11 +100,13 @@ public protocol NativePlugin: AnyObject {
     /// installed, before its surfaces register.
     func activate()
 
-    /// Called on Uninstall, before any surface is unregistered. Must revert
-    /// the plugin's system side effects and cancel its in-flight work.
-    /// Uninstall is transactional: a thrown error (including a cancelled
-    /// required authorization) aborts the uninstall and leaves the plugin
-    /// fully installed — there is no half-uninstalled state.
+    /// Called on Uninstall, before any surface is unregistered. Must cancel
+    /// the plugin's in-flight work and release shared host resources it
+    /// holds (e.g. the privileged helper); it must not surprise the user
+    /// with system mutations or authorization prompts (ADR-0005 addendum
+    /// 2026-07-17). Uninstall is transactional: a thrown error aborts the
+    /// uninstall and leaves the plugin fully installed — there is no
+    /// half-uninstalled state.
     func deactivate() async throws
 
     /// Called after a config-backup import so the plugin re-reads imported
@@ -114,8 +116,8 @@ public protocol NativePlugin: AnyObject {
 
 // Default-empty contributions and no-op hooks keep the next plugin
 // mechanical: a plugin implements only the surfaces it actually has.
-// `deactivate` deliberately has no default — reverting side effects and
-// cancelling in-flight work must be a conscious per-plugin decision.
+// `deactivate` deliberately has no default — cancelling in-flight work and
+// releasing shared resources must be a conscious per-plugin decision.
 extension NativePlugin {
     public var localizedUninstallImpact: String? { nil }
 

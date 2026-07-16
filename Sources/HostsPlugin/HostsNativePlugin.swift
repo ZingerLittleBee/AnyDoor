@@ -27,8 +27,8 @@ public final class HostsNativePlugin: NativePlugin {
     }
 
     /// Test entry point: inject a manager wired to the sanctioned writer
-    /// double (`MockHostsWriter`) so the transactional uninstall path can be
-    /// exercised without touching the real system.
+    /// double (`MockHostsWriter`) so the lifecycle paths can be exercised
+    /// without touching the real system.
     init(host: any PluginHostServices, manager: HostsManager) {
         PluginHost.bootstrap(host)
         self.host = host
@@ -137,20 +137,16 @@ public final class HostsNativePlugin: NativePlugin {
         manager.bootstrap(modelContainer: host.modelContainer)
     }
 
-    /// Uninstall (transactional): deactivate every active profile through
-    /// the normal writer path, then release the shared helper daemon (the
-    /// Core keeps it while forced Scheduled Shutdown still needs it), then
-    /// close the editor window. Any throw aborts the uninstall and the
-    /// plugin stays fully installed. Exactly what has changed by then
-    /// depends on the failing step: a failed write or a cancelled
-    /// administrator authorization throws with the profiles' active state
-    /// rolled back (nothing changed), while a failed helper release throws
-    /// *after* deactivation succeeded — the profiles stay deactivated (their
-    /// managed block already removed from `/etc/hosts`), which is consistent
-    /// persisted-equals-applied state the user can revert by re-activating.
-    /// Profile rows and hosts backups are always retained.
+    /// Uninstall: never touches `/etc/hosts` and never prompts for
+    /// authorization (ADR-0005 addendum 2026-07-17). Active profiles stay
+    /// active — their managed block remains in the hosts file, in effect but
+    /// temporarily unmanaged until a reinstall — so reinstalling restores
+    /// the exact previous setup. The only side effect is releasing the
+    /// shared helper daemon (the Core keeps it while forced Scheduled
+    /// Shutdown still needs it); a failed release throws and aborts the
+    /// uninstall with the plugin fully installed. Profile rows and hosts
+    /// backups are always retained.
     public func deactivate() async throws {
-        try await manager.deactivateAllForUninstall()
         try host.privilegedHelper.releaseIfUnneeded()
         HostsEditorWindowController.shared.closeForUninstall()
     }

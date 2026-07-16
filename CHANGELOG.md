@@ -17,14 +17,16 @@ versioning.
   previous setup. Screenshot "Save As" is a core feature and is unaffected:
   it keeps its full format list and quality setting either way.
 - Plugins: Hosts management is now the second Native Plugin. Uninstalling it
-  first deactivates any active hosts profiles (removing the managed block from
-  `/etc/hosts`, which may ask for administrator authorization) and unregisters
-  the privileged helper when nothing else needs it (forced Scheduled Shutdown
-  shares the helper daemon); a failed write or cancelled authorization aborts
-  the uninstall, leaving the plugin fully installed. While uninstalled the
-  panel popover, palette entries, profile rows, hotkey, and helper approval
-  banner all disappear. Host profiles and hosts backups are kept, so
-  reinstalling restores everything without a relaunch.
+  never touches `/etc/hosts` and never asks for administrator authorization:
+  active profiles stay active and their entries remain in effect (the
+  confirmation says so) until a reinstall brings back the managing UI with
+  your exact previous setup. The privileged helper is unregistered when
+  nothing else needs it (forced Scheduled Shutdown shares the helper
+  daemon); if that fails the uninstall aborts, leaving the plugin fully
+  installed. While uninstalled the panel popover, palette entries, profile
+  rows, hotkey, and helper approval banner all disappear. Host profiles and
+  hosts backups are kept, so reinstalling restores everything without a
+  relaunch.
 - Plugins: upgrading users keep the features they were using — on the first
   launch after the update, Hosts is installed automatically when host profiles
   exist or the privileged helper is registered, and Image Conversion when

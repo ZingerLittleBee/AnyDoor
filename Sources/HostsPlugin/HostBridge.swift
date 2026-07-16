@@ -15,7 +15,6 @@ enum L10n {
         case hostsProfileDisable = "hosts.profile.disable"
         case hostsProfileDuplicate = "hosts.profile.duplicate"
         case hostsProfileEnable = "hosts.profile.enable"
-        case hostsUninstallWriteFailed = "hosts.uninstall.writeFailed"
         case pluginDescription = "plugin.hosts.description"
         case pluginName = "plugin.hosts.name"
         case pluginUninstallImpact = "plugin.hosts.uninstallImpact"

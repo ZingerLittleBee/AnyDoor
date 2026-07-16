@@ -3,9 +3,10 @@ import SwiftUI
 
 /// Settings → 插件: lists every available Native Plugin with its localized
 /// name, description, and install state. Install applies immediately;
-/// uninstall first shows a confirmation describing the side effects the
-/// plugin will revert, then runs the registry's transactional uninstall —
-/// a failed deactivate leaves the plugin installed and surfaces the error.
+/// uninstall first shows a confirmation describing the uninstall's impact
+/// (what remains and what is retained), then runs the registry's
+/// transactional uninstall — a failed deactivate leaves the plugin
+/// installed and surfaces the error.
 @MainActor
 struct PluginsSettingsView: View {
     @State private var registry = PluginRegistry.shared
@@ -100,8 +101,8 @@ struct PluginsSettingsView: View {
         L(.pluginsUninstallConfirmTitle, pendingPlugin?.localizedName ?? "")
     }
 
-    /// The plugin-declared side effects the uninstall reverts, followed by
-    /// the data-retention promise.
+    /// The plugin-declared uninstall impact, followed by the data-retention
+    /// promise.
     private var confirmationMessage: String {
         var parts: [String] = []
         if let impact = pendingPlugin?.localizedUninstallImpact {

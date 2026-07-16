@@ -53,10 +53,12 @@ private final class RecordingPluginHost: PluginHostServices {
 }
 
 /// Registry lifecycle for the real Hosts plugin (PRD Testing Decisions):
-/// install surfaces appear, uninstall deactivates active profiles through
-/// the normal writer path and releases the shared helper, and a failing or
-/// cancelled write aborts the uninstall transactionally — the plugin stays
-/// fully installed. `MockHostsWriter` is the sanctioned boundary double.
+/// install surfaces appear; uninstall never touches the hosts file or
+/// prompts for authorization — active profiles stay active and their managed
+/// block stays in `/etc/hosts` (ADR-0005 addendum 2026-07-17) — and only
+/// releases the shared helper (a failed release aborts the uninstall
+/// transactionally, leaving the plugin fully installed). `MockHostsWriter`
+/// is the sanctioned boundary double.
 @MainActor
 final class HostsPluginLifecycleTests: XCTestCase {
 
@@ -154,26 +156,28 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertNotNil(f.registry.panelPopover(for: .hostsManager))
     }
 
-    // MARK: - Uninstall (transactional)
+    // MARK: - Uninstall (side-effect-free on the hosts file)
 
-    func testUninstallDeactivatesActiveProfilesAndRemovesManagedBlock() async throws {
+    func testUninstallLeavesActiveProfilesAndHostsFileUntouched() async throws {
         let f = try makeFixture()
         defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
         await f.manager.setActive(f.manager.profiles[0], true)
+        XCTAssertEqual(f.writer.writeCount, 1)
         XCTAssertTrue(try XCTUnwrap(f.writer.lastWritten).contains(HostsFile.beginMarker))
 
         try await f.registry.uninstall(f.plugin.id)
 
         XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
-        let written = try XCTUnwrap(f.writer.lastWritten)
-        XCTAssertFalse(written.contains(HostsFile.beginMarker),
-                       "no AnyDoor-managed active entries may survive the uninstall")
-        XCTAssertTrue(written.contains("127.0.0.1 localhost"))
-        // Rows are retained (data survives; only activation was reverted).
+        // The hosts file is never touched: no write, no auth prompt, and the
+        // managed block (the active entries) stays in effect.
+        XCTAssertEqual(f.writer.writeCount, 1,
+                       "uninstall must never write the hosts file")
+        XCTAssertTrue(try XCTUnwrap(f.writer.lastWritten).contains(HostsFile.beginMarker))
+        // Rows are retained and the activation state survives untouched.
         XCTAssertEqual(f.manager.profiles.count, 1)
-        XCTAssertFalse(f.manager.profiles[0].isActive)
+        XCTAssertTrue(f.manager.profiles[0].isActive)
         XCTAssertEqual(f.host.helper.releaseCalls, 1)
         // Surfaces are gone.
         XCTAssertFalse(f.palette.isOptionParent(.hostsManager))
@@ -191,70 +195,22 @@ final class HostsPluginLifecycleTests: XCTestCase {
         try await f.registry.uninstall(f.plugin.id)
 
         XCTAssertEqual(f.writer.writeCount, 0,
-                       "no active profile means no privileged write and no auth prompt")
+                       "uninstall never writes the hosts file or prompts for auth")
         XCTAssertEqual(f.host.helper.releaseCalls, 1)
         XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
     }
 
-    func testCancelledAuthorizationAbortsUninstallTransactionally() async throws {
-        let f = try makeFixture()
-        defer { f.teardown() }
-        f.registry.install(f.plugin.id)
-        f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
-        await f.manager.setActive(f.manager.profiles[0], true)
-
-        // The revert write is cancelled at the admin-auth prompt.
-        f.writer.errorToThrow = HostsWriterError.authorizationCancelled
-
-        do {
-            try await f.registry.uninstall(f.plugin.id)
-            XCTFail("uninstall must rethrow the failed deactivation")
-        } catch {
-            XCTAssertTrue(error is HostsUninstallError)
-        }
-
-        // Fully installed, surfaces intact, profile still active, helper kept.
-        XCTAssertTrue(f.registry.isInstalled(f.plugin.id))
-        XCTAssertTrue(f.registry.isAvailable(.hostsManager))
-        XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
-        XCTAssertNotNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
-        XCTAssertTrue(f.manager.profiles[0].isActive,
-                      "the failed write's rollback must restore the active state")
-        XCTAssertEqual(f.host.helper.releaseCalls, 0,
-                       "the helper must not be released when deactivation fails")
-    }
-
-    func testFailedHelperReleaseAbortsUninstall() async throws {
-        struct ReleaseFailure: Error {}
-        let f = try makeFixture()
-        defer { f.teardown() }
-        f.registry.install(f.plugin.id)
-        f.host.helper.releaseError = ReleaseFailure()
-
-        do {
-            try await f.registry.uninstall(f.plugin.id)
-            XCTFail("uninstall must rethrow the failed helper release")
-        } catch {
-            XCTAssertTrue(error is ReleaseFailure)
-        }
-
-        XCTAssertTrue(f.registry.isInstalled(f.plugin.id))
-        XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
-    }
-
-    /// Pins the residual state when the helper release fails *after* profile
-    /// deactivation succeeded: the uninstall aborts (plugin installed,
-    /// surfaces intact), but deactivation is deliberately not rolled back —
-    /// the profile stays deactivated with its managed block removed, which is
-    /// consistent persisted-equals-applied state the user can re-activate.
-    func testFailedHelperReleaseKeepsProfilesDeactivated() async throws {
+    /// A failed helper release is the only remaining abort path: the
+    /// uninstall rethrows and the plugin stays fully installed with every
+    /// surface intact — and the hosts file still untouched.
+    func testFailedHelperReleaseAbortsUninstallLeavingHostsUntouched() async throws {
         struct ReleaseFailure: Error {}
         let f = try makeFixture()
         defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
         await f.manager.setActive(f.manager.profiles[0], true)
-        XCTAssertTrue(try XCTUnwrap(f.writer.lastWritten).contains(HostsFile.beginMarker))
+        XCTAssertEqual(f.writer.writeCount, 1)
         f.host.helper.releaseError = ReleaseFailure()
 
         do {
@@ -270,20 +226,18 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
         XCTAssertNotNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
         XCTAssertNotNil(f.registry.panelPopover(for: .hostsManager))
-        // Residual state: the profile ended deactivated and its managed block
-        // is gone from the composed hosts file (no rollback by design).
+        // The hosts file and the activation state are untouched either way.
+        XCTAssertEqual(f.writer.writeCount, 1)
+        XCTAssertTrue(try XCTUnwrap(f.writer.lastWritten).contains(HostsFile.beginMarker))
         XCTAssertEqual(f.manager.profiles.count, 1)
-        XCTAssertFalse(f.manager.profiles[0].isActive)
-        let written = try XCTUnwrap(f.writer.lastWritten)
-        XCTAssertFalse(written.contains(HostsFile.beginMarker))
-        XCTAssertTrue(written.contains("127.0.0.1 localhost"))
+        XCTAssertTrue(f.manager.profiles[0].isActive)
         XCTAssertEqual(f.host.helper.releaseCalls, 0,
                        "the failed release never counts as a release")
     }
 
     // MARK: - Reinstall
 
-    func testReinstallRestoresProfilesAndSurfacesWithoutRelaunch() async throws {
+    func testReinstallShowsProfilesStillActiveWithAllSurfacesBack() async throws {
         let f = try makeFixture()
         defer { f.teardown() }
         f.registry.install(f.plugin.id)
@@ -297,11 +251,14 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertTrue(f.registry.isAvailable(.hostsManager))
         XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
         XCTAssertNotNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
-        // The retained row is back on every surface (deactivated, as promised).
+        // The retained row is back on every surface, still active (US8: the
+        // exact previous setup) — no re-authorization, no hosts write.
         XCTAssertEqual(f.manager.profiles.map(\.name), ["Dev"])
-        XCTAssertFalse(f.manager.profiles[0].isActive)
+        XCTAssertTrue(f.manager.profiles[0].isActive)
+        XCTAssertEqual(f.writer.writeCount, 1)
         let rows = f.plugin.paletteRowSources[0].rows()
         XCTAssertEqual(rows.map(\.title), ["Dev"])
+        XCTAssertEqual(rows.map(\.symbol), ["checkmark.circle.fill"])
     }
 
     // MARK: - Palette options

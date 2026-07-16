@@ -4149,23 +4149,6 @@
         }
       }
     },
-    "hosts.uninstall.writeFailed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Failed to write the hosts file"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "写入 hosts 文件失败"
-          }
-        }
-      }
-    },
     "hotkey.recorder.clear": {
       "extractionState": "manual",
       "localizations": {
@@ -6620,13 +6603,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Active hosts profiles will be deactivated (may require administrator authorization)."
+            "value": "Active hosts entries stay in the hosts file and remain in effect; reinstall the plugin to manage them again."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "活动的 hosts 配置将被停用（可能需要管理员授权）。"
+            "value": "已激活的 hosts 条目将保留在系统 hosts 文件中并继续生效；重新安装插件即可再次管理。"
           }
         }
       }

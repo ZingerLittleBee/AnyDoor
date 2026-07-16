@@ -15,8 +15,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "plugins")
 /// registry drives the surface hooks when the installed set changes.
 ///
 /// Uninstall is transactional: `deactivate()` must succeed before any state
-/// or surface changes; a thrown error (including a cancelled required
-/// authorization) leaves the plugin fully installed.
+/// or surface changes; a thrown error leaves the plugin fully installed.
 @MainActor
 @Observable
 final class PluginRegistry {
@@ -167,8 +166,8 @@ final class PluginRegistry {
         logger.info("Installed plugin \(id.rawValue)")
     }
 
-    /// Uninstall a plugin, transactionally: `deactivate()` (revert side
-    /// effects, cancel in-flight work) must succeed before any state or
+    /// Uninstall a plugin, transactionally: `deactivate()` (release shared
+    /// resources, cancel in-flight work) must succeed before any state or
     /// surface changes; on a thrown error the plugin stays fully installed
     /// and the error is rethrown for the UI to surface. User data is
     /// retained by design. Idempotent; re-entrant calls are dropped.

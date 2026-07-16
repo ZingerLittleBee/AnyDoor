@@ -3,7 +3,6 @@ import PluginInterface
 
 enum HostsWriterError: Error, Equatable {
     case writeFailed(String)
-    case authorizationCancelled
 }
 
 /// Abstraction over the privileged write to `/etc/hosts`. Implementations:
