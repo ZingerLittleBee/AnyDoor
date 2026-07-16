@@ -3,6 +3,26 @@
 Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 (in Chinese), and documentation should use them consistently.
 
+## Plugins
+
+- **Native Plugin** (原生插件) — A first-party feature module the user installs
+  or uninstalls as one unit (e.g. Hosts). Its code always ships with the app;
+  installing is a state change, never a download. Distinct from a future
+  **Script Plugin** (external, user-authored).
+- **Core** (内核) — The always-present part of the app that cannot be
+  uninstalled: every command and service not claimed by a Native Plugin.
+- **Claim** (认领) — The exclusive ownership of a built-in command by a Native
+  Plugin or the Core. Every command has exactly one owner.
+- **Install** (安装) — Making a Native Plugin exist for the user: its commands,
+  settings, and permission prompts appear. An uninstalled plugin is invisible
+  everywhere — it contributes no commands, no settings, and requests no
+  permissions.
+  _Avoid_: 启用 (reserved for per-command visibility).
+- **Uninstall** (卸载) — Reverting a plugin's system side effects (e.g.
+  deactivating hosts profiles, unregistering its helper) and removing all its
+  surfaces, while retaining its user data so a reinstall restores it fully.
+  _Avoid_: 禁用, 停用.
+
 ## Quicklinks
 
 - **Quicklink** (快速入口) — A user-named, searchable entry that opens an

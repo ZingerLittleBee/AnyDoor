@@ -1,0 +1,23 @@
+# Native Plugins ship in the binary; install is a logical state
+
+A Native Plugin (first pilots: Hosts, Image Conversion) compiles into the
+main binary as its own SPM target that touches the host only through the
+plugin interface. "Install" flips a state flag; "uninstall" runs the plugin's
+deactivate hook (revert system side effects — deactivate hosts profiles,
+unregister the privileged helper) and unregisters every surface, while
+SwiftData rows are retained so a reinstall restores the user's data intact.
+
+We chose this over physically distributing plugins as downloads because the
+alternative — same-Team-ID-signed dylibs, which hardened-runtime library
+validation does permit — costs a stable ABI boundary, a per-plugin
+sign/notarize/release pipeline, and a plugin updater, for a binary-size win
+that is negligible at this app's scale. The hard SPM target boundary is kept
+precisely so that upgrading to physical distribution later only changes the
+loading mechanism, not the plugin code.
+
+Consequences: an "uninstalled" plugin's code and `@Model` classes still exist
+in the process (the ModelContainer schema is static), so "does not exist" is
+enforced at the registration layer, not the linker; and existing users are
+migrated by usage trace (rows in `HostProfile` / `ImageConversionRecord` mark
+the plugin installed; everyone else, including fresh installs, starts
+uninstalled).
