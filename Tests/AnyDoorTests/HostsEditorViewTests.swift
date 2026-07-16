@@ -6,7 +6,7 @@ final class HostsEditorViewTests: XCTestCase {
     func testDuplicateProfileActionLivesInEditorNotMenuBarPopover() throws {
         let editor = try source("Sources/HostsPlugin/Views/HostsEditorView.swift")
         XCTAssertTrue(editor.contains("duplicate(profile)"), editor)
-        XCTAssertTrue(editor.contains("Label(L(.hostsProfileDuplicate)"), editor)
+        XCTAssertTrue(editor.contains("LocalizedText(.hostsProfileDuplicate)"), editor)
 
         let popover = try source("Sources/HostsPlugin/Views/HostsManagerPopoverView.swift")
         XCTAssertFalse(popover.contains("duplicateProfile"), popover)
