@@ -24,6 +24,16 @@ versioning.
   panel popover, palette entries, profile rows, hotkey, and helper approval
   banner all disappear. Host profiles and hosts backups are kept, so
   reinstalling restores everything without a relaunch.
+- Plugins: upgrading users keep the features they were using — on the first
+  launch after the update, Hosts is installed automatically when host profiles
+  exist or the privileged helper is registered, and Image Conversion when
+  conversion history exists. Fresh installs start with both uninstalled, and
+  later updates never change your installed set.
+- Plugins: the installed-plugin set now travels in config backup. Importing a
+  backup installs or uninstalls plugins to match, with their windows, panel
+  rows, palette entries, and hotkeys appearing or disappearing without a
+  relaunch. Helper approval stays per-machine and is never carried by a
+  backup.
 - Command Palette now opens where you last left it, including after restarting
   AnyDoor. If that monitor is no longer connected, the palette returns to its
   default position.
