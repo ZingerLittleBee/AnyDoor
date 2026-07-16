@@ -3,8 +3,9 @@
 A Native Plugin (first pilots: Hosts, Image Conversion) compiles into the
 main binary as its own SPM target that touches the host only through the
 plugin interface. "Install" flips a state flag; "uninstall" runs the plugin's
-deactivate hook (revert system side effects — deactivate hosts profiles,
-unregister the privileged helper — and cancel in-flight work) and unregisters
+deactivate hook (revert system side effects — deactivate hosts profiles, and
+unregister the privileged helper unless another consumer such as forced
+Scheduled Shutdown still needs it — and cancel in-flight work) and unregisters
 every surface, while SwiftData rows are retained so a reinstall restores the
 user's data intact. Uninstall is transactional: reverting hosts profiles is a
 privileged `/etc/hosts` write that can fail or be cancelled at the auth
