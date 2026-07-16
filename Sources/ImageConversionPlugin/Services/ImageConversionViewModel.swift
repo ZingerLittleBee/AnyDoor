@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import PluginInterface
 import SwiftUI
 import UniformTypeIdentifiers
 

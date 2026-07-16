@@ -1,14 +1,16 @@
 import XCTest
 @testable import AnyDoor
+@testable import HostsPlugin
 @testable import ImageConversionPlugin
 
 final class LocalizationCoverageTests: XCTestCase {
     func test_everyL10nKeyHasZhHansAndEnTranslations() throws {
         // Both the Core's keys and the plugin modules' keys resolve against
         // the single shared catalog (plugin UI localizes through the existing
-        // string catalog), so both enums are covered here.
+        // string catalog), so all three enums are covered here.
         let allKeys = AnyDoor.L10n.Key.allCases.map(\.rawValue)
             + ImageConversionPlugin.L10n.Key.allCases.map(\.rawValue)
+            + HostsPlugin.L10n.Key.allCases.map(\.rawValue)
         let catalog = try loadCatalog()
         let strings = catalog["strings"] as? [String: Any] ?? [:]
 

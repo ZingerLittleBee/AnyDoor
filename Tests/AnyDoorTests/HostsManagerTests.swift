@@ -1,5 +1,6 @@
 import XCTest
 import SwiftData
+import PluginInterface
 @testable import AnyDoor
 @testable import HostsPlugin
 

@@ -1,45 +1,10 @@
 import PluginInterface
 import SwiftUI
 
-/// Module-level access point to the host services injected at plugin
-/// construction. The module's singletons (window controller, history store)
-/// and its SwiftUI views reach the host through this bridge rather than
-/// threading the services through every initializer — mirroring the host
-/// app's own shared-instance style. Set exactly once, by
-/// `ImageConversionPlugin.init`.
-///
-/// Every accessor degrades safely when the bridge is unset (pure unit tests):
-/// strings fall back to their raw keys, toasts and window tracking no-op, and
-/// pasteboard writes go straight to the pasteboard.
-@MainActor
-enum PluginHost {
-    private(set) static var services: (any PluginHostServices)?
-
-    static func bootstrap(_ services: any PluginHostServices) {
-        Self.services = services
-    }
-
-    static func showToast(_ toast: PluginToast) {
-        services?.showToast(toast)
-    }
-
-    static func trackRegularWindow(_ window: NSWindow) {
-        services?.trackRegularWindow(window)
-    }
-
-    static func pasteboardSelfWrite(_ body: (NSPasteboard) throws -> Void) rethrows {
-        if let services {
-            try services.pasteboardSelfWrite(body)
-        } else {
-            try body(NSPasteboard.general)
-        }
-    }
-}
-
 /// Type-safe view of the shared string catalog's keys this module uses. The
 /// entries live in the host's `Localizable.xcstrings` (user story 27:
 /// plugin UI localizes through the existing catalog); resolution goes through
-/// the host services so language switches apply without a relaunch.
+/// `PluginHost.localizedString` so language switches apply without a relaunch.
 enum L10n {
     enum Key: String, CaseIterable, Sendable {
         case clipboardActionRevealInFinder = "clipboard.action.revealInFinder"
@@ -94,31 +59,23 @@ enum L10n {
     }
 }
 
-/// Module-local counterpart of the host's `L(_:)`: resolves a catalog key via
-/// the host services, applying format arguments in the host's active locale.
+/// Module-typed front for the shared resolver (`PluginHost.localizedString`).
 @MainActor
 func L(_ key: L10n.Key, _ args: CVarArg...) -> String {
-    guard let services = PluginHost.services else { return key.rawValue }
-    let template = services.localizedString(key.rawValue)
-    if args.isEmpty {
-        return template
-    }
-    return String(format: template, locale: services.effectiveLocale, arguments: args)
+    PluginHost.localizedString(key.rawValue, arguments: args)
 }
 
-/// Module-local counterpart of the host's `LocalizedText`: reading the host's
-/// locale in `body` establishes observation on the host's `@Observable`
-/// localization state, so the view re-renders on a language switch.
+/// Module-typed front for the shared reactive `PluginLocalizedText`: a `Text`
+/// that re-renders on a host language switch.
 @MainActor
 struct LocalizedText: View {
-    let key: L10n.Key
+    private let key: L10n.Key
 
     init(_ key: L10n.Key) {
         self.key = key
     }
 
     var body: some View {
-        _ = PluginHost.services?.effectiveLocale
-        return Text(L(key))
+        PluginLocalizedText(key: key.rawValue)
     }
 }

@@ -52,7 +52,11 @@ struct HostsEditorView: View {
                                     Label("重命名", systemImage: "pencil")
                                 }
                                 Button { duplicate(profile) } label: {
-                                    Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
+                                    Label {
+                                        LocalizedText(.hostsProfileDuplicate)
+                                    } icon: {
+                                        Image(systemName: "plus.square.on.square")
+                                    }
                                 }
                                 Button(role: .destructive) { delete(profile) } label: {
                                     Label("删除", systemImage: "trash")
@@ -126,12 +130,20 @@ struct HostsEditorView: View {
     private func profileActivationMenuItem(_ profile: HostProfile) -> some View {
         if profile.isActive {
             Button(role: .destructive) { toggleActive(profile) } label: {
-                Label(L(.hostsProfileDisable), systemImage: "circle")
+                Label {
+                    LocalizedText(.hostsProfileDisable)
+                } icon: {
+                    Image(systemName: "circle")
+                }
             }
             .disabled(applyingProfileIDs.contains(profile.id))
         } else {
             Button { toggleActive(profile) } label: {
-                Label(L(.hostsProfileEnable), systemImage: "checkmark.circle")
+                Label {
+                    LocalizedText(.hostsProfileEnable)
+                } icon: {
+                    Image(systemName: "checkmark.circle")
+                }
             }
             .disabled(applyingProfileIDs.contains(profile.id))
         }
@@ -150,7 +162,11 @@ struct HostsEditorView: View {
                     Button {
                         duplicate(profile)
                     } label: {
-                        Label(L(.hostsProfileDuplicate), systemImage: "plus.square.on.square")
+                        Label {
+                            LocalizedText(.hostsProfileDuplicate)
+                        } icon: {
+                            Image(systemName: "plus.square.on.square")
+                        }
                     }
                     Button("删除", role: .destructive) { showDeleteConfirm = true }
                         .tint(.red)
