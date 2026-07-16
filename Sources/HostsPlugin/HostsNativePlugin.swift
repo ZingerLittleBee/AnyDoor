@@ -140,9 +140,15 @@ public final class HostsNativePlugin: NativePlugin {
     /// Uninstall (transactional): deactivate every active profile through
     /// the normal writer path, then release the shared helper daemon (the
     /// Core keeps it while forced Scheduled Shutdown still needs it), then
-    /// close the editor window. A failed write or a cancelled administrator
-    /// authorization throws before any state changed, leaving the plugin
-    /// fully installed. Profile rows and hosts backups are retained.
+    /// close the editor window. Any throw aborts the uninstall and the
+    /// plugin stays fully installed. Exactly what has changed by then
+    /// depends on the failing step: a failed write or a cancelled
+    /// administrator authorization throws with the profiles' active state
+    /// rolled back (nothing changed), while a failed helper release throws
+    /// *after* deactivation succeeded — the profiles stay deactivated (their
+    /// managed block already removed from `/etc/hosts`), which is consistent
+    /// persisted-equals-applied state the user can revert by re-activating.
+    /// Profile rows and hosts backups are always retained.
     public func deactivate() async throws {
         try await manager.deactivateAllForUninstall()
         try host.privilegedHelper.releaseIfUnneeded()

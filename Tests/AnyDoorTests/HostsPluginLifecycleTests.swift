@@ -242,6 +242,45 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
     }
 
+    /// Pins the residual state when the helper release fails *after* profile
+    /// deactivation succeeded: the uninstall aborts (plugin installed,
+    /// surfaces intact), but deactivation is deliberately not rolled back —
+    /// the profile stays deactivated with its managed block removed, which is
+    /// consistent persisted-equals-applied state the user can re-activate.
+    func testFailedHelperReleaseKeepsProfilesDeactivated() async throws {
+        struct ReleaseFailure: Error {}
+        let f = try makeFixture()
+        defer { f.teardown() }
+        f.registry.install(f.plugin.id)
+        f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
+        await f.manager.setActive(f.manager.profiles[0], true)
+        XCTAssertTrue(try XCTUnwrap(f.writer.lastWritten).contains(HostsFile.beginMarker))
+        f.host.helper.releaseError = ReleaseFailure()
+
+        do {
+            try await f.registry.uninstall(f.plugin.id)
+            XCTFail("uninstall must rethrow the failed helper release")
+        } catch {
+            XCTAssertTrue(error is ReleaseFailure)
+        }
+
+        // Still fully installed, every surface intact.
+        XCTAssertTrue(f.registry.isInstalled(f.plugin.id))
+        XCTAssertTrue(f.registry.isAvailable(.hostsManager))
+        XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
+        XCTAssertNotNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
+        XCTAssertNotNil(f.registry.panelPopover(for: .hostsManager))
+        // Residual state: the profile ended deactivated and its managed block
+        // is gone from the composed hosts file (no rollback by design).
+        XCTAssertEqual(f.manager.profiles.count, 1)
+        XCTAssertFalse(f.manager.profiles[0].isActive)
+        let written = try XCTUnwrap(f.writer.lastWritten)
+        XCTAssertFalse(written.contains(HostsFile.beginMarker))
+        XCTAssertTrue(written.contains("127.0.0.1 localhost"))
+        XCTAssertEqual(f.host.helper.releaseCalls, 0,
+                       "the failed release never counts as a release")
+    }
+
     // MARK: - Reinstall
 
     func testReinstallRestoresProfilesAndSurfacesWithoutRelaunch() async throws {
