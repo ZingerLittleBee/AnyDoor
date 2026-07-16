@@ -108,11 +108,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // relaunch. Core control flow names no plugin beyond this list
         // (ADR-0007).
         let pluginHost = CorePluginHost(modelContainer: modelContainer)
+        let plugins: [any NativePlugin] = [
+            ImageConversionNativePlugin(host: pluginHost),
+            HostsNativePlugin(host: pluginHost),
+        ]
+        // One-time usage-trace migration writes the install state directly and
+        // must precede the bootstrap, which activates the migrated-installed
+        // plugins through the normal launch path.
+        PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
         PluginRegistry.shared.bootstrap(
-            plugins: [
-                ImageConversionNativePlugin(host: pluginHost),
-                HostsNativePlugin(host: pluginHost),
-            ],
+            plugins: plugins,
             hooks: PluginRegistry.SurfaceHooks(
                 registerProviders: { PanelStore.shared.registerProviders($0) },
                 unregisterProviders: { PanelStore.shared.unregisterProviders(for: $0) },
