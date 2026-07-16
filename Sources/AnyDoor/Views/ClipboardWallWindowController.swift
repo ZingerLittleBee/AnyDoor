@@ -1,4 +1,7 @@
 import AppKit
+// Registered debt (PRD 2026-07-16 Out of Scope): the clipboard-history
+// context menu's convert action stays hardwired to the Image Conversion
+// plugin module in V1; revisit when this surface is next touched.
 import ImageConversionPlugin
 import PluginInterface
 import QuartzCore

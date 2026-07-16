@@ -1,7 +1,7 @@
 import PluginInterface
 import AppKit
 import Foundation
-import ImageConversionPlugin
+import ImageCodec
 
 /// Orchestrates a single capture: resolve mode -> (selection / countdown / direct
 /// grab) -> output policy (auto-save + auto-copy + history) -> quick-access overlay.
@@ -406,9 +406,9 @@ final class CaptureCoordinator {
         }
 
         // Any other whitelisted extension transcodes the captured PNG through the
-        // shared conversion core, using the persisted quality for lossy formats.
+        // shared codec, using the persisted quality for lossy formats.
         // On failure we surface a toast and write nothing (no partial file).
-        let quality = Double(ImageConversionPreferences.qualityPercent()) / 100
+        let quality = Double(ImageEncodingQuality.percent()) / 100
         do {
             try Self.transcode(png: png, to: url, format: format, quality: quality)
             SystemSound.saveSuccess.play()
@@ -418,27 +418,19 @@ final class CaptureCoordinator {
     }
 
     /// Transcodes captured PNG bytes to `destination` in `format`, honoring the
-    /// lossy-quality setting. Encoding runs to a temporary file first, then the
-    /// finished file is moved atomically into place — so a mid-encode failure can
-    /// never leave a partial file behind or clobber an existing file at the
-    /// destination. Throws on any encode failure.
+    /// lossy-quality setting. Encoding fully completes in memory before any
+    /// file I/O, and the write is atomic — so an encode failure can never
+    /// leave a partial file behind or clobber an existing file at the
+    /// destination (the save panel already confirmed a replace). Throws on
+    /// any encode failure.
     nonisolated static func transcode(
         png: Data,
         to destination: URL,
         format: ImageConversionFormat,
         quality: Double
     ) throws {
-        let fileManager = FileManager.default
-        let tempURL = fileManager.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathExtension(format.fileExtension)
-        defer { try? fileManager.removeItem(at: tempURL) }
-        try ImageConverter().convert(data: png, to: tempURL, format: format, quality: quality)
-        if fileManager.fileExists(atPath: destination.path) {
-            _ = try fileManager.replaceItemAt(destination, withItemAt: tempURL)
-        } else {
-            try fileManager.moveItem(at: tempURL, to: destination)
-        }
+        let encoded = try ImageEncoder().encode(bitmapData: png, format: format, quality: quality)
+        try encoded.write(to: destination, options: .atomic)
     }
 
     private func copyToPasteboard(_ image: NSImage) {

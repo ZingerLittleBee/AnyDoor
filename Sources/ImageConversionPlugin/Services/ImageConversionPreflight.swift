@@ -1,4 +1,5 @@
 import Foundation
+import ImageCodec
 import ImageIO
 import UniformTypeIdentifiers
 

@@ -1,3 +1,4 @@
+import ImageCodec
 import XCTest
 
 @testable import AnyDoor

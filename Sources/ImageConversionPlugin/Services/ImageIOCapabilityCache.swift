@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageCodec
 import ImageIO
 
 /// Runtime-proven encoder capabilities.

@@ -3,8 +3,8 @@ import Darwin
 import Foundation
 
 /// One committed, verified final output file.
-public struct CommittedOutput: Hashable, Sendable {
-    public var url: URL
+struct CommittedOutput: Hashable, Sendable {
+    var url: URL
     var byteCount: Int64
     var sha256: String
 }

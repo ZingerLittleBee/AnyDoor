@@ -1,4 +1,5 @@
 import CoreGraphics
+import ImageCodec
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest

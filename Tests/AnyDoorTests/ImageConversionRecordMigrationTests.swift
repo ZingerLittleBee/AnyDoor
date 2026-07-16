@@ -1,3 +1,4 @@
+import ImageCodec
 import SwiftData
 import XCTest
 @testable import AnyDoor

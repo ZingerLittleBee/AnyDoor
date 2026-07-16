@@ -1,4 +1,5 @@
 import Foundation
+import ImageCodec
 
 /// Which conversion strategy the Image Conversion UI is currently driving. Stored
 /// as a raw string so it stays portable and survives a lightweight schema change.
@@ -7,9 +8,9 @@ enum ImageConversionMode: String, CaseIterable, Sendable {
     case targetSize
 }
 
-public enum ImageConversionPreferences {
+enum ImageConversionPreferences {
     static let targetFormatKey = "imageConversion.targetFormat"
-    static let qualityKey = "imageConversion.quality"
+    static let qualityKey = ImageEncodingQuality.key
 
     static let modeKey = "imageConversion.mode"
     static let targetSizeBytesKey = "imageConversion.targetSize.bytes"
@@ -23,9 +24,11 @@ public enum ImageConversionPreferences {
     static let defaultTransparencyBackgroundHex = "#FFFFFF"
 
     /// Slider range and default, expressed as a whole percentage (1–100).
-    static let minQualityPercent = 1
-    static let maxQualityPercent = 100
-    static let defaultQualityPercent = 85
+    /// Sourced from the shared codec setting so Core's screenshot Save As and
+    /// the plugin's slider stay one knob.
+    static let minQualityPercent = ImageEncodingQuality.minPercent
+    static let maxQualityPercent = ImageEncodingQuality.maxPercent
+    static let defaultQualityPercent = ImageEncodingQuality.defaultPercent
 
     static func targetFormat(availableFormats: [ImageConversionFormat], defaults: UserDefaults = .standard) -> ImageConversionFormat {
         if let raw = defaults.string(forKey: targetFormatKey),
@@ -59,21 +62,13 @@ public enum ImageConversionPreferences {
         defaults.set(url.path, forKey: outputDirectoryKey)
     }
 
-    /// The persisted quality percentage, clamped to the valid range. A missing or
-    /// out-of-range stored value falls back to the default so garbage can never
-    /// reach the encoder.
-    public static func qualityPercent(defaults: UserDefaults = .standard) -> Int {
-        guard defaults.object(forKey: qualityKey) != nil else { return defaultQualityPercent }
-        let stored = defaults.integer(forKey: qualityKey)
-        guard stored >= minQualityPercent, stored <= maxQualityPercent else {
-            return defaultQualityPercent
-        }
-        return stored
+    /// The persisted quality percentage; see `ImageEncodingQuality.percent`.
+    static func qualityPercent(defaults: UserDefaults = .standard) -> Int {
+        ImageEncodingQuality.percent(defaults: defaults)
     }
 
     static func setQualityPercent(_ percent: Int, defaults: UserDefaults = .standard) {
-        let clamped = min(max(percent, minQualityPercent), maxQualityPercent)
-        defaults.set(clamped, forKey: qualityKey)
+        ImageEncodingQuality.setPercent(percent, defaults: defaults)
     }
 
     // MARK: - Target Size mode

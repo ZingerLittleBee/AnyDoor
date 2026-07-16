@@ -1,4 +1,5 @@
 import Foundation
+import ImageCodec
 import SwiftData
 
 /// The V1 terminal outcome recorded for a produced Image Conversion file. Stored

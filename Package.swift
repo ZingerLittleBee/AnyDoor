@@ -37,15 +37,27 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // Pure image-codec utilities shared by Core and the Image Conversion
+        // plugin: the format whitelist and the ImageIO encode path plus the
+        // shared lossy-quality setting. Core's screenshot Save As transcodes
+        // through this target so it never depends on the plugin module. WebP
+        // encoding (bundled libwebp) is plugin-only and stays out.
+        .target(
+            name: "ImageCodec",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
         // Native Plugin pilot (ADR-0005): the Image Conversion feature as its
         // own module. It touches the host only through PluginInterface's host
         // services; the app target depends on it to build the compile-time
-        // plugin registry list (plus the registered-debt call sites noted in
-        // the PRD: clipboard-history context menu and capture save-as).
+        // plugin registry list (plus the one registered-debt call site the
+        // PRD carves out: the clipboard-history context menu).
         .target(
             name: "ImageConversionPlugin",
             dependencies: [
                 .product(name: "libwebp", package: "libwebp-Xcode"),
+                "ImageCodec",
                 "PluginInterface",
             ],
             swiftSettings: [
@@ -72,6 +84,7 @@ let package = Package(
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 "HostsHelperShared",
+                "ImageCodec",
                 "PluginInterface",
                 "ImageConversionPlugin",
                 "HostsPlugin",
@@ -104,7 +117,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AnyDoorTests",
-            dependencies: ["AnyDoor", "PluginInterface", "ImageConversionPlugin", "HostsPlugin"],
+            dependencies: ["AnyDoor", "ImageCodec", "PluginInterface", "ImageConversionPlugin", "HostsPlugin"],
             resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

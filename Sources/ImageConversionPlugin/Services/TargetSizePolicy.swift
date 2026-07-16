@@ -1,4 +1,5 @@
 import Foundation
+import ImageCodec
 
 /// Versioned compression policy for Target Size mode (V1).
 ///

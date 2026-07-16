@@ -1,6 +1,7 @@
 import Accelerate
 import CoreGraphics
 import Foundation
+import ImageCodec
 import ImageIO
 
 /// Encodes measured candidates for one source image.

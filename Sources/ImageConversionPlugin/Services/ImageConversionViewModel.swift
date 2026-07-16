@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ImageCodec
 import Observation
 import PluginInterface
 import SwiftUI

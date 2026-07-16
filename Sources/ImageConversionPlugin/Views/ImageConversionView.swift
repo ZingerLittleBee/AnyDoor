@@ -1,3 +1,4 @@
+import ImageCodec
 import PluginInterface
 import AppKit
 import ImageIO

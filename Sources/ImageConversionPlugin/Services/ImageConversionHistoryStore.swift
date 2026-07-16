@@ -1,4 +1,5 @@
 import Foundation
+import ImageCodec
 import Observation
 import SwiftData
 

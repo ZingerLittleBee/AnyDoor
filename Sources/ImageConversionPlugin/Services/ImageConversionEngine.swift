@@ -1,4 +1,5 @@
 import Foundation
+import ImageCodec
 
 /// The UI-facing Target Size configuration: everything except the output
 /// format, which the engine resolves per item from the source container

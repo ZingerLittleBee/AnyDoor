@@ -14,7 +14,8 @@ versioning.
   hotkeys, the workspace window, and the clipboard-history convert action);
   uninstalling cancels an in-progress conversion first. Conversion history,
   preferences, and hotkeys are kept, so reinstalling restores your exact
-  previous setup.
+  previous setup. Screenshot "Save As" is a core feature and is unaffected:
+  it keeps its full format list and quality setting either way.
 - Plugins: Hosts management is now the second Native Plugin. Uninstalling it
   first deactivates any active hosts profiles (removing the managed block from
   `/etc/hosts`, which may ask for administrator authorization) and unregisters

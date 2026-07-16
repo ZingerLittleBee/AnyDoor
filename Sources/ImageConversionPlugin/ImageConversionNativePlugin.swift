@@ -5,8 +5,8 @@ import SwiftUI
 /// The Image Conversion feature as a Native Plugin (ADR-0005 pilot: own
 /// window, own SwiftData model, no system side effects). The module touches
 /// the host only through `PluginHostServices`; the host reaches the feature
-/// only through this type (plus the registered-debt call sites the PRD
-/// carves out: clipboard-history context menu and capture save-as).
+/// only through this type (plus the one registered-debt call site the PRD's
+/// Out of Scope carves out: the clipboard-history context menu).
 @MainActor
 public final class ImageConversionNativePlugin: NativePlugin {
 

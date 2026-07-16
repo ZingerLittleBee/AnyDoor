@@ -20,7 +20,7 @@ public enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable 
 
     public var id: String { rawValue }
 
-    var typeIdentifier: String {
+    public var typeIdentifier: String {
         switch self {
         case .png: return "public.png"
         case .jpeg: return "public.jpeg"
@@ -59,7 +59,7 @@ public enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable 
         }
     }
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .png: return "PNG"
         case .jpeg: return "JPEG"
@@ -77,7 +77,7 @@ public enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable 
     /// Whether this runtime can encode the format. ImageIO formats depend on
     /// the system encoder set (e.g. AVIF needs an OS AV1 encoder); WebP is
     /// encoded by the bundled libwebp and is always available.
-    var encoderAvailable: Bool {
+    public var encoderAvailable: Bool {
         self == .webp || Self.availableTargets().contains(self)
     }
 
@@ -103,7 +103,7 @@ public enum ImageConversionFormat: String, CaseIterable, Identifiable, Sendable 
     /// `nil` for containers Target Size cannot compress — they have neither an
     /// encoder quality knob nor a meaningful resize contract (GIF/TIFF/BMP/
     /// ICO/PDF). HEIF sources normalize to the HEIC encoder.
-    static func targetSizeFormat(forSourceType typeIdentifier: String) -> ImageConversionFormat? {
+    public static func targetSizeFormat(forSourceType typeIdentifier: String) -> ImageConversionFormat? {
         switch typeIdentifier {
         case ImageConversionFormat.jpeg.typeIdentifier: return .jpeg
         case ImageConversionFormat.heic.typeIdentifier, "public.heif": return .heic

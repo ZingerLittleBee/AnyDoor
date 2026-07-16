@@ -1,4 +1,5 @@
 import Foundation
+import ImageCodec
 
 /// One conversion source: either an on-disk file (output beside it) or an
 /// in-memory bitmap such as a pasted screenshot (output to Downloads).

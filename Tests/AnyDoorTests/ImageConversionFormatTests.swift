@@ -1,6 +1,5 @@
 import XCTest
-@testable import AnyDoor
-@testable import ImageConversionPlugin
+@testable import ImageCodec
 
 final class ImageConversionFormatTests: XCTestCase {
     func testAvailableTargetsKeepWhitelistOrderAndFilterUnsupportedEncoders() {
