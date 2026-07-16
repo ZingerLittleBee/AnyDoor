@@ -208,4 +208,43 @@ final class HotkeyCoordinatorTests: XCTestCase {
         XCTAssertEqual(presented?.link, "https://github.com/search?q={query}")
         XCTAssertEqual(presented?.openWithBundleID, "com.apple.Safari")
     }
+
+    // MARK: - Installed set (Native Plugins)
+
+    @MainActor
+    func testUninstalledPluginCommandBindingNeverCompiles() {
+        // A hotkey recorded for a plugin-claimed command stops firing while
+        // the plugin is uninstalled — and no longer occupies the shortcut.
+        let pref = BuiltinPreference(
+            itemKey: BuiltinItem.imageConversion.rawValue,
+            keyCode: 34, modifierFlags: command
+        )
+
+        let installed = HotkeyCoordinator.compile(
+            bindings: [], prefs: [pref], quicklinks: [], paletteHotkey: nil,
+            availableCommands: Set(BuiltinItem.allCases)
+        )
+        XCTAssertEqual(installed.count, 1)
+        XCTAssertEqual(installed[0].action, .runBuiltin(itemKey: BuiltinItem.imageConversion.rawValue))
+
+        let uninstalled = HotkeyCoordinator.compile(
+            bindings: [], prefs: [pref], quicklinks: [], paletteHotkey: nil,
+            availableCommands: Set(BuiltinItem.allCases).subtracting([.imageConversion])
+        )
+        XCTAssertTrue(uninstalled.isEmpty)
+    }
+
+    @MainActor
+    func testInstalledSetDoesNotAffectCoreSources() {
+        // App shortcuts, quicklinks, and the palette hotkey are Core-owned;
+        // the available-commands input only gates builtin preferences.
+        let snapshots = HotkeyCoordinator.compile(
+            bindings: [makeBinding(keyCode: 11, modifierFlags: control)],
+            prefs: [],
+            quicklinks: [],
+            paletteHotkey: HotkeyDescriptor(keyCode: 49, modifierFlags: command),
+            availableCommands: []
+        )
+        XCTAssertEqual(snapshots.count, 2)
+    }
 }

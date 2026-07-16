@@ -594,6 +594,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// first (without restoring focus) so its slide-out doesn't fight the
     /// conversion panel's activation.
     private func convertImage(_ item: ClipboardHistoryItem) {
+        // The context-menu entry is already gated on availability; this guard
+        // covers a menu built just before an uninstall landed, so the window
+        // can never be summoned while the plugin is uninstalled.
+        guard PluginRegistry.shared.isAvailable(.imageConversion) else { return }
         guard let items = basketItems(for: item), !items.isEmpty else {
             ToastPresenter.shared.show(.failure(L(.imageConversionSourceMissing)))
             return

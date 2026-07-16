@@ -61,18 +61,25 @@ final class HotkeyCoordinator {
             bindings: bindings,
             prefs: prefs,
             quicklinks: quicklinks,
-            paletteHotkey: CommandPaletteService.shared.hotkey
+            paletteHotkey: CommandPaletteService.shared.hotkey,
+            availableCommands: PluginRegistry.shared.availableCommands
         )
         HotkeyService.shared.updateSnapshots(snapshots)
     }
 
     /// Pure snapshot compiler over already-fetched state, so it unit-tests
     /// without singletons or a live store.
+    ///
+    /// `availableCommands` is the installed set's view of the catalog
+    /// (`PluginRegistry.availableCommands`): a binding recorded for an
+    /// uninstalled plugin's command never compiles, so its hotkey neither
+    /// fires nor blocks the shortcut for other bindings.
     static func compile(
         bindings: [KeyBinding],
         prefs: [BuiltinPreference],
         quicklinks: [Quicklink],
-        paletteHotkey: HotkeyDescriptor?
+        paletteHotkey: HotkeyDescriptor?,
+        availableCommands: Set<BuiltinItem> = Set(BuiltinItem.allCases)
     ) -> [HotkeySnapshot] {
         var out: [HotkeySnapshot] = []
 
@@ -86,6 +93,7 @@ final class HotkeyCoordinator {
 
         for pref in prefs {
             guard let item = BuiltinItem(rawValue: pref.itemKey),
+                  availableCommands.contains(item),
                   let code = pref.keyCode,
                   let mods = pref.modifierFlags else { continue }
             let action: HotkeyAction

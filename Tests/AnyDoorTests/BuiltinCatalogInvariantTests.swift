@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import SwiftData
 import Testing
 import PluginInterface
@@ -73,6 +74,48 @@ struct BuiltinCatalogInvariantTests {
         for item in BuiltinItem.allCases
         where item.kind == .submenu || item.kind == .brightnessControl || item.kind == .hiddenHotkey {
             #expect(byItem[item] == nil, "\(item) (\(item.kind)) should not have a provider")
+        }
+    }
+
+    @Test @MainActor func everyCommandIsClaimedByExactlyOneOwner() throws {
+        // A Claim is exclusive (ADR-0006): each catalog case is owned by at
+        // most one Native Plugin; every unclaimed case belongs to the Core.
+        let plugins = try Self.makeProductionPlugins()
+        var owners: [BuiltinItem: NativePluginID] = [:]
+        for plugin in plugins {
+            for command in plugin.claimedCommands {
+                #expect(owners[command] == nil,
+                        "\(command) is claimed by both \(owners[command]?.rawValue ?? "?") and \(plugin.id.rawValue)")
+                owners[command] = plugin.id
+            }
+        }
+
+        // The registry derives availability from the same claims; pin the
+        // wiring: an uninstalled plugin's claims are exactly the commands the
+        // fresh registry reports unavailable.
+        let registry = PluginRegistry()
+        let suiteName = "BuiltinCatalogInvariantTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        registry.bootstrap(plugins: plugins, defaults: defaults, hooks: .noop)
+        let unavailable = Set(BuiltinItem.allCases).subtracting(registry.availableCommands)
+        #expect(unavailable == Set(owners.keys))
+        for command in BuiltinItem.allCases {
+            #expect(registry.claimOwner(of: command) == owners[command])
+        }
+    }
+
+    @Test @MainActor func pluginsProvideOnlyForTheirClaimedActionableCommands() throws {
+        // A plugin's providers must cover exactly its actionable claims —
+        // a provider for an unclaimed command would smuggle a surface past
+        // the install gate.
+        for plugin in try Self.makeProductionPlugins() {
+            let provided = Set(plugin.providers.map(\.itemKey))
+            let actionableClaims = plugin.claimedCommands.filter {
+                $0.kind == .toggle || $0.kind == .action
+            }
+            #expect(provided == actionableClaims,
+                    "\(plugin.id.rawValue) providers \(provided) != actionable claims \(actionableClaims)")
         }
     }
 

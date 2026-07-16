@@ -16,7 +16,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
 
     /// A backup import rewrote the conversion preferences; push them into the
     /// live view model. A no-op when the window was never created.
-    public static func reconcilePreferencesAfterImport() {
+    static func reconcilePreferencesAfterImport() {
         guard sharedExists else { return }
         shared.viewModel.reloadFromDefaults()
     }

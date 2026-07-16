@@ -64,6 +64,7 @@ struct ClipboardCardView: View {
             ))
         }
         if let onConvertImage,
+           PluginRegistry.shared.isAvailable(.imageConversion),
            ClipboardImageConversionEntry.isConvertible(kind: item.historyKind, files: item.files) {
             menu.addItem(ClosureMenuItem(
                 title: L(.clipboardActionConvertImage), systemImage: "arrow.left.arrow.right.square",

@@ -156,6 +156,79 @@ final class ImageConversionViewModelTests: XCTestCase {
         model.clear()
     }
 
+    @MainActor
+    func testCancelActiveRunStopsAnInFlightConversion() async throws {
+        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // A large noisy source with an unattainable target keeps the search
+        // busy long enough to observe the cancellation deterministically.
+        let source = try writeNoisePNG(side: 2_048)
+        defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+
+        let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
+        model.outputDirectoryPicker = { _ in source.deletingLastPathComponent() }
+        model.mode = .targetSize
+        model.switchTargetUnit(to: .kb)
+        model.targetText = "0.01"
+        model.commitTargetText()
+        model.addFiles([source])
+        let item = try XCTUnwrap(model.items.first)
+
+        model.convert()
+        let startDeadline = ContinuousClock.now + .seconds(10)
+        while !model.isConverting, ContinuousClock.now < startDeadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertTrue(model.isConverting)
+
+        // The plugin's deactivate path: cancel and wait for the run to wind
+        // down — nothing may continue in the background afterwards.
+        await model.cancelActiveRun()
+
+        XCTAssertFalse(model.isConverting)
+        XCTAssertTrue(model.items.contains(item), "an interrupted item stays in the basket")
+        XCTAssertNil(model.itemStatuses[item.id],
+                     "a cancelled run must not record a terminal per-item status")
+        model.clear()
+    }
+
+    private func writeNoisePNG(side: Int) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ImageConversionViewModelTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("noise.png")
+        let context = try XCTUnwrap(CGContext(
+            data: nil,
+            width: side,
+            height: side,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        // Deterministic per-pixel noise defeats compression, so every encode
+        // attempt in the target-size search costs real work.
+        if let buffer = context.data {
+            let bytes = buffer.bindMemory(to: UInt8.self, capacity: context.bytesPerRow * side)
+            var state: UInt64 = 0x9E37_79B9_7F4A_7C15
+            for i in 0..<(context.bytesPerRow * side) {
+                state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                bytes[i] = UInt8(truncatingIfNeeded: state >> 33)
+            }
+        }
+        let image = try XCTUnwrap(context.makeImage())
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL,
+            ImageConversionFormat.png.typeIdentifier as CFString,
+            1,
+            nil
+        ))
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return url
+    }
+
     private func writePNG() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ImageConversionViewModelTests-\(UUID().uuidString)", isDirectory: true)

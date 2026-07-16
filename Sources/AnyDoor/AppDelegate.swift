@@ -99,18 +99,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardWatcher.shared = watcher
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
-        // Native Plugins: build the compile-time plugin set. Activation is
-        // unconditional for this slice; the PluginRegistry (install state,
-        // claim lookups, transactional uninstall) lands next.
+        // Native Plugins: the registry loads the installed set, activates the
+        // installed plugins, and — through the surface hooks — keeps the
+        // panel/hotkey surfaces in sync with later install/uninstall, with no
+        // relaunch. Core control flow names no plugin beyond this list
+        // (ADR-0007).
         let pluginHost = CorePluginHost(modelContainer: modelContainer)
-        let imageConversionPlugin = ImageConversionNativePlugin(host: pluginHost)
-        imageConversionPlugin.activate()
+        PluginRegistry.shared.bootstrap(
+            plugins: [ImageConversionNativePlugin(host: pluginHost)],
+            hooks: PluginRegistry.SurfaceHooks(
+                registerProviders: { PanelStore.shared.registerProviders($0) },
+                unregisterProviders: { PanelStore.shared.unregisterProviders(for: $0) },
+                refreshSurfaces: {
+                    PanelStore.shared.rebuild()
+                    HotkeyCoordinator.shared.refresh()
+                }
+            )
+        )
 
-        // Register providers: Core-claimed commands plus the plugins' own.
+        // Register providers: Core-claimed commands plus installed plugins'.
         let providers = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
             PanelStore.shared.onKeepAwakeStateChange(state)
-        }) + imageConversionPlugin.providers
-        PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
+        }) + PluginRegistry.shared.installedProviders
+        PanelStore.shared.bootstrap(
+            modelContainer: modelContainer,
+            providers: providers,
+            commandAvailability: { PluginRegistry.shared.isAvailable($0) }
+        )
         HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
         HostsManager.shared.bootstrap(modelContainer: modelContainer)
         QuicklinkStore.shared.bootstrap(modelContainer: modelContainer)

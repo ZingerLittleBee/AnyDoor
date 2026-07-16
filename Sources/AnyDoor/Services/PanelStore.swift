@@ -42,6 +42,12 @@ final class PanelStore {
     private var providers: [BuiltinItem: any BuiltinProvider] = [:]
     private var modelContainer: ModelContainer?
 
+    /// Whether a built-in command currently exists for the user. Wired to
+    /// `PluginRegistry.isAvailable` in the app: commands claimed by an
+    /// uninstalled Native Plugin are dropped from every rebuilt collection,
+    /// so no panel row, palette entry, or settings row surfaces them.
+    private var commandAvailability: @MainActor (BuiltinItem) -> Bool = { _ in true }
+
     /// Cached toggle states by item key. Refreshed on `refreshAll()`.
     private var toggleStates: [BuiltinItem: Bool] = [:]
 
@@ -73,14 +79,35 @@ final class PanelStore {
 
     func bootstrap(
         modelContainer: ModelContainer,
-        providers: [any BuiltinProvider]
+        providers: [any BuiltinProvider],
+        commandAvailability: @escaping @MainActor (BuiltinItem) -> Bool = { _ in true }
     ) {
         self.modelContainer = modelContainer
+        self.commandAvailability = commandAvailability
+        self.providers = [:]
         for provider in providers {
             self.providers[provider.itemKey] = provider
         }
         rebuild()
         observeLanguageChanges()
+    }
+
+    /// Register an installed plugin's providers (PluginRegistry install hook).
+    /// The caller triggers the rebuild via the refresh hook.
+    func registerProviders(_ newProviders: [any BuiltinProvider]) {
+        for provider in newProviders {
+            providers[provider.itemKey] = provider
+        }
+    }
+
+    /// Drop the providers of an uninstalled plugin's claimed commands
+    /// (PluginRegistry uninstall hook).
+    func unregisterProviders(for items: Set<BuiltinItem>) {
+        for item in items {
+            providers[item] = nil
+            toggleStates[item] = nil
+            permissionStates[item] = nil
+        }
     }
 
     /// Recompute `topLevelEntries`, `appShortcutChildren`, and `windowLayoutChildren`
@@ -98,6 +125,9 @@ final class PanelStore {
             for pref in prefs {
                 guard let item = BuiltinItem(rawValue: pref.itemKey) else { continue }
                 if item.kind == .hiddenHotkey { continue }
+                // Uninstalled-plugin commands are invisible everywhere; their
+                // preference row is retained so a reinstall restores it.
+                guard commandAvailability(item) else { continue }
                 let hotkey = pref.keyCode.flatMap { code in
                     pref.modifierFlags.map { mods in
                         HotkeyDescriptor(keyCode: code, modifierFlags: mods)
