@@ -25,6 +25,9 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     public let subtitle: String?
     /// SF Symbol name.
     public let symbol: String
+    /// Localized label for the row's primary action, shown in the palette's
+    /// footer (e.g. "Toggle"). Nil falls back to the host's generic label.
+    public let actionLabel: String?
     public let commit: CommitSemantics
 
     public init(
@@ -32,12 +35,14 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         title: String,
         subtitle: String? = nil,
         symbol: String,
+        actionLabel: String? = nil,
         commit: CommitSemantics
     ) {
         self.id = id
         self.title = title
         self.subtitle = subtitle
         self.symbol = symbol
+        self.actionLabel = actionLabel
         self.commit = commit
     }
 }
@@ -48,9 +53,23 @@ public struct PluginRowDescriptor: Hashable, Sendable {
 /// plugin-named code path.
 @MainActor
 public protocol PluginRowSource: AnyObject {
-    /// The rows to surface right now, rebuilt on every palette query pass.
-    func rows() async -> [PluginRowDescriptor]
+    /// Stable identity of this row source; commit routing and
+    /// unregistration key on it.
+    var id: String { get }
+
+    /// One refresh at palette open (e.g. re-fetch the backing rows).
+    /// `rows()` runs on every query pass and must stay cheap, so any real
+    /// fetch belongs here.
+    func reload()
+
+    /// The rows to surface right now, in display order. Rebuilt on every
+    /// palette query pass; must be cheap and synchronous.
+    func rows() -> [PluginRowDescriptor]
 
     /// Runs the action behind a committed row.
     func performRow(id: String) async
+}
+
+extension PluginRowSource {
+    public func reload() {}
 }

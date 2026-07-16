@@ -235,11 +235,12 @@ enum CommandPaletteOptions {
 }
 
 extension CommandPaletteExtensions {
-    /// The Core's palette declarations: every option parent the Core owns
-    /// today, each pairing its root-listing policy with a builder that
-    /// gathers live state on the MainActor and dispatches to the pure
-    /// per-item builders above. Native Plugins register and unregister
-    /// through the same API when they claim a parent.
+    /// The Core's palette declarations: every option parent and plugin row
+    /// source the Core owns today. Each parent pairs its root-listing policy
+    /// with a builder that gathers live state on the MainActor and
+    /// dispatches to the pure per-item builders above. Native Plugins
+    /// register and unregister through the same API when they claim a
+    /// parent or a row source.
     static func core() -> CommandPaletteExtensions {
         let registry = CommandPaletteExtensions()
         registry.registerOptionParent(for: .keepAwake, CommandPaletteOptionParent(
@@ -284,6 +285,10 @@ extension CommandPaletteExtensions {
                 CommandPaletteOptions.captureTimerOptions()
             }
         ))
+        registry.registerRowSource(
+            HostProfileRowSource(),
+            sectionTitleKey: .commandPaletteSectionHosts
+        )
         return registry
     }
 }

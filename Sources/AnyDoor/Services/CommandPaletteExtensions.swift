@@ -23,17 +23,26 @@ struct CommandPaletteOptionParent {
 }
 
 /// The command palette's generic extension points (ADR-0007): the
-/// option-parent table. Any owner — the Core today, an installed Native
-/// Plugin later — declares its parents through `registerOptionParent`; the
-/// palette's control flow (the commit-intent classifier and the window
-/// controller) reads only this registry and never names a feature.
+/// option-parent table and the plugin row sources. Any owner — the Core
+/// today, an installed Native Plugin later — declares its parents and row
+/// sources here; the palette's control flow (the commit-intent classifier,
+/// the state's section assembly, and the window controller) reads only this
+/// registry and never names a feature.
 @MainActor
 final class CommandPaletteExtensions {
     /// The production registry, pre-loaded with the Core's declarations
     /// (see `CommandPaletteExtensions.core()` next to the option builders).
     static let shared = CommandPaletteExtensions.core()
 
+    /// One registered root-level plugin row source paired with the section
+    /// title its rows appear under (hosts profiles today).
+    struct RowSourceRegistration {
+        let sectionTitleKey: L10n.Key
+        let source: any PluginRowSource
+    }
+
     private var optionParents: [BuiltinItem: CommandPaletteOptionParent] = [:]
+    private(set) var rowSources: [RowSourceRegistration] = []
 
     // MARK: - Option parents
 
@@ -61,5 +70,24 @@ final class CommandPaletteExtensions {
     func options(for item: BuiltinItem) async -> [CommandPaletteOption]? {
         guard let parent = optionParents[item] else { return nil }
         return await parent.buildOptions()
+    }
+
+    // MARK: - Plugin row sources
+
+    /// Registers a root-level row source; its rows surface in a section
+    /// titled `sectionTitleKey` when they match the query. Re-registering
+    /// the same source id replaces the previous registration.
+    func registerRowSource(_ source: any PluginRowSource, sectionTitleKey: L10n.Key) {
+        rowSources.removeAll { $0.source.id == source.id }
+        rowSources.append(RowSourceRegistration(sectionTitleKey: sectionTitleKey, source: source))
+    }
+
+    func unregisterRowSource(id: String) {
+        rowSources.removeAll { $0.source.id == id }
+    }
+
+    /// The source owning `id`, used to perform a committed plugin row.
+    func rowSource(withID id: String) -> (any PluginRowSource)? {
+        rowSources.first { $0.source.id == id }?.source
     }
 }

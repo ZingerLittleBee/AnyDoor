@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import PluginInterface
 
 /// One labelled group of rows in the command palette.
 struct CommandPaletteSection: Identifiable {
@@ -276,11 +277,11 @@ final class CommandPaletteState {
     let hyperFlags: Int
     private let portInventory: PortInventory
     private var portRefreshTask: Task<Void, Never>?
-    /// Source of the hosts profiles searchable at the root. Injected so the
-    /// hosts section is unit-testable without the HostsManager singleton.
-    private let hostProfilesProvider: () -> [HostProfile]
+    /// The plugin row sources searchable at the root (hosts profiles today).
+    /// Injected so the sections are unit-testable without the registry.
+    private let rowSources: [CommandPaletteExtensions.RowSourceRegistration]
     /// Source of the currency rate table for inline currency conversion. Injected
-    /// (like `hostProfilesProvider`) so conversion tests stay deterministic.
+    /// (like `rowSources`) so conversion tests stay deterministic.
     private let currencyRatesProvider: () -> RateTable?
 
     init(
@@ -288,14 +289,14 @@ final class CommandPaletteState {
         hyperFlags: Int,
         quicklinkTemplateCandidates: [QuicklinkTemplateCandidate] = [],
         portInventory: PortInventory = .shared,
-        hostProfilesProvider: @escaping () -> [HostProfile] = { HostsManager.shared.profiles },
+        rowSources: [CommandPaletteExtensions.RowSourceRegistration] = CommandPaletteExtensions.shared.rowSources,
         currencyRatesProvider: @escaping () -> RateTable? = { CurrencyRatesService.shared.rateTable }
     ) {
         self.allSections = sections
         self.quicklinkTemplateCandidates = quicklinkTemplateCandidates
         self.hyperFlags = hyperFlags
         self.portInventory = portInventory
-        self.hostProfilesProvider = hostProfilesProvider
+        self.rowSources = rowSources
         self.currencyRatesProvider = currencyRatesProvider
     }
 
@@ -318,12 +319,14 @@ final class CommandPaletteState {
         }
         // Insert special sections at index 0 in reverse priority order, so the
         // last inserted ends up on top. Final order: quicklink argument, dev-tool
-        // keyword-completion hint, calc, conversion, ports, hosts, dev tools.
+        // keyword-completion hint, calc, conversion, ports, plugin rows (hosts),
+        // dev tools.
         if let dev = devToolsSection(matching: trimmed) {
             sections.insert(dev, at: 0)
         }
-        if let hosts = hostsSection(matching: trimmed) {
-            sections.insert(hosts, at: 0)
+        // Reversed so on-screen order follows registration order.
+        for section in pluginRowSections(matching: trimmed).reversed() {
+            sections.insert(section, at: 0)
         }
         if let ports = portSection(matching: trimmed) {
             sections.insert(ports, at: 0)
@@ -351,30 +354,44 @@ final class CommandPaletteState {
             || entry.searchAliases.contains { $0.localizedCaseInsensitiveContains(query) }
     }
 
-    /// Builds a "Hosts" section listing every profile whose name contains the
-    /// query, so a profile is reachable by name from the root. Committing a row
-    /// toggles that profile's activation.
-    private func hostsSection(matching query: String) -> CommandPaletteSection? {
+    /// Builds one section per registered plugin row source, listing every row
+    /// whose title contains the query — so e.g. a hosts profile is reachable
+    /// by name from the root. Committing a row routes back to its owning
+    /// source by the descriptor's declared semantics (ADR-0007).
+    private func pluginRowSections(matching query: String) -> [CommandPaletteSection] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let entries = hostProfilesProvider()
-            .filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
-            .sorted { $0.displayOrder < $1.displayOrder }
-            .map { Self.hostEntry(for: $0) }
-        guard !entries.isEmpty else { return nil }
-        return CommandPaletteSection(titleKey: .commandPaletteSectionHosts, entries: entries)
+        guard !trimmed.isEmpty else { return [] }
+        return rowSources.compactMap { registration in
+            let entries = registration.source.rows()
+                .filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+                .enumerated()
+                .map { index, descriptor in
+                    Self.pluginRowEntry(
+                        sourceID: registration.source.id,
+                        descriptor: descriptor,
+                        displayOrder: Double(index)
+                    )
+                }
+            guard !entries.isEmpty else { return nil }
+            return CommandPaletteSection(titleKey: registration.sectionTitleKey, entries: entries)
+        }
     }
 
-    private static func hostEntry(for profile: HostProfile) -> PanelEntry {
-        PanelEntry(
-            id: PanelEntry.id(for: .hostProfile(id: profile.id)),
-            source: .hostProfile(id: profile.id),
-            displayOrder: profile.displayOrder,
+    private static func pluginRowEntry(
+        sourceID: String,
+        descriptor: PluginRowDescriptor,
+        displayOrder: Double
+    ) -> PanelEntry {
+        let source = PanelEntry.Source.pluginRow(sourceID: sourceID, descriptor: descriptor)
+        return PanelEntry(
+            id: PanelEntry.id(for: source),
+            source: source,
+            displayOrder: displayOrder,
             isVisible: true,
             hotkey: nil,
-            title: profile.name,
-            subtitle: profile.isActive ? L(.commandPaletteHostsActive) : nil,
-            symbol: profile.isActive ? "checkmark.circle.fill" : "circle",
+            title: descriptor.title,
+            subtitle: descriptor.subtitle,
+            symbol: descriptor.symbol,
             kind: .action,
             toggleState: nil,
             permission: .notRequired
@@ -935,8 +952,8 @@ struct CommandPalettePicker: View {
             return L(.commandPaletteActionCopy)
         case .devToolScopeSuggestion:
             return L(.commandPaletteActionEnter)
-        case .hostProfile:
-            return L(.commandPaletteActionToggle)
+        case .pluginRow(_, let descriptor):
+            return descriptor.actionLabel ?? L(.commandPaletteActionSelect)
         case .paletteOption(let id):
             if state.option(id: id)?.role == .destructive { return L(.commandPaletteActionQuit) }
             return L(.commandPaletteActionSelect)
@@ -1268,19 +1285,19 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
             return nil
         }
     }
 
     /// Port records, calculator results, dev-tool conversions, unit/time/currency
-    /// conversions, host profiles, and second-level options render their subtitle
+    /// conversions, plugin rows, and second-level options render their subtitle
     /// (the port detail line, the original expression for a calc result, the
-    /// conversion source/rate-date for a conversion row, the tool name for a dev-tool row,
-    /// the host profile's entry summary, or a port option's detail).
+    /// conversion source/rate-date for a conversion row, the tool name for a
+    /// dev-tool row, a plugin row's declared subtitle, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument: return true
+        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument: return true
         default: return false
         }
     }

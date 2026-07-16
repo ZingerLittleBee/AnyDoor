@@ -1,4 +1,5 @@
 import XCTest
+import PluginInterface
 @testable import AnyDoor
 
 final class CommandPaletteTests: XCTestCase {
@@ -135,12 +136,17 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionCalculator })
     }
 
-    // MARK: - Hosts profile root search (#4)
+    // MARK: - Plugin row root search (hosts profiles, #4 / ADR-0007)
 
     @MainActor
-    func testHostProfileSourceMakesStableID() {
-        let id = UUID()
-        XCTAssertEqual(PanelEntry.id(for: .hostProfile(id: id)), "hostProfile:\(id.uuidString)")
+    func testPluginRowSourceMakesStableID() {
+        let descriptor = PluginRowDescriptor(
+            id: "profile-1", title: "Dev", symbol: "circle", commit: .closeThenAct
+        )
+        XCTAssertEqual(
+            PanelEntry.id(for: .pluginRow(sourceID: "hosts.profiles", descriptor: descriptor)),
+            "pluginRow:hosts.profiles:profile-1"
+        )
     }
 
     @MainActor
@@ -403,7 +409,7 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(
             sections: [],
             hyperFlags: 0,
-            hostProfilesProvider: { [dev, prod] }
+            rowSources: [hostsRowSourceRegistration(profiles: [dev, prod])]
         )
         state.query = "Dev"
 
@@ -411,10 +417,11 @@ final class CommandPaletteTests: XCTestCase {
         let entry = try XCTUnwrap(state.flatEntries.first)
         XCTAssertEqual(entry.title, "Dev")
         XCTAssertEqual(entry.subtitle, "Active")
-        guard case .hostProfile(let id) = entry.source else {
-            return XCTFail("Expected a host profile entry")
+        guard case .pluginRow(_, let descriptor) = entry.source else {
+            return XCTFail("Expected a plugin row entry")
         }
-        XCTAssertEqual(id, dev.id)
+        XCTAssertEqual(descriptor.id, dev.id.uuidString)
+        XCTAssertEqual(descriptor.commit, .closeThenAct)
     }
 
     @MainActor
@@ -423,7 +430,7 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(
             sections: [],
             hyperFlags: 0,
-            hostProfilesProvider: { [prod] }
+            rowSources: [hostsRowSourceRegistration(profiles: [prod])]
         )
         state.query = "Prod"
         let entry = try XCTUnwrap(state.flatEntries.first)
@@ -436,9 +443,23 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(
             sections: [],
             hyperFlags: 0,
-            hostProfilesProvider: { [dev] }
+            rowSources: [hostsRowSourceRegistration(profiles: [dev])]
         )
         XCTAssertTrue(state.filteredSections.isEmpty)
+    }
+
+    @MainActor
+    private func hostsRowSourceRegistration(
+        profiles: [HostProfile]
+    ) -> CommandPaletteExtensions.RowSourceRegistration {
+        CommandPaletteExtensions.RowSourceRegistration(
+            sectionTitleKey: .commandPaletteSectionHosts,
+            source: HostProfileRowSource(
+                profiles: { profiles },
+                reload: {},
+                setActive: { _, _ in }
+            )
+        )
     }
 
     // MARK: - Developer tools root search
@@ -635,7 +656,7 @@ final class CommandPaletteTests: XCTestCase {
 
     @MainActor
     func testUnitConversionSurfacesConversionSection() throws {
-        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: [])
         state.query = "3 ft to m"
 
         let section = try XCTUnwrap(state.filteredSections.first)
@@ -669,7 +690,7 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(
             sections: [],
             hyperFlags: 0,
-            hostProfilesProvider: { [] },
+            rowSources: [],
             currencyRatesProvider: { table }
         )
         state.query = "100 usd to eur"
@@ -690,7 +711,7 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(
             sections: [],
             hyperFlags: 0,
-            hostProfilesProvider: { [] },
+            rowSources: [],
             currencyRatesProvider: { nil }
         )
         state.query = "100 usd to eur"
@@ -699,7 +720,7 @@ final class CommandPaletteTests: XCTestCase {
 
     @MainActor
     func testPlainSearchDoesNotShowConversionSection() {
-        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: [])
         state.query = "settings"
         XCTAssertFalse(state.filteredSections.contains { $0.titleKey == .commandPaletteSectionConversion })
     }
@@ -710,7 +731,7 @@ final class CommandPaletteTests: XCTestCase {
     func testCurrencyContextTrueForCurrencyRow() {
         let table = RateTable(base: "USD", rates: ["EUR": 0.925], date: "2026-06-13")
         let state = CommandPaletteState(
-            sections: [], hyperFlags: 0, hostProfilesProvider: { [] }, currencyRatesProvider: { table }
+            sections: [], hyperFlags: 0, rowSources: [], currencyRatesProvider: { table }
         )
         state.query = "100 usd to eur"
         XCTAssertTrue(state.isCurrencyContext)
@@ -720,7 +741,7 @@ final class CommandPaletteTests: XCTestCase {
     func testCurrencyContextTrueForCurrencyQueryWithoutRates() {
         // No rates yet: still show the toolbar so the user can refresh to recover.
         let state = CommandPaletteState(
-            sections: [], hyperFlags: 0, hostProfilesProvider: { [] }, currencyRatesProvider: { nil }
+            sections: [], hyperFlags: 0, rowSources: [], currencyRatesProvider: { nil }
         )
         state.query = "100 usd to eur"
         XCTAssertTrue(state.isCurrencyContext)
@@ -728,14 +749,14 @@ final class CommandPaletteTests: XCTestCase {
 
     @MainActor
     func testCurrencyContextFalseForUnitConversion() {
-        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: [])
         state.query = "3 ft to m"
         XCTAssertFalse(state.isCurrencyContext)
     }
 
     @MainActor
     func testCurrencyContextFalseForPlainSearch() {
-        let state = CommandPaletteState(sections: [], hyperFlags: 0, hostProfilesProvider: { [] })
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: [])
         state.query = "settings"
         XCTAssertFalse(state.isCurrencyContext)
     }
@@ -744,7 +765,7 @@ final class CommandPaletteTests: XCTestCase {
     func testCurrencyContextFalseForUnknownCodesWhenRatesPresent() {
         let table = RateTable(base: "USD", rates: ["EUR": 0.925], date: "2026-06-13")
         let state = CommandPaletteState(
-            sections: [], hyperFlags: 0, hostProfilesProvider: { [] }, currencyRatesProvider: { table }
+            sections: [], hyperFlags: 0, rowSources: [], currencyRatesProvider: { table }
         )
         state.query = "100 abc to xyz"
         XCTAssertFalse(state.isCurrencyContext)

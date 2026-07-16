@@ -128,11 +128,28 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
     }
 
     @MainActor
-    func testHostProfileTogglesActivation() {
-        let id = UUID()
+    func testPluginRowMapsDeclaredCloseThenActSemantics() {
+        let descriptor = PluginRowDescriptor(
+            id: "profile-1", title: "Dev", symbol: "circle", commit: .closeThenAct
+        )
         XCTAssertEqual(
-            CommandPaletteCommitIntent.classify(.hostProfile(id: id)),
-            .toggleHostProfile(id: id)
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceID: "hosts.profiles", descriptor: descriptor)
+            ),
+            .pluginRowCloseThenAct(sourceID: "hosts.profiles", rowID: "profile-1")
+        )
+    }
+
+    @MainActor
+    func testPluginRowMapsDeclaredStayOpenSemantics() {
+        let descriptor = PluginRowDescriptor(
+            id: "row-2", title: "Row", symbol: "circle", commit: .stayOpen
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceID: "some.source", descriptor: descriptor)
+            ),
+            .pluginRowStayOpen(sourceID: "some.source", rowID: "row-2")
         )
     }
 

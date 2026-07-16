@@ -254,7 +254,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
                 return nil
             }
         })
@@ -269,9 +269,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         let store = PanelStore.shared
         var sections: [CommandPaletteSection] = []
 
-        // Refresh hosts profiles once at palette open so the root name-search
-        // section reflects the current set without a per-keystroke fetch.
-        HostsManager.shared.reload()
+        // Give every plugin row source one refresh at palette open (e.g. hosts
+        // profiles re-fetch) so the root name-search sections reflect current
+        // data without a per-keystroke fetch.
+        for registration in CommandPaletteExtensions.shared.rowSources {
+            registration.source.reload()
+        }
 
         // Kick a currency-rates refresh (at most once per day) so inline currency
         // conversion has a fresh table. Fire-and-forget; the cached table is used
@@ -548,13 +551,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .generic:
                 ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
             }
-        case .toggleHostProfile(let id):
+        case .pluginRowStayOpen(let sourceID, let rowID):
+            guard let source = CommandPaletteExtensions.shared.rowSource(withID: sourceID) else { return }
+            Task { await source.performRow(id: rowID) }
+        case .pluginRowCloseThenAct(let sourceID, let rowID):
             close()
-            // Toggle the named profile's activation directly (same as the
-            // drill-in hosts options — no privileged-write confirmation).
-            if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
-                Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
-            }
+            guard let source = CommandPaletteExtensions.shared.rowSource(withID: sourceID) else { return }
+            Task { await source.performRow(id: rowID) }
         case .openQuicklink(let id):
             close()
             guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
