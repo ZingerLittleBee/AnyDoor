@@ -5,8 +5,7 @@ import PluginInterface
 /// descriptor-based `PluginRowSource` (ADR-0007). A row's title is the
 /// profile name; committing a row toggles that profile's activation, exactly
 /// like the drill-in hosts options (no privileged-write confirmation).
-/// Registered by the Core while Hosts still lives in it; the Hosts plugin
-/// takes the registration over when it is extracted.
+/// Registered through the plugin's palette contributions on install.
 @MainActor
 final class HostProfileRowSource: PluginRowSource {
     static let sourceID = "hosts.profiles"
