@@ -1,4 +1,5 @@
 import XCTest
+import PluginInterface
 @testable import AnyDoor
 
 final class CommandPaletteOptionsTests: XCTestCase {
@@ -99,14 +100,78 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     @MainActor
-    func testIsOptionParent() {
-        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.keepAwake))
-        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.scheduledShutdown))
-        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.brightness))
-        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.hostsManager))
-        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.captureTimer))
-        XCTAssertFalse(CommandPaletteOptions.isOptionParent(.muteAudio))
-        XCTAssertFalse(CommandPaletteOptions.isOptionParent(.windowLayout))
+    func testCoreRegistryDeclaresTodaysOptionParents() {
+        let registry = CommandPaletteExtensions.shared
+        for item: BuiltinItem in [.keepAwake, .scheduledShutdown, .brightness,
+                                  .hostsManager, .portManager, .pickColor, .captureTimer] {
+            XCTAssertTrue(registry.isOptionParent(item), "\(item) should be an option parent")
+        }
+        XCTAssertFalse(registry.isOptionParent(.muteAudio))
+        XCTAssertFalse(registry.isOptionParent(.windowLayout))
+    }
+
+    @MainActor
+    func testCoreRegistryListsOnlySubmenuParentsAtRoot() {
+        let registry = CommandPaletteExtensions.shared
+        // Hosts and Port Manager are always listed; toggle/action parents are
+        // already listed by their kind, so their root-listing answer is false.
+        XCTAssertTrue(registry.listsAtRoot(.hostsManager))
+        XCTAssertTrue(registry.listsAtRoot(.portManager))
+        XCTAssertFalse(registry.listsAtRoot(.keepAwake))
+        XCTAssertFalse(registry.listsAtRoot(.scheduledShutdown))
+        XCTAssertFalse(registry.listsAtRoot(.pickColor))
+        XCTAssertFalse(registry.listsAtRoot(.captureTimer))
+        // Unregistered submenu items never list through the option table.
+        XCTAssertFalse(registry.listsAtRoot(.bluetoothBattery))
+    }
+
+    @MainActor
+    func testRegisteredOptionParentEndToEnd() async {
+        let registry = CommandPaletteExtensions()
+        XCTAssertFalse(registry.isOptionParent(.darkMode))
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.builtin(.darkMode), extensions: registry),
+            .toggleBuiltin(.darkMode)
+        )
+
+        registry.registerOptionParent(for: .darkMode, CommandPaletteOptionParent(
+            listsAtRoot: { true },
+            buildOptions: { [CommandPaletteOption(id: "x", title: "X", symbol: "clock", perform: {})] }
+        ))
+
+        XCTAssertTrue(registry.isOptionParent(.darkMode))
+        XCTAssertTrue(registry.listsAtRoot(.darkMode))
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.builtin(.darkMode), extensions: registry),
+            .drillIntoOptions(.darkMode)
+        )
+        let options = await registry.options(for: .darkMode)
+        XCTAssertEqual(options?.map(\.id), ["x"])
+
+        registry.unregisterOptionParent(for: .darkMode)
+        XCTAssertFalse(registry.isOptionParent(.darkMode))
+        let unregisteredOptions = await registry.options(for: .darkMode)
+        XCTAssertNil(unregisteredOptions)
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(.builtin(.darkMode), extensions: registry),
+            .toggleBuiltin(.darkMode)
+        )
+    }
+
+    @MainActor
+    func testRegisteredParentMayDeclineOptionsRightNow() async {
+        // A registered parent whose builder answers nil (brightness without an
+        // external DDC display) stays a parent for classification, but the
+        // palette closes instead of drilling in.
+        let registry = CommandPaletteExtensions()
+        registry.registerOptionParent(for: .brightness, CommandPaletteOptionParent(
+            listsAtRoot: { false },
+            buildOptions: { nil }
+        ))
+        XCTAssertTrue(registry.isOptionParent(.brightness))
+        XCTAssertFalse(registry.listsAtRoot(.brightness))
+        let options = await registry.options(for: .brightness)
+        XCTAssertNil(options)
     }
 
     @MainActor
@@ -136,11 +201,6 @@ final class CommandPaletteOptionsTests: XCTestCase {
                                 binds: [PortBind(address: "*", family: .ipv4)])
         XCTAssertNotNil(CommandPaletteOptions.portOptions(records: [record]).first?.confirmation)
         XCTAssertNil(CommandPaletteOptions.keepAwakeOptions(isOn: false).first?.confirmation)
-    }
-
-    @MainActor
-    func testIsOptionParentIncludesPortManager() {
-        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.portManager))
     }
 
     @MainActor
@@ -293,11 +353,6 @@ final class CommandPaletteOptionsTests: XCTestCase {
     }
 
     // MARK: - Color format options (#3)
-
-    @MainActor
-    func testPickColorIsOptionParent() {
-        XCTAssertTrue(CommandPaletteOptions.isOptionParent(.pickColor))
-    }
 
     @MainActor
     func testColorFormatOptionsHaveStableIDsAndMarkCurrent() {

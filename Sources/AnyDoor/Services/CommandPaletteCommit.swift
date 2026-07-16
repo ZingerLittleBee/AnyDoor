@@ -50,13 +50,16 @@ enum CommandPaletteCommitIntent: Equatable {
     }
 
     @MainActor
-    static func classify(_ source: PanelEntry.Source) -> CommandPaletteCommitIntent {
+    static func classify(
+        _ source: PanelEntry.Source,
+        extensions: CommandPaletteExtensions = .shared
+    ) -> CommandPaletteCommitIntent {
         switch source {
         case .builtin(let item):
             // Option parents drill in regardless of kind — Keep Awake and
             // Scheduled Shutdown are toggle-kind but still open their
             // duration list instead of flipping directly.
-            if CommandPaletteOptions.isOptionParent(item) { return .drillIntoOptions(item) }
+            if extensions.isOptionParent(item) { return .drillIntoOptions(item) }
             switch item.kind {
             case .toggle: return .toggleBuiltin(item)
             case .action: return .runBuiltin(item)

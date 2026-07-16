@@ -278,7 +278,6 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         // immediately and updated rows appear as the user keeps typing.
         Task { await CurrencyRatesService.shared.refreshIfStale() }
 
-        let hasExternalDDC = DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC)
         let commands = store.topLevelEntries.filter { entry in
             guard entry.isVisible else { return false }
             guard case .builtin(let item) = entry.source else { return false }
@@ -286,9 +285,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .toggle, .action:
                 return true
             case .brightnessControl, .submenu:
-                // Only the option parents the palette drills into; App Shortcuts,
-                // Window Layout and Port Manager keep their own flat sections.
-                return CommandPaletteOptions.shouldListInPalette(item, hasExternalDDC: hasExternalDDC)
+                // Only the option parents the palette drills into; App Shortcuts
+                // and Window Layout keep their own flat sections. Brightness
+                // registers a DDC-gated listing policy.
+                return CommandPaletteExtensions.shared.listsAtRoot(item)
             case .hiddenHotkey:
                 return false
             }
@@ -487,7 +487,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         case .drillIntoOptions(let item):
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let options = await CommandPaletteOptions.options(for: item)
+                let options = await CommandPaletteExtensions.shared.options(for: item)
                 // Re-check after the await: the window may have resigned key and
                 // closed (which nils `state`) during option building.
                 guard let state = self.state, self.window?.isVisible == true else { return }
