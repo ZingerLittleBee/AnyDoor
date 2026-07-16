@@ -1,7 +1,7 @@
 ---
 id: 015
 title: "Native Plugins: generic palette extension points (option registry + pluginRow)"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-16-native-plugin-architecture.md
 ---
 
