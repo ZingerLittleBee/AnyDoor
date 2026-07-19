@@ -15,6 +15,7 @@ final class HostsEditorWindowController: NSWindowController, NSWindowDelegate {
         )
         panel.title = "Hosts"
         panel.isReleasedWhenClosed = false
+        panel.isRestorable = false
         // A normal-level window (not floating) that does not hide when the app
         // deactivates; RegularWindowCoordinator keeps it reachable via Dock /
         // Cmd-Tab while it is open.

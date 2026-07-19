@@ -314,10 +314,12 @@ actor ImageConversionEngine {
         expectedArtifact: AtomicOutputWriter.CandidateArtifact,
         destination: AtomicOutputWriter.DestinationPolicy
     ) throws -> CommittedOutput {
+        try Task.checkCancellation()
         guard let artifact = store.retainedBestEffort(forItem: itemID),
               artifact == expectedArtifact else {
             throw ImageConversionFailure.sourceChanged
         }
+        try Task.checkCancellation()
         return try AtomicOutputWriter().commit(artifact, to: destination)
     }
 

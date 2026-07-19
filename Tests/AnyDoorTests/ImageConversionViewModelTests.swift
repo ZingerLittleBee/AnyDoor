@@ -252,6 +252,86 @@ final class ImageConversionViewModelTests: XCTestCase {
         XCTAssertEqual(model.items.count, 1)
     }
 
+    @MainActor
+    func testCancelActiveWorkStopsOutputPickerBeforeItsTaskStarts() async throws {
+        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
+        model.addBitmap(Data([0x01]))
+
+        var pickerCalls = 0
+        model.outputDirectoryPicker = { _ in
+            pickerCalls += 1
+            return FileManager.default.temporaryDirectory
+        }
+
+        model.convert()
+        await model.cancelActiveWork()
+        await Task.yield()
+
+        XCTAssertEqual(pickerCalls, 0)
+        XCTAssertFalse(model.canConvert)
+        model.convert()
+        await Task.yield()
+        XCTAssertEqual(pickerCalls, 0, "a quiesced model must reject new work")
+    }
+
+    @MainActor
+    func testCancelActiveWorkCancelsSaveAnywayBeforeCommit() async throws {
+        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let source = try writePNG()
+        let directory = source.deletingLastPathComponent()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
+        model.outputDirectoryPicker = { _ in directory }
+        model.mode = .targetSize
+        model.switchTargetUnit(to: .kb)
+        model.targetText = "0.01"
+        model.commitTargetText()
+        model.addFiles([source])
+        let item = try XCTUnwrap(model.items.first)
+
+        model.convert()
+        let missDeadline = ContinuousClock.now + .seconds(10)
+        while model.itemStatuses[item.id] == nil, ContinuousClock.now < missDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        guard case .targetMiss = model.itemStatuses[item.id] else {
+            return XCTFail("expected a retained target miss")
+        }
+        let filesBefore = try Set(FileManager.default.contentsOfDirectory(atPath: directory.path))
+
+        model.saveBestEffort(item)
+        await model.cancelActiveWork()
+
+        XCTAssertEqual(
+            try Set(FileManager.default.contentsOfDirectory(atPath: directory.path)),
+            filesBefore,
+            "a cancelled Save Anyway task must not commit an output"
+        )
+        XCTAssertTrue(model.items.contains(item))
+        XCTAssertTrue(model.itemStatuses.isEmpty)
+    }
+
+    @MainActor
+    func testCancelActiveWorkClearsPreviewAndPreflightState() async throws {
+        let source = try writeAnimatedGIF()
+        defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+        let model = ImageConversionViewModel(availableFormats: [.png])
+        model.addFiles([source])
+        model.resetSidebarForPresentation()
+
+        await model.cancelActiveWork()
+        try await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(model.previewState, .empty)
+        XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.isEmpty)
+    }
+
     private func writeNoisePNG(side: Int) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ImageConversionViewModelTests-\(UUID().uuidString)", isDirectory: true)

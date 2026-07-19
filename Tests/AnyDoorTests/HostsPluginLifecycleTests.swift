@@ -122,6 +122,10 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     // MARK: - Contract
 
+    func testEditorWindowDisablesStateRestoration() {
+        XCTAssertFalse(HostsEditorWindowController.shared.window?.isRestorable ?? true)
+    }
+
     func testClaimsAndContributions() throws {
         let f = try makeFixture()
         defer { f.teardown() }

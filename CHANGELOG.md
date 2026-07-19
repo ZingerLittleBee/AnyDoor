@@ -15,8 +15,10 @@ versioning.
   uninstalling cancels an in-progress conversion first. Conversion history,
   preferences, and hotkeys are kept, so reinstalling restores your exact
   previous setup. Screenshot "Save As" is a core feature and is unaffected:
-  it keeps its full format list and quality setting either way. Pending file
-  and output-folder pickers are also dismissed before uninstall completes.
+  it keeps its full format list and quality setting either way. Pending Finder
+  window presentation, file/output-folder pickers, previews, preflight, Save
+  Anyway, and maintenance work are cancelled or drained before uninstall
+  completes, and stale presentation work cannot reopen the window afterward.
 - Plugins: Hosts management is now the second Native Plugin. Uninstalling it
   never touches `/etc/hosts` and never asks for administrator authorization:
   active profiles stay active and their entries remain in effect (the

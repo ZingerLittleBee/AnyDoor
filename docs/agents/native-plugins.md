@@ -121,9 +121,13 @@ marked **required** have no default.
 Called by `PluginRegistry.uninstall` **before any state or surface change**.
 It must:
 
-1. **Cancel in-flight work.** Image Conversion dismisses pending file/folder
-   panels, cancels their owned tasks and the active Conversion Run, then awaits
-   all of them (`ImageConversionWindowController.deactivateForUninstall()`).
+1. **Quiesce, then cancel in-flight work.** Image Conversion closes its
+   presentation gate first, so a provider action already waiting on Finder
+   cannot reopen the window after uninstall (and cannot become current after a
+   quick reinstall). Its view model then rejects new work, dismisses pending
+   file/folder panels, cancels the Conversion Run, previews, preflight, Save
+   Anyway, and maintenance tasks, and awaits every owned task
+   (`ImageConversionWindowController.deactivateForUninstall()`).
 2. **Release shared host resources through the capabilities.** Hosts calls
    `host.privilegedHelper.releaseIfUnneeded()` — the Core decides whether
    another consumer (forced Scheduled Shutdown) still needs the daemon
@@ -277,7 +281,10 @@ claims.
   `PluginHost.trackRegularWindow(window)` and set `isRestorable = false`.
   Windows are reached from the plugin's own surfaces (provider `run()`,
   popover edit button, palette option), all of which are install-gated
-  upstream; `deactivate()` closes them.
+  upstream; `deactivate()` closes them. An async presentation path must also
+  carry an activation generation across each await and drain before uninstall
+  completes, because upstream gating cannot revoke an action that already
+  started.
 - **Registered debt.** The clipboard-history convert action gates on
   `PluginRegistry.shared.isAvailable(.imageConversion)` at the menu **and**
   again in `convertImage(_:)` (menu built just before an uninstall landed).

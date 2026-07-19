@@ -26,6 +26,26 @@ private final class ThrowingDeactivatePlugin: NativePlugin {
     }
 }
 
+@MainActor
+private final class FinderSelectionGate {
+    private(set) var isWaiting = false
+    private var continuation: CheckedContinuation<[URL], Never>?
+
+    func read() async -> [URL] {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            isWaiting = true
+        }
+    }
+
+    func resume(returning urls: [URL] = []) {
+        let continuation = continuation
+        self.continuation = nil
+        isWaiting = false
+        continuation?.resume(returning: urls)
+    }
+}
+
 final class PluginRegistryTests: XCTestCase {
 
     @MainActor
@@ -110,6 +130,40 @@ final class PluginRegistryTests: XCTestCase {
     }
 
     @MainActor
+    func testImageConversionActivationUsesItsCapturedHost() async throws {
+        func makeContainer() throws -> ModelContainer {
+            try ModelContainer(
+                for: Schema(ImageConversionNativePlugin.modelSchemaTypes),
+                configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            )
+        }
+
+        let expectedContainer = try makeContainer()
+        let otherContainer = try makeContainer()
+        let plugin = ImageConversionNativePlugin(
+            host: CorePluginHost(modelContainer: expectedContainer)
+        )
+        _ = ImageConversionNativePlugin(host: CorePluginHost(modelContainer: otherContainer))
+
+        plugin.activate()
+        XCTAssertTrue(ImageConversionHistoryStore.shared.record(
+            sourceName: "source.png",
+            sourceKind: .file,
+            targetFormat: .jpeg,
+            qualityPercent: 85,
+            outputPath: "/tmp/source.jpg"
+        ))
+
+        XCTAssertEqual(try expectedContainer.mainContext.fetchCount(
+            FetchDescriptor<ImageConversionRecord>()
+        ), 1)
+        XCTAssertEqual(try otherContainer.mainContext.fetchCount(
+            FetchDescriptor<ImageConversionRecord>()
+        ), 0)
+        try await plugin.deactivate()
+    }
+
+    @MainActor
     func testUninstallRevertsSurfacesAndPersists() async throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
@@ -137,6 +191,48 @@ final class PluginRegistryTests: XCTestCase {
         let relaunched = PluginRegistry()
         relaunched.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
         XCTAssertFalse(relaunched.isInstalled(plugin.id))
+    }
+
+    @MainActor
+    func testUninstallDrainsPendingWindowPresentationWithoutReopening() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let plugin = try makeImageConversionPlugin()
+        let registry = PluginRegistry()
+        registry.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        registry.install(plugin.id)
+
+        let controller = ImageConversionWindowController.shared
+        controller.close()
+        let previousReader = controller.finderSelectionReader
+        defer { controller.finderSelectionReader = previousReader }
+        let gate = FinderSelectionGate()
+        controller.finderSelectionReader = { await gate.read() }
+
+        let presentation = Task { @MainActor in
+            await controller.toggle()
+        }
+        let presentationDeadline = ContinuousClock.now + .seconds(1)
+        while !gate.isWaiting, ContinuousClock.now < presentationDeadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(gate.isWaiting)
+
+        var uninstallFinished = false
+        let uninstall = Task { @MainActor in
+            try await registry.uninstall(plugin.id)
+            uninstallFinished = true
+        }
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertFalse(uninstallFinished,
+                       "uninstall must drain the Finder-backed presentation")
+
+        gate.resume()
+        try await uninstall.value
+        await presentation.value
+
+        XCTAssertFalse(controller.window?.isVisible ?? true)
+        XCTAssertFalse(registry.isInstalled(plugin.id))
     }
 
     @MainActor

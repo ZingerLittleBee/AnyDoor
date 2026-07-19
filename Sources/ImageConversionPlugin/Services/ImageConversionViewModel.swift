@@ -160,6 +160,9 @@ final class ImageConversionViewModel {
     @ObservationIgnored private var outputPickerTask: Task<Void, Never>?
     @ObservationIgnored private var outputPanel: NSOpenPanel?
     @ObservationIgnored private var runTask: Task<Void, Never>?
+    @ObservationIgnored private var saveBestEffortTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var maintenanceTasks: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var acceptsWork = true
 
     init(
         availableFormats: [ImageConversionFormat] = ImageConversionFormat.availableTargets(),
@@ -200,7 +203,7 @@ final class ImageConversionViewModel {
     var isQualityAdjustable: Bool { selectedFormat.isLossy }
 
     var canConvert: Bool {
-        guard !items.isEmpty, !isConverting else { return false }
+        guard acceptsWork, !items.isEmpty, !isConverting else { return false }
         switch mode {
         case .quality:
             return availableFormats.contains(selectedFormat)
@@ -248,7 +251,7 @@ final class ImageConversionViewModel {
     }
 
     func addFiles(_ urls: [URL]) {
-        guard !isConverting else { return }
+        guard acceptsWork, !isConverting else { return }
         let imageURLs = urls
             .map { $0.standardizedFileURL }
             .filter { ImageConverter.isImageFile(at: $0) }
@@ -269,7 +272,7 @@ final class ImageConversionViewModel {
     /// basket. The async `begin()` keeps the floating conversion panel usable
     /// while the picker is up.
     func presentOpenPanel() {
-        guard !isConverting, openPanelTask == nil else { return }
+        guard acceptsWork, !isConverting, openPanelTask == nil else { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
@@ -281,15 +284,17 @@ final class ImageConversionViewModel {
                 self.openPanel = nil
                 self.openPanelTask = nil
             }
+            guard !Task.isCancelled, self.acceptsWork else { return }
             let response = await panel.begin()
-            guard !Task.isCancelled, response == .OK, !self.isConverting else { return }
+            guard !Task.isCancelled, self.acceptsWork,
+                  response == .OK, !self.isConverting else { return }
             self.addFiles(panel.urls)
         }
     }
 
     /// Adds a pasted bitmap (e.g. a fresh screenshot) with a generic display name.
     func addBitmap(_ data: Data) {
-        guard !isConverting else { return }
+        guard acceptsWork, !isConverting else { return }
         items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
         scheduleQualityPreflightNotices()
         selectFirstIfNeeded()
@@ -299,7 +304,7 @@ final class ImageConversionViewModel {
     /// deduping by id and preserving insertion order so a bitmap keeps its
     /// history-derived display name.
     func add(_ newItems: [ImageConversionBasketItem]) {
-        guard !isConverting else { return }
+        guard acceptsWork, !isConverting else { return }
         var existing = Set(items.map(\.id))
         var next = items
         for item in newItems where existing.insert(item.id).inserted {
@@ -311,12 +316,12 @@ final class ImageConversionViewModel {
     }
 
     func remove(_ item: ImageConversionBasketItem) {
-        guard !isConverting else { return }
+        guard acceptsWork, !isConverting else { return }
         removeItems(withIDs: [item.id])
     }
 
     func clear() {
-        guard !isConverting else { return }
+        guard acceptsWork, !isConverting else { return }
         let removed = items
         items.removeAll()
         itemStatuses.removeAll()
@@ -337,8 +342,10 @@ final class ImageConversionViewModel {
     }
 
     func resetSidebarForPresentation() {
+        guard acceptsWork else { return }
         sidebarTab = .basket
         isWindowPresented = true
+        scheduleQualityPreflightNotices()
         schedulePreview()
     }
 
@@ -347,8 +354,16 @@ final class ImageConversionViewModel {
         previewGeneration += 1
         previewTask?.cancel()
         previewTask = nil
+        qualityPreflightGeneration += 1
+        qualityPreflightTask?.cancel()
+        qualityPreflightTask = nil
+        qualityFirstFrameOnlyItemIDs.removeAll()
         previewState = .empty
         pruneIdlePreviewArtifactsIfNeeded()
+    }
+
+    func resumeAfterActivation() {
+        acceptsWork = true
     }
 
     /// Request Stop: takes effect at the current candidate/commit boundary.
@@ -357,23 +372,48 @@ final class ImageConversionViewModel {
         runTask?.cancel()
     }
 
-    /// Plugin `deactivate` path: dismiss pending panels, cancel the folder
-    /// selection workflow and Conversion Run, then wait for every owned task
-    /// to wind down before the plugin's surfaces disappear.
+    /// Plugin `deactivate` path: stop accepting new work, dismiss pending
+    /// panels, cancel every owned task, then wait for all of them to wind down
+    /// before the plugin's surfaces disappear.
     func cancelActiveWork() async {
+        acceptsWork = false
+        previewGeneration &+= 1
+        qualityPreflightGeneration &+= 1
+
         let pendingOpenPanel = openPanelTask
         let pendingOutputPicker = outputPickerTask
         let activeRun = runTask
+        let activePreview = previewTask
+        let activePreflight = qualityPreflightTask
+        let activeSaves = Array(saveBestEffortTasks.values)
+        let activeMaintenance = Array(maintenanceTasks.values)
 
         pendingOpenPanel?.cancel()
         pendingOutputPicker?.cancel()
         activeRun?.cancel()
+        activePreview?.cancel()
+        activePreflight?.cancel()
+        for task in activeSaves { task.cancel() }
+        for task in activeMaintenance { task.cancel() }
         openPanel?.cancel(nil)
         outputPanel?.cancel(nil)
 
         await pendingOpenPanel?.value
         await pendingOutputPicker?.value
         await activeRun?.value
+        await activePreview?.value
+        await activePreflight?.value
+        for task in activeSaves { await task.value }
+        for task in activeMaintenance { await task.value }
+        if let engine { await engine.reset() }
+
+        previewTask = nil
+        qualityPreflightTask = nil
+        saveBestEffortTasks.removeAll()
+        maintenanceTasks.removeAll()
+        previewState = .empty
+        qualityFirstFrameOnlyItemIDs.removeAll()
+        itemStatuses.removeAll()
     }
 
     /// Injectable folder picker (given the remembered directory, returns the
@@ -388,13 +428,15 @@ final class ImageConversionViewModel {
         let remembered = ImageConversionPreferences.outputDirectory(defaults: defaults)
         outputPickerTask = Task { @MainActor in
             defer { self.outputPickerTask = nil }
+            guard !Task.isCancelled, self.acceptsWork else { return }
             let directory: URL?
             if let picker = outputDirectoryPicker {
                 directory = await picker(remembered)
             } else {
                 directory = await self.presentOutputDirectoryPanel(startingAt: remembered)
             }
-            guard !Task.isCancelled, let directory, self.canConvert else { return }
+            guard !Task.isCancelled, self.acceptsWork,
+                  let directory, self.canConvert else { return }
             ImageConversionPreferences.setOutputDirectory(directory, defaults: self.defaults)
             switch self.mode {
             case .quality: self.convertQuality(outputDirectory: directory)
@@ -404,6 +446,7 @@ final class ImageConversionViewModel {
     }
 
     private func presentOutputDirectoryPanel(startingAt remembered: URL?) async -> URL? {
+        guard !Task.isCancelled, acceptsWork else { return nil }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -417,7 +460,7 @@ final class ImageConversionViewModel {
         outputPanel = panel
         defer { outputPanel = nil }
         let response = await panel.begin()
-        guard !Task.isCancelled, response == .OK else { return nil }
+        guard !Task.isCancelled, acceptsWork, response == .OK else { return nil }
         return panel.url
     }
 
@@ -617,19 +660,23 @@ final class ImageConversionViewModel {
     /// Best-Effort artifact byte-identically, writes its Conversion Record
     /// only then, and lets the item leave the basket.
     func saveBestEffort(_ item: ImageConversionBasketItem) {
-        guard !isConverting,
+        guard acceptsWork, !isConverting,
               let engine,
               case .targetMiss(let candidate) = itemStatuses[item.id],
               let engineID = engineIDs[item.id] else { return }
         let destination = destinationPolicy(for: item, format: candidate.configuration.format)
-        Task { [weak self] in
+        let taskID = UUID()
+        let task = Task { [weak self] in
+            defer { self?.saveBestEffortTasks[taskID] = nil }
             do {
+                try Task.checkCancellation()
                 let output = try await engine.saveBestEffort(
                     itemID: engineID,
                     expectedArtifact: candidate.artifact,
                     destination: destination
                 )
-                guard let self else { return }
+                try Task.checkCancellation()
+                guard let self, self.acceptsWork else { return }
                 let historySaved = self.recordTargetSizeHistory(
                     output, candidate: candidate, item: item, outcome: .targetUnattainable
                 )
@@ -637,10 +684,13 @@ final class ImageConversionViewModel {
                 PluginHost.showToast(historySaved
                     ? .success(L(.imageConversionSavedAnyway))
                     : .info(L(.imageConversionHistorySaveFailed)))
+            } catch is CancellationError {
+                return
             } catch {
                 PluginHost.showToast(.failure(L(.imageConversionFileMissing)))
             }
         }
+        saveBestEffortTasks[taskID] = task
     }
 
     // MARK: - Exact preview
@@ -652,7 +702,10 @@ final class ImageConversionViewModel {
         // A run froze the basket, and its completion state lives on the engine
         // actor: preview work (including artifact pruning) must not interleave
         // with it. The finish path reschedules the preview.
-        guard !isConverting else { return }
+        guard acceptsWork, !isConverting else {
+            previewState = .empty
+            return
+        }
         previewGeneration += 1
         let generation = previewGeneration
         previewTask?.cancel()
@@ -667,7 +720,9 @@ final class ImageConversionViewModel {
         case .quality:
             // Displayed engine artifacts are Target Size state; this mode
             // previews in memory and keeps none of them.
-            if let engine { Task { await engine.pruneDisplayed(keepingItem: nil) } }
+            scheduleMaintenance { engine in
+                await engine.pruneDisplayed(keepingItem: nil)
+            }
             scheduleQualityPreview(generation: generation)
         case .targetSize:
             scheduleTargetSizePreview(generation: generation)
@@ -690,6 +745,7 @@ final class ImageConversionViewModel {
             try? await Task.sleep(nanoseconds: UInt64(TargetSizePolicy.previewDebounce * 1_000_000_000))
             guard !Task.isCancelled else { return }
             let worker = Task.detached(priority: .userInitiated) { () -> Data? in
+                guard !Task.isCancelled else { return nil }
                 let converter = ImageConverter()
                 let quality = Double(qualityPercent) / 100.0
                 switch payload {
@@ -699,8 +755,13 @@ final class ImageConversionViewModel {
                     return try? converter.candidateData(bitmapData: data, format: format, quality: quality)
                 }
             }
-            let encoded = await worker.value
-            guard let self, self.previewGeneration == generation else { return }
+            let encoded = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled, let self,
+                  self.acceptsWork, self.previewGeneration == generation else { return }
             self.previewState = encoded.map {
                 .readyQuality(QualityPreviewCandidate(id: previewID, data: $0))
             } ?? .failed
@@ -714,12 +775,16 @@ final class ImageConversionViewModel {
         }
         guard let item = selectedItem else {
             previewState = .empty
-            Task { await engine.pruneDisplayed(keepingItem: nil) }
+            scheduleMaintenance { engine in
+                await engine.pruneDisplayed(keepingItem: nil)
+            }
             return
         }
         guard targetParseError == nil else {
             previewState = .invalidConfiguration
-            Task { await engine.pruneDisplayed(keepingItem: nil) }
+            scheduleMaintenance { engine in
+                await engine.pruneDisplayed(keepingItem: nil)
+            }
             return
         }
 
@@ -837,6 +902,11 @@ final class ImageConversionViewModel {
         qualityPreflightGeneration += 1
         let generation = qualityPreflightGeneration
         qualityPreflightTask?.cancel()
+        guard acceptsWork else {
+            qualityPreflightTask = nil
+            qualityFirstFrameOnlyItemIDs.removeAll()
+            return
+        }
         let frozenItems = items
         let target = selectedFormat
         let worker = Task.detached(priority: .utility) {
@@ -869,8 +939,10 @@ final class ImageConversionViewModel {
     }
 
     private func pruneIdlePreviewArtifactsIfNeeded() {
-        guard !isWindowPresented, !isConverting, let engine else { return }
-        Task { await engine.pruneDisplayed(keepingItem: nil) }
+        guard !isWindowPresented, !isConverting else { return }
+        scheduleMaintenance { engine in
+            await engine.pruneDisplayed(keepingItem: nil)
+        }
     }
 
     private func showConversionSummary(converted: Int, skipped: Int, historyWarnings: Int) {
@@ -892,7 +964,21 @@ final class ImageConversionViewModel {
 
     private func releaseEngineArtifacts(for itemID: String) {
         guard let engineID = engineIDs.removeValue(forKey: itemID), let engine else { return }
-        Task { await engine.removeItem(engineID) }
+        scheduleMaintenance { _ in
+            await engine.removeItem(engineID)
+        }
+    }
+
+    private func scheduleMaintenance(
+        _ operation: @escaping @MainActor (ImageConversionEngine) async -> Void
+    ) {
+        guard acceptsWork, let engine else { return }
+        let taskID = UUID()
+        let task = Task { [weak self] in
+            await operation(engine)
+            self?.maintenanceTasks[taskID] = nil
+        }
+        maintenanceTasks[taskID] = task
     }
 
     /// Remove a completed set as one basket mutation and keep selection on the

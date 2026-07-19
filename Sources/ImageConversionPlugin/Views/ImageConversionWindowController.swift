@@ -7,12 +7,29 @@ import SwiftUI
 public final class ImageConversionWindowController: NSWindowController, NSWindowDelegate {
     public static let shared = ImageConversionWindowController()
     static let windowFrameKey = "imageConversion.windowFrame"
+    private static var isPluginActive = false
+    private static var presentationGeneration: UInt = 0
     /// Tracks whether the lazy singleton exists so import reconciliation can
     /// reload a live view model without instantiating the window.
     private static var sharedExists = false
 
     private let viewModel = ImageConversionViewModel()
     private var keyMonitor: Any?
+    private var activePresentations = 0
+    private var presentationDrainWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Injectable Finder boundary for lifecycle tests; production uses the
+    /// real AppleScript-backed selection reader.
+    var finderSelectionReader: @MainActor () async -> [URL] = {
+        await FinderSelectionReader.read()
+    }
+
+    static func activateForInstall() {
+        presentationGeneration &+= 1
+        isPluginActive = true
+        if sharedExists {
+            shared.viewModel.resumeAfterActivation()
+        }
+    }
 
     /// A backup import rewrote the conversion preferences; push them into the
     /// live view model. A no-op when the window was never created.
@@ -25,9 +42,21 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     /// work, await its shutdown, and close the workspace window. A no-op when
     /// the window singleton was never created.
     static func deactivateForUninstall() async {
+        isPluginActive = false
+        presentationGeneration &+= 1
         guard sharedExists else { return }
         await shared.viewModel.cancelActiveWork()
+        await shared.waitForPresentationsToDrain()
         shared.close()
+    }
+
+    private static func beginPresentation() -> UInt? {
+        guard isPluginActive else { return nil }
+        return presentationGeneration
+    }
+
+    private static func acceptsPresentation(_ generation: UInt) -> Bool {
+        isPluginActive && generation == presentationGeneration
     }
 
     private init() {
@@ -73,6 +102,10 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     /// Finder selection; otherwise the current Finder selection is echoed into
     /// the basket before the window appears.
     func toggle() async {
+        guard let generation = Self.beginPresentation() else { return }
+        activePresentations += 1
+        defer { finishPresentation() }
+
         if window?.isVisible == true {
             close()
             return
@@ -81,7 +114,8 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
             show()
             return
         }
-        let urls = await FinderSelectionReader.read()
+        let urls = await finderSelectionReader()
+        guard Self.acceptsPresentation(generation) else { return }
         viewModel.addFiles(urls)
         show()
     }
@@ -91,6 +125,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     /// selection and never closes an already-open window — it merges the items
     /// into the current basket and brings the window forward.
     public func present(items: [ImageConversionBasketItem]) {
+        guard Self.isPluginActive else { return }
         if !viewModel.isConverting {
             viewModel.add(items)
         }
@@ -98,7 +133,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     }
 
     func show() {
-        guard let window else { return }
+        guard Self.isPluginActive, let window else { return }
         window.title = L(.imageConversionTitle)
         viewModel.resetSidebarForPresentation()
         mountContentIfNeeded()
@@ -166,6 +201,23 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
         if let keyMonitor {
             NSEvent.removeMonitor(keyMonitor)
             self.keyMonitor = nil
+        }
+    }
+
+    private func finishPresentation() {
+        activePresentations -= 1
+        guard activePresentations == 0 else { return }
+        let waiters = presentationDrainWaiters
+        presentationDrainWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func waitForPresentationsToDrain() async {
+        guard activePresentations > 0 else { return }
+        await withCheckedContinuation { continuation in
+            presentationDrainWaiters.append(continuation)
         }
     }
 

@@ -14,8 +14,11 @@ public final class ImageConversionNativePlugin: NativePlugin {
     public static let pluginID = NativePluginID(rawValue: "imageConversion")
 
     public let id = ImageConversionNativePlugin.pluginID
+    private let host: any PluginHostServices
+    private var cleanupTasks: [UUID: Task<Void, Never>] = [:]
 
     public init(host: any PluginHostServices) {
+        self.host = host
         PluginHost.bootstrap(host)
     }
 
@@ -43,12 +46,12 @@ public final class ImageConversionNativePlugin: NativePlugin {
     }
 
     public func activate() {
-        if let container = PluginHost.services?.modelContainer {
-            ImageConversionHistoryStore.shared.configure(modelContainer: container)
-        }
+        ImageConversionHistoryStore.shared.configure(modelContainer: host.modelContainer)
+        ImageConversionWindowController.activateForInstall()
         // Sweep candidate session directories a previous process left behind:
         // deinit/reset cleanup never runs on process exit or crash.
-        Task.detached(priority: .background) {
+        let taskID = UUID()
+        cleanupTasks[taskID] = Task.detached(priority: .background) {
             CandidateArtifactStore.cleanupStaleSessions()
         }
     }
@@ -60,6 +63,10 @@ public final class ImageConversionNativePlugin: NativePlugin {
     /// throws: there is no revert that can fail.
     public func deactivate() async throws {
         await ImageConversionWindowController.deactivateForUninstall()
+        let cleanupTasks = Array(cleanupTasks.values)
+        for task in cleanupTasks { task.cancel() }
+        for task in cleanupTasks { await task.value }
+        self.cleanupTasks.removeAll()
     }
 
     public func reconcileAfterImport() {
