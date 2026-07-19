@@ -1,7 +1,7 @@
 import PluginInterface
 import SwiftUI
 
-/// Settings → 插件: lists every available Native Plugin with its localized
+/// Settings → Plugins: lists every available Native Plugin with its localized
 /// name, description, and install state. Install applies immediately;
 /// uninstall first shows a confirmation describing the uninstall's impact
 /// (what remains and what is retained), then runs the registry's

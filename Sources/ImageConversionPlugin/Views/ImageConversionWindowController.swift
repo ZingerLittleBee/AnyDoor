@@ -21,12 +21,12 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
         shared.viewModel.reloadFromDefaults()
     }
 
-    /// Plugin `deactivate` path: cancel an in-flight Conversion Run (awaiting
-    /// its cancellation so nothing continues in the background) and close the
-    /// workspace window. A no-op when the window singleton was never created.
+    /// Plugin `deactivate` path: dismiss pending panels, cancel all conversion
+    /// work, await its shutdown, and close the workspace window. A no-op when
+    /// the window singleton was never created.
     static func deactivateForUninstall() async {
         guard sharedExists else { return }
-        await shared.viewModel.cancelActiveRun()
+        await shared.viewModel.cancelActiveWork()
         shared.close()
     }
 

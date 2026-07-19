@@ -11,10 +11,10 @@ struct HelperApprovalBanner: View {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.shield")
                     .foregroundStyle(.orange)
-                Text("需要在系统设置中授权后台帮助程序")
+                LocalizedText(.hostsHelperApproval)
                     .font(.caption2)
                 Spacer()
-                Button("授权") { PluginHost.helper?.openApprovalSettings() }
+                Button(L(.hostsActionAuthorize)) { PluginHost.helper?.openApprovalSettings() }
                     .buttonStyle(.borderless)
                     .font(.caption2)
             }

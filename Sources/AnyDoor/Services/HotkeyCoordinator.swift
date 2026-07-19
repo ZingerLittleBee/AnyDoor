@@ -67,6 +67,53 @@ final class HotkeyCoordinator {
         HotkeyService.shared.updateSnapshots(snapshots)
     }
 
+    /// Drop retained plugin hotkeys claimed by another active source while
+    /// the plugin was uninstalled. This runs immediately before install, when
+    /// `activeCommands` excludes the returning plugin's claims.
+    @discardableResult
+    func resolveRetainedPluginHotkeyConflicts(
+        for returningCommands: Set<BuiltinItem>,
+        activeCommands: Set<BuiltinItem>,
+        paletteHotkey: HotkeyDescriptor? = CommandPaletteService.shared.hotkey
+    ) -> Int {
+        guard let container = modelContainer else { return 0 }
+        let context = container.mainContext
+        let bindings = (try? context.fetch(
+            FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.isEnabled })
+        )) ?? []
+        let prefs = (try? context.fetch(FetchDescriptor<BuiltinPreference>())) ?? []
+        let quicklinks = (try? context.fetch(FetchDescriptor<Quicklink>())) ?? []
+
+        let activeDescriptors = Set(Self.compile(
+            bindings: bindings,
+            prefs: prefs,
+            quicklinks: quicklinks,
+            paletteHotkey: paletteHotkey,
+            availableCommands: activeCommands
+        ).map {
+            HotkeyDescriptor(keyCode: $0.keyCode, modifierFlags: $0.modifierFlags)
+        })
+
+        var cleared = 0
+        for pref in prefs {
+            guard let item = BuiltinItem(rawValue: pref.itemKey),
+                  returningCommands.contains(item),
+                  let keyCode = pref.keyCode,
+                  let modifierFlags = pref.modifierFlags,
+                  activeDescriptors.contains(HotkeyDescriptor(
+                      keyCode: keyCode,
+                      modifierFlags: modifierFlags
+                  )) else { continue }
+            pref.keyCode = nil
+            pref.modifierFlags = nil
+            cleared += 1
+        }
+        if cleared > 0 {
+            try? context.save()
+        }
+        return cleared
+    }
+
     /// Pure snapshot compiler over already-fetched state, so it unit-tests
     /// without singletons or a live store.
     ///

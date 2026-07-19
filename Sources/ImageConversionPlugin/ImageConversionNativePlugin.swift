@@ -53,10 +53,11 @@ public final class ImageConversionNativePlugin: NativePlugin {
         }
     }
 
-    /// Uninstall: the only side effect to revert is in-flight work — cancel
-    /// an active Conversion Run (awaiting its cancellation) and close the
-    /// workspace window. User data (Conversion Records, preferences, hotkeys)
-    /// is retained by design. Never throws: there is no revert that can fail.
+    /// Uninstall: the only side effect to revert is in-flight work — dismiss
+    /// pending file/folder panels, cancel their tasks and any active Conversion
+    /// Run, await all of them, then close the workspace window. User data
+    /// (Conversion Records, preferences, hotkeys) is retained by design. Never
+    /// throws: there is no revert that can fail.
     public func deactivate() async throws {
         await ImageConversionWindowController.deactivateForUninstall()
     }

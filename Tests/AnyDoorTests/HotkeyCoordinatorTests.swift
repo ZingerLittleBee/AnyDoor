@@ -1,4 +1,5 @@
 import CoreGraphics
+import SwiftData
 import XCTest
 import PluginInterface
 @testable import AnyDoor
@@ -232,6 +233,83 @@ final class HotkeyCoordinatorTests: XCTestCase {
             availableCommands: Set(BuiltinItem.allCases).subtracting([.imageConversion])
         )
         XCTAssertTrue(uninstalled.isEmpty)
+    }
+
+    @MainActor
+    func testInstallClearsRetainedPluginHotkeyReboundToQuicklink() throws {
+        let descriptor = HotkeyDescriptor(keyCode: 34, modifierFlags: command)
+        let pluginPreference = BuiltinPreference(
+            itemKey: BuiltinItem.imageConversion.rawValue,
+            keyCode: descriptor.keyCode,
+            modifierFlags: descriptor.modifierFlags
+        )
+        let quicklink = Quicklink(
+            id: UUID(),
+            name: "Rebound",
+            link: "https://example.com",
+            keyCode: descriptor.keyCode,
+            modifierFlags: descriptor.modifierFlags
+        )
+        let container = try ModelContainer(
+            for: KeyBinding.self,
+            BuiltinPreference.self,
+            Quicklink.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        container.mainContext.insert(pluginPreference)
+        container.mainContext.insert(quicklink)
+        try container.mainContext.save()
+
+        let coordinator = HotkeyCoordinator()
+        coordinator.bootstrap(modelContainer: container)
+        let cleared = coordinator.resolveRetainedPluginHotkeyConflicts(
+            for: [.imageConversion],
+            activeCommands: Set(BuiltinItem.allCases).subtracting([.imageConversion]),
+            paletteHotkey: nil
+        )
+
+        let snapshots = HotkeyCoordinator.compile(
+            bindings: [],
+            prefs: [pluginPreference],
+            quicklinks: [quicklink],
+            paletteHotkey: nil,
+            availableCommands: Set(BuiltinItem.allCases)
+        )
+
+        XCTAssertEqual(cleared, 1)
+        XCTAssertNil(pluginPreference.keyCode)
+        XCTAssertNil(pluginPreference.modifierFlags)
+        XCTAssertEqual(snapshots.count, 1)
+        XCTAssertEqual(snapshots[0].action, .openQuicklink(id: quicklink.id))
+    }
+
+    @MainActor
+    func testInstallRetainsPluginHotkeyWithoutAnActiveConflict() throws {
+        let pluginPreference = BuiltinPreference(
+            itemKey: BuiltinItem.imageConversion.rawValue,
+            keyCode: 34,
+            modifierFlags: command
+        )
+        let container = try ModelContainer(
+            for: KeyBinding.self,
+            BuiltinPreference.self,
+            Quicklink.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        container.mainContext.insert(pluginPreference)
+        try container.mainContext.save()
+
+        let coordinator = HotkeyCoordinator()
+        coordinator.bootstrap(modelContainer: container)
+        let cleared = coordinator.resolveRetainedPluginHotkeyConflicts(
+            for: [.imageConversion],
+            activeCommands: Set(BuiltinItem.allCases).subtracting([.imageConversion]),
+            paletteHotkey: nil
+        )
+
+        XCTAssertEqual(cleared, 0)
+        XCTAssertEqual(pluginPreference.keyCode, 34)
+        XCTAssertEqual(pluginPreference.modifierFlags, command)
     }
 
     @MainActor

@@ -4081,6 +4081,139 @@
         }
       }
     },
+    "hosts.action.authorize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Authorize" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "授权" } }
+      }
+    },
+    "hosts.action.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cancel" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "取消" } }
+      }
+    },
+    "hosts.action.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除" } }
+      }
+    },
+    "hosts.action.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Edit" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "编辑" } }
+      }
+    },
+    "hosts.action.openDefaultEditor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open in Default Editor" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用默认编辑器打开" } }
+      }
+    },
+    "hosts.action.rename": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Rename" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重命名" } }
+      }
+    },
+    "hosts.action.restore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restore" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "恢复" } }
+      }
+    },
+    "hosts.action.restoreFirstBackup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restore Initial Backup" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "恢复首次备份" } }
+      }
+    },
+    "hosts.action.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Save" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "保存" } }
+      }
+    },
+    "hosts.dialog.deleteProfile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete profile ‘%@’? This action cannot be undone." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除配置「%@」？此操作不可撤销。" } }
+      }
+    },
+    "hosts.dialog.restoreBackup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restore /etc/hosts from the initial backup? External changes will be lost." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "覆盖 /etc/hosts 为首次备份？外部改动将丢失。" } }
+      }
+    },
+    "hosts.error.backupFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Failed to create a backup. A complete restore may not be possible." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "备份创建失败，可能无法完整恢复" } }
+      }
+    },
+    "hosts.error.deleteFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Failed to delete the profile. Please try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除配置失败，请重试" } }
+      }
+    },
+    "hosts.error.liveReadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unable to read the system hosts file." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法读取系统 hosts 文件" } }
+      }
+    },
+    "hosts.error.noBackup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No backup is available." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无可用备份" } }
+      }
+    },
+    "hosts.field.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Name" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "名称" } }
+      }
+    },
+    "hosts.helper.approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Authorize the background helper in System Settings" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "需要在系统设置中授权后台帮助程序" } }
+      }
+    },
+    "hosts.manager.openHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open Hosts Manager" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "打开 Hosts 管理窗口" } }
+      }
+    },
+    "hosts.manager.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Hosts Manager" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Hosts 管理" } }
+      }
+    },
     "hosts.profile.copyName": {
       "extractionState": "manual",
       "localizations": {
@@ -4147,6 +4280,27 @@
             "value": "启用"
           }
         }
+      }
+    },
+    "hosts.profile.newName": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "New Profile" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "新配置" } }
+      }
+    },
+    "hosts.system.openHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open in Default Editor" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用默认编辑器打开" } }
+      }
+    },
+    "hosts.system.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "System Hosts" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "系统 Hosts" } }
       }
     },
     "hotkey.recorder.clear": {

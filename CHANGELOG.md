@@ -15,7 +15,8 @@ versioning.
   uninstalling cancels an in-progress conversion first. Conversion history,
   preferences, and hotkeys are kept, so reinstalling restores your exact
   previous setup. Screenshot "Save As" is a core feature and is unaffected:
-  it keeps its full format list and quality setting either way.
+  it keeps its full format list and quality setting either way. Pending file
+  and output-folder pickers are also dismissed before uninstall completes.
 - Plugins: Hosts management is now the second Native Plugin. Uninstalling it
   never touches `/etc/hosts` and never asks for administrator authorization:
   active profiles stay active and their entries remain in effect (the
@@ -26,7 +27,10 @@ versioning.
   installed. While uninstalled the panel popover, palette entries, profile
   rows, hotkey, and helper approval banner all disappear. Host profiles and
   hosts backups are kept, so reinstalling restores everything without a
-  relaunch.
+  relaunch. Pending Hosts writes are cancelled before they start; a write
+  already handed to the system is drained before the helper is released.
+  If a retained plugin shortcut was rebound while the plugin was absent, the
+  newer binding wins and the old plugin shortcut is cleared on reinstall.
 - Plugins: upgrading users keep the features they were using — on the first
   launch after the update, Hosts is installed automatically when host profiles
   exist or the privileged helper is registered, and Image Conversion when

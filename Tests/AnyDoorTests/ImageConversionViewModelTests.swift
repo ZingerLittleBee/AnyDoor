@@ -5,6 +5,26 @@ import XCTest
 @testable import AnyDoor
 @testable import ImageConversionPlugin
 
+@MainActor
+private final class OutputDirectoryPickerGate {
+    private(set) var isWaiting = false
+    private var continuation: CheckedContinuation<URL?, Never>?
+
+    func pick() async -> URL? {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            isWaiting = true
+        }
+    }
+
+    func resume(returning url: URL?) {
+        let continuation = continuation
+        self.continuation = nil
+        isWaiting = false
+        continuation?.resume(returning: url)
+    }
+}
+
 final class ImageConversionViewModelTests: XCTestCase {
     @MainActor
     func testBasketMutationsAreIgnoredWhileAConversionIsRunning() throws {
@@ -158,7 +178,7 @@ final class ImageConversionViewModelTests: XCTestCase {
     }
 
     @MainActor
-    func testCancelActiveRunStopsAnInFlightConversion() async throws {
+    func testCancelActiveWorkStopsAnInFlightConversion() async throws {
         let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -185,13 +205,51 @@ final class ImageConversionViewModelTests: XCTestCase {
 
         // The plugin's deactivate path: cancel and wait for the run to wind
         // down — nothing may continue in the background afterwards.
-        await model.cancelActiveRun()
+        await model.cancelActiveWork()
 
         XCTAssertFalse(model.isConverting)
         XCTAssertTrue(model.items.contains(item), "an interrupted item stays in the basket")
         XCTAssertNil(model.itemStatuses[item.id],
                      "a cancelled run must not record a terminal per-item status")
         model.clear()
+    }
+
+    @MainActor
+    func testCancelActiveWorkPreventsPendingPickerFromStartingConversion() async throws {
+        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let source = try writePNG()
+        defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
+        let outputDirectory = source.deletingLastPathComponent()
+
+        let gate = OutputDirectoryPickerGate()
+        let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
+        model.outputDirectoryPicker = { _ in await gate.pick() }
+        model.addFiles([source])
+        model.convert()
+
+        let pickerDeadline = ContinuousClock.now + .seconds(1)
+        while !gate.isWaiting, ContinuousClock.now < pickerDeadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(gate.isWaiting)
+
+        let cancellation = Task { @MainActor in
+            await model.cancelActiveWork()
+        }
+        await Task.yield()
+        gate.resume(returning: outputDirectory)
+        await cancellation.value
+
+        let unexpectedStartDeadline = ContinuousClock.now + .milliseconds(200)
+        while ImageConversionPreferences.outputDirectory(defaults: defaults) == nil,
+              ContinuousClock.now < unexpectedStartDeadline {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNil(ImageConversionPreferences.outputDirectory(defaults: defaults))
+        XCTAssertFalse(model.isConverting)
+        XCTAssertEqual(model.items.count, 1)
     }
 
     private func writeNoisePNG(side: Int) throws -> URL {

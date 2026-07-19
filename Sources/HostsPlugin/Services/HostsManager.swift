@@ -10,13 +10,6 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hosts")
 enum HostsManagerError: Error {
     /// Reading the live `/etc/hosts` failed, so we cannot safely compose or write.
     case liveReadFailed
-
-    /// Chinese UI message, consistent with the other `lastError` strings.
-    var userMessage: String {
-        switch self {
-        case .liveReadFailed: return "无法读取系统 hosts 文件"
-        }
-    }
 }
 
 /// Single source of truth for host profiles. SwiftData-backed, @MainActor.
@@ -52,8 +45,11 @@ final class HostsManager {
 
     // MARK: - Debounce / serialization state
     private let debounceInterval: Duration
+    private var acceptsMutations = false
     private var applyPending = false
     private var applyTask: Task<Void, Never>?
+    private var activeDirectOperations = 0
+    private var operationDrainWaiters: [CheckedContinuation<Void, Never>] = []
     /// Result of the most recent `applyAndPersist`; read by callers that must act
     /// only on a successful system write (e.g. `deleteProfile`).
     private var lastApplySucceeded = false
@@ -84,7 +80,35 @@ final class HostsManager {
         // Helper registration is an install-time act and lives in
         // `HostsNativePlugin.activate()` — bootstrap only wires the store.
         self.modelContainer = modelContainer
+        acceptsMutations = true
         reload()
+    }
+
+    /// Stop accepting mutations, cancel work that has not reached the writer,
+    /// and wait for any already-started system write to finish. A write that
+    /// crossed the external boundary is drained instead of abandoned so the
+    /// persisted profile state can still match `/etc/hosts`.
+    func prepareForDeactivation() async {
+        acceptsMutations = false
+        applyPending = false
+        lastApplySucceeded = false
+
+        let pendingApply = applyTask
+        pendingApply?.cancel()
+        await pendingApply?.value
+
+        await waitForDirectOperationsToDrain()
+
+        if modelContainer?.mainContext.hasChanges == true {
+            modelContainer?.mainContext.rollback()
+            reload()
+        }
+    }
+
+    /// A failed transactional uninstall leaves the plugin installed, so its
+    /// manager must accept mutations again without requiring a reinstall.
+    func resumeAfterFailedDeactivation() {
+        acceptsMutations = true
     }
 
     func reload() {
@@ -107,7 +131,7 @@ final class HostsManager {
     // MARK: - Mutations
 
     func createProfile(name: String, content: String = "") {
-        guard let context = modelContainer?.mainContext else { return }
+        guard acceptsMutations, let context = modelContainer?.mainContext else { return }
         let nextOrder = (profiles.map(\.displayOrder).max() ?? 0) + 100
         context.insert(HostProfile(name: name, content: content, displayOrder: nextOrder))
         try? context.save()
@@ -116,7 +140,7 @@ final class HostsManager {
 
     @discardableResult
     func duplicateProfile(_ profile: HostProfile) -> HostProfile? {
-        guard let context = modelContainer?.mainContext else { return nil }
+        guard acceptsMutations, let context = modelContainer?.mainContext else { return nil }
         let nextOrder = (profiles.map(\.displayOrder).max() ?? 0) + 100
         let duplicate = HostProfile(
             name: copyName(for: profile.name),
@@ -135,11 +159,12 @@ final class HostsManager {
     /// system first and only drop the DB row once that write succeeds, so a
     /// failed write leaves the row (and its block) intact instead of orphaning it.
     func deleteProfile(_ profile: HostProfile) async {
-        guard let context = modelContainer?.mainContext else { return }
+        guard acceptsMutations, let context = modelContainer?.mainContext else { return }
         if profile.isActive {
             // Deactivate in memory and apply; the row is only deleted on success.
             profile.isActive = false
             let applied = await scheduleApply()
+            guard acceptsMutations else { return }
             // scheduleApply coalesces concurrent callers into one task and returns
             // the shared last-iteration result, so its Bool alone can report a
             // batch-mate's success — including a no-op retry after a failed write
@@ -147,7 +172,7 @@ final class HostsManager {
             // delete on the fact that matters: this profile's deactivation was
             // actually applied and saved (`isActive` stayed false).
             guard applied, !profile.isActive else {
-                if lastError == nil { lastError = "删除配置失败，请重试" }
+                if lastError == nil { lastError = L(.hostsErrorDeleteFailed) }
                 return
             }
         }
@@ -169,6 +194,7 @@ final class HostsManager {
 
     /// Edit a profile. Persists immediately; re-applies only if active.
     func updateProfile(_ profile: HostProfile, name: String, content: String) async {
+        guard acceptsMutations else { return }
         profile.name = name
         profile.content = content
         profile.updatedAt = Date()
@@ -182,6 +208,7 @@ final class HostsManager {
 
     /// Toggle activation. Applies first; persists only on success.
     func setActive(_ profile: HostProfile, _ active: Bool) async {
+        guard acceptsMutations else { return }
         profile.isActive = active
         await scheduleApply()
     }
@@ -190,8 +217,11 @@ final class HostsManager {
     /// becomes the new prefix; AnyDoor's managed block (active profiles) is
     /// re-appended so user profiles survive a system-hosts edit.
     func updateSystemHosts(_ newContent: String) async {
+        guard acceptsMutations else { return }
         // Serialize against any in-flight composed apply.
         await applyTask?.value
+        guard beginDirectOperation() else { return }
+        defer { endDirectOperation() }
 
         var backupError: Error?
         do {
@@ -202,7 +232,7 @@ final class HostsManager {
         }
         do {
             try await applyContent(composedContent(systemPrefix: newContent))
-            lastError = backupError != nil ? "备份创建失败，可能无法完整恢复" : nil
+            lastError = backupError != nil ? L(.hostsErrorBackupFailed) : nil
             reload()
         } catch {
             lastError = message(for: error)
@@ -213,11 +243,14 @@ final class HostsManager {
 
     /// Destructive restore (UI must confirm): overwrite with first-run backup.
     func restoreFirstRunBackup() async {
+        guard acceptsMutations else { return }
         // Wait for any in-flight composed apply to finish before overwriting.
         await applyTask?.value
+        guard beginDirectOperation() else { return }
+        defer { endDirectOperation() }
 
         guard let original = backup.originalContents() else {
-            lastError = "无可用备份"
+            lastError = L(.hostsErrorNoBackup)
             return
         }
         do {
@@ -237,20 +270,51 @@ final class HostsManager {
     /// go through the compose path use this instead of `applyAndPersist` directly.
     @discardableResult
     private func scheduleApply() async -> Bool {
+        guard acceptsMutations else { return false }
         applyPending = true
         if applyTask == nil {
             applyTask = Task { @MainActor in
-                try? await Task.sleep(for: self.debounceInterval)
+                defer { self.applyTask = nil }
+                do {
+                    try await Task.sleep(for: self.debounceInterval)
+                    try Task.checkCancellation()
+                } catch {
+                    self.applyPending = false
+                    self.lastApplySucceeded = false
+                    return
+                }
                 // Serial retry loop: pick up any toggle that arrived during the write.
-                while self.applyPending {
+                while self.applyPending && self.acceptsMutations && !Task.isCancelled {
                     self.applyPending = false
                     self.lastApplySucceeded = await self.applyAndPersist()
                 }
-                self.applyTask = nil
             }
         }
         await applyTask?.value
         return lastApplySucceeded
+    }
+
+    private func beginDirectOperation() -> Bool {
+        guard acceptsMutations else { return false }
+        activeDirectOperations += 1
+        return true
+    }
+
+    private func endDirectOperation() {
+        activeDirectOperations -= 1
+        guard activeDirectOperations == 0 else { return }
+        let waiters = operationDrainWaiters
+        operationDrainWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func waitForDirectOperationsToDrain() async {
+        guard activeDirectOperations > 0 else { return }
+        await withCheckedContinuation { continuation in
+            operationDrainWaiters.append(continuation)
+        }
     }
 
     // MARK: - Apply
@@ -272,7 +336,7 @@ final class HostsManager {
             try? modelContainer?.mainContext.save()
             // Surface backup warning instead of clearing error on success.
             if let _ = backupError {
-                lastError = "备份创建失败，可能无法完整恢复"
+                lastError = L(.hostsErrorBackupFailed)
             } else {
                 lastError = nil
             }
@@ -327,10 +391,15 @@ final class HostsManager {
         }
     }
 
-    /// Map an error to a user-facing message. Known HostsManager errors use their
-    /// Chinese text; everything else falls back to a description.
+    /// Map known manager errors to localized UI text; everything else falls
+    /// back to the writer's description.
     private func message(for error: Error) -> String {
-        if let error = error as? HostsManagerError { return error.userMessage }
+        if let error = error as? HostsManagerError {
+            switch error {
+            case .liveReadFailed:
+                return L(.hostsErrorLiveReadFailed)
+            }
+        }
         return String(describing: error)
     }
 }

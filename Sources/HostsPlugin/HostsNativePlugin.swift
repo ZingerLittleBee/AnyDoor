@@ -136,14 +136,21 @@ public final class HostsNativePlugin: NativePlugin {
     /// authorization (ADR-0005 addendum 2026-07-17). Active profiles stay
     /// active — their managed block remains in the hosts file, in effect but
     /// temporarily unmanaged until a reinstall — so reinstalling restores
-    /// the exact previous setup. The only side effect is releasing the
-    /// shared helper daemon (the Core keeps it while forced Scheduled
-    /// Shutdown still needs it); a failed release throws and aborts the
-    /// uninstall with the plugin fully installed. Profile rows and hosts
-    /// backups are always retained.
+    /// the exact previous setup. Deactivation first closes the editor, cancels
+    /// pending applies, and drains a writer that already started. Its only
+    /// external side effect is releasing the shared helper daemon (the Core
+    /// keeps it while forced Scheduled Shutdown still needs it); a failed
+    /// release resumes the manager and aborts the uninstall with the plugin
+    /// fully installed. Profile rows and hosts backups are always retained.
     public func deactivate() async throws {
-        try host.privilegedHelper.releaseIfUnneeded()
         HostsEditorWindowController.shared.closeForUninstall()
+        await manager.prepareForDeactivation()
+        do {
+            try host.privilegedHelper.releaseIfUnneeded()
+        } catch {
+            manager.resumeAfterFailedDeactivation()
+            throw error
+        }
     }
 
     public func reconcileAfterImport() {

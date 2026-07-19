@@ -73,7 +73,9 @@ final class HostsPluginLifecycleTests: XCTestCase {
         let teardown: () -> Void
     }
 
-    private func makeFixture() throws -> Fixture {
+    private func makeFixture(
+        debounceInterval: Duration = .milliseconds(1)
+    ) throws -> Fixture {
         let suiteName = "HostsPluginLifecycleTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
 
@@ -93,7 +95,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
                 readLiveHosts: live
             ),
             readLiveHosts: live,
-            debounceInterval: .milliseconds(1)
+            debounceInterval: debounceInterval
         )
         let host = RecordingPluginHost(modelContainer: container)
         let plugin = HostsNativePlugin(host: host, manager: manager)
@@ -200,6 +202,28 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
     }
 
+    func testUninstallCancelsPendingApplyBeforeReleasingHelper() async throws {
+        let f = try makeFixture(debounceInterval: .milliseconds(100))
+        defer { f.teardown() }
+        f.registry.install(f.plugin.id)
+        f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        let profileID = f.manager.profiles[0].id
+
+        let activation = Task { @MainActor in
+            if let profile = f.manager.profiles.first(where: { $0.id == profileID }) {
+                await f.manager.setActive(profile, true)
+            }
+        }
+        try await Task.sleep(for: .milliseconds(20))
+
+        try await f.registry.uninstall(f.plugin.id)
+        await activation.value
+
+        XCTAssertEqual(f.writer.writeCount, 0)
+        XCTAssertEqual(f.host.helper.releaseCalls, 1)
+        XCTAssertFalse(f.manager.profiles[0].isActive)
+    }
+
     /// A failed helper release is the only remaining abort path: the
     /// uninstall rethrows and the plugin stays fully installed with every
     /// surface intact — and the hosts file still untouched.
@@ -233,6 +257,12 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertTrue(f.manager.profiles[0].isActive)
         XCTAssertEqual(f.host.helper.releaseCalls, 0,
                        "the failed release never counts as a release")
+
+        f.manager.createProfile(name: "Still operational", content: "1.2.3.4 active")
+        let restoredProfile = try XCTUnwrap(f.manager.profiles.last)
+        await f.manager.setActive(restoredProfile, true)
+        XCTAssertEqual(f.writer.writeCount, 2,
+                       "a failed uninstall must restore the manager's mutation lifecycle")
     }
 
     // MARK: - Reinstall

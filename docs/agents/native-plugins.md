@@ -121,8 +121,9 @@ marked **required** have no default.
 Called by `PluginRegistry.uninstall` **before any state or surface change**.
 It must:
 
-1. **Cancel in-flight work.** Image Conversion awaits cancellation of an
-   active Conversion Run (`ImageConversionWindowController.deactivateForUninstall()`).
+1. **Cancel in-flight work.** Image Conversion dismisses pending file/folder
+   panels, cancels their owned tasks and the active Conversion Run, then awaits
+   all of them (`ImageConversionWindowController.deactivateForUninstall()`).
 2. **Release shared host resources through the capabilities.** Hosts calls
    `host.privilegedHelper.releaseIfUnneeded()` — the Core decides whether
    another consumer (forced Scheduled Shutdown) still needs the daemon
@@ -130,7 +131,9 @@ It must:
    ADR-0005).
 3. **NEVER mutate user-facing system state or prompt for authorization**
    (ADR-0005 addendum 2026-07-17). The Hosts precedent: `deactivate()` never
-   writes `/etc/hosts` and never triggers an admin prompt. Active profiles
+   starts an `/etc/hosts` write and never triggers an admin prompt. It closes
+   the editor, cancels debounced applies, drains a writer that already crossed
+   the external boundary, and only then releases the helper. Active profiles
    keep `isActive` and their managed block stays in the file — in effect but
    unmanaged until reinstall, which restores the exact previous setup.
 4. **Throw to abort.** Uninstall is transactional: a thrown error leaves the
@@ -381,7 +384,8 @@ named test, which is the point of them.
      feature; a brand-new feature has no trace and starts uninstalled).
    - Hotkey availability is already generic
      (`HotkeyCoordinatorTests.testUninstalledPluginCommandBindingNeverCompiles`);
-     extend only if the new command kind needs a new `compile` branch.
+     the install hook also clears a retained plugin hotkey when its descriptor
+     was rebound to an active source while the plugin was absent.
    - Palette plumbing is pinned generically by
      `PluginPaletteContributionTests` (fixture plugin) and
      `CommandPaletteCommitIntentTests` (pluginRow semantics); add
@@ -393,7 +397,7 @@ named test, which is the point of them.
    existing Core feature needs a **new** versioned migration pass (v2) if its
    users must be auto-installed; a genuinely new feature needs none.
 8. **Docs**: `CHANGELOG.md` under `## [Unreleased]`; the SPM target list and
-   Native Plugins note in `CLAUDE.md`; glossary additions in `CONTEXT.md` if
+   Native Plugins note in `AGENTS.md`; glossary additions in `CONTEXT.md` if
    the feature brings new terms.
 
 ## 8. Testing rules
@@ -434,19 +438,6 @@ named test, which is the point of them.
   open windows through their own providers/popovers/palette options instead.
   If you wire a Core call site, keep it generic (route via `PluginRegistry`,
   never a named plugin).
-- **Legacy hardcoded Chinese strings in Hosts views** (pre-plugin debt):
-  `HostsEditorView`, `HostsManagerPopoverView`, `HelperApprovalBanner` still
-  contain literal Chinese UI strings that bypass the L10n pattern (they
-  predate the extraction and don't switch with the app language). Do not copy
-  this pattern — new plugin UI must use `L(_:)` / `LocalizedText`. Migrate
-  these opportunistically when touching the files.
-- **US16 reinstall hotkey-conflict edge**: while a plugin is uninstalled its
-  command's shortcut is free and can be recorded elsewhere; after reinstall
-  the retained `BuiltinPreference` hotkey compiles again alongside the newer
-  binding. `HotkeyCoordinator.compile` performs no conflict resolution — both
-  snapshots exist and dispatch order decides. The PRD wording ("unless the
-  shortcut was rebound meanwhile") is aspiration, not enforced code; treat a
-  proper conflict check as open follow-up if it bites.
 - **`HostProfileRowSource` carries a stale doc comment** ("Registered by the
   Core while Hosts still lives in it…") from before the extraction; the Hosts
   plugin registers it now.

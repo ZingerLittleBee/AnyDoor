@@ -127,6 +127,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 unregisterPaletteContributions: {
                     CommandPaletteExtensions.shared.unregisterContributions(of: $0)
                 },
+                prepareInstall: { commands, activeCommands in
+                    HotkeyCoordinator.shared.resolveRetainedPluginHotkeyConflicts(
+                        for: commands,
+                        activeCommands: activeCommands
+                    )
+                },
                 refreshSurfaces: {
                     PanelStore.shared.rebuild()
                     HotkeyCoordinator.shared.refresh()

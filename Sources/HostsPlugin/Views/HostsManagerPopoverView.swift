@@ -48,13 +48,13 @@ struct HostsManagerPopoverView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "list.bullet.rectangle").foregroundStyle(.secondary)
-            Text("Hosts 管理").font(.headline)
+            LocalizedText(.hostsManagerTitle).font(.headline)
             Spacer()
             Button { onEdit() } label: {
                 Image(systemName: "macwindow")
             }
             .buttonStyle(.plain)
-            .help("打开 Hosts 管理窗口")
+            .help(L(.hostsManagerOpenHelp))
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
@@ -73,13 +73,13 @@ private struct HostsSystemRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "cpu").foregroundStyle(.secondary)
-            Text("系统 Hosts")
+            LocalizedText(.hostsSystemTitle)
             Spacer()
             Button { HostsFileOpener.open() } label: {
                 Image(systemName: "arrow.up.forward.app")
             }
             .buttonStyle(.plain)
-            .help("用默认编辑器打开")
+            .help(L(.hostsSystemOpenHelp))
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .contentShape(Rectangle())

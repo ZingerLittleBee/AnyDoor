@@ -6,7 +6,7 @@ import SwiftUI
 /// Profile names are renamed inline in the list (a freshly created profile
 /// drops straight into rename). The right pane shows only the content body —
 /// opening in read-only **view** mode to prevent accidental writes; the user
-/// clicks "编辑" to enter **edit** mode. Switching the selected host file resets
+/// clicks Edit to enter **edit** mode. Switching the selected host file resets
 /// back to view mode. System Hosts editing rewrites the system portion while
 /// preserving the managed block.
 struct HostsEditorView: View {
@@ -40,7 +40,12 @@ struct HostsEditorView: View {
         NavigationSplitView {
             List(selection: $selection) {
                 Section {
-                    Label("系统 Hosts", systemImage: "cpu").tag(Selection.system)
+                    Label {
+                        LocalizedText(.hostsSystemTitle)
+                    } icon: {
+                        Image(systemName: "cpu")
+                    }
+                    .tag(Selection.system)
                 }
                 Section {
                     ForEach(manager.profiles) { profile in
@@ -49,7 +54,11 @@ struct HostsEditorView: View {
                             .contextMenu {
                                 profileActivationMenuItem(profile)
                                 Button { beginRename(profile) } label: {
-                                    Label("重命名", systemImage: "pencil")
+                                    Label {
+                                        LocalizedText(.hostsActionRename)
+                                    } icon: {
+                                        Image(systemName: "pencil")
+                                    }
                                 }
                                 Button { duplicate(profile) } label: {
                                     Label {
@@ -59,7 +68,11 @@ struct HostsEditorView: View {
                                     }
                                 }
                                 Button(role: .destructive) { delete(profile) } label: {
-                                    Label("删除", systemImage: "trash")
+                                    Label {
+                                        LocalizedText(.hostsActionDelete)
+                                    } icon: {
+                                        Image(systemName: "trash")
+                                    }
                                 }
                             }
                     }
@@ -114,7 +127,7 @@ struct HostsEditorView: View {
                     .frame(width: 16, height: 16)
             }
             if renamingID == profile.id {
-                TextField("名称", text: $renameText)
+                TextField(L(.hostsFieldName), text: $renameText)
                     .textFieldStyle(.plain)
                     .focused($renameFieldFocused)
                     .onSubmit { commitRename() }
@@ -168,15 +181,15 @@ struct HostsEditorView: View {
                             Image(systemName: "plus.square.on.square")
                         }
                     }
-                    Button("删除", role: .destructive) { showDeleteConfirm = true }
+                    Button(L(.hostsActionDelete), role: .destructive) { showDeleteConfirm = true }
                         .tint(.red)
                 }
             }
             .padding()
-            .confirmationDialog("删除配置「\(profile.name)」？此操作不可撤销。",
+            .confirmationDialog(L(.hostsDialogDeleteProfile, profile.name),
                                 isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("删除", role: .destructive) { delete(profile) }
-                Button("取消", role: .cancel) {}
+                Button(L(.hostsActionDelete), role: .destructive) { delete(profile) }
+                Button(L(.hostsActionCancel), role: .cancel) {}
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
@@ -187,15 +200,15 @@ struct HostsEditorView: View {
                         draftSystemContent = manager.systemHosts
                     }
                     Spacer()
-                    Button("用默认编辑器打开") { HostsFileOpener.open() }
-                    Button("恢复首次备份") { showRestoreConfirm = true }
+                    Button(L(.hostsActionOpenDefaultEditor)) { HostsFileOpener.open() }
+                    Button(L(.hostsActionRestoreFirstBackup)) { showRestoreConfirm = true }
                 }
             }
             .padding()
-            .confirmationDialog("覆盖 /etc/hosts 为首次备份？外部改动将丢失。",
+            .confirmationDialog(L(.hostsDialogRestoreBackup),
                                 isPresented: $showRestoreConfirm, titleVisibility: .visible) {
-                Button("恢复", role: .destructive) { Task { await manager.restoreFirstRunBackup() } }
-                Button("取消", role: .cancel) {}
+                Button(L(.hostsActionRestore), role: .destructive) { Task { await manager.restoreFirstRunBackup() } }
+                Button(L(.hostsActionCancel), role: .cancel) {}
             }
             .onAppear { draftSystemContent = manager.systemHosts }
         }
@@ -212,21 +225,21 @@ struct HostsEditorView: View {
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
     }
 
-    /// "编辑" in view mode (enters edit mode) or "保存" in edit mode (runs the
+    /// Edit in view mode enters edit mode; Save in edit mode runs the
     /// save action, then returns to view mode). Cancel discards the draft and
     /// returns to the current persisted content.
     @ViewBuilder
     private func modeButton(save: @escaping () async -> Void) -> some View {
         if mode == .edit {
-            Button("保存") {
+            Button(L(.hostsActionSave)) {
                 Task {
                     await save()
                     mode = .view
                 }
             }
-            Button("取消", role: .cancel) { cancelEditing() }
+            Button(L(.hostsActionCancel), role: .cancel) { cancelEditing() }
         } else {
-            Button("编辑") { mode = .edit }
+            Button(L(.hostsActionEdit)) { mode = .edit }
         }
     }
 
@@ -246,7 +259,7 @@ struct HostsEditorView: View {
     }
 
     private func addProfile() {
-        manager.createProfile(name: "新配置")
+        manager.createProfile(name: L(.hostsProfileNewName))
         // The new profile sorts last (highest displayOrder); select it and drop
         // straight into inline rename so the user types the name in the list.
         if let new = manager.profiles.last {

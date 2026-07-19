@@ -39,6 +39,9 @@ final class PluginRegistry {
         var registerPaletteContributions: @MainActor (any NativePlugin) -> Void = { _ in }
         /// Drop an uninstalled plugin's palette contributions.
         var unregisterPaletteContributions: @MainActor (any NativePlugin) -> Void = { _ in }
+        /// Resolve retained state that conflicts with active contributions
+        /// before a returning plugin becomes available.
+        var prepareInstall: @MainActor (Set<BuiltinItem>, Set<BuiltinItem>) -> Void = { _, _ in }
         var refreshSurfaces: @MainActor () -> Void
 
         static let noop = SurfaceHooks(
@@ -158,6 +161,7 @@ final class PluginRegistry {
         guard let plugin = plugin(withID: id),
               !installedIDs.contains(id),
               !transitioningIDs.contains(id) else { return }
+        hooks.prepareInstall(plugin.claimedCommands, availableCommands)
         plugin.activate()
         installedIDs.insert(id)
         persistInstalledIDs()

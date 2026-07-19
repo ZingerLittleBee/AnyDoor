@@ -208,6 +208,37 @@ final class HostsManagerTests: XCTestCase {
         XCTAssertTrue(written.contains("2.2.2.2 beta"))
     }
 
+    func test_prepareForDeactivationDrainsAStartedWrite() async throws {
+        let writer = GatedHostsWriter()
+        let (manager, _) = try makeManager(writer: writer, debounceInterval: .milliseconds(1))
+        manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
+        writer.gateNextWrite()
+
+        let activation = Task { @MainActor in
+            await manager.setActive(manager.profiles[0], true)
+        }
+        let startDeadline = ContinuousClock.now + .seconds(1)
+        while !writer.isSuspended, ContinuousClock.now < startDeadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        XCTAssertTrue(writer.isSuspended)
+
+        var didPrepare = false
+        let preparation = Task { @MainActor in
+            await manager.prepareForDeactivation()
+            didPrepare = true
+        }
+        await Task.yield()
+        XCTAssertFalse(didPrepare, "Deactivation must wait for a writer that already started")
+
+        writer.release()
+        await activation.value
+        await preparation.value
+
+        XCTAssertTrue(didPrepare)
+        XCTAssertTrue(manager.profiles[0].isActive)
+    }
+
     // MARK: - Fix 1: unreadable /etc/hosts aborts the apply instead of writing empty
 
     func test_liveReadFailure_abortsApply_setsError_neverWrites() async throws {

@@ -155,6 +155,10 @@ final class ImageConversionViewModel {
     /// Stable engine-side IDs for basket items, so preview/run/Save Anyway
     /// all address the same artifacts.
     @ObservationIgnored private var engineIDs: [String: UUID] = [:]
+    @ObservationIgnored private var openPanelTask: Task<Void, Never>?
+    @ObservationIgnored private var openPanel: NSOpenPanel?
+    @ObservationIgnored private var outputPickerTask: Task<Void, Never>?
+    @ObservationIgnored private var outputPanel: NSOpenPanel?
     @ObservationIgnored private var runTask: Task<Void, Never>?
 
     init(
@@ -265,15 +269,20 @@ final class ImageConversionViewModel {
     /// basket. The async `begin()` keeps the floating conversion panel usable
     /// while the picker is up.
     func presentOpenPanel() {
-        guard !isConverting else { return }
+        guard !isConverting, openPanelTask == nil else { return }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.image]
-        Task { @MainActor in
+        openPanel = panel
+        openPanelTask = Task { @MainActor in
+            defer {
+                self.openPanel = nil
+                self.openPanelTask = nil
+            }
             let response = await panel.begin()
-            guard response == .OK, !self.isConverting else { return }
+            guard !Task.isCancelled, response == .OK, !self.isConverting else { return }
             self.addFiles(panel.urls)
         }
     }
@@ -348,33 +357,44 @@ final class ImageConversionViewModel {
         runTask?.cancel()
     }
 
-    /// Plugin `deactivate` path: cancel the in-flight run (same boundary as
-    /// Stop) and wait for it to wind down, so nothing continues in the
-    /// background once the plugin's surfaces are gone. No-op when idle.
-    func cancelActiveRun() async {
-        guard let task = runTask else { return }
-        task.cancel()
-        await task.value
+    /// Plugin `deactivate` path: dismiss pending panels, cancel the folder
+    /// selection workflow and Conversion Run, then wait for every owned task
+    /// to wind down before the plugin's surfaces disappear.
+    func cancelActiveWork() async {
+        let pendingOpenPanel = openPanelTask
+        let pendingOutputPicker = outputPickerTask
+        let activeRun = runTask
+
+        pendingOpenPanel?.cancel()
+        pendingOutputPicker?.cancel()
+        activeRun?.cancel()
+        openPanel?.cancel(nil)
+        outputPanel?.cancel(nil)
+
+        await pendingOpenPanel?.value
+        await pendingOutputPicker?.value
+        await activeRun?.value
     }
 
     /// Injectable folder picker (given the remembered directory, returns the
     /// chosen one or nil on cancel) so tests can bypass the modal panel.
     @ObservationIgnored var outputDirectoryPicker: (@MainActor (URL?) async -> URL?)?
 
-    /// 全部转换 first asks where to save; the last confirmed choice is
+    /// Convert All first asks where to save; the last confirmed choice is
     /// remembered as the panel's starting directory. The run starts only
     /// after a confirmed pick — cancel converts nothing.
     func convert() {
-        guard canConvert else { return }
+        guard canConvert, outputPickerTask == nil else { return }
         let remembered = ImageConversionPreferences.outputDirectory(defaults: defaults)
-        Task { @MainActor in
+        outputPickerTask = Task { @MainActor in
+            defer { self.outputPickerTask = nil }
             let directory: URL?
             if let picker = outputDirectoryPicker {
                 directory = await picker(remembered)
             } else {
-                directory = await Self.presentOutputDirectoryPanel(startingAt: remembered)
+                directory = await self.presentOutputDirectoryPanel(startingAt: remembered)
             }
-            guard let directory, self.canConvert else { return }
+            guard !Task.isCancelled, let directory, self.canConvert else { return }
             ImageConversionPreferences.setOutputDirectory(directory, defaults: self.defaults)
             switch self.mode {
             case .quality: self.convertQuality(outputDirectory: directory)
@@ -383,7 +403,7 @@ final class ImageConversionViewModel {
         }
     }
 
-    private static func presentOutputDirectoryPanel(startingAt remembered: URL?) async -> URL? {
+    private func presentOutputDirectoryPanel(startingAt remembered: URL?) async -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -394,8 +414,10 @@ final class ImageConversionViewModel {
         if let remembered {
             panel.directoryURL = remembered
         }
+        outputPanel = panel
+        defer { outputPanel = nil }
         let response = await panel.begin()
-        guard response == .OK else { return nil }
+        guard !Task.isCancelled, response == .OK else { return nil }
         return panel.url
     }
 

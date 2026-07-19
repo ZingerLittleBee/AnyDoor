@@ -71,6 +71,7 @@ final class PluginRegistryTests: XCTestCase {
         let plugin = try makeImageConversionPlugin()
 
         var registered: [BuiltinItem] = []
+        var prepared: [(returning: Set<BuiltinItem>, active: Set<BuiltinItem>)] = []
         var refreshes = 0
         let registry = PluginRegistry()
         registry.bootstrap(
@@ -79,6 +80,7 @@ final class PluginRegistryTests: XCTestCase {
             hooks: PluginRegistry.SurfaceHooks(
                 registerProviders: { registered.append(contentsOf: $0.map(\.itemKey)) },
                 unregisterProviders: { _ in XCTFail("install must not unregister") },
+                prepareInstall: { prepared.append((returning: $0, active: $1)) },
                 refreshSurfaces: { refreshes += 1 }
             )
         )
@@ -87,6 +89,9 @@ final class PluginRegistryTests: XCTestCase {
 
         XCTAssertTrue(registry.isInstalled(plugin.id))
         XCTAssertTrue(registry.isAvailable(.imageConversion))
+        XCTAssertEqual(prepared.count, 1)
+        XCTAssertEqual(prepared[0].returning, [.imageConversion])
+        XCTAssertFalse(prepared[0].active.contains(.imageConversion))
         XCTAssertEqual(registered, [.imageConversion])
         XCTAssertEqual(refreshes, 1)
         XCTAssertEqual(registry.installedProviders.map(\.itemKey), [.imageConversion])
