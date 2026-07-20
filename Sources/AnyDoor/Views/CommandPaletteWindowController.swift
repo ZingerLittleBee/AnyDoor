@@ -93,6 +93,24 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         ))
     }
 
+    /// Recompose a visible palette after the installed plugin set changes.
+    /// Root queries stay in place, while drill-in state is discarded because
+    /// it may hold option closures from a plugin that just uninstalled.
+    func refreshPluginSurfaces() {
+        guard let state, window?.isVisible == true else { return }
+        if !state.isAtRoot {
+            state.popToRoot()
+        }
+        let sections = collectSections(installedApps: cachedApps)
+        state.updateSections(
+            sections,
+            quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates(),
+            pluginRowSources: CommandPaletteExtensions.shared.rowSources
+        )
+        state.selectedIndex = 0
+        prewarmIcons(for: sections)
+    }
+
     private enum InitialMode {
         case root
         case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?)
@@ -204,7 +222,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             let refreshed = self.collectSections(installedApps: apps)
             pickerState.updateSections(
                 refreshed,
-                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates(),
+                pluginRowSources: CommandPaletteExtensions.shared.rowSources
             )
             self.prewarmIcons(for: refreshed)
         }

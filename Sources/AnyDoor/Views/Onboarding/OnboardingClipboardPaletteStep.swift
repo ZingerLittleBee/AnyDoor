@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Step 5 — "Clipboard wall & command palette". Top half mocks the clipboard
 /// wall (tabs, search, favorite, source filter); bottom half mocks the command
-/// palette auto-typing `300 usd`, `:3000`, and `hosts` with their results.
+/// palette auto-typing `300 usd` and `:3000` with their results.
 struct OnboardingClipboardPaletteStep: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var exampleIndex = 0
@@ -21,8 +21,6 @@ struct OnboardingClipboardPaletteStep: View {
                        resultKey: .onboardingDemoCurrencyResult, sectionKey: .commandPaletteSectionConversion, tint: .green),
         PaletteExample(query: ":3000", symbol: "network",
                        resultKey: .onboardingDemoPortResult, sectionKey: .commandPaletteSectionPorts, tint: .blue),
-        PaletteExample(query: "hosts", symbol: "list.bullet.rectangle",
-                       resultKey: .onboardingDemoHostsResult, sectionKey: .commandPaletteSectionHosts, tint: .orange),
     ]
 
     private var example: PaletteExample { examples[exampleIndex] }

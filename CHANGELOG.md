@@ -78,6 +78,11 @@ versioning.
 - Backup import now reports a partial failure when a plugin cannot be removed,
   while still applying the remaining settings and persisting the plugin state
   that actually converged.
+- Backup import no longer reports success while another plugin lifecycle
+  transition can still reverse the imported installed set.
+- An open Command Palette now removes uninstalled plugin commands, options,
+  and searchable rows immediately instead of leaving dead results behind.
+- Fresh-install onboarding no longer advertises the uninstalled Hosts plugin.
 
 ## [3.7.0] - 2026-07-12
 

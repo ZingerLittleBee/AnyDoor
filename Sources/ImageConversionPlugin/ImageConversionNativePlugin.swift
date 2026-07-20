@@ -15,7 +15,6 @@ public final class ImageConversionNativePlugin: NativePlugin {
     nonisolated public static let pluginID = NativePluginID(rawValue: "imageConversion")
 
     public let id = ImageConversionNativePlugin.pluginID
-    private let host: any PluginHostServices
     private let hostContext: PluginHostContext
     let historyStore: ImageConversionHistoryStore
     private var windowControllerStorage: ImageConversionWindowController?
@@ -42,7 +41,6 @@ public final class ImageConversionNativePlugin: NativePlugin {
 
     public init(host: any PluginHostServices) {
         let hostContext = PluginHostContext(services: host)
-        self.host = host
         self.hostContext = hostContext
         self.historyStore = ImageConversionHistoryStore(
             modelContext: host.modelContainer.mainContext

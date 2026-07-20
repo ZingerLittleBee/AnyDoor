@@ -16,10 +16,8 @@ public final class HostsNativePlugin: NativePlugin {
 
     public let id = HostsNativePlugin.pluginID
 
-    /// Captured at construction so lifecycle calls stay bound to this
-    /// instance's host in production and tests.
-    private let host: any PluginHostServices
     private let hostContext: PluginHostContext
+    private let modelContainer: ModelContainer
     private let manager: HostsManager
     private var editorWindowControllerStorage: HostsEditorWindowController?
     private let profileRowSource: HostProfileRowSource
@@ -38,8 +36,8 @@ public final class HostsNativePlugin: NativePlugin {
     public init(host: any PluginHostServices) {
         let hostContext = PluginHostContext(services: host)
         let manager = HostsManager.makeDefault(host: hostContext)
-        self.host = host
         self.hostContext = hostContext
+        self.modelContainer = host.modelContainer
         self.manager = manager
         self.profileRowSource = HostProfileRowSource(
             host: hostContext,
@@ -54,8 +52,8 @@ public final class HostsNativePlugin: NativePlugin {
     /// without touching the real system.
     init(host: any PluginHostServices, manager: HostsManager) {
         let hostContext = PluginHostContext(services: host)
-        self.host = host
         self.hostContext = hostContext
+        self.modelContainer = host.modelContainer
         self.manager = manager
         self.profileRowSource = HostProfileRowSource(
             host: hostContext,
@@ -139,7 +137,7 @@ public final class HostsNativePlugin: NativePlugin {
         if try context.fetchCount(FetchDescriptor<HostProfile>()) > 0 {
             return true
         }
-        return host.privilegedHelper.readiness() != .unavailable
+        return hostContext.helperReadiness() != .unavailable
     }
 
     // MARK: - Lifecycle
@@ -148,8 +146,8 @@ public final class HostsNativePlugin: NativePlugin {
         // Registration is an install-time act (user story 14: an uninstalled
         // plugin requests no permissions), so it lives here rather than in
         // the manager's bootstrap. Cheap when already registered.
-        _ = host.privilegedHelper.ensureRegistered()
-        manager.bootstrap(modelContainer: host.modelContainer)
+        _ = hostContext.helper.ensureRegistered()
+        manager.bootstrap(modelContainer: modelContainer)
     }
 
     /// Uninstall: never touches `/etc/hosts` and never prompts for
@@ -166,7 +164,7 @@ public final class HostsNativePlugin: NativePlugin {
         editorWindowControllerStorage?.closeForUninstall()
         await manager.prepareForDeactivation()
         do {
-            try host.privilegedHelper.releaseIfUnneeded()
+            try hostContext.helper.releaseIfUnneeded()
         } catch {
             manager.resumeAfterFailedDeactivation()
             throw error

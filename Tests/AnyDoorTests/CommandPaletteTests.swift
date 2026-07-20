@@ -462,6 +462,22 @@ final class CommandPaletteTests: XCTestCase {
     }
 
     @MainActor
+    func testUpdatingPluginSurfacesDropsUnregisteredRows() {
+        let dev = HostProfile(name: "Dev", isActive: true)
+        let state = CommandPaletteState(
+            sections: [],
+            hyperFlags: 0,
+            rowSources: [hostsRowSourceRegistration(profiles: [dev])]
+        )
+        state.query = "Dev"
+        XCTAssertFalse(state.filteredSections.isEmpty)
+
+        state.updateSections([], pluginRowSources: [])
+
+        XCTAssertTrue(state.filteredSections.isEmpty)
+    }
+
+    @MainActor
     private func hostsRowSourceRegistration(
         profiles: [HostProfile],
         host: PluginHostContext? = nil

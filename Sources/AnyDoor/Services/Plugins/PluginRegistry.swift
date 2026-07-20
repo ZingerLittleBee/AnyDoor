@@ -22,11 +22,18 @@ struct PluginImportReconciliationError: LocalizedError, Equatable, Sendable {
     }
 }
 
+struct PluginTransitionInProgressError: LocalizedError, Equatable, Sendable {
+    let pluginID: NativePluginID
+    let message: String
+
+    var errorDescription: String? { message }
+}
+
 /// The single seam between the Core and the Native Plugins (ADR-0005).
 ///
-/// Owns the compile-time plugin list and the install-state store, answers
-/// claim lookups (ADR-0006: every `BuiltinItem` is owned by exactly one
-/// Native Plugin or by the Core), and runs the transactional
+/// Receives the catalog-built plugin instances, owns the install-state store,
+/// and answers claim lookups (ADR-0006: every `BuiltinItem` is owned by
+/// exactly one Native Plugin or by the Core), and runs the transactional
 /// install/uninstall lifecycle. Surfaces never ask a plugin anything
 /// directly — they ask the registry whether a command is available, and the
 /// registry publishes the composed surfaces when the installed set changes.
@@ -50,6 +57,7 @@ final class PluginRegistry {
     @ObservationIgnored private let panelStore: PanelStore
     @ObservationIgnored private let paletteExtensions: CommandPaletteExtensions
     @ObservationIgnored private let hotkeyCoordinator: HotkeyCoordinator
+    @ObservationIgnored private let refreshCommandPalette: @MainActor () -> Void
     @ObservationIgnored private var defaults: UserDefaults = .standard
     @ObservationIgnored private var claims: [BuiltinItem: NativePluginID] = [:]
     @ObservationIgnored private var isBootstrapped = false
@@ -59,11 +67,15 @@ final class PluginRegistry {
     init(
         panelStore: PanelStore = .shared,
         paletteExtensions: CommandPaletteExtensions = .shared,
-        hotkeyCoordinator: HotkeyCoordinator = .shared
+        hotkeyCoordinator: HotkeyCoordinator = .shared,
+        refreshCommandPalette: @escaping @MainActor () -> Void = {
+            CommandPaletteWindowController.shared.refreshPluginSurfaces()
+        }
     ) {
         self.panelStore = panelStore
         self.paletteExtensions = paletteExtensions
         self.hotkeyCoordinator = hotkeyCoordinator
+        self.refreshCommandPalette = refreshCommandPalette
     }
 
     /// Load the install state, activate every installed plugin, and compose
@@ -206,11 +218,13 @@ final class PluginRegistry {
     /// resources, cancel in-flight work) must succeed before any state or
     /// surface changes; on a thrown error the plugin stays fully installed
     /// and the error is rethrown for the UI to surface. User data is
-    /// retained by design. Idempotent; re-entrant calls are dropped.
+    /// retained by design. Idempotent; a concurrent transition is reported.
     func uninstall(_ id: NativePluginID) async throws {
         guard let plugin = plugin(withID: id),
-              installedIDs.contains(id),
-              !transitioningIDs.contains(id) else { return }
+              installedIDs.contains(id) else { return }
+        guard !transitioningIDs.contains(id) else {
+            throw transitionInProgressError(for: plugin)
+        }
         transitioningIDs.insert(id)
         defer { transitioningIDs.remove(id) }
 
@@ -242,23 +256,46 @@ final class PluginRegistry {
 
         var failures: [PluginImportFailure] = []
 
+        // MainActor methods are re-entrant across `await`. An uninstall that
+        // started before the import may still reverse the imported target after
+        // this method returns, so the import cannot claim convergence for that
+        // plugin. Report it and persist the current truth; the caller can retry
+        // once the existing transition completes.
+        let blockedIDs = transitioningIDs
+        for plugin in plugins where blockedIDs.contains(plugin.id) {
+            failures.append(importFailure(
+                for: plugin,
+                error: transitionInProgressError(for: plugin)
+            ))
+        }
+
         // Remove first so returning plugins resolve retained hotkeys against
         // the actual survivors, including any plugin whose deactivate failed.
-        for id in installedIDs.subtracting(importedIDs) {
+        let idsToRemove = installedIDs.subtracting(importedIDs).subtracting(blockedIDs)
+        for plugin in plugins where idsToRemove.contains(plugin.id) {
             do {
-                try await uninstall(id)
+                try await uninstall(plugin.id)
             } catch {
-                logger.error("Import-driven uninstall of \(id.rawValue) failed: \(error)")
-                let pluginName = plugin(withID: id)?.localizedName ?? id.rawValue
-                failures.append(PluginImportFailure(
-                    pluginID: id,
-                    pluginName: pluginName,
-                    errorDescription: error.localizedDescription
-                ))
+                logger.error("Import-driven uninstall of \(plugin.id.rawValue) failed: \(error)")
+                failures.append(importFailure(for: plugin, error: error))
             }
         }
-        for id in importedIDs.subtracting(installedIDs) {
-            install(id)
+        let idsToInstall = importedIDs.subtracting(installedIDs).subtracting(blockedIDs)
+        for plugin in plugins where idsToInstall.contains(plugin.id) {
+            install(plugin.id)
+        }
+
+        // Another caller may have entered during one of the awaited removals.
+        // Re-check before the final synchronous segment so no transition can
+        // outlive a successful reconciliation unnoticed.
+        let reportedFailureIDs = Set(failures.map(\.pluginID))
+        for plugin in plugins
+        where transitioningIDs.contains(plugin.id)
+            && !reportedFailureIDs.contains(plugin.id) {
+            failures.append(importFailure(
+                for: plugin,
+                error: transitionInProgressError(for: plugin)
+            ))
         }
         persistInstalledIDs()
 
@@ -283,5 +320,26 @@ final class PluginRegistry {
     private func refreshSurfaces() {
         panelStore.rebuild()
         hotkeyCoordinator.refresh()
+        refreshCommandPalette()
+    }
+
+    private func transitionInProgressError(
+        for plugin: any NativePlugin
+    ) -> PluginTransitionInProgressError {
+        PluginTransitionInProgressError(
+            pluginID: plugin.id,
+            message: L(.pluginsTransitionInProgress)
+        )
+    }
+
+    private func importFailure(
+        for plugin: any NativePlugin,
+        error: any Error
+    ) -> PluginImportFailure {
+        PluginImportFailure(
+            pluginID: plugin.id,
+            pluginName: plugin.localizedName,
+            errorDescription: error.localizedDescription
+        )
     }
 }

@@ -266,7 +266,11 @@ claims.
   `PluginRowSource` gets one `reload()` per palette open (in
   `collectSections`); `rows()` runs per query pass and must stay cheap and
   synchronous. Its `sectionTitleKey` is a raw catalog-key string rendered via
-  `L(raw:)` / `LocalizedText(raw:)` — no Core `L10n.Key` case needed.
+  `L(raw:)` / `LocalizedText(raw:)` — no Core `L10n.Key` case needed. A runtime
+  install or uninstall also asks `CommandPaletteWindowController` to
+  recompose an already-visible palette from the live registrations. Root
+  queries stay intact; drill-in state is reset because it may retain option
+  closures owned by the plugin that just disappeared.
 - **Panel popover.** `MenuBarView`'s generic `case .submenu(let item)` branch
   (after all named Core submenu branches) resolves
   `PluginRegistry.shared.panelPopover(for: item)` — which returns `nil`
@@ -322,8 +326,9 @@ All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
   guarded by `transitioningIDs`): `try await plugin.deactivate()` **first**;
   only on success remove from `installedIDs`, persist,
   unregister its providers and palette contributions, then rebuild the panel
-  and refresh hotkeys.
-  A throw propagates to the UI and nothing changed.
+  and refresh hotkeys plus any visible palette. A deactivate failure propagates
+  to the UI and nothing changed; a concurrent transition for the same plugin
+  throws `PluginTransitionInProgressError` instead of silently dropping intent.
 - **Backup import.** `plugins.installed` is whitelisted in
   `SyncSettingsRegistry` (as `.stringArray`). `BackupService.restore(_:)`
   writes the snapshot and then awaits the live-runtime reconciliation, which
@@ -336,11 +341,12 @@ All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
   match reality). Each transition publishes immediately because an async
   deactivate creates an observable boundary. The registry then forwards
   `reconcileAfterImport()` to the plugins that end up installed. It attempts
-  every transition, then throws `PluginImportReconciliationError` containing
-  all failed removals. `BackupService` still completes the other live-runtime
-  refreshes before rethrowing, and the Sync UI reports a partial failure rather
-  than success. Helper *approval* is machine-local and never travels (PRD
-  US24).
+  every transition and checks `transitioningIDs` both before and after the
+  awaited removals, then throws `PluginImportReconciliationError` containing
+  every failed or overlapping transition. `BackupService` still completes the
+  other live-runtime refreshes before rethrowing, and the Sync UI reports a
+  partial failure rather than success. Helper *approval* is machine-local and
+  never travels (PRD US24).
 - **Usage-trace migration** (`PluginUsageMigration.runIfNeeded`): one-shot
   behind versioned flag `plugins.usageMigrated_v1`. If `plugins.installed`
   already exists before migration (only possible via a config-backup import),
@@ -462,5 +468,7 @@ named test, which is the point of them.
   another reason `pluginID` raw values are frozen forever.
 - **The uninstall UI and the registry are both re-entrancy guarded**
   (`uninstallingIDs` in `PluginsSettingsView`, `transitioningIDs` in
-  `PluginRegistry`) because `deactivate` is async; keep both if you add
-  another uninstall entry point.
+  `PluginRegistry`) because `deactivate` is async. A concurrent uninstall
+  reports a localized error, and backup reconciliation treats any overlapping
+  transition as a partial failure; keep those semantics if you add another
+  lifecycle entry point.

@@ -20,7 +20,6 @@ struct OnboardingMenuBarStep: View {
         Row(symbol: "doc.on.clipboard",    titleKey: .builtinClipboardWall, tint: .teal,   accessory: .hotkey("⌘⇧V")),
         Row(symbol: "camera.viewfinder",   titleKey: .builtinScreenshot,    tint: .blue,   accessory: .chevron),
         Row(symbol: "macwindow",           titleKey: .builtinWindowLayout,  tint: .purple, accessory: .chevron),
-        Row(symbol: "list.bullet.rectangle", titleKey: .builtinHostsManager, tint: .green, accessory: .chevron),
         Row(symbol: "network",             titleKey: .builtinPortManager,   tint: .pink,   accessory: .chevron),
     ]
 

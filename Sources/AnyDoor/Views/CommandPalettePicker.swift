@@ -125,11 +125,15 @@ final class CommandPaletteState {
     /// are intentionally left untouched so a typing/drilling user isn't disturbed.
     func updateSections(
         _ sections: [CommandPaletteSection],
-        quicklinkTemplateCandidates: [QuicklinkTemplateCandidate]? = nil
+        quicklinkTemplateCandidates: [QuicklinkTemplateCandidate]? = nil,
+        pluginRowSources: [CommandPaletteExtensions.RowSourceRegistration]? = nil
     ) {
         allSections = sections
         if let quicklinkTemplateCandidates {
             self.quicklinkTemplateCandidates = quicklinkTemplateCandidates
+        }
+        if let pluginRowSources {
+            rowSources = pluginRowSources
         }
     }
 
@@ -292,7 +296,7 @@ final class CommandPaletteState {
     private var portRefreshTask: Task<Void, Never>?
     /// The plugin row sources searchable at the root (hosts profiles today).
     /// Injected so the sections are unit-testable without the registry.
-    private let rowSources: [CommandPaletteExtensions.RowSourceRegistration]
+    private var rowSources: [CommandPaletteExtensions.RowSourceRegistration]
     /// Source of the currency rate table for inline currency conversion. Injected
     /// (like `rowSources`) so conversion tests stay deterministic.
     private let currencyRatesProvider: () -> RateTable?

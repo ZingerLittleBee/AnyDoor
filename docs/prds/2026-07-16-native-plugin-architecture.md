@@ -120,8 +120,8 @@ trace so nobody loses a feature they were using.
   excluded, consistent with existing backup policy. Import attempts every
   plugin transition, re-persists the installed set that actually converged,
   finishes the other runtime refreshes, and then reports an aggregate error
-  when any uninstall failed; partial convergence is never reported as full
-  success.
+  when any uninstall failed or overlaps another in-flight transition; partial
+  convergence is never reported as full success.
 - **Privileged helper stays Core infrastructure.** The helper daemon is
   shared: Hosts writes through it, and forced Scheduled Shutdown (a Core
   feature) shuts down through it. Hosts' `deactivate` never touches the
@@ -159,7 +159,8 @@ trace so nobody loses a feature they were using.
   with the installed set: uninstalled plugins' bindings never compile.
 - **Palette behavior** extends the existing commit-intent and options tests:
   `pluginRow` commit semantics, plugin-registered option parents, and
-  invisibility of uninstalled plugins' entries.
+  invisibility of uninstalled plugins' entries, including a palette already
+  visible when the installed set changes.
 - **Migration** follows the seeder-test pattern: in-memory container seeded
   with/without usage traces, asserting install state and idempotence across
   repeated launches.

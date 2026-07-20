@@ -15,11 +15,21 @@ final class HotkeySnapshotRecorder {
 }
 
 @MainActor
+final class PaletteSurfaceRefreshRecorder {
+    private(set) var refreshCount = 0
+
+    func record() {
+        refreshCount += 1
+    }
+}
+
+@MainActor
 struct PluginRegistryTestHarness {
     let registry: PluginRegistry
     let panelStore: PanelStore
     let paletteExtensions: CommandPaletteExtensions
     let snapshotRecorder: HotkeySnapshotRecorder
+    let paletteRefreshRecorder: PaletteSurfaceRefreshRecorder
 }
 
 @MainActor
@@ -40,6 +50,7 @@ func makePluginRegistryTestHarness() -> PluginRegistryTestHarness {
     let panelStore = PanelStore()
     let paletteExtensions = CommandPaletteExtensions()
     let snapshotRecorder = HotkeySnapshotRecorder()
+    let paletteRefreshRecorder = PaletteSurfaceRefreshRecorder()
     let hotkeyCoordinator = HotkeyCoordinator(
         quicklinkResolver: { _ in nil },
         quicklinkOpener: { _ in },
@@ -50,13 +61,15 @@ func makePluginRegistryTestHarness() -> PluginRegistryTestHarness {
     let registry = PluginRegistry(
         panelStore: panelStore,
         paletteExtensions: paletteExtensions,
-        hotkeyCoordinator: hotkeyCoordinator
+        hotkeyCoordinator: hotkeyCoordinator,
+        refreshCommandPalette: { paletteRefreshRecorder.record() }
     )
     return PluginRegistryTestHarness(
         registry: registry,
         panelStore: panelStore,
         paletteExtensions: paletteExtensions,
-        snapshotRecorder: snapshotRecorder
+        snapshotRecorder: snapshotRecorder,
+        paletteRefreshRecorder: paletteRefreshRecorder
     )
 }
 

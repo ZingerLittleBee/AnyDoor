@@ -66,6 +66,38 @@ private final class LifecycleProbePlugin: NativePlugin {
 }
 
 @MainActor
+private final class SuspendingDeactivatePlugin: NativePlugin {
+    let id: NativePluginID
+    let localizedName: String
+    let localizedDescription = "Deactivate waits for the test to resume it."
+    let claimedCommands: Set<BuiltinItem> = []
+    let providers: [any BuiltinProvider] = []
+    private(set) var isDeactivating = false
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(id: String = "test.suspendingDeactivate") {
+        self.id = NativePluginID(rawValue: id)
+        self.localizedName = id
+    }
+
+    func hasUsageTrace(in context: ModelContext) throws -> Bool { false }
+
+    func deactivate() async throws {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            isDeactivating = true
+        }
+        isDeactivating = false
+    }
+
+    func resumeDeactivation() {
+        let continuation = continuation
+        self.continuation = nil
+        continuation?.resume()
+    }
+}
+
+@MainActor
 private final class FinderSelectionGate {
     private(set) var isWaiting = false
     private var continuation: CheckedContinuation<[URL], Never>?
@@ -173,6 +205,7 @@ final class PluginRegistryTests: XCTestCase {
                      "the registry must resolve retained conflicts before publishing surfaces")
         XCTAssertNil(retainedPreference.modifierFlags)
         XCTAssertEqual(harness.snapshotRecorder.updateCount, 1)
+        XCTAssertEqual(harness.paletteRefreshRecorder.refreshCount, 1)
         XCTAssertEqual(
             harness.snapshotRecorder.snapshots.map(\.action),
             [.openQuicklink(id: replacementQuicklink.id)]
@@ -445,6 +478,106 @@ final class PluginRegistryTests: XCTestCase {
                        "the stored state is re-persisted to match reality")
     }
 
+    @MainActor
+    func testReconcileAfterImportReportsAnUninstallAlreadyInProgress() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let plugin = SuspendingDeactivatePlugin()
+        defer { plugin.resumeDeactivation() }
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
+        registry.install(plugin.id)
+
+        let uninstall = Task { @MainActor in
+            try await registry.uninstall(plugin.id)
+        }
+        let deadline = ContinuousClock.now + .seconds(1)
+        while !plugin.isDeactivating, ContinuousClock.now < deadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(plugin.isDeactivating)
+
+        // The imported target still wants the plugin installed. Reconciliation
+        // must not report success while an earlier uninstall can still reverse it.
+        defaults.set([plugin.id.rawValue], forKey: PluginRegistry.installStateKey)
+        do {
+            try await registry.reconcileAfterImport()
+            XCTFail("an in-progress lifecycle transition must be reported")
+        } catch let error as PluginImportReconciliationError {
+            XCTAssertEqual(error.failures.map(\.pluginID), [plugin.id])
+        }
+
+        plugin.resumeDeactivation()
+        try await uninstall.value
+        XCTAssertFalse(registry.isInstalled(plugin.id))
+    }
+
+    @MainActor
+    func testReconcileAfterImportReportsATransitionStartedDuringAnotherRemoval() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let first = SuspendingDeactivatePlugin(id: "test.firstSuspendingDeactivate")
+        let second = SuspendingDeactivatePlugin(id: "test.secondSuspendingDeactivate")
+        defer {
+            first.resumeDeactivation()
+            second.resumeDeactivation()
+        }
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness,
+            plugins: [first, second],
+            modelContainer: container,
+            defaults: defaults
+        )
+        let registry = harness.registry
+        registry.install(first.id)
+        registry.install(second.id)
+
+        // Reconciliation starts by removing `first`, while the imported target
+        // keeps `second` installed.
+        defaults.set([second.id.rawValue], forKey: PluginRegistry.installStateKey)
+        let reconciliation = Task { @MainActor in
+            do {
+                try await registry.reconcileAfterImport()
+                return nil as PluginImportReconciliationError?
+            } catch let error as PluginImportReconciliationError {
+                return error
+            } catch {
+                XCTFail("unexpected reconciliation error: \(error)")
+                return nil
+            }
+        }
+        let firstDeadline = ContinuousClock.now + .seconds(1)
+        while !first.isDeactivating, ContinuousClock.now < firstDeadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(first.isDeactivating)
+
+        // A manual uninstall enters while reconciliation is suspended. The
+        // imported target must not be reported as converged afterward.
+        let secondUninstall = Task { @MainActor in
+            try await registry.uninstall(second.id)
+        }
+        let secondDeadline = ContinuousClock.now + .seconds(1)
+        while !second.isDeactivating, ContinuousClock.now < secondDeadline {
+            await Task.yield()
+        }
+        XCTAssertTrue(second.isDeactivating)
+
+        first.resumeDeactivation()
+        let reconciliationError = await reconciliation.value
+        let error = try XCTUnwrap(reconciliationError)
+        XCTAssertEqual(error.failures.map(\.pluginID), [second.id])
+
+        second.resumeDeactivation()
+        try await secondUninstall.value
+    }
+
     // MARK: - End-to-end surfaces through the real PanelStore
 
     @MainActor
@@ -575,5 +708,6 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(harness.registry.installedIDs, Set([newID]))
         XCTAssertEqual(harness.snapshotRecorder.updateCount, 2,
                        "each async lifecycle transition must publish immediately")
+        XCTAssertEqual(harness.paletteRefreshRecorder.refreshCount, 2)
     }
 }

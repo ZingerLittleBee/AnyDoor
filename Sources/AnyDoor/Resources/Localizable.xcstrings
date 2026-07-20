@@ -5833,23 +5833,6 @@
         }
       }
     },
-    "onboarding.demo.hostsResult": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "staging · hosts profile"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "staging · hosts 配置"
-          }
-        }
-      }
-    },
     "onboarding.demo.portResult": {
       "extractionState": "manual",
       "localizations": {
@@ -6781,6 +6764,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已安装"
+          }
+        }
+      }
+    },
+    "plugins.transition.inProgress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another plugin change is still in progress. Try again when it finishes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个插件变更仍在进行中，请等待完成后重试。"
           }
         }
       }
