@@ -103,10 +103,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
         // Native Plugins: the registry loads the installed set, activates the
-        // installed plugins, and — through the surface hooks — keeps the
-        // panel/hotkey surfaces in sync with later install/uninstall, with no
-        // relaunch. Core control flow names no plugin beyond this list
-        // (ADR-0007).
+        // installed plugins, and owns surface composition for launch and
+        // later lifecycle changes. Core control flow names no plugin beyond
+        // this list (ADR-0007).
         let pluginHost = CorePluginHost(modelContainer: modelContainer)
         let plugins: [any NativePlugin] = [
             ImageConversionNativePlugin(host: pluginHost),
@@ -116,46 +115,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // must precede the bootstrap, which activates the migrated-installed
         // plugins through the normal launch path.
         PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
+        let coreProviders = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
+            PanelStore.shared.onKeepAwakeStateChange(state)
+        })
         PluginRegistry.shared.bootstrap(
             plugins: plugins,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { PanelStore.shared.registerProviders($0) },
-                unregisterProviders: { PanelStore.shared.unregisterProviders(for: $0) },
-                registerPaletteContributions: {
-                    CommandPaletteExtensions.shared.registerContributions(of: $0)
-                },
-                unregisterPaletteContributions: {
-                    CommandPaletteExtensions.shared.unregisterContributions(of: $0)
-                },
-                prepareInstall: { commands, activeCommands in
-                    HotkeyCoordinator.shared.resolveRetainedPluginHotkeyConflicts(
-                        for: commands,
-                        activeCommands: activeCommands
-                    )
-                },
-                refreshSurfaces: {
-                    PanelStore.shared.rebuild()
-                    HotkeyCoordinator.shared.refresh()
-                }
-            )
-        )
-        // Initial surface composition: bootstrap does not fire the hooks, so
-        // register the already-installed plugins' palette contributions here
-        // (their providers join the PanelStore bootstrap below).
-        for plugin in PluginRegistry.shared.installedPlugins {
-            CommandPaletteExtensions.shared.registerContributions(of: plugin)
-        }
-
-        // Register providers: Core-claimed commands plus installed plugins'.
-        let providers = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
-            PanelStore.shared.onKeepAwakeStateChange(state)
-        }) + PluginRegistry.shared.installedProviders
-        PanelStore.shared.bootstrap(
             modelContainer: modelContainer,
-            providers: providers,
-            commandAvailability: { PluginRegistry.shared.isAvailable($0) }
+            coreProviders: coreProviders
         )
-        HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
         QuicklinkStore.shared.bootstrap(modelContainer: modelContainer)
 
         // Translation history: give the store the shared container, then point

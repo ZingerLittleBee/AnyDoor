@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import OSLog
 import PluginInterface
+import SwiftData
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "plugins")
 
@@ -12,7 +13,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "plugins")
 /// Native Plugin or by the Core), and runs the transactional
 /// install/uninstall lifecycle. Surfaces never ask a plugin anything
 /// directly — they ask the registry whether a command is available, and the
-/// registry drives the surface hooks when the installed set changes.
+/// registry publishes the composed surfaces when the installed set changes.
 ///
 /// Uninstall is transactional: `deactivate()` must succeed before any state
 /// or surface changes; a thrown error leaves the plugin fully installed.
@@ -27,53 +28,50 @@ final class PluginRegistry {
     /// MainActor-bound like this class) can reference it.
     nonisolated static let installStateKey = "plugins.installed"
 
-    /// How the registry pushes installed-set changes into the Core's
-    /// surfaces. Injected at bootstrap so the lifecycle stays testable
-    /// against real stores without reaching for app-global singletons.
-    struct SurfaceHooks {
-        var registerProviders: @MainActor ([any BuiltinProvider]) -> Void
-        var unregisterProviders: @MainActor (Set<BuiltinItem>) -> Void
-        /// Register a freshly installed plugin's palette contributions
-        /// (option parents and row sources) with the palette registry.
-        /// Defaulted no-op so provider-only test hooks stay terse.
-        var registerPaletteContributions: @MainActor (any NativePlugin) -> Void = { _ in }
-        /// Drop an uninstalled plugin's palette contributions.
-        var unregisterPaletteContributions: @MainActor (any NativePlugin) -> Void = { _ in }
-        /// Resolve retained state that conflicts with active contributions
-        /// before a returning plugin becomes available.
-        var prepareInstall: @MainActor (Set<BuiltinItem>, Set<BuiltinItem>) -> Void = { _, _ in }
-        var refreshSurfaces: @MainActor () -> Void
-
-        static let noop = SurfaceHooks(
-            registerProviders: { _ in },
-            unregisterProviders: { _ in },
-            refreshSurfaces: {}
-        )
-    }
-
     private(set) var plugins: [any NativePlugin] = []
     private(set) var installedIDs: Set<NativePluginID> = []
 
+    @ObservationIgnored private let panelStore: PanelStore
+    @ObservationIgnored private let paletteExtensions: CommandPaletteExtensions
+    @ObservationIgnored private let hotkeyCoordinator: HotkeyCoordinator
     @ObservationIgnored private var defaults: UserDefaults = .standard
-    @ObservationIgnored private var hooks: SurfaceHooks = .noop
     @ObservationIgnored private var claims: [BuiltinItem: NativePluginID] = [:]
+    @ObservationIgnored private var isBootstrapped = false
     /// Re-entrancy guard: ids with an uninstall's async deactivate in flight.
     @ObservationIgnored private var transitioningIDs: Set<NativePluginID> = []
 
-    /// Load the install state and activate every installed plugin. Does NOT
-    /// fire the surface hooks — the caller composes the initial surfaces from
-    /// `installedProviders` itself; hooks only fire on later state changes.
+    init(
+        panelStore: PanelStore = .shared,
+        paletteExtensions: CommandPaletteExtensions = .shared,
+        hotkeyCoordinator: HotkeyCoordinator = .shared
+    ) {
+        self.panelStore = panelStore
+        self.paletteExtensions = paletteExtensions
+        self.hotkeyCoordinator = hotkeyCoordinator
+    }
+
+    /// Load the install state, activate every installed plugin, and compose
+    /// all initial surfaces. Runtime state starts empty so cold-launch
+    /// activation follows the same activate-before-Installed invariant as a
+    /// hands-on Install. Initial surface publication is batched because launch
+    /// has no suspension point and no plugin surface is visible yet.
     func bootstrap(
         plugins: [any NativePlugin],
-        defaults: UserDefaults = .standard,
-        hooks: SurfaceHooks
+        modelContainer: ModelContainer,
+        coreProviders: [any BuiltinProvider],
+        defaults: UserDefaults = .standard
     ) {
+        precondition(!isBootstrapped, "PluginRegistry.bootstrap may only run once")
+        isBootstrapped = true
         self.plugins = plugins
         self.defaults = defaults
-        self.hooks = hooks
 
         claims = [:]
+        var pluginIDs: Set<NativePluginID> = []
         for plugin in plugins {
+            if !pluginIDs.insert(plugin.id).inserted {
+                assertionFailure("Duplicate Native Plugin id: \(plugin.id.rawValue)")
+            }
             for command in plugin.claimedCommands {
                 if let owner = claims[command] {
                     // A duplicate claim is a programming error; the catalog
@@ -90,11 +88,29 @@ final class PluginRegistry {
 
         let storedIDs = (defaults.stringArray(forKey: Self.installStateKey) ?? [])
             .map(NativePluginID.init(rawValue:))
-        installedIDs = Set(storedIDs).intersection(Set(plugins.map(\.id)))
+        let targetInstalledIDs = Set(storedIDs).intersection(pluginIDs)
+        installedIDs = []
 
-        for plugin in plugins where installedIDs.contains(plugin.id) {
-            plugin.activate()
+        for plugin in plugins where targetInstalledIDs.contains(plugin.id) {
+            activateAndEnterInstalled(plugin)
         }
+
+        let installedPlugins = plugins.filter { installedIDs.contains($0.id) }
+        let providers = coreProviders + installedPlugins.flatMap(\.providers)
+        panelStore.bootstrap(
+            modelContainer: modelContainer,
+            providers: providers,
+            commandAvailability: { [weak self] in self?.isAvailable($0) ?? true }
+        )
+        for plugin in installedPlugins {
+            paletteExtensions.registerContributions(of: plugin)
+        }
+        hotkeyCoordinator.bootstrap(
+            modelContainer: modelContainer,
+            availableCommands: { [weak self] in
+                self?.availableCommands ?? Set(BuiltinItem.allCases)
+            }
+        )
     }
 
     // MARK: - Lookups
@@ -131,18 +147,6 @@ final class PluginRegistry {
         return commands
     }
 
-    /// Every installed plugin, in registration order (initial surface
-    /// composition at launch — providers, palette contributions).
-    var installedPlugins: [any NativePlugin] {
-        plugins.filter { installedIDs.contains($0.id) }
-    }
-
-    /// Providers contributed by every installed plugin (initial surface
-    /// composition at launch).
-    var installedProviders: [any BuiltinProvider] {
-        installedPlugins.flatMap(\.providers)
-    }
-
     /// The panel popover for a claimed submenu command, or nil when the Core
     /// owns the command or its plugin is not installed — an uninstalled
     /// plugin's popover must never mount.
@@ -161,13 +165,15 @@ final class PluginRegistry {
         guard let plugin = plugin(withID: id),
               !installedIDs.contains(id),
               !transitioningIDs.contains(id) else { return }
-        hooks.prepareInstall(plugin.claimedCommands, availableCommands)
-        plugin.activate()
-        installedIDs.insert(id)
+        hotkeyCoordinator.resolveRetainedPluginHotkeyConflicts(
+            for: plugin.claimedCommands,
+            activeCommands: availableCommands
+        )
+        activateAndEnterInstalled(plugin)
         persistInstalledIDs()
-        hooks.registerProviders(plugin.providers)
-        hooks.registerPaletteContributions(plugin)
-        hooks.refreshSurfaces()
+        panelStore.registerProviders(plugin.providers)
+        paletteExtensions.registerContributions(of: plugin)
+        refreshSurfaces()
         logger.info("Installed plugin \(id.rawValue)")
     }
 
@@ -187,9 +193,9 @@ final class PluginRegistry {
 
         installedIDs.remove(id)
         persistInstalledIDs()
-        hooks.unregisterProviders(plugin.claimedCommands)
-        hooks.unregisterPaletteContributions(plugin)
-        hooks.refreshSurfaces()
+        panelStore.unregisterProviders(for: plugin.claimedCommands)
+        paletteExtensions.unregisterContributions(of: plugin)
+        refreshSurfaces()
         logger.info("Uninstalled plugin \(id.rawValue)")
     }
 
@@ -198,7 +204,7 @@ final class PluginRegistry {
     ///
     /// The settings import only wrote the installed set into defaults;
     /// installing/uninstalling here runs the real lifecycle (activate /
-    /// deactivate plus the surface hooks), so an imported selection behaves
+    /// deactivate plus surface publication), so an imported selection behaves
     /// like hands-on installs — surfaces appear or disappear without a
     /// relaunch. A failed deactivate keeps its plugin installed (the usual
     /// transactional rule) and the stored state is re-persisted to match
@@ -209,15 +215,17 @@ final class PluginRegistry {
                 .map(NativePluginID.init(rawValue:))
         ).intersection(Set(plugins.map(\.id)))
 
-        for id in importedIDs.subtracting(installedIDs) {
-            install(id)
-        }
+        // Remove first so returning plugins resolve retained hotkeys against
+        // the actual survivors, including any plugin whose deactivate failed.
         for id in installedIDs.subtracting(importedIDs) {
             do {
                 try await uninstall(id)
             } catch {
                 logger.error("Import-driven uninstall of \(id.rawValue) failed: \(error)")
             }
+        }
+        for id in importedIDs.subtracting(installedIDs) {
+            install(id)
         }
         persistInstalledIDs()
 
@@ -228,5 +236,15 @@ final class PluginRegistry {
 
     private func persistInstalledIDs() {
         defaults.set(installedIDs.map(\.rawValue).sorted(), forKey: Self.installStateKey)
+    }
+
+    private func activateAndEnterInstalled(_ plugin: any NativePlugin) {
+        plugin.activate()
+        installedIDs.insert(plugin.id)
+    }
+
+    private func refreshSurfaces() {
+        panelStore.rebuild()
+        hotkeyCoordinator.refresh()
     }
 }

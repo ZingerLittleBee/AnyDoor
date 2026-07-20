@@ -114,28 +114,29 @@ final class PluginPaletteContributionTests: XCTestCase {
         XCTAssertEqual(registry.rowSources.first?.sectionTitleKey, "commandPalette.section.hosts")
     }
 
-    // MARK: - Registry pushes palette contributions through the surface hooks
+    // MARK: - Registry owns palette contribution publication
 
     @MainActor
-    func testInstallAndUninstallFirePaletteContributionHooks() async throws {
+    func testInstallAndUninstallPublishPaletteContributions() async throws {
         let suiteName = "PluginPaletteContributionTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let plugin = FixturePlugin()
-        let registry = PluginRegistry()
-        var registered: [String] = []
-        var unregistered: [String] = []
-        var hooks = PluginRegistry.SurfaceHooks.noop
-        hooks.registerPaletteContributions = { registered.append($0.id.rawValue) }
-        hooks.unregisterPaletteContributions = { unregistered.append($0.id.rawValue) }
-        registry.bootstrap(plugins: [plugin], defaults: defaults, hooks: hooks)
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
 
         registry.install(plugin.id)
-        XCTAssertEqual(registered, ["test.fixture"])
+        XCTAssertTrue(harness.paletteExtensions.isOptionParent(.hostsManager))
+        XCTAssertNotNil(harness.paletteExtensions.rowSource(withID: "fixture.rows"))
 
         try await registry.uninstall(plugin.id)
-        XCTAssertEqual(unregistered, ["test.fixture"])
+        XCTAssertFalse(harness.paletteExtensions.isOptionParent(.hostsManager))
+        XCTAssertNil(harness.paletteExtensions.rowSource(withID: "fixture.rows"))
     }
 
     // MARK: - Panel popover lookup gates on the installed set
@@ -147,8 +148,12 @@ final class PluginPaletteContributionTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let plugin = FixturePlugin()
-        let registry = PluginRegistry()
-        registry.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
 
         XCTAssertNil(registry.panelPopover(for: .hostsManager),
                      "an uninstalled plugin's popover must not surface")

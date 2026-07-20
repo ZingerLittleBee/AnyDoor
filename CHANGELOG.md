@@ -47,6 +47,12 @@ versioning.
   AnyDoor. If that monitor is no longer connected, the palette returns to its
   default position.
 
+### Changed
+
+- Native Plugin lifecycle and surface composition now live behind one
+  `PluginRegistry` boundary, with consistent activation ordering across cold
+  launch, install, uninstall, and backup import.
+
 ## [3.7.0] - 2026-07-12
 
 ### Added

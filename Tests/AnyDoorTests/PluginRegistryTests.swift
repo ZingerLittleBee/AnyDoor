@@ -27,6 +27,45 @@ private final class ThrowingDeactivatePlugin: NativePlugin {
 }
 
 @MainActor
+private final class LifecycleProbePlugin: NativePlugin {
+    let id: NativePluginID
+    let localizedName: String
+    let localizedDescription = "Lifecycle ordering probe."
+    let claimedCommands: Set<BuiltinItem>
+    let providers: [any BuiltinProvider] = []
+    private let onActivate: () -> Void
+    private let onDeactivate: () -> Void
+    private let onReadContributions: () -> Void
+
+    init(
+        id: String,
+        claimedCommands: Set<BuiltinItem> = [],
+        onActivate: @escaping () -> Void = {},
+        onDeactivate: @escaping () -> Void = {},
+        onReadContributions: @escaping () -> Void = {}
+    ) {
+        self.id = NativePluginID(rawValue: id)
+        localizedName = id
+        self.claimedCommands = claimedCommands
+        self.onActivate = onActivate
+        self.onDeactivate = onDeactivate
+        self.onReadContributions = onReadContributions
+    }
+
+    var paletteOptionParents: Set<BuiltinItem> {
+        onReadContributions()
+        return []
+    }
+
+    func hasUsageTrace(in context: ModelContext) throws -> Bool { false }
+    func activate() { onActivate() }
+
+    func deactivate() async throws {
+        onDeactivate()
+    }
+}
+
+@MainActor
 private final class FinderSelectionGate {
     private(set) var isWaiting = false
     private var continuation: CheckedContinuation<[URL], Never>?
@@ -56,12 +95,25 @@ final class PluginRegistryTests: XCTestCase {
     }
 
     @MainActor
-    private func makeImageConversionPlugin() throws -> ImageConversionNativePlugin {
-        let container = try ModelContainer(
-            for: Schema(ImageConversionNativePlugin.modelSchemaTypes),
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    private func makeImageConversionPlugin() throws -> (
+        plugin: ImageConversionNativePlugin,
+        container: ModelContainer
+    ) {
+        let container = try makePluginRegistryTestContainer(
+            pluginModelTypes: ImageConversionNativePlugin.modelSchemaTypes
         )
-        return ImageConversionNativePlugin(host: CorePluginHost(modelContainer: container))
+        return (
+            ImageConversionNativePlugin(host: CorePluginHost(modelContainer: container)),
+            container
+        )
+    }
+
+    @MainActor
+    private func panelItems(in store: PanelStore) -> [BuiltinItem] {
+        store.topLevelEntries.compactMap {
+            if case .builtin(let item) = $0.source { return item }
+            return nil
+        }
     }
 
     // MARK: - Install state & claims
@@ -70,10 +122,12 @@ final class PluginRegistryTests: XCTestCase {
     func testFreshRegistryStartsUninstalledAndHidesClaimedCommands() throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
-        let plugin = try makeImageConversionPlugin()
-
-        let registry = PluginRegistry()
-        registry.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        let (plugin, container) = try makeImageConversionPlugin()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
 
         XCTAssertFalse(registry.isInstalled(plugin.id))
         XCTAssertEqual(registry.claimOwner(of: .imageConversion), plugin.id)
@@ -81,52 +135,63 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertFalse(registry.isAvailable(.imageConversion))
         XCTAssertTrue(registry.isAvailable(.keepAwake))
         XCTAssertFalse(registry.availableCommands.contains(.imageConversion))
-        XCTAssertTrue(registry.installedProviders.isEmpty)
     }
 
     @MainActor
     func testInstallActivatesPersistsAndRegistersSurfaces() throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
-        let plugin = try makeImageConversionPlugin()
-
-        var registered: [BuiltinItem] = []
-        var prepared: [(returning: Set<BuiltinItem>, active: Set<BuiltinItem>)] = []
-        var refreshes = 0
-        let registry = PluginRegistry()
-        registry.bootstrap(
-            plugins: [plugin],
-            defaults: defaults,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { registered.append(contentsOf: $0.map(\.itemKey)) },
-                unregisterProviders: { _ in XCTFail("install must not unregister") },
-                prepareInstall: { prepared.append((returning: $0, active: $1)) },
-                refreshSurfaces: { refreshes += 1 }
-            )
+        let (plugin, container) = try makeImageConversionPlugin()
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+        let itemKey = BuiltinItem.imageConversion.rawValue
+        let retainedPreference = try XCTUnwrap(try container.mainContext.fetch(
+            FetchDescriptor<BuiltinPreference>(predicate: #Predicate { $0.itemKey == itemKey })
+        ).first)
+        retainedPreference.keyCode = 34
+        retainedPreference.modifierFlags = 1 << 20
+        let replacementQuicklink = Quicklink(
+            id: UUID(),
+            name: "Replacement",
+            link: "https://example.com",
+            keyCode: 34,
+            modifierFlags: 1 << 20
         )
+        container.mainContext.insert(replacementQuicklink)
+        try container.mainContext.save()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
 
         registry.install(plugin.id)
 
         XCTAssertTrue(registry.isInstalled(plugin.id))
         XCTAssertTrue(registry.isAvailable(.imageConversion))
-        XCTAssertEqual(prepared.count, 1)
-        XCTAssertEqual(prepared[0].returning, [.imageConversion])
-        XCTAssertFalse(prepared[0].active.contains(.imageConversion))
-        XCTAssertEqual(registered, [.imageConversion])
-        XCTAssertEqual(refreshes, 1)
-        XCTAssertEqual(registry.installedProviders.map(\.itemKey), [.imageConversion])
+        XCTAssertTrue(panelItems(in: harness.panelStore).contains(.imageConversion))
+        XCTAssertNil(retainedPreference.keyCode,
+                     "the registry must resolve retained conflicts before publishing surfaces")
+        XCTAssertNil(retainedPreference.modifierFlags)
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, 1)
+        XCTAssertEqual(
+            harness.snapshotRecorder.snapshots.map(\.action),
+            [.openQuicklink(id: replacementQuicklink.id)]
+        )
 
         // Idempotent: a second install changes nothing.
         registry.install(plugin.id)
-        XCTAssertEqual(registered, [.imageConversion])
-        XCTAssertEqual(refreshes, 1)
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, 1)
 
         // Persisted: a fresh registry over the same defaults reads the state
         // back and activates the plugin on bootstrap.
-        let relaunched = PluginRegistry()
-        relaunched.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        let relaunchedHarness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            relaunchedHarness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let relaunched = relaunchedHarness.registry
         XCTAssertTrue(relaunched.isInstalled(plugin.id))
-        XCTAssertEqual(relaunched.installedProviders.map(\.itemKey), [.imageConversion])
+        XCTAssertTrue(panelItems(in: relaunchedHarness.panelStore).contains(.imageConversion))
+        XCTAssertEqual(relaunchedHarness.snapshotRecorder.updateCount, 0)
     }
 
     @MainActor
@@ -167,29 +232,28 @@ final class PluginRegistryTests: XCTestCase {
     func testUninstallRevertsSurfacesAndPersists() async throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
-        let plugin = try makeImageConversionPlugin()
-
-        var unregistered: [Set<BuiltinItem>] = []
-        let registry = PluginRegistry()
-        registry.bootstrap(
-            plugins: [plugin],
-            defaults: defaults,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { _ in },
-                unregisterProviders: { unregistered.append($0) },
-                refreshSurfaces: {}
-            )
+        let (plugin, container) = try makeImageConversionPlugin()
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
         )
+        let registry = harness.registry
         registry.install(plugin.id)
+        let updatesAfterInstall = harness.snapshotRecorder.updateCount
 
         try await registry.uninstall(plugin.id)
 
         XCTAssertFalse(registry.isInstalled(plugin.id))
         XCTAssertFalse(registry.isAvailable(.imageConversion))
-        XCTAssertEqual(unregistered, [[.imageConversion]])
+        XCTAssertFalse(panelItems(in: harness.panelStore).contains(.imageConversion))
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, updatesAfterInstall + 1)
 
-        let relaunched = PluginRegistry()
-        relaunched.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        let relaunchedHarness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            relaunchedHarness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let relaunched = relaunchedHarness.registry
         XCTAssertFalse(relaunched.isInstalled(plugin.id))
     }
 
@@ -197,9 +261,12 @@ final class PluginRegistryTests: XCTestCase {
     func testUninstallDrainsPendingWindowPresentationWithoutReopening() async throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
-        let plugin = try makeImageConversionPlugin()
-        let registry = PluginRegistry()
-        registry.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        let (plugin, container) = try makeImageConversionPlugin()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
         registry.install(plugin.id)
 
         let controller = ImageConversionWindowController.shared
@@ -240,21 +307,15 @@ final class PluginRegistryTests: XCTestCase {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
         let plugin = ThrowingDeactivatePlugin()
-
-        var unregisters = 0
-        var refreshes = 0
-        let registry = PluginRegistry()
-        registry.bootstrap(
-            plugins: [plugin],
-            defaults: defaults,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { _ in },
-                unregisterProviders: { _ in unregisters += 1 },
-                refreshSurfaces: { refreshes += 1 }
-            )
+        let container = try makePluginRegistryTestContainer()
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
         )
+        let registry = harness.registry
         registry.install(plugin.id)
-        let refreshesAfterInstall = refreshes
+        let refreshesAfterInstall = harness.snapshotRecorder.updateCount
 
         do {
             try await registry.uninstall(plugin.id)
@@ -264,13 +325,15 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertEqual(plugin.deactivateCalls, 1)
         XCTAssertTrue(registry.isInstalled(plugin.id), "a failed deactivate must abort the uninstall")
         XCTAssertTrue(registry.isAvailable(.imageConversion))
-        XCTAssertEqual(unregisters, 0)
-        XCTAssertEqual(refreshes, refreshesAfterInstall)
+        XCTAssertTrue(panelItems(in: harness.panelStore).contains(.imageConversion))
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, refreshesAfterInstall)
 
         // The persisted state still says installed.
-        let relaunched = PluginRegistry()
-        relaunched.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
-        XCTAssertTrue(relaunched.isInstalled(plugin.id))
+        let relaunchedHarness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            relaunchedHarness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        XCTAssertTrue(relaunchedHarness.registry.isInstalled(plugin.id))
     }
 
     // MARK: - Backup import (reconcile adopts the imported install state)
@@ -279,20 +342,13 @@ final class PluginRegistryTests: XCTestCase {
     func testReconcileAfterImportInstallsFromImportedState() async throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
-        let plugin = try makeImageConversionPlugin()
-
-        var registered: [BuiltinItem] = []
-        var refreshes = 0
-        let registry = PluginRegistry()
-        registry.bootstrap(
-            plugins: [plugin],
-            defaults: defaults,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { registered.append(contentsOf: $0.map(\.itemKey)) },
-                unregisterProviders: { _ in XCTFail("an import that installs must not unregister") },
-                refreshSurfaces: { refreshes += 1 }
-            )
+        let (plugin, container) = try makeImageConversionPlugin()
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
         )
+        let registry = harness.registry
         XCTAssertFalse(registry.isInstalled(plugin.id))
 
         // The settings import wrote the installed set into defaults; reconcile
@@ -301,34 +357,30 @@ final class PluginRegistryTests: XCTestCase {
         await registry.reconcileAfterImport()
 
         XCTAssertTrue(registry.isInstalled(plugin.id))
-        XCTAssertEqual(registered, [.imageConversion])
-        XCTAssertEqual(refreshes, 1)
+        XCTAssertTrue(panelItems(in: harness.panelStore).contains(.imageConversion))
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, 1)
     }
 
     @MainActor
     func testReconcileAfterImportUninstallsRemovedPlugins() async throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
-        let plugin = try makeImageConversionPlugin()
-
-        var unregistered: [Set<BuiltinItem>] = []
-        let registry = PluginRegistry()
-        registry.bootstrap(
-            plugins: [plugin],
-            defaults: defaults,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { _ in },
-                unregisterProviders: { unregistered.append($0) },
-                refreshSurfaces: {}
-            )
+        let (plugin, container) = try makeImageConversionPlugin()
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
         )
+        let registry = harness.registry
         registry.install(plugin.id)
+        let updatesAfterInstall = harness.snapshotRecorder.updateCount
 
         defaults.set([String](), forKey: PluginRegistry.installStateKey)
         await registry.reconcileAfterImport()
 
         XCTAssertFalse(registry.isInstalled(plugin.id))
-        XCTAssertEqual(unregistered, [[.imageConversion]])
+        XCTAssertFalse(panelItems(in: harness.panelStore).contains(.imageConversion))
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, updatesAfterInstall + 1)
         XCTAssertEqual(defaults.stringArray(forKey: PluginRegistry.installStateKey), [])
     }
 
@@ -337,9 +389,12 @@ final class PluginRegistryTests: XCTestCase {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
         let plugin = ThrowingDeactivatePlugin()
-
-        let registry = PluginRegistry()
-        registry.bootstrap(plugins: [plugin], defaults: defaults, hooks: .noop)
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
         registry.install(plugin.id)
 
         defaults.set([String](), forKey: PluginRegistry.installStateKey)
@@ -360,32 +415,17 @@ final class PluginRegistryTests: XCTestCase {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
 
-        let container = try ModelContainer(
-            for: Schema(
-                [KeyBinding.self, BuiltinPreference.self]
-                    + ImageConversionNativePlugin.modelSchemaTypes
-            ),
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        let container = try makePluginRegistryTestContainer(
+            pluginModelTypes: ImageConversionNativePlugin.modelSchemaTypes
         )
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
         let plugin = ImageConversionNativePlugin(host: CorePluginHost(modelContainer: container))
-
-        let registry = PluginRegistry()
-        let store = PanelStore.shared
-        registry.bootstrap(
-            plugins: [plugin],
-            defaults: defaults,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { store.registerProviders($0) },
-                unregisterProviders: { store.unregisterProviders(for: $0) },
-                refreshSurfaces: { store.rebuild() }
-            )
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
         )
-        store.bootstrap(
-            modelContainer: container,
-            providers: registry.installedProviders,
-            commandAvailability: { registry.isAvailable($0) }
-        )
+        let registry = harness.registry
+        let store = harness.panelStore
 
         func panelItems() -> [BuiltinItem] {
             store.topLevelEntries.compactMap {
@@ -410,6 +450,10 @@ final class PluginRegistryTests: XCTestCase {
 
         registry.install(plugin.id)
         XCTAssertTrue(panelItems().contains(.imageConversion))
+        XCTAssertEqual(
+            harness.snapshotRecorder.snapshots.map(\.action),
+            [.runBuiltin(itemKey: BuiltinItem.imageConversion.rawValue)]
+        )
         let entry = try XCTUnwrap(store.topLevelEntries.first {
             $0.source == .builtin(.imageConversion)
         })
@@ -418,11 +462,81 @@ final class PluginRegistryTests: XCTestCase {
 
         try await registry.uninstall(plugin.id)
         XCTAssertFalse(panelItems().contains(.imageConversion))
+        XCTAssertTrue(harness.snapshotRecorder.snapshots.isEmpty)
 
         // The preference row survives the uninstall (data retention).
         let survivors = try container.mainContext.fetch(
             FetchDescriptor<BuiltinPreference>(predicate: #Predicate { $0.itemKey == key })
         )
         XCTAssertEqual(survivors.first?.keyCode, 11)
+    }
+
+    // MARK: - Lifecycle ordering
+
+    @MainActor
+    func testColdLaunchActivatesBeforeEnteringInstalledAndPublishesAfterward() throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        let id = NativePluginID(rawValue: "test.lifecycle")
+        defaults.set([id.rawValue], forKey: PluginRegistry.installStateKey)
+
+        var installedDuringActivate: Bool?
+        var installedWhenReadingContributions: Bool?
+        let plugin = LifecycleProbePlugin(
+            id: id.rawValue,
+            onActivate: { installedDuringActivate = harness.registry.isInstalled(id) },
+            onReadContributions: {
+                installedWhenReadingContributions = harness.registry.isInstalled(id)
+            }
+        )
+
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+
+        XCTAssertEqual(installedDuringActivate, false)
+        XCTAssertEqual(installedWhenReadingContributions, true)
+        XCTAssertTrue(harness.registry.isInstalled(id))
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, 0,
+                       "cold launch must not start hotkey publication before app startup completes")
+    }
+
+    @MainActor
+    func testImportRemovesPluginsBeforeInstallingAdditions() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        let oldID = NativePluginID(rawValue: "test.old")
+        let newID = NativePluginID(rawValue: "test.new")
+        var lifecycle: [String] = []
+        let oldPlugin = LifecycleProbePlugin(
+            id: oldID.rawValue,
+            onActivate: { lifecycle.append("activate.old") },
+            onDeactivate: { lifecycle.append("deactivate.old") }
+        )
+        let newPlugin = LifecycleProbePlugin(
+            id: newID.rawValue,
+            onActivate: { lifecycle.append("activate.new") },
+            onDeactivate: { lifecycle.append("deactivate.new") }
+        )
+        defaults.set([oldID.rawValue], forKey: PluginRegistry.installStateKey)
+        bootstrapPluginRegistryTestHarness(
+            harness,
+            plugins: [oldPlugin, newPlugin],
+            modelContainer: container,
+            defaults: defaults
+        )
+        lifecycle.removeAll()
+
+        defaults.set([newID.rawValue], forKey: PluginRegistry.installStateKey)
+        await harness.registry.reconcileAfterImport()
+
+        XCTAssertEqual(lifecycle, ["deactivate.old", "activate.new"])
+        XCTAssertEqual(harness.registry.installedIDs, Set([newID]))
+        XCTAssertEqual(harness.snapshotRecorder.updateCount, 2,
+                       "each async lifecycle transition must publish immediately")
     }
 }

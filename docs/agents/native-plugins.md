@@ -247,9 +247,8 @@ claims.
   (`listsAtRoot: { true }`, options built from `paletteOptions(for:)`
   descriptors, committing via `performPaletteOption`) and registers each
   `paletteRowSources` element. `unregisterContributions(of:)` reverts both.
-  Fired by the registry's `registerPaletteContributions` /
-  `unregisterPaletteContributions` hooks on install/uninstall — plus one
-  manual loop in `AppDelegate` for launch (bootstrap doesn't fire hooks).
+  `PluginRegistry` owns registration and removal across launch, Install, and
+  Uninstall; `AppDelegate` only supplies the plugin list and Core providers.
   Root plugin rows flow through `PanelEntry.Source.pluginRow(sourceID:descriptor:)`;
   `CommandPaletteCommitIntent.classify` maps them exhaustively by declared
   `CommitSemantics` (`.stayOpen` → `.pluginRowStayOpen`, `.closeThenAct` →
@@ -299,33 +298,33 @@ All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
   `CorePluginHost`, construct the plugin list
   (`[ImageConversionNativePlugin(host:), HostsNativePlugin(host:)]`), then —
   **order matters** — `PluginUsageMigration.runIfNeeded(plugins:in:)` first,
-  `PluginRegistry.shared.bootstrap(plugins:hooks:)` second (bootstrap reads
-  the possibly-just-migrated install state and calls `activate()` on each
-  installed plugin). Bootstrap does **not** fire the surface hooks; the
-  composition root registers initial surfaces itself: a loop over
-  `installedPlugins` calling
-  `CommandPaletteExtensions.shared.registerContributions(of:)`, and
-  `providers = BuiltinProviderRegistry.makeAll(...) + PluginRegistry.shared.installedProviders`
-  into `PanelStore.shared.bootstrap(modelContainer:providers:commandAvailability:)`.
+  `PluginRegistry.shared.bootstrap(plugins:modelContainer:coreProviders:)`
+  second. Bootstrap reads the possibly-just-migrated install state, starts
+  runtime state empty, calls `activate()` before marking each plugin
+  Installed, then publishes all initial providers and palette contributions
+  as one batch. It wires `PanelStore` and `HotkeyCoordinator` itself; hotkey
+  snapshots are still published later in normal app startup so bootstrap
+  cannot start the event tap early.
 - **Install** (`PluginRegistry.install(id)`, idempotent): `activate()` →
-  insert into `installedIDs` → persist → `hooks.registerProviders(plugin.providers)`
-  → `hooks.registerPaletteContributions(plugin)` → `hooks.refreshSurfaces()`
-  (in the app: `PanelStore.rebuild()` + `HotkeyCoordinator.refresh()`).
+  insert into `installedIDs` → persist → register providers and palette
+  contributions → `PanelStore.rebuild()` → `HotkeyCoordinator.refresh()`.
   Everything appears without relaunch.
 - **Uninstall** (`uninstall(id) async throws`, idempotent, re-entrancy
   guarded by `transitioningIDs`): `try await plugin.deactivate()` **first**;
   only on success remove from `installedIDs`, persist,
-  `hooks.unregisterProviders(plugin.claimedCommands)`,
-  `hooks.unregisterPaletteContributions(plugin)`, `hooks.refreshSurfaces()`.
+  unregister its providers and palette contributions, then rebuild the panel
+  and refresh hotkeys.
   A throw propagates to the UI and nothing changed.
 - **Backup import.** `plugins.installed` is whitelisted in
   `SyncSettingsRegistry` (as `.stringArray`). `BackupService.reconcileAfterImport()`
   awaits `PluginRegistry.shared.reconcileAfterImport()`: read the imported
-  set from defaults, run the **real lifecycle** for the delta (`install` per
-  added id — so `activate` runs and helper registration happens only as a
-  consequence of install, never from the defaults write itself; transactional
-  `uninstall` per removed id — a failed deactivate keeps the plugin and the
-  state is re-persisted to match reality), then forward
+  set from defaults, remove plugins before adding replacements, and run the
+  **real lifecycle** for every delta (`install` per added id — so `activate`
+  runs and helper registration happens only as a consequence of install,
+  never from the defaults write itself; transactional `uninstall` per removed
+  id — a failed deactivate keeps the plugin and the state is re-persisted to
+  match reality). Each transition publishes immediately because an async
+  deactivate creates an observable boundary. The registry then forwards
   `reconcileAfterImport()` to the plugins that end up installed. Helper
   *approval* is machine-local and never travels (PRD US24).
 - **Usage-trace migration** (`PluginUsageMigration.runIfNeeded`): one-shot
@@ -364,7 +363,7 @@ named test, which is the point of them.
    (Hosts' injected `HostsManager` + `MockHostsWriter` precedent).
 4. **Register in `AppDelegate`**: append `<Name>NativePlugin.modelSchemaTypes`
    to the `Schema` in `init()` (if it owns models) and the instance to the
-   `plugins` array in `applicationDidFinishLaunching`. Nothing else — hooks,
+   `plugins` array in `applicationDidFinishLaunching`. Nothing else — lifecycle,
    migration, backup, and all surfaces are generic.
    *Missed schema → SwiftData faults at first fetch; missed list entry → the
    plugin simply doesn't exist (and its lifecycle test can't pass).*
@@ -417,11 +416,12 @@ named test, which is the point of them.
   `PrivilegedHelperAccess` inside a `PluginHostServices` test double
   (`RecordingPluginHost.RecordingHelper` pattern); real `SMAppService`
   registration is never exercised. Everything else runs for real.
-- **Registry lifecycle tests use real plugin instances**, a fresh
-  `PluginRegistry()` (not `.shared`), an isolated
-  `UserDefaults(suiteName:)` with `removePersistentDomain` teardown, and
-  either counting hooks or a private `CommandPaletteExtensions()` instance.
-  `SurfaceHooks.noop` exists for tests that don't care.
+- **Registry lifecycle tests use real plugin instances** with an isolated
+  harness: a fresh `PluginRegistry` wired to private `PanelStore`,
+  `CommandPaletteExtensions`, and `HotkeyCoordinator` instances, an in-memory
+  `ModelContainer`, a snapshot recorder instead of the real event tap, and an
+  isolated `UserDefaults(suiteName:)` with teardown. Assert published state,
+  not callback counts.
 - **No view-layer tests.** Policies, models, stores, and descriptors only.
   The one end-to-end exception drives the real `PanelStore`
   (`PluginRegistryTests.testLifecycleTogglesPanelRowThroughRealSurfaces`),

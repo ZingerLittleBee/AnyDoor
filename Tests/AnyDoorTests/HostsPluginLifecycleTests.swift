@@ -79,9 +79,8 @@ final class HostsPluginLifecycleTests: XCTestCase {
         let suiteName = "HostsPluginLifecycleTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
 
-        let container = try ModelContainer(
-            for: Schema(HostsNativePlugin.modelSchemaTypes),
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true, allowsSave: true)
+        let container = try makePluginRegistryTestContainer(
+            pluginModelTypes: HostsNativePlugin.modelSchemaTypes
         )
         let writer = MockHostsWriter()
         // Stateful live read: each write becomes the new file content, so the
@@ -100,22 +99,13 @@ final class HostsPluginLifecycleTests: XCTestCase {
         let host = RecordingPluginHost(modelContainer: container)
         let plugin = HostsNativePlugin(host: host, manager: manager)
 
-        let palette = CommandPaletteExtensions()
-        let registry = PluginRegistry()
-        registry.bootstrap(
-            plugins: [plugin],
-            defaults: defaults,
-            hooks: PluginRegistry.SurfaceHooks(
-                registerProviders: { _ in },
-                unregisterProviders: { _ in },
-                registerPaletteContributions: { palette.registerContributions(of: $0) },
-                unregisterPaletteContributions: { palette.unregisterContributions(of: $0) },
-                refreshSurfaces: {}
-            )
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
         )
         return Fixture(
             plugin: plugin, manager: manager, writer: writer, host: host,
-            registry: registry, palette: palette, defaults: defaults,
+            registry: harness.registry, palette: harness.paletteExtensions, defaults: defaults,
             teardown: { defaults.removePersistentDomain(forName: suiteName) }
         )
     }

@@ -54,6 +54,7 @@ final class PluginUsageMigrationTests: XCTestCase {
         let host: MigrationPluginHost
         let plugins: [any NativePlugin]
         let hostsPlugin: HostsNativePlugin
+        let container: ModelContainer
         let context: ModelContext
         let defaults: UserDefaults
         let teardown: () -> Void
@@ -63,12 +64,9 @@ final class PluginUsageMigrationTests: XCTestCase {
         let suiteName = "PluginUsageMigrationTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
 
-        let container = try ModelContainer(
-            for: Schema(
-                HostsNativePlugin.modelSchemaTypes
-                    + ImageConversionNativePlugin.modelSchemaTypes
-            ),
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true, allowsSave: true)
+        let container = try makePluginRegistryTestContainer(
+            pluginModelTypes: HostsNativePlugin.modelSchemaTypes
+                + ImageConversionNativePlugin.modelSchemaTypes
         )
         let host = MigrationPluginHost(modelContainer: container)
 
@@ -92,6 +90,7 @@ final class PluginUsageMigrationTests: XCTestCase {
             host: host,
             plugins: plugins,
             hostsPlugin: hostsPlugin,
+            container: container,
             context: container.mainContext,
             defaults: defaults,
             teardown: { defaults.removePersistentDomain(forName: suiteName) }
@@ -201,8 +200,14 @@ final class PluginUsageMigrationTests: XCTestCase {
         // Launch sequence: migration first, then the registry bootstrap reads
         // the migrated state and activates the installed plugins.
         PluginUsageMigration.runIfNeeded(plugins: f.plugins, in: f.context, defaults: f.defaults)
-        let registry = PluginRegistry()
-        registry.bootstrap(plugins: f.plugins, defaults: f.defaults, hooks: .noop)
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness,
+            plugins: f.plugins,
+            modelContainer: f.container,
+            defaults: f.defaults
+        )
+        let registry = harness.registry
 
         XCTAssertTrue(registry.isInstalled(f.hostsPlugin.id))
         XCTAssertFalse(registry.isInstalled(ImageConversionNativePlugin.pluginID))

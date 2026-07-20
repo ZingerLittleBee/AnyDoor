@@ -112,11 +112,15 @@ struct BuiltinCatalogInvariantTests {
         // The registry derives availability from the same claims; pin the
         // wiring: an uninstalled plugin's claims are exactly the commands the
         // fresh registry reports unavailable.
-        let registry = PluginRegistry()
         let suiteName = "BuiltinCatalogInvariantTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        registry.bootstrap(plugins: plugins, defaults: defaults, hooks: .noop)
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: plugins, modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
         let unavailable = Set(BuiltinItem.allCases).subtracting(registry.availableCommands)
         #expect(unavailable == Set(owners.keys))
         for command in BuiltinItem.allCases {

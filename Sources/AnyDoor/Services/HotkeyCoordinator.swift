@@ -21,9 +21,13 @@ final class HotkeyCoordinator {
     static let shared = HotkeyCoordinator()
 
     private var modelContainer: ModelContainer?
+    private var availableCommands: @MainActor () -> Set<BuiltinItem> = {
+        Set(BuiltinItem.allCases)
+    }
     private let quicklinkResolver: @MainActor (UUID) -> Quicklink?
     private let quicklinkOpener: @MainActor (Quicklink) -> Void
     private let quicklinkArgumentPresenter: @MainActor (UUID, String, String, String?) -> Void
+    private let snapshotUpdater: @MainActor ([HotkeySnapshot]) -> Void
 
     init(
         quicklinkResolver: @escaping @MainActor (UUID) -> Quicklink? = { QuicklinkStore.shared.quicklink(id: $0) },
@@ -35,15 +39,25 @@ final class HotkeyCoordinator {
                 link: $2,
                 openWithBundleID: $3
             )
+        },
+        snapshotUpdater: @escaping @MainActor ([HotkeySnapshot]) -> Void = {
+            HotkeyService.shared.updateSnapshots($0)
         }
     ) {
         self.quicklinkResolver = quicklinkResolver
         self.quicklinkOpener = quicklinkOpener
         self.quicklinkArgumentPresenter = quicklinkArgumentPresenter
+        self.snapshotUpdater = snapshotUpdater
     }
 
-    func bootstrap(modelContainer: ModelContainer) {
+    func bootstrap(
+        modelContainer: ModelContainer,
+        availableCommands: @escaping @MainActor () -> Set<BuiltinItem> = {
+            PluginRegistry.shared.availableCommands
+        }
+    ) {
         self.modelContainer = modelContainer
+        self.availableCommands = availableCommands
     }
 
     /// Recompile the snapshot list from all sources and push it to
@@ -62,9 +76,9 @@ final class HotkeyCoordinator {
             prefs: prefs,
             quicklinks: quicklinks,
             paletteHotkey: CommandPaletteService.shared.hotkey,
-            availableCommands: PluginRegistry.shared.availableCommands
+            availableCommands: availableCommands()
         )
-        HotkeyService.shared.updateSnapshots(snapshots)
+        snapshotUpdater(snapshots)
     }
 
     /// Drop retained plugin hotkeys claimed by another active source while

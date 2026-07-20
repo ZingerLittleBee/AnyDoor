@@ -75,7 +75,7 @@ final class PanelStore {
     /// (used by tests) cancels the previous loop instead of stacking another.
     private var languageObservationTask: Task<Void, Never>?
 
-    private init() {}
+    init() {}
 
     func bootstrap(
         modelContainer: ModelContainer,
