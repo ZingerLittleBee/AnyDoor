@@ -131,14 +131,45 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportInsertsNewShortcutAndResolvesPath() throws {
+    func testRestoreWaitsForRuntimeReconciliation() async throws {
+        let context = try makeContext()
+        var didReconcile = false
+        let service = BackupService(
+            context: context,
+            defaults: makeDefaults(),
+            appPathResolver: { _ in nil },
+            reconcileRuntime: {
+                await Task.yield()
+                didReconcile = true
+            }
+        )
+
+        let summary = try await service.restore(snapshot(shortcuts: [
+            AppShortcutDTO(
+                appBundleID: "com.example.App",
+                appName: "Example",
+                keyCode: 4,
+                modifierFlags: 256,
+                isEnabled: true,
+                isVisible: true,
+                displayOrder: 100
+            ),
+        ]))
+
+        XCTAssertTrue(didReconcile)
+        XCTAssertEqual(summary.shortcutsInserted, 1)
+    }
+
+    @MainActor
+    func testImportInsertsNewShortcutAndResolvesPath() async throws {
         let context = try makeContext()
         let service = BackupService(
             context: context, defaults: makeDefaults(),
-            appPathResolver: { id in id == "com.apple.Safari" ? "/Applications/Safari.app" : nil }
+            appPathResolver: { id in id == "com.apple.Safari" ? "/Applications/Safari.app" : nil },
+            reconcileRuntime: {}
         )
 
-        let summary = try service.importSnapshot(snapshot(shortcuts: [
+        let summary = try await service.restore(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.apple.Safari", appName: "Safari",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 100)
@@ -151,11 +182,11 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportInsertsShortcutWithEmptyPathWhenAppMissing() throws {
+    func testImportInsertsShortcutWithEmptyPathWhenAppMissing() async throws {
         let context = try makeContext()
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        let summary = try service.importSnapshot(snapshot(shortcuts: [
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.unknown.App", appName: "Unknown",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 100)
@@ -166,7 +197,7 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportUpdatesExistingShortcutByBundleIDAndReresolvesPath() throws {
+    func testImportUpdatesExistingShortcutByBundleIDAndReresolvesPath() async throws {
         let context = try makeContext()
         context.insert(KeyBinding(keyCode: 0, modifierFlags: 0,
                                   appBundleID: "com.apple.Safari", appName: "Old Safari",
@@ -176,9 +207,10 @@ final class BackupServiceTests: XCTestCase {
 
         let service = BackupService(
             context: context, defaults: makeDefaults(),
-            appPathResolver: { _ in "/Applications/Safari.app" }
+            appPathResolver: { _ in "/Applications/Safari.app" },
+            reconcileRuntime: {}
         )
-        let summary = try service.importSnapshot(snapshot(shortcuts: [
+        let summary = try await service.restore(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.apple.Safari", appName: "Safari",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 100)
@@ -195,7 +227,7 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportKeepsLocalOnlyShortcuts() throws {
+    func testImportKeepsLocalOnlyShortcuts() async throws {
         let context = try makeContext()
         context.insert(KeyBinding(keyCode: 5, modifierFlags: 256,
                                   appBundleID: "com.local.Only", appName: "Local",
@@ -204,8 +236,8 @@ final class BackupServiceTests: XCTestCase {
         try context.save()
 
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        _ = try service.importSnapshot(snapshot(shortcuts: [
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        _ = try await service.restore(snapshot(shortcuts: [
             AppShortcutDTO(appBundleID: "com.other.App", appName: "Other",
                            keyCode: 4, modifierFlags: 256,
                            isEnabled: true, isVisible: true, displayOrder: 200)
@@ -216,15 +248,15 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportUpdatesExistingPreferenceByItemKey() throws {
+    func testImportUpdatesExistingPreferenceByItemKey() async throws {
         let context = try makeContext()
         context.insert(BuiltinPreference(itemKey: "darkMode", isVisible: false,
                                          displayOrder: 999, keyCode: nil, modifierFlags: nil))
         try context.save()
 
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        let summary = try service.importSnapshot(snapshot(prefs: [
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(prefs: [
             BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
                                  displayOrder: 100, keyCode: 2, modifierFlags: 256)
         ]))
@@ -236,11 +268,11 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportSkipsPreferenceWithUnknownItemKey() throws {
+    func testImportSkipsPreferenceWithUnknownItemKey() async throws {
         let context = try makeContext()
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        let summary = try service.importSnapshot(snapshot(prefs: [
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(prefs: [
             BuiltinPreferenceDTO(itemKey: "darkMode", isVisible: true,
                                  displayOrder: 100, keyCode: nil, modifierFlags: nil)
         ]))
@@ -249,7 +281,7 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportUpdatesExistingQuicklinkByIDAndKeepsLocalOnlyRows() throws {
+    func testImportUpdatesExistingQuicklinkByIDAndKeepsLocalOnlyRows() async throws {
         let context = try makeContext()
         let importedID = UUID()
         let localOnlyID = UUID()
@@ -281,8 +313,8 @@ final class BackupServiceTests: XCTestCase {
         try context.save()
 
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        let summary = try service.importSnapshot(snapshot(quicklinks: [
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(quicklinks: [
             QuicklinkDTO(
                 id: importedID,
                 name: "GitHub Search",
@@ -317,7 +349,7 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportQuicklinkKeywordCollisionClearsLocalKeywordAndKeepsBothRows() throws {
+    func testImportQuicklinkKeywordCollisionClearsLocalKeywordAndKeepsBothRows() async throws {
         let context = try makeContext()
         let importedID = UUID()
         let localID = UUID()
@@ -331,8 +363,8 @@ final class BackupServiceTests: XCTestCase {
         try context.save()
 
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        let summary = try service.importSnapshot(snapshot(quicklinks: [
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(quicklinks: [
             QuicklinkDTO(
                 id: importedID,
                 name: "Imported",
@@ -355,12 +387,12 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportedQuicklinkHotkeyCompilesWithoutRelaunch() throws {
+    func testImportedQuicklinkHotkeyCompilesWithoutRelaunch() async throws {
         let context = try makeContext()
         let id = UUID()
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        _ = try service.importSnapshot(snapshot(quicklinks: [
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        _ = try await service.restore(snapshot(quicklinks: [
             QuicklinkDTO(
                 id: id,
                 name: "Docs",
@@ -387,7 +419,7 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testOldSchemaImportLeavesLocalQuicklinksUntouched() throws {
+    func testOldSchemaImportLeavesLocalQuicklinksUntouched() async throws {
         let context = try makeContext()
         let localID = UUID()
         context.insert(Quicklink(
@@ -412,8 +444,8 @@ final class BackupServiceTests: XCTestCase {
         """
         let oldSnapshot = try BackupCodec.decode(Data(json.utf8))
         let service = BackupService(context: context, defaults: makeDefaults(),
-                                    appPathResolver: { _ in nil })
-        _ = try service.importSnapshot(oldSnapshot)
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        _ = try await service.restore(oldSnapshot)
 
         let rows = try context.fetch(FetchDescriptor<Quicklink>())
         XCTAssertEqual(rows.count, 1)
@@ -422,12 +454,12 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportAppliesSettings() throws {
+    func testImportAppliesSettings() async throws {
         let context = try makeContext()
         let defaults = makeDefaults()
         let service = BackupService(context: context, defaults: defaults,
-                                    appPathResolver: { _ in nil })
-        let summary = try service.importSnapshot(snapshot(
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(
             settings: ["menuBar.iconVisible": .bool(false),
                        "dev.bybee.AnyDoor.language": .string("en")]
         ))
@@ -451,13 +483,13 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportWritesInstalledPluginSet() throws {
+    func testImportWritesInstalledPluginSet() async throws {
         let context = try makeContext()
         let defaults = makeDefaults()
         let service = BackupService(context: context, defaults: defaults,
-                                    appPathResolver: { _ in nil })
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
 
-        _ = try service.importSnapshot(snapshot(
+        _ = try await service.restore(snapshot(
             settings: [PluginRegistry.installStateKey: .stringArray(["hosts"])]
         ))
 
@@ -466,12 +498,12 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testImportSettingsAppliedCountExcludesNonWhitelistedKeys() throws {
+    func testImportSettingsAppliedCountExcludesNonWhitelistedKeys() async throws {
         let context = try makeContext()
         let defaults = makeDefaults()
         let service = BackupService(context: context, defaults: defaults,
-                                    appPathResolver: { _ in nil })
-        let summary = try service.importSnapshot(snapshot(
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(
             settings: ["menuBar.iconVisible": .bool(true),
                        "SUSkippedVersion": .string("9.9.9")]
         ))

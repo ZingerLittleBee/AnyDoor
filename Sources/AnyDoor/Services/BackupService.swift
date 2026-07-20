@@ -20,6 +20,7 @@ final class BackupService {
     private let context: ModelContext
     private let defaults: UserDefaults
     private let appPathResolver: (String) -> String?
+    private let reconcileRuntime: @MainActor () async throws -> Void
 
     /// - Parameter appPathResolver: bundleID → absolute path. Defaults to
     ///   `NSWorkspace`. Injected as `{ _ in nil }` in tests.
@@ -28,11 +29,15 @@ final class BackupService {
         defaults: UserDefaults = .standard,
         appPathResolver: @escaping (String) -> String? = { bundleID in
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path
+        },
+        reconcileRuntime: @escaping @MainActor () async throws -> Void = {
+            await BackupService.reconcileLiveRuntime()
         }
     ) {
         self.context = context
         self.defaults = defaults
         self.appPathResolver = appPathResolver
+        self.reconcileRuntime = reconcileRuntime
     }
 
     // MARK: - Export
@@ -101,10 +106,19 @@ final class BackupService {
         )
     }
 
-    // MARK: - Import (merge; import wins per key, local-only rows preserved)
+    // MARK: - Restore (merge; import wins per key, local-only rows preserved)
 
+    /// Apply a snapshot and wait until every live subsystem has converged on
+    /// the imported state. Callers cannot observe a successful restore while
+    /// plugin lifecycle or derived surfaces are still stale.
     @discardableResult
-    func importSnapshot(_ snapshot: BackupSnapshot) throws -> ImportSummary {
+    func restore(_ snapshot: BackupSnapshot) async throws -> ImportSummary {
+        let summary = try apply(snapshot)
+        try await reconcileRuntime()
+        return summary
+    }
+
+    private func apply(_ snapshot: BackupSnapshot) throws -> ImportSummary {
         var summary = ImportSummary(shortcutsUpdated: 0, shortcutsInserted: 0,
                                     preferencesUpdated: 0, quicklinksUpdated: 0,
                                     quicklinksInserted: 0, settingsApplied: 0)
@@ -204,10 +218,9 @@ final class BackupService {
         return summary
     }
 
-    /// Re-read settings into the services whose setters carry side effects that
-    /// raw UserDefaults writes bypass. Call after `importSnapshot` on the live
-    /// app (not needed in tests). Also rebuilds the panel + hotkey snapshots.
-    func reconcileAfterImport() async {
+    /// Re-read settings into the modules whose setters carry side effects that
+    /// raw UserDefaults writes bypass, then rebuild derived surfaces.
+    private static func reconcileLiveRuntime() async {
         CommandPaletteService.shared.reloadFromDefaults()
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()

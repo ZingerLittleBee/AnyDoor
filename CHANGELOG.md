@@ -52,6 +52,8 @@ versioning.
 - Native Plugin lifecycle and surface composition now live behind one
   `PluginRegistry` boundary, with consistent activation ordering across cold
   launch, install, uninstall, and backup import.
+- Backup restore now reports success only after imported settings, plugin
+  lifecycle, cleanup, panel rows, and hotkeys have all converged.
 
 ## [3.7.0] - 2026-07-12
 

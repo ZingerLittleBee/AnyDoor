@@ -316,8 +316,9 @@ All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
   and refresh hotkeys.
   A throw propagates to the UI and nothing changed.
 - **Backup import.** `plugins.installed` is whitelisted in
-  `SyncSettingsRegistry` (as `.stringArray`). `BackupService.reconcileAfterImport()`
-  awaits `PluginRegistry.shared.reconcileAfterImport()`: read the imported
+  `SyncSettingsRegistry` (as `.stringArray`). `BackupService.restore(_:)`
+  writes the snapshot and then awaits the live-runtime reconciliation, which
+  includes `PluginRegistry.shared.reconcileAfterImport()`: read the imported
   set from defaults, remove plugins before adding replacements, and run the
   **real lifecycle** for every delta (`install` per added id — so `activate`
   runs and helper registration happens only as a consequence of install,
