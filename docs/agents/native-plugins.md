@@ -108,8 +108,6 @@ marked **required** have no default.
 | `performPaletteOption(parent:id:) async` | default no-op | Runs a committed second-level option, routed back by descriptor id — Core never sees the action. |
 | `paletteRowSources: [any PluginRowSource]` | default `[]` | Root-level palette row sources (section 5). |
 | `panelPopover(for:) -> PluginPanelPopover?` | default `nil` | Menu-panel hover popover for a claimed submenu command. Resolved per-mount through `PluginRegistry.panelPopover(for:)`. |
-| `presentWindow(for:)` | default no-op | Presents the plugin's window for a claimed window-bearing command. **Currently dormant**: no Core call site exists yet (see section 9); pilots open their windows from their own providers/popovers/palette options. |
-| `settingsSection: AnyView?` | default `nil` | **Currently dormant**: declared by the protocol, but no Core view renders it yet (section 9). |
 | `nonisolated static modelSchemaTypes: [any PersistentModel.Type]` | default `[]` | SwiftData types the plugin owns. `nonisolated static` because `AppDelegate.init()` composes the schema **before any MainActor plugin instance exists**, and unconditionally — install state never changes the schema. This is the data-retention mechanism. |
 | `hasUsageTrace(in: ModelContext) throws -> Bool` | **yes** | Evaluated once by `PluginUsageMigration` to auto-install for upgrading users. Hosts: `HostProfile` rows exist **or** `privilegedHelper.readiness() != .unavailable` (a registered daemon needs its managing UI). Image Conversion: `ImageConversionRecord` rows exist. A throw aborts the whole migration and it retries next launch. |
 | `activate()` | default no-op | On `install(_:)` and on every launch while installed (from `bootstrap`), **before** surfaces register. Wire stores to `host.modelContainer` here; install-time permission acts live here too (Hosts calls `privilegedHelper.ensureRegistered()` — an uninstalled plugin requests no permissions, PRD US14). |
@@ -438,13 +436,6 @@ named test, which is the point of them.
   composition root (permanent, sanctioned) and the clipboard-history convert
   context menu (`ClipboardWallWindowController`) — the latter is the PRD's
   single carved-out debt; revisit when that surface changes.
-- **`presentWindow(for:)` and `settingsSection` are dormant surfaces.** Both
-  are declared on `NativePlugin` (PRD Implementation Decisions) but as of
-  2026-07-17 no Core code calls `presentWindow` or renders `settingsSection`
-  (verified by grep; only `NativePluginContractTests` touches them). Pilots
-  open windows through their own providers/popovers/palette options instead.
-  If you wire a Core call site, keep it generic (route via `PluginRegistry`,
-  never a named plugin).
 - **`HostProfileRowSource` carries a stale doc comment** ("Registered by the
   Core while Hosts still lives in it…") from before the extraction; the Hosts
   plugin registers it now.

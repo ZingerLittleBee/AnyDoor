@@ -1,5 +1,4 @@
 import SwiftData
-import SwiftUI
 
 /// Stable identity of a Native Plugin. The raw value is persisted (install
 /// state, config backup) and must never change once shipped.
@@ -72,14 +71,6 @@ public protocol NativePlugin: AnyObject {
     /// nil when that command has no popover.
     func panelPopover(for command: BuiltinItem) -> PluginPanelPopover?
 
-    /// Presents the plugin's window for a claimed window-bearing command
-    /// (e.g. an editor window); does nothing for commands without one.
-    func presentWindow(for command: BuiltinItem)
-
-    /// The section this plugin contributes to the Settings window, or nil
-    /// when it has no settings of its own.
-    var settingsSection: AnyView? { get }
-
     /// SwiftData model types owned by this plugin. Collected once at
     /// ModelContainer creation — the schema stays static regardless of
     /// install state (ADR-0005), which is what keeps user data retained
@@ -132,10 +123,6 @@ extension NativePlugin {
     public var paletteRowSources: [any PluginRowSource] { [] }
 
     public func panelPopover(for command: BuiltinItem) -> PluginPanelPopover? { nil }
-
-    public func presentWindow(for command: BuiltinItem) {}
-
-    public var settingsSection: AnyView? { nil }
 
     public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] { [] }
 

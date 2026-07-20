@@ -56,6 +56,8 @@ versioning.
   lifecycle, cleanup, panel rows, and hotkeys have all converged.
 - Native Plugins now have one compile-time catalog for both SwiftData schema
   participation and runtime construction.
+- Removed unused speculative window and Settings requirements from the Native
+  Plugin interface; new surfaces will be added only with a real Core caller.
 
 ## [3.7.0] - 2026-07-12
 

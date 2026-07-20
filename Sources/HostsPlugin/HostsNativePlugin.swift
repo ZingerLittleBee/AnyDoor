@@ -101,11 +101,6 @@ public final class HostsNativePlugin: NativePlugin {
         )
     }
 
-    public func presentWindow(for command: BuiltinItem) {
-        guard command == .hostsManager else { return }
-        HostsEditorWindowController.shared.show(manager: manager)
-    }
-
     // MARK: - Data & migration
 
     public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] {

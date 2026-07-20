@@ -40,11 +40,6 @@ public final class ImageConversionNativePlugin: NativePlugin {
         try context.fetchCount(FetchDescriptor<ImageConversionRecord>()) > 0
     }
 
-    public func presentWindow(for command: BuiltinItem) {
-        guard command == .imageConversion else { return }
-        Task { await ImageConversionWindowController.shared.toggle() }
-    }
-
     public func activate() {
         ImageConversionHistoryStore.shared.configure(modelContainer: host.modelContainer)
         ImageConversionWindowController.activateForInstall()
