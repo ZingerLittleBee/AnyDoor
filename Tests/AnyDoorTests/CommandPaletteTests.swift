@@ -142,12 +142,16 @@ final class CommandPaletteTests: XCTestCase {
 
     @MainActor
     func testPluginRowSourceMakesStableID() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "hosts"),
+            localID: "profiles"
+        )
         let descriptor = PluginRowDescriptor(
             id: "profile-1", title: "Dev", symbol: "circle", commit: .closeThenAct
         )
         XCTAssertEqual(
-            PanelEntry.id(for: .pluginRow(sourceID: "hosts.profiles", descriptor: descriptor)),
-            "pluginRow:hosts.profiles:profile-1"
+            PanelEntry.id(for: .pluginRow(sourceKey: sourceKey, descriptor: descriptor)),
+            "pluginRow:hosts:profiles:profile-1"
         )
     }
 
@@ -463,6 +467,10 @@ final class CommandPaletteTests: XCTestCase {
         host: PluginHostContext? = nil
     ) -> CommandPaletteExtensions.RowSourceRegistration {
         CommandPaletteExtensions.RowSourceRegistration(
+            key: PluginRowSourceKey(
+                pluginID: HostsNativePlugin.pluginID,
+                localID: HostProfileRowSource.sourceID
+            ),
             sectionTitleKey: "commandPalette.section.hosts",
             source: HostProfileRowSource(
                 host: host,

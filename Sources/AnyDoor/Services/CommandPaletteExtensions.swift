@@ -38,6 +38,7 @@ final class CommandPaletteExtensions {
     /// string-catalog key of the section title its rows appear under
     /// (hosts profiles today).
     struct RowSourceRegistration {
+        let key: PluginRowSourceKey
         let sectionTitleKey: String
         let source: any PluginRowSource
     }
@@ -77,21 +78,23 @@ final class CommandPaletteExtensions {
 
     /// Registers a root-level row source; its rows surface in a section
     /// titled by the source's `sectionTitleKey` when they match the query.
-    /// Re-registering the same source id replaces the previous registration.
-    func registerRowSource(_ source: any PluginRowSource) {
-        rowSources.removeAll { $0.source.id == source.id }
+    /// Re-registering the same plugin-local source replaces the previous
+    /// registration without affecting another plugin using the same local id.
+    func registerRowSource(_ source: any PluginRowSource, ownerID: NativePluginID) {
+        let key = PluginRowSourceKey(pluginID: ownerID, localID: source.id)
+        rowSources.removeAll { $0.key == key }
         rowSources.append(
-            RowSourceRegistration(sectionTitleKey: source.sectionTitleKey, source: source)
+            RowSourceRegistration(key: key, sectionTitleKey: source.sectionTitleKey, source: source)
         )
     }
 
-    func unregisterRowSource(id: String) {
-        rowSources.removeAll { $0.source.id == id }
+    func unregisterRowSource(key: PluginRowSourceKey) {
+        rowSources.removeAll { $0.key == key }
     }
 
-    /// The source owning `id`, used to perform a committed plugin row.
-    func rowSource(withID id: String) -> (any PluginRowSource)? {
-        rowSources.first { $0.source.id == id }?.source
+    /// The source owning `key`, used to perform a committed plugin row.
+    func rowSource(for key: PluginRowSourceKey) -> (any PluginRowSource)? {
+        rowSources.first { $0.key == key }?.source
     }
 
     // MARK: - Plugin contributions (one registration unit per plugin)
@@ -121,7 +124,7 @@ final class CommandPaletteExtensions {
             ))
         }
         for source in plugin.paletteRowSources {
-            registerRowSource(source)
+            registerRowSource(source, ownerID: plugin.id)
         }
     }
 
@@ -131,7 +134,9 @@ final class CommandPaletteExtensions {
             unregisterOptionParent(for: parent)
         }
         for source in plugin.paletteRowSources {
-            unregisterRowSource(id: source.id)
+            unregisterRowSource(
+                key: PluginRowSourceKey(pluginID: plugin.id, localID: source.id)
+            )
         }
     }
 }

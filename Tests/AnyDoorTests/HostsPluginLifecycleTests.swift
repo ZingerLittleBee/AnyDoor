@@ -62,6 +62,13 @@ private final class RecordingPluginHost: PluginHostServices {
 @MainActor
 final class HostsPluginLifecycleTests: XCTestCase {
 
+    private var rowSourceKey: PluginRowSourceKey {
+        PluginRowSourceKey(
+            pluginID: HostsNativePlugin.pluginID,
+            localID: HostProfileRowSource.sourceID
+        )
+    }
+
     private struct Fixture {
         let plugin: HostsNativePlugin
         let manager: HostsManager
@@ -157,7 +164,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
                        "helper registration is an install-time act")
         XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
         XCTAssertTrue(f.palette.listsAtRoot(.hostsManager))
-        XCTAssertNotNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
+        XCTAssertNotNil(f.palette.rowSource(for: rowSourceKey))
         XCTAssertNotNil(f.registry.panelPopover(for: .hostsManager))
     }
 
@@ -186,7 +193,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertEqual(f.host.helper.releaseCalls, 1)
         // Surfaces are gone.
         XCTAssertFalse(f.palette.isOptionParent(.hostsManager))
-        XCTAssertNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
+        XCTAssertNil(f.palette.rowSource(for: rowSourceKey))
         XCTAssertNil(f.registry.panelPopover(for: .hostsManager))
         XCTAssertFalse(f.registry.isAvailable(.hostsManager))
     }
@@ -251,7 +258,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertTrue(f.registry.isInstalled(f.plugin.id))
         XCTAssertTrue(f.registry.isAvailable(.hostsManager))
         XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
-        XCTAssertNotNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
+        XCTAssertNotNil(f.palette.rowSource(for: rowSourceKey))
         XCTAssertNotNil(f.registry.panelPopover(for: .hostsManager))
         // The hosts file and the activation state are untouched either way.
         XCTAssertEqual(f.writer.writeCount, 1)
@@ -283,7 +290,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
         XCTAssertTrue(f.registry.isInstalled(f.plugin.id))
         XCTAssertTrue(f.registry.isAvailable(.hostsManager))
         XCTAssertTrue(f.palette.isOptionParent(.hostsManager))
-        XCTAssertNotNil(f.palette.rowSource(withID: HostProfileRowSource.sourceID))
+        XCTAssertNotNil(f.palette.rowSource(for: rowSourceKey))
         // The retained row is back on every surface, still active (US8: the
         // exact previous setup) — no re-authorization, no hosts write.
         XCTAssertEqual(f.manager.profiles.map(\.name), ["Dev"])

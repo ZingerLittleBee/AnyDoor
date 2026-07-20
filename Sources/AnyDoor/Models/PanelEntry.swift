@@ -47,7 +47,7 @@ struct PanelEntry: Identifiable, Hashable {
         case devToolScopeSuggestion(DevToolScope)      // Command-palette-only: keyword-prefix tool hint
         case conversion(ConversionResult)              // Command-palette-only: unit/time-zone/currency conversion
         case paletteOption(id: String)                 // Command-palette-only: a drilled-in second-level option
-        case pluginRow(sourceID: String, descriptor: PluginRowDescriptor) // Command-palette-only: a plugin-contributed row (ADR-0007)
+        case pluginRow(sourceKey: PluginRowSourceKey, descriptor: PluginRowDescriptor) // Command-palette-only: a plugin-contributed row (ADR-0007)
         case quicklink(id: UUID)                       // Command-palette-only: user-defined Link
         case quicklinkTemplate(id: UUID)               // Command-palette-only: user-defined Search Template
         case quicklinkArgument(id: UUID, argument: String) // Command-palette-only: synthesized template+argument row
@@ -108,8 +108,8 @@ struct PanelEntry: Identifiable, Hashable {
         case .devToolScopeSuggestion(let scope):  return "devToolScope:\(scope.rawValue)"
         case .conversion(let result):             return "conversion:\(result.kind.rawValue):\(result.copyText):\(result.display)"
         case .paletteOption(let id):              return "option:\(id)"
-        case .pluginRow(let sourceID, let descriptor):
-            return "pluginRow:\(sourceID):\(descriptor.id)"
+        case .pluginRow(let sourceKey, let descriptor):
+            return "pluginRow:\(sourceKey.pluginID.rawValue):\(sourceKey.localID):\(descriptor.id)"
         case .quicklink(let id):                  return "quicklink:\(id.uuidString)"
         case .quicklinkTemplate(let id):          return "quicklinkTemplate:\(id.uuidString)"
         case .quicklinkArgument(let id, let argument):

@@ -551,12 +551,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .generic:
                 ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
             }
-        case .pluginRowStayOpen(let sourceID, let rowID):
-            guard let source = CommandPaletteExtensions.shared.rowSource(withID: sourceID) else { return }
+        case .pluginRowStayOpen(let sourceKey, let rowID):
+            guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
             Task { await source.performRow(id: rowID) }
-        case .pluginRowCloseThenAct(let sourceID, let rowID):
+        case .pluginRowCloseThenAct(let sourceKey, let rowID):
             close()
-            guard let source = CommandPaletteExtensions.shared.rowSource(withID: sourceID) else { return }
+            guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
             Task { await source.performRow(id: rowID) }
         case .openQuicklink(let id):
             close()

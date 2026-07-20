@@ -29,7 +29,7 @@ enum CommandPaletteCommitIntent: Equatable {
     case enterQuicklinkArgument(id: UUID)
     /// A plugin row that declared `.stayOpen`: run it through its owning
     /// `PluginRowSource` while the palette remains visible.
-    case pluginRowStayOpen(sourceID: String, rowID: String)
+    case pluginRowStayOpen(sourceKey: PluginRowSourceKey, rowID: String)
 
     // Close-then-act intents — the palette dismisses first.
     case launchAppShortcut(id: UUID)
@@ -39,7 +39,7 @@ enum CommandPaletteCommitIntent: Equatable {
     case copyToClipboard(text: String, toast: CopyToast)
     /// A plugin row that declared `.closeThenAct`: dismiss, then run it
     /// through its owning `PluginRowSource` (e.g. toggle a hosts profile).
-    case pluginRowCloseThenAct(sourceID: String, rowID: String)
+    case pluginRowCloseThenAct(sourceKey: PluginRowSourceKey, rowID: String)
     case openQuicklink(id: UUID)
     case openQuicklinkArgument(id: UUID, argument: String)
     /// Close without acting (a submenu/brightness builtin that isn't an
@@ -86,14 +86,14 @@ enum CommandPaletteCommitIntent: Equatable {
             return .copyToClipboard(text: result.output, toast: .generic)
         case .conversion(let result):
             return .copyToClipboard(text: result.copyText, toast: .generic)
-        case .pluginRow(let sourceID, let descriptor):
+        case .pluginRow(let sourceKey, let descriptor):
             // Mapped by the descriptor's declared semantics alone (ADR-0007);
             // exhaustive, so a new semantic must declare its intent here.
             switch descriptor.commit {
             case .stayOpen:
-                return .pluginRowStayOpen(sourceID: sourceID, rowID: descriptor.id)
+                return .pluginRowStayOpen(sourceKey: sourceKey, rowID: descriptor.id)
             case .closeThenAct:
-                return .pluginRowCloseThenAct(sourceID: sourceID, rowID: descriptor.id)
+                return .pluginRowCloseThenAct(sourceKey: sourceKey, rowID: descriptor.id)
             }
         case .quicklink(let id):
             return .openQuicklink(id: id)

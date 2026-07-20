@@ -77,7 +77,7 @@ final class PluginPaletteContributionTests: XCTestCase {
         XCTAssertTrue(registry.isOptionParent(.hostsManager))
         XCTAssertTrue(registry.listsAtRoot(.hostsManager),
                       "a plugin submenu option parent lists as a root command row")
-        XCTAssertNotNil(registry.rowSource(withID: "fixture.rows"))
+        XCTAssertNotNil(registry.rowSource(for: rowSourceKey(for: plugin)))
 
         let options = await registry.options(for: .hostsManager)
         XCTAssertEqual(options?.map(\.id), ["opt-active", "opt-plain"])
@@ -100,7 +100,7 @@ final class PluginPaletteContributionTests: XCTestCase {
 
         XCTAssertFalse(registry.isOptionParent(.hostsManager))
         XCTAssertFalse(registry.listsAtRoot(.hostsManager))
-        XCTAssertNil(registry.rowSource(withID: "fixture.rows"))
+        XCTAssertNil(registry.rowSource(for: rowSourceKey(for: plugin)))
         let options = await registry.options(for: .hostsManager)
         XCTAssertNil(options)
     }
@@ -112,6 +112,32 @@ final class PluginPaletteContributionTests: XCTestCase {
         registry.registerContributions(of: plugin)
 
         XCTAssertEqual(registry.rowSources.first?.sectionTitleKey, "commandPalette.section.hosts")
+    }
+
+    @MainActor
+    func testRowSourcesWithTheSameLocalIDRemainIsolatedByPlugin() {
+        let registry = CommandPaletteExtensions()
+        let first = FixturePlugin.FixtureRowSource()
+        let second = FixturePlugin.FixtureRowSource()
+        let firstKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "test.first"),
+            localID: first.id
+        )
+        let secondKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "test.second"),
+            localID: second.id
+        )
+
+        registry.registerRowSource(first, ownerID: firstKey.pluginID)
+        registry.registerRowSource(second, ownerID: secondKey.pluginID)
+
+        XCTAssertTrue(registry.rowSource(for: firstKey) === first)
+        XCTAssertTrue(registry.rowSource(for: secondKey) === second)
+
+        registry.unregisterRowSource(key: firstKey)
+
+        XCTAssertNil(registry.rowSource(for: firstKey))
+        XCTAssertTrue(registry.rowSource(for: secondKey) === second)
     }
 
     // MARK: - Registry owns palette contribution publication
@@ -132,11 +158,11 @@ final class PluginPaletteContributionTests: XCTestCase {
 
         registry.install(plugin.id)
         XCTAssertTrue(harness.paletteExtensions.isOptionParent(.hostsManager))
-        XCTAssertNotNil(harness.paletteExtensions.rowSource(withID: "fixture.rows"))
+        XCTAssertNotNil(harness.paletteExtensions.rowSource(for: rowSourceKey(for: plugin)))
 
         try await registry.uninstall(plugin.id)
         XCTAssertFalse(harness.paletteExtensions.isOptionParent(.hostsManager))
-        XCTAssertNil(harness.paletteExtensions.rowSource(withID: "fixture.rows"))
+        XCTAssertNil(harness.paletteExtensions.rowSource(for: rowSourceKey(for: plugin)))
     }
 
     // MARK: - Panel popover lookup gates on the installed set
@@ -162,6 +188,11 @@ final class PluginPaletteContributionTests: XCTestCase {
 
         registry.install(plugin.id)
         XCTAssertNotNil(registry.panelPopover(for: .hostsManager))
+    }
+
+    @MainActor
+    private func rowSourceKey(for plugin: FixturePlugin) -> PluginRowSourceKey {
+        PluginRowSourceKey(pluginID: plugin.id, localID: plugin.rowSource.id)
     }
 }
 

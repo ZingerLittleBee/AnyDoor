@@ -148,27 +148,35 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
 
     @MainActor
     func testPluginRowMapsDeclaredCloseThenActSemantics() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "hosts"),
+            localID: "profiles"
+        )
         let descriptor = PluginRowDescriptor(
             id: "profile-1", title: "Dev", symbol: "circle", commit: .closeThenAct
         )
         XCTAssertEqual(
             CommandPaletteCommitIntent.classify(
-                .pluginRow(sourceID: "hosts.profiles", descriptor: descriptor)
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
             ),
-            .pluginRowCloseThenAct(sourceID: "hosts.profiles", rowID: "profile-1")
+            .pluginRowCloseThenAct(sourceKey: sourceKey, rowID: "profile-1")
         )
     }
 
     @MainActor
     func testPluginRowMapsDeclaredStayOpenSemantics() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "test.plugin"),
+            localID: "some.source"
+        )
         let descriptor = PluginRowDescriptor(
             id: "row-2", title: "Row", symbol: "circle", commit: .stayOpen
         )
         XCTAssertEqual(
             CommandPaletteCommitIntent.classify(
-                .pluginRow(sourceID: "some.source", descriptor: descriptor)
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
             ),
-            .pluginRowStayOpen(sourceID: "some.source", rowID: "row-2")
+            .pluginRowStayOpen(sourceKey: sourceKey, rowID: "row-2")
         )
     }
 

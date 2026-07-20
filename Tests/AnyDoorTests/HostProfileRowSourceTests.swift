@@ -94,7 +94,7 @@ final class HostProfileRowSourceTests: XCTestCase {
     func testCoreRegistryDoesNotRegisterTheHostsRowSource() {
         // The registration moved to the Hosts plugin's install lifecycle
         // (see HostsPluginLifecycleTests); the Core declares no hosts rows.
-        XCTAssertNil(CommandPaletteExtensions.shared.rowSource(withID: HostProfileRowSource.sourceID))
+        XCTAssertNil(CommandPaletteExtensions.shared.rowSource(for: hostsRowSourceKey))
     }
 
     @MainActor
@@ -103,13 +103,21 @@ final class HostProfileRowSourceTests: XCTestCase {
         XCTAssertTrue(registry.rowSources.isEmpty)
 
         let source = HostProfileRowSource(profiles: { [] }, reload: {}, setActive: { _, _ in })
-        registry.registerRowSource(source)
+        registry.registerRowSource(source, ownerID: HostsNativePlugin.pluginID)
 
         XCTAssertEqual(registry.rowSources.count, 1)
-        XCTAssertTrue(registry.rowSource(withID: HostProfileRowSource.sourceID) === source)
+        XCTAssertTrue(registry.rowSource(for: hostsRowSourceKey) === source)
 
-        registry.unregisterRowSource(id: HostProfileRowSource.sourceID)
+        registry.unregisterRowSource(key: hostsRowSourceKey)
         XCTAssertTrue(registry.rowSources.isEmpty)
-        XCTAssertNil(registry.rowSource(withID: HostProfileRowSource.sourceID))
+        XCTAssertNil(registry.rowSource(for: hostsRowSourceKey))
+    }
+
+    @MainActor
+    private var hostsRowSourceKey: PluginRowSourceKey {
+        PluginRowSourceKey(
+            pluginID: HostsNativePlugin.pluginID,
+            localID: HostProfileRowSource.sourceID
+        )
     }
 }

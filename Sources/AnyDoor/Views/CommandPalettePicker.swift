@@ -380,7 +380,7 @@ final class CommandPaletteState {
                 .enumerated()
                 .map { index, descriptor in
                     Self.pluginRowEntry(
-                        sourceID: registration.source.id,
+                        sourceKey: registration.key,
                         descriptor: descriptor,
                         displayOrder: Double(index)
                     )
@@ -391,11 +391,11 @@ final class CommandPaletteState {
     }
 
     private static func pluginRowEntry(
-        sourceID: String,
+        sourceKey: PluginRowSourceKey,
         descriptor: PluginRowDescriptor,
         displayOrder: Double
     ) -> PanelEntry {
-        let source = PanelEntry.Source.pluginRow(sourceID: sourceID, descriptor: descriptor)
+        let source = PanelEntry.Source.pluginRow(sourceKey: sourceKey, descriptor: descriptor)
         return PanelEntry(
             id: PanelEntry.id(for: source),
             source: source,

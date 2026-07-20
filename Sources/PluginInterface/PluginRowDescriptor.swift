@@ -1,11 +1,28 @@
 import Foundation
 
+/// Host-scoped identity for a plugin-contributed palette row source.
+///
+/// A plugin only declares its local `PluginRowSource.id`. Core combines that
+/// value with the owning plugin's stable identity at registration time, so
+/// unrelated plugins may use the same local source id without replacing or
+/// routing to each other.
+public struct PluginRowSourceKey: Hashable, Sendable {
+    public let pluginID: NativePluginID
+    public let localID: String
+
+    public init(pluginID: NativePluginID, localID: String) {
+        self.pluginID = pluginID
+        self.localID = localID
+    }
+}
+
 /// A command-palette row contributed by a Native Plugin (ADR-0007).
 ///
 /// Plugins never build `PanelEntry` — that type and its `Source` payloads are
 /// Core-internal. A plugin declares its rows as pure descriptors instead;
 /// Core maps each descriptor onto the generic `Source.pluginRow` case and
-/// routes a committed row back to its owning `PluginRowSource` by `id`, so
+/// routes a committed row back to its owning `PluginRowSource` by its
+/// host-scoped key, so
 /// Core control flow never names the plugin behind a row.
 public struct PluginRowDescriptor: Hashable, Sendable {
     /// What committing the row means to the palette. The commit-intent
@@ -58,8 +75,9 @@ public struct PluginRowDescriptor: Hashable, Sendable {
 /// plugin-named code path.
 @MainActor
 public protocol PluginRowSource: AnyObject {
-    /// Stable identity of this row source; commit routing and
-    /// unregistration key on it.
+    /// Stable identity within the owning plugin. Core namespaces this value
+    /// with the plugin id for registration, unregistration, and commit
+    /// routing.
     var id: String { get }
 
     /// String-catalog key for the palette section header this source's rows
