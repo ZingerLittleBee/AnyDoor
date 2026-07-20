@@ -29,6 +29,7 @@ final class HotkeyCoordinator {
     private let quicklinkResolver: @MainActor (UUID) -> Quicklink?
     private let quicklinkOpener: @MainActor (Quicklink) -> Void
     private let quicklinkArgumentPresenter: @MainActor (UUID, String, String, String?) -> Void
+    private let paletteHotkeyResolver: @MainActor () -> HotkeyDescriptor?
     private let snapshotUpdater: @MainActor ([HotkeySnapshot]) -> Void
 
     init(
@@ -42,6 +43,9 @@ final class HotkeyCoordinator {
                 openWithBundleID: $3
             )
         },
+        paletteHotkeyResolver: @escaping @MainActor () -> HotkeyDescriptor? = {
+            CommandPaletteService.shared.hotkey
+        },
         snapshotUpdater: @escaping @MainActor ([HotkeySnapshot]) -> Void = {
             HotkeyService.shared.updateSnapshots($0)
         }
@@ -49,6 +53,7 @@ final class HotkeyCoordinator {
         self.quicklinkResolver = quicklinkResolver
         self.quicklinkOpener = quicklinkOpener
         self.quicklinkArgumentPresenter = quicklinkArgumentPresenter
+        self.paletteHotkeyResolver = paletteHotkeyResolver
         self.snapshotUpdater = snapshotUpdater
     }
 
@@ -81,7 +86,7 @@ final class HotkeyCoordinator {
             bindings: bindings,
             prefs: prefs,
             quicklinks: quicklinks,
-            paletteHotkey: CommandPaletteService.shared.hotkey,
+            paletteHotkey: paletteHotkeyResolver(),
             availableCommands: availableCommands()
         )
         snapshotUpdater(snapshots)
@@ -93,8 +98,20 @@ final class HotkeyCoordinator {
     @discardableResult
     func resolveRetainedPluginHotkeyConflicts(
         for returningCommands: Set<BuiltinItem>,
+        activeCommands: Set<BuiltinItem>
+    ) -> Int {
+        resolveRetainedPluginHotkeyConflicts(
+            for: returningCommands,
+            activeCommands: activeCommands,
+            paletteHotkey: paletteHotkeyResolver()
+        )
+    }
+
+    @discardableResult
+    func resolveRetainedPluginHotkeyConflicts(
+        for returningCommands: Set<BuiltinItem>,
         activeCommands: Set<BuiltinItem>,
-        paletteHotkey: HotkeyDescriptor? = CommandPaletteService.shared.hotkey
+        paletteHotkey: HotkeyDescriptor?
     ) -> Int {
         guard let container = modelContainer else { return 0 }
         let context = container.mainContext

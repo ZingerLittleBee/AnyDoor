@@ -59,9 +59,9 @@ final class HostsEditorViewTests: XCTestCase {
         let modeButton = editor[modeButtonStart..<selectedProfileStart]
 
         XCTAssertLessThan(
-            try XCTUnwrap(modeButton.range(of: "Button(L(.hostsActionSave))")?.lowerBound),
+            try XCTUnwrap(modeButton.range(of: "Button(L(host, .hostsActionSave))")?.lowerBound),
             try XCTUnwrap(
-                modeButton.range(of: "Button(L(.hostsActionCancel), role: .cancel) { cancelEditing() }")?
+                modeButton.range(of: "Button(L(host, .hostsActionCancel), role: .cancel) { cancelEditing() }")?
                     .lowerBound
             )
         )

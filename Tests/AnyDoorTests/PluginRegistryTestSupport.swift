@@ -44,6 +44,7 @@ func makePluginRegistryTestHarness() -> PluginRegistryTestHarness {
         quicklinkResolver: { _ in nil },
         quicklinkOpener: { _ in },
         quicklinkArgumentPresenter: { _, _, _, _ in },
+        paletteHotkeyResolver: { nil },
         snapshotUpdater: { snapshotRecorder.record($0) }
     )
     let registry = PluginRegistry(
