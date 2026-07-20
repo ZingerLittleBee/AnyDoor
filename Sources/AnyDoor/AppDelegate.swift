@@ -4,8 +4,6 @@ import SwiftData
 import SwiftUI
 import OSLog
 import AskForPermission
-import HostsPlugin
-import ImageConversionPlugin
 import Sparkle
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
@@ -53,8 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
                     TranslationRecord.self, Quicklink.self,
                 ]
-                + ImageConversionNativePlugin.modelSchemaTypes
-                + HostsNativePlugin.modelSchemaTypes
+                + NativePluginCatalog.modelSchemaTypes
             )
             modelContainer = try ModelContainer(for: schema, configurations: config)
 
@@ -107,10 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // later lifecycle changes. Core control flow names no plugin beyond
         // this list (ADR-0007).
         let pluginHost = CorePluginHost(modelContainer: modelContainer)
-        let plugins: [any NativePlugin] = [
-            ImageConversionNativePlugin(host: pluginHost),
-            HostsNativePlugin(host: pluginHost),
-        ]
+        let plugins = NativePluginCatalog.makePlugins(host: pluginHost)
         // One-time usage-trace migration writes the install state directly and
         // must precede the bootstrap, which activates the migrated-installed
         // plugins through the normal launch path.

@@ -12,7 +12,7 @@ import SwiftUI
 public final class HostsNativePlugin: NativePlugin {
 
     /// Stable persisted identity; never change once shipped.
-    public static let pluginID = NativePluginID(rawValue: "hosts")
+    nonisolated public static let pluginID = NativePluginID(rawValue: "hosts")
 
     public let id = HostsNativePlugin.pluginID
 

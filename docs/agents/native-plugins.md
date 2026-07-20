@@ -248,7 +248,8 @@ claims.
   descriptors, committing via `performPaletteOption`) and registers each
   `paletteRowSources` element. `unregisterContributions(of:)` reverts both.
   `PluginRegistry` owns registration and removal across launch, Install, and
-  Uninstall; `AppDelegate` only supplies the plugin list and Core providers.
+  Uninstall; `NativePluginCatalog` supplies the plugin list and schema while
+  `AppDelegate` supplies only the host and Core providers.
   Root plugin rows flow through `PanelEntry.Source.pluginRow(sourceID:descriptor:)`;
   `CommandPaletteCommitIntent.classify` maps them exhaustively by declared
   `CommitSemantics` (`.stayOpen` → `.pluginRowStayOpen`, `.closeThenAct` →
@@ -292,11 +293,10 @@ claims.
 
 All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
 
-- **Launch.** `init()`: schema = 5 Core `@Model` types
-  `+ ImageConversionNativePlugin.modelSchemaTypes + HostsNativePlugin.modelSchemaTypes`
-  (unconditional). `applicationDidFinishLaunching`: build one
-  `CorePluginHost`, construct the plugin list
-  (`[ImageConversionNativePlugin(host:), HostsNativePlugin(host:)]`), then —
+- **Launch.** `init()`: schema = 5 Core `@Model` types plus
+  `NativePluginCatalog.modelSchemaTypes` (unconditional).
+  `applicationDidFinishLaunching`: build one `CorePluginHost`, ask the same
+  catalog to construct the plugin list, then —
   **order matters** — `PluginUsageMigration.runIfNeeded(plugins:in:)` first,
   `PluginRegistry.shared.bootstrap(plugins:modelContainer:coreProviders:)`
   second. Bootstrap reads the possibly-just-migrated install state, starts
@@ -362,12 +362,11 @@ named test, which is the point of them.
    `deactivate` must be written consciously per the section-3 contract.
    Provide a test `init` seam if the plugin touches a system boundary
    (Hosts' injected `HostsManager` + `MockHostsWriter` precedent).
-4. **Register in `AppDelegate`**: append `<Name>NativePlugin.modelSchemaTypes`
-   to the `Schema` in `init()` (if it owns models) and the instance to the
-   `plugins` array in `applicationDidFinishLaunching`. Nothing else — lifecycle,
-   migration, backup, and all surfaces are generic.
-   *Missed schema → SwiftData faults at first fetch; missed list entry → the
-   plugin simply doesn't exist (and its lifecycle test can't pass).*
+4. **Register once in `NativePluginCatalog`**: add one registration pairing
+   `<Name>NativePlugin.pluginID`, `.modelSchemaTypes`, and its host-backed
+   factory. Nothing else — AppDelegate schema construction, runtime creation,
+   lifecycle, migration, backup, and all surfaces derive from the catalog.
+   Extend `NativePluginCatalogTests` with the expected id and model names.
 5. **Strings**: `HostBridge.swift` in the module (typed `L10n.Key` enum +
    `L(_:)` + `LocalizedText` fronts, copied from a pilot), entries in
    `Sources/AnyDoor/Resources/Localizable.xcstrings` with **both** `en` and

@@ -11,7 +11,7 @@ import SwiftUI
 public final class ImageConversionNativePlugin: NativePlugin {
 
     /// Stable persisted identity; never change once shipped.
-    public static let pluginID = NativePluginID(rawValue: "imageConversion")
+    nonisolated public static let pluginID = NativePluginID(rawValue: "imageConversion")
 
     public let id = ImageConversionNativePlugin.pluginID
     private let host: any PluginHostServices

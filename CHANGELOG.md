@@ -54,6 +54,8 @@ versioning.
   launch, install, uninstall, and backup import.
 - Backup restore now reports success only after imported settings, plugin
   lifecycle, cleanup, panel rows, and hotkeys have all converged.
+- Native Plugins now have one compile-time catalog for both SwiftData schema
+  participation and runtime construction.
 
 ## [3.7.0] - 2026-07-12
 
