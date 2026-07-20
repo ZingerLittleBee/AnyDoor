@@ -12,10 +12,10 @@ import PluginInterface
 /// - the Command Palette hotkey (`CommandPaletteService.shared.hotkey`)
 ///
 /// PanelStore mutations, config import (`BackupService`), and the palette
-/// hotkey setter all call `refresh()` after changing a source; hotkey sources
-/// never reach into PanelStore. `dispatch` is the single routing point bound
-/// to `HotkeyService.setDispatcher` in AppDelegate — only the builtin
-/// toggle/run cases touch PanelStore, everything else routes directly.
+/// hotkey setter all call `refresh()` after changing a source. `dispatch` is
+/// the single routing point bound to `HotkeyService.setDispatcher` in
+/// AppDelegate. PluginRegistry wires builtin toggle/run dispatch to the paired
+/// PanelStore during bootstrap; every other action routes directly.
 @MainActor
 final class HotkeyCoordinator {
     static let shared = HotkeyCoordinator()
@@ -24,6 +24,8 @@ final class HotkeyCoordinator {
     private var availableCommands: @MainActor () -> Set<BuiltinItem> = {
         Set(BuiltinItem.allCases)
     }
+    private var toggleBuiltin: @MainActor (BuiltinItem) async -> Void = { _ in }
+    private var runBuiltin: @MainActor (BuiltinItem) async -> Void = { _ in }
     private let quicklinkResolver: @MainActor (UUID) -> Quicklink?
     private let quicklinkOpener: @MainActor (Quicklink) -> Void
     private let quicklinkArgumentPresenter: @MainActor (UUID, String, String, String?) -> Void
@@ -54,10 +56,14 @@ final class HotkeyCoordinator {
         modelContainer: ModelContainer,
         availableCommands: @escaping @MainActor () -> Set<BuiltinItem> = {
             PluginRegistry.shared.availableCommands
-        }
+        },
+        toggleBuiltin: @escaping @MainActor (BuiltinItem) async -> Void = { _ in },
+        runBuiltin: @escaping @MainActor (BuiltinItem) async -> Void = { _ in }
     ) {
         self.modelContainer = modelContainer
         self.availableCommands = availableCommands
+        self.toggleBuiltin = toggleBuiltin
+        self.runBuiltin = runBuiltin
     }
 
     /// Recompile the snapshot list from all sources and push it to
@@ -206,10 +212,10 @@ final class HotkeyCoordinator {
             AppSwitcher.toggle(bundleID: bundleID, appPath: path)
         case .toggleBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
-            Task { await PanelStore.shared.toggle(item) }
+            Task { await toggleBuiltin(item) }
         case .runBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
-            Task { await PanelStore.shared.run(item) }
+            Task { await runBuiltin(item) }
         case .brightnessUp:
             DisplayBrightnessService.shared.bump(+1.0 / 16.0, target: .displayUnderMouse)
         case .brightnessDown:

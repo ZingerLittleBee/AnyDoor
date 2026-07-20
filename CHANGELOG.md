@@ -58,6 +58,8 @@ versioning.
   participation and runtime construction.
 - Removed unused speculative window and Settings requirements from the Native
   Plugin interface; new surfaces will be added only with a real Core caller.
+- Panel and hotkey coordination is now wired explicitly at plugin-registry
+  bootstrap instead of reaching across a two-way global-singleton dependency.
 
 ## [3.7.0] - 2026-07-12
 

@@ -300,7 +300,8 @@ All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
   second. Bootstrap reads the possibly-just-migrated install state, starts
   runtime state empty, calls `activate()` before marking each plugin
   Installed, then publishes all initial providers and palette contributions
-  as one batch. It wires `PanelStore` and `HotkeyCoordinator` itself; hotkey
+  as one batch. It wires its paired `PanelStore` and `HotkeyCoordinator`
+  instances through refresh and builtin-dispatch closures; hotkey
   snapshots are still published later in normal app startup so bootstrap
   cannot start the event tap early.
 - **Install** (`PluginRegistry.install(id)`, idempotent): `activate()` →

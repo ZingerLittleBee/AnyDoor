@@ -106,6 +106,29 @@ final class PanelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testHotkeyMutationUsesBootstrappedRefreshHandler() throws {
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
+        var refreshCount = 0
+        let store = PanelStore()
+        store.bootstrap(
+            modelContainer: container,
+            providers: [],
+            refreshHotkeys: { refreshCount += 1 }
+        )
+
+        store.setBuiltinHotkey(
+            .keepAwake,
+            hotkey: HotkeyDescriptor(keyCode: 40, modifierFlags: 1)
+        )
+
+        XCTAssertEqual(refreshCount, 1)
+    }
+
+    @MainActor
     func testRunDropsOverlappingCallForSameItem() async throws {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(

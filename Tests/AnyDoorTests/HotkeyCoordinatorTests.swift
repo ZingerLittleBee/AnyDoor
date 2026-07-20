@@ -210,6 +210,37 @@ final class HotkeyCoordinatorTests: XCTestCase {
         XCTAssertEqual(presented?.openWithBundleID, "com.apple.Safari")
     }
 
+    @MainActor
+    func testDispatchBuiltinActionsUsesBootstrappedHandlers() async throws {
+        let container = try ModelContainer(
+            for: KeyBinding.self, BuiltinPreference.self, Quicklink.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        var toggledItem: BuiltinItem?
+        var runItem: BuiltinItem?
+        let toggleHandled = expectation(description: "toggle handler called")
+        let runHandled = expectation(description: "run handler called")
+        let coordinator = HotkeyCoordinator()
+        coordinator.bootstrap(
+            modelContainer: container,
+            toggleBuiltin: {
+                toggledItem = $0
+                toggleHandled.fulfill()
+            },
+            runBuiltin: {
+                runItem = $0
+                runHandled.fulfill()
+            }
+        )
+
+        coordinator.dispatch(.toggleBuiltin(itemKey: BuiltinItem.keepAwake.rawValue))
+        coordinator.dispatch(.runBuiltin(itemKey: BuiltinItem.lockScreen.rawValue))
+
+        await fulfillment(of: [toggleHandled, runHandled])
+        XCTAssertEqual(toggledItem, .keepAwake)
+        XCTAssertEqual(runItem, .lockScreen)
+    }
+
     // MARK: - Installed set (Native Plugins)
 
     @MainActor

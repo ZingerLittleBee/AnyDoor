@@ -42,6 +42,10 @@ final class PanelStore {
     private var providers: [BuiltinItem: any BuiltinProvider] = [:]
     private var modelContainer: ModelContainer?
 
+    /// Recompiles hotkey snapshots after a mutation changes a hotkey source.
+    /// PluginRegistry wires this to its paired HotkeyCoordinator at bootstrap.
+    private var refreshHotkeys: @MainActor () -> Void = {}
+
     /// Whether a built-in command currently exists for the user. Wired to
     /// `PluginRegistry.isAvailable` in the app: commands claimed by an
     /// uninstalled Native Plugin are dropped from every rebuilt collection,
@@ -80,10 +84,12 @@ final class PanelStore {
     func bootstrap(
         modelContainer: ModelContainer,
         providers: [any BuiltinProvider],
-        commandAvailability: @escaping @MainActor (BuiltinItem) -> Bool = { _ in true }
+        commandAvailability: @escaping @MainActor (BuiltinItem) -> Bool = { _ in true },
+        refreshHotkeys: @escaping @MainActor () -> Void = {}
     ) {
         self.modelContainer = modelContainer
         self.commandAvailability = commandAvailability
+        self.refreshHotkeys = refreshHotkeys
         self.providers = [:]
         for provider in providers {
             self.providers[provider.itemKey] = provider
@@ -440,7 +446,7 @@ final class PanelStore {
             pref.isVisible = isVisible
             try? context.save()
             rebuild()
-            HotkeyCoordinator.shared.refresh()
+            refreshHotkeys()
         }
     }
 
@@ -456,7 +462,7 @@ final class PanelStore {
             pref.modifierFlags = hotkey?.modifierFlags
             try? context.save()
             rebuild()
-            HotkeyCoordinator.shared.refresh()
+            refreshHotkeys()
         }
     }
 
@@ -475,7 +481,7 @@ final class PanelStore {
         }
         try? container.mainContext.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Reorder the top-level entries as one flat list. Reassigns a global
@@ -496,7 +502,7 @@ final class PanelStore {
         }
         try? context.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Reorder app shortcuts by new id array (ordered).
@@ -534,7 +540,7 @@ final class PanelStore {
         }
         try? context.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Find which entry currently owns a given hotkey (used for conflict detection).
@@ -600,7 +606,7 @@ final class PanelStore {
         context.insert(new)
         try? context.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Delete an app shortcut by id.
@@ -609,6 +615,6 @@ final class PanelStore {
         container.mainContext.delete(binding)
         try? container.mainContext.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 }

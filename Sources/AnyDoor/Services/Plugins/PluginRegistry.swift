@@ -100,7 +100,10 @@ final class PluginRegistry {
         panelStore.bootstrap(
             modelContainer: modelContainer,
             providers: providers,
-            commandAvailability: { [weak self] in self?.isAvailable($0) ?? true }
+            commandAvailability: { [weak self] in self?.isAvailable($0) ?? true },
+            refreshHotkeys: { [weak hotkeyCoordinator = self.hotkeyCoordinator] in
+                hotkeyCoordinator?.refresh()
+            }
         )
         for plugin in installedPlugins {
             paletteExtensions.registerContributions(of: plugin)
@@ -109,6 +112,12 @@ final class PluginRegistry {
             modelContainer: modelContainer,
             availableCommands: { [weak self] in
                 self?.availableCommands ?? Set(BuiltinItem.allCases)
+            },
+            toggleBuiltin: { [weak panelStore = self.panelStore] item in
+                await panelStore?.toggle(item)
+            },
+            runBuiltin: { [weak panelStore = self.panelStore] item in
+                await panelStore?.run(item)
             }
         )
     }
