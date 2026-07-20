@@ -151,6 +151,7 @@ final class ImageConversionViewModel {
     }
 
     @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let host: PluginHostContext?
     @ObservationIgnored private var engine: ImageConversionEngine?
     /// Stable engine-side IDs for basket items, so preview/run/Save Anyway
     /// all address the same artifacts.
@@ -166,10 +167,12 @@ final class ImageConversionViewModel {
 
     init(
         availableFormats: [ImageConversionFormat] = ImageConversionFormat.availableTargets(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        host: PluginHostContext? = nil
     ) {
         self.availableFormats = availableFormats
         self.defaults = defaults
+        self.host = host
         self.selectedFormat = ImageConversionPreferences.targetFormat(
             availableFormats: availableFormats,
             defaults: defaults
@@ -295,7 +298,7 @@ final class ImageConversionViewModel {
     /// Adds a pasted bitmap (e.g. a fresh screenshot) with a generic display name.
     func addBitmap(_ data: Data) {
         guard acceptsWork, !isConverting else { return }
-        items.append(.bitmap(data, displayName: L(.imageConversionClipboardItem)))
+        items.append(.bitmap(data, displayName: L(host, .imageConversionClipboardItem)))
         scheduleQualityPreflightNotices()
         selectFirstIfNeeded()
     }
@@ -452,8 +455,8 @@ final class ImageConversionViewModel {
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = L(.imageConversionOutputPanelPrompt)
-        panel.message = L(.imageConversionOutputPanelMessage)
+        panel.prompt = L(host, .imageConversionOutputPanelPrompt)
+        panel.message = L(host, .imageConversionOutputPanelMessage)
         if let remembered {
             panel.directoryURL = remembered
         }
@@ -551,9 +554,14 @@ final class ImageConversionViewModel {
 
     private func copyOutputsToPasteboard(_ outputURLs: [URL]) {
         guard !outputURLs.isEmpty else { return }
-        PluginHost.pasteboardSelfWrite { pb in
-            pb.clearContents()
-            pb.writeObjects(outputURLs as [NSURL])
+        if let host {
+            host.pasteboardSelfWrite { pb in
+                pb.clearContents()
+                pb.writeObjects(outputURLs as [NSURL])
+            }
+        } else {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects(outputURLs as [NSURL])
         }
     }
 
@@ -681,13 +689,14 @@ final class ImageConversionViewModel {
                     output, candidate: candidate, item: item, outcome: .targetUnattainable
                 )
                 self.remove(item)
-                PluginHost.showToast(historySaved
-                    ? .success(L(.imageConversionSavedAnyway))
-                    : .info(L(.imageConversionHistorySaveFailed)))
+                self.host?.showToast(historySaved
+                    ? .success(L(self.host, .imageConversionSavedAnyway))
+                    : .info(L(self.host, .imageConversionHistorySaveFailed)))
             } catch is CancellationError {
                 return
             } catch {
-                PluginHost.showToast(.failure(L(.imageConversionFileMissing)))
+                let host = self?.host
+                host?.showToast(.failure(L(host, .imageConversionFileMissing)))
             }
         }
         saveBestEffortTasks[taskID] = task
@@ -947,14 +956,16 @@ final class ImageConversionViewModel {
 
     private func showConversionSummary(converted: Int, skipped: Int, historyWarnings: Int) {
         if historyWarnings > 0 {
-            PluginHost.showToast(.info(L(
+            host?.showToast(.info(L(
+                host,
                 .imageConversionToastSummaryWithHistoryWarnings,
                 converted,
                 skipped,
                 historyWarnings
             )))
         } else {
-            PluginHost.showToast(.success(L(
+            host?.showToast(.success(L(
+                host,
                 .imageConversionToastSummary,
                 converted,
                 skipped

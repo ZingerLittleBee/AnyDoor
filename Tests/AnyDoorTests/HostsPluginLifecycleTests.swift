@@ -112,8 +112,17 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     // MARK: - Contract
 
-    func testEditorWindowDisablesStateRestoration() {
-        XCTAssertFalse(HostsEditorWindowController.shared.window?.isRestorable ?? true)
+    func testEditorWindowDisablesStateRestoration() throws {
+        let fixture = try makeFixture()
+        defer { fixture.teardown() }
+        XCTAssertFalse(fixture.plugin.editorWindowController.window?.isRestorable ?? true)
+    }
+
+    func testConstructionDoesNotCreateEditorWindow() throws {
+        let fixture = try makeFixture()
+        defer { fixture.teardown() }
+
+        XCTAssertFalse(fixture.plugin.hasCreatedEditorWindowController)
     }
 
     func testClaimsAndContributions() throws {

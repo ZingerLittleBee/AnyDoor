@@ -6,6 +6,7 @@ import SwiftUI
 /// create/edit actions, a read-only System Hosts entry with an "open file"
 /// action, and quick activation toggles for each profile.
 struct HostsManagerPopoverView: View {
+    @Environment(\.pluginHostContext) private var host
     @Bindable var manager: HostsManager
     let onHoverChange: @MainActor (Bool) -> Void
     let onEdit: () -> Void
@@ -54,7 +55,7 @@ struct HostsManagerPopoverView: View {
                 Image(systemName: "macwindow")
             }
             .buttonStyle(.plain)
-            .help(L(.hostsManagerOpenHelp))
+            .help(L(host, .hostsManagerOpenHelp))
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
     }
@@ -68,6 +69,7 @@ struct HostsManagerPopoverView: View {
 /// PortTreeView rows. (Previously each row stacked an interactive glass surface
 /// that rendered noticeably brighter than the popover background in light mode.)
 private struct HostsSystemRow: View {
+    @Environment(\.pluginHostContext) private var host
     @State private var isHovered = false
 
     var body: some View {
@@ -79,7 +81,7 @@ private struct HostsSystemRow: View {
                 Image(systemName: "arrow.up.forward.app")
             }
             .buttonStyle(.plain)
-            .help(L(.hostsSystemOpenHelp))
+            .help(L(host, .hostsSystemOpenHelp))
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .contentShape(Rectangle())

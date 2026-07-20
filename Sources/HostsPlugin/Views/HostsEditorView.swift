@@ -10,6 +10,7 @@ import SwiftUI
 /// back to view mode. System Hosts editing rewrites the system portion while
 /// preserving the managed block.
 struct HostsEditorView: View {
+    @Environment(\.pluginHostContext) private var host
     @Bindable var manager: HostsManager
     // A dedicated case for System Hosts instead of a nil UUID tag: List single
     // selection treats a nil tag as "no selection", which made the System Hosts
@@ -127,7 +128,7 @@ struct HostsEditorView: View {
                     .frame(width: 16, height: 16)
             }
             if renamingID == profile.id {
-                TextField(L(.hostsFieldName), text: $renameText)
+                TextField(L(host, .hostsFieldName), text: $renameText)
                     .textFieldStyle(.plain)
                     .focused($renameFieldFocused)
                     .onSubmit { commitRename() }
@@ -181,15 +182,15 @@ struct HostsEditorView: View {
                             Image(systemName: "plus.square.on.square")
                         }
                     }
-                    Button(L(.hostsActionDelete), role: .destructive) { showDeleteConfirm = true }
+                    Button(L(host, .hostsActionDelete), role: .destructive) { showDeleteConfirm = true }
                         .tint(.red)
                 }
             }
             .padding()
-            .confirmationDialog(L(.hostsDialogDeleteProfile, profile.name),
+            .confirmationDialog(L(host, .hostsDialogDeleteProfile, profile.name),
                                 isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button(L(.hostsActionDelete), role: .destructive) { delete(profile) }
-                Button(L(.hostsActionCancel), role: .cancel) {}
+                Button(L(host, .hostsActionDelete), role: .destructive) { delete(profile) }
+                Button(L(host, .hostsActionCancel), role: .cancel) {}
             }
         } else {
             VStack(alignment: .leading, spacing: 8) {
@@ -200,15 +201,15 @@ struct HostsEditorView: View {
                         draftSystemContent = manager.systemHosts
                     }
                     Spacer()
-                    Button(L(.hostsActionOpenDefaultEditor)) { HostsFileOpener.open() }
-                    Button(L(.hostsActionRestoreFirstBackup)) { showRestoreConfirm = true }
+                    Button(L(host, .hostsActionOpenDefaultEditor)) { HostsFileOpener.open() }
+                    Button(L(host, .hostsActionRestoreFirstBackup)) { showRestoreConfirm = true }
                 }
             }
             .padding()
-            .confirmationDialog(L(.hostsDialogRestoreBackup),
+            .confirmationDialog(L(host, .hostsDialogRestoreBackup),
                                 isPresented: $showRestoreConfirm, titleVisibility: .visible) {
-                Button(L(.hostsActionRestore), role: .destructive) { Task { await manager.restoreFirstRunBackup() } }
-                Button(L(.hostsActionCancel), role: .cancel) {}
+                Button(L(host, .hostsActionRestore), role: .destructive) { Task { await manager.restoreFirstRunBackup() } }
+                Button(L(host, .hostsActionCancel), role: .cancel) {}
             }
             .onAppear { draftSystemContent = manager.systemHosts }
         }
@@ -231,15 +232,15 @@ struct HostsEditorView: View {
     @ViewBuilder
     private func modeButton(save: @escaping () async -> Void) -> some View {
         if mode == .edit {
-            Button(L(.hostsActionSave)) {
+            Button(L(host, .hostsActionSave)) {
                 Task {
                     await save()
                     mode = .view
                 }
             }
-            Button(L(.hostsActionCancel), role: .cancel) { cancelEditing() }
+            Button(L(host, .hostsActionCancel), role: .cancel) { cancelEditing() }
         } else {
-            Button(L(.hostsActionEdit)) { mode = .edit }
+            Button(L(host, .hostsActionEdit)) { mode = .edit }
         }
     }
 
@@ -259,7 +260,7 @@ struct HostsEditorView: View {
     }
 
     private func addProfile() {
-        manager.createProfile(name: L(.hostsProfileNewName))
+        manager.createProfile(name: L(host, .hostsProfileNewName))
         // The new profile sorts last (highest displayOrder); select it and drop
         // straight into inline rename so the user types the name in the list.
         if let new = manager.profiles.last {

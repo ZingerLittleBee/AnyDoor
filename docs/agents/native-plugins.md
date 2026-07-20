@@ -60,8 +60,9 @@ ImageCodec       ←─ AnyDoor, ImageConversionPlugin
 - **`PluginInterface`** (`Sources/PluginInterface/`) — the lean shared
   interface: `BuiltinItem` (closed catalog), `BuiltinProvider` /
   `ToggleProvider` / `ActionProvider` + `PermissionStatus`, `NativePlugin` +
-  `NativePluginID`, `PluginHostServices` + `PluginToast`, the `PluginHost`
-  bridge + `PluginLocalizedText`, `PluginRowDescriptor` + `PluginRowSource`,
+  `NativePluginID`, `PluginHostServices` + `PluginToast`, the instance-scoped
+  `PluginHostContext` + `PluginLocalizedText`, `PluginRowDescriptor` +
+  `PluginRowSource`,
   `PluginPanelPopover` + `PluginPanelPopoverContext`,
   `PrivilegedHelperAccess` + `PrivilegedHelperReadiness` +
   `PrivilegedHelperCallError`, plus a few shared utilities/views
@@ -79,15 +80,16 @@ ImageCodec       ←─ AnyDoor, ImageConversionPlugin
   Conversion plugin (`ImageConversionFormat`, `ImageEncoder`,
   `ImageEncodingQuality`), so Core's screenshot Save As never imports the
   plugin module.
-- **`AnyDoor`** (host) — depends on the plugin modules solely to build the
-  compile-time registry list. Core files importing a plugin module:
-  1. `Sources/AnyDoor/AppDelegate.swift` — the composition root (sanctioned):
-     schema composition and the plugin list.
+- **`AnyDoor`** (host) — depends on the plugin modules to build the
+  compile-time catalog. Core files importing a plugin module:
+  1. `Sources/AnyDoor/Services/Plugins/NativePluginCatalog.swift` — the
+     composition root (sanctioned): schema participation and runtime factories.
   2. `Sources/AnyDoor/Views/ClipboardWallWindowController.swift` — the
      **registered debt** (PRD Out of Scope): the clipboard-history
      "Convert Image Format" context menu is hardwired to
-     `ImageConversionWindowController` / `ImageConversionBasketItem`, guarded
-     by `PluginRegistry.shared.isAvailable(.imageConversion)` (line ~603).
+     `ImageConversionNativePlugin` / `ImageConversionBasketItem`, guarded by
+     `PluginRegistry.shared.isAvailable(.imageConversion)` and resolved from
+     the registry as the installed plugin instance.
      Revisit when that surface is next touched; do not add a third import.
 
 ## 3. The `NativePlugin` protocol, member by member
@@ -177,20 +179,19 @@ Adding a member needs the same scrutiny as a new `NativePlugin` requirement.
 Every test host double (`RecordingPluginHost`, `MigrationPluginHost`,
 `StubLocalizationHost`) must grow the member too.
 
-### The `PluginHost` bridge (module-level access)
+### `PluginHostContext` (instance-scoped capability access)
 
-`Sources/PluginInterface/PluginHost.swift`. Every plugin `init` calls
-`PluginHost.bootstrap(host)`; module singletons (window controllers, stores)
-and SwiftUI views reach the host through the static accessors
-(`PluginHost.showToast`, `.trackRegularWindow`, `.pasteboardSelfWrite`,
-`.helper`, `.helperReadiness()`, `.writeHostsFileViaHelper(_:)`,
-`.runAppleScript(_:)`, `.localizedString(_:arguments:)`) instead of threading
-services through every initializer. **Last bootstrap wins** — in production
-all plugins share one `CorePluginHost`; in tests the most recent fixture's
-host wins, so lifecycle assertions should go through the instance-captured
-`host`, not the bridge. Every accessor degrades safely when unset (pure unit
-tests): strings fall back to raw keys, toasts/window-tracking no-op, the
-helper reads `.unavailable`, AppleScript throws `PrivilegedHelperCallError`.
+`Sources/PluginInterface/PluginHostContext.swift`. Every plugin `init`
+constructs one `PluginHostContext` from its injected services and passes that
+same immutable reference to its manager, writers, view models, window
+controllers, and SwiftUI root environment. There is no module-level mutable
+host slot and no last-bootstrap-wins behavior: two plugin instances or test
+fixtures remain isolated even when alive together. The context provides the
+narrow capability fronts (`showToast`, `trackRegularWindow`,
+`pasteboardSelfWrite`, helper access, AppleScript, and localization). Pure
+logic tests may inject `nil` into consumers that deliberately support a
+raw-key/no-toast fallback; production plugin roots always provide a real
+context.
 
 ### Per-module L10n pattern
 
@@ -198,9 +199,9 @@ Each plugin module has a `HostBridge.swift` with:
 
 1. `enum L10n { enum Key: String, CaseIterable, Sendable }` — typed view of
    the raw catalog keys the module uses (e.g. `"plugin.hosts.name"`).
-2. `func L(_ key: L10n.Key, _ args: CVarArg...) -> String` → thin front over
-   `PluginHost.localizedString(key.rawValue, arguments:)`.
-3. `struct LocalizedText: View` wrapping the shared reactive
+2. `func L(_ host: PluginHostContext?, _ key: L10n.Key, _ args: CVarArg...) -> String`
+   → thin front over the supplied instance context, with raw-key fallback.
+3. `struct LocalizedText: View` wrapping the environment-scoped reactive
    `PluginLocalizedText(key:)` — a `Text` that re-renders on a host language
    switch (the body reads `services.effectiveLocale`, registering an
    Observation dependency).
@@ -273,10 +274,10 @@ claims.
   transactional `registry.uninstall(id)`; a thrown deactivate surfaces a
   failure toast and the plugin stays installed. The row icon is the claimed
   command with the smallest `defaultOrder`.
-- **Window presentation.** Plugins own their windows
-  (`HostsEditorWindowController`, `ImageConversionWindowController` — both
-  module-internal singletons) and must call
-  `PluginHost.trackRegularWindow(window)` and set `isRestorable = false`.
+- **Window presentation.** Each plugin instance owns its windows
+  (`HostsEditorWindowController`, `ImageConversionWindowController`) and must
+  call its `PluginHostContext.trackRegularWindow(window)` and set
+  `isRestorable = false`.
   Windows are reached from the plugin's own surfaces (provider `run()`,
   popover edit button, palette option), all of which are install-gated
   upstream; `deactivate()` closes them. An async presentation path must also
@@ -355,8 +356,8 @@ named test, which is the point of them.
    `AnyDoorTests` dependency lists.
 3. **Plugin type**: `@MainActor public final class <Name>NativePlugin:
    NativePlugin` with `public static let pluginID = NativePluginID(rawValue:
-   "<stable-id>")`, `init(host: any PluginHostServices)` calling
-   `PluginHost.bootstrap(host)` and capturing `host` for lifecycle calls.
+   "<stable-id>")`, `init(host: any PluginHostServices)` constructing one
+   `PluginHostContext` and passing it through every capability consumer.
    Implement only the surfaces the feature has (defaults cover the rest);
    `deactivate` must be written consciously per the section-3 contract.
    Provide a test `init` seam if the plugin touches a system boundary
@@ -428,18 +429,16 @@ named test, which is the point of them.
 - Contract-level pins live in `NativePluginContractTests` (a `BarePlugin`
   proves optional members default to empty/no-op and don't trap) — extend it
   if you add a protocol member.
-- Remember `PluginHost.bootstrap` is last-wins global state: assert through
-  the instance-captured host, and don't rely on the bridge across fixtures.
+- Add an isolation assertion when introducing a new context consumer: two
+  simultaneously alive fixtures must keep their host services independent.
 
 ## 9. Known debts / gotchas
 
-- **Two registered-debt plugin imports in Core** (section 2): the AppDelegate
-  composition root (permanent, sanctioned) and the clipboard-history convert
-  context menu (`ClipboardWallWindowController`) — the latter is the PRD's
-  single carved-out debt; revisit when that surface changes.
-- **`HostProfileRowSource` carries a stale doc comment** ("Registered by the
-  Core while Hosts still lives in it…") from before the extraction; the Hosts
-  plugin registers it now.
+- **Two plugin imports in Core** (section 2): `NativePluginCatalog` (permanent,
+  sanctioned composition root) and the clipboard-history convert context menu
+  (`ClipboardWallWindowController`) — the latter is the PRD's single carved-out
+  concrete-module debt; it is lifecycle-safe through the registry but should
+  become a generic plugin action when that surface is redesigned.
 - **`PluginRegistry.bootstrap` intersects the stored set with the known
   plugin list**, so an id from the future (or a typo) is silently dropped —
   another reason `pluginID` raw values are frozen forever.

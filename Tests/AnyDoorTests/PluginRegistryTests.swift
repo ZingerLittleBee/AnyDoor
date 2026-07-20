@@ -229,6 +229,19 @@ final class PluginRegistryTests: XCTestCase {
     }
 
     @MainActor
+    func testImageConversionConstructionDoesNotCreateWorkspaceWindow() throws {
+        let container = try ModelContainer(
+            for: Schema(ImageConversionNativePlugin.modelSchemaTypes),
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let plugin = ImageConversionNativePlugin(
+            host: CorePluginHost(modelContainer: container)
+        )
+
+        XCTAssertFalse(plugin.hasCreatedWindowController)
+    }
+
+    @MainActor
     func testUninstallRevertsSurfacesAndPersists() async throws {
         let (defaults, teardown) = try makeIsolatedDefaults()
         defer { teardown() }
@@ -269,7 +282,7 @@ final class PluginRegistryTests: XCTestCase {
         let registry = harness.registry
         registry.install(plugin.id)
 
-        let controller = ImageConversionWindowController.shared
+        let controller = plugin.windowController
         controller.close()
         let previousReader = controller.finderSelectionReader
         defer { controller.finderSelectionReader = previousReader }

@@ -402,13 +402,13 @@ final class CommandPaletteTests: XCTestCase {
 
     @MainActor
     func testProfileNameQueryShowsMatchingHostsProfile() throws {
-        // Point the shared plugin bridge at a real host so the row's
-        // "Active" subtitle resolves through the shared catalog.
+        // Give this row source a real host so its "Active" subtitle resolves
+        // through the shared catalog without mutating process-wide state.
         let container = try ModelContainer(
             for: Schema(HostsNativePlugin.modelSchemaTypes),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        PluginHost.bootstrap(CorePluginHost(modelContainer: container))
+        let host = PluginHostContext(services: CorePluginHost(modelContainer: container))
         let previousLanguage = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .en
         defer { LocalizationManager.shared.preference = previousLanguage }
@@ -418,7 +418,7 @@ final class CommandPaletteTests: XCTestCase {
         let state = CommandPaletteState(
             sections: [],
             hyperFlags: 0,
-            rowSources: [hostsRowSourceRegistration(profiles: [dev, prod])]
+            rowSources: [hostsRowSourceRegistration(profiles: [dev, prod], host: host)]
         )
         state.query = "Dev"
 
@@ -459,11 +459,13 @@ final class CommandPaletteTests: XCTestCase {
 
     @MainActor
     private func hostsRowSourceRegistration(
-        profiles: [HostProfile]
+        profiles: [HostProfile],
+        host: PluginHostContext? = nil
     ) -> CommandPaletteExtensions.RowSourceRegistration {
         CommandPaletteExtensions.RowSourceRegistration(
             sectionTitleKey: "commandPalette.section.hosts",
             source: HostProfileRowSource(
+                host: host,
                 profiles: { profiles },
                 reload: {},
                 setActive: { _, _ in }

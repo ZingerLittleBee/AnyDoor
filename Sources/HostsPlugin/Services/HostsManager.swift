@@ -16,18 +16,26 @@ enum HostsManagerError: Error {
 /// Persisted state always equals what was successfully applied to the system.
 @Observable @MainActor
 final class HostsManager {
-    static let shared = HostsManager(
-        makeWriter: {
-            // Re-evaluate on every write so the privileged helper is used as soon
-            // as the user approves it — without requiring an app relaunch.
-            if PluginHost.helperReadiness() == .enabled {
-                return PrivilegedHostsWriter()
-            }
-            return AppleScriptWriter()
-        },
-        backup: HostsBackupStore.makeDefault(),
-        readLiveHosts: { try String(contentsOf: URL(fileURLWithPath: "/etc/hosts"), encoding: .utf8) }
-    )
+    static func makeDefault(host: PluginHostContext) -> HostsManager {
+        HostsManager(
+            makeWriter: {
+                // Re-evaluate on every write so the privileged helper is used as soon
+                // as the user approves it — without requiring an app relaunch.
+                if host.helperReadiness() == .enabled {
+                    return PrivilegedHostsWriter(host: host)
+                }
+                return AppleScriptWriter(host: host)
+            },
+            backup: HostsBackupStore.makeDefault(),
+            readLiveHosts: {
+                try String(
+                    contentsOf: URL(fileURLWithPath: "/etc/hosts"),
+                    encoding: .utf8
+                )
+            },
+            host: host
+        )
+    }
 
     private(set) var profiles: [HostProfile] = []
     /// System content (prefix + suffix) shown read-only in the UI.
@@ -41,6 +49,7 @@ final class HostsManager {
     // Throwing: a failed read of `/etc/hosts` must abort composing/applying, never
     // fall back to an empty string (which would destroy the system's own entries).
     private let readLiveHosts: () throws -> String
+    private let host: PluginHostContext?
     private var modelContainer: ModelContainer?
 
     // MARK: - Debounce / serialization state
@@ -60,20 +69,23 @@ final class HostsManager {
     init(makeWriter: @escaping () -> HostsWriter,
          backup: HostsBackupStore,
          readLiveHosts: @escaping () throws -> String,
-         debounceInterval: Duration = .milliseconds(150)) {
+         debounceInterval: Duration = .milliseconds(150),
+         host: PluginHostContext? = nil) {
         self.makeWriter = makeWriter
         self.backup = backup
         self.readLiveHosts = readLiveHosts
         self.debounceInterval = debounceInterval
+        self.host = host
     }
 
     /// Convenience initialiser for tests that supply a fixed writer.
     convenience init(writer: HostsWriter,
                      backup: HostsBackupStore,
                      readLiveHosts: @escaping () throws -> String,
-                     debounceInterval: Duration = .milliseconds(150)) {
+                     debounceInterval: Duration = .milliseconds(150),
+                     host: PluginHostContext? = nil) {
         self.init(makeWriter: { writer }, backup: backup, readLiveHosts: readLiveHosts,
-                  debounceInterval: debounceInterval)
+                  debounceInterval: debounceInterval, host: host)
     }
 
     func bootstrap(modelContainer: ModelContainer) {
@@ -172,7 +184,7 @@ final class HostsManager {
             // delete on the fact that matters: this profile's deactivation was
             // actually applied and saved (`isActive` stayed false).
             guard applied, !profile.isActive else {
-                if lastError == nil { lastError = L(.hostsErrorDeleteFailed) }
+                if lastError == nil { lastError = L(host, .hostsErrorDeleteFailed) }
                 return
             }
         }
@@ -182,7 +194,7 @@ final class HostsManager {
     }
 
     private func copyName(for name: String) -> String {
-        let base = L(.hostsProfileCopyName, name)
+        let base = L(host, .hostsProfileCopyName, name)
         let existing = Set(profiles.map(\.name))
         guard existing.contains(base) else { return base }
         var index = 2
@@ -232,7 +244,7 @@ final class HostsManager {
         }
         do {
             try await applyContent(composedContent(systemPrefix: newContent))
-            lastError = backupError != nil ? L(.hostsErrorBackupFailed) : nil
+            lastError = backupError != nil ? L(host, .hostsErrorBackupFailed) : nil
             reload()
         } catch {
             lastError = message(for: error)
@@ -250,7 +262,7 @@ final class HostsManager {
         defer { endDirectOperation() }
 
         guard let original = backup.originalContents() else {
-            lastError = L(.hostsErrorNoBackup)
+            lastError = L(host, .hostsErrorNoBackup)
             return
         }
         do {
@@ -336,7 +348,7 @@ final class HostsManager {
             try? modelContainer?.mainContext.save()
             // Surface backup warning instead of clearing error on success.
             if let _ = backupError {
-                lastError = L(.hostsErrorBackupFailed)
+                lastError = L(host, .hostsErrorBackupFailed)
             } else {
                 lastError = nil
             }
@@ -397,7 +409,7 @@ final class HostsManager {
         if let error = error as? HostsManagerError {
             switch error {
             case .liveReadFailed:
-                return L(.hostsErrorLiveReadFailed)
+                return L(host, .hostsErrorLiveReadFailed)
             }
         }
         return String(describing: error)

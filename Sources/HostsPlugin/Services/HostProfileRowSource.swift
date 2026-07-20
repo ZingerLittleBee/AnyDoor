@@ -16,14 +16,15 @@ final class HostProfileRowSource: PluginRowSource {
     private let profilesProvider: @MainActor () -> [HostProfile]
     private let reloadAction: @MainActor () -> Void
     private let setActive: @MainActor (HostProfile, Bool) async -> Void
+    private let host: PluginHostContext?
 
     init(
-        profiles: @escaping @MainActor () -> [HostProfile] = { HostsManager.shared.profiles },
-        reload: @escaping @MainActor () -> Void = { HostsManager.shared.reload() },
-        setActive: @escaping @MainActor (HostProfile, Bool) async -> Void = {
-            await HostsManager.shared.setActive($0, $1)
-        }
+        host: PluginHostContext? = nil,
+        profiles: @escaping @MainActor () -> [HostProfile],
+        reload: @escaping @MainActor () -> Void,
+        setActive: @escaping @MainActor (HostProfile, Bool) async -> Void
     ) {
+        self.host = host
         self.profilesProvider = profiles
         self.reloadAction = reload
         self.setActive = setActive
@@ -42,9 +43,9 @@ final class HostProfileRowSource: PluginRowSource {
                 PluginRowDescriptor(
                     id: profile.id.uuidString,
                     title: profile.name,
-                    subtitle: profile.isActive ? L(.commandPaletteHostsActive) : nil,
+                    subtitle: profile.isActive ? L(host, .commandPaletteHostsActive) : nil,
                     symbol: profile.isActive ? "checkmark.circle.fill" : "circle",
-                    actionLabel: L(.commandPaletteActionToggle),
+                    actionLabel: L(host, .commandPaletteActionToggle),
                     commit: .closeThenAct
                 )
             }

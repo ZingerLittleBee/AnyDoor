@@ -4,7 +4,7 @@ import XCTest
 @testable import AnyDoor
 @testable import PluginInterface
 
-/// Minimal host double for the shared localization resolver: only the
+/// Minimal host double for the plugin localization resolver: only the
 /// localization surface matters, everything else is inert.
 @MainActor
 private final class StubLocalizationHost: PluginHostServices {
@@ -38,18 +38,18 @@ private final class StubLocalizationHost: PluginHostServices {
     let privilegedHelper: any PrivilegedHelperAccess = InertHelper()
 }
 
-/// The shared plugin localization path (PluginInterface's `PluginHost`
-/// resolver + the `@Observable` link every plugin `LocalizedText` relies on):
-/// key resolution, format arguments, the unset-bridge fallback, and the
+/// The instance-scoped plugin localization path (`PluginHostContext` resolver
+/// + the `@Observable` link every plugin `LocalizedText` relies on): key
+/// resolution, format arguments, the context-free fallback, and the
 /// language-switch invalidation that makes plugin views re-render live.
 @MainActor
 final class PluginLocalizationTests: XCTestCase {
 
-    // MARK: - Shared resolver
+    // MARK: - Resolver
 
     func testResolveFallsBackToRawKeyWithoutHostServices() {
         XCTAssertEqual(
-            PluginHost.resolve(key: "plugin.hosts.name", arguments: [], services: nil),
+            PluginHostContext.resolve(key: "plugin.hosts.name", arguments: [], services: nil),
             "plugin.hosts.name"
         )
     }
@@ -58,7 +58,7 @@ final class PluginLocalizationTests: XCTestCase {
         let host = try StubLocalizationHost()
         host.strings["plugin.hosts.name"] = "Hosts 管理"
         XCTAssertEqual(
-            PluginHost.resolve(key: "plugin.hosts.name", arguments: [], services: host),
+            PluginHostContext.resolve(key: "plugin.hosts.name", arguments: [], services: host),
             "Hosts 管理"
         )
     }
@@ -68,13 +68,25 @@ final class PluginLocalizationTests: XCTestCase {
         host.strings["hosts.profile.copyName"] = "%@ copy"
         host.strings["imageConversion.basket.count"] = "%d items"
         XCTAssertEqual(
-            PluginHost.resolve(key: "hosts.profile.copyName", arguments: ["Dev"], services: host),
+            PluginHostContext.resolve(key: "hosts.profile.copyName", arguments: ["Dev"], services: host),
             "Dev copy"
         )
         XCTAssertEqual(
-            PluginHost.resolve(key: "imageConversion.basket.count", arguments: [3], services: host),
+            PluginHostContext.resolve(key: "imageConversion.basket.count", arguments: [3], services: host),
             "3 items"
         )
+    }
+
+    func testContextsKeepTheirHostsIsolated() throws {
+        let firstHost = try StubLocalizationHost()
+        firstHost.strings["plugin.hosts.name"] = "First"
+        let secondHost = try StubLocalizationHost()
+        secondHost.strings["plugin.hosts.name"] = "Second"
+        let first = PluginHostContext(services: firstHost)
+        let second = PluginHostContext(services: secondHost)
+
+        XCTAssertEqual(first.localizedString("plugin.hosts.name"), "First")
+        XCTAssertEqual(second.localizedString("plugin.hosts.name"), "Second")
     }
 
     // MARK: - Language-switch reactivity

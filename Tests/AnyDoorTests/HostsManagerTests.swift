@@ -56,14 +56,16 @@ final class HostsManagerTests: XCTestCase {
 
     private func makeManager(writer: HostsWriter,
                              live: @escaping () -> String = { "127.0.0.1 localhost\n" },
-                             debounceInterval: Duration = .milliseconds(150)) throws
+                             debounceInterval: Duration = .milliseconds(150),
+                             host: PluginHostContext? = nil) throws
         -> (HostsManager, ModelContainer) {
         let container = try makeContainer()
         let mgr = HostsManager(writer: writer,
                                backup: HostsBackupStore(backupDirectory: FileManager.default.temporaryDirectory
                                    .appendingPathComponent(UUID().uuidString), readLiveHosts: live),
                                readLiveHosts: live,
-                               debounceInterval: debounceInterval)
+                               debounceInterval: debounceInterval,
+                               host: host)
         mgr.bootstrap(modelContainer: container)
         return (mgr, container)
     }
@@ -77,14 +79,15 @@ final class HostsManagerTests: XCTestCase {
     }
 
     func test_duplicateProfileCopiesContentAsInactiveProfileWithoutSystemWrite() throws {
-        // The copy name resolves through the plugin module's host bridge.
-        PluginHost.bootstrap(CorePluginHost(modelContainer: try makeContainer()))
+        let host = PluginHostContext(
+            services: CorePluginHost(modelContainer: try makeContainer())
+        )
         let previous = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .en
         defer { LocalizationManager.shared.preference = previous }
 
         let mock = MockHostsWriter()
-        let (mgr, _) = try makeManager(writer: mock)
+        let (mgr, _) = try makeManager(writer: mock, host: host)
         mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
         mgr.profiles[0].isActive = true
 

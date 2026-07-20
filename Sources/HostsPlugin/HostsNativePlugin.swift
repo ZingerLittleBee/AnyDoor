@@ -16,35 +16,60 @@ public final class HostsNativePlugin: NativePlugin {
 
     public let id = HostsNativePlugin.pluginID
 
-    /// Captured at construction (rather than read from the module bridge) so
-    /// lifecycle calls stay bound to this instance's host in tests.
+    /// Captured at construction so lifecycle calls stay bound to this
+    /// instance's host in production and tests.
     private let host: any PluginHostServices
+    private let hostContext: PluginHostContext
     private let manager: HostsManager
+    private var editorWindowControllerStorage: HostsEditorWindowController?
     private let profileRowSource: HostProfileRowSource
 
-    public convenience init(host: any PluginHostServices) {
-        self.init(host: host, manager: .shared)
+    var editorWindowController: HostsEditorWindowController {
+        if let editorWindowControllerStorage { return editorWindowControllerStorage }
+        let controller = HostsEditorWindowController(hostContext: hostContext)
+        editorWindowControllerStorage = controller
+        return controller
+    }
+
+    var hasCreatedEditorWindowController: Bool {
+        editorWindowControllerStorage != nil
+    }
+
+    public init(host: any PluginHostServices) {
+        let hostContext = PluginHostContext(services: host)
+        let manager = HostsManager.makeDefault(host: hostContext)
+        self.host = host
+        self.hostContext = hostContext
+        self.manager = manager
+        self.profileRowSource = HostProfileRowSource(
+            host: hostContext,
+            profiles: { [manager] in manager.profiles },
+            reload: { [manager] in manager.reload() },
+            setActive: { [manager] in await manager.setActive($0, $1) }
+        )
     }
 
     /// Test entry point: inject a manager wired to the sanctioned writer
     /// double (`MockHostsWriter`) so the lifecycle paths can be exercised
     /// without touching the real system.
     init(host: any PluginHostServices, manager: HostsManager) {
-        PluginHost.bootstrap(host)
+        let hostContext = PluginHostContext(services: host)
         self.host = host
+        self.hostContext = hostContext
         self.manager = manager
         self.profileRowSource = HostProfileRowSource(
+            host: hostContext,
             profiles: { manager.profiles },
             reload: { manager.reload() },
             setActive: { await manager.setActive($0, $1) }
         )
     }
 
-    public var localizedName: String { L(.pluginName) }
+    public var localizedName: String { L(hostContext, .pluginName) }
 
-    public var localizedDescription: String { L(.pluginDescription) }
+    public var localizedDescription: String { L(hostContext, .pluginDescription) }
 
-    public var localizedUninstallImpact: String? { L(.pluginUninstallImpact) }
+    public var localizedUninstallImpact: String? { L(hostContext, .pluginUninstallImpact) }
 
     public let claimedCommands: Set<BuiltinItem> = [.hostsManager]
 
@@ -59,13 +84,13 @@ public final class HostsNativePlugin: NativePlugin {
     public func paletteOptions(for parent: BuiltinItem) async -> [PluginRowDescriptor] {
         guard parent == .hostsManager else { return [] }
         manager.reload()
-        return HostsPaletteOptions.options(profiles: manager.profiles)
+        return HostsPaletteOptions.options(profiles: manager.profiles, host: hostContext)
     }
 
     public func performPaletteOption(parent: BuiltinItem, id: String) async {
         guard parent == .hostsManager else { return }
         if id == HostsPaletteOptions.editOptionID {
-            HostsEditorWindowController.shared.show(manager: manager)
+            editorWindowController.show(manager: manager)
             return
         }
         guard let profile = HostsPaletteOptions.profile(for: id, in: manager.profiles) else { return }
@@ -87,11 +112,11 @@ public final class HostsNativePlugin: NativePlugin {
                     onHoverChange: context.onHoverChange,
                     onEdit: {
                         context.dismissPopover()
-                        HostsEditorWindowController.shared.show(manager: manager)
+                        self.editorWindowController.show(manager: manager)
                         context.closePanel()
                     },
                     onClose: { context.dismissPopover() }
-                ))
+                ).pluginHostContext(self.hostContext))
             },
             // Mounting happens from already-loaded state; this refresh (and
             // the host's remount) picks up profile/system-hosts changes
@@ -138,7 +163,7 @@ public final class HostsNativePlugin: NativePlugin {
     /// release resumes the manager and aborts the uninstall with the plugin
     /// fully installed. Profile rows and hosts backups are always retained.
     public func deactivate() async throws {
-        HostsEditorWindowController.shared.closeForUninstall()
+        editorWindowControllerStorage?.closeForUninstall()
         await manager.prepareForDeactivation()
         do {
             try host.privilegedHelper.releaseIfUnneeded()

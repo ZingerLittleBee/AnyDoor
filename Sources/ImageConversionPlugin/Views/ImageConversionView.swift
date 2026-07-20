@@ -6,6 +6,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ImageConversionView: View {
+    @Environment(\.pluginHostContext) private var host
     @Bindable var model: ImageConversionViewModel
     var store: ImageConversionHistoryStore = .shared
     /// Measured width of the mode switch (the segmented control keeps its
@@ -41,8 +42,8 @@ struct ImageConversionView: View {
             // and merely centers inside any wider frame.
             SidebarTabPicker(
                 selection: $model.sidebarTab,
-                basketLabel: L(.imageConversionSidebarBasket),
-                historyLabel: L(.imageConversionHistoryTitle)
+                basketLabel: L(host, .imageConversionSidebarBasket),
+                historyLabel: L(host, .imageConversionHistoryTitle)
             )
             .fixedSize(horizontal: false, vertical: true)
             .padding(12)
@@ -82,7 +83,7 @@ struct ImageConversionView: View {
                 }
             }
 
-            Text(L(.imageConversionBasketCount, model.items.count))
+            Text(L(host, .imageConversionBasketCount, model.items.count))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -95,11 +96,11 @@ struct ImageConversionView: View {
                 Button {
                     model.presentOpenPanel()
                 } label: {
-                    Label(L(.commandPaletteActionOpen), systemImage: "plus")
+                    Label(L(host, .commandPaletteActionOpen), systemImage: "plus")
                         .lineLimit(1)
                 }
                 .disabled(model.isConverting)
-                .help(L(.commandPaletteActionOpen))
+                .help(L(host, .commandPaletteActionOpen))
 
                 Spacer(minLength: 0)
 
@@ -111,8 +112,8 @@ struct ImageConversionView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(model.items.isEmpty || model.isConverting)
-                .accessibilityLabel(L(.imageConversionClear))
-                .help(L(.imageConversionClear))
+                .accessibilityLabel(L(host, .imageConversionClear))
+                .help(L(host, .imageConversionClear))
             }
             .controlSize(.small)
             .padding(10)
@@ -172,7 +173,7 @@ struct ImageConversionView: View {
                 Button {
                     store.clear()
                 } label: {
-                    Label(L(.imageConversionHistoryClear), systemImage: "trash")
+                    Label(L(host, .imageConversionHistoryClear), systemImage: "trash")
                 }
                 .disabled(records.isEmpty)
             }
@@ -379,7 +380,7 @@ struct ImageConversionView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         } else {
-            Picker(L(.imageConversionTargetFormat), selection: $model.selectedFormat) {
+            Picker(L(host, .imageConversionTargetFormat), selection: $model.selectedFormat) {
                 ForEach(model.availableFormats) { format in
                     Text(format.displayName).tag(format)
                 }
@@ -406,7 +407,7 @@ struct ImageConversionView: View {
                         .frame(width: 38, alignment: .trailing)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel(L(.imageConversionQuality))
+                .accessibilityLabel(L(host, .imageConversionQuality))
             }
         }
     }
@@ -423,7 +424,7 @@ struct ImageConversionView: View {
                     .frame(maxWidth: .infinity)
                     .onSubmit { model.commitTargetText() }
                     .onChange(of: model.targetText) { model.commitTargetText() }
-                    .accessibilityLabel(L(.imageConversionModeTargetSize))
+                    .accessibilityLabel(L(host, .imageConversionModeTargetSize))
                 Picker("", selection: Binding(
                     get: { model.targetLimit.unit },
                     set: { model.switchTargetUnit(to: $0) }
@@ -604,6 +605,7 @@ private struct HideDetailToolbarBackground: ViewModifier {
 }
 
 private struct ImageConversionSidebarRow: View {
+    @Environment(\.pluginHostContext) private var host
     let item: ImageConversionBasketItem
     var status: ImageConversionItemStatus?
     var showsFirstFrameOnly: Bool
@@ -636,8 +638,8 @@ private struct ImageConversionSidebarRow: View {
             }
             .buttonStyle(.plain)
             .disabled(isRemovalDisabled)
-            .accessibilityLabel(L(.imageConversionRemove))
-            .help(L(.imageConversionRemove))
+            .accessibilityLabel(L(host, .imageConversionRemove))
+            .help(L(host, .imageConversionRemove))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -656,14 +658,14 @@ private struct ImageConversionSidebarRow: View {
     private var statusBadge: some View {
         switch status {
         case .targetMiss:
-            badge(L(.imageConversionStatusTargetMiss), color: .orange)
+            badge(L(host, .imageConversionStatusTargetMiss), color: .orange)
         case .unsupported:
-            badge(L(.imageConversionStatusUnsupported), color: .secondary)
+            badge(L(host, .imageConversionStatusUnsupported), color: .secondary)
         case .failed:
-            badge(L(.imageConversionStatusFailed), color: .red)
+            badge(L(host, .imageConversionStatusFailed), color: .red)
         case nil:
             if showsFirstFrameOnly {
-                badge(L(.imageConversionStatusFirstFrameOnly), color: .secondary)
+                badge(L(host, .imageConversionStatusFirstFrameOnly), color: .secondary)
             }
         }
     }
@@ -722,6 +724,7 @@ private enum ImageComparisonSource: Hashable, Sendable {
 }
 
 private struct ImageComparisonPreview: View {
+    @Environment(\.pluginHostContext) private var host
     let source: ImageComparisonSource
     var caption: ComparisonCaption?
     var showsBestEffortBadge = false
@@ -759,7 +762,7 @@ private struct ImageComparisonPreview: View {
                         .lineLimit(1)
                     Spacer(minLength: 0)
                     if showsBestEffortBadge {
-                        Text(L(.imageConversionStatusTargetMiss))
+                        Text(L(host, .imageConversionStatusTargetMiss))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.orange)
                             .padding(.horizontal, 6)
@@ -868,6 +871,7 @@ private enum BitmapThumbnail {
 }
 
 private struct ImageConversionHistoryRow: View {
+    @Environment(\.pluginHostContext) private var host
     let record: ImageConversionRecord
     @State private var preview: NSImage?
 
@@ -902,16 +906,16 @@ private struct ImageConversionHistoryRow: View {
                     .frame(width: 18, height: 18)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(L(.clipboardActionRevealInFinder))
-            .help(L(.clipboardActionRevealInFinder))
+            .accessibilityLabel(L(host, .clipboardActionRevealInFinder))
+            .help(L(host, .clipboardActionRevealInFinder))
 
             Button(action: copyAsFile) {
                 Image(systemName: "doc.on.doc")
                     .frame(width: 18, height: 18)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(L(.imageConversionCopyAsFile))
-            .help(L(.imageConversionCopyAsFile))
+            .accessibilityLabel(L(host, .imageConversionCopyAsFile))
+            .help(L(host, .imageConversionCopyAsFile))
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
@@ -932,7 +936,7 @@ private struct ImageConversionHistoryRow: View {
     private func reveal() {
         let url = record.outputURL
         guard FileManager.default.fileExists(atPath: url.path) else {
-            PluginHost.showToast(.failure(L(.imageConversionFileMissing)))
+            host?.showToast(.failure(L(host, .imageConversionFileMissing)))
             return
         }
         NSWorkspace.shared.activateFileViewerSelecting([url])
@@ -941,14 +945,16 @@ private struct ImageConversionHistoryRow: View {
     private func copyAsFile() {
         let url = record.outputURL
         guard FileManager.default.fileExists(atPath: url.path) else {
-            PluginHost.showToast(.failure(L(.imageConversionFileMissing)))
+            host?.showToast(.failure(L(host, .imageConversionFileMissing)))
             return
         }
-        PluginHost.pasteboardSelfWrite { pasteboard in
-            pasteboard.clearContents()
-            pasteboard.writeObjects([url as NSURL])
+        if let host {
+            host.pasteboardSelfWrite { pasteboard in
+                pasteboard.clearContents()
+                pasteboard.writeObjects([url as NSURL])
+            }
+            host.showToast(.success(L(host, .toastCopiedToClipboard)))
         }
-        PluginHost.showToast(.success(L(.toastCopiedToClipboard)))
     }
 }
 

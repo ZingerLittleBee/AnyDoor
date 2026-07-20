@@ -4,9 +4,10 @@ import SwiftUI
 
 @MainActor
 final class HostsEditorWindowController: NSWindowController, NSWindowDelegate {
-    static let shared = HostsEditorWindowController()
+    private let hostContext: PluginHostContext
 
-    private init() {
+    init(hostContext: PluginHostContext) {
+        self.hostContext = hostContext
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 480),
             styleMask: [.titled, .closable, .fullSizeContentView],
@@ -28,14 +29,15 @@ final class HostsEditorWindowController: NSWindowController, NSWindowDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func show(manager: HostsManager = .shared) {
+    func show(manager: HostsManager) {
         let view = HostsEditorView(manager: manager)
+            .pluginHostContext(hostContext)
         let host = NSHostingView(rootView: view)
         host.frame = window?.contentLayoutRect ?? .zero
         host.autoresizingMask = [.width, .height]
         window?.contentView = host
         manager.refresh()
-        if let window { PluginHost.trackRegularWindow(window) }
+        if let window { hostContext.trackRegularWindow(window) }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.center()

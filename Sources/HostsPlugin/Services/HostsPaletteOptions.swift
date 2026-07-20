@@ -13,7 +13,10 @@ enum HostsPaletteOptions {
         "hosts.\(profile.id.uuidString)"
     }
 
-    static func options(profiles: [HostProfile]) -> [PluginRowDescriptor] {
+    static func options(
+        profiles: [HostProfile],
+        host: PluginHostContext? = nil
+    ) -> [PluginRowDescriptor] {
         var options: [PluginRowDescriptor] = profiles.map { profile in
             PluginRowDescriptor(
                 id: optionID(for: profile),
@@ -25,7 +28,7 @@ enum HostsPaletteOptions {
         }
         options.append(PluginRowDescriptor(
             id: editOptionID,
-            title: L(.commandPaletteHostsEdit),
+            title: L(host, .commandPaletteHostsEdit),
             symbol: "pencil",
             commit: .closeThenAct
         ))

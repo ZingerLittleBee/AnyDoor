@@ -607,7 +607,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         }
         dismiss(restoreFocus: false) {
             Task { @MainActor in
-                ImageConversionWindowController.shared.present(items: items)
+                guard let plugin = PluginRegistry.shared.plugin(
+                    withID: ImageConversionNativePlugin.pluginID
+                ) as? ImageConversionNativePlugin else { return }
+                plugin.present(items: items)
             }
         }
     }

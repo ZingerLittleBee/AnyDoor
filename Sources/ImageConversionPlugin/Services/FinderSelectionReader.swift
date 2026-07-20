@@ -21,10 +21,9 @@ enum FinderSelectionReader {
     /// Best-effort read of the current Finder selection as image-file URLs.
     /// Returns an empty array on any AppleScript failure or empty selection.
     @MainActor
-    static func read() async -> [URL] {
-        guard let services = PluginHost.services else { return [] }
+    static func read(host: PluginHostContext) async -> [URL] {
         do {
-            let output = try await services.runAppleScript(selectionScript)
+            let output = try await host.runAppleScript(selectionScript)
             return parse(output)
         } catch {
             // Silent by design: an unavailable Automation permission or a

@@ -5,8 +5,9 @@ import SwiftUI
 /// The Image Conversion feature as a Native Plugin (ADR-0005 pilot: own
 /// window, own SwiftData model, no system side effects). The module touches
 /// the host only through `PluginHostServices`; the host reaches the feature
-/// only through this type (plus the one registered-debt call site the PRD's
-/// Out of Scope carves out: the clipboard-history context menu).
+/// only through this type. The clipboard-history context menu remains the one
+/// registered concrete-module import, but it resolves this installed plugin
+/// instance through PluginRegistry instead of reaching into its window.
 @MainActor
 public final class ImageConversionNativePlugin: NativePlugin {
 
@@ -15,22 +16,41 @@ public final class ImageConversionNativePlugin: NativePlugin {
 
     public let id = ImageConversionNativePlugin.pluginID
     private let host: any PluginHostServices
+    private let hostContext: PluginHostContext
+    private var windowControllerStorage: ImageConversionWindowController?
+    private var isActive = false
+    private lazy var provider = ImageConversionProvider { [weak self] in
+        await self?.toggleWindow()
+    }
     private var cleanupTasks: [UUID: Task<Void, Never>] = [:]
 
-    public init(host: any PluginHostServices) {
-        self.host = host
-        PluginHost.bootstrap(host)
+    var windowController: ImageConversionWindowController {
+        if let windowControllerStorage { return windowControllerStorage }
+        let controller = ImageConversionWindowController(hostContext: hostContext)
+        if isActive { controller.activateForInstall() }
+        windowControllerStorage = controller
+        return controller
     }
 
-    public var localizedName: String { L(.pluginName) }
+    var hasCreatedWindowController: Bool {
+        windowControllerStorage != nil
+    }
 
-    public var localizedDescription: String { L(.pluginDescription) }
+    public init(host: any PluginHostServices) {
+        let hostContext = PluginHostContext(services: host)
+        self.host = host
+        self.hostContext = hostContext
+    }
 
-    public var localizedUninstallImpact: String? { L(.pluginUninstallImpact) }
+    public var localizedName: String { L(hostContext, .pluginName) }
+
+    public var localizedDescription: String { L(hostContext, .pluginDescription) }
+
+    public var localizedUninstallImpact: String? { L(hostContext, .pluginUninstallImpact) }
 
     public let claimedCommands: Set<BuiltinItem> = [.imageConversion]
 
-    public var providers: [any BuiltinProvider] { [ImageConversionProvider()] }
+    public var providers: [any BuiltinProvider] { [provider] }
 
     public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] {
         [ImageConversionRecord.self]
@@ -42,7 +62,8 @@ public final class ImageConversionNativePlugin: NativePlugin {
 
     public func activate() {
         ImageConversionHistoryStore.shared.configure(modelContainer: host.modelContainer)
-        ImageConversionWindowController.activateForInstall()
+        isActive = true
+        windowControllerStorage?.activateForInstall()
         // Sweep candidate session directories a previous process left behind:
         // deinit/reset cleanup never runs on process exit or crash.
         let taskID = UUID()
@@ -57,7 +78,8 @@ public final class ImageConversionNativePlugin: NativePlugin {
     /// (Conversion Records, preferences, hotkeys) is retained by design. Never
     /// throws: there is no revert that can fail.
     public func deactivate() async throws {
-        await ImageConversionWindowController.deactivateForUninstall()
+        isActive = false
+        await windowControllerStorage?.deactivateForUninstall()
         let cleanupTasks = Array(cleanupTasks.values)
         for task in cleanupTasks { task.cancel() }
         for task in cleanupTasks { await task.value }
@@ -65,6 +87,16 @@ public final class ImageConversionNativePlugin: NativePlugin {
     }
 
     public func reconcileAfterImport() {
-        ImageConversionWindowController.reconcilePreferencesAfterImport()
+        windowControllerStorage?.reconcilePreferencesAfterImport()
+    }
+
+    public func present(items: [ImageConversionBasketItem]) {
+        guard isActive else { return }
+        windowController.present(items: items)
+    }
+
+    private func toggleWindow() async {
+        guard isActive else { return }
+        await windowController.toggle()
     }
 }

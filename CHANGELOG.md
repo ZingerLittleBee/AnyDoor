@@ -60,6 +60,9 @@ versioning.
   Plugin interface; new surfaces will be added only with a real Core caller.
 - Panel and hotkey coordination is now wired explicitly at plugin-registry
   bootstrap instead of reaching across a two-way global-singleton dependency.
+- Native Plugin host capabilities are now scoped to each plugin instance;
+  windows, services, writers, and localized views no longer depend on mutable
+  process-wide host or plugin-window singletons.
 
 ## [3.7.0] - 2026-07-12
 

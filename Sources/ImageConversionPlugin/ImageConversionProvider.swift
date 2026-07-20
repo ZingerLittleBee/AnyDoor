@@ -5,8 +5,13 @@ import PluginInterface
 final class ImageConversionProvider: ActionProvider {
     let itemKey: BuiltinItem = .imageConversion
     var permission: PermissionStatus { .notRequired }
+    private let action: @MainActor () async -> Void
+
+    init(action: @escaping @MainActor () async -> Void) {
+        self.action = action
+    }
 
     func run() async throws {
-        await ImageConversionWindowController.shared.toggle()
+        await action()
     }
 }

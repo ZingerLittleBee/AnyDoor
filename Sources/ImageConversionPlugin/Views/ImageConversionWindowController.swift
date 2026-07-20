@@ -5,61 +5,53 @@ import SwiftUI
 
 @MainActor
 public final class ImageConversionWindowController: NSWindowController, NSWindowDelegate {
-    public static let shared = ImageConversionWindowController()
     static let windowFrameKey = "imageConversion.windowFrame"
-    private static var isPluginActive = false
-    private static var presentationGeneration: UInt = 0
-    /// Tracks whether the lazy singleton exists so import reconciliation can
-    /// reload a live view model without instantiating the window.
-    private static var sharedExists = false
-
-    private let viewModel = ImageConversionViewModel()
+    private var isPluginActive = false
+    private var presentationGeneration: UInt = 0
+    private let hostContext: PluginHostContext
+    private let viewModel: ImageConversionViewModel
     private var keyMonitor: Any?
     private var activePresentations = 0
     private var presentationDrainWaiters: [CheckedContinuation<Void, Never>] = []
     /// Injectable Finder boundary for lifecycle tests; production uses the
     /// real AppleScript-backed selection reader.
-    var finderSelectionReader: @MainActor () async -> [URL] = {
-        await FinderSelectionReader.read()
-    }
+    var finderSelectionReader: @MainActor () async -> [URL]
 
-    static func activateForInstall() {
+    func activateForInstall() {
         presentationGeneration &+= 1
         isPluginActive = true
-        if sharedExists {
-            shared.viewModel.resumeAfterActivation()
-        }
+        viewModel.resumeAfterActivation()
     }
 
     /// A backup import rewrote the conversion preferences; push them into the
-    /// live view model. A no-op when the window was never created.
-    static func reconcilePreferencesAfterImport() {
-        guard sharedExists else { return }
-        shared.viewModel.reloadFromDefaults()
+    /// plugin instance's view model.
+    func reconcilePreferencesAfterImport() {
+        viewModel.reloadFromDefaults()
     }
 
     /// Plugin `deactivate` path: dismiss pending panels, cancel all conversion
-    /// work, await its shutdown, and close the workspace window. A no-op when
-    /// the window singleton was never created.
-    static func deactivateForUninstall() async {
+    /// work, await its shutdown, and close the workspace window.
+    func deactivateForUninstall() async {
         isPluginActive = false
         presentationGeneration &+= 1
-        guard sharedExists else { return }
-        await shared.viewModel.cancelActiveWork()
-        await shared.waitForPresentationsToDrain()
-        shared.close()
+        await viewModel.cancelActiveWork()
+        await waitForPresentationsToDrain()
+        close()
     }
 
-    private static func beginPresentation() -> UInt? {
+    private func beginPresentation() -> UInt? {
         guard isPluginActive else { return nil }
         return presentationGeneration
     }
 
-    private static func acceptsPresentation(_ generation: UInt) -> Bool {
+    private func acceptsPresentation(_ generation: UInt) -> Bool {
         isPluginActive && generation == presentationGeneration
     }
 
-    private init() {
+    init(hostContext: PluginHostContext) {
+        self.hostContext = hostContext
+        self.viewModel = ImageConversionViewModel(host: hostContext)
+        self.finderSelectionReader = { await FinderSelectionReader.read(host: hostContext) }
         // A standard-chrome workspace window: system title bar, working
         // minimize/zoom, normal level. It yields to other apps and relies on
         // RegularWindowCoordinator (see `show()`) to stay reachable under the
@@ -90,7 +82,6 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
 
         super.init(window: window)
         window.delegate = self
-        Self.sharedExists = true
     }
 
     @available(*, unavailable)
@@ -102,7 +93,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     /// Finder selection; otherwise the current Finder selection is echoed into
     /// the basket before the window appears.
     func toggle() async {
-        guard let generation = Self.beginPresentation() else { return }
+        guard let generation = beginPresentation() else { return }
         activePresentations += 1
         defer { finishPresentation() }
 
@@ -115,7 +106,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
             return
         }
         let urls = await finderSelectionReader()
-        guard Self.acceptsPresentation(generation) else { return }
+        guard acceptsPresentation(generation) else { return }
         viewModel.addFiles(urls)
         show()
     }
@@ -125,7 +116,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     /// selection and never closes an already-open window — it merges the items
     /// into the current basket and brings the window forward.
     public func present(items: [ImageConversionBasketItem]) {
-        guard Self.isPluginActive else { return }
+        guard isPluginActive else { return }
         if !viewModel.isConverting {
             viewModel.add(items)
         }
@@ -133,15 +124,15 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     }
 
     func show() {
-        guard Self.isPluginActive, let window else { return }
-        window.title = L(.imageConversionTitle)
+        guard isPluginActive, let window else { return }
+        window.title = L(hostContext, .imageConversionTitle)
         viewModel.resetSidebarForPresentation()
         mountContentIfNeeded()
         restoreFrame()
         installKeyMonitor()
         // Normal-level window of an accessory app: adopt .regular policy while
         // it is open so it stays reachable (untracked on willClose).
-        PluginHost.trackRegularWindow(window)
+        hostContext.trackRegularWindow(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         // Drop the initial first responder so no control renders a focus ring
@@ -159,6 +150,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     private func mountContentIfNeeded() {
         guard let window, window.contentView == nil || !(window.contentView is NSHostingView<ImageConversionView>) else { return }
         let view = ImageConversionView(model: viewModel)
+            .pluginHostContext(hostContext)
         let host = NSHostingView(rootView: view)
         // Let SwiftUI install the NavigationSplitView toolbar (the sidebar
         // toggle) onto this manually managed window.

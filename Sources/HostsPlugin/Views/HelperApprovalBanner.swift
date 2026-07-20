@@ -6,15 +6,17 @@ import SwiftUI
 /// Renders nothing when the helper is enabled or unavailable (dev/ad-hoc
 /// builds fall back to the AppleScript writer and need no nagging).
 struct HelperApprovalBanner: View {
+    @Environment(\.pluginHostContext) private var host
+
     var body: some View {
-        if PluginHost.helperReadiness() == .requiresApproval {
+        if host?.helperReadiness() == .requiresApproval {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.shield")
                     .foregroundStyle(.orange)
                 LocalizedText(.hostsHelperApproval)
                     .font(.caption2)
                 Spacer()
-                Button(L(.hostsActionAuthorize)) { PluginHost.helper?.openApprovalSettings() }
+                Button(L(host, .hostsActionAuthorize)) { host?.helper.openApprovalSettings() }
                     .buttonStyle(.borderless)
                     .font(.caption2)
             }

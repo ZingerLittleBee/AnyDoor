@@ -4,7 +4,7 @@ import SwiftUI
 /// Type-safe view of the shared string catalog's keys this module uses. The
 /// entries live in the host's `Localizable.xcstrings` (user story 27:
 /// plugin UI localizes through the existing catalog); resolution goes through
-/// `PluginHost.localizedString` so language switches apply without a relaunch.
+/// the plugin instance's host context so language switches apply without a relaunch.
 enum L10n {
     enum Key: String, CaseIterable, Sendable {
         case commandPaletteActionToggle = "commandPalette.action.toggle"
@@ -43,13 +43,13 @@ enum L10n {
     }
 }
 
-/// Module-typed front for the shared resolver (`PluginHost.localizedString`).
+/// Module-typed front for the instance-scoped host resolver.
 @MainActor
-func L(_ key: L10n.Key, _ args: CVarArg...) -> String {
-    PluginHost.localizedString(key.rawValue, arguments: args)
+func L(_ host: PluginHostContext?, _ key: L10n.Key, _ args: CVarArg...) -> String {
+    host?.localizedString(key.rawValue, arguments: args) ?? key.rawValue
 }
 
-/// Module-typed front for the shared reactive `PluginLocalizedText`: a `Text`
+/// Module-typed front for the environment-scoped `PluginLocalizedText`: a `Text`
 /// that re-renders on a host language switch.
 @MainActor
 struct LocalizedText: View {

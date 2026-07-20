@@ -9,20 +9,20 @@ import PluginInterface
 /// retired `Source.hostProfile` case did.
 final class HostProfileRowSourceTests: XCTestCase {
 
-    /// Points the plugin module's host bridge at a real CorePluginHost so
-    /// the row descriptors resolve catalog strings ("Active" / "Toggle").
+    /// Builds an instance context over the real Core host so row descriptors
+    /// resolve catalog strings ("Active" / "Toggle").
     @MainActor
-    private func bootstrapPluginHost() throws {
+    private func makeHostContext() throws -> PluginHostContext {
         let container = try ModelContainer(
             for: Schema(HostsNativePlugin.modelSchemaTypes),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        PluginHost.bootstrap(CorePluginHost(modelContainer: container))
+        return PluginHostContext(services: CorePluginHost(modelContainer: container))
     }
 
     @MainActor
     func testRowsMapProfilesSortedByDisplayOrder() throws {
-        try bootstrapPluginHost()
+        let host = try makeHostContext()
         let previous = LocalizationManager.shared.preference
         LocalizationManager.shared.preference = .en
         defer { LocalizationManager.shared.preference = previous }
@@ -30,6 +30,7 @@ final class HostProfileRowSourceTests: XCTestCase {
         let dev = HostProfile(name: "Dev", isActive: true, displayOrder: 200)
         let prod = HostProfile(name: "Prod", isActive: false, displayOrder: 100)
         let source = HostProfileRowSource(
+            host: host,
             profiles: { [dev, prod] },
             reload: {},
             setActive: { _, _ in }

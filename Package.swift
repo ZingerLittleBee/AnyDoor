@@ -50,9 +50,9 @@ let package = Package(
         ),
         // Native Plugin pilot (ADR-0005): the Image Conversion feature as its
         // own module. It touches the host only through PluginInterface's host
-        // services; the app target depends on it to build the compile-time
-        // plugin registry list (plus the one registered-debt call site the
-        // PRD carves out: the clipboard-history context menu).
+        // services; the app target depends on it for NativePluginCatalog plus
+        // the one registered-debt concrete call site: the clipboard-history
+        // context menu resolves the installed plugin instance via the registry.
         .target(
             name: "ImageConversionPlugin",
             dependencies: [
