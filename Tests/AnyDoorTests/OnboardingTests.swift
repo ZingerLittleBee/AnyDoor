@@ -107,7 +107,7 @@ final class OnboardingTests: XCTestCase {
 
     func test_steps_areOrderedAndDistinct() {
         let steps = OnboardingStep.allCases
-        XCTAssertEqual(steps.count, 9)
+        XCTAssertEqual(steps.count, 8)
         // rawValue is the page index, in order.
         XCTAssertEqual(steps.map(\.rawValue), Array(0..<steps.count))
         // Every step has a distinct title and sidebar label key.
