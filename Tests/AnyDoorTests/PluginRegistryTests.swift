@@ -208,15 +208,25 @@ final class PluginRegistryTests: XCTestCase {
         let plugin = ImageConversionNativePlugin(
             host: CorePluginHost(modelContainer: expectedContainer)
         )
-        _ = ImageConversionNativePlugin(host: CorePluginHost(modelContainer: otherContainer))
+        let otherPlugin = ImageConversionNativePlugin(
+            host: CorePluginHost(modelContainer: otherContainer)
+        )
 
         plugin.activate()
-        XCTAssertTrue(ImageConversionHistoryStore.shared.record(
+        otherPlugin.activate()
+        XCTAssertTrue(plugin.historyStore.record(
             sourceName: "source.png",
             sourceKind: .file,
             targetFormat: .jpeg,
             qualityPercent: 85,
             outputPath: "/tmp/source.jpg"
+        ))
+        XCTAssertTrue(otherPlugin.historyStore.record(
+            sourceName: "other.png",
+            sourceKind: .file,
+            targetFormat: .jpeg,
+            qualityPercent: 85,
+            outputPath: "/tmp/other.jpg"
         ))
 
         XCTAssertEqual(try expectedContainer.mainContext.fetchCount(
@@ -224,8 +234,11 @@ final class PluginRegistryTests: XCTestCase {
         ), 1)
         XCTAssertEqual(try otherContainer.mainContext.fetchCount(
             FetchDescriptor<ImageConversionRecord>()
-        ), 0)
+        ), 1)
+        XCTAssertEqual(plugin.historyStore.recent().map(\.sourceName), ["source.png"])
+        XCTAssertEqual(otherPlugin.historyStore.recent().map(\.sourceName), ["other.png"])
         try await plugin.deactivate()
+        try await otherPlugin.deactivate()
     }
 
     @MainActor

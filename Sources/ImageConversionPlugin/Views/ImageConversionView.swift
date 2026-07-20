@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 struct ImageConversionView: View {
     @Environment(\.pluginHostContext) private var host
     @Bindable var model: ImageConversionViewModel
-    var store: ImageConversionHistoryStore = .shared
+    let store: ImageConversionHistoryStore
     /// Measured width of the mode switch (the segmented control keeps its
     /// intrinsic size — a `.frame` would only center it); the target-size
     /// field + unit row above adopts it so the stacked rows align on both

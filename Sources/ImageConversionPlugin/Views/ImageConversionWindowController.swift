@@ -9,6 +9,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
     private var isPluginActive = false
     private var presentationGeneration: UInt = 0
     private let hostContext: PluginHostContext
+    private let historyStore: ImageConversionHistoryStore
     private let viewModel: ImageConversionViewModel
     private var keyMonitor: Any?
     private var activePresentations = 0
@@ -48,9 +49,16 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
         isPluginActive && generation == presentationGeneration
     }
 
-    init(hostContext: PluginHostContext) {
+    init(
+        hostContext: PluginHostContext,
+        historyStore: ImageConversionHistoryStore
+    ) {
         self.hostContext = hostContext
-        self.viewModel = ImageConversionViewModel(host: hostContext)
+        self.historyStore = historyStore
+        self.viewModel = ImageConversionViewModel(
+            host: hostContext,
+            historyStore: historyStore
+        )
         self.finderSelectionReader = { await FinderSelectionReader.read(host: hostContext) }
         // A standard-chrome workspace window: system title bar, working
         // minimize/zoom, normal level. It yields to other apps and relies on
@@ -149,7 +157,7 @@ public final class ImageConversionWindowController: NSWindowController, NSWindow
 
     private func mountContentIfNeeded() {
         guard let window, window.contentView == nil || !(window.contentView is NSHostingView<ImageConversionView>) else { return }
-        let view = ImageConversionView(model: viewModel)
+        let view = ImageConversionView(model: viewModel, store: historyStore)
             .pluginHostContext(hostContext)
         let host = NSHostingView(rootView: view)
         // Let SwiftUI install the NavigationSplitView toolbar (the sidebar

@@ -3,12 +3,10 @@ import ImageCodec
 import Observation
 import SwiftData
 
-/// Persists completed Image Conversions and serves the window's history section.
-/// `@MainActor` and context-backed, mirroring `TranslationHistoryStore`: a single
-/// shared `mainContext` is captured in `configure` after the ModelContainer is
-/// ready (`ImageConversionHistoryStore.shared.configure(modelContainer:)` from the
-/// app). Reads no-op and writes report failure when no context is wired
-/// (unit tests / pre-bootstrap).
+/// Persists completed Image Conversions and serves one plugin instance's
+/// history section. The owning plugin injects its captured `mainContext`, so
+/// simultaneously alive plugin instances never overwrite one another's store.
+/// Reads no-op and writes report failure when no context is wired (pure tests).
 ///
 /// `@Observable` so a SwiftUI list re-renders when history changes: mutations bump
 /// `revision`, which the history view observes to re-fetch — the same "publish a
@@ -16,8 +14,6 @@ import SwiftData
 @MainActor
 @Observable
 final class ImageConversionHistoryStore {
-    static let shared = ImageConversionHistoryStore()
-
     /// Fixed durable cap: the oldest records are trimmed on write so history
     /// never exceeds this many rows.
     static let capacity = 50
@@ -29,11 +25,6 @@ final class ImageConversionHistoryStore {
 
     init(modelContext: ModelContext? = nil) {
         self.modelContext = modelContext
-    }
-
-    /// Wire the shared container's main context. Mirrors `TranslationHistoryStore.configure`.
-    func configure(modelContainer: ModelContainer) {
-        modelContext = modelContainer.mainContext
     }
 
     /// Write one completed conversion and trim to the 50-record cap in the

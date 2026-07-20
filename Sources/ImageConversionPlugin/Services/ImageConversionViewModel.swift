@@ -152,6 +152,7 @@ final class ImageConversionViewModel {
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let host: PluginHostContext?
+    @ObservationIgnored private let historyStore: ImageConversionHistoryStore
     @ObservationIgnored private var engine: ImageConversionEngine?
     /// Stable engine-side IDs for basket items, so preview/run/Save Anyway
     /// all address the same artifacts.
@@ -168,11 +169,13 @@ final class ImageConversionViewModel {
     init(
         availableFormats: [ImageConversionFormat] = ImageConversionFormat.availableTargets(),
         defaults: UserDefaults = .standard,
-        host: PluginHostContext? = nil
+        host: PluginHostContext? = nil,
+        historyStore: ImageConversionHistoryStore = ImageConversionHistoryStore()
     ) {
         self.availableFormats = availableFormats
         self.defaults = defaults
         self.host = host
+        self.historyStore = historyStore
         self.selectedFormat = ImageConversionPreferences.targetFormat(
             availableFormats: availableFormats,
             defaults: defaults
@@ -540,7 +543,7 @@ final class ImageConversionViewModel {
         qualityPercent: Int
     ) -> Int {
         outputs.reduce(into: 0) { warnings, output in
-            let saved = ImageConversionHistoryStore.shared.record(
+            let saved = historyStore.record(
                 sourceName: output.sourceName,
                 sourceKind: output.sourceKind,
                 targetFormat: target,
@@ -1036,7 +1039,7 @@ final class ImageConversionViewModel {
         outcome: ImageConversionOutcome
     ) -> Bool {
         let sourceKind: ImageConversionSourceKind = item.fileURL != nil ? .file : .bitmap
-        return ImageConversionHistoryStore.shared.recordTargetSize(
+        return historyStore.recordTargetSize(
             sourceName: item.displayName,
             sourceKind: sourceKind,
             targetFormat: candidate.configuration.format,

@@ -17,6 +17,7 @@ public final class ImageConversionNativePlugin: NativePlugin {
     public let id = ImageConversionNativePlugin.pluginID
     private let host: any PluginHostServices
     private let hostContext: PluginHostContext
+    let historyStore: ImageConversionHistoryStore
     private var windowControllerStorage: ImageConversionWindowController?
     private var isActive = false
     private lazy var provider = ImageConversionProvider { [weak self] in
@@ -26,7 +27,10 @@ public final class ImageConversionNativePlugin: NativePlugin {
 
     var windowController: ImageConversionWindowController {
         if let windowControllerStorage { return windowControllerStorage }
-        let controller = ImageConversionWindowController(hostContext: hostContext)
+        let controller = ImageConversionWindowController(
+            hostContext: hostContext,
+            historyStore: historyStore
+        )
         if isActive { controller.activateForInstall() }
         windowControllerStorage = controller
         return controller
@@ -40,6 +44,9 @@ public final class ImageConversionNativePlugin: NativePlugin {
         let hostContext = PluginHostContext(services: host)
         self.host = host
         self.hostContext = hostContext
+        self.historyStore = ImageConversionHistoryStore(
+            modelContext: host.modelContainer.mainContext
+        )
     }
 
     public var localizedName: String { L(hostContext, .pluginName) }
@@ -61,7 +68,6 @@ public final class ImageConversionNativePlugin: NativePlugin {
     }
 
     public func activate() {
-        ImageConversionHistoryStore.shared.configure(modelContainer: host.modelContainer)
         isActive = true
         windowControllerStorage?.activateForInstall()
         // Sweep candidate session directories a previous process left behind:
