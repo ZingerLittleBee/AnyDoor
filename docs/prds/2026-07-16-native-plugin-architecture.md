@@ -1,6 +1,6 @@
 # PRD: Native Plugin Architecture
 
-- **Status:** ready-for-agent
+- **Status:** implemented
 - **Date:** 2026-07-16
 - **Tracker:** local (`docs/prds/`, issues under `docs/issues/`)
 - **Glossary:** [Ubiquitous Language](../../CONTEXT.md#plugins)
@@ -69,6 +69,7 @@ trace so nobody loses a feature they were using.
 30. As the developer, I want every built-in command claimed by exactly one owner — a plugin or the Core — with an invariant test, so that ownership can never silently drift.
 31. As the developer, I want plugin-contributed palette rows to flow through one generic descriptor, so that Core control flow never names a plugin (ADR-0007).
 32. As the developer, I want the plugin lifecycle (activate on install/launch, deactivate on uninstall, reconcile after backup import) defined once on the plugin interface, so that adding the next plugin is mechanical.
+33. As a user importing a backup, I want any plugin transition that could not be completed reported explicitly after the remaining settings finish reconciling, so that a partial restore is never presented as a success.
 
 ## Implementation Decisions
 
@@ -82,33 +83,45 @@ trace so nobody loses a feature they were using.
 - **Plugin protocol.** A Native Plugin declares: stable identity, localized
   name/description, claimed `BuiltinItem` cases, its providers, palette
   option-parent registrations and option builders, palette row sources
-  (descriptor-based), panel popover and window contributions, a settings
-  section, its SwiftData model types (collected at container creation — the
-  schema stays static regardless of install state), a usage-trace predicate
-  for migration, and lifecycle hooks: `activate`, `deactivate` (throwing;
+  (descriptor-based), an optional panel popover, its SwiftData model types
+  (collected at container creation — the schema stays static regardless of
+  install state), a usage-trace predicate for migration, and lifecycle hooks:
+  `activate`, `deactivate` (throwing;
   must cancel in-flight work and release shared host resources, without
   mutating user-visible system state or prompting for authorization), and
-  reconcile-after-import.
-- **PluginRegistry.** The single new seam. Owns the compile-time plugin list
-  and the install-state store; exposes the installed set and claim lookups;
-  enforces exclusive claims; performs transactional uninstall — `deactivate`
-  must succeed before any surface is unregistered, and a thrown error
-  leaves the plugin installed and reports the error.
+  reconcile-after-import. Plugin-owned windows stay implementation details
+  reached through registered surfaces; speculative generic window and
+  settings-section requirements are deliberately absent.
+- **Catalog plus runtime registry.** `NativePluginCatalog` is the single
+  compile-time inventory, pairing each stable id with unconditional SwiftData
+  schema types and a runtime factory. `PluginRegistry` receives the instances
+  built by that catalog and owns runtime install state, claim lookups,
+  lifecycle, and surface publication. It enforces exclusive claims and
+  transactional uninstall — `deactivate` must succeed before any surface is
+  unregistered, and a thrown error leaves the plugin installed and reports
+  the error.
 - **Extension points, zero named branches.** Every host surface the pilots
   touch becomes generic: the provider registry, panel entry building, the
-  palette option-parent table (today a hardcoded five), palette row sections,
-  window/popover hosting, the settings sidebar's plugin area, hotkey snapshot
-  compilation (which gains the installed set as an input and drops
-  uninstalled plugins' bindings), and backup reconcile. The rule from
+  palette option-parent table, palette row sections, panel-popover hosting,
+  the Plugins settings tab, hotkey snapshot compilation (which gains the
+  installed set as an input and drops uninstalled plugins' bindings), and
+  backup reconcile. Plugin-owned windows are opened only through these gated
+  surfaces. The rule from
   ADR-0007: shared catalog types may enumerate plugin-claimed commands; Core
   control flow may never name a plugin.
 - **`Source.pluginRow`.** Plugin palette rows (hosts profiles first) use one
   generic case carrying a descriptor that declares title, icon, and commit
-  semantics; the hosts-specific source case and its named intent retire.
+  semantics; the hosts-specific source case and its named intent retire. Core
+  namespaces every row source as `(pluginID, localID)` before registration and
+  commit routing, so two plugins may safely choose the same local source id.
 - **Install state storage.** Installed set lives in UserDefaults and joins
   the settings-sync whitelist, so backup import reproduces the feature
   selection; helper approval and other machine-local security state are
-  excluded, consistent with existing backup policy.
+  excluded, consistent with existing backup policy. Import attempts every
+  plugin transition, re-persists the installed set that actually converged,
+  finishes the other runtime refreshes, and then reports an aggregate error
+  when any uninstall failed; partial convergence is never reported as full
+  success.
 - **Privileged helper stays Core infrastructure.** The helper daemon is
   shared: Hosts writes through it, and forced Scheduled Shutdown (a Core
   feature) shuts down through it. Hosts' `deactivate` never touches the
@@ -152,7 +165,11 @@ trace so nobody loses a feature they were using.
   repeated launches.
 - **Backup round-trip** extends the existing codec/service tests: installed
   set exports, imports, and triggers reconcile; machine-local helper state
-  does not travel.
+  does not travel. A failed plugin removal remains installed, the remaining
+  restore work completes, and the restore call throws a structured failure.
+- **Instance isolation** is pinned with two simultaneous plugin instances and
+  separate in-memory containers; host capabilities and mutable stores must not
+  overwrite or read one another.
 - Not tested: SwiftUI view layers (repo convention tests policies and
   models, not views) and real `SMAppService` registration (external system
   boundary behind the existing readiness injection point).
@@ -171,7 +188,8 @@ trace so nobody loses a feature they were using.
   hardwired in Core for V1; registered debt, revisited when the surface is
   next touched.
 - **Onboarding/first-run plugin picker** — Settings is the only
-  install/uninstall surface in V1.
+  install/uninstall surface in V1. The onboarding catalog is Core-only and
+  must not advertise an uninstalled plugin.
 
 ## Further Notes
 

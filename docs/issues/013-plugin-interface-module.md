@@ -28,13 +28,23 @@ behavior afterward.
 Glossary vocabulary (Native Plugin, Core, Claim, Install, Uninstall) is
 canonical in `CONTEXT.md`; use it in all API names and doc comments.
 
+## Final implementation note (2026-07-20)
+
+The protocol was narrowed after the pilot plugins exercised the boundary. Its
+final contribution surface is providers, palette option parents, namespaced
+palette row sources, and an optional panel popover. Plugin-owned windows stay
+inside their modules and are reached through those registered surfaces;
+settings-section and generic window contributions were removed because no Core
+caller needed them. `NativePluginCatalog`, not `PluginRegistry`, owns the
+compile-time schema and factory inventory.
+
 ## Acceptance criteria
 
-- [ ] A new library target exists containing the command catalog, the plugin protocols, and the row descriptor; the app target depends on it
-- [ ] The plugin protocol expresses everything the PRD's plugin-protocol decision lists (claims, contributions, lifecycle, usage-trace predicate) — even where no implementation exists yet
-- [ ] `swift build` and the full existing test suite pass unchanged; no user-visible behavior differs
-- [ ] `PanelEntry` and `Source` did not move — the interface target has no dependency on palette/UI types
-- [ ] No file left behind re-exports or aliases moved types "for compatibility" — call sites import the new module directly
+- [x] A new library target exists containing the command catalog, plugin protocols, row descriptors, and host-scoped row-source key; the app target depends on it
+- [x] The plugin protocol expresses the contribution surfaces proven by the pilots, lifecycle, schema, and usage-trace predicate, without speculative window or settings requirements
+- [x] `swift build` and the full existing test suite pass; the prefactor itself changed no user-visible behavior
+- [x] `PanelEntry` and `Source` did not move — the interface target has no dependency on palette/UI types
+- [x] No file left behind re-exports or aliases moved types "for compatibility" — call sites import the new module directly
 
 ## Blocked by
 

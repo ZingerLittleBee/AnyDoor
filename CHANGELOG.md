@@ -63,6 +63,21 @@ versioning.
 - Native Plugin host capabilities are now scoped to each plugin instance;
   windows, services, writers, and localized views no longer depend on mutable
   process-wide host or plugin-window singletons.
+- Image Conversion history is now owned by the plugin instance and bound to
+  its captured data container, so concurrent plugin instances cannot replace
+  one another's persistence context.
+- Plugin palette row sources are now namespaced by plugin id, preventing two
+  plugins with the same local source id from replacing or routing into one
+  another.
+- Fresh-install onboarding now presents Core features only; optional Native
+  Plugins remain discoverable exclusively from Settings → Plugins until
+  installed.
+
+### Fixed
+
+- Backup import now reports a partial failure when a plugin cannot be removed,
+  while still applying the remaining settings and persisting the plugin state
+  that actually converged.
 
 ## [3.7.0] - 2026-07-12
 

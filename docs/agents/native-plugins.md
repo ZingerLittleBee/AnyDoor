@@ -2,7 +2,7 @@
 
 Audience: an agent (or developer) adding or modifying a Native Plugin without
 re-deriving the architecture. Everything here is verified against the source
-on branch `feat/native-plugins` (2026-07-17). Rationale lives in the linked
+on branch `feat/native-plugins` (2026-07-20). Rationale lives in the linked
 docs; this file is the operational map.
 
 Background: [PRD](../prds/2026-07-16-native-plugin-architecture.md) ·
@@ -28,7 +28,9 @@ Background: [PRD](../prds/2026-07-16-native-plugin-architecture.md) ·
 - **Uninstalled = invisible everywhere.** No panel row, no palette entry, no
   hotkey firing, no popover, no permission prompts, no approval banners. Not
   "greyed out" — gone (PRD US18). Every surface gates through
-  `PluginRegistry` (section 5).
+  `PluginRegistry` (section 5). The sole discovery surface is Settings →
+  Plugins; first-run onboarding remains Core-only and never advertises an
+  uninstalled plugin.
 - **Data always retained.** A plugin's `@Model` types are registered in the
   ModelContainer schema regardless of install state (ADR-0005), and its
   `BuiltinPreference` rows (visibility/order/hotkey) survive uninstall.
@@ -62,7 +64,7 @@ ImageCodec       ←─ AnyDoor, ImageConversionPlugin
   `ToggleProvider` / `ActionProvider` + `PermissionStatus`, `NativePlugin` +
   `NativePluginID`, `PluginHostServices` + `PluginToast`, the instance-scoped
   `PluginHostContext` + `PluginLocalizedText`, `PluginRowDescriptor` +
-  `PluginRowSource`,
+  `PluginRowSource` + `PluginRowSourceKey`,
   `PluginPanelPopover` + `PluginPanelPopoverContext`,
   `PrivilegedHelperAccess` + `PrivilegedHelperReadiness` +
   `PrivilegedHelperCallError`, plus a few shared utilities/views
@@ -112,7 +114,7 @@ marked **required** have no default.
 | `panelPopover(for:) -> PluginPanelPopover?` | default `nil` | Menu-panel hover popover for a claimed submenu command. Resolved per-mount through `PluginRegistry.panelPopover(for:)`. |
 | `nonisolated static modelSchemaTypes: [any PersistentModel.Type]` | default `[]` | SwiftData types the plugin owns. `nonisolated static` because `AppDelegate.init()` composes the schema **before any MainActor plugin instance exists**, and unconditionally — install state never changes the schema. This is the data-retention mechanism. |
 | `hasUsageTrace(in: ModelContext) throws -> Bool` | **yes** | Evaluated once by `PluginUsageMigration` to auto-install for upgrading users. Hosts: `HostProfile` rows exist **or** `privilegedHelper.readiness() != .unavailable` (a registered daemon needs its managing UI). Image Conversion: `ImageConversionRecord` rows exist. A throw aborts the whole migration and it retries next launch. |
-| `activate()` | default no-op | On `install(_:)` and on every launch while installed (from `bootstrap`), **before** surfaces register. Wire stores to `host.modelContainer` here; install-time permission acts live here too (Hosts calls `privilegedHelper.ensureRegistered()` — an uninstalled plugin requests no permissions, PRD US14). |
+| `activate()` | default no-op | On `install(_:)` and on every launch while installed (from `bootstrap`), **before** surfaces register. Start install-scoped work here; install-time permission acts live here too (Hosts calls `privilegedHelper.ensureRegistered()` — an uninstalled plugin requests no permissions, PRD US14). Mutable stores should already belong to the plugin instance, not be configured through a module singleton. |
 | `deactivate() async throws` | **yes, deliberately no default** | See the contract below. |
 | `reconcileAfterImport()` | default no-op | After a config-backup import, for every plugin that ends up installed: re-read imported settings, refresh internal state (Hosts: `manager.reload()`). |
 
@@ -191,7 +193,10 @@ narrow capability fronts (`showToast`, `trackRegularWindow`,
 `pasteboardSelfWrite`, helper access, AppleScript, and localization). Pure
 logic tests may inject `nil` into consumers that deliberately support a
 raw-key/no-toast fallback; production plugin roots always provide a real
-context.
+context. Mutable services follow the same ownership rule: Image Conversion,
+for example, constructs one `ImageConversionHistoryStore` from its captured
+container and injects that exact store into its window and view model. Never
+add a process-wide `shared` store with a later `configure` step.
 
 ### Per-module L10n pattern
 
@@ -249,11 +254,15 @@ claims.
   `PluginRegistry` owns registration and removal across launch, Install, and
   Uninstall; `NativePluginCatalog` supplies the plugin list and schema while
   `AppDelegate` supplies only the host and Core providers.
-  Root plugin rows flow through `PanelEntry.Source.pluginRow(sourceID:descriptor:)`;
+  Core combines each source's plugin-local `id` with its owner's stable plugin
+  id into a `PluginRowSourceKey`. Registrations, entry identity, unregister,
+  and commit routing all use this key, so two plugins may use the same local
+  source id without replacing one another. Root plugin rows flow through
+  `PanelEntry.Source.pluginRow(sourceKey:descriptor:)`;
   `CommandPaletteCommitIntent.classify` maps them exhaustively by declared
   `CommitSemantics` (`.stayOpen` → `.pluginRowStayOpen`, `.closeThenAct` →
   `.pluginRowCloseThenAct`) and the controller performs them via
-  `CommandPaletteExtensions.rowSource(withID:)?.performRow(id:)`. A
+  `CommandPaletteExtensions.rowSource(for:)?.performRow(id:)`. A
   `PluginRowSource` gets one `reload()` per palette open (in
   `collectSections`); `rows()` runs per query pass and must stay cheap and
   synchronous. Its `sectionTitleKey` is a raw catalog-key string rendered via
@@ -326,8 +335,12 @@ All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
   id — a failed deactivate keeps the plugin and the state is re-persisted to
   match reality). Each transition publishes immediately because an async
   deactivate creates an observable boundary. The registry then forwards
-  `reconcileAfterImport()` to the plugins that end up installed. Helper
-  *approval* is machine-local and never travels (PRD US24).
+  `reconcileAfterImport()` to the plugins that end up installed. It attempts
+  every transition, then throws `PluginImportReconciliationError` containing
+  all failed removals. `BackupService` still completes the other live-runtime
+  refreshes before rethrowing, and the Sync UI reports a partial failure rather
+  than success. Helper *approval* is machine-local and never travels (PRD
+  US24).
 - **Usage-trace migration** (`PluginUsageMigration.runIfNeeded`): one-shot
   behind versioned flag `plugins.usageMigrated_v1`. If `plugins.installed`
   already exists before migration (only possible via a config-backup import),
@@ -358,6 +371,9 @@ named test, which is the point of them.
    NativePlugin` with `public static let pluginID = NativePluginID(rawValue:
    "<stable-id>")`, `init(host: any PluginHostServices)` constructing one
    `PluginHostContext` and passing it through every capability consumer.
+   Construct mutable stores as instance properties from the captured host
+   container and inject those same instances downward; never add a module
+   singleton that a later bootstrap call reconfigures.
    Implement only the surfaces the feature has (defaults cover the rest);
    `deactivate` must be written consciously per the section-3 contract.
    Provide a test `init` seam if the plugin touches a system boundary
@@ -425,7 +441,9 @@ named test, which is the point of them.
 - **No view-layer tests.** Policies, models, stores, and descriptors only.
   The one end-to-end exception drives the real `PanelStore`
   (`PluginRegistryTests.testLifecycleTogglesPanelRowThroughRealSurfaces`),
-  still headless.
+  still headless. Do not read Swift source files and assert that view code
+  contains particular strings; extract the decision into a pure policy when
+  it deserves a regression test.
 - Contract-level pins live in `NativePluginContractTests` (a `BarePlugin`
   proves optional members default to empty/no-op and don't trap) — extend it
   if you add a protocol member.
