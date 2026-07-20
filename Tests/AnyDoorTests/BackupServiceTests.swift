@@ -161,6 +161,42 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testRestoreSurfacesRuntimeFailureAfterApplyingSnapshot() async throws {
+        struct ReconcileFailure: Error {}
+
+        let context = try makeContext()
+        let service = BackupService(
+            context: context,
+            defaults: makeDefaults(),
+            appPathResolver: { _ in nil },
+            reconcileRuntime: { throw ReconcileFailure() }
+        )
+
+        do {
+            _ = try await service.restore(snapshot(shortcuts: [
+                AppShortcutDTO(
+                    appBundleID: "com.example.App",
+                    appName: "Example",
+                    keyCode: 4,
+                    modifierFlags: 256,
+                    isEnabled: true,
+                    isVisible: true,
+                    displayOrder: 100
+                ),
+            ]))
+            XCTFail("runtime reconciliation failure must be surfaced")
+        } catch {
+            XCTAssertTrue(error is ReconcileFailure)
+        }
+
+        XCTAssertEqual(
+            try context.fetch(FetchDescriptor<KeyBinding>()).map(\.appBundleID),
+            ["com.example.App"],
+            "the persisted import is retained even when a live subsystem cannot converge"
+        )
+    }
+
+    @MainActor
     func testImportInsertsNewShortcutAndResolvesPath() async throws {
         let context = try makeContext()
         let service = BackupService(

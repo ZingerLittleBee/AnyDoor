@@ -326,7 +326,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
         // A backup exported from a machine with Hosts installed: the settings
         // import wrote the set; reconcile must behave like a hands-on install.
         f.defaults.set(["hosts"], forKey: PluginRegistry.installStateKey)
-        await f.registry.reconcileAfterImport()
+        try await f.registry.reconcileAfterImport()
 
         XCTAssertTrue(f.registry.isInstalled(f.plugin.id))
         XCTAssertEqual(f.host.helper.ensureRegisteredCalls, 1,
@@ -340,7 +340,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
         defer { f.teardown() }
 
         f.defaults.set([String](), forKey: PluginRegistry.installStateKey)
-        await f.registry.reconcileAfterImport()
+        try await f.registry.reconcileAfterImport()
 
         XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
         XCTAssertEqual(f.host.helper.ensureRegisteredCalls, 0,

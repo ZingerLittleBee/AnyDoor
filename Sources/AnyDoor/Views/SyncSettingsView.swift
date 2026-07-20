@@ -78,6 +78,13 @@ struct SyncSettingsView: View {
                                       summary.preferencesUpdated,
                                       summary.quicklinksUpdated + summary.quicklinksInserted)
                     isError = false
+                } catch let error as PluginImportReconciliationError {
+                    logger.error("Import completed with plugin failures: \(error)")
+                    statusMessage = L(
+                        .settingsSyncImportPartialFailure,
+                        error.localizedDescription
+                    )
+                    isError = true
                 } catch {
                     logger.error("Import failed: \(error)")
                     statusMessage = L(.settingsSyncImportFailed, error.localizedDescription)

@@ -9624,6 +9624,23 @@
         }
       }
     },
+    "settings.sync.importPartialFailure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import completed, but some plugin changes could not be applied: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入已完成，但部分插件变更无法应用：%@"
+          }
+        }
+      }
+    },
     "settings.sync.importSuccess": {
       "extractionState": "manual",
       "localizations": {

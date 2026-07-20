@@ -380,7 +380,7 @@ final class PluginRegistryTests: XCTestCase {
         // The settings import wrote the installed set into defaults; reconcile
         // must run the real install lifecycle so surfaces appear sans relaunch.
         defaults.set([plugin.id.rawValue], forKey: PluginRegistry.installStateKey)
-        await registry.reconcileAfterImport()
+        try await registry.reconcileAfterImport()
 
         XCTAssertTrue(registry.isInstalled(plugin.id))
         XCTAssertTrue(panelItems(in: harness.panelStore).contains(.imageConversion))
@@ -402,7 +402,7 @@ final class PluginRegistryTests: XCTestCase {
         let updatesAfterInstall = harness.snapshotRecorder.updateCount
 
         defaults.set([String](), forKey: PluginRegistry.installStateKey)
-        await registry.reconcileAfterImport()
+        try await registry.reconcileAfterImport()
 
         XCTAssertFalse(registry.isInstalled(plugin.id))
         XCTAssertFalse(panelItems(in: harness.panelStore).contains(.imageConversion))
@@ -424,7 +424,18 @@ final class PluginRegistryTests: XCTestCase {
         registry.install(plugin.id)
 
         defaults.set([String](), forKey: PluginRegistry.installStateKey)
-        await registry.reconcileAfterImport()
+        do {
+            try await registry.reconcileAfterImport()
+            XCTFail("a failed imported uninstall must be surfaced")
+        } catch let error as PluginImportReconciliationError {
+            XCTAssertEqual(error.failures, [
+                PluginImportFailure(
+                    pluginID: plugin.id,
+                    pluginName: plugin.localizedName,
+                    errorDescription: ThrowingDeactivatePlugin.DeactivateError().localizedDescription
+                ),
+            ])
+        }
 
         XCTAssertEqual(plugin.deactivateCalls, 1)
         XCTAssertTrue(registry.isInstalled(plugin.id),
@@ -558,7 +569,7 @@ final class PluginRegistryTests: XCTestCase {
         lifecycle.removeAll()
 
         defaults.set([newID.rawValue], forKey: PluginRegistry.installStateKey)
-        await harness.registry.reconcileAfterImport()
+        try await harness.registry.reconcileAfterImport()
 
         XCTAssertEqual(lifecycle, ["deactivate.old", "activate.new"])
         XCTAssertEqual(harness.registry.installedIDs, Set([newID]))

@@ -31,7 +31,7 @@ final class BackupService {
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path
         },
         reconcileRuntime: @escaping @MainActor () async throws -> Void = {
-            await BackupService.reconcileLiveRuntime()
+            try await BackupService.reconcileLiveRuntime()
         }
     ) {
         self.context = context
@@ -220,14 +220,20 @@ final class BackupService {
 
     /// Re-read settings into the modules whose setters carry side effects that
     /// raw UserDefaults writes bypass, then rebuild derived surfaces.
-    private static func reconcileLiveRuntime() async {
+    private static func reconcileLiveRuntime() async throws {
         CommandPaletteService.shared.reloadFromDefaults()
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()
         ScheduledShutdownService.shared.reloadFromDefaults()
         CaptureSettings.shared.reloadFromDefaults()
         TranslationSettings.shared.reloadFromDefaults()
-        await PluginRegistry.shared.reconcileAfterImport()
+        let pluginError: (any Error)?
+        do {
+            try await PluginRegistry.shared.reconcileAfterImport()
+            pluginError = nil
+        } catch {
+            pluginError = error
+        }
         ClipboardTagStore.shared.reload()
         // An import may remove tag definitions, leaving items tagged with ids
         // that no longer exist. Sweep those ghost ids and reclaim storage.
@@ -238,6 +244,10 @@ final class BackupService {
         QuicklinkStore.shared.rebuild()
         PanelStore.shared.rebuild()
         HotkeyCoordinator.shared.refresh()
+
+        if let pluginError {
+            throw pluginError
+        }
     }
 
     private func sanitizedQuicklinkLink(_ link: String) -> String? {

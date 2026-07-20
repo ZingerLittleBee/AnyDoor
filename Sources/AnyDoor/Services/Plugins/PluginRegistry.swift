@@ -6,6 +6,22 @@ import SwiftData
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "plugins")
 
+struct PluginImportFailure: Equatable, Sendable {
+    let pluginID: NativePluginID
+    let pluginName: String
+    let errorDescription: String
+}
+
+struct PluginImportReconciliationError: LocalizedError, Equatable, Sendable {
+    let failures: [PluginImportFailure]
+
+    var errorDescription: String? {
+        failures
+            .map { "\($0.pluginName): \($0.errorDescription)" }
+            .joined(separator: "\n")
+    }
+}
+
 /// The single seam between the Core and the Native Plugins (ADR-0005).
 ///
 /// Owns the compile-time plugin list and the install-state store, answers
@@ -218,11 +234,13 @@ final class PluginRegistry {
     /// relaunch. A failed deactivate keeps its plugin installed (the usual
     /// transactional rule) and the stored state is re-persisted to match
     /// reality.
-    func reconcileAfterImport() async {
+    func reconcileAfterImport() async throws {
         let importedIDs = Set(
             (defaults.stringArray(forKey: Self.installStateKey) ?? [])
                 .map(NativePluginID.init(rawValue:))
         ).intersection(Set(plugins.map(\.id)))
+
+        var failures: [PluginImportFailure] = []
 
         // Remove first so returning plugins resolve retained hotkeys against
         // the actual survivors, including any plugin whose deactivate failed.
@@ -231,6 +249,12 @@ final class PluginRegistry {
                 try await uninstall(id)
             } catch {
                 logger.error("Import-driven uninstall of \(id.rawValue) failed: \(error)")
+                let pluginName = plugin(withID: id)?.localizedName ?? id.rawValue
+                failures.append(PluginImportFailure(
+                    pluginID: id,
+                    pluginName: pluginName,
+                    errorDescription: error.localizedDescription
+                ))
             }
         }
         for id in importedIDs.subtracting(installedIDs) {
@@ -240,6 +264,10 @@ final class PluginRegistry {
 
         for plugin in plugins where installedIDs.contains(plugin.id) {
             plugin.reconcileAfterImport()
+        }
+
+        if !failures.isEmpty {
+            throw PluginImportReconciliationError(failures: failures)
         }
     }
 
