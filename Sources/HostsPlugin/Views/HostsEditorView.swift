@@ -53,27 +53,11 @@ struct HostsEditorView: View {
                         profileRow(profile)
                             .tag(Selection.profile(profile.id))
                             .contextMenu {
-                                profileActivationMenuItem(profile)
-                                Button { beginRename(profile) } label: {
-                                    Label {
-                                        LocalizedText(.hostsActionRename)
-                                    } icon: {
-                                        Image(systemName: "pencil")
-                                    }
-                                }
-                                Button { duplicate(profile) } label: {
-                                    Label {
-                                        LocalizedText(.hostsProfileDuplicate)
-                                    } icon: {
-                                        Image(systemName: "plus.square.on.square")
-                                    }
-                                }
-                                Button(role: .destructive) { delete(profile) } label: {
-                                    Label {
-                                        LocalizedText(.hostsActionDelete)
-                                    } icon: {
-                                        Image(systemName: "trash")
-                                    }
+                                ForEach(
+                                    HostProfileContextMenuPolicy.actions(isActive: profile.isActive),
+                                    id: \.self
+                                ) { action in
+                                    profileContextMenuItem(action, profile: profile)
                                 }
                             }
                     }
@@ -141,25 +125,40 @@ struct HostsEditorView: View {
     }
 
     @ViewBuilder
-    private func profileActivationMenuItem(_ profile: HostProfile) -> some View {
-        if profile.isActive {
-            Button(role: .destructive) { toggleActive(profile) } label: {
-                Label {
-                    LocalizedText(.hostsProfileDisable)
-                } icon: {
-                    Image(systemName: "circle")
-                }
-            }
-            .disabled(applyingProfileIDs.contains(profile.id))
-        } else {
-            Button { toggleActive(profile) } label: {
-                Label {
-                    LocalizedText(.hostsProfileEnable)
-                } icon: {
-                    Image(systemName: "checkmark.circle")
-                }
-            }
-            .disabled(applyingProfileIDs.contains(profile.id))
+    private func profileContextMenuItem(
+        _ action: HostProfileContextAction,
+        profile: HostProfile
+    ) -> some View {
+        Button(role: action.isDestructive ? .destructive : nil) {
+            performContextAction(action, profile: profile)
+        } label: {
+            profileContextMenuLabel(action)
+        }
+        .disabled(action.togglesActivation && applyingProfileIDs.contains(profile.id))
+    }
+
+    private func performContextAction(_ action: HostProfileContextAction, profile: HostProfile) {
+        switch action {
+        case .enable, .disable: toggleActive(profile)
+        case .rename: beginRename(profile)
+        case .duplicate: duplicate(profile)
+        case .delete: delete(profile)
+        }
+    }
+
+    @ViewBuilder
+    private func profileContextMenuLabel(_ action: HostProfileContextAction) -> some View {
+        switch action {
+        case .enable:
+            Label { LocalizedText(.hostsProfileEnable) } icon: { Image(systemName: "checkmark.circle") }
+        case .disable:
+            Label { LocalizedText(.hostsProfileDisable) } icon: { Image(systemName: "circle") }
+        case .rename:
+            Label { LocalizedText(.hostsActionRename) } icon: { Image(systemName: "pencil") }
+        case .duplicate:
+            Label { LocalizedText(.hostsProfileDuplicate) } icon: { Image(systemName: "plus.square.on.square") }
+        case .delete:
+            Label { LocalizedText(.hostsActionDelete) } icon: { Image(systemName: "trash") }
         }
     }
 
