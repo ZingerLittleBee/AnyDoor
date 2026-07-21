@@ -23,11 +23,7 @@ enum ScriptRowDecoder {
             throw ScriptPluginError.resultDecodingFailed("row '\(id)' is missing a string 'title'")
         }
 
-        let commit: PluginRowDescriptor.CommitSemantics
-        switch fields["commit"]?.stringValue {
-        case "closeThenAct": commit = .closeThenAct
-        default: commit = .stayOpen
-        }
+        let commit = try decodeCommit(fields, rowID: id)
 
         return PluginRowDescriptor(
             id: id,
@@ -41,5 +37,50 @@ enum ScriptRowDecoder {
             }(),
             commit: commit
         )
+    }
+
+    /// Decode a row's commit semantics. The forward form is an `action`
+    /// discriminated union (`{ type: "detail" | "openURL" | "copy" | "argument"
+    /// | "run", ... }`); when absent, the legacy `commit` string is honored so
+    /// existing packages keep working. The host-only `noAction`/`runArgument`
+    /// cases are never authored by a plugin, so they are not decodable here.
+    private static func decodeCommit(
+        _ fields: [String: ScriptValue],
+        rowID: String
+    ) throws -> PluginRowDescriptor.CommitSemantics {
+        guard case let .object(action)? = fields["action"] else {
+            // Legacy form: a bare `commit` string.
+            switch fields["commit"]?.stringValue {
+            case "closeThenAct": return .closeThenAct
+            default: return .stayOpen
+            }
+        }
+        let type = action["type"]?.stringValue ?? "run"
+        switch type {
+        case "detail":
+            return .pushDetail
+        case "argument":
+            return .enterArgument
+        case "openURL":
+            guard let url = action["url"]?.stringValue, !url.isEmpty else {
+                throw ScriptPluginError.resultDecodingFailed(
+                    "row '\(rowID)' openURL action is missing a string 'url'")
+            }
+            return .openURL(url)
+        case "copy":
+            guard let text = action["text"]?.stringValue else {
+                throw ScriptPluginError.resultDecodingFailed(
+                    "row '\(rowID)' copy action is missing a string 'text'")
+            }
+            return .copy(text)
+        case "run":
+            // A function invocation closes the palette by default; `close: false`
+            // keeps it open (e.g. a toggle-style action that refreshes the list).
+            if case .bool(false) = action["close"] { return .stayOpen }
+            return .closeThenAct
+        default:
+            throw ScriptPluginError.resultDecodingFailed(
+                "row '\(rowID)' has an unknown action type '\(type)'")
+        }
     }
 }

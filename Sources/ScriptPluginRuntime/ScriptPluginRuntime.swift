@@ -83,9 +83,19 @@ public final class ScriptPluginRuntime {
     }
 
     /// Run a row action (entry point `action`) and return its decoded result.
+    /// When `argument` is present (the row declared `.enterArgument` and the user
+    /// submitted text), it is passed as a third argument so the plugin's
+    /// `action(rowID, actionID, argument)` receives it.
     @discardableResult
-    public func performAction(pluginID: ScriptPluginID, rowID: String, actionID: String) async throws -> ScriptValue {
-        try await context(for: pluginID).invoke("action", arguments: [.string(rowID), .string(actionID)])
+    public func performAction(
+        pluginID: ScriptPluginID,
+        rowID: String,
+        actionID: String,
+        argument: String? = nil
+    ) async throws -> ScriptValue {
+        var arguments: [ScriptValue] = [.string(rowID), .string(actionID)]
+        if let argument { arguments.append(.string(argument)) }
+        return try await context(for: pluginID).invoke("action", arguments: arguments)
     }
 
     /// Generic entry-point invocation, for entry points beyond the three the

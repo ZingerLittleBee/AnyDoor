@@ -57,6 +57,97 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         XCTAssertEqual(detail, "# Detail a")
     }
 
+    // MARK: - Row action declarations (the `action` union)
+
+    func testRowActionUnionDecodesEverySemantic() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.actions",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () {
+                return [
+                  { id: "detail", title: "Detail", action: { type: "detail" } },
+                  { id: "open", title: "Open", action: { type: "openURL", url: "https://anydoor.dev" } },
+                  { id: "copy", title: "Copy", action: { type: "copy", text: "clip" } },
+                  { id: "arg", title: "Arg", action: { type: "argument" } },
+                  { id: "run", title: "Run", action: { type: "run" } },
+                  { id: "runOpen", title: "RunOpen", action: { type: "run", close: false } }
+                ];
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        let rows = try await runtime.buildRows(pluginID: id, query: "")
+
+        XCTAssertEqual(rows.map(\.commit), [
+            .pushDetail,
+            .openURL("https://anydoor.dev"),
+            .copy("clip"),
+            .enterArgument,
+            .closeThenAct,
+            .stayOpen,
+        ])
+    }
+
+    func testLegacyCommitStringStillDecodes() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.legacy",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () {
+                return [
+                  { id: "a", title: "A", commit: "stayOpen" },
+                  { id: "b", title: "B", commit: "closeThenAct" },
+                  { id: "c", title: "C" }
+                ];
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        let rows = try await runtime.buildRows(pluginID: id, query: "")
+        XCTAssertEqual(rows.map(\.commit), [.stayOpen, .closeThenAct, .stayOpen])
+    }
+
+    func testOpenURLActionMissingURLIsTypedDecodeError() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.badopen",
+            bundle: #"anydoor.registerPlugin({ rows: function () { return [{ id: "x", title: "X", action: { type: "openURL" } }]; } });"#
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        do {
+            _ = try await runtime.buildRows(pluginID: id, query: "")
+            XCTFail("expected a decode error")
+        } catch let error as ScriptPluginError {
+            guard case .resultDecodingFailed = error else {
+                return XCTFail("expected resultDecodingFailed, got \(error)")
+            }
+        }
+    }
+
+    func testActionReceivesArgumentAsThirdParameter() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.arg",
+            bundle: """
+            anydoor.registerPlugin({
+              action: function (rowID, actionID, argument) {
+                return rowID + "|" + actionID + "|" + argument;
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        let result = try await runtime.performAction(
+            pluginID: id, rowID: "search", actionID: "default", argument: "anydoor"
+        )
+        XCTAssertEqual(result, .string("search|default|anydoor"))
+    }
+
     // MARK: - Throwing fixture
 
     func testThrowingFixtureYieldsTypedErrorNotCrash() async throws {
