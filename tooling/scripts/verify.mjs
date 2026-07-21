@@ -19,6 +19,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const toolingRoot = path.join(here, "..");
 const apiDir = path.join(toolingRoot, "packages", "api");
 const cli = path.join(toolingRoot, "packages", "create-plugin", "bin", "create.mjs");
+const examplesRoot = path.join(toolingRoot, "examples");
+
+// Worked-example plugins under examples/ that must install, typecheck, and build
+// into a valid package standalone (they are not pnpm workspace members).
+const EXAMPLES = ["v2ex"];
 
 let failures = 0;
 function check(label, condition, detail = "") {
@@ -121,15 +126,34 @@ function assertSelfRegisters(bundleSource) {
   check("registered action is a function", typeof impl.action === "function");
 }
 
+/** Install, typecheck, and build a committed example in place; return its dist. */
+function buildExample(name) {
+  const projectDir = path.join(examplesRoot, name);
+  process.stdout.write(`[verify] installing example ${name}\n`);
+  run("pnpm", ["install"], projectDir);
+  process.stdout.write(`[verify] type-checking example ${name}\n`);
+  run("pnpm", ["typecheck"], projectDir);
+  process.stdout.write(`[verify] building example ${name}\n`);
+  run("pnpm", ["build"], projectDir);
+  return path.join(projectDir, "dist");
+}
+
 async function main() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "anydoor-tooling-verify-"));
   try {
     const projectDir = await buildTemplate(tmp);
     const distDir = path.join(projectDir, "dist");
-    process.stdout.write("\n[verify] asserting output\n");
+    process.stdout.write("\n[verify] asserting template output\n");
     assertManifest(distDir);
     const source = assertBundle(distDir);
     assertSelfRegisters(source);
+
+    for (const name of EXAMPLES) {
+      const exampleDist = buildExample(name);
+      process.stdout.write(`\n[verify] asserting example ${name} output\n`);
+      assertManifest(exampleDist);
+      assertSelfRegisters(assertBundle(exampleDist));
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

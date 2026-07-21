@@ -16,6 +16,18 @@ This is a standalone pnpm workspace. It does not participate in the SwiftPM buil
 | [`@anydoor/api`](packages/api) | The typed authoring API: type definitions plus the thin runtime shim (`definePlugin`) and descriptor builders (`actions`). |
 | [`@anydoor/create-plugin`](packages/create-plugin) | The scaffold. Generates a building TypeScript plugin: manifest, typed entry point, esbuild bundle. |
 
+## Examples
+
+Worked-example plugins live under [`examples/`](examples). They are **not** pnpm
+workspace members (the workspace only globs `packages/*`): each carries its own
+`pnpm-workspace.yaml` sentinel and wires `@anydoor/api` through a `file:`
+dependency, so `pnpm install && pnpm build` runs standalone inside the example
+directory. `pnpm verify` builds and asserts them alongside the scaffold template.
+
+- [`examples/v2ex`](examples/v2ex) — a V2EX viewer: merged hot/latest topic list,
+  per-topic markdown Detail with comments, and an optional stored access token
+  (`fetch` + `store` + `toast` + `openURL`).
+
 ## Requirements
 
 - Node >= 18
