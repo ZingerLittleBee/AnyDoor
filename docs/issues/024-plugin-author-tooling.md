@@ -1,7 +1,7 @@
 ---
 id: 024
 title: "Script Plugins: typed npm API and plugin scaffold"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-21-script-plugin-runtime.md
 ---
 
