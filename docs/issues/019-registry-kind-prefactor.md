@@ -1,7 +1,7 @@
 ---
 id: 019
 title: "Script Plugins prefactor: generalize the plugin registry over plugin kinds"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-21-script-plugin-runtime.md
 ---
 
