@@ -178,6 +178,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onDetailActiveChange: { [weak self] inDetail in
                 self?.setSearchFieldActive(!inDetail)
             },
+            onLevelChange: { [weak self] in
+                self?.relayoutSearchFieldSoon()
+            },
             registerSearchAnchor: { [weak self] anchor, text, placeholder in
                 self?.registerSearchAnchor(anchor, text: text, placeholder: placeholder)
             }
@@ -262,6 +265,20 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         guard frame.width > 0, frame.height > 0 else { return }
         guard searchField.frame != frame else { return }
         searchField.frame = frame
+    }
+
+    /// Re-anchor the overlaid AppKit search field one runloop after a navigation
+    /// transition. A second level inserts a back-header row that shifts the
+    /// field's SwiftUI slot down; returning to the root removes it. The SwiftUI
+    /// anchor's own `layout()` fires only when its own size changes, not when an
+    /// ancestor moves it, so `registerSearchAnchor` alone leaves the field one
+    /// transition behind. Deferring a runloop lets SwiftUI finish its layout pass
+    /// so the anchor reports its new frame, mirroring `setSearchFieldActive`.
+    /// A hidden field (Detail) is repositioned harmlessly and stays hidden.
+    private func relayoutSearchFieldSoon() {
+        DispatchQueue.main.async { [weak self] in
+            self?.layoutSearchField()
+        }
     }
 
     private func focusSearchField() {

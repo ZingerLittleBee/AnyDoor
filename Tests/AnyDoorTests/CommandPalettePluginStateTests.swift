@@ -312,6 +312,39 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertEqual(state.listLevel?.title, "Nodes")
     }
 
+    @MainActor
+    func testNavigationRevisionAdvancesOnEveryTransitionNotOnContentUpdates() {
+        // The view watches `navigationRevision` to re-anchor the overlaid AppKit
+        // search field after a level shifts (a back header appears/disappears).
+        // Every push/pop must bump it; a content update (list rows resolving)
+        // must not, since the field's slot has not moved.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        var revisions: [Int] = [state.navigationRevision]
+        func note() { revisions.append(state.navigationRevision) }
+
+        // root -> list
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        note()
+        // A content update alone must NOT advance the revision.
+        let before = state.navigationRevision
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+        XCTAssertEqual(state.navigationRevision, before, "resolving list rows does not move the field")
+
+        // list -> detail -> list -> root -> (argument in -> out)
+        state.enterDetail(title: "Alpha"); note()
+        state.popLevel(); note()          // detail -> list
+        state.popLevel(); note()          // list -> root
+        state.enterPluginArgumentInput(sourceKey: sourceKey, rowID: "s", title: "S"); note()
+        state.popLevel(); note()          // argument -> root
+
+        // Strictly increasing across every transition.
+        for (earlier, later) in zip(revisions, revisions.dropFirst()) {
+            XCTAssertLessThan(earlier, later, "each level transition bumps the navigation revision")
+        }
+    }
+
     // MARK: - Plugin Argument input
 
     @MainActor

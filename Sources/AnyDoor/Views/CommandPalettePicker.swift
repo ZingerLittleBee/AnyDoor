@@ -271,12 +271,25 @@ final class CommandPaletteState {
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
+        navigationRevision += 1
     }
 
+    /// Monotonic counter bumped on every navigation-position change (a push or a
+    /// pop, not a content update). The view watches it to re-anchor the overlaid
+    /// AppKit search field after a level transition: adding or removing the back
+    /// header shifts the field's SwiftUI slot, but the anchor's own `layout()`
+    /// fires only when its own size changes, not when an ancestor moves it, so
+    /// without this nudge the field would land one transition behind (its
+    /// placeholder overlapping the back header, then dropping below the glyph
+    /// after popping back to the root).
+    private(set) var navigationRevision = 0
+
     /// Record the current level so a later `popLevel` can return to it. Called by
-    /// every drill-in push (options / argument input / detail / list).
+    /// every drill-in push (options / argument input / detail / list); bumps the
+    /// navigation revision so the field re-anchors below the new back header.
     private func pushCurrentFrame() {
         navigationStack.append(level)
+        navigationRevision += 1
     }
 
     /// Pop one navigation level: restore the frame just below, or fall back to the
@@ -295,6 +308,7 @@ final class CommandPaletteState {
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
+        navigationRevision += 1
     }
 
     func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
@@ -1035,6 +1049,10 @@ struct CommandPalettePicker: View {
     /// hide the overlaid AppKit search field (no text input in Detail) and
     /// restore focus on return.
     let onDetailActiveChange: (Bool) -> Void
+    /// Notifies the controller after any navigation-position change (drill-in or
+    /// pop) so it can re-anchor the overlaid AppKit search field below the new
+    /// back header — or back at the top when returning to the root.
+    let onLevelChange: () -> Void
     let registerSearchAnchor: (CommandPaletteSearchAnchorView, String, String) -> Void
 
     var body: some View {
@@ -1102,6 +1120,9 @@ struct CommandPalettePicker: View {
         }
         .onChange(of: state.isInDetail) { _, inDetail in
             onDetailActiveChange(inDetail)
+        }
+        .onChange(of: state.navigationRevision) { _, _ in
+            onLevelChange()
         }
         .focusEffectDisabled()
     }
