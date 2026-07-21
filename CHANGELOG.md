@@ -51,6 +51,17 @@ versioning.
 - Command Palette now opens where you last left it, including after restarting
   AnyDoor. If that monitor is no longer connected, the palette returns to its
   default position.
+- Plugins: Script Plugins are the second plugin kind. Install one from
+  Settings → 插件 by picking a local package folder; it appears grouped under
+  「脚本插件」 with its name, description, and version (each shown in your
+  language when the manifest provides it). Its rows are searchable at the
+  command-palette root right away — no relaunch. An invalid package (missing
+  manifest fields, an unsupported apiVersion, or a duplicate id) is refused
+  with a clear message and changes nothing. Uninstalling removes the package
+  copy and every palette row at once, including from an open palette, while
+  the plugin's private data is kept — reinstalling the same plugin finds it
+  again. Script Plugin install state and data stay on this machine and never
+  travel in a config backup.
 
 ### Changed
 
