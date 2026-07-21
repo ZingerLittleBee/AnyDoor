@@ -860,35 +860,50 @@ struct CommandPalettePicker: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let onRefreshRates: () -> Void
+    /// Opens a markdown link tapped inside the Detail pane. The controller
+    /// scheme-guards and dismisses (plugin-supplied URLs, ADR-0009).
+    let onOpenDetailLink: (URL) -> Void
+    /// Notifies the controller when the Detail level is entered/left so it can
+    /// hide the overlaid AppKit search field (no text input in Detail) and
+    /// restore focus on return.
+    let onDetailActiveChange: (Bool) -> Void
     let registerSearchAnchor: (CommandPaletteSearchAnchorView, String, String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            // Argument-input mode carries its own search-field badge (Raycast
-            // style), so only the options and Detail levels show the back header.
-            if backHeaderTitle != nil { backHeader }
-
-            searchField
-
-            Divider().opacity(0.4)
-
             if state.isInDetail {
-                detailView
-            } else if state.flatEntries.isEmpty {
-                if let scope = state.activeDevToolScope {
-                    scopeTips(for: scope)
-                } else {
-                    emptyState
-                }
-            } else if state.isAtRoot {
-                entryList
-            } else {
-                optionList
-            }
-
-            if state.isCurrencyContext {
+                // The Detail level replaces the root search chrome entirely: only
+                // the back header and the rendered markdown occupy the surface, so
+                // the search field, its placeholder/caret, and the root list can
+                // neither show through nor accept stray input.
+                backHeader
                 Divider().opacity(0.4)
-                footerBar
+                detailView
+            } else {
+                // Argument-input mode carries its own search-field badge (Raycast
+                // style), so only the options level shows the back header.
+                if backHeaderTitle != nil { backHeader }
+
+                searchField
+
+                Divider().opacity(0.4)
+
+                if state.flatEntries.isEmpty {
+                    if let scope = state.activeDevToolScope {
+                        scopeTips(for: scope)
+                    } else {
+                        emptyState
+                    }
+                } else if state.isAtRoot {
+                    entryList
+                } else {
+                    optionList
+                }
+
+                if state.isCurrencyContext {
+                    Divider().opacity(0.4)
+                    footerBar
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -916,6 +931,9 @@ struct CommandPalettePicker: View {
             state.absorbDevToolScopeIfNeeded()
             state.selectedIndex = 0
             state.refreshPortsIfNeeded()
+        }
+        .onChange(of: state.isInDetail) { _, inDetail in
+            onDetailActiveChange(inDetail)
         }
         .focusEffectDisabled()
     }
@@ -1197,8 +1215,7 @@ struct CommandPalettePicker: View {
             .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
         case .loaded(_, let markdown):
             ScrollView {
-                Text(Self.renderMarkdown(markdown))
-                    .font(.system(size: 14))
+                MarkdownBlocksView(blocks: MarkdownBlocks.blocks(from: markdown))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 22)
@@ -1206,6 +1223,12 @@ struct CommandPalettePicker: View {
                     .overlayScrollers()
             }
             .frame(minHeight: 320, maxHeight: .infinity)
+            // Markdown links open through the environment so the controller can
+            // scheme-guard the plugin-supplied URL and dismiss the palette.
+            .environment(\.openURL, OpenURLAction { url in
+                onOpenDetailLink(url)
+                return .handled
+            })
         case .failed(_, let message):
             VStack(spacing: 10) {
                 Spacer()
@@ -1223,18 +1246,6 @@ struct CommandPalettePicker: View {
         case .none:
             EmptyView()
         }
-    }
-
-    /// Parse plugin-authored markdown into an `AttributedString` with the system
-    /// parser, preserving paragraph breaks (`.inlineOnlyPreservingWhitespace`
-    /// would collapse them). Falls back to the raw text if parsing fails.
-    static func renderMarkdown(_ markdown: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .full,
-            failurePolicy: .returnPartiallyParsedIfPossible
-        )
-        return (try? AttributedString(markdown: markdown, options: options))
-            ?? AttributedString(markdown)
     }
 
     private var optionList: some View {
@@ -1566,5 +1577,72 @@ private struct CommandPaletteRow: View {
             return Color.primary.opacity(0.08)
         }
         return Color.clear
+    }
+}
+
+/// Lays out `MarkdownBlocks` output as a modest styled document for the palette
+/// Detail: headings, paragraphs, bulleted/numbered lists, code blocks, and
+/// thematic rules. Deliberately not a full renderer — inline styling (bold /
+/// italic / inline-code / links) is carried by each block's `AttributedString`
+/// and rendered by `Text`; block structure is what this view adds back.
+private struct MarkdownBlocksView: View {
+    let blocks: [MarkdownBlock]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(text)
+                .font(.system(size: Self.headingSize(level), weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, level <= 2 ? 4 : 1)
+        case .paragraph(let text):
+            Text(text)
+                .font(.system(size: 14))
+                .fixedSize(horizontal: false, vertical: true)
+        case .listItem(let ordinal, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(ordinal.map { "\($0)." } ?? "•")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 16, alignment: .trailing)
+                Text(text)
+                    .font(.system(size: 14))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.leading, 6)
+        case .codeBlock(let code):
+            Text(code)
+                .font(.system(size: 12.5, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                )
+        case .thematicBreak:
+            Divider().opacity(0.5).padding(.vertical, 2)
+        }
+    }
+
+    /// Heading point sizes, tapering h1→h6 down toward body size (14pt).
+    private static func headingSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return 22
+        case 2: return 18
+        case 3: return 16
+        case 4: return 15
+        default: return 14
+        }
     }
 }

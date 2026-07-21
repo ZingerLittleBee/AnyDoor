@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import PluginInterface
+import ScriptPluginRuntime
 
 @MainActor
 final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate {
@@ -171,6 +172,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onRefreshRates: { [weak self] in
                 self?.refreshRates()
             },
+            onOpenDetailLink: { [weak self] url in
+                self?.openDetailLink(url)
+            },
+            onDetailActiveChange: { [weak self] inDetail in
+                self?.setSearchFieldActive(!inDetail)
+            },
             registerSearchAnchor: { [weak self] anchor, text, placeholder in
                 self?.registerSearchAnchor(anchor, text: text, placeholder: placeholder)
             }
@@ -262,6 +269,40 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         guard window.makeFirstResponder(searchField) else { return }
         let end = (searchField.stringValue as NSString).length
         searchField.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
+    }
+
+    /// Show or hide the overlaid AppKit search field around the Detail level.
+    /// Detail has no text input, so its field is hidden and first responder is
+    /// dropped (no stray caret); returning to a searchable level re-shows and
+    /// refocuses it once SwiftUI has re-registered the anchor.
+    private func setSearchFieldActive(_ active: Bool) {
+        guard let searchField else { return }
+        if active {
+            searchField.isHidden = false
+            // Defer a runloop so the re-rendered SwiftUI anchor has registered
+            // its frame before we position and focus the field.
+            DispatchQueue.main.async { [weak self] in
+                self?.layoutSearchField()
+                self?.focusSearchField()
+            }
+        } else {
+            window?.makeFirstResponder(window)
+            searchField.isHidden = true
+        }
+    }
+
+    /// Open a markdown link tapped inside the Detail pane. The URL is
+    /// plugin-supplied, so it is confined to the `openURL` scheme allowlist
+    /// (ADR-0009) before opening; either way the palette dismisses, mirroring a
+    /// Row Action `openURL` commit.
+    private func openDetailLink(_ url: URL) {
+        guard ScriptOpenURLPolicy.allows(url) else {
+            close()
+            ToastPresenter.shared.show(.failure(L(.pluginsActionFailed)))
+            return
+        }
+        close()
+        NSWorkspace.shared.open(url)
     }
 
     /// Warm the icon cache for every app-backed row off the main thread, so the
