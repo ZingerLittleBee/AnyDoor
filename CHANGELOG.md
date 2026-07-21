@@ -71,6 +71,19 @@ versioning.
   action shows a failure toast — none of which hang or close the palette.
   Uninstalling a plugin while its Detail is open discards the drill-in and
   removes its rows immediately.
+- Plugins: a per-machine Developer Mode switch (Settings → 插件) unlocks Dev
+  Plugins for plugin authors — with it off, no Dev Plugin affordance appears
+  anywhere. Register a local development folder as a Dev Plugin and it loads
+  in place, never copied; editing its bundle reloads the plugin automatically,
+  so an edit shows up in already-open palette rows within seconds. A Dev Plugin
+  surfaces its error detail (message and stack) to the author, while a normally
+  installed plugin keeps the plain inline error. Removing the registration
+  removes its surfaces and never modifies the development folder. Developer Mode
+  and Dev Plugin registrations are machine-local and never travel in a config
+  backup.
+- Plugins: every Script Plugin now keeps a per-plugin diagnostics log file
+  capturing load refusals, watchdog kills, and capability errors, so a failure
+  is diagnosable after the fact instead of only as a transient toast.
 
 ### Changed
 
