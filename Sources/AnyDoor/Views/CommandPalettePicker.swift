@@ -565,9 +565,10 @@ final class CommandPaletteState {
     }
 
     /// Builds one section per registered plugin row source, listing every row
-    /// whose title contains the query — so e.g. a hosts profile is reachable
-    /// by name from the root. Committing a row routes back to its owning
-    /// source by the descriptor's declared semantics (ADR-0007).
+    /// that matches the query — so e.g. a hosts profile is reachable by name
+    /// from the root, and typing a plugin's display name surfaces all of its
+    /// rows (see `filterRootPluginRows`). Committing a row routes back to its
+    /// owning source by the descriptor's declared semantics (ADR-0007).
     private func pluginRowSections(matching query: String) -> [CommandPaletteSection] {
         // Establish the Observation dependency: an async source mutates its rows
         // and load state out of band, so a bump forces this recomputation.
@@ -588,8 +589,13 @@ final class CommandPaletteState {
                     sourceKey: registration.key, status: .error, message: message
                 )]
             case .ready:
-                entries = registration.source.rows()
-                    .filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+                // Match against the section's display title too (the plugin's
+                // name), so typing that name lists every row — resolve the raw
+                // catalog key to what the user actually sees.
+                let sectionTitle = L(raw: registration.sectionTitleKey)
+                entries = Self.filterRootPluginRows(
+                    registration.source.rows(), query: trimmed, sectionTitle: sectionTitle
+                )
                     .enumerated()
                     .map { index, descriptor in
                         Self.pluginRowEntry(
@@ -602,6 +608,31 @@ final class CommandPaletteState {
             guard !entries.isEmpty else { return nil }
             return CommandPaletteSection(rawTitleKey: registration.sectionTitleKey, entries: entries)
         }
+    }
+
+    /// Root-level plugin-row filtering (pure, so it is unit-tested without the
+    /// palette). Mirrors Raycast: typing an extension's display name surfaces
+    /// all of its rows, so a query matching `sectionTitle` shows every row;
+    /// otherwise each row is kept when the query matches its own title or
+    /// subtitle (`pluginRowMatches`). Case-insensitive throughout. An empty
+    /// query yields nothing — plugin rows are query-gated at the root.
+    nonisolated static func filterRootPluginRows(
+        _ rows: [PluginRowDescriptor],
+        query: String,
+        sectionTitle: String
+    ) -> [PluginRowDescriptor] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        if sectionTitle.localizedCaseInsensitiveContains(trimmed) { return rows }
+        return rows.filter { pluginRowMatches($0, query: trimmed) }
+    }
+
+    /// Whether a plugin row matches a query on its own text — title or subtitle,
+    /// case-insensitively. Shared by the root and pushed-list levels; the root
+    /// level additionally shows every row when the section title itself matches.
+    nonisolated static func pluginRowMatches(_ row: PluginRowDescriptor, query: String) -> Bool {
+        row.title.localizedCaseInsensitiveContains(query)
+            || (row.subtitle?.localizedCaseInsensitiveContains(query) ?? false)
     }
 
     /// The two host-synthesized status rows for an async plugin row source. Both
@@ -923,10 +954,12 @@ final class CommandPaletteState {
                 sourceKey: listLevel.sourceKey, status: .error, message: message
             )]
         case .loaded(let rows):
+            // Inside a pushed list the plugin context is already chosen, so this
+            // level matches each row's title or subtitle only (not the section
+            // title). An empty query shows all, like the options level.
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
             let filtered = trimmed.isEmpty ? rows : rows.filter {
-                $0.title.localizedCaseInsensitiveContains(trimmed)
-                    || ($0.subtitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
+                Self.pluginRowMatches($0, query: trimmed)
             }
             return filtered.enumerated().map { index, descriptor in
                 Self.pluginRowEntry(

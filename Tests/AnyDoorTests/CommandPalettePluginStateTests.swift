@@ -449,4 +449,108 @@ final class CommandPalettePluginStateTests: XCTestCase {
         // plugin row source, so an empty query shows nothing.
         XCTAssertTrue(state.filteredSections.isEmpty)
     }
+
+    // MARK: - Root plugin-row filtering (pure seam)
+
+    private static let v2exRows = [
+        PluginRowDescriptor(id: "hot", title: "热门主题", subtitle: "Hot topics", symbol: "flame", commit: .pushList("hot")),
+        PluginRowDescriptor(id: "latest", title: "最新主题", subtitle: "Latest topics", symbol: "clock", commit: .pushList("latest")),
+        PluginRowDescriptor(id: "node", title: "节点主题", symbol: "square.grid.2x2", commit: .pushList("node")),
+        PluginRowDescriptor(id: "token", title: "设置 V2EX Token", symbol: "key", commit: .enterArgument),
+    ]
+
+    /// Typing the plugin's display name (the section title) surfaces every row,
+    /// mirroring Raycast — even the three rows whose titles do not contain "v2".
+    func testSectionTitleMatchSurfacesAllRows() {
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            Self.v2exRows, query: "v2", sectionTitle: "V2EX"
+        )
+        XCTAssertEqual(filtered.map(\.id), ["hot", "latest", "node", "token"])
+    }
+
+    /// A section-title match is case-insensitive (the header is "V2EX").
+    func testSectionTitleMatchIsCaseInsensitive() {
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            Self.v2exRows, query: "V2ex", sectionTitle: "V2EX"
+        )
+        XCTAssertEqual(filtered.count, Self.v2exRows.count)
+    }
+
+    /// When the section title does not match, rows filter by their own title.
+    func testRowTitleMatchNarrowsWithinSource() {
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            Self.v2exRows, query: "热门", sectionTitle: "V2EX"
+        )
+        XCTAssertEqual(filtered.map(\.id), ["hot"])
+    }
+
+    /// A row is also kept when the query matches its subtitle (case-insensitive).
+    func testRowSubtitleMatchNarrowsWithinSource() {
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            Self.v2exRows, query: "hot", sectionTitle: "V2EX"
+        )
+        // "hot" matches only the "Hot topics" subtitle (no title/section match).
+        XCTAssertEqual(filtered.map(\.id), ["hot"])
+    }
+
+    /// A query matching neither the section title nor any row still excludes all.
+    func testNonMatchingQueryExcludesEveryRow() {
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            Self.v2exRows, query: "nonesuch", sectionTitle: "V2EX"
+        )
+        XCTAssertTrue(filtered.isEmpty)
+    }
+
+    /// An empty (or whitespace-only) query yields nothing — plugin rows are
+    /// query-gated at the root.
+    func testEmptyQueryYieldsNoRows() {
+        XCTAssertTrue(CommandPaletteState.filterRootPluginRows(
+            Self.v2exRows, query: "   ", sectionTitle: "V2EX"
+        ).isEmpty)
+    }
+
+    /// End-to-end through the state: a plain-string section title ("V2EX", how a
+    /// Script Plugin registers) lists all four rows for "v2", proving the wiring
+    /// resolves and matches the section header, not only row titles.
+    @MainActor
+    func testStateSurfacesAllRowsOnSectionTitleMatch() {
+        let source = StubRowSource(
+            id: "rows", sectionTitleKey: "V2EX", loadState: .ready, rows: Self.v2exRows
+        )
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: [registration(source)])
+        state.query = "v2"
+        XCTAssertEqual(state.flatEntries.count, 4)
+    }
+
+    // MARK: - List-level plugin-row filtering (title + subtitle, no section)
+
+    /// Inside a pushed list, a subtitle match keeps the row (the section title is
+    /// not consulted — the plugin context is already chosen).
+    func testPluginRowMatchesTitleOrSubtitle() {
+        let row = PluginRowDescriptor(
+            id: "1", title: "Alpha", subtitle: "swift topic", symbol: "doc", commit: .pushDetail
+        )
+        XCTAssertTrue(CommandPaletteState.pluginRowMatches(row, query: "alph"))
+        XCTAssertTrue(CommandPaletteState.pluginRowMatches(row, query: "SWIFT"))
+        XCTAssertFalse(CommandPaletteState.pluginRowMatches(row, query: "beta"))
+    }
+
+    /// The pushed-list level matches title AND subtitle but never the section
+    /// title: "v2" (the plugin name) filters rows down to those whose own text
+    /// contains it, not all rows.
+    @MainActor
+    func testListLevelMatchesRowTextNotSectionTitle() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "V2EX")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Rust on V2EX", symbol: "doc", commit: .pushDetail),
+            PluginRowDescriptor(id: "2", title: "Swift thread", subtitle: "about v2ex api", symbol: "doc", commit: .pushDetail),
+            PluginRowDescriptor(id: "3", title: "Unrelated", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+
+        state.query = "v2ex"
+        // Row 1 (title) and row 2 (subtitle) match; row 3 does not — the section
+        // title "V2EX" is not consulted at this level.
+        XCTAssertEqual(state.flatEntries.count, 2)
+    }
 }
