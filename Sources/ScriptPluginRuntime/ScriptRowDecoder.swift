@@ -40,9 +40,9 @@ enum ScriptRowDecoder {
     }
 
     /// Decode a row's commit semantics. The forward form is an `action`
-    /// discriminated union (`{ type: "detail" | "openURL" | "copy" | "argument"
-    /// | "run", ... }`); when absent, the legacy `commit` string is honored so
-    /// existing packages keep working. The host-only `noAction`/`runArgument`
+    /// discriminated union (`{ type: "detail" | "list" | "openURL" | "copy" |
+    /// "argument" | "run", ... }`); when absent, the legacy `commit` string is
+    /// honored so existing packages keep working. The host-only `noAction`/`runArgument`
     /// cases are never authored by a plugin, so they are not decodable here.
     private static func decodeCommit(
         _ fields: [String: ScriptValue],
@@ -61,6 +61,12 @@ enum ScriptRowDecoder {
             return .pushDetail
         case "argument":
             return .enterArgument
+        case "list":
+            guard let listID = action["id"]?.stringValue, !listID.isEmpty else {
+                throw ScriptPluginError.resultDecodingFailed(
+                    "row '\(rowID)' list action is missing a string 'id'")
+            }
+            return .pushList(listID)
         case "openURL":
             guard let url = action["url"]?.stringValue, !url.isEmpty else {
                 throw ScriptPluginError.resultDecodingFailed(

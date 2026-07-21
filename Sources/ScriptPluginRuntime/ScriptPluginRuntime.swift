@@ -79,6 +79,17 @@ public final class ScriptPluginRuntime {
         return try ScriptRowDecoder.decode(result)
     }
 
+    /// Build a `pushList` row's second-level rows (entry point `list`). The list
+    /// id and the current second-level query are passed to `list(listId, query)`;
+    /// a plugin without a `list` handler surfaces `entryPointMissing`, which the
+    /// row source turns into an inline error row.
+    public func buildList(
+        pluginID: ScriptPluginID, listID: String, query: String
+    ) async throws -> [PluginRowDescriptor] {
+        let result = try await context(for: pluginID).invoke("list", arguments: [.string(listID), .string(query)])
+        return try ScriptRowDecoder.decode(result)
+    }
+
     /// Build a row's markdown Detail (entry point `detail`).
     public func buildDetail(pluginID: ScriptPluginID, rowID: String) async throws -> String {
         let result = try await context(for: pluginID).invoke("detail", arguments: [.string(rowID)])

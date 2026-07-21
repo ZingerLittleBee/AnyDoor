@@ -129,6 +129,70 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         }
     }
 
+    func testPushListActionDecodesWithListID() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.pushlist",
+            bundle: #"anydoor.registerPlugin({ rows: function () { return [{ id: "hot", title: "Hot", action: { type: "list", id: "hot" } }]; } });"#
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        let rows = try await runtime.buildRows(pluginID: id, query: "")
+        XCTAssertEqual(rows.map(\.commit), [.pushList("hot")])
+    }
+
+    func testPushListActionMissingIDIsTypedDecodeError() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.badlist",
+            bundle: #"anydoor.registerPlugin({ rows: function () { return [{ id: "x", title: "X", action: { type: "list" } }]; } });"#
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        do {
+            _ = try await runtime.buildRows(pluginID: id, query: "")
+            XCTFail("expected a decode error")
+        } catch let error as ScriptPluginError {
+            guard case .resultDecodingFailed = error else {
+                return XCTFail("expected resultDecodingFailed, got \(error)")
+            }
+        }
+    }
+
+    func testBuildListInvokesListEntryPointWithIDAndQuery() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.list",
+            bundle: """
+            anydoor.registerPlugin({
+              list: function (listId, query) {
+                return [{ id: listId + ":1", title: listId + " " + query, action: { type: "detail" } }];
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        let rows = try await runtime.buildList(pluginID: id, listID: "hot", query: "swift")
+        XCTAssertEqual(rows.map(\.id), ["hot:1"])
+        XCTAssertEqual(rows.map(\.title), ["hot swift"])
+        XCTAssertEqual(rows.map(\.commit), [.pushDetail])
+    }
+
+    func testBuildListMissingHandlerIsTypedError() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.nolist",
+            bundle: #"anydoor.registerPlugin({ rows: function () { return []; } });"#
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+        do {
+            _ = try await runtime.buildList(pluginID: id, listID: "hot", query: "")
+            XCTFail("expected a typed error for a missing list handler")
+        } catch let error as ScriptPluginError {
+            guard case .entryPointMissing("list") = error else {
+                return XCTFail("expected entryPointMissing(\"list\"), got \(error)")
+            }
+        }
+    }
+
     func testActionReceivesArgumentAsThirdParameter() async throws {
         let directory = try ScriptPluginFixture.writePackage(
             id: "com.example.arg",

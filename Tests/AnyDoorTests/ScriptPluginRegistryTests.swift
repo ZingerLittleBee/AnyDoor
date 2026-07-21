@@ -312,6 +312,65 @@ final class ScriptPluginRegistryTests: XCTestCase {
         XCTAssertTrue(state.filteredSections.isEmpty)
     }
 
+    // MARK: - Uninstall while in a plugin's list discards the drill-in
+
+    func testUninstallWhileListVisibleDiscardsDrillInAndRemovesRows() async throws {
+        let suiteName = "ScriptPluginRegistryTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let packagesDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("script-packages-\(UUID().uuidString)", isDirectory: true)
+        let storeDirectory = ScriptPluginFixture.makeStoreDirectory()
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: packagesDirectory)
+            try? FileManager.default.removeItem(at: storeDirectory)
+        }
+
+        let host = ScriptRuntimeHarness.makeCapabilityHost(
+            spy: ScriptCapabilitySpy(),
+            transport: RecordingFetchTransport(response: ScriptFetchResponse(status: 200, body: "{}")),
+            storeDirectory: storeDirectory
+        )
+        let palette = CommandPaletteExtensions()
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: palette.rowSources)
+        let registry = ScriptPluginRegistry(
+            runtime: ScriptPluginRuntime(capabilityHost: host),
+            packagesDirectory: packagesDirectory,
+            paletteExtensions: palette,
+            defaults: defaults,
+            languageCode: { "en" },
+            refreshCommandPalette: {
+                if !state.isAtRoot { state.popToRoot() }
+                state.updateSections([], pluginRowSources: palette.rowSources)
+            }
+        )
+
+        let source = try rowsFixture(id: "com.acme.list")
+        let id = try registry.sideload(fromDirectory: source)
+        let liveSource = try XCTUnwrap(registry.rowSource(for: id))
+        await liveSource.refresh()
+        state.updateSections([], pluginRowSources: palette.rowSources)
+
+        // The user has drilled into a searchable second-level list.
+        let key = rowSourceKey(for: id)
+        state.enterList(sourceKey: key, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: state.listGeneration)
+        XCTAssertTrue(state.isInList)
+
+        try await registry.uninstall(id)
+
+        // Uninstall recomposed the visible palette: the list drill-in is gone and
+        // the plugin's rows have vanished entirely.
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertFalse(state.isInList)
+        XCTAssertNil(registry.rowSource(for: id))
+        XCTAssertTrue(palette.rowSources.isEmpty)
+        state.query = "Alpha"
+        XCTAssertTrue(state.filteredSections.isEmpty)
+    }
+
     // MARK: - Bootstrap activates persisted-installed packages
 
     func testBootstrapActivatesPersistedInstalledPackage() async throws {

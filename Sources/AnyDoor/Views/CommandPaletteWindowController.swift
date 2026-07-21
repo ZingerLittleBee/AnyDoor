@@ -531,7 +531,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 return true
             }
             if !state.isAtRoot, state.query.isEmpty {
-                state.popToRoot()
+                state.popLevel()
                 return true
             }
             return false // otherwise let the search field delete a character
@@ -620,6 +620,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             Task { await source.performRow(id: rowID) }
         case .pluginRowPushDetail(let sourceKey, let rowID, let title):
             pushPluginDetail(sourceKey: sourceKey, rowID: rowID, title: title)
+        case .pluginRowPushList(let sourceKey, let listID, let title):
+            pushPluginList(sourceKey: sourceKey, listID: listID, title: title)
         case .pluginRowEnterArgument(let sourceKey, let rowID, let title):
             state?.enterPluginArgumentInput(sourceKey: sourceKey, rowID: rowID, title: title)
         case .pluginRowRunArgument(let sourceKey, let rowID, let argument):
@@ -671,6 +673,33 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 state.updateDetail(.failed(title: title, message: message), generation: generation)
             case nil:
                 state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
+            }
+        }
+    }
+
+    /// Push a plugin row's searchable second-level list: show the loading level
+    /// immediately, then build the rows off the row source and update in place.
+    /// Guards re-check that the same list is still visible after the await, so a
+    /// dismissed palette or a mid-flight uninstall can neither hang nor resurface;
+    /// the generation token keys a slow result to the exact drill-in that asked
+    /// for it (list A -> back -> list B). Mirrors `pushPluginDetail`.
+    private func pushPluginList(sourceKey: PluginRowSourceKey, listID: String, title: String) {
+        let generation = state?.enterList(sourceKey: sourceKey, listID: listID, title: title)
+        guard let generation else { return }
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
+            state?.updateList(.failed(L(.commandPalettePluginRowError)), generation: generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadList(id: listID, query: "")
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .rows(let rows):
+                state.updateList(.loaded(rows), generation: generation)
+            case .failure(let message):
+                state.updateList(.failed(message), generation: generation)
+            case nil:
+                state.updateList(.failed(L(.commandPalettePluginRowError)), generation: generation)
             }
         }
     }

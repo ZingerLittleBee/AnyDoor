@@ -135,6 +135,183 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertNil(state.detailState)
     }
 
+    // MARK: - Plugin list navigation
+
+    @MainActor
+    func testEnterListStartsLoadingAndResetsQuery() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "stale"
+        state.selectedIndex = 4
+
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot Topics")
+
+        XCTAssertTrue(state.isInList)
+        XCTAssertFalse(state.isAtRoot)
+        XCTAssertEqual(state.listLevel?.title, "Hot Topics")
+        XCTAssertEqual(state.listLevel?.listID, "hot")
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.selectedIndex, 0)
+
+        // A loading list shows a single non-interactive status row.
+        XCTAssertEqual(state.flatEntries.count, 1)
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        guard case .pluginRow(_, let descriptor) = entry.source else {
+            return XCTFail("Expected a plugin status row")
+        }
+        XCTAssertEqual(descriptor.symbol, "hourglass")
+        XCTAssertEqual(descriptor.commit, .noAction)
+
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+        XCTAssertEqual(state.flatEntries.count, 1)
+    }
+
+    @MainActor
+    func testLoadedListFiltersByQueryAndKeepsRowSemantics() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", subtitle: "swift", symbol: "doc", commit: .pushDetail),
+            PluginRowDescriptor(id: "2", title: "Beta", symbol: "doc", commit: .openURL("https://x.dev")),
+        ]), generation: generation)
+
+        // Empty query shows all rows (like the options level).
+        XCTAssertEqual(state.flatEntries.count, 2)
+
+        state.query = "alph"
+        XCTAssertEqual(state.flatEntries.count, 1)
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        guard case .pluginRow(_, let descriptor) = entry.source else {
+            return XCTFail("Expected a real plugin row")
+        }
+        XCTAssertEqual(descriptor.id, "1")
+        // A list row keeps its own declared commit — a Detail push from within a list.
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(entry.source),
+            .pluginRowPushDetail(sourceKey: sourceKey, rowID: "1", title: "Alpha")
+        )
+    }
+
+    @MainActor
+    func testFailedListShowsInlineErrorRowCarryingMessage() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.failed("network is down"), generation: generation)
+
+        XCTAssertEqual(state.flatEntries.count, 1)
+        let entry = try XCTUnwrap(state.flatEntries.first)
+        guard case .pluginRow(_, let descriptor) = entry.source else {
+            return XCTFail("Expected a plugin error row")
+        }
+        XCTAssertEqual(descriptor.symbol, "exclamationmark.triangle")
+        XCTAssertEqual(descriptor.title, "network is down")
+        XCTAssertEqual(descriptor.commit, .noAction)
+    }
+
+    @MainActor
+    func testUpdateListIgnoredAfterPopToRoot() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.popToRoot()
+
+        // A late async list result must not resurrect a discarded drill-in.
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertNil(state.listLevel)
+    }
+
+    @MainActor
+    func testLateListResultDoesNotRepopulateALaterDrillIn() {
+        // list A -> back -> list B: a slow A result must not land on B (their
+        // plugin queues are independent). The generation token keys each result.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let genA = state.enterList(sourceKey: sourceKey, listID: "hot", title: "A")
+        state.popToRoot()
+        let genB = state.enterList(sourceKey: sourceKey, listID: "latest", title: "B")
+
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "x", title: "A row", symbol: "doc", commit: .pushDetail),
+        ]), generation: genA)
+        XCTAssertEqual(state.listLevel?.content, .loading, "B stays loading; A's late result is ignored")
+
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "y", title: "B row", symbol: "doc", commit: .pushDetail),
+        ]), generation: genB)
+        XCTAssertEqual(state.listLevel?.content, .loaded([
+            PluginRowDescriptor(id: "y", title: "B row", symbol: "doc", commit: .pushDetail),
+        ]))
+        XCTAssertNotEqual(genA, genB)
+    }
+
+    @MainActor
+    func testEscapePopsRootListDetailListRootOneLevelAtATime() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        // root -> list
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+        XCTAssertTrue(state.isInList)
+
+        // list -> detail (drilled from a list row)
+        state.enterDetail(title: "Alpha")
+        XCTAssertTrue(state.isInDetail)
+
+        // Esc pops the Detail back to the LIST it came from, not the root.
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertTrue(state.isInList)
+        XCTAssertEqual(state.listLevel?.title, "Hot")
+        // The list's cached rows survive the round trip (no refetch needed).
+        XCTAssertEqual(state.flatEntries.count, 1)
+
+        // Esc again pops the list to the root.
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertTrue(state.isAtRoot)
+
+        // Esc at the root dismisses.
+        XCTAssertEqual(state.handleEscape(), .dismiss)
+    }
+
+    @MainActor
+    func testEscapeInListClearsQueryBeforePopping() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+
+        state.query = "typed"
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertTrue(state.isInList, "a non-empty query clears first, staying in the list")
+        XCTAssertEqual(state.query, "")
+
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testArgumentInputDrilledFromListPopsBackToList() {
+        // A list row can declare `.enterArgument`; escaping the argument input
+        // returns to the list, not the root (the stack restores the level below).
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "nodes", title: "Nodes")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "set", title: "Set Node", symbol: "gear", commit: .enterArgument),
+        ]), generation: generation)
+
+        state.enterPluginArgumentInput(sourceKey: sourceKey, rowID: "set", title: "Set Node")
+        XCTAssertTrue(state.isInArgumentInput)
+
+        state.query = "swift"
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertTrue(state.isInList)
+        XCTAssertEqual(state.listLevel?.title, "Nodes")
+    }
+
     // MARK: - Plugin Argument input
 
     @MainActor

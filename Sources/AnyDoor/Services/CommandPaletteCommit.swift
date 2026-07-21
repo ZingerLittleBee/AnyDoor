@@ -34,6 +34,10 @@ enum CommandPaletteCommitIntent: Equatable {
     /// A plugin row that declared `.pushDetail`: push its markdown Detail as a
     /// new palette level while the palette remains visible.
     case pluginRowPushDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String)
+    /// A plugin row that declared `.pushList`: push its searchable second-level
+    /// list as a new palette level while the palette remains visible. The list
+    /// id is carried so the host can ask the owning source to build it.
+    case pluginRowPushList(sourceKey: PluginRowSourceKey, listID: String, title: String)
     /// A plugin row that declared `.enterArgument`: enter the palette's
     /// Argument input mode bound to this row.
     case pluginRowEnterArgument(sourceKey: PluginRowSourceKey, rowID: String, title: String)
@@ -115,6 +119,8 @@ enum CommandPaletteCommitIntent: Equatable {
                 return .pluginRowCloseThenAct(sourceKey: sourceKey, rowID: descriptor.id)
             case .pushDetail:
                 return .pluginRowPushDetail(sourceKey: sourceKey, rowID: descriptor.id, title: descriptor.title)
+            case .pushList(let listID):
+                return .pluginRowPushList(sourceKey: sourceKey, listID: listID, title: descriptor.title)
             case .enterArgument:
                 return .pluginRowEnterArgument(sourceKey: sourceKey, rowID: descriptor.id, title: descriptor.title)
             case .openURL(let url):

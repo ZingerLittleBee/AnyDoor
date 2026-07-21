@@ -117,6 +117,27 @@ final class ScriptPluginRowSource: PluginRowSource {
         }
     }
 
+    func loadList(id listID: String, query: String) async -> PluginRowListResult? {
+        // Drop-after-unload guard (mirrors runAction): a `pushList` row committed
+        // just before uninstall can reach here after the context was torn down.
+        // Report nothing so the palette — which has already popped to root on the
+        // uninstall recomposition — never repopulates a stale list.
+        guard runtime.isLoaded(scriptID) else { return nil }
+        do {
+            let rows = try await runtime.buildList(pluginID: scriptID, listID: listID, query: query)
+            return .rows(rows)
+        } catch {
+            // A missing `list` handler surfaces `entryPointMissing`, which lands
+            // here as an inline error row — a `pushList` row with no backing list
+            // fails visibly rather than silently.
+            return .failure(ScriptPluginErrorPresentation.message(
+                for: error,
+                surfacesDetail: surfacesErrorDetail,
+                generic: L(.commandPalettePluginRowError)
+            ))
+        }
+    }
+
     func performRow(id: String) async {
         await runAction(rowID: id, argument: nil)
     }

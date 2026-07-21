@@ -48,6 +48,26 @@ final class CommandPaletteState {
         }
     }
 
+    /// The content of a pushed second-level plugin list (a `.pushList` drill-in).
+    /// Mirrors `DetailState`: loading while the plugin builds the rows, loaded
+    /// with the rows, or failed with an inline message.
+    enum ListContent: Equatable {
+        case loading
+        case loaded([PluginRowDescriptor])
+        case failed(String)
+    }
+
+    /// A pushed second-level plugin list. Carries the owning source + list id so
+    /// the host can build it, its title for the back header, and its current
+    /// content. The rows are cached here, so returning from a Detail drilled out
+    /// of the list restores them without a refetch.
+    struct ListLevel: Equatable {
+        let sourceKey: PluginRowSourceKey
+        let listID: String
+        let title: String
+        var content: ListContent
+    }
+
     enum Level: Equatable {
         case root
         case options(parentTitle: String)
@@ -57,9 +77,17 @@ final class CommandPaletteState {
         case pluginArgumentInput(sourceKey: PluginRowSourceKey, rowID: String, title: String, badge: String)
         /// A plugin row's pushed markdown Detail.
         case detail(DetailState)
+        /// A plugin row's pushed searchable second-level list (a `.pushList`
+        /// drill-in). Sits between the root and a Detail drilled out of it.
+        case list(ListLevel)
     }
 
     private(set) var level: Level = .root
+    /// Levels below the current one, innermost last. Only `.root` and `.list`
+    /// frames are ever pushed (options/argument/detail are navigation leaves),
+    /// so restoring a frame yields a fully self-contained level. `popToRoot`
+    /// clears the whole stack.
+    private var navigationStack: [Level] = []
     private var optionsByID: [String: CommandPaletteOption] = [:]
     private var optionEntries: [PanelEntry] = []
 
@@ -73,6 +101,14 @@ final class CommandPaletteState {
     var isInDetail: Bool {
         if case .detail = level { return true }
         return false
+    }
+    var isInList: Bool {
+        if case .list = level { return true }
+        return false
+    }
+    var listLevel: ListLevel? {
+        if case .list(let listLevel) = level { return listLevel }
+        return nil
     }
     var detailState: DetailState? {
         if case .detail(let state) = level { return state }
@@ -99,6 +135,7 @@ final class CommandPaletteState {
 
     /// Push a second level built from `options`; resets the search + selection.
     func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
+        pushCurrentFrame()
         optionsByID = Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) })
         optionEntries = options.enumerated().map { index, option in
             PanelEntry(
@@ -131,6 +168,7 @@ final class CommandPaletteState {
         openWithBundleID: String? = nil,
         keyword: String? = nil
     ) {
+        pushCurrentFrame()
         optionsByID = [:]
         optionEntries = []
         let trimmedKeyword = keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -149,6 +187,7 @@ final class CommandPaletteState {
     /// Push Argument input for a plugin row: the entered text is later passed to
     /// the row's plugin action. Mirrors `enterArgumentInput` for Quicklinks.
     func enterPluginArgumentInput(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
+        pushCurrentFrame()
         optionsByID = [:]
         optionEntries = []
         level = .pluginArgumentInput(sourceKey: sourceKey, rowID: rowID, title: title, badge: title)
@@ -168,6 +207,7 @@ final class CommandPaletteState {
     /// that token back to `updateDetail` when the markdown resolves.
     @discardableResult
     func enterDetail(title: String) -> Int {
+        pushCurrentFrame()
         optionsByID = [:]
         optionEntries = []
         detailGeneration += 1
@@ -176,6 +216,38 @@ final class CommandPaletteState {
         query = ""
         selectedIndex = 0
         return detailGeneration
+    }
+
+    /// Monotonic id for the current list drill-in. Bumped on every push, so a
+    /// late `updateList` can tell whether it belongs to the list still open —
+    /// drilling list A -> back -> list B must not let A's slow result repopulate
+    /// B (their plugin queues are independent). Mirrors `detailGeneration`.
+    private(set) var listGeneration = 0
+
+    /// Push a searchable second-level plugin list in its loading state and return
+    /// the generation token identifying this drill-in. The window controller
+    /// passes that token back to `updateList` when the rows resolve.
+    @discardableResult
+    func enterList(sourceKey: PluginRowSourceKey, listID: String, title: String) -> Int {
+        pushCurrentFrame()
+        optionsByID = [:]
+        optionEntries = []
+        listGeneration += 1
+        level = .list(ListLevel(sourceKey: sourceKey, listID: listID, title: title, content: .loading))
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
+        return listGeneration
+    }
+
+    /// Replace the pushed list's content once its rows resolve (or fail). A no-op
+    /// unless the same drill-in is still the current level: a list that was
+    /// popped, or superseded by a later drill-in, discards the stale result via
+    /// the generation token. Mirrors `updateDetail`.
+    func updateList(_ content: ListContent, generation: Int) {
+        guard case .list(var listLevel) = level, generation == listGeneration else { return }
+        listLevel.content = content
+        level = .list(listLevel)
     }
 
     /// Replace the Detail presentation state once its markdown resolves (or
@@ -187,9 +259,37 @@ final class CommandPaletteState {
         level = .detail(state)
     }
 
-    /// Return to the root level, clearing the option state + search + selection.
+    /// Return to the root level, clearing the whole navigation stack, the option
+    /// state, search, and selection. Use this to discard an entire drill-in (e.g.
+    /// a plugin uninstalled while its list/detail was open); `popLevel` steps back
+    /// a single level instead.
     func popToRoot() {
         level = .root
+        navigationStack = []
+        optionsByID = [:]
+        optionEntries = []
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
+    }
+
+    /// Record the current level so a later `popLevel` can return to it. Called by
+    /// every drill-in push (options / argument input / detail / list).
+    private func pushCurrentFrame() {
+        navigationStack.append(level)
+    }
+
+    /// Pop one navigation level: restore the frame just below, or fall back to the
+    /// root when the stack is empty. Clears the transient per-level state (option
+    /// lookup, scope, query, selection); the restored level carries its own
+    /// content (list rows, detail state) inside its enum payload, so a Detail
+    /// drilled out of a list returns to that list without a refetch.
+    func popLevel() {
+        guard let previous = navigationStack.popLast() else {
+            popToRoot()
+            return
+        }
+        level = previous
         optionsByID = [:]
         optionEntries = []
         activeDevToolScope = nil
@@ -334,11 +434,16 @@ final class CommandPaletteState {
     func cancelConfirmation() { pendingConfirmation = nil }
 
     /// What the window controller should do after applying the Esc-key policy.
+    /// `.poppedToRoot` names the non-dismiss, non-clear outcome — it pops one
+    /// navigation level, which lands on the root or an intermediate list (a
+    /// Detail drilled out of a list pops back to that list). The window
+    /// controller only distinguishes `.dismiss` from the rest.
     enum EscapeOutcome: Equatable { case clearedQuery, poppedToRoot, dismiss }
 
-    /// Esc-key policy: a non-empty query is cleared first (at either level); an
-    /// empty query pops to the root from the second level, or asks the window to
-    /// dismiss at the root.
+    /// Esc-key policy: a non-empty query is cleared first (at any level); an empty
+    /// query sheds an active dev-tool scope, then pops one navigation level from a
+    /// drill-in (list -> root, detail -> the list or root it came from), or asks
+    /// the window to dismiss at the root.
     @discardableResult
     func handleEscape() -> EscapeOutcome {
         if !query.isEmpty {
@@ -354,7 +459,7 @@ final class CommandPaletteState {
             return .poppedToRoot
         }
         if isAtRoot { return .dismiss }
-        popToRoot()
+        popLevel()
         return .poppedToRoot
     }
 
@@ -798,6 +903,36 @@ final class CommandPaletteState {
         case .argumentInput: return argumentInputEntry().map { [$0] } ?? []
         case .pluginArgumentInput: return pluginArgumentInputEntry().map { [$0] } ?? []
         case .detail: return []
+        case .list(let listLevel): return listEntries(listLevel)
+        }
+    }
+
+    /// The committable rows for a pushed plugin list: a single non-interactive
+    /// status row while loading or failed, otherwise the plugin's rows filtered
+    /// by the second-level query (empty query shows all, like the options level).
+    /// Each row keeps its own declared commit semantics, so a `pushDetail` row
+    /// inside a list still pushes a Detail on top of it.
+    private func listEntries(_ listLevel: ListLevel) -> [PanelEntry] {
+        switch listLevel.content {
+        case .loading:
+            return [Self.pluginRowStatusEntry(
+                sourceKey: listLevel.sourceKey, status: .loading, message: nil
+            )]
+        case .failed(let message):
+            return [Self.pluginRowStatusEntry(
+                sourceKey: listLevel.sourceKey, status: .error, message: message
+            )]
+        case .loaded(let rows):
+            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            let filtered = trimmed.isEmpty ? rows : rows.filter {
+                $0.title.localizedCaseInsensitiveContains(trimmed)
+                    || ($0.subtitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
+            }
+            return filtered.enumerated().map { index, descriptor in
+                Self.pluginRowEntry(
+                    sourceKey: listLevel.sourceKey, descriptor: descriptor, displayOrder: Double(index)
+                )
+            }
         }
     }
 
@@ -1167,13 +1302,14 @@ struct CommandPalettePicker: View {
         switch state.level {
         case .options(let parentTitle): return parentTitle
         case .detail(let detail): return detail.title
+        case .list(let listLevel): return listLevel.title
         case .root, .argumentInput, .pluginArgumentInput: return nil
         }
     }
 
     private var backHeader: some View {
         Button {
-            state.popToRoot()
+            state.popLevel()
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left")

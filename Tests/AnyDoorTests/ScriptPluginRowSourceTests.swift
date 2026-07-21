@@ -102,6 +102,59 @@ final class ScriptPluginRowSourceTests: XCTestCase {
         }
     }
 
+    // MARK: - List (pushList) building
+
+    func testLoadListReturnsRows() async throws {
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: try ScriptPluginFixture.writePackage(
+            id: "com.acme.list",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () { return [{ id: "hot", title: "Hot", action: { type: "list", id: "hot" } }]; },
+              list: function (listId) { return [{ id: listId + ":1", title: "Topic", action: { type: "detail" } }]; }
+            });
+            """
+        ))
+        let source = makeSource(runtime: runtime, id: id)
+
+        let result = await source.loadList(id: "hot", query: "")
+        XCTAssertEqual(result, .rows([
+            PluginRowDescriptor(id: "hot:1", title: "Topic", symbol: "puzzlepiece.extension", commit: .pushDetail),
+        ]))
+    }
+
+    func testLoadListReturnsFailureWhenListHandlerAbsent() async throws {
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: try ScriptPluginFixture.writePackage(
+            id: "com.acme.nolist",
+            bundle: #"anydoor.registerPlugin({ rows: function () { return []; } });"#
+        ))
+        let source = makeSource(runtime: runtime, id: id)
+
+        guard case .failure = await source.loadList(id: "hot", query: "") else {
+            return XCTFail("a pushList row with no backing list handler fails visibly")
+        }
+    }
+
+    func testLoadListAfterUnloadIsDropped() async throws {
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: try ScriptPluginFixture.writePackage(
+            id: "com.acme.listgone",
+            bundle: """
+            anydoor.registerPlugin({
+              list: function (listId) { return [{ id: "x", title: "X", action: { type: "detail" } }]; }
+            });
+            """
+        ))
+        let source = makeSource(runtime: runtime, id: id)
+
+        // Uninstall unloads the context; a list committed just before must not
+        // repopulate — the source drops it (the palette has popped to root).
+        runtime.unload(id)
+        let result = await source.loadList(id: "hot", query: "")
+        XCTAssertNil(result, "a list build for an unloaded plugin is dropped")
+    }
+
     // MARK: - Argument passing
 
     func testPerformRowArgumentReachesPluginAction() async throws {

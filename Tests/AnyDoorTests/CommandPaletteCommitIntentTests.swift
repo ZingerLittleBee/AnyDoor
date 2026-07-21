@@ -198,6 +198,23 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
     }
 
     @MainActor
+    func testPluginRowPushListStaysOpenAndCarriesListIDAndTitle() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.v2ex"),
+            localID: "rows"
+        )
+        let descriptor = PluginRowDescriptor(
+            id: "hot", title: "View Hot Topics", symbol: "flame", commit: .pushList("hot")
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+            ),
+            .pluginRowPushList(sourceKey: sourceKey, listID: "hot", title: "View Hot Topics")
+        )
+    }
+
+    @MainActor
     func testPluginRowEnterArgumentStaysOpenAndCarriesTitle() {
         let sourceKey = PluginRowSourceKey(
             pluginID: NativePluginID(rawValue: "script:com.acme.search"),

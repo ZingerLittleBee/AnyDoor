@@ -28,7 +28,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     /// What committing the row means to the palette. The commit-intent
     /// classifier maps a plugin row by this declared value alone.
     ///
-    /// The first six cases are author-facing — a plugin declares one per row.
+    /// The first seven cases are author-facing — a plugin declares one per row.
     /// The last two (`noAction`, `runArgument`) are host-synthesized for the
     /// rows the palette builds itself (a loading/error status row, and the row
     /// materialized after Argument input), never decoded from a plugin package.
@@ -48,6 +48,11 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         /// Enter the palette's Argument input mode; the entered text is passed
         /// to the row's plugin action.
         case enterArgument
+        /// Push a searchable second-level list of the plugin's rows, built by the
+        /// plugin's `list` entry point for the carried list id. The rows inside
+        /// follow their own declared semantics (a `pushDetail` row still pushes a
+        /// Detail on top of the list, `openURL`/`copy` close and act, and so on).
+        case pushList(String)
         /// A non-interactive row (a loading placeholder or an inline error).
         /// Committing it does nothing and keeps the palette open. Host-only.
         case noAction
@@ -113,6 +118,16 @@ public enum PluginRowDetailResult: Sendable, Equatable {
     case failure(String)
 }
 
+/// The result of building a `pushList` row's second-level list: the rows to
+/// surface, or a failure message to show as a single inline error row. A source
+/// that has no list for the requested id returns `nil` from `loadList`, which
+/// the palette also renders as an inline error (a `pushList` row with no backing
+/// `list` handler is a consistent visible failure, not a silent no-op).
+public enum PluginRowListResult: Sendable, Equatable {
+    case rows([PluginRowDescriptor])
+    case failure(String)
+}
+
 /// A palette row source contributed by a Native Plugin (e.g. hosts profile
 /// rows). Descriptor-based per ADR-0007: Core surfaces the rows generically
 /// and performs a committed row through this protocol, never through a
@@ -153,6 +168,13 @@ public protocol PluginRowSource: AnyObject {
     /// Builds a row's markdown Detail, or `nil` when the source has none.
     /// Called when a row whose descriptor declared `.pushDetail` is committed.
     func loadDetail(id: String) async -> PluginRowDetailResult?
+
+    /// Builds the second-level rows for a committed `.pushList` row's list id,
+    /// or `nil` when the source has no list for that id. Defaults to `nil`, so
+    /// only sources with a nested list level (a Script Plugin declaring a
+    /// `list` entry point) implement it; synchronous sources (hosts profiles)
+    /// never push a list and keep the default.
+    func loadList(id listID: String, query: String) async -> PluginRowListResult?
 }
 
 extension PluginRowSource {
@@ -162,4 +184,5 @@ extension PluginRowSource {
         await performRow(id: id)
     }
     public func loadDetail(id: String) async -> PluginRowDetailResult? { nil }
+    public func loadList(id listID: String, query: String) async -> PluginRowListResult? { nil }
 }
