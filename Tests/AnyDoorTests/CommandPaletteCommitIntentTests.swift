@@ -181,6 +181,111 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
     }
 
     @MainActor
+    func testPluginRowPushDetailStaysOpenAndCarriesTitle() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.posts"),
+            localID: "rows"
+        )
+        let descriptor = PluginRowDescriptor(
+            id: "post-1", title: "Latest Post", symbol: "doc", commit: .pushDetail
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+            ),
+            .pluginRowPushDetail(sourceKey: sourceKey, rowID: "post-1", title: "Latest Post")
+        )
+    }
+
+    @MainActor
+    func testPluginRowEnterArgumentStaysOpenAndCarriesTitle() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.search"),
+            localID: "rows"
+        )
+        let descriptor = PluginRowDescriptor(
+            id: "search", title: "Search", symbol: "magnifyingglass", commit: .enterArgument
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+            ),
+            .pluginRowEnterArgument(sourceKey: sourceKey, rowID: "search", title: "Search")
+        )
+    }
+
+    @MainActor
+    func testPluginRowOpenURLClosesAndOpens() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.posts"),
+            localID: "rows"
+        )
+        let descriptor = PluginRowDescriptor(
+            id: "post-1", title: "Open", symbol: "link",
+            commit: .openURL("https://example.com/post/1")
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+            ),
+            .openURL(url: "https://example.com/post/1")
+        )
+    }
+
+    @MainActor
+    func testPluginRowCopyClosesAndCopiesGenericToast() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.posts"),
+            localID: "rows"
+        )
+        let descriptor = PluginRowDescriptor(
+            id: "post-1", title: "Copy", symbol: "doc.on.doc",
+            commit: .copy("copied text")
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+            ),
+            .copyToClipboard(text: "copied text", toast: .generic)
+        )
+    }
+
+    @MainActor
+    func testPluginRowNoActionIsInert() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.posts"),
+            localID: "rows"
+        )
+        let descriptor = PluginRowDescriptor(
+            id: "__status", title: "Loading…", symbol: "hourglass", commit: .noAction
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+            ),
+            .noAction
+        )
+    }
+
+    @MainActor
+    func testPluginRowRunArgumentClosesAndCarriesArgument() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.search"),
+            localID: "rows"
+        )
+        let descriptor = PluginRowDescriptor(
+            id: "search", title: "Search — anydoor", symbol: "magnifyingglass",
+            commit: .runArgument("anydoor")
+        )
+        XCTAssertEqual(
+            CommandPaletteCommitIntent.classify(
+                .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+            ),
+            .pluginRowRunArgument(sourceKey: sourceKey, rowID: "search", argument: "anydoor")
+        )
+    }
+
+    @MainActor
     func testQuicklinkIntentsDeclarePlainTemplateAndArgumentRows() {
         let id = UUID()
         XCTAssertEqual(

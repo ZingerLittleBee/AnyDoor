@@ -30,6 +30,15 @@ enum CommandPaletteCommitIntent: Equatable {
     /// A plugin row that declared `.stayOpen`: run it through its owning
     /// `PluginRowSource` while the palette remains visible.
     case pluginRowStayOpen(sourceKey: PluginRowSourceKey, rowID: String)
+    /// A plugin row that declared `.pushDetail`: push its markdown Detail as a
+    /// new palette level while the palette remains visible.
+    case pluginRowPushDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String)
+    /// A plugin row that declared `.enterArgument`: enter the palette's
+    /// Argument input mode bound to this row.
+    case pluginRowEnterArgument(sourceKey: PluginRowSourceKey, rowID: String, title: String)
+    /// A non-interactive plugin row (loading placeholder / inline error):
+    /// committing does nothing and the palette stays open.
+    case noAction
 
     // Close-then-act intents — the palette dismisses first.
     case launchAppShortcut(id: UUID)
@@ -40,6 +49,11 @@ enum CommandPaletteCommitIntent: Equatable {
     /// A plugin row that declared `.closeThenAct`: dismiss, then run it
     /// through its owning `PluginRowSource` (e.g. toggle a hosts profile).
     case pluginRowCloseThenAct(sourceKey: PluginRowSourceKey, rowID: String)
+    /// A plugin row materialized after Argument input: dismiss, then run its
+    /// plugin action with the captured argument text.
+    case pluginRowRunArgument(sourceKey: PluginRowSourceKey, rowID: String, argument: String)
+    /// A plugin row that declared `.openURL`: dismiss, then open the URL.
+    case openURL(url: String)
     case openQuicklink(id: UUID)
     case openQuicklinkArgument(id: UUID, argument: String)
     /// Close without acting (a submenu/brightness builtin that isn't an
@@ -94,6 +108,18 @@ enum CommandPaletteCommitIntent: Equatable {
                 return .pluginRowStayOpen(sourceKey: sourceKey, rowID: descriptor.id)
             case .closeThenAct:
                 return .pluginRowCloseThenAct(sourceKey: sourceKey, rowID: descriptor.id)
+            case .pushDetail:
+                return .pluginRowPushDetail(sourceKey: sourceKey, rowID: descriptor.id, title: descriptor.title)
+            case .enterArgument:
+                return .pluginRowEnterArgument(sourceKey: sourceKey, rowID: descriptor.id, title: descriptor.title)
+            case .openURL(let url):
+                return .openURL(url: url)
+            case .copy(let text):
+                return .copyToClipboard(text: text, toast: .generic)
+            case .noAction:
+                return .noAction
+            case .runArgument(let argument):
+                return .pluginRowRunArgument(sourceKey: sourceKey, rowID: descriptor.id, argument: argument)
             }
         case .quicklink(let id):
             return .openQuicklink(id: id)

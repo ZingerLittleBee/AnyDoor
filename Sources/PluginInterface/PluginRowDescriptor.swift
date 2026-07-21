@@ -27,12 +27,34 @@ public struct PluginRowSourceKey: Hashable, Sendable {
 public struct PluginRowDescriptor: Hashable, Sendable {
     /// What committing the row means to the palette. The commit-intent
     /// classifier maps a plugin row by this declared value alone.
+    ///
+    /// The first six cases are author-facing — a plugin declares one per row.
+    /// The last two (`noAction`, `runArgument`) are host-synthesized for the
+    /// rows the palette builds itself (a loading/error status row, and the row
+    /// materialized after Argument input), never decoded from a plugin package.
     public enum CommitSemantics: Hashable, Sendable {
-        /// The palette dismisses first, then the row's action runs
+        /// The palette dismisses first, then the row's plugin action runs
         /// (e.g. toggling a hosts profile).
         case closeThenAct
-        /// The palette stays open while the row's action runs.
+        /// The palette stays open while the row's plugin action runs.
         case stayOpen
+        /// Push the row's markdown Detail as a new palette navigation level.
+        case pushDetail
+        /// Close the palette, then open this URL in the default browser.
+        case openURL(String)
+        /// Close the palette, then copy this text through the host self-write
+        /// funnel (so a plugin copy never lands in clipboard history).
+        case copy(String)
+        /// Enter the palette's Argument input mode; the entered text is passed
+        /// to the row's plugin action.
+        case enterArgument
+        /// A non-interactive row (a loading placeholder or an inline error).
+        /// Committing it does nothing and keeps the palette open. Host-only.
+        case noAction
+        /// Run the row's plugin action with a captured Argument-input string.
+        /// Synthesized by the host once the user submits the argument; not a
+        /// value a plugin declares. Host-only.
+        case runArgument(String)
     }
 
     /// Stable identity within the owning row source; commit routes back
@@ -69,6 +91,28 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     }
 }
 
+/// The load state of a row source whose rows are produced asynchronously
+/// (a Script Plugin building rows off its JavaScript queue). Synchronous
+/// sources (hosts profiles) stay `.ready`; the palette renders a loading
+/// placeholder or an inline error row for the other two states so a slow or
+/// broken plugin degrades visibly instead of hanging (user story 9).
+public enum PluginRowLoadState: Sendable, Equatable {
+    /// `rows()` is authoritative.
+    case ready
+    /// A build is in flight and no rows are cached yet — show a loading row.
+    case loading
+    /// The last build failed (message carried) — show an inline error row.
+    case failed(String)
+}
+
+/// The result of building a row's markdown Detail: the markdown to render, or
+/// a failure message to show inline. `nil` from `loadDetail` means the source
+/// has no Detail for that row at all.
+public enum PluginRowDetailResult: Sendable, Equatable {
+    case markdown(String)
+    case failure(String)
+}
+
 /// A palette row source contributed by a Native Plugin (e.g. hosts profile
 /// rows). Descriptor-based per ADR-0007: Core surfaces the rows generically
 /// and performs a committed row through this protocol, never through a
@@ -94,10 +138,28 @@ public protocol PluginRowSource: AnyObject {
     /// palette query pass; must be cheap and synchronous.
     func rows() -> [PluginRowDescriptor]
 
+    /// Whether `rows()` is authoritative, still loading, or failed to build.
+    /// Defaults to `.ready` for synchronous sources.
+    var loadState: PluginRowLoadState { get }
+
     /// Runs the action behind a committed row.
     func performRow(id: String) async
+
+    /// Runs the action behind a committed row, passing an Argument-input
+    /// string. Defaults to ignoring the argument and calling `performRow(id:)`,
+    /// so only sources that opt into Argument input implement it.
+    func performRow(id: String, argument: String) async
+
+    /// Builds a row's markdown Detail, or `nil` when the source has none.
+    /// Called when a row whose descriptor declared `.pushDetail` is committed.
+    func loadDetail(id: String) async -> PluginRowDetailResult?
 }
 
 extension PluginRowSource {
     public func reload() {}
+    public var loadState: PluginRowLoadState { .ready }
+    public func performRow(id: String, argument: String) async {
+        await performRow(id: id)
+    }
+    public func loadDetail(id: String) async -> PluginRowDetailResult? { nil }
 }

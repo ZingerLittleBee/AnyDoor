@@ -31,10 +31,32 @@ final class CommandPaletteState {
     var query: String = ""
     var selectedIndex: Int = 0
 
+    /// A pushed markdown Detail's presentation state. The raw markdown is held
+    /// here; the view parses it with the system markdown parser (no third-party
+    /// renderer). Loading and failure are first-class so a slow or broken
+    /// `detail()` degrades visibly instead of hanging the palette.
+    enum DetailState: Equatable {
+        case loading(title: String)
+        case loaded(title: String, markdown: String)
+        case failed(title: String, message: String)
+
+        var title: String {
+            switch self {
+            case .loading(let title), .loaded(let title, _), .failed(let title, _):
+                return title
+            }
+        }
+    }
+
     enum Level: Equatable {
         case root
         case options(parentTitle: String)
         case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?, badge: String)
+        /// A plugin row's Argument input mode: the entered text is passed to the
+        /// row's plugin action (mirrors `.argumentInput` for Quicklinks).
+        case pluginArgumentInput(sourceKey: PluginRowSourceKey, rowID: String, title: String, badge: String)
+        /// A plugin row's pushed markdown Detail.
+        case detail(DetailState)
     }
 
     private(set) var level: Level = .root
@@ -43,20 +65,36 @@ final class CommandPaletteState {
 
     var isAtRoot: Bool { level == .root }
     var isInArgumentInput: Bool {
-        if case .argumentInput = level { return true }
+        switch level {
+        case .argumentInput, .pluginArgumentInput: return true
+        default: return false
+        }
+    }
+    var isInDetail: Bool {
+        if case .detail = level { return true }
         return false
     }
-    var argumentInputTitle: String? {
-        if case .argumentInput(_, let title, _, _, _) = level { return title }
+    var detailState: DetailState? {
+        if case .detail(let state) = level { return state }
         return nil
+    }
+    var argumentInputTitle: String? {
+        switch level {
+        case .argumentInput(_, let title, _, _, _): return title
+        case .pluginArgumentInput(_, _, let title, _): return title
+        default: return nil
+        }
     }
 
     /// The pill label shown in the search field while in argument-input mode —
     /// the Quicklink's keyword when known (what the user typed before Tab),
     /// otherwise its title. Nil at every other level.
     var argumentBadge: String? {
-        if case .argumentInput(_, _, _, _, let badge) = level { return badge }
-        return nil
+        switch level {
+        case .argumentInput(_, _, _, _, let badge): return badge
+        case .pluginArgumentInput(_, _, _, let badge): return badge
+        default: return nil
+        }
     }
 
     /// Push a second level built from `options`; resets the search + selection.
@@ -106,6 +144,36 @@ final class CommandPaletteState {
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
+    }
+
+    /// Push Argument input for a plugin row: the entered text is later passed to
+    /// the row's plugin action. Mirrors `enterArgumentInput` for Quicklinks.
+    func enterPluginArgumentInput(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
+        optionsByID = [:]
+        optionEntries = []
+        level = .pluginArgumentInput(sourceKey: sourceKey, rowID: rowID, title: title, badge: title)
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
+    }
+
+    /// Push a markdown Detail level in its loading state. The window controller
+    /// then builds the markdown and calls `updateDetail`.
+    func enterDetail(title: String) {
+        optionsByID = [:]
+        optionEntries = []
+        level = .detail(.loading(title: title))
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
+    }
+
+    /// Replace the Detail presentation state once its markdown resolves (or
+    /// fails). A no-op if the user has already navigated away from the Detail,
+    /// so a late async result can never resurrect a dismissed level.
+    func updateDetail(_ state: DetailState) {
+        guard case .detail = level else { return }
+        level = .detail(state)
     }
 
     /// Return to the root level, clearing the option state + search + selection.
@@ -289,6 +357,15 @@ final class CommandPaletteState {
         }
     }
 
+    /// Bumped when an async plugin row source finishes (re)loading, so a visible
+    /// palette recomputes its sections without disturbing query/selection/
+    /// drill-in. Read inside `pluginRowSections` purely to register the
+    /// Observation dependency (the row source object mutates out of band).
+    private(set) var pluginRowRevision = 0
+
+    /// Note that a plugin row source's rows or load state changed out of band.
+    func notePluginRowsChanged() { pluginRowRevision += 1 }
+
     private(set) var allSections: [CommandPaletteSection]
     private(set) var quicklinkTemplateCandidates: [QuicklinkTemplateCandidate]
     let hyperFlags: Int
@@ -376,22 +453,71 @@ final class CommandPaletteState {
     /// by name from the root. Committing a row routes back to its owning
     /// source by the descriptor's declared semantics (ADR-0007).
     private func pluginRowSections(matching query: String) -> [CommandPaletteSection] {
+        // Establish the Observation dependency: an async source mutates its rows
+        // and load state out of band, so a bump forces this recomputation.
+        _ = pluginRowRevision
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         return rowSources.compactMap { registration in
-            let entries = registration.source.rows()
-                .filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
-                .enumerated()
-                .map { index, descriptor in
-                    Self.pluginRowEntry(
-                        sourceKey: registration.key,
-                        descriptor: descriptor,
-                        displayOrder: Double(index)
-                    )
-                }
+            let entries: [PanelEntry]
+            switch registration.source.loadState {
+            case .loading:
+                // No rows yet — show a single non-interactive loading row so the
+                // section is visibly building instead of hanging or vanishing.
+                entries = [Self.pluginRowStatusEntry(
+                    sourceKey: registration.key, status: .loading, message: nil
+                )]
+            case .failed(let message):
+                entries = [Self.pluginRowStatusEntry(
+                    sourceKey: registration.key, status: .error, message: message
+                )]
+            case .ready:
+                entries = registration.source.rows()
+                    .filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+                    .enumerated()
+                    .map { index, descriptor in
+                        Self.pluginRowEntry(
+                            sourceKey: registration.key,
+                            descriptor: descriptor,
+                            displayOrder: Double(index)
+                        )
+                    }
+            }
             guard !entries.isEmpty else { return nil }
             return CommandPaletteSection(rawTitleKey: registration.sectionTitleKey, entries: entries)
         }
+    }
+
+    /// The two host-synthesized status rows for an async plugin row source. Both
+    /// carry `.noAction` so committing them does nothing (the palette stays open
+    /// rather than hanging or closing on a loading/error row, user story 9).
+    enum PluginRowStatus { case loading, error }
+
+    private static func pluginRowStatusEntry(
+        sourceKey: PluginRowSourceKey,
+        status: PluginRowStatus,
+        message: String?
+    ) -> PanelEntry {
+        let descriptor: PluginRowDescriptor
+        switch status {
+        case .loading:
+            descriptor = PluginRowDescriptor(
+                id: "__anydoor.status.loading",
+                title: L(.commandPalettePluginRowLoading),
+                symbol: "hourglass",
+                actionLabel: "",
+                commit: .noAction
+            )
+        case .error:
+            descriptor = PluginRowDescriptor(
+                id: "__anydoor.status.error",
+                title: message?.isEmpty == false ? message! : L(.commandPalettePluginRowError),
+                symbol: "exclamationmark.triangle",
+                actionLabel: "",
+                commit: .noAction
+            )
+        }
+        return pluginRowEntry(sourceKey: sourceKey, descriptor: descriptor, displayOrder: 0)
     }
 
     private static func pluginRowEntry(
@@ -659,7 +785,27 @@ final class CommandPaletteState {
         case .root: return filteredSections.flatMap(\.entries)
         case .options: return filteredOptionEntries
         case .argumentInput: return argumentInputEntry().map { [$0] } ?? []
+        case .pluginArgumentInput: return pluginArgumentInputEntry().map { [$0] } ?? []
+        case .detail: return []
         }
+    }
+
+    /// The single committable row while a plugin row's Argument input is active:
+    /// a synthesized row carrying `.runArgument(text)`, so committing routes back
+    /// through the row's plugin action with the entered text.
+    private func pluginArgumentInputEntry() -> PanelEntry? {
+        guard case .pluginArgumentInput(let sourceKey, let rowID, let title, _) = level else {
+            return nil
+        }
+        let argument = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !argument.isEmpty else { return nil }
+        let descriptor = PluginRowDescriptor(
+            id: rowID,
+            title: "\(title) — \(argument)",
+            symbol: "puzzlepiece.extension",
+            commit: .runArgument(argument)
+        )
+        return Self.pluginRowEntry(sourceKey: sourceKey, descriptor: descriptor, displayOrder: 0)
     }
 
     private func argumentInputEntry() -> PanelEntry? {
@@ -708,14 +854,16 @@ struct CommandPalettePicker: View {
     var body: some View {
         VStack(spacing: 0) {
             // Argument-input mode carries its own search-field badge (Raycast
-            // style), so only the options level shows the back header.
-            if case .options = state.level { backHeader }
+            // style), so only the options and Detail levels show the back header.
+            if backHeaderTitle != nil { backHeader }
 
             searchField
 
             Divider().opacity(0.4)
 
-            if state.flatEntries.isEmpty {
+            if state.isInDetail {
+                detailView
+            } else if state.flatEntries.isEmpty {
                 if let scope = state.activeDevToolScope {
                     scopeTips(for: scope)
                 } else {
@@ -984,6 +1132,16 @@ struct CommandPalettePicker: View {
         }
     }
 
+    /// The back-header title for the second-level view, or nil at levels that
+    /// carry no header (root, and the badge-bearing argument-input modes).
+    private var backHeaderTitle: String? {
+        switch state.level {
+        case .options(let parentTitle): return parentTitle
+        case .detail(let detail): return detail.title
+        case .root, .argumentInput, .pluginArgumentInput: return nil
+        }
+    }
+
     private var backHeader: some View {
         Button {
             state.popToRoot()
@@ -991,8 +1149,8 @@ struct CommandPalettePicker: View {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 13, weight: .semibold))
-                if case let .options(parentTitle) = state.level {
-                    Text(parentTitle)
+                if let title = backHeaderTitle {
+                    Text(title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                 }
@@ -1006,6 +1164,66 @@ struct CommandPalettePicker: View {
         .padding(.top, 14)
         .padding(.bottom, 2)
         .help(L(.commandPaletteOptionBack))
+    }
+
+    /// The pushed markdown Detail: a loading placeholder, the rendered markdown,
+    /// or an inline error — parsed with the system markdown parser (no
+    /// third-party renderer). SwiftUI view internals are untested per repo
+    /// convention; the loading/error state transitions are pinned at the state
+    /// layer.
+    @ViewBuilder
+    private var detailView: some View {
+        switch state.detailState {
+        case .loading:
+            VStack(spacing: 12) {
+                Spacer()
+                ProgressView()
+                LocalizedText(.commandPalettePluginRowLoading)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+        case .loaded(_, let markdown):
+            ScrollView {
+                Text(Self.renderMarkdown(markdown))
+                    .font(.system(size: 14))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 22)
+                    .padding(.vertical, 16)
+                    .overlayScrollers()
+            }
+            .frame(minHeight: 320, maxHeight: .infinity)
+        case .failed(_, let message):
+            VStack(spacing: 10) {
+                Spacer()
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+            .padding(.horizontal, 40)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    /// Parse plugin-authored markdown into an `AttributedString` with the system
+    /// parser, preserving paragraph breaks (`.inlineOnlyPreservingWhitespace`
+    /// would collapse them). Falls back to the raw text if parsing fails.
+    static func renderMarkdown(_ markdown: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .full,
+            failurePolicy: .returnPartiallyParsedIfPossible
+        )
+        return (try? AttributedString(markdown: markdown, options: options))
+            ?? AttributedString(markdown)
     }
 
     private var optionList: some View {

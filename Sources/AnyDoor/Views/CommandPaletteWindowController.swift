@@ -577,6 +577,21 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             close()
             guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
             Task { await source.performRow(id: rowID) }
+        case .pluginRowPushDetail(let sourceKey, let rowID, let title):
+            pushPluginDetail(sourceKey: sourceKey, rowID: rowID, title: title)
+        case .pluginRowEnterArgument(let sourceKey, let rowID, let title):
+            state?.enterPluginArgumentInput(sourceKey: sourceKey, rowID: rowID, title: title)
+        case .pluginRowRunArgument(let sourceKey, let rowID, let argument):
+            close()
+            guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
+            Task { await source.performRow(id: rowID, argument: argument) }
+        case .noAction:
+            // A loading placeholder / inline error row: keep the palette open.
+            break
+        case .openURL(let url):
+            close()
+            guard let parsed = URL(string: url) else { return }
+            NSWorkspace.shared.open(parsed)
         case .openQuicklink(let id):
             close()
             guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
@@ -588,6 +603,38 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         case .dismiss:
             close()
         }
+    }
+
+    /// Push a plugin row's markdown Detail: show the loading level immediately,
+    /// then resolve the markdown off the row source and update in place. Guards
+    /// re-check that the same Detail is still visible after the await, so a
+    /// dismissed palette or a mid-flight uninstall can neither hang nor resurface.
+    private func pushPluginDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
+        state?.enterDetail(title: title)
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
+            state?.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)))
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadDetail(id: rowID)
+            guard let self, let state = self.state, self.window?.isVisible == true,
+                  state.isInDetail else { return }
+            switch result {
+            case .markdown(let markdown):
+                state.updateDetail(.loaded(title: title, markdown: markdown))
+            case .failure(let message):
+                state.updateDetail(.failed(title: title, message: message))
+            case nil:
+                state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)))
+            }
+        }
+    }
+
+    /// Recompute a visible palette's rows in place after an async plugin row
+    /// source finishes loading — no popToRoot, so a drilled-in Detail survives.
+    func refreshVisibleRows() {
+        guard let state, window?.isVisible == true else { return }
+        state.notePluginRowsChanged()
     }
 
     /// Run the pending confirmation's action, then dismiss. Reads `perform`
