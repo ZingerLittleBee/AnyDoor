@@ -1,26 +1,51 @@
 import PluginInterface
+import ScriptPluginRuntime
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// Settings → Plugins: lists every available Native Plugin with its localized
-/// name, description, and install state. Install applies immediately;
-/// uninstall first shows a confirmation describing the uninstall's impact
-/// (what remains and what is retained), then runs the registry's
-/// transactional uninstall — a failed deactivate leaves the plugin
-/// installed and surfaces the error.
+/// Settings → Plugins: one place to manage both plugin kinds. Native Plugins
+/// ship in the binary and install by flipping a state flag; Script Plugins are
+/// Sideloaded from a local folder. Each kind lists its plugins with localized
+/// name, description, and (for Script Plugins) version. Install applies
+/// immediately; uninstall first confirms the impact, then runs the registry's
+/// transactional uninstall.
 @MainActor
 struct PluginsSettingsView: View {
     @State private var registry = PluginRegistry.shared
-    /// Plugin id awaiting the uninstall confirmation.
+    @State private var scriptRegistry = ScriptPluginRegistry.shared
+    /// Native plugin id awaiting the uninstall confirmation.
     @State private var pendingUninstallID: NativePluginID?
-    /// Plugin ids with an uninstall's async deactivate in flight.
+    /// Native plugin ids with an uninstall's async deactivate in flight.
     @State private var uninstallingIDs: Set<NativePluginID> = []
+    /// Script plugin ids with an uninstall in flight.
+    @State private var uninstallingScriptIDs: Set<ScriptPluginID> = []
 
     var body: some View {
         Form {
             Section {
                 ForEach(registry.plugins, id: \.id) { plugin in
-                    row(for: plugin)
+                    nativeRow(for: plugin)
                 }
+            } header: {
+                LocalizedText(.pluginsSectionNative)
+            }
+
+            Section {
+                if scriptRegistry.installedManifests.isEmpty {
+                    LocalizedText(.pluginsScriptEmpty)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(scriptRegistry.installedManifests, id: \.id) { manifest in
+                    scriptRow(for: manifest)
+                }
+                Button {
+                    sideload()
+                } label: {
+                    LocalizedText(.pluginsSideload)
+                }
+            } header: {
+                LocalizedText(.pluginsSectionScript)
             }
         }
         .formStyle(.grouped)
@@ -43,7 +68,9 @@ struct PluginsSettingsView: View {
         }
     }
 
-    private func row(for plugin: any NativePlugin) -> some View {
+    // MARK: - Native rows
+
+    private func nativeRow(for plugin: any NativePlugin) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: symbol(for: plugin))
                 .font(.system(size: 18))
@@ -53,12 +80,7 @@ struct PluginsSettingsView: View {
                 HStack(spacing: 6) {
                     Text(plugin.localizedName)
                     if registry.isInstalled(plugin.id) {
-                        LocalizedText(.pluginsStateInstalled)
-                            .font(.caption)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(.quaternary, in: Capsule())
-                            .foregroundStyle(.secondary)
+                        installedBadge
                     }
                 }
                 Text(plugin.localizedDescription)
@@ -93,6 +115,53 @@ struct PluginsSettingsView: View {
             ?? "puzzlepiece.extension"
     }
 
+    // MARK: - Script rows
+
+    private func scriptRow(for manifest: ScriptPluginManifest) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "puzzlepiece.extension")
+                .font(.system(size: 18))
+                .frame(width: 28, height: 28)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(manifest.displayName(forLanguageCode: languageCode))
+                    installedBadge
+                    Text(L(.pluginsVersion, manifest.version))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                Text(manifest.displayDescription(forLanguageCode: languageCode))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Button {
+                uninstallScript(manifest.id)
+            } label: {
+                LocalizedText(.pluginsUninstall)
+            }
+            .disabled(uninstallingScriptIDs.contains(manifest.id))
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var languageCode: String? {
+        LocalizationManager.shared.effectiveLocale.language.languageCode?.identifier
+    }
+
+    private var installedBadge: some View {
+        LocalizedText(.pluginsStateInstalled)
+            .font(.caption)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
+            .foregroundStyle(.secondary)
+    }
+
+    // MARK: - Native uninstall confirmation
+
     private var pendingPlugin: (any NativePlugin)? {
         pendingUninstallID.flatMap { registry.plugin(withID: $0) }
     }
@@ -118,6 +187,40 @@ struct PluginsSettingsView: View {
             defer { uninstallingIDs.remove(id) }
             do {
                 try await registry.uninstall(id)
+            } catch {
+                ToastPresenter.shared.show(
+                    .failure(L(.pluginsUninstallFailed, error.localizedDescription))
+                )
+            }
+        }
+    }
+
+    // MARK: - Script sideload / uninstall
+
+    /// Present a folder picker, then Sideload the chosen package. A refusal
+    /// (invalid manifest, unknown apiVersion, duplicate id) surfaces a clear
+    /// localized message and changes nothing.
+    private func sideload() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        do {
+            try scriptRegistry.sideload(fromDirectory: folder)
+        } catch {
+            ToastPresenter.shared.show(
+                .failure(L(.pluginsSideloadFailed, scriptSideloadFailureMessage(error)))
+            )
+        }
+    }
+
+    private func uninstallScript(_ id: ScriptPluginID) {
+        uninstallingScriptIDs.insert(id)
+        Task {
+            defer { uninstallingScriptIDs.remove(id) }
+            do {
+                try await scriptRegistry.uninstall(id)
             } catch {
                 ToastPresenter.shared.show(
                     .failure(L(.pluginsUninstallFailed, error.localizedDescription))

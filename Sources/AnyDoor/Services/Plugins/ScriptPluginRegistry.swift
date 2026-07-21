@@ -38,6 +38,45 @@ final class ScriptPluginRegistry {
     /// in a config backup (user story 17).
     nonisolated static let installStateKey = "plugins.script.installed"
 
+    /// The production registry, wired to Core services. Its runtime, capability
+    /// host, and storage directories are built lazily on first access, on the
+    /// main actor. `AppDelegate` bootstraps it at launch.
+    static let shared = ScriptPluginRegistry.makeShared()
+
+    private static func makeShared() -> ScriptPluginRegistry {
+        let base = scriptPluginSupportDirectory()
+        let host = ScriptCapabilityHost(
+            transport: URLSessionFetchTransport(),
+            storeDirectory: base.appendingPathComponent("stores", isDirectory: true),
+            presentToast: { _, toast in
+                switch toast {
+                case .success(let message): ToastPresenter.shared.show(.success(message))
+                case .info(let message): ToastPresenter.shared.show(.info(message))
+                case .failure(let message): ToastPresenter.shared.show(.failure(message))
+                }
+            },
+            writePasteboard: { text in ClipboardWatcher.selfWrite(string: text) },
+            openURL: { url in NSWorkspace.shared.open(url) }
+        )
+        return ScriptPluginRegistry(
+            runtime: ScriptPluginRuntime(capabilityHost: host),
+            packagesDirectory: base.appendingPathComponent("packages", isDirectory: true)
+        )
+    }
+
+    /// `~/Library/Application Support/dev.bybee.AnyDoor/ScriptPlugins`, the root
+    /// for installed package copies and their private stores. Shares the pinned
+    /// support directory the ModelContainer uses, so `swift run` and the `.app`
+    /// see the same plugins.
+    private static func scriptPluginSupportDirectory() -> URL {
+        let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return appSupport
+            .appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
+            .appendingPathComponent("ScriptPlugins", isDirectory: true)
+    }
+
     /// Owner-id prefix that namespaces a Script Plugin's palette row source into
     /// the shared `PluginRowSourceKey` space. Native Plugin ids never contain a
     /// colon, so a Script Plugin id can never collide with a Native one even if
@@ -200,6 +239,29 @@ final class ScriptPluginRegistry {
 
     private func rowSourceKey(for id: ScriptPluginID) -> PluginRowSourceKey {
         PluginRowSourceKey(pluginID: rowSourceOwnerID(for: id), localID: ScriptPluginRowSource.localID)
+    }
+}
+
+// MARK: - Localized refusal messages
+
+/// Maps a Sideload refusal to a clear, localized message for the Settings toast.
+/// Every case is a typed refusal from the runtime's manifest/loader boundary, so
+/// a bad package always explains itself rather than surfacing a raw error string.
+@MainActor
+func scriptSideloadFailureMessage(_ error: any Error) -> String {
+    switch error {
+    case let manifest as ScriptManifestError:
+        switch manifest {
+        case .missingField(let field): return L(.pluginsSideloadErrorMissingField, field)
+        case .invalidJSON: return L(.pluginsSideloadErrorInvalidJSON)
+        case .fileUnreadable: return L(.pluginsSideloadErrorFileUnreadable)
+        case .unknownAPIVersion(let version): return L(.pluginsSideloadErrorUnknownAPIVersion, version)
+        case .unknownCapability(let key): return L(.pluginsSideloadErrorUnknownCapability, key)
+        }
+    case ScriptPluginError.duplicateID:
+        return L(.pluginsSideloadErrorDuplicate)
+    default:
+        return error.localizedDescription
     }
 }
 
