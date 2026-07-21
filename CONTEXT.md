@@ -7,27 +7,42 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 
 - **Native Plugin** (原生插件) — A first-party feature module the user installs
   or uninstalls as one unit (e.g. Hosts). Its code always ships with the app;
-  installing is a state change, never a download. Distinct from a future
-  **Script Plugin** (external, user-authored).
+  installing is a state change, never a download. Distinct from a
+  **Script Plugin**.
+- **Script Plugin** (脚本插件) — A plugin authored outside the app and
+  installed as a package the user obtains separately; its code does not ship
+  with the app. It acts only through the Capabilities it is granted. Distinct
+  from a Native Plugin.
+- **Capability** (能力) — A host facility a Script Plugin must declare to use
+  (e.g. network access, its private storage). A Capability that is not
+  granted does not exist for the plugin.
 - **Core** (内核) — The always-present part of the app that cannot be
   uninstalled: every command and service not claimed by a Native Plugin.
 - **Claim** (认领) — The exclusive ownership of a built-in command by a Native
   Plugin or the Core. Every command has exactly one owner.
-- **Install** (安装) — Making a Native Plugin exist for the user: its commands,
-  settings, and permission prompts appear. An uninstalled plugin is invisible
-  everywhere — it contributes no commands, no settings, and requests no
-  permissions.
+- **Install** (安装) — Making a plugin exist for the user: its commands,
+  settings, and permission prompts appear. For a Native Plugin this is a
+  state change, never a download; for a Script Plugin it brings the plugin's
+  package into the app. An uninstalled plugin is invisible everywhere — it
+  contributes no commands, no settings, and requests no permissions.
   _Avoid_: 启用 (reserved for per-command visibility).
-- **Uninstall** (卸载) — Cancelling a plugin's in-flight work, releasing the
-  shared host resources it holds (e.g. unregistering the privileged helper
-  when nothing else needs it), and removing all its surfaces, while
-  retaining its user data so a reinstall restores it fully. An uninstall
+- **Uninstall** (卸载) — Removing all of a plugin's surfaces while retaining
+  its user data, so a reinstall restores it fully. For a Native Plugin this
+  cancels in-flight work and releases the shared host resources it holds
+  (e.g. unregistering the privileged helper when nothing else needs it); it
   never mutates user-visible system state and never prompts for
   authorization — active hosts entries stay in effect until a reinstall
-  (ADR-0005 addendum 2026-07-17). Uninstalling is transactional: if
-  `deactivate` throws, the plugin remains installed — there is no
-  half-uninstalled state.
+  (ADR-0005 addendum 2026-07-17) — and it is transactional: if `deactivate`
+  throws, the plugin remains installed; there is no half-uninstalled state.
+  For a Script Plugin it removes the installed package while retaining the
+  plugin's private storage.
   _Avoid_: 禁用, 停用.
+- **Sideload** (旁加载) — Installing a Script Plugin from a local package the
+  user picked themselves, rather than from a store.
+- **Dev Plugin** (开发插件) — A Script Plugin loaded in place from a local
+  development directory, so changes take effect without reinstalling. Only
+  available in developer mode; never copied into the app.
+  _Avoid_: 链接 (reserved for Quicklinks).
 
 ## Quicklinks
 
