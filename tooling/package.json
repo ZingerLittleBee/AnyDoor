@@ -1,0 +1,19 @@
+{
+  "name": "@anydoor/tooling",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Script Plugin authoring toolchain for AnyDoor: the typed npm API and the plugin scaffold.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "pnpm --filter @anydoor/api build",
+    "typecheck": "pnpm -r typecheck",
+    "verify": "node scripts/verify.mjs",
+    "test": "pnpm run verify"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
