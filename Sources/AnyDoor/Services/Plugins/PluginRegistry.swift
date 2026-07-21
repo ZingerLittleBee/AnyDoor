@@ -194,6 +194,32 @@ final class PluginRegistry {
         return plugin.panelPopover(for: command)
     }
 
+    /// Context-menu actions installed plugins contribute for a
+    /// clipboard-history entry, each paired with its owner for commit
+    /// routing. An uninstalled plugin contributes nothing.
+    func clipboardActions(
+        for payload: PluginClipboardPayload
+    ) -> [(owner: NativePluginID, action: PluginClipboardAction)] {
+        plugins
+            .filter { installedIDs.contains($0.id) }
+            .flatMap { plugin in
+                plugin.clipboardActions(for: payload).map { (plugin.id, $0) }
+            }
+    }
+
+    /// Perform a committed clipboard action. Re-checks install state so a
+    /// menu built just before an uninstall landed can never reach the plugin.
+    func performClipboardAction(
+        pluginID: NativePluginID,
+        actionID: String,
+        payload: PluginClipboardPayload,
+        context: PluginClipboardActionContext
+    ) async {
+        guard installedIDs.contains(pluginID),
+              let plugin = plugin(withID: pluginID) else { return }
+        await plugin.performClipboardAction(id: actionID, payload: payload, context: context)
+    }
+
     // MARK: - Lifecycle
 
     /// Install a plugin: activate it, persist the state, and register its

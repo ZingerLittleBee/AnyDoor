@@ -29,6 +29,16 @@ struct NativePluginContractTests {
         #expect(options.isEmpty)
         #expect(plugin.paletteRowSources.isEmpty)
         #expect(plugin.panelPopover(for: .imageConversion) == nil)
+        #expect(plugin.clipboardActions(for: .files([])).isEmpty)
+        // The defaulted perform is a no-op: it must not trap and must not
+        // touch the host context (dismissing here would close the wall).
+        await plugin.performClipboardAction(
+            id: "unknown",
+            payload: .files([]),
+            context: PluginClipboardActionContext(dismissHistoryWindow: { _ in
+                Issue.record("the defaulted clipboard action must not dismiss the history window")
+            })
+        )
         // The schema surface is static (ADR-0005: collected before any
         // MainActor instance exists) and defaults to empty.
         #expect(BarePlugin.modelSchemaTypes.isEmpty)

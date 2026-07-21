@@ -7,6 +7,7 @@ import SwiftUI
 /// the plugin instance's host context so language switches apply without a relaunch.
 enum L10n {
     enum Key: String, CaseIterable, Sendable {
+        case clipboardActionConvertImage = "clipboard.action.convertImage"
         case clipboardActionRevealInFinder = "clipboard.action.revealInFinder"
         case commandPaletteActionOpen = "commandPalette.action.open"
         case imageConversionBasketCount = "imageConversion.basket.count"

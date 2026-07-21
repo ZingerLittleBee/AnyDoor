@@ -97,6 +97,33 @@ private final class SuspendingDeactivatePlugin: NativePlugin {
     }
 }
 
+/// Contributes one clipboard action and records commits, for exercising the
+/// registry's install-state gate on the clipboard-history surface.
+@MainActor
+private final class ClipboardActionProbePlugin: NativePlugin {
+    let id = NativePluginID(rawValue: "test.clipboardAction")
+    let localizedName = "Clipboard Action Probe"
+    let localizedDescription = "Contributes one clipboard action."
+    let claimedCommands: Set<BuiltinItem> = []
+    let providers: [any BuiltinProvider] = []
+    private(set) var performedIDs: [String] = []
+
+    func hasUsageTrace(in context: ModelContext) throws -> Bool { false }
+    func deactivate() async throws {}
+
+    func clipboardActions(for payload: PluginClipboardPayload) -> [PluginClipboardAction] {
+        [PluginClipboardAction(id: "probe", titleKey: "probe.title", symbol: "circle")]
+    }
+
+    func performClipboardAction(
+        id: String,
+        payload: PluginClipboardPayload,
+        context: PluginClipboardActionContext
+    ) async {
+        performedIDs.append(id)
+    }
+}
+
 @MainActor
 private final class FinderSelectionGate {
     private(set) var isWaiting = false
@@ -167,6 +194,46 @@ final class PluginRegistryTests: XCTestCase {
         XCTAssertFalse(registry.isAvailable(.imageConversion))
         XCTAssertTrue(registry.isAvailable(.keepAwake))
         XCTAssertFalse(registry.availableCommands.contains(.imageConversion))
+    }
+
+    /// The clipboard-history surface gates like every other one: an
+    /// uninstalled plugin contributes no actions and a stale commit (menu
+    /// built just before an uninstall landed) never reaches the plugin.
+    @MainActor
+    func testClipboardActionsGateOnInstallState() async throws {
+        let (defaults, teardown) = try makeIsolatedDefaults()
+        defer { teardown() }
+        let plugin = ClipboardActionProbePlugin()
+        let container = try makePluginRegistryTestContainer()
+        let harness = makePluginRegistryTestHarness()
+        bootstrapPluginRegistryTestHarness(
+            harness, plugins: [plugin], modelContainer: container, defaults: defaults
+        )
+        let registry = harness.registry
+        let payload = PluginClipboardPayload.files([])
+        let context = PluginClipboardActionContext(dismissHistoryWindow: { $0() })
+
+        XCTAssertTrue(registry.clipboardActions(for: payload).isEmpty)
+        await registry.performClipboardAction(
+            pluginID: plugin.id, actionID: "probe", payload: payload, context: context
+        )
+        XCTAssertTrue(plugin.performedIDs.isEmpty, "an uninstalled plugin's action must never run")
+
+        registry.install(plugin.id)
+        let actions = registry.clipboardActions(for: payload)
+        XCTAssertEqual(actions.map(\.owner), [plugin.id])
+        XCTAssertEqual(actions.map(\.action.id), ["probe"])
+        await registry.performClipboardAction(
+            pluginID: plugin.id, actionID: "probe", payload: payload, context: context
+        )
+        XCTAssertEqual(plugin.performedIDs, ["probe"])
+
+        try await registry.uninstall(plugin.id)
+        XCTAssertTrue(registry.clipboardActions(for: payload).isEmpty)
+        await registry.performClipboardAction(
+            pluginID: plugin.id, actionID: "probe", payload: payload, context: context
+        )
+        XCTAssertEqual(plugin.performedIDs, ["probe"], "no commit may reach an uninstalled plugin")
     }
 
     @MainActor

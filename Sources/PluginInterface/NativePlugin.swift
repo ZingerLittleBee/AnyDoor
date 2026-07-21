@@ -71,6 +71,20 @@ public protocol NativePlugin: AnyObject {
     /// nil when that command has no popover.
     func panelPopover(for command: BuiltinItem) -> PluginPanelPopover?
 
+    /// Context-menu actions this plugin contributes for a clipboard-history
+    /// entry with the given payload. Called at menu-build time on the main
+    /// actor; must stay cheap, synchronous, and disk-free.
+    func clipboardActions(for payload: PluginClipboardPayload) -> [PluginClipboardAction]
+
+    /// Runs a committed clipboard action, routed back by descriptor id — the
+    /// host's control flow never names the plugin behind an action. Loading
+    /// the payload and reporting a load failure belong here.
+    func performClipboardAction(
+        id: String,
+        payload: PluginClipboardPayload,
+        context: PluginClipboardActionContext
+    ) async
+
     /// SwiftData model types owned by this plugin. Collected once at
     /// ModelContainer creation — the schema stays static regardless of
     /// install state (ADR-0005), which is what keeps user data retained
@@ -123,6 +137,14 @@ extension NativePlugin {
     public var paletteRowSources: [any PluginRowSource] { [] }
 
     public func panelPopover(for command: BuiltinItem) -> PluginPanelPopover? { nil }
+
+    public func clipboardActions(for payload: PluginClipboardPayload) -> [PluginClipboardAction] { [] }
+
+    public func performClipboardAction(
+        id: String,
+        payload: PluginClipboardPayload,
+        context: PluginClipboardActionContext
+    ) async {}
 
     public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] { [] }
 

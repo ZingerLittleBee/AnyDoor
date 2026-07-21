@@ -15,7 +15,9 @@ struct ClipboardCardView: View {
     /// Context-menu actions; nil hides the matching menu item (previews/tests).
     var onEdit: (() -> Void)? = nil
     var onCopy: (() -> Void)? = nil
-    var onConvertImage: (() -> Void)? = nil
+    /// Commit handler for a plugin-contributed context-menu action; nil hides
+    /// all plugin actions (previews/tests).
+    var onPluginAction: ((NativePluginID, PluginClipboardAction) -> Void)? = nil
     var onRevealInFinder: (() -> Void)? = nil
     var onToggleTag: ((String) -> Void)? = nil
     var onNewTag: (() -> Void)? = nil
@@ -63,13 +65,17 @@ struct ClipboardCardView: View {
                 title: L(.clipboardActionCopy), systemImage: "doc.on.doc", handler: onCopy
             ))
         }
-        if let onConvertImage,
-           PluginRegistry.shared.isAvailable(.imageConversion),
-           ClipboardImageConversionEntry.isConvertible(kind: item.historyKind, files: item.files) {
-            menu.addItem(ClosureMenuItem(
-                title: L(.clipboardActionConvertImage), systemImage: "arrow.left.arrow.right.square",
-                handler: onConvertImage
-            ))
+        // Plugin-contributed actions (e.g. Convert Image Format), rendered
+        // generically: installed plugins decide from the payload whether an
+        // action applies; Core never names the plugin behind a menu item.
+        if let onPluginAction,
+           let payload = ClipboardPluginPayloadMapper.payload(for: item, historyDirectory: historyDirectory) {
+            for (owner, action) in PluginRegistry.shared.clipboardActions(for: payload) {
+                menu.addItem(ClosureMenuItem(
+                    title: L(raw: action.titleKey), systemImage: action.symbol,
+                    handler: { onPluginAction(owner, action) }
+                ))
+            }
         }
         if item.historyKind == .file, let onRevealInFinder {
             menu.addItem(ClosureMenuItem(

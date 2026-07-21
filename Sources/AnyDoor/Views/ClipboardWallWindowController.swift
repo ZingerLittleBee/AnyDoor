@@ -1,8 +1,4 @@
 import AppKit
-// Registered debt (PRD 2026-07-16 Out of Scope): the clipboard-history
-// context menu's convert action stays hardwired to the Image Conversion
-// plugin module in V1; revisit when this surface is next touched.
-import ImageConversionPlugin
 import PluginInterface
 import QuartzCore
 import QuickLookUI
@@ -206,7 +202,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             },
             onEdit: { [weak self] item in self?.beginEdit(item) },
             onCopy: { [weak self] item in self?.copyWithoutPasting(item) },
-            onConvertImage: { [weak self] item in self?.convertImage(item) },
+            onPluginAction: { [weak self] item, owner, action in
+                self?.performPluginAction(action, owner: owner, on: item)
+            },
             onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
             onDelete: { item in
                 Task { await ClipboardHistoryStore.shared.delete(item) }
@@ -589,49 +587,34 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 
-    /// "Convert Image Format" from a card's context menu: preload the entry into
-    /// the Image Conversion basket and open that window. Screenshot/image cards
-    /// enter as bitmaps (output → Downloads); file cards enter their image files
-    /// as file references (output → beside the original). A missing payload
-    /// surfaces a failure toast and leaves the window closed. The wall dismisses
-    /// first (without restoring focus) so its slide-out doesn't fight the
-    /// conversion panel's activation.
-    private func convertImage(_ item: ClipboardHistoryItem) {
-        // The context-menu entry is already gated on availability; this guard
-        // covers a menu built just before an uninstall landed, so the window
-        // can never be summoned while the plugin is uninstalled.
-        guard PluginRegistry.shared.isAvailable(.imageConversion) else { return }
-        guard let items = basketItems(for: item), !items.isEmpty else {
-            ToastPresenter.shared.show(.failure(L(.imageConversionSourceMissing)))
-            return
-        }
-        dismiss(restoreFocus: false) {
-            Task { @MainActor in
-                guard let plugin = PluginRegistry.shared.plugin(
-                    withID: ImageConversionNativePlugin.pluginID
-                ) as? ImageConversionNativePlugin else { return }
-                plugin.present(items: items)
+    /// A plugin-contributed action from a card's context menu, routed back
+    /// through the registry so this controller never names the plugin behind
+    /// it. The plugin decides whether to dismiss the wall via the context
+    /// (e.g. before presenting its own window) — a failure it reports itself
+    /// leaves the wall open.
+    private func performPluginAction(
+        _ action: PluginClipboardAction,
+        owner: NativePluginID,
+        on item: ClipboardHistoryItem
+    ) {
+        guard let payload = ClipboardPluginPayloadMapper.payload(
+            for: item, historyDirectory: historyDirectory
+        ) else { return }
+        let context = PluginClipboardActionContext(dismissHistoryWindow: { [weak self] then in
+            guard let self else {
+                then()
+                return
             }
-        }
-    }
-
-    /// Resolve a clipboard-history entry into Image Conversion basket items, or
-    /// nil when the payload can't be loaded (stored bitmap gone, or no image
-    /// file survives on disk).
-    private func basketItems(for item: ClipboardHistoryItem) -> [ImageConversionBasketItem]? {
-        switch item.historyKind {
-        case .screenshot, .image:
-            guard let fileName = item.fileName else { return nil }
-            let url = historyDirectory.appendingPathComponent(fileName)
-            guard let data = try? Data(contentsOf: url) else { return nil }
-            return [.bitmap(data, displayName: item.previewTitle)]
-        case .file:
-            let urls = ClipboardImageConversionEntry.imageFileURLs(from: item.files)
-                .filter { FileManager.default.fileExists(atPath: $0.path) }
-            guard !urls.isEmpty else { return nil }
-            return urls.map { .file($0) }
-        default:
-            return nil
+            // Dismiss without restoring focus so the wall's slide-out doesn't
+            // fight the activation of whatever the plugin presents next.
+            self.dismiss(restoreFocus: false) {
+                Task { @MainActor in then() }
+            }
+        })
+        Task { @MainActor in
+            await PluginRegistry.shared.performClipboardAction(
+                pluginID: owner, actionID: action.id, payload: payload, context: context
+            )
         }
     }
 

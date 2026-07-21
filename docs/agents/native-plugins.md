@@ -40,7 +40,7 @@ Background: [PRD](../prds/2026-07-16-native-plugin-architecture.md) ·
   Core services, intent classifiers, and window controllers must never branch
   on a specific plugin. Plugins reach the Core only through registrations and
   descriptors; the Core reaches plugins only through `PluginRegistry` lookups.
-  The two sanctioned exceptions are in section 2.
+  The one sanctioned exception is in section 2.
 - **Glossary (canonical, with the Chinese UI copy):** Native Plugin 原生插件 ·
   Core 内核 · Claim 认领 · Install 安装 · Uninstall 卸载. UI copy uses
   「插件 / 安装 / 卸载」; 「启用/禁用」 is reserved for per-command visibility
@@ -66,6 +66,8 @@ ImageCodec       ←─ AnyDoor, ImageConversionPlugin
   `PluginHostContext` + `PluginLocalizedText`, `PluginRowDescriptor` +
   `PluginRowSource` + `PluginRowSourceKey`,
   `PluginPanelPopover` + `PluginPanelPopoverContext`,
+  `PluginClipboardAction` + `PluginClipboardPayload` +
+  `PluginClipboardActionContext`,
   `PrivilegedHelperAccess` + `PrivilegedHelperReadiness` +
   `PrivilegedHelperCallError`, plus a few shared utilities/views
   (`MainThreadIsolation`, `CaptureFilename`, `FileThumbnailCache`,
@@ -83,16 +85,11 @@ ImageCodec       ←─ AnyDoor, ImageConversionPlugin
   `ImageEncodingQuality`), so Core's screenshot Save As never imports the
   plugin module.
 - **`AnyDoor`** (host) — depends on the plugin modules to build the
-  compile-time catalog. Core files importing a plugin module:
-  1. `Sources/AnyDoor/Services/Plugins/NativePluginCatalog.swift` — the
-     composition root (sanctioned): schema participation and runtime factories.
-  2. `Sources/AnyDoor/Views/ClipboardWallWindowController.swift` — the
-     **registered debt** (PRD Out of Scope): the clipboard-history
-     "Convert Image Format" context menu is hardwired to
-     `ImageConversionNativePlugin` / `ImageConversionBasketItem`, guarded by
-     `PluginRegistry.shared.isAvailable(.imageConversion)` and resolved from
-     the registry as the installed plugin instance.
-     Revisit when that surface is next touched; do not add a third import.
+  compile-time catalog. Exactly one Core file imports a plugin module:
+  `Sources/AnyDoor/Services/Plugins/NativePluginCatalog.swift` — the
+  composition root (sanctioned): schema participation and runtime factories.
+  Do not add a second import; the former clipboard-history registered debt
+  was paid down into the generic `PluginClipboardAction` surface (section 5).
 
 ## 3. The `NativePlugin` protocol, member by member
 
@@ -112,6 +109,8 @@ marked **required** have no default.
 | `performPaletteOption(parent:id:) async` | default no-op | Runs a committed second-level option, routed back by descriptor id — Core never sees the action. |
 | `paletteRowSources: [any PluginRowSource]` | default `[]` | Root-level palette row sources (section 5). |
 | `panelPopover(for:) -> PluginPanelPopover?` | default `nil` | Menu-panel hover popover for a claimed submenu command. Resolved per-mount through `PluginRegistry.panelPopover(for:)`. |
+| `clipboardActions(for:) -> [PluginClipboardAction]` | default `[]` | Context-menu actions for a clipboard-history entry, decided from the neutral `PluginClipboardPayload` alone. Runs at menu-build time — cheap, synchronous, disk-free. |
+| `performClipboardAction(id:payload:context:) async` | default no-op | Runs a committed clipboard action, routed back by descriptor id. Payload loading and failure feedback live here; dismiss the history window through the context before presenting a window. |
 | `nonisolated static modelSchemaTypes: [any PersistentModel.Type]` | default `[]` | SwiftData types the plugin owns. `nonisolated static` because `AppDelegate.init()` composes the schema **before any MainActor plugin instance exists**, and unconditionally — install state never changes the schema. This is the data-retention mechanism. |
 | `hasUsageTrace(in: ModelContext) throws -> Bool` | **yes** | Evaluated once by `PluginUsageMigration` to auto-install for upgrading users. Hosts: `HostProfile` rows exist **or** `privilegedHelper.readiness() != .unavailable` (a registered daemon needs its managing UI). Image Conversion: `ImageConversionRecord` rows exist. A throw aborts the whole migration and it retries next launch. |
 | `activate()` | default no-op | On `install(_:)` and on every launch while installed (from `bootstrap`), **before** surfaces register. Start install-scoped work here; install-time permission acts live here too (Hosts calls `privilegedHelper.ensureRegistered()` — an uninstalled plugin requests no permissions, PRD US14). Mutable stores should already belong to the plugin instance, not be configured through a module singleton. |
@@ -297,9 +296,18 @@ claims.
   carry an activation generation across each await and drain before uninstall
   completes, because upstream gating cannot revoke an action that already
   started.
-- **Registered debt.** The clipboard-history convert action gates on
-  `PluginRegistry.shared.isAvailable(.imageConversion)` at the menu **and**
-  again in `convertImage(_:)` (menu built just before an uninstall landed).
+- **Clipboard-history context menu.** `ClipboardCardView` builds a neutral
+  `PluginClipboardPayload` via `ClipboardPluginPayloadMapper` (Core describes
+  the entry; it never encodes a plugin's policy) and lists
+  `PluginRegistry.clipboardActions(for:)` — installed plugins only. Commit
+  routes through `PluginRegistry.performClipboardAction(pluginID:actionID:
+  payload:context:)`, which re-checks install state so a menu built just
+  before an uninstall landed never reaches the plugin. The
+  `PluginClipboardActionContext` hands the plugin a dismiss-then-run closure
+  for the history window; an action that only reports a failure (e.g. via a
+  toast) skips it and leaves the window open. Image Conversion's
+  "Convert Image Format" is the first contribution
+  (`ClipboardConversionPolicy` + `performClipboardAction` in the plugin).
 
 ## 6. Lifecycle flows
 
@@ -458,11 +466,11 @@ named test, which is the point of them.
 
 ## 9. Known debts / gotchas
 
-- **Two plugin imports in Core** (section 2): `NativePluginCatalog` (permanent,
-  sanctioned composition root) and the clipboard-history convert context menu
-  (`ClipboardWallWindowController`) — the latter is the PRD's single carved-out
-  concrete-module debt; it is lifecycle-safe through the registry but should
-  become a generic plugin action when that surface is redesigned.
+- **One plugin import in Core** (section 2): `NativePluginCatalog`, the
+  permanent, sanctioned composition root. The clipboard-history convert
+  context menu — formerly the PRD's single carved-out concrete-module debt —
+  now flows through the generic `PluginClipboardAction` surface; keep it that
+  way.
 - **`PluginRegistry.bootstrap` intersects the stored set with the known
   plugin list**, so an id from the future (or a typo) is silently dropped —
   another reason `pluginID` raw values are frozen forever.

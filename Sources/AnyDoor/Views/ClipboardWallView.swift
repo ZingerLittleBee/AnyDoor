@@ -20,7 +20,7 @@ struct ClipboardWallView: View {
     /// Context-menu actions, injected by the window controller.
     let onEdit: (ClipboardHistoryItem) -> Void
     let onCopy: (ClipboardHistoryItem) -> Void
-    let onConvertImage: (ClipboardHistoryItem) -> Void
+    let onPluginAction: (ClipboardHistoryItem, NativePluginID, PluginClipboardAction) -> Void
     let onRevealInFinder: (ClipboardHistoryItem) -> Void
     let onDelete: (ClipboardHistoryItem) -> Void
     let onToggleTag: (ClipboardHistoryItem, String) -> Void
@@ -656,7 +656,7 @@ struct ClipboardWallView: View {
                             // action visibly applies to it.
                             onEdit: { state.select(index); onEdit(item) },
                             onCopy: { state.select(index); onCopy(item) },
-                            onConvertImage: { state.select(index); onConvertImage(item) },
+                            onPluginAction: { state.select(index); onPluginAction(item, $0, $1) },
                             onRevealInFinder: { state.select(index); onRevealInFinder(item) },
                             onToggleTag: { state.select(index); onToggleTag(item, $0) },
                             onNewTag: { state.select(index); onNewTag(item) },

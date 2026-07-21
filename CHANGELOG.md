@@ -33,6 +33,11 @@ versioning.
   already handed to the system is drained before the helper is released.
   If a retained plugin shortcut was rebound while the plugin was absent, the
   newer binding wins and the old plugin shortcut is cleared on reinstall.
+- Plugins: the clipboard-history context menu is now a generic plugin
+  surface — installed plugins contribute actions through descriptors, and
+  the Image Conversion entry (「图片格式转换」) is its first contribution.
+  Behavior is unchanged; internally the Core no longer hardwires the Image
+  Conversion module, closing the plugin architecture's registered debt.
 - Plugins: upgrading users keep the features they were using — on the first
   launch after the update, Hosts is installed automatically when host profiles
   exist or the privileged helper is registered, and Image Conversion when

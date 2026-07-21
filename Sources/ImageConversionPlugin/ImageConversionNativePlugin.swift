@@ -5,9 +5,9 @@ import SwiftUI
 /// The Image Conversion feature as a Native Plugin (ADR-0005 pilot: own
 /// window, own SwiftData model, no system side effects). The module touches
 /// the host only through `PluginHostServices`; the host reaches the feature
-/// only through this type. The clipboard-history context menu remains the one
-/// registered concrete-module import, but it resolves this installed plugin
-/// instance through PluginRegistry instead of reaching into its window.
+/// only through this type. The clipboard-history "Convert Image Format"
+/// entry is a generic `PluginClipboardAction` contribution — the host
+/// surfaces and routes it without naming this plugin.
 @MainActor
 public final class ImageConversionNativePlugin: NativePlugin {
 
@@ -94,7 +94,41 @@ public final class ImageConversionNativePlugin: NativePlugin {
         windowControllerStorage?.reconcilePreferencesAfterImport()
     }
 
-    public func present(items: [ImageConversionBasketItem]) {
+    // MARK: Clipboard-history contribution
+
+    /// Stable id of the "Convert Image Format" clipboard action; commit
+    /// routes back through `performClipboardAction` with this value.
+    nonisolated static let convertClipboardActionID = "convertImageFormat"
+
+    public func clipboardActions(for payload: PluginClipboardPayload) -> [PluginClipboardAction] {
+        guard ClipboardConversionPolicy.isConvertible(payload) else { return [] }
+        return [PluginClipboardAction(
+            id: Self.convertClipboardActionID,
+            titleKey: L10n.Key.clipboardActionConvertImage.rawValue,
+            symbol: "arrow.left.arrow.right.square"
+        )]
+    }
+
+    /// Preload the entry into the conversion basket and open the workspace
+    /// window. A missing payload surfaces a failure toast and leaves the
+    /// history window open; otherwise the window dismisses first so its
+    /// slide-out doesn't fight the conversion panel's activation.
+    public func performClipboardAction(
+        id: String,
+        payload: PluginClipboardPayload,
+        context: PluginClipboardActionContext
+    ) async {
+        guard id == Self.convertClipboardActionID, isActive else { return }
+        guard let items = ClipboardConversionPolicy.basketItems(for: payload) else {
+            hostContext.showToast(.failure(L(hostContext, .imageConversionSourceMissing)))
+            return
+        }
+        context.dismissHistoryWindow { [weak self] in
+            self?.present(items: items)
+        }
+    }
+
+    private func present(items: [ImageConversionBasketItem]) {
         guard isActive else { return }
         windowController.present(items: items)
     }
