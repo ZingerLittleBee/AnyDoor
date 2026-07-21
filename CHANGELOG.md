@@ -62,6 +62,15 @@ versioning.
   the plugin's private data is kept — reinstalling the same plugin finds it
   again. Script Plugin install state and data stay on this machine and never
   travel in a config backup.
+- Plugins: Script Plugin rows are now interactive in the command palette.
+  Selecting a row can open a markdown Detail in place (Esc or Backspace walk
+  back), open a URL, copy text, or run a plugin function; a row that needs
+  input drops into the palette's argument field and hands the text to the
+  plugin. While a plugin builds its rows or a Detail the palette shows a
+  loading state, a build failure shows an inline error row, and a failed
+  action shows a failure toast — none of which hang or close the palette.
+  Uninstalling a plugin while its Detail is open discards the drill-in and
+  removes its rows immediately.
 
 ### Changed
 
