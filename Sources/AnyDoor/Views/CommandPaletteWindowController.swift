@@ -610,22 +610,23 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// re-check that the same Detail is still visible after the await, so a
     /// dismissed palette or a mid-flight uninstall can neither hang nor resurface.
     private func pushPluginDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
-        state?.enterDetail(title: title)
+        guard let generation = state?.enterDetail(title: title) else { return }
         guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
-            state?.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)))
+            state?.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
             return
         }
         Task { @MainActor [weak self] in
             let result = await source.loadDetail(id: rowID)
-            guard let self, let state = self.state, self.window?.isVisible == true,
-                  state.isInDetail else { return }
+            // The generation token ensures a slow result only lands on the exact
+            // drill-in that requested it — never on a later Detail (A→back→B).
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
             switch result {
             case .markdown(let markdown):
-                state.updateDetail(.loaded(title: title, markdown: markdown))
+                state.updateDetail(.loaded(title: title, markdown: markdown), generation: generation)
             case .failure(let message):
-                state.updateDetail(.failed(title: title, message: message))
+                state.updateDetail(.failed(title: title, message: message), generation: generation)
             case nil:
-                state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)))
+                state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
             }
         }
     }

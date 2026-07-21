@@ -64,7 +64,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         state.query = "stale"
         state.selectedIndex = 3
 
-        state.enterDetail(title: "Latest Post")
+        let generation = state.enterDetail(title: "Latest Post")
 
         XCTAssertTrue(state.isInDetail)
         XCTAssertFalse(state.isAtRoot)
@@ -73,15 +73,15 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertEqual(state.selectedIndex, 0)
         XCTAssertTrue(state.flatEntries.isEmpty)
 
-        state.updateDetail(.loaded(title: "Latest Post", markdown: "# Hello"))
+        state.updateDetail(.loaded(title: "Latest Post", markdown: "# Hello"), generation: generation)
         XCTAssertEqual(state.detailState, .loaded(title: "Latest Post", markdown: "# Hello"))
     }
 
     @MainActor
     func testDetailEscapeClearsQueryThenPopsToRoot() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        state.enterDetail(title: "Post")
-        state.updateDetail(.loaded(title: "Post", markdown: "body"))
+        let generation = state.enterDetail(title: "Post")
+        state.updateDetail(.loaded(title: "Post", markdown: "body"), generation: generation)
 
         // A non-empty query clears first (even in Detail), then an empty query
         // pops back to root — the extended escape policy.
@@ -96,20 +96,40 @@ final class CommandPalettePluginStateTests: XCTestCase {
     @MainActor
     func testUpdateDetailIgnoredAfterNavigatingAway() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        state.enterDetail(title: "Post")
+        let generation = state.enterDetail(title: "Post")
         state.popToRoot()
 
         // A late async markdown result must not resurrect a dismissed Detail.
-        state.updateDetail(.loaded(title: "Post", markdown: "body"))
+        state.updateDetail(.loaded(title: "Post", markdown: "body"), generation: generation)
         XCTAssertTrue(state.isAtRoot)
         XCTAssertNil(state.detailState)
     }
 
     @MainActor
+    func testLateDetailResultDoesNotRepopulateALaterDrillIn() {
+        // A→back→B: a slow Detail A result must not land on Detail B (their
+        // plugin queues are independent, so A can resolve after B). The
+        // generation token keys each result to the exact drill-in that asked.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let genA = state.enterDetail(title: "Post A")
+        state.popToRoot()
+        let genB = state.enterDetail(title: "Post B")
+
+        // A's slow result arrives now — ignored, B stays loading.
+        state.updateDetail(.loaded(title: "Post A", markdown: "A body"), generation: genA)
+        XCTAssertEqual(state.detailState, .loading(title: "Post B"))
+
+        // B's own result applies.
+        state.updateDetail(.loaded(title: "Post B", markdown: "B body"), generation: genB)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post B", markdown: "B body"))
+        XCTAssertNotEqual(genA, genB)
+    }
+
+    @MainActor
     func testDetailPopClearsMarkdownFailureState() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        state.enterDetail(title: "Post")
-        state.updateDetail(.failed(title: "Post", message: "boom"))
+        let generation = state.enterDetail(title: "Post")
+        state.updateDetail(.failed(title: "Post", message: "boom"), generation: generation)
         XCTAssertEqual(state.detailState, .failed(title: "Post", message: "boom"))
         state.popToRoot()
         XCTAssertNil(state.detailState)

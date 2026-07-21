@@ -157,22 +157,33 @@ final class CommandPaletteState {
         selectedIndex = 0
     }
 
-    /// Push a markdown Detail level in its loading state. The window controller
-    /// then builds the markdown and calls `updateDetail`.
-    func enterDetail(title: String) {
+    /// Monotonic id for the current Detail drill-in. Bumped on every push (and
+    /// on leaving Detail), so a late `updateDetail` can tell whether it belongs
+    /// to the Detail that is still open — drilling A→back→B must not let A's slow
+    /// result repopulate B (their plugin queues are independent).
+    private(set) var detailGeneration = 0
+
+    /// Push a markdown Detail level in its loading state and return the
+    /// generation token identifying this drill-in. The window controller passes
+    /// that token back to `updateDetail` when the markdown resolves.
+    @discardableResult
+    func enterDetail(title: String) -> Int {
         optionsByID = [:]
         optionEntries = []
+        detailGeneration += 1
         level = .detail(.loading(title: title))
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
+        return detailGeneration
     }
 
     /// Replace the Detail presentation state once its markdown resolves (or
-    /// fails). A no-op if the user has already navigated away from the Detail,
-    /// so a late async result can never resurrect a dismissed level.
-    func updateDetail(_ state: DetailState) {
-        guard case .detail = level else { return }
+    /// fails). A no-op unless the same drill-in is still open: a Detail that was
+    /// dismissed, or superseded by a later drill-in, discards the stale result
+    /// via the generation token.
+    func updateDetail(_ state: DetailState, generation: Int) {
+        guard case .detail = level, generation == detailGeneration else { return }
         level = .detail(state)
     }
 
