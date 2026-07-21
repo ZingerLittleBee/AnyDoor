@@ -1,10 +1,7 @@
 import Foundation
 import Observation
-import OSLog
 import PluginInterface
 import SwiftData
-
-private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "plugins")
 
 struct PluginImportFailure: Equatable, Sendable {
     let pluginID: NativePluginID
@@ -52,17 +49,22 @@ final class PluginRegistry {
     nonisolated static let installStateKey = "plugins.installed"
 
     private(set) var plugins: [any NativePlugin] = []
-    private(set) var installedIDs: Set<NativePluginID> = []
+
+    /// The installed Native Plugin ids. Backed by the kind-agnostic
+    /// `PluginLifecycleCore` install-state set, mapped into the typed identity.
+    var installedIDs: Set<NativePluginID> {
+        Set(core.installedIDStrings.map(NativePluginID.init(rawValue:)))
+    }
 
     @ObservationIgnored private let panelStore: PanelStore
     @ObservationIgnored private let paletteExtensions: CommandPaletteExtensions
     @ObservationIgnored private let hotkeyCoordinator: HotkeyCoordinator
-    @ObservationIgnored private let refreshCommandPalette: @MainActor () -> Void
-    @ObservationIgnored private var defaults: UserDefaults = .standard
     @ObservationIgnored private var claims: [BuiltinItem: NativePluginID] = [:]
     @ObservationIgnored private var isBootstrapped = false
-    /// Re-entrancy guard: ids with an uninstall's async deactivate in flight.
-    @ObservationIgnored private var transitioningIDs: Set<NativePluginID> = []
+    /// The shared, kind-agnostic lifecycle engine. This registry is its
+    /// Native-kind host: it owns claims, providers, and hotkey conflicts, and
+    /// feeds the core opaque id strings through `AnyPluginLifecycleHost`.
+    @ObservationIgnored private var core: PluginLifecycleCore!
 
     init(
         panelStore: PanelStore = .shared,
@@ -75,7 +77,11 @@ final class PluginRegistry {
         self.panelStore = panelStore
         self.paletteExtensions = paletteExtensions
         self.hotkeyCoordinator = hotkeyCoordinator
-        self.refreshCommandPalette = refreshCommandPalette
+        self.core = PluginLifecycleCore(
+            host: self,
+            installStateKey: Self.installStateKey,
+            refreshCommandPalette: refreshCommandPalette
+        )
     }
 
     /// Load the install state, activate every installed plugin, and compose
@@ -92,7 +98,7 @@ final class PluginRegistry {
         precondition(!isBootstrapped, "PluginRegistry.bootstrap may only run once")
         isBootstrapped = true
         self.plugins = plugins
-        self.defaults = defaults
+        core.defaults = defaults
 
         claims = [:]
         var pluginIDs: Set<NativePluginID> = []
@@ -114,16 +120,13 @@ final class PluginRegistry {
             }
         }
 
-        let storedIDs = (defaults.stringArray(forKey: Self.installStateKey) ?? [])
-            .map(NativePluginID.init(rawValue:))
-        let targetInstalledIDs = Set(storedIDs).intersection(pluginIDs)
-        installedIDs = []
+        // The core reads the persisted set, activates each installed plugin
+        // before marking it installed, and marks it — surface composition below
+        // is batched because launch has no suspension point and no plugin
+        // surface is visible yet.
+        core.loadAndActivateInstalled()
 
-        for plugin in plugins where targetInstalledIDs.contains(plugin.id) {
-            activateAndEnterInstalled(plugin)
-        }
-
-        let installedPlugins = plugins.filter { installedIDs.contains($0.id) }
+        let installedPlugins = plugins.filter { core.contains($0.id.rawValue) }
         let providers = coreProviders + installedPlugins.flatMap(\.providers)
         panelStore.bootstrap(
             modelContainer: modelContainer,
@@ -157,7 +160,7 @@ final class PluginRegistry {
     }
 
     func isInstalled(_ id: NativePluginID) -> Bool {
-        installedIDs.contains(id)
+        core.contains(id.rawValue)
     }
 
     /// The plugin owning a command's Claim, or nil when the Core owns it.
@@ -171,14 +174,14 @@ final class PluginRegistry {
     /// the clipboard context menu) gate on this.
     func isAvailable(_ command: BuiltinItem) -> Bool {
         guard let owner = claims[command] else { return true }
-        return installedIDs.contains(owner)
+        return core.contains(owner.rawValue)
     }
 
     /// The full catalog minus uninstalled plugins' claims — the installed-set
     /// input to hotkey snapshot compilation.
     var availableCommands: Set<BuiltinItem> {
         var commands = Set(BuiltinItem.allCases)
-        for plugin in plugins where !installedIDs.contains(plugin.id) {
+        for plugin in plugins where !core.contains(plugin.id.rawValue) {
             commands.subtract(plugin.claimedCommands)
         }
         return commands
@@ -189,7 +192,7 @@ final class PluginRegistry {
     /// plugin's popover must never mount.
     func panelPopover(for command: BuiltinItem) -> PluginPanelPopover? {
         guard let owner = claims[command],
-              installedIDs.contains(owner),
+              core.contains(owner.rawValue),
               let plugin = plugin(withID: owner) else { return nil }
         return plugin.panelPopover(for: command)
     }
@@ -201,7 +204,7 @@ final class PluginRegistry {
         for payload: PluginClipboardPayload
     ) -> [(owner: NativePluginID, action: PluginClipboardAction)] {
         plugins
-            .filter { installedIDs.contains($0.id) }
+            .filter { core.contains($0.id.rawValue) }
             .flatMap { plugin in
                 plugin.clipboardActions(for: payload).map { (plugin.id, $0) }
             }
@@ -215,7 +218,7 @@ final class PluginRegistry {
         payload: PluginClipboardPayload,
         context: PluginClipboardActionContext
     ) async {
-        guard installedIDs.contains(pluginID),
+        guard core.contains(pluginID.rawValue),
               let plugin = plugin(withID: pluginID) else { return }
         await plugin.performClipboardAction(id: actionID, payload: payload, context: context)
     }
@@ -223,21 +226,11 @@ final class PluginRegistry {
     // MARK: - Lifecycle
 
     /// Install a plugin: activate it, persist the state, and register its
-    /// surfaces. Takes effect immediately — no relaunch. Idempotent.
+    /// surfaces. Takes effect immediately — no relaunch. Idempotent. The
+    /// transactional machinery lives in `PluginLifecycleCore`; the Native-kind
+    /// hooks below supply the claims, providers, and hotkey conflicts.
     func install(_ id: NativePluginID) {
-        guard let plugin = plugin(withID: id),
-              !installedIDs.contains(id),
-              !transitioningIDs.contains(id) else { return }
-        hotkeyCoordinator.resolveRetainedPluginHotkeyConflicts(
-            for: plugin.claimedCommands,
-            activeCommands: availableCommands
-        )
-        activateAndEnterInstalled(plugin)
-        persistInstalledIDs()
-        panelStore.registerProviders(plugin.providers)
-        paletteExtensions.registerContributions(of: plugin)
-        refreshSurfaces()
-        logger.info("Installed plugin \(id.rawValue)")
+        core.install(id.rawValue)
     }
 
     /// Uninstall a plugin, transactionally: `deactivate()` (release shared
@@ -246,22 +239,7 @@ final class PluginRegistry {
     /// and the error is rethrown for the UI to surface. User data is
     /// retained by design. Idempotent; a concurrent transition is reported.
     func uninstall(_ id: NativePluginID) async throws {
-        guard let plugin = plugin(withID: id),
-              installedIDs.contains(id) else { return }
-        guard !transitioningIDs.contains(id) else {
-            throw transitionInProgressError(for: plugin)
-        }
-        transitioningIDs.insert(id)
-        defer { transitioningIDs.remove(id) }
-
-        try await plugin.deactivate()
-
-        installedIDs.remove(id)
-        persistInstalledIDs()
-        panelStore.unregisterProviders(for: plugin.claimedCommands)
-        paletteExtensions.unregisterContributions(of: plugin)
-        refreshSurfaces()
-        logger.info("Uninstalled plugin \(id.rawValue)")
+        try await core.uninstall(id.rawValue)
     }
 
     /// Adopt an imported install state, then forward the import to the
@@ -273,99 +251,88 @@ final class PluginRegistry {
     /// like hands-on installs — surfaces appear or disappear without a
     /// relaunch. A failed deactivate keeps its plugin installed (the usual
     /// transactional rule) and the stored state is re-persisted to match
-    /// reality.
+    /// reality. The core returns every failed transition; this layer maps them
+    /// into the Native-kind error and throws.
     func reconcileAfterImport() async throws {
-        let importedIDs = Set(
-            (defaults.stringArray(forKey: Self.installStateKey) ?? [])
-                .map(NativePluginID.init(rawValue:))
-        ).intersection(Set(plugins.map(\.id)))
-
-        var failures: [PluginImportFailure] = []
-
-        // MainActor methods are re-entrant across `await`. An uninstall that
-        // started before the import may still reverse the imported target after
-        // this method returns, so the import cannot claim convergence for that
-        // plugin. Report it and persist the current truth; the caller can retry
-        // once the existing transition completes.
-        let blockedIDs = transitioningIDs
-        for plugin in plugins where blockedIDs.contains(plugin.id) {
-            failures.append(importFailure(
-                for: plugin,
-                error: transitionInProgressError(for: plugin)
-            ))
-        }
-
-        // Remove first so returning plugins resolve retained hotkeys against
-        // the actual survivors, including any plugin whose deactivate failed.
-        let idsToRemove = installedIDs.subtracting(importedIDs).subtracting(blockedIDs)
-        for plugin in plugins where idsToRemove.contains(plugin.id) {
-            do {
-                try await uninstall(plugin.id)
-            } catch {
-                logger.error("Import-driven uninstall of \(plugin.id.rawValue) failed: \(error)")
-                failures.append(importFailure(for: plugin, error: error))
+        let failures = await core.reconcileAfterImport()
+        guard !failures.isEmpty else { return }
+        throw PluginImportReconciliationError(
+            failures: failures.map { failure in
+                importFailure(forID: failure.idString, error: failure.error)
             }
-        }
-        let idsToInstall = importedIDs.subtracting(installedIDs).subtracting(blockedIDs)
-        for plugin in plugins where idsToInstall.contains(plugin.id) {
-            install(plugin.id)
-        }
-
-        // Another caller may have entered during one of the awaited removals.
-        // Re-check before the final synchronous segment so no transition can
-        // outlive a successful reconciliation unnoticed.
-        let reportedFailureIDs = Set(failures.map(\.pluginID))
-        for plugin in plugins
-        where transitioningIDs.contains(plugin.id)
-            && !reportedFailureIDs.contains(plugin.id) {
-            failures.append(importFailure(
-                for: plugin,
-                error: transitionInProgressError(for: plugin)
-            ))
-        }
-        persistInstalledIDs()
-
-        for plugin in plugins where installedIDs.contains(plugin.id) {
-            plugin.reconcileAfterImport()
-        }
-
-        if !failures.isEmpty {
-            throw PluginImportReconciliationError(failures: failures)
-        }
-    }
-
-    private func persistInstalledIDs() {
-        defaults.set(installedIDs.map(\.rawValue).sorted(), forKey: Self.installStateKey)
-    }
-
-    private func activateAndEnterInstalled(_ plugin: any NativePlugin) {
-        plugin.activate()
-        installedIDs.insert(plugin.id)
-    }
-
-    private func refreshSurfaces() {
-        panelStore.rebuild()
-        hotkeyCoordinator.refresh()
-        refreshCommandPalette()
-    }
-
-    private func transitionInProgressError(
-        for plugin: any NativePlugin
-    ) -> PluginTransitionInProgressError {
-        PluginTransitionInProgressError(
-            pluginID: plugin.id,
-            message: L(.pluginsTransitionInProgress)
         )
     }
 
     private func importFailure(
-        for plugin: any NativePlugin,
+        forID idString: String,
         error: any Error
     ) -> PluginImportFailure {
         PluginImportFailure(
-            pluginID: plugin.id,
-            pluginName: plugin.localizedName,
+            pluginID: NativePluginID(rawValue: idString),
+            pluginName: plugin(withRawID: idString)?.localizedName ?? idString,
             errorDescription: error.localizedDescription
+        )
+    }
+
+    private func plugin(withRawID idString: String) -> (any NativePlugin)? {
+        plugins.first { $0.id.rawValue == idString }
+    }
+}
+
+// MARK: - AnyPluginLifecycleHost (the Native-kind driver of the shared core)
+
+/// The Native-Plugin implementation of the kind-agnostic lifecycle hooks. Every
+/// method resolves the opaque id string back to the typed plugin and applies
+/// the Native-specific behavior — claim-derived providers, palette
+/// contributions, retained-hotkey conflict resolution — that the core must not
+/// know about.
+extension PluginRegistry: AnyPluginLifecycleHost {
+    func lifecyclePluginIDs() -> [String] {
+        plugins.map(\.id.rawValue)
+    }
+
+    func activateLifecyclePlugin(idString: String) {
+        plugin(withRawID: idString)?.activate()
+    }
+
+    func deactivateLifecyclePlugin(idString: String) async throws {
+        guard let plugin = plugin(withRawID: idString) else { return }
+        try await plugin.deactivate()
+    }
+
+    func prepareLifecycleInstall(idString: String) {
+        guard let plugin = plugin(withRawID: idString) else { return }
+        hotkeyCoordinator.resolveRetainedPluginHotkeyConflicts(
+            for: plugin.claimedCommands,
+            activeCommands: availableCommands
+        )
+    }
+
+    func registerLifecycleSurfaces(idString: String) {
+        guard let plugin = plugin(withRawID: idString) else { return }
+        panelStore.registerProviders(plugin.providers)
+        paletteExtensions.registerContributions(of: plugin)
+    }
+
+    func unregisterLifecycleSurfaces(idString: String) {
+        guard let plugin = plugin(withRawID: idString) else { return }
+        panelStore.unregisterProviders(for: plugin.claimedCommands)
+        paletteExtensions.unregisterContributions(of: plugin)
+    }
+
+    func publishLifecycleSurfaces() {
+        panelStore.rebuild()
+        hotkeyCoordinator.refresh()
+    }
+
+    func reconcileLifecycleImport(idString: String) {
+        plugin(withRawID: idString)?.reconcileAfterImport()
+    }
+
+    func lifecycleTransitionInProgressError(idString: String) -> any Error {
+        PluginTransitionInProgressError(
+            pluginID: NativePluginID(rawValue: idString),
+            message: L(.pluginsTransitionInProgress)
         )
     }
 }
