@@ -556,15 +556,13 @@ final class ImageConversionViewModel {
     }
 
     private func copyOutputsToPasteboard(_ outputURLs: [URL]) {
-        guard !outputURLs.isEmpty else { return }
-        if let host {
-            host.pasteboardSelfWrite { pb in
-                pb.clearContents()
-                pb.writeObjects(outputURLs as [NSURL])
-            }
-        } else {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.writeObjects(outputURLs as [NSURL])
+        // Without a host (tests/previews) skip the copy entirely: a raw
+        // NSPasteboard write would bypass the self-write funnel and could be
+        // captured as a bogus clipboard-history entry.
+        guard !outputURLs.isEmpty, let host else { return }
+        host.pasteboardSelfWrite { pb in
+            pb.clearContents()
+            pb.writeObjects(outputURLs as [NSURL])
         }
     }
 
