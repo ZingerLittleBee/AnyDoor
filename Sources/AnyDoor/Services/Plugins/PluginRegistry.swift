@@ -120,10 +120,6 @@ final class PluginRegistry {
             }
         }
 
-        // The core reads the persisted set, activates each installed plugin
-        // before marking it installed, and marks it — surface composition below
-        // is batched because launch has no suspension point and no plugin
-        // surface is visible yet.
         core.loadAndActivateInstalled()
 
         let installedPlugins = plugins.filter { core.contains($0.id.rawValue) }

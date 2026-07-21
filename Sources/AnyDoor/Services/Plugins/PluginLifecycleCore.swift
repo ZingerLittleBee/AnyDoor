@@ -111,10 +111,6 @@ final class PluginLifecycleCore {
         installedIDStrings.contains(idString)
     }
 
-    var transitioning: Set<String> {
-        transitioningIDs
-    }
-
     // MARK: - Bootstrap
 
     /// Read the persisted install set (keeping only ids the kind still knows),
