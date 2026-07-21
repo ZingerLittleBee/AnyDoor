@@ -1,7 +1,7 @@
 ---
 id: 023
 title: "Script Plugins: Dev Plugin mode and diagnostics"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-21-script-plugin-runtime.md
 ---
 
