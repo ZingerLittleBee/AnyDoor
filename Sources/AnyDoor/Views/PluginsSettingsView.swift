@@ -47,6 +47,40 @@ struct PluginsSettingsView: View {
             } header: {
                 LocalizedText(.pluginsSectionScript)
             }
+
+            Section {
+                Toggle(isOn: Binding(
+                    get: { scriptRegistry.isDeveloperModeEnabled },
+                    set: { scriptRegistry.setDeveloperMode($0) }
+                )) {
+                    LocalizedText(.pluginsDeveloperMode)
+                }
+            } footer: {
+                LocalizedText(.pluginsDeveloperModeHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // The entire Dev Plugin affordance only exists behind the switch.
+            if scriptRegistry.isDeveloperModeEnabled {
+                Section {
+                    if scriptRegistry.devPluginManifests.isEmpty {
+                        LocalizedText(.pluginsDevEmpty)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(scriptRegistry.devPluginManifests, id: \.id) { manifest in
+                        devRow(for: manifest)
+                    }
+                    Button {
+                        registerDevPlugin()
+                    } label: {
+                        LocalizedText(.pluginsRegisterDev)
+                    }
+                } header: {
+                    LocalizedText(.pluginsSectionDev)
+                }
+            }
         }
         .formStyle(.grouped)
         .confirmationDialog(
@@ -145,6 +179,66 @@ struct PluginsSettingsView: View {
             .disabled(uninstallingScriptIDs.contains(manifest.id))
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Dev plugin rows
+
+    private func devRow(for manifest: ScriptPluginManifest) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "hammer")
+                .font(.system(size: 18))
+                .frame(width: 28, height: 28)
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(manifest.displayName(forLanguageCode: languageCode))
+                    devBadge
+                    Text(L(.pluginsVersion, manifest.version))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if let path = scriptRegistry.devPluginDirectory(for: manifest.id)?.path {
+                    Text(path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+            Spacer()
+            Button {
+                scriptRegistry.unregisterDevPlugin(manifest.id)
+            } label: {
+                LocalizedText(.pluginsRemoveDev)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var devBadge: some View {
+        LocalizedText(.pluginsStateDev)
+            .font(.caption)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(.quaternary, in: Capsule())
+            .foregroundStyle(.secondary)
+    }
+
+    /// Present a folder picker, then register the chosen directory as a Dev
+    /// Plugin loaded in place. A refusal surfaces a localized message.
+    private func registerDevPlugin() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        do {
+            try scriptRegistry.registerDevPlugin(fromDirectory: folder)
+        } catch {
+            ToastPresenter.shared.show(
+                .failure(L(.pluginsRegisterDevFailed, scriptSideloadFailureMessage(error)))
+            )
+        }
     }
 
     private var languageCode: String? {
