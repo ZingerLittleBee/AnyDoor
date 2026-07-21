@@ -1,7 +1,7 @@
 ---
 id: 021
 title: "Script Plugins: Sideload install/uninstall and searchable palette rows"
-status: ready-for-agent
+status: done
 prd: docs/prds/2026-07-21-script-plugin-runtime.md
 ---
 
