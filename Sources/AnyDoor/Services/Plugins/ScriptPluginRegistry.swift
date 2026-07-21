@@ -38,6 +38,17 @@ final class ScriptPluginRegistry {
     /// in a config backup (user story 17).
     nonisolated static let installStateKey = "plugins.script.installed"
 
+    /// UserDefaults key for the machine-local developer-mode switch. With it off
+    /// no Dev Plugin affordance exists anywhere in Settings (ticket 023).
+    /// Deliberately **not** in `SyncSettingsRegistry`: developer mode is a
+    /// per-machine authoring convenience, never carried in a config backup.
+    nonisolated static let developerModeKey = "plugins.script.developerMode"
+
+    /// UserDefaults key holding the registered Dev Plugin directory paths. Also
+    /// machine-local and out of the sync whitelist — a dev directory only exists
+    /// on the author's machine.
+    nonisolated static let devDirectoriesKey = "plugins.script.devDirectories"
+
     /// The production registry, wired to Core services. Its runtime, capability
     /// host, and storage directories are built lazily on first access, on the
     /// main actor. `AppDelegate` bootstraps it at launch.
@@ -58,9 +69,16 @@ final class ScriptPluginRegistry {
             writePasteboard: { text in ClipboardWatcher.selfWrite(string: text) },
             openURL: { url in NSWorkspace.shared.open(url) }
         )
+        // One diagnostics log shared by the runtime (context-level refusals,
+        // watchdog kills, capability errors) and the registry (dev-plugin reload
+        // refusals), so every Script Plugin's failures land in its own log file.
+        let diagnostics = FileScriptPluginLog(
+            directory: base.appendingPathComponent("logs", isDirectory: true)
+        )
         return ScriptPluginRegistry(
-            runtime: ScriptPluginRuntime(capabilityHost: host),
-            packagesDirectory: base.appendingPathComponent("packages", isDirectory: true)
+            runtime: ScriptPluginRuntime(capabilityHost: host, diagnostics: diagnostics),
+            packagesDirectory: base.appendingPathComponent("packages", isDirectory: true),
+            diagnostics: diagnostics
         )
     }
 
@@ -86,14 +104,38 @@ final class ScriptPluginRegistry {
     /// Packages known to this registry: discovered on disk at bootstrap and
     /// added on Sideload. Keyed by manifest id.
     @ObservationIgnored private var knownPackages: [ScriptPluginID: ScriptPluginPackage] = [:]
-    /// The live palette row source per installed plugin, kept so its
-    /// registration can be reverted on uninstall.
+    /// The live palette row source per active plugin (installed **or** dev),
+    /// kept so its registration can be reverted on uninstall or removal.
     @ObservationIgnored private var rowSources: [ScriptPluginID: ScriptPluginRowSource] = [:]
+
+    /// Registered Dev Plugin directories, keyed by manifest id. Durable across a
+    /// developer-mode toggle (persisted to `devDirectoriesKey`); the value is the
+    /// author's development directory, loaded **in place** and never copied.
+    @ObservationIgnored private var devDirectories: [ScriptPluginID: URL] = [:]
+    /// The active runtime state per Dev Plugin — present only while developer
+    /// mode is on. Disabling developer mode tears these down but keeps
+    /// `devDirectories`, so re-enabling restores them.
+    @ObservationIgnored private var activeDevPlugins: [ScriptPluginID: DevPluginState] = [:]
+    /// Developer-mode switch, seeded from defaults; observed so the Settings
+    /// toggle reflects it. Mutated only through `setDeveloperMode`.
+    private var developerModeEnabled: Bool
+    /// Bumped whenever `activeDevPlugins` changes so the observed
+    /// `devPluginManifests` list refreshes the Settings UI (the map itself is
+    /// `@ObservationIgnored` because it holds live objects).
+    private var activeDevPluginsObservationToken = 0
 
     @ObservationIgnored private let runtime: ScriptPluginRuntime
     @ObservationIgnored private let packagesDirectory: URL
+    @ObservationIgnored private let diagnostics: any ScriptPluginDiagnostics
     @ObservationIgnored private let paletteExtensions: CommandPaletteExtensions
     @ObservationIgnored private let languageCode: @MainActor () -> String?
+    /// Recomposes a visible palette from the live registrations (install/uninstall
+    /// and dev register/remove all use it). Held here as well as inside the core
+    /// so the dev-plugin paths can recompose without going through the core.
+    @ObservationIgnored private let refreshCommandPalette: @MainActor () -> Void
+    /// Presents a Dev Plugin's action failure with full detail (the author wants
+    /// the message and stack, not the generic toast a normal user sees).
+    @ObservationIgnored private let presentDevActionFailure: @MainActor (ScriptPluginID, ScriptPluginError) -> Void
     /// Nudges a visible palette to recompute its rows when an async row source
     /// finishes loading, without discarding a drilled-in Detail (unlike the full
     /// `refreshCommandPalette` recomposition used on install/uninstall).
@@ -109,6 +151,7 @@ final class ScriptPluginRegistry {
     init(
         runtime: ScriptPluginRuntime,
         packagesDirectory: URL,
+        diagnostics: any ScriptPluginDiagnostics = NullScriptPluginDiagnostics(),
         paletteExtensions: CommandPaletteExtensions = .shared,
         defaults: UserDefaults = .standard,
         languageCode: @escaping @MainActor () -> String? = {
@@ -122,14 +165,21 @@ final class ScriptPluginRegistry {
         },
         presentActionFailure: @escaping @MainActor (ScriptPluginID) -> Void = { _ in
             ToastPresenter.shared.show(.failure(L(.pluginsActionFailed)))
+        },
+        presentDevActionFailure: @escaping @MainActor (ScriptPluginID, ScriptPluginError) -> Void = { _, error in
+            ToastPresenter.shared.show(.failure(ScriptPluginErrorPresentation.detail(of: error)))
         }
     ) {
         self.runtime = runtime
         self.packagesDirectory = packagesDirectory
+        self.diagnostics = diagnostics
         self.paletteExtensions = paletteExtensions
         self.languageCode = languageCode
+        self.refreshCommandPalette = refreshCommandPalette
         self.notifyRowsChanged = notifyRowsChanged
         self.presentActionFailure = presentActionFailure
+        self.presentDevActionFailure = presentDevActionFailure
+        self.developerModeEnabled = defaults.bool(forKey: Self.developerModeKey)
         self.core = PluginLifecycleCore(
             host: self,
             installStateKey: Self.installStateKey,
@@ -150,6 +200,14 @@ final class ScriptPluginRegistry {
         core.loadAndActivateInstalled()
         for idString in core.installedIDStrings where knownPackages[ScriptPluginID(idString)] != nil {
             registerLifecycleSurfaces(idString: idString)
+        }
+        loadPersistedDevDirectories()
+        // Dev Plugins load in place only behind the developer-mode switch; with
+        // it off they stay dormant on disk and contribute nothing.
+        if developerModeEnabled {
+            for (_, directory) in devDirectories.sorted(by: { $0.key < $1.key }) {
+                activateDevPlugin(directory: directory)
+            }
         }
     }
 
@@ -203,7 +261,7 @@ final class ScriptPluginRegistry {
         let package = try ScriptPluginPackage.load(fromDirectory: source)
         let id = package.id
 
-        guard knownPackages[id] == nil, !core.contains(id.rawValue) else {
+        guard !isIDInUse(id) else {
             throw ScriptPluginError.duplicateID(id)
         }
 
@@ -237,6 +295,188 @@ final class ScriptPluginRegistry {
         try await core.uninstall(id.rawValue)
     }
 
+    // MARK: - Developer mode
+
+    /// The machine-local developer-mode switch. With it off the Settings UI hides
+    /// every Dev Plugin affordance; reading it here registers Observation so the
+    /// toggle stays in sync.
+    var isDeveloperModeEnabled: Bool {
+        developerModeEnabled
+    }
+
+    /// Flip developer mode. Turning it **on** activates every persisted Dev
+    /// Plugin (in place, with its watcher); turning it **off** tears their
+    /// surfaces and contexts down while keeping the persisted directory list, so
+    /// re-enabling restores them. The development directories are never touched.
+    func setDeveloperMode(_ enabled: Bool) {
+        guard enabled != developerModeEnabled else { return }
+        developerModeEnabled = enabled
+        core.defaults.set(enabled, forKey: Self.developerModeKey)
+        if enabled {
+            for (_, directory) in devDirectories.sorted(by: { $0.key < $1.key }) {
+                activateDevPlugin(directory: directory)
+            }
+        } else {
+            for id in Array(activeDevPlugins.keys) {
+                deactivateDevPlugin(id)
+            }
+        }
+        refreshCommandPalette()
+    }
+
+    // MARK: - Dev Plugin registration (in place, never copied)
+
+    /// The manifests of the currently active Dev Plugins, sorted by id, for the
+    /// Settings list. Empty when developer mode is off.
+    var devPluginManifests: [ScriptPluginManifest] {
+        _ = activeDevPluginsObservationToken
+        return activeDevPlugins.values
+            .compactMap { runtime.manifest(for: $0.id) }
+            .sorted { $0.id < $1.id }
+    }
+
+    /// The development directory a Dev Plugin is loaded from, for the Settings row.
+    func devPluginDirectory(for id: ScriptPluginID) -> URL? {
+        devDirectories[id]
+    }
+
+    /// Register an author's development directory as a Dev Plugin, loaded **in
+    /// place** — the package is validated and handed to the runtime straight from
+    /// the development directory, never copied into app storage (ticket 023). The
+    /// host never modifies that directory. Refuses a duplicate id (an installed or
+    /// already-registered plugin) so the shared runtime id space stays exclusive.
+    @discardableResult
+    func registerDevPlugin(fromDirectory directory: URL) throws -> ScriptPluginID {
+        guard developerModeEnabled else { throw ScriptDevPluginError.developerModeDisabled }
+        let standardized = directory.standardizedFileURL
+        // Validate the manifest in place; throws a typed error and reads no
+        // bundle, so a malformed dev package is refused without side effects.
+        let package = try ScriptPluginPackage.load(fromDirectory: standardized)
+        let id = package.id
+        guard !isIDInUse(id) else { throw ScriptPluginError.duplicateID(id) }
+
+        devDirectories[id] = standardized
+        persistDevDirectories()
+        activateDevPlugin(directory: standardized)
+        refreshCommandPalette()
+        return id
+    }
+
+    /// Remove a Dev Plugin registration: tear down its surfaces and context and
+    /// drop the persisted directory. The development directory itself is never
+    /// modified — only the host-side registration and the JS context are removed.
+    func unregisterDevPlugin(_ id: ScriptPluginID) {
+        guard devDirectories[id] != nil else { return }
+        deactivateDevPlugin(id)
+        devDirectories.removeValue(forKey: id)
+        persistDevDirectories()
+        refreshCommandPalette()
+    }
+
+    /// Whether a plugin id is a registered Dev Plugin (installed-in-place).
+    func isDevPlugin(_ id: ScriptPluginID) -> Bool {
+        devDirectories[id] != nil
+    }
+
+    /// Reload a Dev Plugin's context from its development directory. The runtime
+    /// re-reads the manifest and bundle, so an edit to the bundle takes effect at
+    /// the next invocation and already-visible palette rows refresh. A manifest
+    /// that no longer validates (or whose id changed) is a load refusal: it is
+    /// logged and surfaced to the author through the row source's failed state.
+    func reloadDevPlugin(_ id: ScriptPluginID) {
+        guard let directory = devDirectories[id], let state = activeDevPlugins[id] else { return }
+        do {
+            let reloaded = try ScriptPluginPackage.load(fromDirectory: directory)
+            guard reloaded.id == id else {
+                throw ScriptPluginError.bundleEvaluationFailed(
+                    "plugin id changed on reload: expected \(id.rawValue), got \(reloaded.id.rawValue)")
+            }
+            runtime.unload(id)
+            try runtime.load(reloaded)
+            state.source.reload()
+        } catch {
+            runtime.unload(id)
+            diagnostics.record(ScriptDiagnosticEvent(
+                pluginID: id, category: .loadRefused,
+                message: "dev reload refused: \(ScriptPluginErrorPresentation.detail(of: error))"))
+            state.source.reportLoadFailure(ScriptPluginErrorPresentation.detail(of: error))
+        }
+        notifyRowsChanged()
+    }
+
+    // MARK: - Dev Plugin internals
+
+    /// Activate a Dev Plugin from its development directory: load it into the
+    /// shared runtime in place and register its palette row source (which surfaces
+    /// error detail to the author). Idempotent for a directory whose id is already
+    /// active. Never copies and never writes to `directory`.
+    private func activateDevPlugin(directory: URL) {
+        guard let package = try? ScriptPluginPackage.load(fromDirectory: directory) else {
+            // A persisted directory whose manifest no longer validates: skip
+            // activation but keep the registration so the author can fix it.
+            return
+        }
+        let id = package.id
+        guard activeDevPlugins[id] == nil, !runtime.isLoaded(id) else { return }
+        do {
+            try runtime.load(package)
+        } catch {
+            return
+        }
+        let source = ScriptPluginRowSource(
+            scriptID: id,
+            runtime: runtime,
+            sectionTitle: package.manifest.displayName(forLanguageCode: languageCode()),
+            surfacesErrorDetail: true,
+            onRowsChanged: notifyRowsChanged,
+            onActionError: { [presentDevActionFailure] error in presentDevActionFailure(id, error) }
+        )
+        rowSources[id] = source
+        let watcher = makeDevWatcher(for: id, directory: directory)
+        activeDevPlugins[id] = DevPluginState(id: id, source: source, watcher: watcher)
+        activeDevPluginsObservationToken &+= 1
+        paletteExtensions.registerRowSource(source, ownerID: rowSourceOwnerID(for: id))
+        source.reload()
+    }
+
+    /// Tear down a Dev Plugin's active runtime state without touching its
+    /// registration or its development directory.
+    private func deactivateDevPlugin(_ id: ScriptPluginID) {
+        guard let state = activeDevPlugins.removeValue(forKey: id) else { return }
+        activeDevPluginsObservationToken &+= 1
+        state.watcher?.cancel()
+        rowSources.removeValue(forKey: id)
+        paletteExtensions.unregisterRowSource(key: rowSourceKey(for: id))
+        runtime.unload(id)
+    }
+
+    /// Overridden by ticket 023's watcher slice; nil keeps activation working
+    /// before the watcher exists.
+    private func makeDevWatcher(for id: ScriptPluginID, directory: URL) -> DirectoryWatcher? {
+        DirectoryWatcher(directory: directory) { [weak self] in
+            self?.reloadDevPlugin(id)
+        }
+    }
+
+    private func loadPersistedDevDirectories() {
+        let paths = core.defaults.stringArray(forKey: Self.devDirectoriesKey) ?? []
+        for path in paths {
+            let directory = URL(fileURLWithPath: path).standardizedFileURL
+            guard let package = try? ScriptPluginPackage.load(fromDirectory: directory) else { continue }
+            devDirectories[package.id] = directory
+        }
+    }
+
+    private func persistDevDirectories() {
+        core.defaults.set(devDirectories.values.map(\.path).sorted(), forKey: Self.devDirectoriesKey)
+    }
+
+    /// Whether an id is already claimed by an installed package or a Dev Plugin —
+    /// they share the runtime's single id space, so it must be exclusive.
+    private func isIDInUse(_ id: ScriptPluginID) -> Bool {
+        knownPackages[id] != nil || core.contains(id.rawValue) || devDirectories[id] != nil
+    }
+
     // MARK: - Internals
 
     private func packageDirectory(for id: ScriptPluginID) -> URL {
@@ -254,6 +494,37 @@ final class ScriptPluginRegistry {
 
     private func rowSourceKey(for id: ScriptPluginID) -> PluginRowSourceKey {
         PluginRowSourceKey(pluginID: rowSourceOwnerID(for: id), localID: ScriptPluginRowSource.localID)
+    }
+}
+
+// MARK: - Dev Plugin support types
+
+/// The active runtime state for one registered Dev Plugin: its palette row
+/// source and the file-system watcher that reloads it on a change. Held only
+/// while developer mode is on.
+@MainActor
+private final class DevPluginState {
+    let id: ScriptPluginID
+    let source: ScriptPluginRowSource
+    let watcher: DirectoryWatcher?
+
+    init(id: ScriptPluginID, source: ScriptPluginRowSource, watcher: DirectoryWatcher?) {
+        self.id = id
+        self.source = source
+        self.watcher = watcher
+    }
+}
+
+/// A refusal specific to Dev Plugin registration.
+enum ScriptDevPluginError: LocalizedError, Equatable {
+    /// Registration was attempted while developer mode is off (defensive — the
+    /// UI gates the affordance behind the switch).
+    case developerModeDisabled
+
+    var errorDescription: String? {
+        switch self {
+        case .developerModeDisabled: return "Developer mode is disabled."
+        }
     }
 }
 

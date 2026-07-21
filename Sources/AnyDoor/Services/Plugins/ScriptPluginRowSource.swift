@@ -94,6 +94,16 @@ final class ScriptPluginRowSource: PluginRowSource {
         cachedRows
     }
 
+    /// Force the source into a failed state with a caller-supplied message, used
+    /// when a Dev Plugin reload refuses at the manifest boundary (before any
+    /// runtime invocation can report it). Clears the cached rows and nudges the
+    /// visible palette to redraw.
+    func reportLoadFailure(_ message: String) {
+        cachedRows = []
+        currentLoadState = .failed(message)
+        onRowsChanged()
+    }
+
     func loadDetail(id: String) async -> PluginRowDetailResult? {
         do {
             let markdown = try await runtime.buildDetail(pluginID: scriptID, rowID: id)
