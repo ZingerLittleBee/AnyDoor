@@ -18,12 +18,18 @@ public final class ScriptPluginRuntime {
 
     private let capabilityHost: ScriptCapabilityHost
     private let timeout: TimeInterval
+    private let diagnostics: any ScriptPluginDiagnostics
     private var packages: [ScriptPluginID: ScriptPluginPackage] = [:]
     private var contexts: [ScriptPluginID: ScriptPluginContext] = [:]
 
-    public init(capabilityHost: ScriptCapabilityHost, timeout: TimeInterval = ScriptPluginRuntime.defaultTimeout) {
+    public init(
+        capabilityHost: ScriptCapabilityHost,
+        timeout: TimeInterval = ScriptPluginRuntime.defaultTimeout,
+        diagnostics: any ScriptPluginDiagnostics = NullScriptPluginDiagnostics()
+    ) {
         self.capabilityHost = capabilityHost
         self.timeout = timeout
+        self.diagnostics = diagnostics
     }
 
     // MARK: - Load / unload
@@ -123,7 +129,8 @@ public final class ScriptPluginRuntime {
             package: package,
             capabilityHost: capabilityHost,
             store: store,
-            timeout: timeout
+            timeout: timeout,
+            diagnostics: diagnostics
         )
         contexts[id] = context
         return context

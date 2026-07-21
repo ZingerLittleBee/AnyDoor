@@ -23,6 +23,7 @@ final class ScriptPluginContext: @unchecked Sendable {
     private let capabilityHost: ScriptCapabilityHost
     private let store: (any ScriptKeyValueStore)?
     private let timeout: TimeInterval
+    private let diagnostics: any ScriptPluginDiagnostics
     private let queue: DispatchQueue
 
     // MARK: Queue-confined JavaScriptCore state
@@ -38,7 +39,8 @@ final class ScriptPluginContext: @unchecked Sendable {
         package: ScriptPluginPackage,
         capabilityHost: ScriptCapabilityHost,
         store: (any ScriptKeyValueStore)?,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        diagnostics: any ScriptPluginDiagnostics = NullScriptPluginDiagnostics()
     ) {
         self.id = id
         self.package = package
@@ -46,7 +48,14 @@ final class ScriptPluginContext: @unchecked Sendable {
         self.capabilityHost = capabilityHost
         self.store = store
         self.timeout = timeout
+        self.diagnostics = diagnostics
         self.queue = DispatchQueue(label: "dev.bybee.AnyDoor.script-plugin.\(id.rawValue)")
+    }
+
+    /// Record a diagnostic event for this plugin. Every caller is already on the
+    /// plugin queue; `diagnostics` serializes its own writes.
+    private func record(_ category: ScriptDiagnosticCategory, _ message: String) {
+        diagnostics.record(ScriptDiagnosticEvent(pluginID: id, category: category, message: message))
     }
 
     // MARK: - Invocation
@@ -99,6 +108,10 @@ final class ScriptPluginContext: @unchecked Sendable {
         do {
             context = try ensureContext()
         } catch {
+            // The runtime could not bring the context up: unreadable bundle, a
+            // bundle that threw, or a plugin that never registered — a load
+            // refusal for the diagnostics log (user story 21).
+            record(.loadRefused, describe(error))
             finish(box, result: .failure(error), tearDown: false)
             return
         }
@@ -184,6 +197,12 @@ final class ScriptPluginContext: @unchecked Sendable {
         guard !box.hasResumed else { return }
         box.hasResumed = true
         box.timeoutWork?.cancel()
+        // A tear-down finish carrying `.timedOut` is a watchdog kill (either the
+        // wall-clock timer or the engine's execution-time-limit) — log it before
+        // the context is destroyed.
+        if case .failure(let error) = result, case ScriptPluginError.timedOut = error {
+            record(.watchdogKill, "invocation exceeded the \(timeout)s watchdog and was terminated")
+        }
         if tearDown { destroyContext() }
         box.continuation.resume(with: result)
     }
@@ -262,6 +281,10 @@ final class ScriptPluginContext: @unchecked Sendable {
         case let .fetchResponse(response):
             pair.resolve.call(withArguments: [response.makeJSObject(in: context)])
         case let .failure(message):
+            // A capability rejected the plugin's promise (fetch failed, invalid
+            // openURL, …). Record it before rejecting, so a capability error is
+            // in the plugin's log even when the plugin swallows the rejection.
+            record(.capabilityError, message)
             let error = context.objectForKeyedSubscript("Error")?.construct(withArguments: [message])
             pair.reject.call(withArguments: [error ?? message as Any])
         }
@@ -437,6 +460,16 @@ final class ScriptPluginContext: @unchecked Sendable {
             }
         }
         return ScriptFetchRequest(url: urlString, method: method, headers: headers, body: body)
+    }
+
+    /// A human-readable one-liner for a runtime error, for the diagnostics log.
+    private func describe(_ error: Error) -> String {
+        switch error {
+        case ScriptPluginError.bundleUnreadable(let name): return "bundle unreadable: \(name)"
+        case ScriptPluginError.bundleEvaluationFailed(let message): return "bundle evaluation failed: \(message)"
+        case ScriptPluginError.pluginNotRegistered: return "plugin never called anydoor.registerPlugin"
+        default: return String(describing: error)
+        }
     }
 
     private static func makeToast(kind: String, message: String) -> PluginToast {
