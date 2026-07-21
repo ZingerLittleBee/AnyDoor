@@ -322,6 +322,40 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         XCTAssertEqual(spy.openedURLs.map(\.absoluteString), ["https://anydoor.dev/x"])
     }
 
+    func testOpenURLRejectsNonWebSchemes() async throws {
+        let spy = ScriptCapabilitySpy()
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.badscheme",
+            capabilities: ["openURL"],
+            bundle: #"anydoor.registerPlugin({ action: async function (rowID, actionID) { await anydoor.openURL(actionID); return "ok"; } });"#
+        )
+        let runtime = makeRuntime(spy: spy)
+        let id = try runtime.load(fromDirectory: directory)
+
+        // file:// (filesystem reach), a custom app scheme, javascript:, and a
+        // scheme-less string all reject with a rejected promise (a thrown await
+        // inside the plugin surfaces as invocationFailed), and none reach the host.
+        for blocked in ["file:///etc/hosts", "raycast://extensions", "javascript:alert(1)", "example.com"] {
+            do {
+                _ = try await runtime.performAction(pluginID: id, rowID: "r", actionID: blocked)
+                XCTFail("expected \(blocked) to be rejected")
+            } catch let error as ScriptPluginError {
+                guard case .invocationFailed = error else {
+                    return XCTFail("expected invocationFailed for \(blocked), got \(error)")
+                }
+            }
+        }
+        XCTAssertTrue(spy.openedURLs.isEmpty, "no blocked URL should reach the host")
+
+        // http and https (case-insensitively) still pass through to the host.
+        _ = try await runtime.performAction(pluginID: id, rowID: "r", actionID: "https://anydoor.dev/ok")
+        _ = try await runtime.performAction(pluginID: id, rowID: "r", actionID: "HTTP://anydoor.dev/up")
+        XCTAssertEqual(
+            spy.openedURLs.map { $0.scheme?.lowercased() },
+            ["https", "http"]
+        )
+    }
+
     func testDelayCapabilityResolves() async throws {
         let directory = try ScriptPluginFixture.writePackage(
             id: "com.example.delayer",

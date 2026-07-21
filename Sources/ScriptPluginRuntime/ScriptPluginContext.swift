@@ -429,6 +429,18 @@ final class ScriptPluginContext: @unchecked Sendable {
                 self.resolveOnQueue(token: token, .failure("openURL: invalid URL \(string)"))
                 return promise
             }
+            // Confine openURL to its declared surface — the default browser
+            // (ADR-0009). A non-web scheme (file://, custom app schemes) would
+            // reach past the capability, so reject it with the same capability
+            // error path fetch uses; the JS caller gets a rejected promise and
+            // the rejection lands in the plugin's diagnostics log.
+            guard ScriptOpenURLPolicy.allows(url) else {
+                self.resolveOnQueue(
+                    token: token,
+                    .failure("openURL: only http and https URLs are permitted, got \(string)")
+                )
+                return promise
+            }
             Task { @MainActor in
                 open(url)
                 self.settle(token: token, .void)

@@ -10,7 +10,8 @@
  * What committing a row does. Maps onto the host's decodable commit semantics:
  *
  * - `detail`   -> push the row's markdown Detail as a new palette level
- * - `openURL`  -> close the palette, open `url` in the default browser
+ * - `openURL`  -> close the palette, open `url` in the default browser (only
+ *                 `http`/`https` URLs; any other scheme is rejected)
  * - `copy`     -> close the palette, copy `text` through the self-write funnel
  * - `argument` -> enter the palette's Argument input mode; the entered text is
  *                 passed to `action(rowId, actionId, argument)`
@@ -60,7 +61,7 @@ export const actions = {
   detail(): RowAction {
     return { type: "detail" };
   },
-  /** Close the palette and open `url`. */
+  /** Close the palette and open `url` (only `http`/`https` URLs are permitted). */
   openURL(url: string): RowAction {
     return { type: "openURL", url };
   },

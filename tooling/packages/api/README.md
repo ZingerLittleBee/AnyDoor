@@ -88,6 +88,11 @@ async rows(query, api) {
 | `delay` | `api.delay` | `(ms) => Promise<void>` |
 | `openURL` | `api.openURL` | `(url) => Promise<void>` |
 
+`openURL` accepts only `http` and `https` URLs — the host rejects any other
+scheme (e.g. `file:` or a custom app scheme) with a rejected promise, so a
+plugin cannot use it to reach the filesystem or launch arbitrary apps. The same
+restriction applies to a row's `openURL` commit action.
+
 ### Entry points
 
 | Entry point | Signature | Purpose |

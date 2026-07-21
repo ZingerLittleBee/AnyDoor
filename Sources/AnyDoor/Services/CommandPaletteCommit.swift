@@ -1,5 +1,6 @@
 import Foundation
 import PluginInterface
+import ScriptPluginRuntime
 
 /// What committing a command-palette row means, declared in one place.
 ///
@@ -54,6 +55,10 @@ enum CommandPaletteCommitIntent: Equatable {
     case pluginRowRunArgument(sourceKey: PluginRowSourceKey, rowID: String, argument: String)
     /// A plugin row that declared `.openURL`: dismiss, then open the URL.
     case openURL(url: String)
+    /// A plugin row that declared `.openURL` with a URL outside the openURL
+    /// capability's http/https surface (ADR-0009): dismiss and report a failure
+    /// toast rather than opening a `file://` or custom-scheme URL.
+    case openURLRejected
     case openQuicklink(id: UUID)
     case openQuicklinkArgument(id: UUID, argument: String)
     /// Close without acting (a submenu/brightness builtin that isn't an
@@ -113,6 +118,14 @@ enum CommandPaletteCommitIntent: Equatable {
             case .enterArgument:
                 return .pluginRowEnterArgument(sourceKey: sourceKey, rowID: descriptor.id, title: descriptor.title)
             case .openURL(let url):
+                // The URL is plugin-supplied; confine it to the openURL
+                // capability's http/https surface (ADR-0009) before the palette
+                // hands it to the default browser, the same guard the JS
+                // capability enforces. A rejected URL fails with a toast, never
+                // a silent no-op or a launch outside the declared surface.
+                guard let parsed = URL(string: url), ScriptOpenURLPolicy.allows(parsed) else {
+                    return .openURLRejected
+                }
                 return .openURL(url: url)
             case .copy(let text):
                 return .copyToClipboard(text: text, toast: .generic)

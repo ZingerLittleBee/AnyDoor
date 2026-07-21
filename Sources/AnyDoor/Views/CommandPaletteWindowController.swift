@@ -592,6 +592,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             close()
             guard let parsed = URL(string: url) else { return }
             NSWorkspace.shared.open(parsed)
+        case .openURLRejected:
+            close()
+            ToastPresenter.shared.show(.failure(L(.pluginsActionFailed)))
         case .openQuicklink(let id):
             close()
             guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }

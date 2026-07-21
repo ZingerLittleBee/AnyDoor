@@ -110,6 +110,35 @@ final class ScriptPluginDiagnosticsTests: XCTestCase {
         XCTAssertTrue(contents.contains("fetch failed"), "log was: \(contents)")
     }
 
+    func testBlockedOpenURLSchemeIsLoggedAsCapabilityError() async throws {
+        let logDir = makeLogDirectory()
+        defer { try? FileManager.default.removeItem(at: logDir) }
+        let log = FileScriptPluginLog(directory: logDir)
+        let runtime = makeRuntime(log: log)
+
+        // The plugin declares openURL and hands it a file:// URL; the runtime
+        // rejects the capability promise for the off-surface scheme, which is
+        // logged like any other capability error.
+        let id = try runtime.load(fromDirectory: try ScriptPluginFixture.writePackage(
+            id: "com.acme.opener",
+            capabilities: ["openURL"],
+            bundle: """
+            anydoor.registerPlugin({
+              rows: async function () {
+                await anydoor.openURL("file:///etc/hosts");
+                return [];
+              }
+            });
+            """
+        ))
+
+        _ = try? await runtime.buildRows(pluginID: id, query: "")
+
+        let contents = log.contents(for: id)
+        XCTAssertTrue(contents.contains("[capabilityError]"), "log was: \(contents)")
+        XCTAssertTrue(contents.contains("openURL"), "log was: \(contents)")
+    }
+
     // MARK: - File routing
 
     func testEachPluginGetsItsOwnFile() async throws {

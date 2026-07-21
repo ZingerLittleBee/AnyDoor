@@ -85,7 +85,12 @@ export type CopyFn = (text: string) => Promise<void>;
 /** A one-shot delay. JavaScriptCore has no event loop, so even this is host-granted. */
 export type DelayFn = (milliseconds: number) => Promise<void>;
 
-/** Open a URL in the default browser. */
+/**
+ * Open a URL in the default browser. Only `http` and `https` URLs are permitted;
+ * the host rejects any other scheme (e.g. `file:` or a custom app scheme) with a
+ * rejected promise, so this capability cannot reach the filesystem or launch
+ * arbitrary registered apps.
+ */
 export type OpenURLFn = (url: string) => Promise<void>;
 
 // MARK: - Capability surface

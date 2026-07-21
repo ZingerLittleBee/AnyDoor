@@ -233,6 +233,29 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
     }
 
     @MainActor
+    func testPluginRowOpenURLWithNonWebSchemeIsRejected() {
+        let sourceKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.posts"),
+            localID: "rows"
+        )
+        // file:// (filesystem), a custom app scheme, and a scheme-less string are
+        // all outside the openURL capability's http/https surface (ADR-0009), so
+        // they classify as a rejection (failure toast) rather than opening.
+        for url in ["file:///etc/hosts", "raycast://extensions", "example.com"] {
+            let descriptor = PluginRowDescriptor(
+                id: "post-1", title: "Open", symbol: "link", commit: .openURL(url)
+            )
+            XCTAssertEqual(
+                CommandPaletteCommitIntent.classify(
+                    .pluginRow(sourceKey: sourceKey, descriptor: descriptor)
+                ),
+                .openURLRejected,
+                "\(url) should be rejected"
+            )
+        }
+    }
+
+    @MainActor
     func testPluginRowCopyClosesAndCopiesGenericToast() {
         let sourceKey = PluginRowSourceKey(
             pluginID: NativePluginID(rawValue: "script:com.acme.posts"),

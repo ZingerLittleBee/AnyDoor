@@ -21,7 +21,9 @@ public enum ScriptCapability: String, CaseIterable, Sendable, Hashable {
     /// A one-shot delay timer (`anydoor.delay`). JavaScriptCore has no event
     /// loop, so even a timer is a host-granted capability. No repeating timers.
     case delay
-    /// Open a URL in the default browser (`anydoor.openURL`).
+    /// Open a URL in the default browser (`anydoor.openURL`). Confined to
+    /// `http`/`https` by ``ScriptOpenURLPolicy`` so it cannot reach the
+    /// filesystem or launch arbitrary apps.
     case openURL
 
     /// The manifest string authors write. Distinct from `rawValue` only for
