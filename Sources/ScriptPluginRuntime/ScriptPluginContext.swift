@@ -77,8 +77,19 @@ final class ScriptPluginContext: @unchecked Sendable {
     }
 
     /// Tear down the plugin's context and queue state (used on uninstall).
+    ///
+    /// Dispatched **async** on purpose: `teardown()` is called from the main
+    /// actor (the registry's uninstall path), and a synchronous `queue.sync`
+    /// would block that actor until the queue drains. If a synchronous runaway
+    /// were mid-flight that wait could last until the execution-time-limit fires
+    /// (up to `timeout`, 30 s in production), freezing the UI. Queuing the
+    /// destroy behind any in-flight work lets uninstall return immediately;
+    /// script deactivation has no external side effects, so nothing depends on
+    /// the teardown having completed before uninstall proceeds. `self` is
+    /// retained by the block, so the context outlives its removal from the
+    /// runtime until the destroy runs.
     func teardown() {
-        queue.sync { destroyContext() }
+        queue.async { [self] in destroyContext() }
     }
 
     // MARK: - Queue-confined internals
@@ -146,8 +157,18 @@ final class ScriptPluginContext: @unchecked Sendable {
 
     private func finishForException(_ exception: JSValue, box: InvocationBox) {
         let description = exception.toString() ?? "unknown error"
-        // The execution-time-limit terminates with an uncatchable "terminated"
-        // exception; that is a watchdog kill, so the context must be destroyed.
+        // CONSTRAINT: JavaScriptCore's execution-time-limit aborts a synchronous
+        // runaway with an uncatchable exception that stringifies to
+        // "JavaScript execution terminated." — there is no structured flag for
+        // it (the shim arms the limit with a NULL callback), so a watchdog kill
+        // is recognized only by that text. The classification is asymmetric on
+        // purpose: a false positive (a plugin that throws its own message
+        // containing "terminated") merely destroys a healthy context, which is
+        // lazily recreated on the next invocation — wasteful, not harmful. The
+        // failure mode to avoid is a false negative (a real kill NOT matching),
+        // which would keep a poisoned context; the engine's wording makes that
+        // path unreachable today. Revisit if the shim ever adopts a callback
+        // that can report the kill directly.
         if description.localizedCaseInsensitiveContains("terminated") {
             finish(box, result: .failure(ScriptPluginError.timedOut), tearDown: true)
         } else {
