@@ -64,6 +64,26 @@ public struct ScriptPluginManifest: Sendable, Equatable {
         self.localizedDescriptions = localizedDescriptions
     }
 
+    // MARK: - Localized display
+
+    /// The display name for a language, falling back to the base `name` when the
+    /// manifest declares no per-language override (user story 22). `code` is a
+    /// bare language code such as "zh" or "en".
+    public func displayName(forLanguageCode code: String?) -> String {
+        Self.localizedValue(localizedNames, code: code, base: name)
+    }
+
+    /// The display description for a language, falling back to the base
+    /// `description` when no per-language override exists.
+    public func displayDescription(forLanguageCode code: String?) -> String {
+        Self.localizedValue(localizedDescriptions, code: code, base: description)
+    }
+
+    private static func localizedValue(_ map: [String: String], code: String?, base: String) -> String {
+        if let code, let value = map[code], !value.isEmpty { return value }
+        return base
+    }
+
     // MARK: - Loading
 
     /// Read and validate `manifest.json` from a package directory.
