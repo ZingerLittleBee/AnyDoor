@@ -94,6 +94,13 @@ final class ScriptPluginRegistry {
     @ObservationIgnored private let packagesDirectory: URL
     @ObservationIgnored private let paletteExtensions: CommandPaletteExtensions
     @ObservationIgnored private let languageCode: @MainActor () -> String?
+    /// Nudges a visible palette to recompute its rows when an async row source
+    /// finishes loading, without discarding a drilled-in Detail (unlike the full
+    /// `refreshCommandPalette` recomposition used on install/uninstall).
+    @ObservationIgnored private let notifyRowsChanged: @MainActor () -> Void
+    /// Presents the failure toast when a committed Script Plugin row action
+    /// throws (user story 16). Injectable so tests observe it without a window.
+    @ObservationIgnored private let presentActionFailure: @MainActor (ScriptPluginID) -> Void
     @ObservationIgnored private var isBootstrapped = false
     /// The shared, kind-agnostic lifecycle engine — a Script-kind instance,
     /// distinct from `PluginRegistry`'s Native-kind instance.
@@ -109,12 +116,20 @@ final class ScriptPluginRegistry {
         },
         refreshCommandPalette: @escaping @MainActor () -> Void = {
             CommandPaletteWindowController.shared.refreshPluginSurfaces()
+        },
+        notifyRowsChanged: @escaping @MainActor () -> Void = {
+            CommandPaletteWindowController.shared.refreshVisibleRows()
+        },
+        presentActionFailure: @escaping @MainActor (ScriptPluginID) -> Void = { _ in
+            ToastPresenter.shared.show(.failure(L(.pluginsActionFailed)))
         }
     ) {
         self.runtime = runtime
         self.packagesDirectory = packagesDirectory
         self.paletteExtensions = paletteExtensions
         self.languageCode = languageCode
+        self.notifyRowsChanged = notifyRowsChanged
+        self.presentActionFailure = presentActionFailure
         self.core = PluginLifecycleCore(
             host: self,
             installStateKey: Self.installStateKey,
@@ -302,7 +317,9 @@ extension ScriptPluginRegistry: AnyPluginLifecycleHost {
         let source = ScriptPluginRowSource(
             scriptID: id,
             runtime: runtime,
-            sectionTitle: package.manifest.displayName(forLanguageCode: languageCode())
+            sectionTitle: package.manifest.displayName(forLanguageCode: languageCode()),
+            onRowsChanged: notifyRowsChanged,
+            onActionError: { [presentActionFailure] _ in presentActionFailure(id) }
         )
         rowSources[id] = source
         paletteExtensions.registerRowSource(source, ownerID: rowSourceOwnerID(for: id))

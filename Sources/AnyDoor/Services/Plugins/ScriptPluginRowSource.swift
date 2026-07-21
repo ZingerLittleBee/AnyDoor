@@ -4,18 +4,23 @@ import ScriptPluginRuntime
 
 /// The command-palette root row source for one installed Script Plugin.
 ///
-/// Bridges the async, JavaScriptCore-backed `rows()` entry point onto the
-/// palette's synchronous `PluginRowSource` contract (ADR-0007): `reload()`
-/// (one refresh per palette open) kicks an async `buildRows` and caches the
-/// result, and the synchronous `rows()` the palette calls on every keystroke
-/// returns that cache. The palette filters by title itself, so the source asks
-/// the plugin for its full row set with an empty query — mirroring how the
-/// Hosts profile source returns every profile and lets the palette match.
+/// Bridges the async, JavaScriptCore-backed entry points onto the palette's
+/// synchronous `PluginRowSource` contract (ADR-0007):
 ///
-/// A committed row runs the plugin's `action` entry point through the runtime;
-/// the palette's generic commit path decides whether to close first from the
-/// descriptor's own `CommitSemantics`. Markdown Detail navigation is a later
-/// ticket and deliberately absent here.
+/// - `reload()` (one refresh per palette open) kicks an async `buildRows` and
+///   caches the result; the synchronous `rows()` the palette calls on every
+///   keystroke returns that cache. While the first fetch is in flight the source
+///   reports `.loading`, and a failed fetch reports `.failed`, so the palette can
+///   render a loading placeholder or an inline error row instead of hanging.
+/// - `loadDetail(id:)` builds a committed row's markdown Detail.
+/// - `performRow(id:)` / `performRow(id:argument:)` run the plugin's `action`
+///   entry point; a failure is reported as a toast (never a silent no-op), while
+///   an invocation that lands after the plugin was unloaded is dropped so a
+///   just-uninstalled plugin cannot flash a spurious failure.
+///
+/// The palette filters by title itself, so the source asks the plugin for its
+/// full row set with an empty query — mirroring how the Hosts profile source
+/// returns every profile and lets the palette match.
 @MainActor
 final class ScriptPluginRowSource: PluginRowSource {
     /// One row source per plugin, so its plugin-local id is a constant; the
@@ -23,9 +28,8 @@ final class ScriptPluginRowSource: PluginRowSource {
     /// host-scoped `PluginRowSourceKey`.
     static let localID = "rows"
 
-    /// Row action id used until per-action selection arrives with Detail
-    /// navigation (ticket 022). The plugin's `action(rowID, actionID)` receives
-    /// it as the default primary action.
+    /// Action id passed to the plugin's `action(rowID, actionID)` for a row's
+    /// primary action. Milestone A rows have a single primary action.
     static let defaultActionID = "default"
 
     let id = ScriptPluginRowSource.localID
@@ -34,33 +38,87 @@ final class ScriptPluginRowSource: PluginRowSource {
     private let scriptID: ScriptPluginID
     private let runtime: ScriptPluginRuntime
     private var cachedRows: [PluginRowDescriptor] = []
+    private var currentLoadState: PluginRowLoadState = .loading
+    /// Nudges a visible palette to recompute its rows once an async fetch lands.
+    private let onRowsChanged: @MainActor () -> Void
+    /// Presents a failure toast when a committed row action throws.
+    private let onActionError: @MainActor (ScriptPluginError) -> Void
 
-    init(scriptID: ScriptPluginID, runtime: ScriptPluginRuntime, sectionTitle: String) {
+    init(
+        scriptID: ScriptPluginID,
+        runtime: ScriptPluginRuntime,
+        sectionTitle: String,
+        onRowsChanged: @escaping @MainActor () -> Void = {},
+        onActionError: @escaping @MainActor (ScriptPluginError) -> Void = { _ in }
+    ) {
         self.scriptID = scriptID
         self.runtime = runtime
         self.sectionTitleKey = sectionTitle
+        self.onRowsChanged = onRowsChanged
+        self.onActionError = onActionError
     }
+
+    var loadState: PluginRowLoadState { currentLoadState }
 
     func reload() {
         Task { [weak self] in await self?.refresh() }
     }
 
-    /// Fetch the plugin's rows and cache them. Exposed (beyond the fire-and-
-    /// forget `reload()`) so lifecycle tests can await the fetch deterministically
-    /// instead of racing the background task.
+    /// Fetch the plugin's rows and cache them, updating the load state. Exposed
+    /// (beyond the fire-and-forget `reload()`) so tests can await the fetch
+    /// deterministically instead of racing the background task. A successful
+    /// fetch clears any prior error; a failure leaves the cache empty and
+    /// records the failure so the palette shows an inline error row.
     func refresh() async {
-        cachedRows = (try? await runtime.buildRows(pluginID: scriptID, query: "")) ?? []
+        do {
+            cachedRows = try await runtime.buildRows(pluginID: scriptID, query: "")
+            currentLoadState = .ready
+        } catch {
+            cachedRows = []
+            currentLoadState = .failed(L(.commandPalettePluginRowError))
+        }
+        onRowsChanged()
     }
 
     func rows() -> [PluginRowDescriptor] {
         cachedRows
     }
 
+    func loadDetail(id: String) async -> PluginRowDetailResult? {
+        do {
+            let markdown = try await runtime.buildDetail(pluginID: scriptID, rowID: id)
+            return .markdown(markdown)
+        } catch {
+            return .failure(L(.commandPaletteDetailFailed))
+        }
+    }
+
     func performRow(id: String) async {
-        _ = try? await runtime.performAction(
-            pluginID: scriptID,
-            rowID: id,
-            actionID: Self.defaultActionID
-        )
+        await runAction(rowID: id, argument: nil)
+    }
+
+    func performRow(id: String, argument: String) async {
+        await runAction(rowID: id, argument: argument)
+    }
+
+    private func runAction(rowID: String, argument: String?) async {
+        // A row committed just before uninstall can dispatch here after the
+        // context was torn down; drop it so a just-uninstalled plugin never
+        // flashes a spurious failure toast (021-verifier note).
+        guard runtime.isLoaded(scriptID) else { return }
+        do {
+            _ = try await runtime.performAction(
+                pluginID: scriptID,
+                rowID: rowID,
+                actionID: Self.defaultActionID,
+                argument: argument
+            )
+        } catch let error as ScriptPluginError {
+            // The plugin was unloaded mid-flight — not a plugin failure.
+            if case .notLoaded = error { return }
+            onActionError(error)
+        } catch {
+            onActionError(.invocationFailed(error.localizedDescription))
+        }
     }
 }

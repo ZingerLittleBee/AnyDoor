@@ -250,6 +250,68 @@ final class ScriptPluginRegistryTests: XCTestCase {
         XCTAssertNil(f.registry.rowSource(for: id))
     }
 
+    // MARK: - Uninstall while a Detail is visible discards the drill-in
+
+    func testUninstallWhileDetailVisibleDiscardsDrillInAndRemovesRows() async throws {
+        let suiteName = "ScriptPluginRegistryTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let packagesDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("script-packages-\(UUID().uuidString)", isDirectory: true)
+        let storeDirectory = ScriptPluginFixture.makeStoreDirectory()
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: packagesDirectory)
+            try? FileManager.default.removeItem(at: storeDirectory)
+        }
+
+        let host = ScriptRuntimeHarness.makeCapabilityHost(
+            spy: ScriptCapabilitySpy(),
+            transport: RecordingFetchTransport(response: ScriptFetchResponse(status: 200, body: "{}")),
+            storeDirectory: storeDirectory
+        )
+        let palette = CommandPaletteExtensions()
+        // A real palette state, refreshed exactly as the window controller wires
+        // it (`refreshPluginSurfaces`): pop out of any drill-in, then re-read the
+        // live row-source registrations. This is the seam the uninstall drives.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0, rowSources: palette.rowSources)
+        let registry = ScriptPluginRegistry(
+            runtime: ScriptPluginRuntime(capabilityHost: host),
+            packagesDirectory: packagesDirectory,
+            paletteExtensions: palette,
+            defaults: defaults,
+            languageCode: { "en" },
+            refreshCommandPalette: {
+                if !state.isAtRoot { state.popToRoot() }
+                state.updateSections([], pluginRowSources: palette.rowSources)
+            }
+        )
+
+        let source = try rowsFixture(id: "com.acme.detail")
+        let id = try registry.sideload(fromDirectory: source)
+        let liveSource = try XCTUnwrap(registry.rowSource(for: id))
+        await liveSource.refresh()
+        state.updateSections([], pluginRowSources: palette.rowSources)
+
+        // The plugin's rows are searchable at the root…
+        state.query = "Alpha"
+        XCTAssertFalse(state.filteredSections.isEmpty)
+
+        // …and the user has drilled into a Detail.
+        state.enterDetail(title: "Alpha")
+        XCTAssertTrue(state.isInDetail)
+
+        try await registry.uninstall(id)
+
+        // Uninstall recomposed the visible palette: the Detail is gone and the
+        // plugin's rows have vanished entirely.
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertFalse(state.isInDetail)
+        XCTAssertNil(registry.rowSource(for: id))
+        XCTAssertTrue(palette.rowSources.isEmpty)
+        state.query = "Alpha"
+        XCTAssertTrue(state.filteredSections.isEmpty)
+    }
+
     // MARK: - Bootstrap activates persisted-installed packages
 
     func testBootstrapActivatesPersistedInstalledPackage() async throws {
