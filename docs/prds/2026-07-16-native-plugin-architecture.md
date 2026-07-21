@@ -187,7 +187,11 @@ trace so nobody loses a feature they were using.
   pilots.
 - **Clipboard-history context-menu integration of Image Conversion** — stays
   hardwired in Core for V1; registered debt, revisited when the surface is
-  next touched.
+  next touched. *Amendment (2026-07-21, per review sign-off): the surface was
+  touched during the V1 lifecycle-gap work, so the debt was paid down within
+  V1 — the hardwiring was replaced by the generic `PluginClipboardAction`
+  extension point (`NativePlugin.clipboardActions` / `performClipboardAction`,
+  routed through `PluginRegistry`), commit `ff27c54`.*
 - **Onboarding/first-run plugin picker** — Settings is the only
   install/uninstall surface in V1. The onboarding catalog is Core-only and
   must not advertise an uninstalled plugin.
