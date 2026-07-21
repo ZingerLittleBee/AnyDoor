@@ -1,0 +1,20 @@
+{
+  "name": "@anydoor/create-plugin",
+  "version": "0.1.0",
+  "description": "Scaffold a new AnyDoor Script Plugin: manifest, typed entry point, esbuild bundling.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "create-anydoor-plugin": "bin/create.mjs"
+  },
+  "files": [
+    "bin",
+    "template"
+  ],
+  "scripts": {
+    "typecheck": "node --check bin/create.mjs"
+  },
+  "dependencies": {
+    "@anydoor/api": "workspace:*"
+  }
+}
