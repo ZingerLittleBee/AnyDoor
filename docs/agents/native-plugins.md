@@ -5,6 +5,11 @@ re-deriving the architecture. Everything here is verified against the source
 on branch `feat/native-plugins` (2026-07-20). Rationale lives in the linked
 docs; this file is the operational map.
 
+Scope: **Native Plugins only.** Script Plugins are a separate kind (sideloaded
+pure-JavaScript packages on JavaScriptCore) sharing only the kind-agnostic
+`PluginLifecycleCore` — see ADR-0008/0009, tickets `docs/issues/018`–`024`, and
+the Script Plugin notes in `AGENTS.md`; do not apply this playbook to them.
+
 Background: [PRD](../prds/2026-07-16-native-plugin-architecture.md) ·
 [ADR-0005 logical install (+ 2026-07-17 addendum)](../adr/0005-native-plugins-logical-install.md) ·
 [ADR-0006 enum claim](../adr/0006-plugin-commands-claim-enum-cases.md) ·
