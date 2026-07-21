@@ -10,6 +10,9 @@
  * What committing a row does. Maps onto the host's decodable commit semantics:
  *
  * - `detail`   -> push the row's markdown Detail as a new palette level
+ * - `list`     -> push a searchable second-level list built by the plugin's
+ *                 `list(listId, query)` entry point; rows inside keep their own
+ *                 actions (a `detail` row there still pushes a Detail on top)
  * - `openURL`  -> close the palette, open `url` in the default browser (only
  *                 `http`/`https` URLs; any other scheme is rejected)
  * - `copy`     -> close the palette, copy `text` through the self-write funnel
@@ -21,6 +24,7 @@
  */
 export type RowAction =
   | { type: "detail" }
+  | { type: "list"; id: string }
   | { type: "openURL"; url: string }
   | { type: "copy"; text: string }
   | { type: "argument" }
@@ -60,6 +64,10 @@ export const actions = {
   /** Push the row's markdown Detail. Requires the plugin to implement `detail`. */
   detail(): RowAction {
     return { type: "detail" };
+  },
+  /** Push a searchable second-level list. Requires the plugin to implement `list`. */
+  list(id: string): RowAction {
+    return { type: "list", id };
   },
   /** Close the palette and open `url` (only `http`/`https` URLs are permitted). */
   openURL(url: string): RowAction {

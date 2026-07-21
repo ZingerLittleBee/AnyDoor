@@ -1,30 +1,49 @@
 import { definePlugin, actions, type Row, type FetchFn, type Store } from "@anydoor/api";
 import manifest from "./manifest.js";
 
-// A real-world Script Plugin for V2EX (https://www.v2ex.com):
-//   - fetch the public v1 hot + latest topic feeds and merge them into one
-//     searchable palette list,
-//   - drill into a per-topic markdown Detail (content, plus comments when a
-//     personal access token is stored),
-//   - store an optional V2EX token so the token-gated v2 API can be used,
-//   - and open the token settings page in the browser through openURL.
+// A real-world Script Plugin for V2EX (https://www.v2ex.com), shaped like the
+// Raycast command it mirrors:
+//   - the palette ROOT shows only command rows — 热门主题 / 最新主题 / 节点主题
+//     and a pinned 设置 Token row — so opening V2EX is instant (no network),
+//   - committing a topic command drills into a searchable second-level LIST of
+//     topics built by `list(listId, query)`,
+//   - a topic row there drills into a per-topic markdown Detail (content, plus
+//     comments when a personal access token is stored),
+//   - the token row stores an optional V2EX token, or opens the settings page.
 //
-// The public v1 feeds need no token, so the whole list and Detail work
-// anonymously; a stored token only enriches Detail with the v2 topic body and
-// its first comments.
+// The public v1 feeds need no token, so the lists and Detail work anonymously;
+// a stored token only enriches Detail with the v2 topic body and its comments.
 
 const HOT_URL = "https://www.v2ex.com/api/topics/hot.json";
 const LATEST_URL = "https://www.v2ex.com/api/topics/latest.json";
 const V2_BASE = "https://www.v2ex.com/api/v2";
 const TOKEN_SETTINGS_URL = "https://v2ex.com/settings/tokens";
 
-// Store key for the personal access token and the sentinel row id the token
-// row commits to. A `__`-prefixed id cannot collide with a numeric topic id.
+// Public v1 endpoint for a single node's recent topics (no token required).
+function nodeTopicsURL(node: string): string {
+  return `https://www.v2ex.com/api/topics/show.json?node_name=${encodeURIComponent(node)}`;
+}
+
+// The list ids the root command rows commit to, matched in `list()`.
+const LIST_HOT = "hot";
+const LIST_LATEST = "latest";
+const LIST_NODE = "node";
+
+// Store keys + the sentinel token row id. A `__`-prefixed id cannot collide with
+// a numeric topic id.
 const TOKEN_KEY = "token";
+const NODES_KEY = "nodes";
 const TOKEN_ROW_ID = "__set_token__";
 
+// The default node list mirrors the Raycast V2EX extension. Overridable through
+// the `nodes` store key (a space-separated list); a set-nodes UI is a follow-up.
+const DEFAULT_NODES = ["programmer", "create", "share", "ideas", "apple", "jobs", "all4all", "qna"];
+
+// Cap topics per node so the merged 节点主题 list stays within the 30s watchdog.
+const MAX_TOPICS_PER_NODE = 10;
+
 // Cap the comments rendered into a Detail so a hot topic with hundreds of
-// replies stays within the simple-markdown budget and the 30s watchdog.
+// replies stays within the simple-markdown budget and the watchdog.
 const MAX_REPLIES = 10;
 
 // MARK: - V2EX API shapes (only the fields this plugin reads)
@@ -38,8 +57,8 @@ interface Node {
   title: string;
 }
 
-// A v1 topic. The hot/latest feeds return an array of these directly; the v2
-// topic endpoint returns one inside a `V2Response.result`.
+// A v1 topic. The hot/latest/node feeds return an array of these directly; the
+// v2 topic endpoint returns one inside a `V2Response.result`.
 interface Topic {
   id: number;
   title: string;
@@ -61,8 +80,6 @@ interface V2Response<T> {
   message?: string;
   result?: T;
 }
-
-type TopicSource = "hot" | "latest";
 
 // The context persists between invocations, so caching the last listed topics
 // lets `detail` resolve a row id without refetching the feeds.
@@ -89,32 +106,62 @@ async function readToken(store: Store): Promise<string | undefined> {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** Merge hot then latest, de-duplicating by topic id and keeping the source. */
-function mergeFeeds(hot: Topic[], latest: Topic[]): { topic: Topic; source: TopicSource }[] {
+/** Read the configured node list, falling back to the Raycast default set. */
+async function readNodes(store: Store): Promise<string[]> {
+  const value = await store.get(NODES_KEY);
+  if (typeof value !== "string") {
+    return DEFAULT_NODES;
+  }
+  const nodes = value.split(/\s+/).filter((name) => name.length > 0);
+  return nodes.length > 0 ? nodes : DEFAULT_NODES;
+}
+
+/** De-duplicate topics by id, keeping the first occurrence. */
+function dedupe(list: Topic[]): Topic[] {
   const seen = new Set<string>();
-  const merged: { topic: Topic; source: TopicSource }[] = [];
-  const push = (list: Topic[], source: TopicSource) => {
-    for (const topic of list) {
-      const id = String(topic.id);
-      if (seen.has(id)) {
-        continue;
-      }
-      seen.add(id);
-      merged.push({ topic, source });
+  const merged: Topic[] = [];
+  for (const topic of list) {
+    const id = String(topic.id);
+    if (seen.has(id)) {
+      continue;
     }
-  };
-  push(hot, "hot");
-  push(latest, "latest");
+    seen.add(id);
+    merged.push(topic);
+  }
   return merged;
 }
 
-function topicSubtitle(topic: Topic, source: TopicSource): string {
-  const sourceLabel = source === "hot" ? "热门" : "最新";
+function topicSubtitle(topic: Topic): string {
   const node = topic.node?.title ?? topic.node?.name ?? "";
   const author = topic.member?.username ?? "未知";
-  return [sourceLabel, node, `${topic.replies} 回复`, `by ${author}`]
+  return [node, `${topic.replies} 回复`, `by ${author}`]
     .filter((part) => part.length > 0)
     .join(" · ");
+}
+
+/** Cache the listed topics and map them to searchable palette rows. */
+function toRows(list: Topic[], query: string): Row[] {
+  topics.clear();
+  for (const topic of list) {
+    topics.set(String(topic.id), topic);
+  }
+  const needle = query.trim().toLowerCase();
+  const rows: Row[] = [];
+  for (const topic of list) {
+    const subtitle = topicSubtitle(topic);
+    if (needle.length > 0 && !`${topic.title} ${subtitle}`.toLowerCase().includes(needle)) {
+      continue;
+    }
+    rows.push({
+      id: String(topic.id),
+      title: topic.title,
+      subtitle,
+      symbol: "text.bubble",
+      actionLabel: "详情",
+      action: actions.detail(),
+    });
+  }
+  return rows;
 }
 
 function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
@@ -147,38 +194,24 @@ function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
 
 definePlugin(manifest, {
   async rows(query, api) {
-    const [hot, latest] = await Promise.all([
-      fetchJSON<Topic[]>(api.fetch, HOT_URL),
-      fetchJSON<Topic[]>(api.fetch, LATEST_URL),
-    ]);
-
-    const merged = mergeFeeds(hot, latest);
-    topics.clear();
-    for (const { topic } of merged) {
-      topics.set(String(topic.id), topic);
-    }
-
+    // The root is instant: only command rows and the token row, no network.
+    // English subtitles keep the Raycast-style command names searchable.
     const token = await readToken(api.store);
+    const commands: Row[] = [
+      { id: LIST_HOT, title: "热门主题", subtitle: "View Hot Topics",
+        symbol: "flame", actionLabel: "查看", action: actions.list(LIST_HOT) },
+      { id: LIST_LATEST, title: "最新主题", subtitle: "View Latest Topics",
+        symbol: "clock", actionLabel: "查看", action: actions.list(LIST_LATEST) },
+      { id: LIST_NODE, title: "节点主题", subtitle: "View Topics By Node",
+        symbol: "square.grid.2x2", actionLabel: "查看", action: actions.list(LIST_NODE) },
+    ];
+
     const needle = query.trim().toLowerCase();
+    const rows = needle.length > 0
+      ? commands.filter((row) => `${row.title} ${row.subtitle ?? ""}`.toLowerCase().includes(needle))
+      : commands;
 
-    const rows: Row[] = [];
-    for (const { topic, source } of merged) {
-      const subtitle = topicSubtitle(topic, source);
-      if (needle.length > 0 && !`${topic.title} ${subtitle}`.toLowerCase().includes(needle)) {
-        continue;
-      }
-      rows.push({
-        id: String(topic.id),
-        title: topic.title,
-        subtitle,
-        symbol: "text.bubble",
-        actionLabel: "详情",
-        action: actions.detail(),
-      });
-    }
-
-    // The token row is pinned last and always present, regardless of the query,
-    // so the token can be set even while the list is filtered.
+    // The token row is pinned last and always present, regardless of the query.
     rows.push({
       id: TOKEN_ROW_ID,
       title: "设置 V2EX Token",
@@ -190,6 +223,27 @@ definePlugin(manifest, {
     });
 
     return rows;
+  },
+
+  async list(listId, query, api) {
+    if (listId === LIST_HOT) {
+      const hot = await fetchJSON<Topic[]>(api.fetch, HOT_URL);
+      return toRows(dedupe(hot), query);
+    }
+    if (listId === LIST_LATEST) {
+      const latest = await fetchJSON<Topic[]>(api.fetch, LATEST_URL);
+      return toRows(dedupe(latest), query);
+    }
+    if (listId === LIST_NODE) {
+      const nodes = await readNodes(api.store);
+      const perNode = await Promise.all(
+        nodes.map((node) => fetchJSON<Topic[]>(api.fetch, nodeTopicsURL(node))),
+      );
+      const merged = perNode.flatMap((list) => list.slice(0, MAX_TOPICS_PER_NODE));
+      return toRows(dedupe(merged), query);
+    }
+    // An unknown list id: surface an empty list rather than throwing.
+    return [];
   },
 
   async detail(rowId, api) {
@@ -217,7 +271,7 @@ definePlugin(manifest, {
   },
 
   async action(rowId, _actionId, argument, api) {
-    // Only the token row acts; topic rows drill into Detail instead.
+    // Only the token row acts; topic and command rows drill in instead.
     if (rowId !== TOKEN_ROW_ID) {
       return;
     }

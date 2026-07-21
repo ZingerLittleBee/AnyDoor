@@ -24,6 +24,13 @@ definePlugin(fetchOnly, {
     api.store.keys();
     return [];
   },
+  async list(_listId, _query, api) {
+    // The `list` handler is narrowed to the same declared capabilities.
+    await api.fetch("https://example.com");
+    // @ts-expect-error toast is not declared in the manifest
+    await api.toast("info", "nope");
+    return [];
+  },
 });
 
 const pasteboardOnly = defineManifest({

@@ -16,6 +16,12 @@ import type { Row } from "./rows.js";
 export interface PluginHandlers<C extends readonly Capability[]> {
   /** Build the plugin's root palette rows for a query. */
   rows?: (query: string, api: DeclaredAPI<C>) => Row[] | Promise<Row[]>;
+  /**
+   * Build a searchable second-level list's rows (for rows whose action is
+   * `list`). `listId` is the id the committed `list` action carried; `query` is
+   * the second-level search text.
+   */
+  list?: (listId: string, query: string, api: DeclaredAPI<C>) => Row[] | Promise<Row[]>;
   /** Build a row's markdown Detail (for rows whose action is `detail`). */
   detail?: (rowId: string, api: DeclaredAPI<C>) => string | Promise<string>;
   /**
@@ -33,6 +39,7 @@ export interface PluginHandlers<C extends readonly Capability[]> {
 /** The impl object the host's `registerPlugin` receives (host-facing shape). */
 interface RegisteredImpl {
   rows?: (query: string) => Row[] | Promise<Row[]>;
+  list?: (listId: string, query: string) => Row[] | Promise<Row[]>;
   detail?: (rowId: string) => string | Promise<string>;
   action?: (rowId: string, actionId: string, argument?: string) => unknown | Promise<unknown>;
 }
@@ -80,9 +87,12 @@ export function definePlugin<const C extends readonly Capability[]>(
   const api = globalThis.anydoor as unknown as DeclaredAPI<C>;
   const impl: RegisteredImpl = {};
 
-  const { rows, detail, action } = handlers;
+  const { rows, list, detail, action } = handlers;
   if (rows) {
     impl.rows = (query) => rows(query, api);
+  }
+  if (list) {
+    impl.list = (listId, query) => list(listId, query, api);
   }
   if (detail) {
     impl.detail = (rowId) => detail(rowId, api);
