@@ -37,6 +37,10 @@ final class ScriptPluginRowSource: PluginRowSource {
 
     private let scriptID: ScriptPluginID
     private let runtime: ScriptPluginRuntime
+    /// Whether a failed build surfaces the error's own detail (Dev Plugin) or the
+    /// plain generic inline string (a normally installed plugin). See
+    /// ``ScriptPluginErrorPresentation`` (ticket 023).
+    private let surfacesErrorDetail: Bool
     private var cachedRows: [PluginRowDescriptor] = []
     private var currentLoadState: PluginRowLoadState = .loading
     /// Nudges a visible palette to recompute its rows once an async fetch lands.
@@ -48,12 +52,14 @@ final class ScriptPluginRowSource: PluginRowSource {
         scriptID: ScriptPluginID,
         runtime: ScriptPluginRuntime,
         sectionTitle: String,
+        surfacesErrorDetail: Bool = false,
         onRowsChanged: @escaping @MainActor () -> Void = {},
         onActionError: @escaping @MainActor (ScriptPluginError) -> Void = { _ in }
     ) {
         self.scriptID = scriptID
         self.runtime = runtime
         self.sectionTitleKey = sectionTitle
+        self.surfacesErrorDetail = surfacesErrorDetail
         self.onRowsChanged = onRowsChanged
         self.onActionError = onActionError
     }
@@ -75,7 +81,11 @@ final class ScriptPluginRowSource: PluginRowSource {
             currentLoadState = .ready
         } catch {
             cachedRows = []
-            currentLoadState = .failed(L(.commandPalettePluginRowError))
+            currentLoadState = .failed(ScriptPluginErrorPresentation.message(
+                for: error,
+                surfacesDetail: surfacesErrorDetail,
+                generic: L(.commandPalettePluginRowError)
+            ))
         }
         onRowsChanged()
     }
@@ -89,7 +99,11 @@ final class ScriptPluginRowSource: PluginRowSource {
             let markdown = try await runtime.buildDetail(pluginID: scriptID, rowID: id)
             return .markdown(markdown)
         } catch {
-            return .failure(L(.commandPaletteDetailFailed))
+            return .failure(ScriptPluginErrorPresentation.message(
+                for: error,
+                surfacesDetail: surfacesErrorDetail,
+                generic: L(.commandPaletteDetailFailed)
+            ))
         }
     }
 

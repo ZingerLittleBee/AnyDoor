@@ -160,7 +160,7 @@ final class ScriptPluginContext: @unchecked Sendable {
             self?.finish(box, result: .success(ScriptValue(jsValue: result)), tearDown: false)
         }
         let onRejected: @convention(block) (JSValue) -> Void = { [weak self] reason in
-            let message = reason.toString() ?? "unknown error"
+            let message = Self.describeThrown(reason)
             self?.finish(box, result: .failure(ScriptPluginError.invocationFailed(message)), tearDown: false)
         }
         let fulfilledValue = JSValue(object: onFulfilled, in: context)
@@ -169,7 +169,7 @@ final class ScriptPluginContext: @unchecked Sendable {
     }
 
     private func finishForException(_ exception: JSValue, box: InvocationBox) {
-        let description = exception.toString() ?? "unknown error"
+        let description = Self.describeThrown(exception)
         // CONSTRAINT: JavaScriptCore's execution-time-limit aborts a synchronous
         // runaway with an uncatchable exception that stringifies to
         // "JavaScript execution terminated." — there is no structured flag for
@@ -470,6 +470,21 @@ final class ScriptPluginContext: @unchecked Sendable {
         case ScriptPluginError.pluginNotRegistered: return "plugin never called anydoor.registerPlugin"
         default: return String(describing: error)
         }
+    }
+
+    /// Stringify a thrown JS value, appending its `stack` when the engine
+    /// attached one. Dev Plugin mode surfaces this whole message (message +
+    /// stack) to the author; installed plugins show only a generic inline string,
+    /// so carrying the stack here costs a normal user nothing (user story 21).
+    private static func describeThrown(_ value: JSValue) -> String {
+        let message = value.toString() ?? "unknown error"
+        guard value.isObject,
+              let stack = value.objectForKeyedSubscript("stack")?.toString(),
+              !stack.isEmpty,
+              !message.contains(stack) else {
+            return message
+        }
+        return "\(message)\n\(stack)"
     }
 
     private static func makeToast(kind: String, message: String) -> PluginToast {
