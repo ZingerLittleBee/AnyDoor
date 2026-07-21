@@ -64,6 +64,36 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // C shim exposing JavaScriptCore's private execution-time-limit API
+        // (ADR-0008 watchdog). The symbol is exported by the framework dylib
+        // but missing from the public SDK headers, so it is redeclared here —
+        // the same sanctioned technique as the XPCAuditToken ObjC shim.
+        .target(
+            name: "JavaScriptCoreWatchdog",
+            linkerSettings: [
+                .linkedFramework("JavaScriptCore"),
+            ]
+        ),
+        // Script Plugin runtime (ADR-0008/0009): the headless heart of the
+        // Script Plugin milestone. One inspectable JSContext per plugin on its
+        // own serial queue, promise-bridged capability calls gated by the
+        // manifest, and a hard watchdog. Depends only on PluginInterface (for
+        // the row descriptor it emits) plus the watchdog shim; it never touches
+        // Core, so the registry (ticket 021) wires it in through the capability
+        // host seam.
+        .target(
+            name: "ScriptPluginRuntime",
+            dependencies: [
+                "PluginInterface",
+                "JavaScriptCoreWatchdog",
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ],
+            linkerSettings: [
+                .linkedFramework("JavaScriptCore"),
+            ]
+        ),
         // Native Plugin pilot (ADR-0005): the Hosts feature as its own module
         // — profiles, /etc/hosts parse+compose, the editor window, popover,
         // and palette contributions. The privileged helper daemon (XPC
@@ -88,6 +118,7 @@ let package = Package(
                 "PluginInterface",
                 "ImageConversionPlugin",
                 "HostsPlugin",
+                "ScriptPluginRuntime",
             ],
             resources: [
                 .process("Resources"),
@@ -117,7 +148,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AnyDoorTests",
-            dependencies: ["AnyDoor", "ImageCodec", "PluginInterface", "ImageConversionPlugin", "HostsPlugin"],
+            dependencies: ["AnyDoor", "ImageCodec", "PluginInterface", "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime"],
             resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
