@@ -117,6 +117,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             modelContainer: modelContainer,
             coreProviders: coreProviders
         )
+        // Script Plugins: the second plugin kind. Discover Sideloaded packages
+        // in storage, activate the installed ones, and register their palette
+        // row sources. Independent of the Native registry — its own lifecycle
+        // core and install-state key (machine-local, out of config backup).
+        ScriptPluginRegistry.shared.bootstrap()
         QuicklinkStore.shared.bootstrap(modelContainer: modelContainer)
 
         // Translation history: give the store the shared container, then point
