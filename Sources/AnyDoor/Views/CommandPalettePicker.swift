@@ -11,6 +11,9 @@ struct CommandPalettePicker: View {
     /// Opens a markdown link tapped inside the Detail pane. The controller
     /// scheme-guards and dismisses (plugin-supplied URLs, ADR-0009).
     let onOpenDetailLink: (URL) -> Void
+    /// Fired when the Detail's bottom sentinel scrolls into view; the
+    /// controller fetches the next chunk through the state's load-more gate.
+    let onLoadDetailMore: () -> Void
     /// Notifies the controller when the Detail level is entered/left so it can
     /// hide the overlaid AppKit search field (no text input in Detail) and
     /// restore focus on return.
@@ -321,7 +324,7 @@ struct CommandPalettePicker: View {
     private var backHeaderTitle: String? {
         switch state.level {
         case .options(let optionsLevel): return optionsLevel.parentTitle
-        case .detail(let detail): return detail.title
+        case .detail(let detailLevel): return detailLevel.content.title
         case .list(let listLevel): return listLevel.title
         case .root, .argumentInput, .pluginArgumentInput: return nil
         }
@@ -371,12 +374,31 @@ struct CommandPalettePicker: View {
             .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
         case .loaded(_, let markdown):
             ScrollView {
-                MarkdownBlocksView(blocks: MarkdownBlocks.blocks(from: markdown))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 16)
-                    .overlayScrollers()
+                // Lazy so the bottom sentinel's `onAppear` fires only when the
+                // user actually scrolls it into view (in a plain VStack every
+                // child "appears" immediately, which would eagerly page in the
+                // whole document).
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    MarkdownBlocksView(blocks: MarkdownBlocks.blocks(from: markdown))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let cursor = state.detailMoreCursor {
+                        HStack {
+                            Spacer()
+                            ProgressView().controlSize(.small)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
+                        // Identity per cursor: each appended chunk re-arms the
+                        // sentinel, so it can trigger the next page when it is
+                        // still (or again) visible.
+                        .id(cursor)
+                        .onAppear { onLoadDetailMore() }
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+                .overlayScrollers()
             }
             .frame(minHeight: 320, maxHeight: .infinity)
             // Markdown links open through the environment so the controller can

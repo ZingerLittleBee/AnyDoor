@@ -111,10 +111,11 @@ final class ScriptPluginToolingTemplateTests: XCTestCase {
         let filtered = try await runtime.buildRows(pluginID: id, query: "JavaScriptCore")
         XCTAssertEqual(filtered.map(\.id), ["1002"])
 
-        // detail(): per-row markdown.
+        // detail(): per-row markdown (a plain string, so no pagination cursor).
         let detail = try await runtime.buildDetail(pluginID: id, rowID: "1001")
-        XCTAssertTrue(detail.contains("# Show HN: AnyDoor Script Plugins"), detail)
-        XCTAssertTrue(detail.contains("https://anydoor.dev/plugins"), detail)
+        XCTAssertTrue(detail.markdown.contains("# Show HN: AnyDoor Script Plugins"), detail.markdown)
+        XCTAssertTrue(detail.markdown.contains("https://anydoor.dev/plugins"), detail.markdown)
+        XCTAssertNil(detail.more)
 
         // action(): the openURL capability reaches the host through the spy.
         let result = try await runtime.performAction(pluginID: id, rowID: "1001", actionID: "default")

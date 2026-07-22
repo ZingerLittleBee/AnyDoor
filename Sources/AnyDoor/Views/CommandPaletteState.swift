@@ -48,6 +48,20 @@ final class CommandPaletteState {
         }
     }
 
+    /// A pushed markdown Detail level. Carries the owning source + row id so
+    /// the host can request further chunks, the presentation state, and the
+    /// pagination cursor the source's last chunk offered (user scrolls to the
+    /// bottom → the host fetches the next chunk and appends it).
+    struct DetailLevel: Equatable {
+        let sourceKey: PluginRowSourceKey
+        let rowID: String
+        var content: DetailState
+        /// Opaque source-defined cursor for the next chunk; nil = complete.
+        var moreCursor: String?
+        /// A load-more fetch is in flight — `beginDetailMore` refuses a second.
+        var isFetchingMore: Bool = false
+    }
+
     /// The content of a pushed second-level plugin list (a `.pushList` drill-in).
     /// Mirrors `DetailState`: loading while the plugin builds the rows, loaded
     /// with the rows, or failed with an inline message.
@@ -91,7 +105,7 @@ final class CommandPaletteState {
         /// row's plugin action (mirrors `.argumentInput` for Quicklinks).
         case pluginArgumentInput(sourceKey: PluginRowSourceKey, rowID: String, title: String, badge: String)
         /// A plugin row's pushed markdown Detail.
-        case detail(DetailState)
+        case detail(DetailLevel)
         /// A plugin row's pushed searchable second-level list (a `.pushList`
         /// drill-in). Sits between the root and a Detail drilled out of it.
         case list(ListLevel)
@@ -124,8 +138,17 @@ final class CommandPaletteState {
         return nil
     }
     var detailState: DetailState? {
-        if case .detail(let state) = level { return state }
+        if case .detail(let detailLevel) = level { return detailLevel.content }
         return nil
+    }
+
+    /// The cursor whose sentinel the Detail view shows at the bottom of a
+    /// loaded document, or nil when there is nothing more to load. Doubles as
+    /// the sentinel's view identity, so each new cursor re-arms `onAppear`.
+    var detailMoreCursor: String? {
+        guard case .detail(let detailLevel) = level,
+              case .loaded = detailLevel.content else { return nil }
+        return detailLevel.moreCursor
     }
     var argumentInputTitle: String? {
         switch level {
@@ -192,10 +215,13 @@ final class CommandPaletteState {
 
     /// Push a markdown Detail level in its loading state and return the
     /// generation token identifying this drill-in. The window controller passes
-    /// that token back to `updateDetail` when the markdown resolves.
+    /// that token back to `updateDetail` when the markdown resolves. The source
+    /// key and row id travel with the level so a later load-more request knows
+    /// whom to ask without any controller-held side state.
     @discardableResult
-    func enterDetail(title: String) -> Int {
-        push(.detail(.loading(title: title)))
+    func enterDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String) -> Int {
+        push(.detail(DetailLevel(
+            sourceKey: sourceKey, rowID: rowID, content: .loading(title: title))))
         return navigationRevision
     }
 
@@ -221,10 +247,53 @@ final class CommandPaletteState {
     /// Replace the Detail presentation state once its markdown resolves (or
     /// fails). A no-op unless the same drill-in is still open: a Detail that was
     /// dismissed, or superseded by a later drill-in, discards the stale result
-    /// via the generation token.
-    func updateDetail(_ state: DetailState, generation: Int) {
-        guard case .detail = level, generation == navigationRevision else { return }
-        level = .detail(state)
+    /// via the generation token. `more` is the pagination cursor the loaded
+    /// chunk offered (nil for a complete document and for failures).
+    func updateDetail(_ state: DetailState, more: String? = nil, generation: Int) {
+        guard case .detail(var detailLevel) = level, generation == navigationRevision else { return }
+        detailLevel.content = state
+        detailLevel.moreCursor = more
+        detailLevel.isFetchingMore = false
+        level = .detail(detailLevel)
+    }
+
+    /// Claim the next Detail chunk fetch: returns whom to ask and the cursor,
+    /// or nil when there is nothing to fetch (not a loaded Detail, no cursor,
+    /// or a fetch already in flight — the sentinel may fire more than once).
+    func beginDetailMore() -> (sourceKey: PluginRowSourceKey, rowID: String, cursor: String, generation: Int)? {
+        guard case .detail(var detailLevel) = level,
+              case .loaded = detailLevel.content,
+              let cursor = detailLevel.moreCursor,
+              !detailLevel.isFetchingMore else { return nil }
+        detailLevel.isFetchingMore = true
+        level = .detail(detailLevel)
+        return (detailLevel.sourceKey, detailLevel.rowID, cursor, navigationRevision)
+    }
+
+    /// Append a fetched Detail chunk to the loaded document and adopt the
+    /// chunk's own cursor (nil ends pagination). Generation-guarded like
+    /// `updateDetail`; an empty chunk only advances the cursor, so a source
+    /// whose last page came back empty terminates cleanly without junk
+    /// separators in the rendered markdown.
+    func appendDetailChunk(_ markdown: String, more: String?, generation: Int) {
+        guard case .detail(var detailLevel) = level, generation == navigationRevision,
+              case .loaded(let title, let existing) = detailLevel.content else { return }
+        let chunk = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !chunk.isEmpty {
+            detailLevel.content = .loaded(title: title, markdown: existing + "\n\n" + chunk)
+        }
+        detailLevel.moreCursor = more
+        detailLevel.isFetchingMore = false
+        level = .detail(detailLevel)
+    }
+
+    /// A load-more fetch failed: stop paginating silently (the document shown
+    /// so far stays; a retry loop against a broken source would be noise).
+    func failDetailMore(generation: Int) {
+        guard case .detail(var detailLevel) = level, generation == navigationRevision else { return }
+        detailLevel.moreCursor = nil
+        detailLevel.isFetchingMore = false
+        level = .detail(detailLevel)
     }
 
     /// Return to the root level, clearing the whole navigation stack, the option

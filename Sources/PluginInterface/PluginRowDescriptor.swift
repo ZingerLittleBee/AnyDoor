@@ -113,8 +113,13 @@ public enum PluginRowLoadState: Sendable, Equatable {
 /// The result of building a row's markdown Detail: the markdown to render, or
 /// a failure message to show inline. `nil` from `loadDetail` means the source
 /// has no Detail for that row at all.
+///
+/// `more` is an opaque source-defined cursor: non-nil means the Detail has a
+/// further chunk (e.g. the next page of comments), which the palette requests
+/// by calling `loadDetail(id:cursor:)` with it when the user scrolls to the
+/// bottom. The returned chunk's markdown is appended to the rendered document.
 public enum PluginRowDetailResult: Sendable, Equatable {
-    case markdown(String)
+    case markdown(String, more: String?)
     case failure(String)
 }
 
@@ -166,8 +171,11 @@ public protocol PluginRowSource: AnyObject {
     func performRow(id: String, argument: String) async
 
     /// Builds a row's markdown Detail, or `nil` when the source has none.
-    /// Called when a row whose descriptor declared `.pushDetail` is committed.
-    func loadDetail(id: String) async -> PluginRowDetailResult?
+    /// Called with a nil cursor when a row whose descriptor declared
+    /// `.pushDetail` is committed, and again with the last result's `more`
+    /// cursor when the user scrolls to the bottom of a Detail that has one —
+    /// the returned chunk is appended to the rendered document.
+    func loadDetail(id: String, cursor: String?) async -> PluginRowDetailResult?
 
     /// Builds the second-level rows for a committed `.pushList` row's list id,
     /// or `nil` when the source has no list for that id. Defaults to `nil`, so
@@ -183,6 +191,6 @@ extension PluginRowSource {
     public func performRow(id: String, argument: String) async {
         await performRow(id: id)
     }
-    public func loadDetail(id: String) async -> PluginRowDetailResult? { nil }
+    public func loadDetail(id: String, cursor: String?) async -> PluginRowDetailResult? { nil }
     public func loadList(id listID: String, query: String) async -> PluginRowListResult? { nil }
 }

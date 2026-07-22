@@ -42,9 +42,12 @@ const DEFAULT_NODES = ["programmer", "create", "share", "ideas", "apple", "jobs"
 // Cap topics per node so the merged 节点主题 list stays within the 30s watchdog.
 const MAX_TOPICS_PER_NODE = 10;
 
-// Cap the comments rendered into a Detail so a hot topic with hundreds of
-// replies stays within the simple-markdown budget and the watchdog.
-const MAX_REPLIES = 10;
+// The v2 replies endpoint pages at 20 per request (`?p=N`). Comments load one
+// page per Detail chunk: the initial Detail carries page 1, and a full page
+// offers the next page number as the `more` cursor so the host fetches it when
+// the user scrolls to the bottom. A short page ends pagination; a mistaken
+// extra fetch returns an empty chunk, which the host drops cleanly.
+const REPLIES_PAGE_SIZE = 20;
 
 // MARK: - V2EX API shapes (only the fields this plugin reads)
 
@@ -182,6 +185,17 @@ function quoted(...paragraphs: string[]): string {
     .join("\n");
 }
 
+/** Render one page of replies as per-comment blockquotes; floor numbers
+ * continue across pages via `startFloor`. */
+function repliesMarkdown(replies: Reply[], startFloor: number): string {
+  return replies
+    .map((reply, index) => {
+      const who = reply.member?.username ?? "匿名";
+      return quoted(`**${who}** · ${startFloor + index} 楼`, withImagePreviews(reply.content));
+    })
+    .join("\n\n");
+}
+
 function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
   const node = topic.node?.title ?? topic.node?.name ?? "";
   const author = topic.member?.username ?? "未知";
@@ -203,11 +217,7 @@ function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
   } else if (replies.length === 0) {
     lines.push("", "---", "", "## 评论", "", quoted("暂无评论"));
   } else {
-    lines.push("", "---", "", `## 评论 · 前 ${replies.length} 条`);
-    replies.forEach((reply, index) => {
-      const who = reply.member?.username ?? "匿名";
-      lines.push("", quoted(`**${who}** · ${index + 1} 楼`, withImagePreviews(reply.content)));
-    });
+    lines.push("", "---", "", "## 评论", "", repliesMarkdown(replies, 1));
   }
 
   return lines.join("\n");
@@ -267,7 +277,7 @@ definePlugin(manifest, {
     return [];
   },
 
-  async detail(rowId, api) {
+  async detail(rowId, api, cursor) {
     const topic = topics.get(rowId);
     if (topic === undefined) {
       return "# 未找到\n\n请返回列表重新载入帖子。";
@@ -278,17 +288,34 @@ definePlugin(manifest, {
       return topicMarkdown(topic, undefined);
     }
 
-    // With a token, pull the v2 topic (fresher body/node/author) and its first
-    // comments. A failed fetch throws, which the host surfaces inline.
     const headers = { Authorization: `Bearer ${token}` };
-    const [detailResponse, repliesResponse] = await Promise.all([
-      fetchJSON<V2Response<Topic>>(api.fetch, `${V2_BASE}/topics/${topic.id}`, headers),
-      fetchJSON<V2Response<Reply[]>>(api.fetch, `${V2_BASE}/topics/${topic.id}/replies`, headers),
-    ]);
+    const fetchRepliesPage = async (page: number): Promise<Reply[]> => {
+      const response = await fetchJSON<V2Response<Reply[]>>(
+        api.fetch, `${V2_BASE}/topics/${topic.id}/replies?p=${page}`, headers);
+      return response.result ?? [];
+    };
 
-    const enriched = detailResponse.result ?? topic;
-    const replies = (repliesResponse.result ?? []).slice(0, MAX_REPLIES);
-    return topicMarkdown(enriched, replies);
+    // A cursor requests one further page of comments; the host appends the
+    // returned chunk below the document it already renders.
+    if (cursor !== undefined) {
+      const page = Number.parseInt(cursor, 10);
+      const replies = await fetchRepliesPage(page);
+      return {
+        markdown: repliesMarkdown(replies, (page - 1) * REPLIES_PAGE_SIZE + 1),
+        more: replies.length >= REPLIES_PAGE_SIZE ? String(page + 1) : undefined,
+      };
+    }
+
+    // Initial document: the v2 topic (fresher body/node/author) plus the first
+    // page of comments. A failed fetch throws, which the host surfaces inline.
+    const [detailResponse, replies] = await Promise.all([
+      fetchJSON<V2Response<Topic>>(api.fetch, `${V2_BASE}/topics/${topic.id}`, headers),
+      fetchRepliesPage(1),
+    ]);
+    return {
+      markdown: topicMarkdown(detailResponse.result ?? topic, replies),
+      more: replies.length >= REPLIES_PAGE_SIZE ? "2" : undefined,
+    };
   },
 
   async action(rowId, _actionId, argument, api) {

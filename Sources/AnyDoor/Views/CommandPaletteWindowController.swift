@@ -176,6 +176,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onOpenDetailLink: { [weak self] url in
                 self?.openDetailLink(url)
             },
+            onLoadDetailMore: { [weak self] in
+                self?.loadMoreDetail()
+            },
             onDetailActiveChange: { [weak self] inDetail in
                 self?.setSearchFieldActive(!inDetail)
             },
@@ -668,23 +671,46 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// re-check that the same Detail is still visible after the await, so a
     /// dismissed palette or a mid-flight uninstall can neither hang nor resurface.
     private func pushPluginDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
-        guard let generation = state?.enterDetail(title: title) else { return }
+        guard let generation = state?.enterDetail(sourceKey: sourceKey, rowID: rowID, title: title) else { return }
         guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
             state?.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
             return
         }
         Task { @MainActor [weak self] in
-            let result = await source.loadDetail(id: rowID)
+            let result = await source.loadDetail(id: rowID, cursor: nil)
             // The generation token ensures a slow result only lands on the exact
             // drill-in that requested it — never on a later Detail (A→back→B).
             guard let self, let state = self.state, self.window?.isVisible == true else { return }
             switch result {
-            case .markdown(let markdown):
-                state.updateDetail(.loaded(title: title, markdown: markdown), generation: generation)
+            case .markdown(let markdown, let more):
+                state.updateDetail(.loaded(title: title, markdown: markdown), more: more, generation: generation)
             case .failure(let message):
                 state.updateDetail(.failed(title: title, message: message), generation: generation)
             case nil:
                 state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
+            }
+        }
+    }
+
+    /// Fetch the next Detail chunk when the user scrolls to the bottom sentinel.
+    /// The state's `beginDetailMore` is the single gate (loaded Detail + cursor +
+    /// no fetch in flight), so a sentinel that fires repeatedly cannot stack
+    /// requests; the generation token keys the append to this exact drill-in.
+    private func loadMoreDetail() {
+        guard let state, let request = state.beginDetailMore() else { return }
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: request.sourceKey) else {
+            state.failDetailMore(generation: request.generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadDetail(id: request.rowID, cursor: request.cursor)
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .markdown(let markdown, let more):
+                state.appendDetailChunk(markdown, more: more, generation: request.generation)
+            case .failure, nil:
+                // Keep what is already rendered; stop paginating quietly.
+                state.failDetailMore(generation: request.generation)
             }
         }
     }

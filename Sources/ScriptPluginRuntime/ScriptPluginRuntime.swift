@@ -1,6 +1,18 @@
 import Foundation
 import PluginInterface
 
+/// One chunk of a row's markdown Detail. `more` is the plugin's opaque cursor
+/// for the next chunk, or nil when the document is complete.
+public struct ScriptDetailChunk: Sendable, Equatable {
+    public let markdown: String
+    public let more: String?
+
+    public init(markdown: String, more: String?) {
+        self.markdown = markdown
+        self.more = more
+    }
+}
+
 /// The headless Script Plugin runtime: a self-contained subsystem the registry
 /// (ticket 021) consumes through clean seams. A validated package goes in;
 /// palette row descriptors, Detail markdown, action results, and capability side
@@ -90,13 +102,36 @@ public final class ScriptPluginRuntime {
         return try ScriptRowDecoder.decode(result)
     }
 
-    /// Build a row's markdown Detail (entry point `detail`).
-    public func buildDetail(pluginID: ScriptPluginID, rowID: String) async throws -> String {
-        let result = try await context(for: pluginID).invoke("detail", arguments: [.string(rowID)])
-        guard let markdown = result.stringValue else {
-            throw ScriptPluginError.resultDecodingFailed("detail() must return a string")
+    /// Build a row's markdown Detail chunk (entry point `detail`).
+    ///
+    /// A nil `cursor` requests the initial document; a non-nil cursor (the
+    /// previous chunk's `more`, opaque to the host) is passed as `detail`'s
+    /// second argument to request the next chunk. The plugin returns either a
+    /// plain markdown string (a complete document, nothing more to load) or
+    /// `{ markdown, more? }` to offer pagination.
+    public func buildDetail(
+        pluginID: ScriptPluginID, rowID: String, cursor: String? = nil
+    ) async throws -> ScriptDetailChunk {
+        var arguments: [ScriptValue] = [.string(rowID)]
+        if let cursor { arguments.append(.string(cursor)) }
+        let result = try await context(for: pluginID).invoke("detail", arguments: arguments)
+        if let markdown = result.stringValue {
+            return ScriptDetailChunk(markdown: markdown, more: nil)
         }
-        return markdown
+        if case .object(let fields) = result, let markdown = fields["markdown"]?.stringValue {
+            let more = fields["more"]
+            switch more {
+            case .none, .some(.null):
+                return ScriptDetailChunk(markdown: markdown, more: nil)
+            case .some(let value):
+                guard let cursor = value.stringValue else {
+                    throw ScriptPluginError.resultDecodingFailed("detail() 'more' must be a string")
+                }
+                return ScriptDetailChunk(markdown: markdown, more: cursor)
+            }
+        }
+        throw ScriptPluginError.resultDecodingFailed(
+            "detail() must return a string or { markdown, more? }")
     }
 
     /// Run a row action (entry point `action`) and return its decoded result.

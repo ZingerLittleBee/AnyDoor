@@ -297,7 +297,7 @@ final class ScriptPluginRegistryTests: XCTestCase {
         XCTAssertFalse(state.filteredSections.isEmpty)
 
         // …and the user has drilled into a Detail.
-        state.enterDetail(title: "Alpha")
+        state.enterDetail(sourceKey: rowSourceKey(for: id), rowID: "1", title: "Alpha")
         XCTAssertTrue(state.isInDetail)
 
         try await registry.uninstall(id)

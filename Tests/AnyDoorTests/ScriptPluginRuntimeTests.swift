@@ -53,8 +53,65 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         XCTAssertEqual(rows[1].id, "b")
         XCTAssertEqual(rows[1].commit, .closeThenAct)
 
+        // A plain-string detail() stays the complete-document shape: no cursor.
         let detail = try await runtime.buildDetail(pluginID: id, rowID: "a")
-        XCTAssertEqual(detail, "# Detail a")
+        XCTAssertEqual(detail, ScriptDetailChunk(markdown: "# Detail a", more: nil))
+    }
+
+    func testDetailChunkCarriesCursorAndReceivesItBack() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.pages",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () { return [{ id: "a", title: "A", action: { type: "detail" } }]; },
+              detail: function (rowId, cursor) {
+                if (cursor === undefined) {
+                  return { markdown: "# Page 1", more: "2" };
+                }
+                if (cursor === "2") {
+                  return { markdown: "Page 2", more: "3" };
+                }
+                return { markdown: "Last page" };
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+
+        let first = try await runtime.buildDetail(pluginID: id, rowID: "a")
+        XCTAssertEqual(first, ScriptDetailChunk(markdown: "# Page 1", more: "2"))
+
+        // The opaque cursor round-trips as detail()'s second argument.
+        let second = try await runtime.buildDetail(pluginID: id, rowID: "a", cursor: first.more)
+        XCTAssertEqual(second, ScriptDetailChunk(markdown: "Page 2", more: "3"))
+
+        // A chunk without `more` ends pagination.
+        let last = try await runtime.buildDetail(pluginID: id, rowID: "a", cursor: second.more)
+        XCTAssertEqual(last, ScriptDetailChunk(markdown: "Last page", more: nil))
+    }
+
+    func testDetailChunkWithNonStringMoreFailsDecoding() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.badmore",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () { return []; },
+              detail: function () { return { markdown: "x", more: 2 }; }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+
+        do {
+            _ = try await runtime.buildDetail(pluginID: id, rowID: "a")
+            XCTFail("expected resultDecodingFailed")
+        } catch let error as ScriptPluginError {
+            guard case .resultDecodingFailed = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
     }
 
     // MARK: - Row action declarations (the `action` union)

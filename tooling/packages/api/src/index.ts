@@ -24,7 +24,7 @@ export type { ApiVersion, Manifest } from "./manifest.js";
 export { defineManifest } from "./manifest.js";
 export type { Row, RowAction, LegacyCommit } from "./rows.js";
 export { actions } from "./rows.js";
-export type { PluginHandlers } from "./plugin.js";
+export type { PluginHandlers, DetailResult } from "./plugin.js";
 export { definePlugin } from "./plugin.js";
 
 /** The host `apiVersion` this package targets. */

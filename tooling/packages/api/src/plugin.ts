@@ -12,6 +12,17 @@ import type { Capability, DeclaredAPI } from "./capabilities.js";
 import type { Manifest } from "./manifest.js";
 import type { Row } from "./rows.js";
 
+/**
+ * What `detail` may return: a plain markdown string (a complete document), or
+ * a chunk carrying a `more` cursor. A non-undefined `more` tells the host the
+ * Detail has a further chunk; when the user scrolls to the bottom, the host
+ * calls `detail(rowId, api, cursor)` again with that cursor and appends the
+ * returned chunk's markdown to the rendered document. The cursor is opaque to
+ * the host — encode whatever pagination state you need (a page number, an
+ * API-issued token).
+ */
+export type DetailResult = string | { markdown: string; more?: string };
+
 /** The entry points a plugin may implement. Each receives the declared capability API. */
 export interface PluginHandlers<C extends readonly Capability[]> {
   /** Build the plugin's root palette rows for a query. */
@@ -22,8 +33,12 @@ export interface PluginHandlers<C extends readonly Capability[]> {
    * the second-level search text.
    */
   list?: (listId: string, query: string, api: DeclaredAPI<C>) => Row[] | Promise<Row[]>;
-  /** Build a row's markdown Detail (for rows whose action is `detail`). */
-  detail?: (rowId: string, api: DeclaredAPI<C>) => string | Promise<string>;
+  /**
+   * Build a row's markdown Detail (for rows whose action is `detail`).
+   * `cursor` is undefined for the initial document, or the `more` value your
+   * previous chunk returned when the host requests the next chunk.
+   */
+  detail?: (rowId: string, api: DeclaredAPI<C>, cursor?: string) => DetailResult | Promise<DetailResult>;
   /**
    * Run a row action. `argument` is present only when the row used the
    * `argument` action and the user submitted text.
@@ -40,7 +55,7 @@ export interface PluginHandlers<C extends readonly Capability[]> {
 interface RegisteredImpl {
   rows?: (query: string) => Row[] | Promise<Row[]>;
   list?: (listId: string, query: string) => Row[] | Promise<Row[]>;
-  detail?: (rowId: string) => string | Promise<string>;
+  detail?: (rowId: string, cursor?: string) => DetailResult | Promise<DetailResult>;
   action?: (rowId: string, actionId: string, argument?: string) => unknown | Promise<unknown>;
 }
 
@@ -95,7 +110,7 @@ export function definePlugin<const C extends readonly Capability[]>(
     impl.list = (listId, query) => list(listId, query, api);
   }
   if (detail) {
-    impl.detail = (rowId) => detail(rowId, api);
+    impl.detail = (rowId, cursor) => detail(rowId, api, cursor);
   }
   if (action) {
     impl.action = (rowId, actionId, argument) => action(rowId, actionId, argument, api);

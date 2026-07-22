@@ -12,7 +12,8 @@ import ScriptPluginRuntime
 ///   keystroke returns that cache. While the first fetch is in flight the source
 ///   reports `.loading`, and a failed fetch reports `.failed`, so the palette can
 ///   render a loading placeholder or an inline error row instead of hanging.
-/// - `loadDetail(id:)` builds a committed row's markdown Detail.
+/// - `loadDetail(id:cursor:)` builds a committed row's markdown Detail (or its
+///   next chunk when the plugin offered a pagination cursor).
 /// - `performRow(id:)` / `performRow(id:argument:)` run the plugin's `action`
 ///   entry point; a failure is reported as a toast (never a silent no-op), while
 ///   an invocation that lands after the plugin was unloaded is dropped so a
@@ -104,10 +105,10 @@ final class ScriptPluginRowSource: PluginRowSource {
         onRowsChanged()
     }
 
-    func loadDetail(id: String) async -> PluginRowDetailResult? {
+    func loadDetail(id: String, cursor: String?) async -> PluginRowDetailResult? {
         do {
-            let markdown = try await runtime.buildDetail(pluginID: scriptID, rowID: id)
-            return .markdown(markdown)
+            let chunk = try await runtime.buildDetail(pluginID: scriptID, rowID: id, cursor: cursor)
+            return .markdown(chunk.markdown, more: chunk.more)
         } catch {
             return .failure(ScriptPluginErrorPresentation.message(
                 for: error,

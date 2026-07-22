@@ -64,7 +64,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         state.query = "stale"
         state.selectedIndex = 3
 
-        let generation = state.enterDetail(title: "Latest Post")
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Latest Post")
 
         XCTAssertTrue(state.isInDetail)
         XCTAssertFalse(state.isAtRoot)
@@ -80,7 +80,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
     @MainActor
     func testDetailEscapeClearsQueryThenPopsToRoot() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        let generation = state.enterDetail(title: "Post")
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
         state.updateDetail(.loaded(title: "Post", markdown: "body"), generation: generation)
 
         // A non-empty query clears first (even in Detail), then an empty query
@@ -96,7 +96,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
     @MainActor
     func testUpdateDetailIgnoredAfterNavigatingAway() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        let generation = state.enterDetail(title: "Post")
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
         state.popToRoot()
 
         // A late async markdown result must not resurrect a dismissed Detail.
@@ -111,9 +111,9 @@ final class CommandPalettePluginStateTests: XCTestCase {
         // plugin queues are independent, so A can resolve after B). The
         // generation token keys each result to the exact drill-in that asked.
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        let genA = state.enterDetail(title: "Post A")
+        let genA = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post A")
         state.popToRoot()
-        let genB = state.enterDetail(title: "Post B")
+        let genB = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post B")
 
         // A's slow result arrives now — ignored, B stays loading.
         state.updateDetail(.loaded(title: "Post A", markdown: "A body"), generation: genA)
@@ -128,11 +128,87 @@ final class CommandPalettePluginStateTests: XCTestCase {
     @MainActor
     func testDetailPopClearsMarkdownFailureState() {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
-        let generation = state.enterDetail(title: "Post")
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
         state.updateDetail(.failed(title: "Post", message: "boom"), generation: generation)
         XCTAssertEqual(state.detailState, .failed(title: "Post", message: "boom"))
         state.popToRoot()
         XCTAssertNil(state.detailState)
+    }
+
+    // MARK: - Detail load-more (comment pagination)
+
+    @MainActor
+    func testDetailMoreCursorFlowsFromLoadThroughAppendToEnd() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        XCTAssertNil(state.detailMoreCursor, "a loading Detail offers no sentinel")
+
+        state.updateDetail(.loaded(title: "Post", markdown: "body"), more: "2", generation: generation)
+        XCTAssertEqual(state.detailMoreCursor, "2")
+
+        // Claiming the fetch marks it in flight; a second sentinel fire is refused.
+        let request = state.beginDetailMore()
+        XCTAssertEqual(request?.sourceKey, sourceKey)
+        XCTAssertEqual(request?.rowID, "row")
+        XCTAssertEqual(request?.cursor, "2")
+        XCTAssertNil(state.beginDetailMore(), "one fetch in flight at a time")
+
+        // The chunk appends below the document and adopts the next cursor.
+        state.appendDetailChunk("page 2", more: "3", generation: request!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body\n\npage 2"))
+        XCTAssertEqual(state.detailMoreCursor, "3")
+
+        // The final chunk carries no cursor: pagination ends, sentinel gone.
+        let last = state.beginDetailMore()
+        state.appendDetailChunk("page 3", more: nil, generation: last!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body\n\npage 2\n\npage 3"))
+        XCTAssertNil(state.detailMoreCursor)
+        XCTAssertNil(state.beginDetailMore())
+    }
+
+    @MainActor
+    func testEmptyChunkOnlyAdvancesCursorWithoutJunkSeparators() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        state.updateDetail(.loaded(title: "Post", markdown: "body"), more: "2", generation: generation)
+
+        // A source whose last page came back empty terminates cleanly.
+        let request = state.beginDetailMore()
+        state.appendDetailChunk("  \n", more: nil, generation: request!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body"))
+        XCTAssertNil(state.detailMoreCursor)
+    }
+
+    @MainActor
+    func testLateChunkDoesNotLandOnALaterDrillIn() {
+        // Detail A offers more → user backs out → Detail B: A's slow chunk must
+        // neither append to B nor resurrect A's cursor.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let genA = state.enterDetail(sourceKey: sourceKey, rowID: "a", title: "A")
+        state.updateDetail(.loaded(title: "A", markdown: "A body"), more: "2", generation: genA)
+        let requestA = state.beginDetailMore()
+        state.popToRoot()
+
+        let genB = state.enterDetail(sourceKey: sourceKey, rowID: "b", title: "B")
+        state.updateDetail(.loaded(title: "B", markdown: "B body"), generation: genB)
+
+        state.appendDetailChunk("A page 2", more: "3", generation: requestA!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "B", markdown: "B body"))
+        XCTAssertNil(state.detailMoreCursor)
+    }
+
+    @MainActor
+    func testFailedLoadMoreStopsPaginationButKeepsDocument() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        state.updateDetail(.loaded(title: "Post", markdown: "body"), more: "2", generation: generation)
+
+        let request = state.beginDetailMore()
+        state.failDetailMore(generation: request!.generation)
+
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body"))
+        XCTAssertNil(state.detailMoreCursor, "a broken source stops paginating silently")
+        XCTAssertNil(state.beginDetailMore())
     }
 
     // MARK: - Plugin list navigation
@@ -257,7 +333,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertTrue(state.isInList)
 
         // list -> detail (drilled from a list row)
-        state.enterDetail(title: "Alpha")
+        state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Alpha")
         XCTAssertTrue(state.isInDetail)
 
         // Esc pops the Detail back to the LIST it came from, not the root.
@@ -333,7 +409,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertEqual(state.navigationRevision, before, "resolving list rows does not move the field")
 
         // list -> detail -> list -> root -> (argument in -> out)
-        state.enterDetail(title: "Alpha"); note()
+        state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Alpha"); note()
         state.popLevel(); note()          // detail -> list
         state.popLevel(); note()          // list -> root
         state.enterPluginArgumentInput(sourceKey: sourceKey, rowID: "s", title: "S"); note()
