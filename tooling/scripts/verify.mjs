@@ -15,6 +15,8 @@ import os from "node:os";
 import path from "node:path";
 import vm from "node:vm";
 
+import { contractFixturePath, generateContractJSON } from "./refresh-contract-fixtures.mjs";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const toolingRoot = path.join(here, "..");
 const apiDir = path.join(toolingRoot, "packages", "api");
@@ -154,6 +156,16 @@ async function main() {
       assertManifest(exampleDist);
       assertSelfRegisters(assertBundle(exampleDist));
     }
+
+    process.stdout.write("\n[verify] asserting the Swift contract fixture is current\n");
+    const expectedContract = await generateContractJSON();
+    const committedContract = fs.existsSync(contractFixturePath)
+      ? fs.readFileSync(contractFixturePath, "utf8")
+      : "";
+    check(
+      "contract.json matches the typed fixture source (run scripts/refresh-contract-fixtures.mjs)",
+      committedContract === expectedContract
+    );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
