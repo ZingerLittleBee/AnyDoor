@@ -69,13 +69,13 @@ async rows(query, api) {
 
 - `defineManifest(manifest)` — identity helper that captures the declared
   capability tuple for type inference.
-- `definePlugin(manifest, handlers)` — registers `rows` / `detail` / `action`
-  with the host and injects the narrowed capability API.
-- `actions` — builders for row commit actions: `detail()`, `openURL(url)`,
-  `copy(text)`, `argument()`, `run(close?)`.
-- Types: `Manifest`, `Capability`, `Row`, `RowAction`, `FetchOptions`,
-  `FetchResponse`, `Store`, `ToastKind`, `DeclaredAPI`, `JSONValue`, and the
-  per-capability function types.
+- `definePlugin(manifest, handlers)` — registers `rows` / `list` / `detail` /
+  `action` with the host and injects the narrowed capability API.
+- `actions` — builders for row commit actions: `detail()`, `list(listId)`,
+  `openURL(url)`, `copy(text)`, `argument()`, `run(close?)`.
+- Types: `Manifest`, `Capability`, `Row`, `RowAction`, `DetailResult`,
+  `FetchOptions`, `FetchResponse`, `Store`, `ToastKind`, `DeclaredAPI`,
+  `JSONValue`, and the per-capability function types.
 
 ### Capabilities
 
@@ -98,5 +98,51 @@ restriction applies to a row's `openURL` commit action.
 | Entry point | Signature | Purpose |
 | --- | --- | --- |
 | `rows` | `(query, api) => Row[] \| Promise<Row[]>` | Root palette rows for a query. |
-| `detail` | `(rowId, api) => string \| Promise<string>` | Markdown Detail for a row. |
+| `list` | `(listId, query, api) => Row[] \| Promise<Row[]>` | Second-level rows for a committed `list` action. |
+| `detail` | `(rowId, api, cursor?) => DetailResult \| Promise<DetailResult>` | Markdown Detail for a row, optionally chunked (see below). |
 | `action` | `(rowId, actionId, argument, api) => unknown` | Run a row action. |
+
+## Detail markdown
+
+The host renders a Detail with the system markdown parser (no third-party
+renderer). Block structure it lays out:
+
+- headings (`#`…`######`), paragraphs, ordered/unordered lists, fenced code
+  blocks, thematic breaks (`---`)
+- **blockquotes** (`> …`) — drawn with a leading bar in secondary text, visually
+  distinct from body paragraphs. Use them for quoted or secondary content such
+  as comments; a multi-paragraph quote stays one visual unit, separate quotes
+  stay separate.
+- **image previews** — `![alt](url)` renders inline (async loaded, capped
+  height, tappable-link fallback on failure). Only `http`/`https` image URLs
+  load; any other scheme is dropped, never fetched. Bare image URLs in plain
+  text are *not* auto-detected — if your data source is plain text, rewrite
+  them into `![](url)` yourself (see `examples/v2ex`'s `withImagePreviews`).
+- inline bold / italic / inline code / links survive inside every block. Tapped
+  links are scheme-guarded like `openURL`.
+
+## Detail pagination (load more on scroll)
+
+`detail` may return a chunk instead of a plain string:
+
+```ts
+async detail(rowId, api, cursor) {
+  const page = cursor === undefined ? 1 : Number(cursor);
+  const items = await fetchPage(rowId, page, api);
+  return {
+    markdown: page === 1 ? renderDocument(items) : renderItems(items),
+    more: items.length === PAGE_SIZE ? String(page + 1) : undefined,
+  };
+},
+```
+
+- A returned `more` cursor makes the host show a loading sentinel at the bottom
+  of the Detail; when the user scrolls to it, the host calls
+  `detail(rowId, api, cursor)` with that cursor and appends the returned
+  chunk's markdown below the rendered document.
+- The cursor is **opaque to the host** — encode whatever pagination state you
+  need (a page number, an API-issued token). It round-trips verbatim.
+- Omitting `more` (or returning a plain string) marks the document complete.
+- An empty chunk ends pagination cleanly; a thrown error keeps what is already
+  rendered and stops paginating. The host never issues more than one chunk
+  fetch at a time.

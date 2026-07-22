@@ -25,7 +25,8 @@ dependency, so `pnpm install && pnpm build` runs standalone inside the example
 directory. `pnpm verify` builds and asserts them alongside the scaffold template.
 
 - [`examples/v2ex`](examples/v2ex) — a V2EX viewer: merged hot/latest topic list,
-  per-topic markdown Detail with comments, and an optional stored access token
+  per-topic markdown Detail with image previews and scroll-paginated comments,
+  and an optional stored access token
   (`fetch` + `store` + `toast` + `openURL`).
 
 ## Requirements
