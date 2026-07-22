@@ -37,18 +37,28 @@ public protocol ScriptFetchTransport: Sendable {
 }
 
 /// The production transport, backed by `URLSession`.
+///
+/// Deliberately cache-free: palette rows rebuild on every open, so a plugin's
+/// `fetch` must observe the live network — some APIs (V2EX sends
+/// `Cache-Control: max-age=432000`, five days) would otherwise pin a plugin's
+/// rows to the first response served from the local `URLCache`. The ephemeral
+/// session also keeps plugin responses (which may carry personal tokens) out
+/// of the shared on-disk cache and cookie store.
 public struct URLSessionFetchTransport: ScriptFetchTransport {
     private let session: URLSession
 
-    public init(session: URLSession = .shared) {
-        self.session = session
+    public init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        self.session = URLSession(configuration: configuration)
     }
 
     public func fetch(_ request: ScriptFetchRequest) async throws -> ScriptFetchResponse {
         guard let url = URL(string: request.url) else {
             throw ScriptPluginError.capabilityFailed("fetch: invalid URL \(request.url)")
         }
-        var urlRequest = URLRequest(url: url)
+        var urlRequest = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData)
         urlRequest.httpMethod = request.method
         for (field, value) in request.headers {
             urlRequest.setValue(value, forHTTPHeaderField: field)
