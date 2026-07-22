@@ -124,19 +124,28 @@ public final class ScriptPluginRuntime {
         if let cursor { arguments.append(.string(cursor)) }
         let result = try await context(for: pluginID).invoke("list", arguments: arguments)
         if case .object(let fields) = result, let rowsValue = fields["rows"] {
-            let more: String?
-            switch fields["more"] {
-            case .none, .some(.null):
-                more = nil
-            case .some(let value):
-                guard let cursor = value.stringValue else {
-                    throw ScriptPluginError.resultDecodingFailed("list() 'more' must be a string")
-                }
-                more = cursor
-            }
-            return ScriptListChunk(rows: try ScriptRowDecoder.decode(rowsValue), more: more)
+            return ScriptListChunk(
+                rows: try ScriptRowDecoder.decode(rowsValue),
+                more: try Self.decodeMoreCursor(fields, entryPoint: "list"))
         }
         return ScriptListChunk(rows: try ScriptRowDecoder.decode(result), more: nil)
+    }
+
+    /// Decode a chunked result's optional `more` pagination cursor: absent or
+    /// null means the document/list is complete; any non-string value is a
+    /// decode error attributed to `entryPoint`.
+    private static func decodeMoreCursor(
+        _ fields: [String: ScriptValue], entryPoint: String
+    ) throws -> String? {
+        switch fields["more"] {
+        case .none, .some(.null):
+            return nil
+        case .some(let value):
+            guard let cursor = value.stringValue else {
+                throw ScriptPluginError.resultDecodingFailed("\(entryPoint)() 'more' must be a string")
+            }
+            return cursor
+        }
     }
 
     /// Build a row's markdown Detail chunk (entry point `detail`).
@@ -180,16 +189,7 @@ public final class ScriptPluginRuntime {
                 "\(entryPoint)() must return a string or { markdown, more?, actions? }")
         }
 
-        let more: String?
-        switch fields["more"] {
-        case .none, .some(.null):
-            more = nil
-        case .some(let value):
-            guard let cursor = value.stringValue else {
-                throw ScriptPluginError.resultDecodingFailed("\(entryPoint)() 'more' must be a string")
-            }
-            more = cursor
-        }
+        let more = try decodeMoreCursor(fields, entryPoint: entryPoint)
 
         var actions: [PluginRowDetailAction] = []
         switch fields["actions"] {
