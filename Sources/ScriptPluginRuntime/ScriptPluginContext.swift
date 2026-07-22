@@ -293,77 +293,92 @@ final class ScriptPluginContext: @unchecked Sendable {
     // MARK: - Capability injection
 
     private func injectCapabilities(into anydoor: JSValue, context: JSContext) {
-        if declaredCapabilities.contains(.fetch) { injectFetch(into: anydoor, context: context) }
-        if declaredCapabilities.contains(.store) { injectStore(into: anydoor, context: context) }
-        if declaredCapabilities.contains(.toast) { injectToast(into: anydoor, context: context) }
-        if declaredCapabilities.contains(.pasteboard) { injectPasteboard(into: anydoor, context: context) }
-        if declaredCapabilities.contains(.delay) { injectDelay(into: anydoor, context: context) }
-        if declaredCapabilities.contains(.openURL) { injectOpenURL(into: anydoor, context: context) }
+        for capability in ScriptCapability.allCases where declaredCapabilities.contains(capability) {
+            inject(capability, into: anydoor, context: context)
+        }
     }
 
-    private func injectFetch(into anydoor: JSValue, context: JSContext) {
+    /// The single site pairing each capability with its JS surface. Exhaustive
+    /// on purpose: a new `ScriptCapability` case fails to compile until it is
+    /// given an injection here, so a capability can never be declared in a
+    /// manifest yet silently missing from the context.
+    private func inject(_ capability: ScriptCapability, into anydoor: JSValue, context: JSContext) {
+        switch capability {
+        case .fetch: injectFetch(into: anydoor)
+        case .store: injectStore(into: anydoor, context: context)
+        case .toast: injectToast(into: anydoor)
+        case .pasteboard: injectPasteboard(into: anydoor)
+        case .delay: injectDelay(into: anydoor)
+        case .openURL: injectOpenURL(into: anydoor)
+        }
+    }
+
+    /// Shared skeleton for a promise-returning capability: mint a promise, run
+    /// `work` in a task (which hops to whatever isolation it declares), and
+    /// settle the promise back on the plugin queue. Must be called on the queue,
+    /// which every capability block already is — JS only executes there.
+    private func settleFromTask(
+        in context: JSContext,
+        _ work: @escaping @Sendable () async -> CapabilityOutcome
+    ) -> JSValue {
+        let (promise, token) = makePromise(in: context)
+        Task {
+            let outcome = await work()
+            self.settle(token: token, outcome)
+        }
+        return promise
+    }
+
+    private func injectFetch(into anydoor: JSValue) {
         let transport = capabilityHost.transport
         let block: @convention(block) (JSValue, JSValue) -> JSValue = { [weak self] urlValue, optionsValue in
             guard let self, let context = self.context else { return JSValue() }
             let request = Self.decodeFetchRequest(url: urlValue, options: optionsValue)
-            let (promise, token) = self.makePromise(in: context)
-            Task {
+            return self.settleFromTask(in: context) {
                 do {
-                    let response = try await transport.fetch(request)
-                    self.settle(token: token, .fetchResponse(response))
+                    return .fetchResponse(try await transport.fetch(request))
                 } catch {
-                    self.settle(token: token, .failure("fetch failed: \(error.localizedDescription)"))
+                    return .failure("fetch failed: \(error.localizedDescription)")
                 }
             }
-            return promise
         }
         anydoor.setObject(block, forKeyedSubscript: "fetch" as NSString)
     }
 
     private func injectStore(into anydoor: JSValue, context: JSContext) {
         // The store is `@MainActor`-isolated, so it is read through `self`
-        // inside each `@MainActor` task — never captured across the queue.
+        // inside each `@MainActor` work closure — never captured across the queue.
         guard let storeObject = JSValue(newObjectIn: context) else { return }
 
         let get: @convention(block) (JSValue) -> JSValue = { [weak self] keyValue in
             guard let self, let context = self.context else { return JSValue() }
             let key = keyValue.toString() ?? ""
-            let (promise, token) = self.makePromise(in: context)
-            Task { @MainActor in
-                let value = self.store?.get(key) ?? .null
-                self.settle(token: token, .value(value))
+            return self.settleFromTask(in: context) { @MainActor in
+                .value(self.store?.get(key) ?? .null)
             }
-            return promise
         }
         let set: @convention(block) (JSValue, JSValue) -> JSValue = { [weak self] keyValue, valueValue in
             guard let self, let context = self.context else { return JSValue() }
             let key = keyValue.toString() ?? ""
             let value = ScriptValue(jsValue: valueValue)
-            let (promise, token) = self.makePromise(in: context)
-            Task { @MainActor in
+            return self.settleFromTask(in: context) { @MainActor in
                 self.store?.set(key, value: value)
-                self.settle(token: token, .void)
+                return .void
             }
-            return promise
         }
         let remove: @convention(block) (JSValue) -> JSValue = { [weak self] keyValue in
             guard let self, let context = self.context else { return JSValue() }
             let key = keyValue.toString() ?? ""
-            let (promise, token) = self.makePromise(in: context)
-            Task { @MainActor in
+            return self.settleFromTask(in: context) { @MainActor in
                 self.store?.remove(key)
-                self.settle(token: token, .void)
+                return .void
             }
-            return promise
         }
         let keys: @convention(block) () -> JSValue = { [weak self] in
             guard let self, let context = self.context else { return JSValue() }
-            let (promise, token) = self.makePromise(in: context)
-            Task { @MainActor in
-                let all = self.store?.keys() ?? []
-                self.settle(token: token, .value(.array(all.map(ScriptValue.string))))
+            return self.settleFromTask(in: context) { @MainActor in
+                .value(.array((self.store?.keys() ?? []).map(ScriptValue.string)))
             }
-            return promise
         }
         storeObject.setObject(get, forKeyedSubscript: "get" as NSString)
         storeObject.setObject(set, forKeyedSubscript: "set" as NSString)
@@ -372,45 +387,43 @@ final class ScriptPluginContext: @unchecked Sendable {
         anydoor.setObject(storeObject, forKeyedSubscript: "store" as NSString)
     }
 
-    private func injectToast(into anydoor: JSValue, context: JSContext) {
+    private func injectToast(into anydoor: JSValue) {
         let present = capabilityHost.presentToast
         let id = id
         let block: @convention(block) (JSValue, JSValue) -> JSValue = { [weak self] kindValue, messageValue in
             guard let self, let context = self.context else { return JSValue() }
-            let kind = kindValue.toString() ?? "info"
-            let message = messageValue.toString() ?? ""
-            let toast = Self.makeToast(kind: kind, message: message)
-            let (promise, token) = self.makePromise(in: context)
-            Task { @MainActor in
+            let toast = Self.makeToast(
+                kind: kindValue.toString() ?? "info",
+                message: messageValue.toString() ?? ""
+            )
+            return self.settleFromTask(in: context) { @MainActor in
                 present(id, toast)
-                self.settle(token: token, .void)
+                return .void
             }
-            return promise
         }
         anydoor.setObject(block, forKeyedSubscript: "toast" as NSString)
     }
 
-    private func injectPasteboard(into anydoor: JSValue, context: JSContext) {
+    private func injectPasteboard(into anydoor: JSValue) {
         let write = capabilityHost.writePasteboard
         let block: @convention(block) (JSValue) -> JSValue = { [weak self] textValue in
             guard let self, let context = self.context else { return JSValue() }
             let text = textValue.toString() ?? ""
-            let (promise, token) = self.makePromise(in: context)
-            Task { @MainActor in
+            return self.settleFromTask(in: context) { @MainActor in
                 write(text)
-                self.settle(token: token, .void)
+                return .void
             }
-            return promise
         }
         anydoor.setObject(block, forKeyedSubscript: "copy" as NSString)
     }
 
-    private func injectDelay(into anydoor: JSValue, context: JSContext) {
+    private func injectDelay(into anydoor: JSValue) {
         let block: @convention(block) (JSValue) -> JSValue = { [weak self] msValue in
             guard let self, let context = self.context else { return JSValue() }
             let milliseconds = max(0, msValue.toDouble())
             let (promise, token) = self.makePromise(in: context)
-            // Scheduled on the plugin queue; resolves the promise in place.
+            // The one capability with no off-queue work: a timer scheduled on
+            // the plugin queue resolves the promise in place.
             self.queue.asyncAfter(deadline: .now() + milliseconds / 1000.0) { [weak self] in
                 self?.resolveOnQueue(token: token, .void)
             }
@@ -419,33 +432,27 @@ final class ScriptPluginContext: @unchecked Sendable {
         anydoor.setObject(block, forKeyedSubscript: "delay" as NSString)
     }
 
-    private func injectOpenURL(into anydoor: JSValue, context: JSContext) {
+    private func injectOpenURL(into anydoor: JSValue) {
         let open = capabilityHost.openURL
         let block: @convention(block) (JSValue) -> JSValue = { [weak self] urlValue in
             guard let self, let context = self.context else { return JSValue() }
             let string = urlValue.toString() ?? ""
-            let (promise, token) = self.makePromise(in: context)
-            guard let url = URL(string: string) else {
-                self.resolveOnQueue(token: token, .failure("openURL: invalid URL \(string)"))
-                return promise
-            }
-            // Confine openURL to its declared surface — the default browser
-            // (ADR-0009). A non-web scheme (file://, custom app schemes) would
-            // reach past the capability, so reject it with the same capability
-            // error path fetch uses; the JS caller gets a rejected promise and
-            // the rejection lands in the plugin's diagnostics log.
-            guard ScriptOpenURLPolicy.allows(url) else {
-                self.resolveOnQueue(
-                    token: token,
-                    .failure("openURL: only http and https URLs are permitted, got \(string)")
-                )
-                return promise
-            }
-            Task { @MainActor in
+            return self.settleFromTask(in: context) { @MainActor in
+                guard let url = URL(string: string) else {
+                    return .failure("openURL: invalid URL \(string)")
+                }
+                // Confine openURL to its declared surface — the default browser
+                // (ADR-0009). A non-web scheme (file://, custom app schemes)
+                // would reach past the capability, so reject it with the same
+                // capability error path fetch uses; the JS caller gets a
+                // rejected promise and the rejection lands in the plugin's
+                // diagnostics log.
+                guard ScriptOpenURLPolicy.allows(url) else {
+                    return .failure("openURL: only http and https URLs are permitted, got \(string)")
+                }
                 open(url)
-                self.settle(token: token, .void)
+                return .void
             }
-            return promise
         }
         anydoor.setObject(block, forKeyedSubscript: "openURL" as NSString)
     }
