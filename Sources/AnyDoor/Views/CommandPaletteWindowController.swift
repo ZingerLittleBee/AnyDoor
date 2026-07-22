@@ -429,18 +429,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             .filter { !boundBundleIDs.contains($0.bundleID) }
             .enumerated()
             .map { offset, app in
-                PanelEntry(
-                    id: PanelEntry.id(for: .installedApp(bundleID: app.bundleID, path: app.path)),
+                PanelEntry.paletteRow(
                     source: .installedApp(bundleID: app.bundleID, path: app.path),
                     displayOrder: unboundOrder + Double(offset),
-                    isVisible: true,
-                    hotkey: nil,
                     title: app.displayName,
-                    subtitle: nil,
                     symbol: "app.fill",
-                    kind: .submenu,
-                    toggleState: nil,
-                    permission: .notRequired
+                    kind: .submenu
                 )
             }
 

@@ -149,18 +149,12 @@ final class CommandPaletteState {
     /// Push a second level built from `options`; resets the search + selection.
     func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
         let entries = options.enumerated().map { index, option in
-            PanelEntry(
-                id: PanelEntry.id(for: .paletteOption(id: option.id)),
+            PanelEntry.paletteRow(
                 source: .paletteOption(id: option.id),
                 displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
                 title: option.title,
                 subtitle: option.subtitle,
-                symbol: option.symbol,
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
+                symbol: option.symbol
             )
         }
         push(.options(OptionsLevel(
@@ -573,37 +567,53 @@ final class CommandPaletteState {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
         return rowSources.compactMap { registration in
-            let entries: [PanelEntry]
+            let content: PluginRowsContent
             switch registration.source.loadState {
             case .loading:
-                // No rows yet — show a single non-interactive loading row so the
-                // section is visibly building instead of hanging or vanishing.
-                entries = [Self.pluginRowStatusEntry(
-                    sourceKey: registration.key, status: .loading, message: nil
-                )]
+                content = .loading
             case .failed(let message):
-                entries = [Self.pluginRowStatusEntry(
-                    sourceKey: registration.key, status: .error, message: message
-                )]
+                content = .failed(message)
             case .ready:
                 // Match against the section's display title too (the plugin's
                 // name), so typing that name lists every row — resolve the raw
                 // catalog key to what the user actually sees.
                 let sectionTitle = L(raw: registration.sectionTitleKey)
-                entries = Self.filterRootPluginRows(
+                content = .rows(Self.filterRootPluginRows(
                     registration.source.rows(), query: trimmed, sectionTitle: sectionTitle
-                )
-                    .enumerated()
-                    .map { index, descriptor in
-                        Self.pluginRowEntry(
-                            sourceKey: registration.key,
-                            descriptor: descriptor,
-                            displayOrder: Double(index)
-                        )
-                    }
+                ))
             }
+            let entries = Self.pluginContentEntries(sourceKey: registration.key, content: content)
             guard !entries.isEmpty else { return nil }
             return CommandPaletteSection(rawTitleKey: registration.sectionTitleKey, entries: entries)
+        }
+    }
+
+    /// One plugin level's row content — a row source's load state at the root,
+    /// or a pushed list's `ListContent` — unified so both levels share the
+    /// status-row / enumeration scaffold in `pluginContentEntries`.
+    private enum PluginRowsContent {
+        case loading
+        case failed(String?)
+        case rows([PluginRowDescriptor])
+    }
+
+    /// The visible entries for one plugin level: a single non-interactive status
+    /// row while loading or failed (so the level is visibly building instead of
+    /// hanging or vanishing), otherwise one entry per already-filtered
+    /// descriptor.
+    private static func pluginContentEntries(
+        sourceKey: PluginRowSourceKey,
+        content: PluginRowsContent
+    ) -> [PanelEntry] {
+        switch content {
+        case .loading:
+            return [pluginRowStatusEntry(sourceKey: sourceKey, status: .loading, message: nil)]
+        case .failed(let message):
+            return [pluginRowStatusEntry(sourceKey: sourceKey, status: .error, message: message)]
+        case .rows(let rows):
+            return rows.enumerated().map { index, descriptor in
+                pluginRowEntry(sourceKey: sourceKey, descriptor: descriptor, displayOrder: Double(index))
+            }
         }
     }
 
@@ -669,19 +679,12 @@ final class CommandPaletteState {
         descriptor: PluginRowDescriptor,
         displayOrder: Double
     ) -> PanelEntry {
-        let source = PanelEntry.Source.pluginRow(sourceKey: sourceKey, descriptor: descriptor)
-        return PanelEntry(
-            id: PanelEntry.id(for: source),
-            source: source,
+        .paletteRow(
+            source: .pluginRow(sourceKey: sourceKey, descriptor: descriptor),
             displayOrder: displayOrder,
-            isVisible: true,
-            hotkey: nil,
             title: descriptor.title,
             subtitle: descriptor.subtitle,
-            symbol: descriptor.symbol,
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
+            symbol: descriptor.symbol
         )
     }
 
@@ -711,22 +714,15 @@ final class CommandPaletteState {
         substitutedLink: String?,
         openWithBundleID: String?
     ) -> PanelEntry {
-        let source = PanelEntry.Source.quicklinkArgument(id: quicklinkID, argument: argument)
-        return PanelEntry(
-            id: PanelEntry.id(for: source),
-            source: source,
+        return .paletteRow(
+            source: .quicklinkArgument(id: quicklinkID, argument: argument),
             displayOrder: 0,
-            isVisible: true,
-            hotkey: nil,
             title: "\(title) — \(argument)",
             subtitle: substitutedLink,
             symbol: "link",
             quicklinkIcon: substitutedLink.map {
                 QuicklinkIconRequest(link: $0, openWithBundleID: openWithBundleID)
-            },
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
+            }
         )
     }
 
@@ -735,18 +731,12 @@ final class CommandPaletteState {
     /// and Return copies the result immediately.
     private func calcSection(matching query: String) -> CommandPaletteSection? {
         guard let result = Calculator.evaluate(query: query) else { return nil }
-        let entry = PanelEntry(
-            id: PanelEntry.id(for: .calcResult(result)),
+        let entry = PanelEntry.paletteRow(
             source: .calcResult(result),
             displayOrder: 0,
-            isVisible: true,
-            hotkey: nil,
             title: result.display,
             subtitle: query.trimmingCharacters(in: .whitespacesAndNewlines),
-            symbol: "function",
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
+            symbol: "function"
         )
         return CommandPaletteSection(titleKey: .commandPaletteSectionCalculator, entries: [entry])
     }
@@ -772,18 +762,12 @@ final class CommandPaletteState {
         )
         guard !results.isEmpty else { return nil }
         let entries = results.enumerated().map { index, result in
-            PanelEntry(
-                id: PanelEntry.id(for: .conversion(result)),
+            PanelEntry.paletteRow(
                 source: .conversion(result),
                 displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
                 title: result.display,
                 subtitle: Self.conversionSubtitle(for: result),
-                symbol: result.symbol,
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
+                symbol: result.symbol
             )
         }
         return CommandPaletteSection(titleKey: .commandPaletteSectionConversion, entries: entries)
@@ -804,18 +788,12 @@ final class CommandPaletteState {
         let scopes = devToolScopeSuggestions(matching: query)
         guard !scopes.isEmpty else { return nil }
         let entries = scopes.enumerated().map { index, scope in
-            PanelEntry(
-                id: PanelEntry.id(for: .devToolScopeSuggestion(scope)),
+            PanelEntry.paletteRow(
                 source: .devToolScopeSuggestion(scope),
                 displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
                 title: scope.badgeLabel,
                 subtitle: L(.commandPaletteDevToolScopeSuggestionHint),
-                symbol: "hammer",
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
+                symbol: "hammer"
             )
         }
         return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
@@ -825,18 +803,12 @@ final class CommandPaletteState {
     /// Shared by the auto-detect path (`devToolsSection`) and the scope path.
     private func makeDevToolsSection(from results: [DevToolResult]) -> CommandPaletteSection {
         let entries = results.enumerated().map { index, result in
-            PanelEntry(
-                id: PanelEntry.id(for: .devTool(result)),
+            PanelEntry.paletteRow(
                 source: .devTool(result),
                 displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
                 title: result.output,
                 subtitle: L(Self.devToolLabelKey(result.toolID)),
-                symbol: "hammer",
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
+                symbol: "hammer"
             )
         }
         return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
@@ -907,18 +879,12 @@ final class CommandPaletteState {
     }
 
     private static func portEntry(for record: PortRecord) -> PanelEntry {
-        PanelEntry(
-            id: PanelEntry.id(for: .portRecord(record)),
+        .paletteRow(
             source: .portRecord(record),
             displayOrder: Double(record.port),
-            isVisible: true,
-            hotkey: nil,
             title: record.processName,
             subtitle: L(.commandPalettePortSubtitle, String(record.port), String(record.pid)),
-            symbol: "xmark.circle.fill",
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
+            symbol: "xmark.circle.fill"
         )
     }
 
@@ -941,29 +907,22 @@ final class CommandPaletteState {
     /// Each row keeps its own declared commit semantics, so a `pushDetail` row
     /// inside a list still pushes a Detail on top of it.
     private func listEntries(_ listLevel: ListLevel) -> [PanelEntry] {
+        let content: PluginRowsContent
         switch listLevel.content {
         case .loading:
-            return [Self.pluginRowStatusEntry(
-                sourceKey: listLevel.sourceKey, status: .loading, message: nil
-            )]
+            content = .loading
         case .failed(let message):
-            return [Self.pluginRowStatusEntry(
-                sourceKey: listLevel.sourceKey, status: .error, message: message
-            )]
+            content = .failed(message)
         case .loaded(let rows):
             // Inside a pushed list the plugin context is already chosen, so this
             // level matches each row's title or subtitle only (not the section
             // title). An empty query shows all, like the options level.
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            let filtered = trimmed.isEmpty ? rows : rows.filter {
+            content = .rows(trimmed.isEmpty ? rows : rows.filter {
                 Self.pluginRowMatches($0, query: trimmed)
-            }
-            return filtered.enumerated().map { index, descriptor in
-                Self.pluginRowEntry(
-                    sourceKey: listLevel.sourceKey, descriptor: descriptor, displayOrder: Double(index)
-                )
-            }
+            })
         }
+        return Self.pluginContentEntries(sourceKey: listLevel.sourceKey, content: content)
     }
 
     /// The single committable row while a plugin row's Argument input is active:

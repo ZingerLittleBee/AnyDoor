@@ -97,6 +97,37 @@ struct PanelEntry: Identifiable, Hashable {
         self.permission = permission
     }
 
+    /// A palette-synthesized row (drilled-in option, calc result, dev tool,
+    /// port, plugin row, installed app, …). These rows share fixed values for
+    /// the panel-only fields and derive their id from the source; the factory
+    /// keeps the full initializer out of every palette builder.
+    static func paletteRow(
+        source: Source,
+        displayOrder: Double,
+        title: String,
+        subtitle: String? = nil,
+        searchAliases: [String] = [],
+        symbol: String,
+        quicklinkIcon: QuicklinkIconRequest? = nil,
+        kind: BuiltinItem.Kind = .action
+    ) -> PanelEntry {
+        PanelEntry(
+            id: id(for: source),
+            source: source,
+            displayOrder: displayOrder,
+            isVisible: true,
+            hotkey: nil,
+            title: title,
+            subtitle: subtitle,
+            searchAliases: searchAliases,
+            symbol: symbol,
+            quicklinkIcon: quicklinkIcon,
+            kind: kind,
+            toggleState: nil,
+            permission: .notRequired
+        )
+    }
+
     static func id(for source: Source) -> String {
         switch source {
         case .appShortcut(let id):                return "app:\(id.uuidString)"
