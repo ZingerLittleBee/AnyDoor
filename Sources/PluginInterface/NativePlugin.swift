@@ -93,6 +93,13 @@ public protocol NativePlugin: AnyObject {
     /// MainActor plugin instance exists.
     nonisolated static var modelSchemaTypes: [any PersistentModel.Type] { get }
 
+    /// Portable UserDefaults preferences this plugin contributes to config
+    /// backup. Nonisolated and static like `modelSchemaTypes`, and consulted
+    /// independently of install state: plugin preferences are user data, which
+    /// ADR-0005 retains across Uninstall, so they keep travelling in a backup
+    /// while the plugin is absent and are live again on reinstall.
+    nonisolated static var syncedDefaults: [PluginSyncedDefault] { get }
+
     // MARK: Migration
 
     /// Whether existing user data shows this plugin was in use before the
@@ -147,6 +154,8 @@ extension NativePlugin {
     ) async {}
 
     public nonisolated static var modelSchemaTypes: [any PersistentModel.Type] { [] }
+
+    public nonisolated static var syncedDefaults: [PluginSyncedDefault] { [] }
 
     public func activate() {}
 

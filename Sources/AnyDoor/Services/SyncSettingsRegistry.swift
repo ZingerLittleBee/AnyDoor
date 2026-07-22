@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Single source of truth for which UserDefaults keys are portable across
 /// machines, plus their value type. Machine-specific keys
@@ -6,14 +7,34 @@ import Foundation
 /// are deliberately absent.
 enum SyncSettingsRegistry {
 
-    enum ValueType: Equatable { case bool, int, string, stringArray }
+    enum ValueType: Equatable {
+        case bool, int, string, stringArray
+
+        init(_ type: PluginSyncedDefault.ValueType) {
+            switch type {
+            case .bool: self = .bool
+            case .int: self = .int
+            case .string: self = .string
+            case .stringArray: self = .stringArray
+            }
+        }
+    }
 
     struct Entry {
         let key: String
         let type: ValueType
     }
 
-    static let entries: [Entry] = [
+    /// Core-owned portable keys plus every plugin-declared preference. A Native
+    /// Plugin declares its own `syncedDefaults` (aggregated through the
+    /// catalog), so adding a plugin never edits this file.
+    static var entries: [Entry] {
+        coreEntries + NativePluginCatalog.syncedDefaults.map {
+            Entry(key: $0.key, type: ValueType($0.type))
+        }
+    }
+
+    private static let coreEntries: [Entry] = [
         // Installed Native Plugin ids. Import applies it through
         // `PluginRegistry.reconcileAfterImport()`, which runs the real
         // install/uninstall lifecycle; helper approval and other
@@ -45,16 +66,11 @@ enum SyncSettingsRegistry {
         Entry(key: "translation.secondTargetLanguage", type: .string),
         Entry(key: "translation.autoSpeak", type: .bool),
         Entry(key: "translation.services", type: .string),
-        Entry(key: "imageConversion.targetFormat", type: .string),
-        Entry(key: "imageConversion.quality", type: .int),
-        Entry(key: "imageConversion.mode", type: .string),
-        Entry(key: "imageConversion.targetSize.bytes", type: .int),
-        Entry(key: "imageConversion.targetSize.unit", type: .string),
-        Entry(key: "imageConversion.transparencyBackgroundHex", type: .string),
     ]
 
-    private static let entriesByKey: [String: Entry] =
+    private static var entriesByKey: [String: Entry] {
         Dictionary(uniqueKeysWithValues: entries.map { ($0.key, $0) })
+    }
 
     /// Collect whitelisted keys that are actually present in `defaults`.
     static func read(from defaults: UserDefaults) -> [String: SettingValue] {

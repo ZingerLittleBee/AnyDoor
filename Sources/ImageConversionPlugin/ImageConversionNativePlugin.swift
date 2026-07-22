@@ -61,6 +61,20 @@ public final class ImageConversionNativePlugin: NativePlugin {
         [ImageConversionRecord.self]
     }
 
+    /// The portable conversion preferences (target format, quality, mode,
+    /// target size, transparency background). `outputDirectory` stays out —
+    /// a filesystem path is machine-local.
+    public nonisolated static var syncedDefaults: [PluginSyncedDefault] {
+        [
+            PluginSyncedDefault(key: ImageConversionPreferences.targetFormatKey, type: .string),
+            PluginSyncedDefault(key: ImageConversionPreferences.qualityKey, type: .int),
+            PluginSyncedDefault(key: ImageConversionPreferences.modeKey, type: .string),
+            PluginSyncedDefault(key: ImageConversionPreferences.targetSizeBytesKey, type: .int),
+            PluginSyncedDefault(key: ImageConversionPreferences.targetSizeUnitKey, type: .string),
+            PluginSyncedDefault(key: ImageConversionPreferences.transparencyBackgroundHexKey, type: .string),
+        ]
+    }
+
     public func hasUsageTrace(in context: ModelContext) throws -> Bool {
         try context.fetchCount(FetchDescriptor<ImageConversionRecord>()) > 0
     }
