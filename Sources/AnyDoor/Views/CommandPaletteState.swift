@@ -941,9 +941,14 @@ final class CommandPaletteState {
                 commit: .noAction
             )
         case .error:
+            let title = if let message, !message.isEmpty {
+                message
+            } else {
+                L(.commandPalettePluginRowError)
+            }
             descriptor = PluginRowDescriptor(
                 id: "__anydoor.status.error",
-                title: message?.isEmpty == false ? message! : L(.commandPalettePluginRowError),
+                title: title,
                 symbol: "exclamationmark.triangle",
                 actionLabel: "",
                 commit: .noAction
