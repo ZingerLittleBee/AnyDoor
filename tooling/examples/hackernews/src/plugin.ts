@@ -164,8 +164,10 @@ function storySubtitle(story: HNItem): string {
   return [`${story.score ?? 0} 分`, `${story.descendants ?? 0} 评论`, `by ${author}`].join(" · ");
 }
 
-/** Cache the listed stories and map them to searchable palette rows. */
-function toRows(list: HNItem[], query: string): Row[] {
+/** Cache the listed stories and map them to searchable palette rows. With
+ * translation on, titles display from the translation cache (searchable in
+ * both languages); the cache is display-only, so toggling off reverts. */
+function toRows(list: HNItem[], query: string, translated: boolean): Row[] {
   stories.clear();
   for (const story of list) {
     stories.set(String(story.id), story);
@@ -173,9 +175,10 @@ function toRows(list: HNItem[], query: string): Row[] {
   const needle = query.trim().toLowerCase();
   const rows: Row[] = [];
   for (const story of list) {
-    const title = story.title ?? `#${story.id}`;
+    const original = story.title ?? `#${story.id}`;
+    const title = translated ? titleCache.get(String(story.id)) ?? original : original;
     const subtitle = storySubtitle(story);
-    if (needle.length > 0 && !`${title} ${subtitle}`.toLowerCase().includes(needle)) {
+    if (needle.length > 0 && !`${original} ${title} ${subtitle}`.toLowerCase().includes(needle)) {
       continue;
     }
     rows.push({
@@ -188,6 +191,43 @@ function toRows(list: HNItem[], query: string): Row[] {
     });
   }
   return rows;
+}
+
+// Translated story titles by id. A palette query keystroke re-invokes `list`,
+// so without a cache every keystroke would re-translate the same 25 titles.
+const titleCache = new Map<string, string>();
+const TITLE_CACHE_LIMIT = 500;
+
+/**
+ * Batch-translate the titles missing from the cache — ONE `api.translate` call
+ * for the whole list (newline-joined, split back per line), never one per
+ * story. On failure, or when the provider does not preserve the line count,
+ * the original titles are cached instead: the list degrades to untranslated
+ * rather than retrying (and re-toasting) on every keystroke.
+ */
+async function translateTitles(list: HNItem[], api: DetailAPI): Promise<void> {
+  const misses = list.filter((story) => !titleCache.has(String(story.id)));
+  if (misses.length === 0) {
+    return;
+  }
+  if (titleCache.size > TITLE_CACHE_LIMIT) {
+    titleCache.clear();
+  }
+  const originals = misses.map((story) => story.title ?? `#${story.id}`);
+  let lines: string[];
+  try {
+    lines = (await api.translate(originals.join("\n"))).split("\n").map((line) => line.trim());
+    if (lines.length !== misses.length) {
+      lines = originals;
+    }
+  } catch (error) {
+    await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
+    lines = originals;
+  }
+  misses.forEach((story, index) => {
+    const line = lines[index];
+    titleCache.set(String(story.id), line !== undefined && line.length > 0 ? line : originals[index] ?? "");
+  });
 }
 
 /**
@@ -319,12 +359,19 @@ async function buildStoryDocument(
   const translate = makeTranslator(api, translated);
   const comments = await loadComments(String(story.id), api.fetch);
 
+  // The list may already hold this title's translation; a Detail translate
+  // fills the cache too, so drilling back out shows the same title.
+  const originalTitle = story.title ?? `#${story.id}`;
+  const cachedTitle = translated ? titleCache.get(String(story.id)) : undefined;
   const [title, body] = await Promise.all([
-    translate(story.title ?? `#${story.id}`),
+    cachedTitle !== undefined ? Promise.resolve(cachedTitle) : translate(originalTitle),
     typeof story.text === "string" && story.text.length > 0
       ? translate(withImagePreviews(htmlToMarkdown(story.text)))
       : Promise.resolve(""),
   ]);
+  if (translated && cachedTitle === undefined) {
+    titleCache.set(String(story.id), title);
+  }
   const firstPage = comments.slice(0, COMMENTS_PAGE_SIZE);
   const rendered = firstPage.length === 0
     ? quoted("暂无评论")
@@ -386,7 +433,7 @@ definePlugin(manifest, {
     rows.push({
       id: TRANSLATE_ROW_ID,
       title: "翻译帖子内容",
-      subtitle: translateOn ? "已开启 · Detail 将翻译正文与评论" : "使用设置中的翻译服务与目标语言",
+      subtitle: translateOn ? "已开启 · 列表标题与 Detail 均会翻译" : "使用设置中的翻译服务与目标语言",
       symbol: "character.bubble",
       actionLabel: translateOn ? "关闭" : "开启",
       badge: translateOn ? "开启" : "关闭",
@@ -413,7 +460,12 @@ definePlugin(manifest, {
     const alive = items.filter(
       (item): item is HNItem => item !== undefined && item !== null && item.dead !== true && item.deleted !== true,
     );
-    return toRows(alive, query);
+    // With the translate toggle on, list titles render translated too.
+    const translateOn = await readTranslateEnabled(api.store);
+    if (translateOn) {
+      await translateTitles(alive, api);
+    }
+    return toRows(alive, query, translateOn);
   },
 
   async detail(rowId, api, cursor) {
