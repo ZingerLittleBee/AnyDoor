@@ -159,8 +159,10 @@ function topicSubtitle(topic: Topic): string {
     .join(" · ");
 }
 
-/** Cache the listed topics and map them to searchable palette rows. */
-function toRows(list: Topic[], query: string): Row[] {
+/** Cache the listed topics and map them to searchable palette rows. With
+ * translation on, titles display from the translation cache (searchable in
+ * both languages); the cache is display-only, so toggling off reverts. */
+function toRows(list: Topic[], query: string, translated: boolean): Row[] {
   topics.clear();
   for (const topic of list) {
     topics.set(String(topic.id), topic);
@@ -168,13 +170,14 @@ function toRows(list: Topic[], query: string): Row[] {
   const needle = query.trim().toLowerCase();
   const rows: Row[] = [];
   for (const topic of list) {
+    const title = translated ? titleCache.get(String(topic.id)) ?? topic.title : topic.title;
     const subtitle = topicSubtitle(topic);
-    if (needle.length > 0 && !`${topic.title} ${subtitle}`.toLowerCase().includes(needle)) {
+    if (needle.length > 0 && !`${topic.title} ${title} ${subtitle}`.toLowerCase().includes(needle)) {
       continue;
     }
     rows.push({
       id: String(topic.id),
-      title: topic.title,
+      title,
       subtitle,
       symbol: "text.bubble",
       actionLabel: "详情",
@@ -182,6 +185,43 @@ function toRows(list: Topic[], query: string): Row[] {
     });
   }
   return rows;
+}
+
+// Translated topic titles by id. A palette query keystroke re-invokes `list`,
+// so without a cache every keystroke would re-translate the same titles.
+const titleCache = new Map<string, string>();
+const TITLE_CACHE_LIMIT = 500;
+
+/**
+ * Batch-translate the titles missing from the cache — ONE `api.translate` call
+ * for the whole list (newline-joined, split back per line), never one per
+ * topic. On failure, or when the provider does not preserve the line count,
+ * the original titles are cached instead: the list degrades to untranslated
+ * rather than retrying (and re-toasting) on every keystroke.
+ */
+async function translateTitles(list: Topic[], api: DetailAPI): Promise<void> {
+  const misses = list.filter((topic) => !titleCache.has(String(topic.id)));
+  if (misses.length === 0) {
+    return;
+  }
+  if (titleCache.size > TITLE_CACHE_LIMIT) {
+    titleCache.clear();
+  }
+  const originals = misses.map((topic) => topic.title);
+  let lines: string[];
+  try {
+    lines = (await api.translate(originals.join("\n"))).split("\n").map((line) => line.trim());
+    if (lines.length !== misses.length) {
+      lines = originals;
+    }
+  } catch (error) {
+    await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
+    lines = originals;
+  }
+  misses.forEach((topic, index) => {
+    const line = lines[index];
+    titleCache.set(String(topic.id), line !== undefined && line.length > 0 ? line : originals[index] ?? "");
+  });
 }
 
 // A bare image URL in plain V2EX text (the feeds are not markdown, so nothing
@@ -213,18 +253,18 @@ function repliesMarkdown(replies: Reply[], startFloor: number): string {
     .join("\n\n");
 }
 
-/// Assemble the initial Detail document. `body` is the already-rendered (and
-/// possibly translated) topic body, empty when the topic has none; `comments`
-/// is the rendered comment-section content, or undefined for the no-token hint.
-/// The title, meta line, and origin link deliberately stay untranslated.
-function topicMarkdown(topic: Topic, body: string, comments: string | undefined): string {
+/// Assemble the initial Detail document. `title` and `body` are already
+/// rendered (and possibly translated); `body` is empty when the topic has
+/// none; `comments` is the rendered comment-section content, or undefined for
+/// the no-token hint. The meta line and origin link stay untranslated.
+function topicMarkdown(topic: Topic, title: string, body: string, comments: string | undefined): string {
   const node = topic.node?.title ?? topic.node?.name ?? "";
   const author = topic.member?.username ?? "未知";
   const meta = [node && `\`${node}\``, `**${author}**`, `${topic.replies} 回复`]
     .filter((part) => part.length > 0)
     .join(" · ");
 
-  const lines: string[] = [`# ${topic.title}`, "", meta, "", `[在浏览器中打开原帖](${topic.url})`];
+  const lines: string[] = [`# ${title}`, "", meta, "", `[在浏览器中打开原帖](${topic.url})`];
 
   if (body.length > 0) {
     lines.push("", "---", "", body);
@@ -306,6 +346,22 @@ async function fetchRepliesPage(
   return response.result ?? [];
 }
 
+/** The Detail title: original, or the (cached) translation. The list may have
+ * translated it already; a Detail translate fills the same cache, so drilling
+ * back out to the list shows the same title. */
+async function resolveTitle(topic: Topic, translated: boolean, api: DetailAPI): Promise<string> {
+  if (!translated) {
+    return topic.title;
+  }
+  const cached = titleCache.get(String(topic.id));
+  if (cached !== undefined) {
+    return cached;
+  }
+  const title = await makeTranslator(api, true)(topic.title);
+  titleCache.set(String(topic.id), title);
+  return title;
+}
+
 /** Build the full Detail document (initial load or a footer-action rebuild). */
 async function buildTopicDocument(
   topic: Topic,
@@ -320,7 +376,7 @@ async function buildTopicDocument(
       ? await translate(withImagePreviews(topic.content))
       : "";
     return {
-      markdown: topicMarkdown(topic, body, undefined),
+      markdown: topicMarkdown(topic, await resolveTitle(topic, translated, api), body, undefined),
       actions: detailActionsFor(translated),
     };
   }
@@ -340,7 +396,7 @@ async function buildTopicDocument(
     ? quoted("暂无评论")
     : await translate(repliesMarkdown(replies, 1));
   return {
-    markdown: topicMarkdown(enriched, body, comments),
+    markdown: topicMarkdown(enriched, await resolveTitle(enriched, translated, api), body, comments),
     more: replies.length >= REPLIES_PAGE_SIZE ? detailCursor(2, translated) : undefined,
     actions: detailActionsFor(translated),
   };
@@ -392,7 +448,7 @@ definePlugin(manifest, {
     rows.push({
       id: TRANSLATE_ROW_ID,
       title: "翻译帖子内容",
-      subtitle: translateOn ? "已开启 · Detail 将翻译正文与评论" : "使用设置中的翻译服务与目标语言",
+      subtitle: translateOn ? "已开启 · 列表标题与 Detail 均会翻译" : "使用设置中的翻译服务与目标语言",
       symbol: "character.bubble",
       actionLabel: translateOn ? "关闭" : "开启",
       badge: translateOn ? "开启" : "关闭",
@@ -412,24 +468,27 @@ definePlugin(manifest, {
   },
 
   async list(listId, query, api) {
+    let fetched: Topic[];
     if (listId === LIST_HOT) {
-      const hot = await fetchJSON<Topic[]>(api.fetch, HOT_URL);
-      return toRows(dedupe(hot), query);
-    }
-    if (listId === LIST_LATEST) {
-      const latest = await fetchJSON<Topic[]>(api.fetch, LATEST_URL);
-      return toRows(dedupe(latest), query);
-    }
-    if (listId === LIST_NODE) {
+      fetched = dedupe(await fetchJSON<Topic[]>(api.fetch, HOT_URL));
+    } else if (listId === LIST_LATEST) {
+      fetched = dedupe(await fetchJSON<Topic[]>(api.fetch, LATEST_URL));
+    } else if (listId === LIST_NODE) {
       const nodes = await readNodes(api.store);
       const perNode = await Promise.all(
         nodes.map((node) => fetchJSON<Topic[]>(api.fetch, nodeTopicsURL(node))),
       );
-      const merged = perNode.flatMap((list) => list.slice(0, MAX_TOPICS_PER_NODE));
-      return toRows(dedupe(merged), query);
+      fetched = dedupe(perNode.flatMap((list) => list.slice(0, MAX_TOPICS_PER_NODE)));
+    } else {
+      // An unknown list id: surface an empty list rather than throwing.
+      return [];
     }
-    // An unknown list id: surface an empty list rather than throwing.
-    return [];
+    // With the translate toggle on, list titles render translated too.
+    const translateOn = await readTranslateEnabled(api.store);
+    if (translateOn) {
+      await translateTitles(fetched, api);
+    }
+    return toRows(fetched, query, translateOn);
   },
 
   async detail(rowId, api, cursor) {
