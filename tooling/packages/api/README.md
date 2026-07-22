@@ -74,8 +74,8 @@ async rows(query, api) {
 - `actions` — builders for row commit actions: `detail()`, `list(listId)`,
   `openURL(url)`, `copy(text)`, `argument()`, `run(close?)`.
 - Types: `Manifest`, `Capability`, `Row`, `RowAction`, `DetailResult`,
-  `FetchOptions`, `FetchResponse`, `Store`, `ToastKind`, `DeclaredAPI`,
-  `JSONValue`, and the per-capability function types.
+  `ListResult`, `FetchOptions`, `FetchResponse`, `Store`, `ToastKind`,
+  `DeclaredAPI`, `JSONValue`, and the per-capability function types.
 
 ### Capabilities
 
@@ -108,7 +108,7 @@ user's paid API quota).
 | Entry point | Signature | Purpose |
 | --- | --- | --- |
 | `rows` | `(query, api) => Row[] \| Promise<Row[]>` | Root palette rows for a query. |
-| `list` | `(listId, query, api) => Row[] \| Promise<Row[]>` | Second-level rows for a committed `list` action. |
+| `list` | `(listId, query, api, cursor?) => ListResult \| Promise<ListResult>` | Second-level rows for a committed `list` action, optionally paged (see below). |
 | `detail` | `(rowId, api, cursor?) => DetailResult \| Promise<DetailResult>` | Markdown Detail for a row, optionally chunked (see below). |
 | `detailAction` | `(rowId, actionId, api) => DetailResult \| Promise<DetailResult>` | Rebuild the Detail for a pressed footer action (see below). |
 | `action` | `(rowId, actionId, argument, api) => unknown` | Run a row action. |
@@ -170,6 +170,33 @@ async detail(rowId, api, cursor) {
 - An empty chunk ends pagination cleanly; a thrown error keeps what is already
   rendered and stops paginating. The host never issues more than one chunk
   fetch at a time.
+
+## List pagination (load more on scroll)
+
+`list` may return a page instead of a plain row array:
+
+```ts
+async list(listId, query, api, cursor) {
+  const start = cursor === undefined ? 0 : Number(cursor);
+  const rows = await fetchPage(listId, start, api);
+  return {
+    rows,
+    more: rows.length === PAGE_SIZE ? String(start + PAGE_SIZE) : undefined,
+  };
+},
+```
+
+- A returned `more` cursor makes the host show a loading sentinel below the
+  last row; when the user scrolls to it, the host calls
+  `list(listId, query, api, cursor)` with that cursor and appends the returned
+  page's rows. The cursor is opaque to the host, same as Detail pagination.
+- Omitting `more` (or returning a plain array) marks the list complete.
+- Appended rows whose id already exists are dropped, so overlapping pages (a
+  feed that shifted between fetches) cannot produce duplicate rows.
+- While the user is typing a second-level search, the sentinel hides —
+  filtering is local to the rows already loaded.
+- A failed page fetch keeps what is already shown and stops paginating; the
+  host never issues more than one page fetch at a time.
 
 ## Detail actions (footer buttons)
 

@@ -17,6 +17,18 @@ public struct ScriptDetailChunk: Sendable, Equatable {
     }
 }
 
+/// One page of a `pushList` row's second-level list. `more` is the plugin's
+/// opaque cursor for the next page, or nil when the list is complete.
+public struct ScriptListChunk: Sendable, Equatable {
+    public let rows: [PluginRowDescriptor]
+    public let more: String?
+
+    public init(rows: [PluginRowDescriptor], more: String?) {
+        self.rows = rows
+        self.more = more
+    }
+}
+
 /// The headless Script Plugin runtime: a self-contained subsystem the registry
 /// (ticket 021) consumes through clean seams. A validated package goes in;
 /// palette row descriptors, Detail markdown, action results, and capability side
@@ -95,15 +107,36 @@ public final class ScriptPluginRuntime {
         return try ScriptRowDecoder.decode(result)
     }
 
-    /// Build a `pushList` row's second-level rows (entry point `list`). The list
+    /// Build a `pushList` row's second-level page (entry point `list`). The list
     /// id and the current second-level query are passed to `list(listId, query)`;
     /// a plugin without a `list` handler surfaces `entryPointMissing`, which the
     /// row source turns into an inline error row.
+    ///
+    /// A nil `cursor` requests the initial page; a non-nil cursor (the previous
+    /// page's `more`, opaque to the host) is passed as `list`'s third argument
+    /// to request the next page. The plugin returns either a plain row array (a
+    /// complete list, nothing more to load) or `{ rows, more? }` to offer
+    /// pagination — mirroring `detail`'s chunked result.
     public func buildList(
-        pluginID: ScriptPluginID, listID: String, query: String
-    ) async throws -> [PluginRowDescriptor] {
-        let result = try await context(for: pluginID).invoke("list", arguments: [.string(listID), .string(query)])
-        return try ScriptRowDecoder.decode(result)
+        pluginID: ScriptPluginID, listID: String, query: String, cursor: String? = nil
+    ) async throws -> ScriptListChunk {
+        var arguments: [ScriptValue] = [.string(listID), .string(query)]
+        if let cursor { arguments.append(.string(cursor)) }
+        let result = try await context(for: pluginID).invoke("list", arguments: arguments)
+        if case .object(let fields) = result, let rowsValue = fields["rows"] {
+            let more: String?
+            switch fields["more"] {
+            case .none, .some(.null):
+                more = nil
+            case .some(let value):
+                guard let cursor = value.stringValue else {
+                    throw ScriptPluginError.resultDecodingFailed("list() 'more' must be a string")
+                }
+                more = cursor
+            }
+            return ScriptListChunk(rows: try ScriptRowDecoder.decode(rowsValue), more: more)
+        }
+        return ScriptListChunk(rows: try ScriptRowDecoder.decode(result), more: nil)
     }
 
     /// Build a row's markdown Detail chunk (entry point `detail`).

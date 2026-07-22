@@ -37,6 +37,18 @@ export type DetailResult =
   | string
   | { markdown: string; more?: string; actions?: DetailAction[] };
 
+/**
+ * What `list` may return: a plain row array (a complete list), or a page
+ * carrying a `more` cursor. A non-undefined `more` makes the host show a
+ * loading sentinel below the last row; when the user scrolls to it, the host
+ * calls `list(listId, query, api, cursor)` again with that cursor and appends
+ * the returned page's rows. The cursor is opaque to the host — encode whatever
+ * pagination state you need. Appended rows whose id already exists are
+ * dropped, so overlapping pages (a feed that shifted between fetches) cannot
+ * produce duplicate rows. Mirrors `DetailResult` pagination.
+ */
+export type ListResult = Row[] | { rows: Row[]; more?: string };
+
 /** The entry points a plugin may implement. Each receives the declared capability API. */
 export interface PluginHandlers<C extends readonly Capability[]> {
   /** Build the plugin's root palette rows for a query. */
@@ -44,9 +56,16 @@ export interface PluginHandlers<C extends readonly Capability[]> {
   /**
    * Build a searchable second-level list's rows (for rows whose action is
    * `list`). `listId` is the id the committed `list` action carried; `query` is
-   * the second-level search text.
+   * the second-level search text. `cursor` is undefined for the initial page,
+   * or the `more` value your previous page returned when the host requests the
+   * next page (see `ListResult`).
    */
-  list?: (listId: string, query: string, api: DeclaredAPI<C>) => Row[] | Promise<Row[]>;
+  list?: (
+    listId: string,
+    query: string,
+    api: DeclaredAPI<C>,
+    cursor?: string,
+  ) => ListResult | Promise<ListResult>;
   /**
    * Build a row's markdown Detail (for rows whose action is `detail`).
    * `cursor` is undefined for the initial document, or the `more` value your
@@ -78,7 +97,7 @@ export interface PluginHandlers<C extends readonly Capability[]> {
 /** The impl object the host's `registerPlugin` receives (host-facing shape). */
 interface RegisteredImpl {
   rows?: (query: string) => Row[] | Promise<Row[]>;
-  list?: (listId: string, query: string) => Row[] | Promise<Row[]>;
+  list?: (listId: string, query: string, cursor?: string) => ListResult | Promise<ListResult>;
   detail?: (rowId: string, cursor?: string) => DetailResult | Promise<DetailResult>;
   detailAction?: (rowId: string, actionId: string) => DetailResult | Promise<DetailResult>;
   action?: (rowId: string, actionId: string, argument?: string) => unknown | Promise<unknown>;
@@ -132,7 +151,7 @@ export function definePlugin<const C extends readonly Capability[]>(
     impl.rows = (query) => rows(query, api);
   }
   if (list) {
-    impl.list = (listId, query) => list(listId, query, api);
+    impl.list = (listId, query, cursor) => list(listId, query, api, cursor);
   }
   if (detail) {
     impl.detail = (rowId, cursor) => detail(rowId, api, cursor);

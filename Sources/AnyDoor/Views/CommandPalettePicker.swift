@@ -14,6 +14,9 @@ struct CommandPalettePicker: View {
     /// Fired when the Detail's bottom sentinel scrolls into view; the
     /// controller fetches the next chunk through the state's load-more gate.
     let onLoadDetailMore: () -> Void
+    /// Fired when a pushed list's bottom sentinel scrolls into view; the
+    /// controller fetches the next page through the state's load-more gate.
+    let onLoadListMore: () -> Void
     /// Fired when a Detail footer action is pressed; the controller rebuilds
     /// the document through the plugin's `detailAction` entry point.
     let onDetailAction: (String) -> Void
@@ -467,6 +470,19 @@ struct CommandPalettePicker: View {
                             onSelect: { onSelect(entry) }
                         )
                         .id(entry.id)
+                    }
+                    if let cursor = state.listMoreCursor {
+                        HStack {
+                            Spacer()
+                            ProgressView().controlSize(.small)
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+                        // Identity per cursor: each appended page re-arms the
+                        // sentinel, so it can trigger the next page when it is
+                        // still (or again) visible. Mirrors the Detail sentinel.
+                        .id(cursor)
+                        .onAppear { onLoadListMore() }
                     }
                 }
                 .overlayScrollers()

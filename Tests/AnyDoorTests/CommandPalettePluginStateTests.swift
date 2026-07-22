@@ -324,6 +324,95 @@ final class CommandPalettePluginStateTests: XCTestCase {
     }
 
     @MainActor
+    func testListMorePagesAppendRowsAndDedupeByID() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), more: "page2", generation: generation)
+        XCTAssertEqual(state.listMoreCursor, "page2")
+
+        // Claiming the fetch flips the in-flight flag; a second claim is refused.
+        let request = try XCTUnwrap(state.beginListMore())
+        XCTAssertEqual(request.cursor, "page2")
+        XCTAssertEqual(request.listID, "hot")
+        XCTAssertNil(state.beginListMore(), "one fetch at a time")
+
+        // The appended page dedupes by row id (ids double as view identity) and
+        // adopts the page's own cursor.
+        state.appendListRows([
+            PluginRowDescriptor(id: "1", title: "Alpha again", symbol: "doc", commit: .pushDetail),
+            PluginRowDescriptor(id: "2", title: "Beta", symbol: "doc", commit: .pushDetail),
+        ], more: "page3", generation: request.generation)
+        XCTAssertEqual(state.flatEntries.count, 2)
+        XCTAssertEqual(state.listMoreCursor, "page3")
+
+        // A nil-`more` page ends pagination: no sentinel, nothing to claim.
+        let last = try XCTUnwrap(state.beginListMore())
+        state.appendListRows([
+            PluginRowDescriptor(id: "3", title: "Gamma", symbol: "doc", commit: .pushDetail),
+        ], more: nil, generation: last.generation)
+        XCTAssertEqual(state.flatEntries.count, 3)
+        XCTAssertNil(state.listMoreCursor)
+        XCTAssertNil(state.beginListMore())
+    }
+
+    @MainActor
+    func testListMoreSentinelHidesWhileSearchingAndStaleAppendIsDropped() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), more: "page2", generation: generation)
+
+        // Filtering is local to the loaded rows: the sentinel hides so scrolling
+        // a filtered subset cannot auto-page through the whole source.
+        state.query = "alp"
+        XCTAssertNil(state.listMoreCursor)
+        state.query = ""
+        XCTAssertEqual(state.listMoreCursor, "page2")
+
+        // A page that lands after the user popped away is generation-rejected.
+        let request = try XCTUnwrap(state.beginListMore())
+        state.popLevel()
+        state.appendListRows([
+            PluginRowDescriptor(id: "2", title: "Beta", symbol: "doc", commit: .pushDetail),
+        ], more: nil, generation: request.generation)
+        XCTAssertTrue(state.isAtRoot)
+    }
+
+    @MainActor
+    func testFailListMoreStopsPaginationQuietly() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), more: "page2", generation: generation)
+
+        let request = try XCTUnwrap(state.beginListMore())
+        state.failListMore(generation: request.generation)
+        XCTAssertEqual(state.flatEntries.count, 1, "the rows shown so far stay")
+        XCTAssertNil(state.listMoreCursor)
+        XCTAssertNil(state.beginListMore())
+    }
+
+    @MainActor
+    func testPrepareForResumeReArmsAListMoreFetch() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), more: "page2", generation: generation)
+        _ = state.beginListMore()
+
+        // Closing mid-fetch drops the result (visibility guard). Resume clears
+        // the in-flight flag so the re-shown sentinel can claim a fresh fetch.
+        XCTAssertNil(state.prepareForResume(), "a loaded list needs no reload")
+        let request = try XCTUnwrap(state.beginListMore())
+        XCTAssertEqual(request.cursor, "page2")
+    }
+
+    @MainActor
     func testFailedListShowsInlineErrorRowCarryingMessage() throws {
         let state = CommandPaletteState(sections: [], hyperFlags: 0)
         let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")

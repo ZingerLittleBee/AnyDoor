@@ -300,10 +300,39 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         )
         let runtime = makeRuntime()
         let id = try runtime.load(fromDirectory: directory)
-        let rows = try await runtime.buildList(pluginID: id, listID: "hot", query: "swift")
-        XCTAssertEqual(rows.map(\.id), ["hot:1"])
-        XCTAssertEqual(rows.map(\.title), ["hot swift"])
-        XCTAssertEqual(rows.map(\.commit), [.pushDetail])
+        let chunk = try await runtime.buildList(pluginID: id, listID: "hot", query: "swift")
+        XCTAssertEqual(chunk.rows.map(\.id), ["hot:1"])
+        XCTAssertEqual(chunk.rows.map(\.title), ["hot swift"])
+        XCTAssertEqual(chunk.rows.map(\.commit), [.pushDetail])
+        XCTAssertNil(chunk.more, "a plain row array is a complete list")
+    }
+
+    func testBuildListDecodesPagedResultAndPassesCursor() async throws {
+        // A `{ rows, more }` result offers pagination; the next call passes the
+        // cursor as `list`'s third argument, and a nil-`more` page ends it.
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.pagedlist",
+            bundle: """
+            anydoor.registerPlugin({
+              list: function (listId, query, cursor) {
+                if (cursor === undefined) {
+                  return { rows: [{ id: "a", title: "Page 1", action: { type: "detail" } }], more: "2" };
+                }
+                return { rows: [{ id: "b:" + cursor, title: "Page " + cursor, action: { type: "detail" } }] };
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+
+        let first = try await runtime.buildList(pluginID: id, listID: "hot", query: "")
+        XCTAssertEqual(first.rows.map(\.id), ["a"])
+        XCTAssertEqual(first.more, "2")
+
+        let second = try await runtime.buildList(pluginID: id, listID: "hot", query: "", cursor: first.more)
+        XCTAssertEqual(second.rows.map(\.id), ["b:2"])
+        XCTAssertNil(second.more)
     }
 
     func testBuildListMissingHandlerIsTypedError() async throws {

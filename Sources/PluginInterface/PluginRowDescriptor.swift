@@ -148,9 +148,17 @@ public enum PluginRowDetailResult: Sendable, Equatable {
 /// that has no list for the requested id returns `nil` from `loadList`, which
 /// the palette also renders as an inline error (a `pushList` row with no backing
 /// `list` handler is a consistent visible failure, not a silent no-op).
+/// `more` is the source's opaque pagination cursor: non-nil makes the palette
+/// show a bottom sentinel and call `loadList` again with it when the user
+/// scrolls there; the returned page is appended (mirrors Detail pagination).
 public enum PluginRowListResult: Sendable, Equatable {
-    case rows([PluginRowDescriptor])
+    case rows([PluginRowDescriptor], more: String?)
     case failure(String)
+
+    /// A complete (unpaginated) list.
+    public static func rows(_ rows: [PluginRowDescriptor]) -> PluginRowListResult {
+        .rows(rows, more: nil)
+    }
 }
 
 /// A palette row source contributed by a Native Plugin (e.g. hosts profile
@@ -203,11 +211,14 @@ public protocol PluginRowSource: AnyObject {
     func loadDetailAction(id: String, actionID: String) async -> PluginRowDetailResult?
 
     /// Builds the second-level rows for a committed `.pushList` row's list id,
-    /// or `nil` when the source has no list for that id. Defaults to `nil`, so
-    /// only sources with a nested list level (a Script Plugin declaring a
-    /// `list` entry point) implement it; synchronous sources (hosts profiles)
-    /// never push a list and keep the default.
-    func loadList(id listID: String, query: String) async -> PluginRowListResult?
+    /// or `nil` when the source has no list for that id. Called with a nil
+    /// cursor for the initial page, and again with the last result's `more`
+    /// cursor when the user scrolls to the bottom of a list that offered one —
+    /// the returned page is appended. Defaults to `nil`, so only sources with
+    /// a nested list level (a Script Plugin declaring a `list` entry point)
+    /// implement it; synchronous sources (hosts profiles) never push a list
+    /// and keep the default.
+    func loadList(id listID: String, query: String, cursor: String?) async -> PluginRowListResult?
 }
 
 extension PluginRowSource {
@@ -218,5 +229,5 @@ extension PluginRowSource {
     }
     public func loadDetail(id: String, cursor: String?) async -> PluginRowDetailResult? { nil }
     public func loadDetailAction(id: String, actionID: String) async -> PluginRowDetailResult? { nil }
-    public func loadList(id listID: String, query: String) async -> PluginRowListResult? { nil }
+    public func loadList(id listID: String, query: String, cursor: String?) async -> PluginRowListResult? { nil }
 }

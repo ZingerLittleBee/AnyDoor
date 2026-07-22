@@ -82,6 +82,10 @@ final class CommandPaletteState {
         let listID: String
         let title: String
         var content: ListContent
+        /// The source's pagination cursor for the next page, nil when complete.
+        var moreCursor: String?
+        /// A load-more fetch is in flight — `beginListMore` refuses a second.
+        var isFetchingMore: Bool = false
     }
 
     /// A pushed options level. The option lookup and its pre-built entries
@@ -256,10 +260,64 @@ final class CommandPaletteState {
     /// Replace the pushed list's content once its rows resolve (or fail). A no-op
     /// unless the same drill-in is still the current level: a list that was
     /// popped, or superseded by a later drill-in, discards the stale result via
-    /// the generation token. Mirrors `updateDetail`.
-    func updateList(_ content: ListContent, generation: Int) {
+    /// the generation token. Mirrors `updateDetail`. `more` is the pagination
+    /// cursor the loaded page offered (nil for a complete list and for failures).
+    func updateList(_ content: ListContent, more: String? = nil, generation: Int) {
         guard case .list(var listLevel) = level, generation == navigationRevision else { return }
         listLevel.content = content
+        listLevel.moreCursor = more
+        listLevel.isFetchingMore = false
+        level = .list(listLevel)
+    }
+
+    /// The cursor whose sentinel the pushed list shows below its last row, or
+    /// nil when there is nothing more to load. Hidden while a second-level
+    /// query is active: filtering is local to the loaded rows, and a sentinel
+    /// under a filtered subset would auto-page through the whole source while
+    /// the user is just searching what is already there. Doubles as the
+    /// sentinel's view identity, so each new cursor re-arms `onAppear`.
+    var listMoreCursor: String? {
+        guard case .list(let listLevel) = level,
+              case .loaded = listLevel.content,
+              query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return listLevel.moreCursor
+    }
+
+    /// Claim the next list-page fetch: returns whom to ask and the cursor, or
+    /// nil when there is nothing to fetch (not a loaded list, no cursor, or a
+    /// fetch already in flight — the sentinel may fire more than once).
+    /// Mirrors `beginDetailMore`.
+    func beginListMore() -> (sourceKey: PluginRowSourceKey, listID: String, cursor: String, generation: Int)? {
+        guard case .list(var listLevel) = level,
+              case .loaded = listLevel.content,
+              let cursor = listLevel.moreCursor,
+              !listLevel.isFetchingMore else { return nil }
+        listLevel.isFetchingMore = true
+        level = .list(listLevel)
+        return (listLevel.sourceKey, listLevel.listID, cursor, navigationRevision)
+    }
+
+    /// Append a fetched list page and adopt the page's own cursor (nil ends
+    /// pagination). Generation-guarded like `updateList`. Rows whose id is
+    /// already present are dropped: ids double as SwiftUI row identity, and a
+    /// source whose pages overlap (a feed that shifted between fetches) must
+    /// not produce duplicate-id rows.
+    func appendListRows(_ rows: [PluginRowDescriptor], more: String?, generation: Int) {
+        guard case .list(var listLevel) = level, generation == navigationRevision,
+              case .loaded(let existing) = listLevel.content else { return }
+        let seen = Set(existing.map(\.id))
+        listLevel.content = .loaded(existing + rows.filter { !seen.contains($0.id) })
+        listLevel.moreCursor = more
+        listLevel.isFetchingMore = false
+        level = .list(listLevel)
+    }
+
+    /// A list load-more fetch failed: stop paginating silently (the rows shown
+    /// so far stay; a retry loop against a broken source would be noise).
+    func failListMore(generation: Int) {
+        guard case .list(var listLevel) = level, generation == navigationRevision else { return }
+        listLevel.moreCursor = nil
+        listLevel.isFetchingMore = false
         level = .list(listLevel)
     }
 
@@ -463,7 +521,9 @@ final class CommandPaletteState {
                 )
             }
             return nil
-        case .list(let listLevel):
+        case .list(var listLevel):
+            listLevel.isFetchingMore = false
+            level = .list(listLevel)
             if case .loading = listLevel.content {
                 return .reloadList(
                     sourceKey: listLevel.sourceKey, listID: listLevel.listID,

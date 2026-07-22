@@ -117,10 +117,41 @@ final class ScriptPluginRowSourceTests: XCTestCase {
         ))
         let source = makeSource(runtime: runtime, id: id)
 
-        let result = await source.loadList(id: "hot", query: "")
+        let result = await source.loadList(id: "hot", query: "", cursor: nil)
         XCTAssertEqual(result, .rows([
             PluginRowDescriptor(id: "hot:1", title: "Topic", symbol: "puzzlepiece.extension", commit: .pushDetail),
         ]))
+    }
+
+    func testLoadListPagesThroughTheCursor() async throws {
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: try ScriptPluginFixture.writePackage(
+            id: "com.acme.pagedlist",
+            bundle: """
+            anydoor.registerPlugin({
+              list: function (listId, query, cursor) {
+                if (cursor === undefined) {
+                  return { rows: [{ id: "1", title: "One", action: { type: "detail" } }], more: "next" };
+                }
+                return { rows: [{ id: "2", title: "Two:" + cursor, action: { type: "detail" } }] };
+              }
+            });
+            """
+        ))
+        let source = makeSource(runtime: runtime, id: id)
+
+        guard case .rows(let first, let firstMore)? = await source.loadList(id: "hot", query: "", cursor: nil) else {
+            return XCTFail("expected a first page")
+        }
+        XCTAssertEqual(first.map(\.title), ["One"])
+        XCTAssertEqual(firstMore, "next")
+
+        guard case .rows(let second, let secondMore)? = await source.loadList(
+            id: "hot", query: "", cursor: firstMore) else {
+            return XCTFail("expected a second page")
+        }
+        XCTAssertEqual(second.map(\.title), ["Two:next"])
+        XCTAssertNil(secondMore, "the last page ends pagination")
     }
 
     func testLoadListReturnsFailureWhenListHandlerAbsent() async throws {
@@ -131,7 +162,7 @@ final class ScriptPluginRowSourceTests: XCTestCase {
         ))
         let source = makeSource(runtime: runtime, id: id)
 
-        guard case .failure = await source.loadList(id: "hot", query: "") else {
+        guard case .failure = await source.loadList(id: "hot", query: "", cursor: nil) else {
             return XCTFail("a pushList row with no backing list handler fails visibly")
         }
     }
@@ -151,7 +182,7 @@ final class ScriptPluginRowSourceTests: XCTestCase {
         // Uninstall unloads the context; a list committed just before must not
         // repopulate — the source drops it (the palette has popped to root).
         runtime.unload(id)
-        let result = await source.loadList(id: "hot", query: "")
+        let result = await source.loadList(id: "hot", query: "", cursor: nil)
         XCTAssertNil(result, "a list build for an unloaded plugin is dropped")
     }
 

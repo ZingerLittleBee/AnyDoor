@@ -133,15 +133,16 @@ final class ScriptPluginRowSource: PluginRowSource {
         }
     }
 
-    func loadList(id listID: String, query: String) async -> PluginRowListResult? {
+    func loadList(id listID: String, query: String, cursor: String?) async -> PluginRowListResult? {
         // Drop-after-unload guard (mirrors runAction): a `pushList` row committed
         // just before uninstall can reach here after the context was torn down.
         // Report nothing so the palette — which has already popped to root on the
         // uninstall recomposition — never repopulates a stale list.
         guard runtime.isLoaded(scriptID) else { return nil }
         do {
-            let rows = try await runtime.buildList(pluginID: scriptID, listID: listID, query: query)
-            return .rows(rows)
+            let chunk = try await runtime.buildList(
+                pluginID: scriptID, listID: listID, query: query, cursor: cursor)
+            return .rows(chunk.rows, more: chunk.more)
         } catch {
             // A missing `list` handler surfaces `entryPointMissing`, which lands
             // here as an inline error row — a `pushList` row with no backing list

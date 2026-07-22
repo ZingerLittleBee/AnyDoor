@@ -199,6 +199,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onLoadDetailMore: { [weak self] in
                 self?.loadMoreDetail()
             },
+            onLoadListMore: { [weak self] in
+                self?.loadMoreList()
+            },
             onDetailAction: { [weak self] actionID in
                 self?.performDetailAction(actionID: actionID)
             },
@@ -830,15 +833,40 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             return
         }
         Task { @MainActor [weak self] in
-            let result = await source.loadList(id: listID, query: "")
+            let result = await source.loadList(id: listID, query: "", cursor: nil)
             guard let self, let state = self.state, self.window?.isVisible == true else { return }
             switch result {
-            case .rows(let rows):
-                state.updateList(.loaded(rows), generation: generation)
+            case .rows(let rows, let more):
+                state.updateList(.loaded(rows), more: more, generation: generation)
             case .failure(let message):
                 state.updateList(.failed(message), generation: generation)
             case nil:
                 state.updateList(.failed(L(.commandPalettePluginRowError)), generation: generation)
+            }
+        }
+    }
+
+    /// Fetch the next list page when the user scrolls to the bottom sentinel.
+    /// The state's `beginListMore` is the single gate (loaded list + cursor +
+    /// no fetch in flight), so a sentinel that fires repeatedly cannot stack
+    /// requests; the generation token keys the append to this exact drill-in.
+    /// Mirrors `loadMoreDetail`.
+    private func loadMoreList() {
+        guard let state, let request = state.beginListMore() else { return }
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: request.sourceKey) else {
+            state.failListMore(generation: request.generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadList(
+                id: request.listID, query: "", cursor: request.cursor)
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .rows(let rows, let more):
+                state.appendListRows(rows, more: more, generation: request.generation)
+            case .failure, nil:
+                // Keep what is already shown; stop paginating quietly.
+                state.failListMore(generation: request.generation)
             }
         }
     }
