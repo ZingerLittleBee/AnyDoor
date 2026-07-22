@@ -353,10 +353,10 @@ final class ScriptPluginRegistryTests: XCTestCase {
 
         // The user has drilled into a searchable second-level list.
         let key = rowSourceKey(for: id)
-        state.enterList(sourceKey: key, listID: "hot", title: "Hot")
+        let generation = state.enterList(sourceKey: key, listID: "hot", title: "Hot")
         state.updateList(.loaded([
             PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
-        ]), generation: state.listGeneration)
+        ]), generation: generation)
         XCTAssertTrue(state.isInList)
 
         try await registry.uninstall(id)

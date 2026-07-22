@@ -68,9 +68,24 @@ final class CommandPaletteState {
         var content: ListContent
     }
 
+    /// A pushed options level. The option lookup and its pre-built entries
+    /// travel with the level itself, so push/pop cannot leave stale option
+    /// state behind in a side slot.
+    struct OptionsLevel: Equatable {
+        let parentTitle: String
+        let optionsByID: [String: CommandPaletteOption]
+        let entries: [PanelEntry]
+
+        /// Options carry `@MainActor` perform closures, so equality compares
+        /// the visible identity: same parent and same option rows.
+        static func == (lhs: OptionsLevel, rhs: OptionsLevel) -> Bool {
+            lhs.parentTitle == rhs.parentTitle && lhs.entries.map(\.id) == rhs.entries.map(\.id)
+        }
+    }
+
     enum Level: Equatable {
         case root
-        case options(parentTitle: String)
+        case options(OptionsLevel)
         case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?, badge: String)
         /// A plugin row's Argument input mode: the entered text is passed to the
         /// row's plugin action (mirrors `.argumentInput` for Quicklinks).
@@ -88,8 +103,6 @@ final class CommandPaletteState {
     /// so restoring a frame yields a fully self-contained level. `popToRoot`
     /// clears the whole stack.
     private var navigationStack: [Level] = []
-    private var optionsByID: [String: CommandPaletteOption] = [:]
-    private var optionEntries: [PanelEntry] = []
 
     var isAtRoot: Bool { level == .root }
     var isInArgumentInput: Bool {
@@ -135,9 +148,7 @@ final class CommandPaletteState {
 
     /// Push a second level built from `options`; resets the search + selection.
     func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
-        pushCurrentFrame()
-        optionsByID = Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) })
-        optionEntries = options.enumerated().map { index, option in
+        let entries = options.enumerated().map { index, option in
             PanelEntry(
                 id: PanelEntry.id(for: .paletteOption(id: option.id)),
                 source: .paletteOption(id: option.id),
@@ -152,10 +163,11 @@ final class CommandPaletteState {
                 permission: .notRequired
             )
         }
-        level = .options(parentTitle: parentTitle)
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
+        push(.options(OptionsLevel(
+            parentTitle: parentTitle,
+            optionsByID: Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) }),
+            entries: entries
+        )))
     }
 
     /// Push argument-input mode for a Search Template Quicklink. `keyword`, when
@@ -168,76 +180,38 @@ final class CommandPaletteState {
         openWithBundleID: String? = nil,
         keyword: String? = nil
     ) {
-        pushCurrentFrame()
-        optionsByID = [:]
-        optionEntries = []
         let trimmedKeyword = keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        level = .argumentInput(
+        push(.argumentInput(
             quicklinkID: quicklinkID,
             title: title,
             link: link,
             openWithBundleID: openWithBundleID,
             badge: trimmedKeyword.isEmpty ? title : trimmedKeyword
-        )
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
+        ))
     }
 
     /// Push Argument input for a plugin row: the entered text is later passed to
     /// the row's plugin action. Mirrors `enterArgumentInput` for Quicklinks.
     func enterPluginArgumentInput(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
-        pushCurrentFrame()
-        optionsByID = [:]
-        optionEntries = []
-        level = .pluginArgumentInput(sourceKey: sourceKey, rowID: rowID, title: title, badge: title)
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
+        push(.pluginArgumentInput(sourceKey: sourceKey, rowID: rowID, title: title, badge: title))
     }
-
-    /// Monotonic id for the current Detail drill-in. Bumped on every push (and
-    /// on leaving Detail), so a late `updateDetail` can tell whether it belongs
-    /// to the Detail that is still open — drilling A→back→B must not let A's slow
-    /// result repopulate B (their plugin queues are independent).
-    private(set) var detailGeneration = 0
 
     /// Push a markdown Detail level in its loading state and return the
     /// generation token identifying this drill-in. The window controller passes
     /// that token back to `updateDetail` when the markdown resolves.
     @discardableResult
     func enterDetail(title: String) -> Int {
-        pushCurrentFrame()
-        optionsByID = [:]
-        optionEntries = []
-        detailGeneration += 1
-        level = .detail(.loading(title: title))
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
-        return detailGeneration
+        push(.detail(.loading(title: title)))
+        return navigationRevision
     }
-
-    /// Monotonic id for the current list drill-in. Bumped on every push, so a
-    /// late `updateList` can tell whether it belongs to the list still open —
-    /// drilling list A -> back -> list B must not let A's slow result repopulate
-    /// B (their plugin queues are independent). Mirrors `detailGeneration`.
-    private(set) var listGeneration = 0
 
     /// Push a searchable second-level plugin list in its loading state and return
     /// the generation token identifying this drill-in. The window controller
     /// passes that token back to `updateList` when the rows resolve.
     @discardableResult
     func enterList(sourceKey: PluginRowSourceKey, listID: String, title: String) -> Int {
-        pushCurrentFrame()
-        optionsByID = [:]
-        optionEntries = []
-        listGeneration += 1
-        level = .list(ListLevel(sourceKey: sourceKey, listID: listID, title: title, content: .loading))
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
-        return listGeneration
+        push(.list(ListLevel(sourceKey: sourceKey, listID: listID, title: title, content: .loading)))
+        return navigationRevision
     }
 
     /// Replace the pushed list's content once its rows resolve (or fail). A no-op
@@ -245,7 +219,7 @@ final class CommandPaletteState {
     /// popped, or superseded by a later drill-in, discards the stale result via
     /// the generation token. Mirrors `updateDetail`.
     func updateList(_ content: ListContent, generation: Int) {
-        guard case .list(var listLevel) = level, generation == listGeneration else { return }
+        guard case .list(var listLevel) = level, generation == navigationRevision else { return }
         listLevel.content = content
         level = .list(listLevel)
     }
@@ -255,7 +229,7 @@ final class CommandPaletteState {
     /// dismissed, or superseded by a later drill-in, discards the stale result
     /// via the generation token.
     func updateDetail(_ state: DetailState, generation: Int) {
-        guard case .detail = level, generation == detailGeneration else { return }
+        guard case .detail = level, generation == navigationRevision else { return }
         level = .detail(state)
     }
 
@@ -266,8 +240,6 @@ final class CommandPaletteState {
     func popToRoot() {
         level = .root
         navigationStack = []
-        optionsByID = [:]
-        optionEntries = []
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
@@ -275,27 +247,36 @@ final class CommandPaletteState {
     }
 
     /// Monotonic counter bumped on every navigation-position change (a push or a
-    /// pop, not a content update). The view watches it to re-anchor the overlaid
-    /// AppKit search field after a level transition: adding or removing the back
-    /// header shifts the field's SwiftUI slot, but the anchor's own `layout()`
-    /// fires only when its own size changes, not when an ancestor moves it, so
-    /// without this nudge the field would land one transition behind (its
-    /// placeholder overlapping the back header, then dropping below the glyph
-    /// after popping back to the root).
+    /// pop, not a content update). It serves two roles. The view watches it to
+    /// re-anchor the overlaid AppKit search field after a level transition:
+    /// adding or removing the back header shifts the field's SwiftUI slot, but
+    /// the anchor's own `layout()` fires only when its own size changes, not
+    /// when an ancestor moves it, so without this nudge the field would land one
+    /// transition behind. And it is the generation token for async drill-ins
+    /// (Detail / list): a slow result is accepted only while no navigation
+    /// change has happened since the push that requested it, so drilling
+    /// A → back → B can never let A's late result repopulate B.
     private(set) var navigationRevision = 0
 
-    /// Record the current level so a later `popLevel` can return to it. Called by
-    /// every drill-in push (options / argument input / detail / list); bumps the
-    /// navigation revision so the field re-anchors below the new back header.
-    private func pushCurrentFrame() {
+    /// Enter a new navigation level: record the current frame, install the new
+    /// level, clear the transient state every drill-in resets (dev-tool scope,
+    /// query, selection), and bump the navigation revision. The one
+    /// implementation of the drill-in ritual — a new level cannot forget part
+    /// of it, and level content (option lookup, list rows, detail state)
+    /// travels inside the enum payload rather than in side slots.
+    private func push(_ newLevel: Level) {
         navigationStack.append(level)
+        level = newLevel
+        activeDevToolScope = nil
+        query = ""
+        selectedIndex = 0
         navigationRevision += 1
     }
 
     /// Pop one navigation level: restore the frame just below, or fall back to the
-    /// root when the stack is empty. Clears the transient per-level state (option
-    /// lookup, scope, query, selection); the restored level carries its own
-    /// content (list rows, detail state) inside its enum payload, so a Detail
+    /// root when the stack is empty. Clears the transient per-level state (scope,
+    /// query, selection); the restored level carries its own content (option
+    /// lookup, list rows, detail state) inside its enum payload, so a Detail
     /// drilled out of a list returns to that list without a refetch.
     func popLevel() {
         guard let previous = navigationStack.popLast() else {
@@ -303,15 +284,16 @@ final class CommandPaletteState {
             return
         }
         level = previous
-        optionsByID = [:]
-        optionEntries = []
         activeDevToolScope = nil
         query = ""
         selectedIndex = 0
         navigationRevision += 1
     }
 
-    func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
+    func option(id: String) -> CommandPaletteOption? {
+        guard case .options(let optionsLevel) = level else { return nil }
+        return optionsLevel.optionsByID[id]
+    }
 
     /// Replace the root sections after the off-main installed-apps scan resolves.
     /// `@Observable` re-renders the picker; `query`/`selectedIndex`/drill-in state
@@ -479,9 +461,10 @@ final class CommandPaletteState {
 
     /// Option entries filtered by the second-level query.
     var filteredOptionEntries: [PanelEntry] {
+        guard case .options(let optionsLevel) = level else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return optionEntries }
-        return optionEntries.filter {
+        guard !trimmed.isEmpty else { return optionsLevel.entries }
+        return optionsLevel.entries.filter {
             $0.title.localizedCaseInsensitiveContains(trimmed)
                 || ($0.subtitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
         }
@@ -1354,7 +1337,7 @@ struct CommandPalettePicker: View {
     /// carry no header (root, and the badge-bearing argument-input modes).
     private var backHeaderTitle: String? {
         switch state.level {
-        case .options(let parentTitle): return parentTitle
+        case .options(let optionsLevel): return optionsLevel.parentTitle
         case .detail(let detail): return detail.title
         case .list(let listLevel): return listLevel.title
         case .root, .argumentInput, .pluginArgumentInput: return nil
