@@ -9,7 +9,8 @@ final class MarkdownBlocksTests: XCTestCase {
 
     private func plainText(_ block: MarkdownBlock?) -> String? {
         switch block {
-        case .heading(_, let text), .paragraph(let text), .listItem(_, let text):
+        case .heading(_, let text), .paragraph(let text), .listItem(_, let text),
+             .blockquote(let text):
             return String(text.characters)
         case .codeBlock(let code):
             return code
@@ -110,6 +111,40 @@ final class MarkdownBlocksTests: XCTestCase {
         XCTAssertEqual(code, ["let x = 1\nprint(x)"])
     }
 
+    // MARK: - Blockquote
+
+    func testBlockquoteBecomesQuoteBlock() {
+        let blocks = MarkdownBlocks.blocks(from: "Body.\n\n> A quoted hint.")
+        XCTAssertEqual(blocks.count, 2)
+        guard case .paragraph = blocks[0], case .blockquote = blocks[1] else {
+            return XCTFail("expected paragraph then blockquote, got \(blocks)")
+        }
+        XCTAssertEqual(plainText(blocks[1]), "A quoted hint.")
+    }
+
+    func testMultiParagraphQuoteMergesIntoOneBlock() {
+        // The v2ex comment shape: an author line and a body inside one quote.
+        let blocks = MarkdownBlocks.blocks(from: "> **alice** · 1 楼\n>\n> Comment body.")
+        XCTAssertEqual(blocks.count, 1)
+        guard case .blockquote(let text) = blocks[0] else {
+            return XCTFail("expected one blockquote, got \(blocks)")
+        }
+        XCTAssertEqual(String(text.characters), "alice · 1 楼\n\nComment body.")
+        // The author's bold must survive as an inline intent inside the quote.
+        XCTAssertTrue(text.runs.contains { $0.inlinePresentationIntent != nil })
+    }
+
+    func testSeparateQuotesStayDistinctBlocks() {
+        // Two comments = two quotes; they must not merge into one visual unit.
+        let blocks = MarkdownBlocks.blocks(from: "> First comment.\n\n> Second comment.")
+        XCTAssertEqual(blocks.count, 2)
+        guard case .blockquote = blocks[0], case .blockquote = blocks[1] else {
+            return XCTFail("expected two blockquotes, got \(blocks)")
+        }
+        XCTAssertEqual(plainText(blocks[0]), "First comment.")
+        XCTAssertEqual(plainText(blocks[1]), "Second comment.")
+    }
+
     // MARK: - Inline styling survival
 
     func testInlineStylingSurvivesInParagraph() {
@@ -147,6 +182,8 @@ final class MarkdownBlocksTests: XCTestCase {
 
         ---
 
+        > A quote.
+
         Closing paragraph.
         """
         let blocks = MarkdownBlocks.blocks(from: markdown)
@@ -158,11 +195,12 @@ final class MarkdownBlocksTests: XCTestCase {
             case .listItem: kinds.append("listItem")
             case .codeBlock: kinds.append("codeBlock")
             case .thematicBreak: kinds.append("thematicBreak")
+            case .blockquote: kinds.append("blockquote")
             }
         }
         XCTAssertEqual(
             kinds,
-            ["heading", "paragraph", "listItem", "listItem", "thematicBreak", "paragraph"]
+            ["heading", "paragraph", "listItem", "listItem", "thematicBreak", "blockquote", "paragraph"]
         )
     }
 

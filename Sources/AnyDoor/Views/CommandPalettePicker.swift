@@ -737,8 +737,9 @@ private struct CommandPaletteRow: View {
 }
 
 /// Lays out `MarkdownBlocks` output as a modest styled document for the palette
-/// Detail: headings, paragraphs, bulleted/numbered lists, code blocks, and
-/// thematic rules. Deliberately not a full renderer — inline styling (bold /
+/// Detail: headings, paragraphs, bulleted/numbered lists, code blocks,
+/// thematic rules, and blockquotes. Deliberately not a full renderer — inline
+/// styling (bold /
 /// italic / inline-code / links) is carried by each block's `AttributedString`
 /// and rendered by `Text`; block structure is what this view adds back.
 private struct MarkdownBlocksView: View {
@@ -788,6 +789,18 @@ private struct MarkdownBlocksView: View {
                 )
         case .thematicBreak:
             Divider().opacity(0.5).padding(.vertical, 2)
+        case .blockquote(let text):
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Color.secondary.opacity(0.35))
+                    .frame(width: 3)
+                Text(text)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 1)
         }
     }
 

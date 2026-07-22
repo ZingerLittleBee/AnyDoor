@@ -21,6 +21,10 @@ enum MarkdownBlock: Equatable {
     case codeBlock(String)
     /// A thematic break (`---`), rendered as a divider.
     case thematicBreak
+    /// A blockquote (`> …`). Consecutive paragraphs of the *same* quote are
+    /// merged into one block (joined by blank lines) so a multi-paragraph quote
+    /// renders as a single quoted unit; separate quotes stay separate blocks.
+    case blockquote(AttributedString)
 }
 
 /// Pure markdown → `[MarkdownBlock]` splitter built on the system markdown
@@ -47,11 +51,27 @@ enum MarkdownBlocks {
         var currentIntent: PresentationIntent?
         var currentText = AttributedString()
         var hasGroup = false
+        // Blockquote identity of the last appended block, used to merge the
+        // paragraphs of one quote while keeping distinct quotes separate.
+        var lastQuoteIdentity: Int?
 
         func flush() {
             guard hasGroup else { return }
             if let block = makeBlock(intent: currentIntent, text: currentText) {
-                blocks.append(block)
+                let quoteIdentity = currentIntent.flatMap(Self.quoteIdentity)
+                if case .blockquote(let text) = block,
+                   quoteIdentity != nil, quoteIdentity == lastQuoteIdentity,
+                   case .blockquote(var merged) = blocks[blocks.count - 1] {
+                    merged.append(AttributedString("\n\n"))
+                    merged.append(text)
+                    blocks[blocks.count - 1] = .blockquote(merged)
+                } else {
+                    blocks.append(block)
+                    lastQuoteIdentity = {
+                        if case .blockquote = block { return quoteIdentity }
+                        return nil
+                    }()
+                }
             }
             currentText = AttributedString()
             hasGroup = false
@@ -88,6 +108,7 @@ enum MarkdownBlocks {
         var isOrdered = false
         var isCodeBlock = false
         var isThematicBreak = false
+        var isBlockquote = false
 
         for component in intent.components {
             switch component.kind {
@@ -96,6 +117,7 @@ enum MarkdownBlocks {
             case .orderedList: isOrdered = true
             case .codeBlock: isCodeBlock = true
             case .thematicBreak: isThematicBreak = true
+            case .blockQuote: isBlockquote = true
             default: break
             }
         }
@@ -112,6 +134,11 @@ enum MarkdownBlocks {
         let content = trimmed(text)
         guard !content.characters.isEmpty else { return nil }
 
+        // A quote wins over anything nested inside it (`> # title`), so the
+        // whole quote renders as one quoted unit.
+        if isBlockquote {
+            return .blockquote(content)
+        }
         if let headingLevel {
             return .heading(level: headingLevel, text: content)
         }
@@ -119,6 +146,16 @@ enum MarkdownBlocks {
             return .listItem(ordinal: isOrdered ? listOrdinal : nil, text: content)
         }
         return .paragraph(content)
+    }
+
+    /// The parser-assigned identity of the blockquote containing this intent,
+    /// or nil when the intent is not inside a quote. Two paragraphs share an
+    /// identity exactly when they belong to the same source quote.
+    private static func quoteIdentity(_ intent: PresentationIntent) -> Int? {
+        for component in intent.components {
+            if case .blockQuote = component.kind { return component.identity }
+        }
+        return nil
     }
 
     /// Drop leading and trailing whitespace/newline characters while preserving

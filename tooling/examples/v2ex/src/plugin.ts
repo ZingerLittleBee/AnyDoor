@@ -164,6 +164,15 @@ function toRows(list: Topic[], query: string): Row[] {
   return rows;
 }
 
+/** Wrap `paragraphs` into one markdown blockquote (every line `>`-prefixed). */
+function quoted(...paragraphs: string[]): string {
+  return paragraphs
+    .flatMap((paragraph) => ["", ...paragraph.split("\n")])
+    .slice(1)
+    .map((line) => (line.length > 0 ? `> ${line}` : ">"))
+    .join("\n");
+}
+
 function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
   const node = topic.node?.title ?? topic.node?.name ?? "";
   const author = topic.member?.username ?? "未知";
@@ -177,16 +186,19 @@ function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
     lines.push("", "---", "", topic.content);
   }
 
+  // Comments render as one blockquote per reply — the host draws each quote
+  // with a leading bar in secondary text, visually separating the comment
+  // section from the plain-paragraph topic body and each comment from the next.
   if (replies === undefined) {
-    lines.push("", "> 设置 V2EX Token 后可加载评论。");
+    lines.push("", "---", "", quoted("设置 V2EX Token 后可加载评论。"));
   } else if (replies.length === 0) {
-    lines.push("", "---", "", "> 暂无评论");
+    lines.push("", "---", "", "## 评论", "", quoted("暂无评论"));
   } else {
-    lines.push("", "---", "", `## 评论（前 ${replies.length} 条）`);
-    for (const reply of replies) {
+    lines.push("", "---", "", `## 评论 · 前 ${replies.length} 条`);
+    replies.forEach((reply, index) => {
       const who = reply.member?.username ?? "匿名";
-      lines.push("", `**${who}**`, "", reply.content);
-    }
+      lines.push("", quoted(`**${who}** · ${index + 1} 楼`, reply.content));
+    });
   }
 
   return lines.join("\n");
