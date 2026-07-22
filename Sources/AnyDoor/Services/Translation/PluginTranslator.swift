@@ -22,16 +22,21 @@ import Foundation
 enum PluginTranslator {
     static func translate(
         _ text: String,
-        settings: TranslationSettings = .shared
+        settings: TranslationSettings = .shared,
+        makeProvider: (TranslationServiceConfig) -> (any TranslationProvider)? = {
+            TranslationProviderFactory.makeStreamProvider(for: $0)
+        }
     ) async throws -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return text }
 
-        let provider = settings.enabledServicesInOrder
-            .filter { !$0.startsManual }
-            .lazy
-            .compactMap { TranslationProviderFactory.makeStreamProvider(for: $0) }
-            .first
+        var provider: (any TranslationProvider)?
+        for config in settings.enabledServicesInOrder where !config.startsManual {
+            if let built = makeProvider(config) {
+                provider = built
+                break
+            }
+        }
         guard let provider else {
             throw PluginTranslationError.noUsableService
         }
