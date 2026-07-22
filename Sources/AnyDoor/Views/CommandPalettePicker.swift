@@ -738,8 +738,8 @@ private struct CommandPaletteRow: View {
 
 /// Lays out `MarkdownBlocks` output as a modest styled document for the palette
 /// Detail: headings, paragraphs, bulleted/numbered lists, code blocks,
-/// thematic rules, and blockquotes. Deliberately not a full renderer — inline
-/// styling (bold /
+/// thematic rules, blockquotes, and http(s) image previews. Deliberately not a
+/// full renderer — inline styling (bold /
 /// italic / inline-code / links) is carried by each block's `AttributedString`
 /// and rendered by `Text`; block structure is what this view adds back.
 private struct MarkdownBlocksView: View {
@@ -801,6 +801,32 @@ private struct MarkdownBlocksView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.vertical, 1)
+        case .image(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                case .failure:
+                    // Keep the information reachable when loading fails: a
+                    // tappable link in place of the preview.
+                    Link(destination: url) {
+                        Label(url.absoluteString, systemImage: "photo")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                case .empty:
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                        .frame(height: 120)
+                        .overlay(ProgressView().controlSize(.small))
+                @unknown default:
+                    EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: 280, alignment: .leading)
         }
     }
 

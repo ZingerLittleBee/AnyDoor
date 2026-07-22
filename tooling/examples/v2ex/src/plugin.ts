@@ -164,6 +164,15 @@ function toRows(list: Topic[], query: string): Row[] {
   return rows;
 }
 
+// A bare image URL in plain V2EX text (the feeds are not markdown, so nothing
+// autolinks). The lookbehind skips URLs already inside `![…](…)` / `[…](…)`.
+const BARE_IMAGE_URL = /(?<![([])\bhttps?:\/\/\S+\.(?:png|jpe?g|gif|webp)(?:\?\S*)?/gi;
+
+/** Turn bare image URLs into markdown images so the host renders previews. */
+function withImagePreviews(text: string): string {
+  return text.replace(BARE_IMAGE_URL, (url) => `![](${url})`);
+}
+
 /** Wrap `paragraphs` into one markdown blockquote (every line `>`-prefixed). */
 function quoted(...paragraphs: string[]): string {
   return paragraphs
@@ -183,7 +192,7 @@ function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
   const lines: string[] = [`# ${topic.title}`, "", meta, "", `[在浏览器中打开原帖](${topic.url})`];
 
   if (topic.content.length > 0) {
-    lines.push("", "---", "", topic.content);
+    lines.push("", "---", "", withImagePreviews(topic.content));
   }
 
   // Comments render as one blockquote per reply — the host draws each quote
@@ -197,7 +206,7 @@ function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
     lines.push("", "---", "", `## 评论 · 前 ${replies.length} 条`);
     replies.forEach((reply, index) => {
       const who = reply.member?.username ?? "匿名";
-      lines.push("", quoted(`**${who}** · ${index + 1} 楼`, reply.content));
+      lines.push("", quoted(`**${who}** · ${index + 1} 楼`, withImagePreviews(reply.content)));
     });
   }
 

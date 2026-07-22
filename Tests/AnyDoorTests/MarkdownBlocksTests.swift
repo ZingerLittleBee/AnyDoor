@@ -14,7 +14,7 @@ final class MarkdownBlocksTests: XCTestCase {
             return String(text.characters)
         case .codeBlock(let code):
             return code
-        case .thematicBreak, .none:
+        case .thematicBreak, .image, .none:
             return nil
         }
     }
@@ -145,6 +145,36 @@ final class MarkdownBlocksTests: XCTestCase {
         XCTAssertEqual(plainText(blocks[1]), "Second comment.")
     }
 
+    // MARK: - Images
+
+    func testMarkdownImageBecomesImageBlock() {
+        let blocks = MarkdownBlocks.blocks(from: "Body.\n\n![alt](https://i.example.com/a.jpeg)\n\nAfter.")
+        XCTAssertEqual(blocks.count, 3)
+        guard case .image(let url) = blocks[1] else {
+            return XCTFail("expected an image block in the middle, got \(blocks)")
+        }
+        XCTAssertEqual(url, URL(string: "https://i.example.com/a.jpeg"))
+        XCTAssertEqual(plainText(blocks[2]), "After.")
+    }
+
+    func testNonHTTPImageIsDroppedNotLoaded() {
+        // The ADR-0009 scheme allowlist applies to remote-content boundaries:
+        // a plugin-authored file:// image must never surface as a loadable block.
+        let blocks = MarkdownBlocks.blocks(from: "![x](file:///etc/passwd)\n\nStill here.")
+        XCTAssertFalse(blocks.contains { if case .image = $0 { return true }; return false })
+        XCTAssertEqual(plainText(blocks.last), "Still here.")
+    }
+
+    func testImageInsideQuoteBreaksOutAsItsOwnBlock() {
+        // A comment embedding an image: quote text, the preview, quote text.
+        let blocks = MarkdownBlocks.blocks(from: "> before ![p](https://example.com/p.png) after")
+        XCTAssertEqual(blocks.count, 3)
+        guard case .blockquote = blocks[0], case .image = blocks[1],
+              case .blockquote = blocks[2] else {
+            return XCTFail("expected quote / image / quote, got \(blocks)")
+        }
+    }
+
     // MARK: - Inline styling survival
 
     func testInlineStylingSurvivesInParagraph() {
@@ -196,6 +226,7 @@ final class MarkdownBlocksTests: XCTestCase {
             case .codeBlock: kinds.append("codeBlock")
             case .thematicBreak: kinds.append("thematicBreak")
             case .blockquote: kinds.append("blockquote")
+            case .image: kinds.append("image")
             }
         }
         XCTAssertEqual(

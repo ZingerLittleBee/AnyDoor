@@ -25,6 +25,11 @@ enum MarkdownBlock: Equatable {
     /// merged into one block (joined by blank lines) so a multi-paragraph quote
     /// renders as a single quoted unit; separate quotes stay separate blocks.
     case blockquote(AttributedString)
+    /// A markdown image (`![alt](url)`), surfaced as its own block so the
+    /// Detail can render an inline preview. Confined to http/https — the same
+    /// scheme allowlist every other plugin-authored URL boundary enforces
+    /// (ADR-0009); a `file://` or custom-scheme image is dropped, never loaded.
+    case image(URL)
 }
 
 /// Pure markdown → `[MarkdownBlock]` splitter built on the system markdown
@@ -78,6 +83,21 @@ enum MarkdownBlocks {
         }
 
         for run in attributed.runs {
+            // An image run carries its URL as an attribute while sharing the
+            // surrounding paragraph's intent, so it must break the group here:
+            // text before it flushes, the image becomes its own block, and text
+            // after it starts a fresh group. (A quote interrupted by an image
+            // intentionally resumes as a separate quote block — the merge guard
+            // only extends a quote when it is still the last block.)
+            if let imageURL = run.imageURL {
+                flush()
+                if let scheme = imageURL.scheme?.lowercased(),
+                   scheme == "http" || scheme == "https" {
+                    blocks.append(.image(imageURL))
+                    lastQuoteIdentity = nil
+                }
+                continue
+            }
             let intent = run.presentationIntent
             if !hasGroup {
                 currentIntent = intent
