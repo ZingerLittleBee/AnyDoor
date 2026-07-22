@@ -60,6 +60,18 @@ protocol AnyPluginLifecycleHost: AnyObject {
     func lifecycleTransitionInProgressError(idString: String) -> any Error
 }
 
+// Default no-ops for the hooks a kind may not need: Native Plugins resolve
+// retained-hotkey conflicts, republish panel/hotkey surfaces, and forward
+// imports, but a kind whose only surface is core-owned (Script Plugins)
+// implements none of these. Defaults keep a host from advertising phases it
+// does not have; the register/unregister/activate/deactivate hooks stay
+// required because every kind has them.
+extension AnyPluginLifecycleHost {
+    func prepareLifecycleInstall(idString: String) {}
+    func publishLifecycleSurfaces() {}
+    func reconcileLifecycleImport(idString: String) {}
+}
+
 /// A single reconcile failure surfaced back to the kind layer, pairing the
 /// plugin id string with the opaque error the core caught for it. The kind
 /// layer maps these into its own typed reconciliation error.

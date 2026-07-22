@@ -602,10 +602,11 @@ extension ScriptPluginRegistry: AnyPluginLifecycleHost {
         runtime.unload(ScriptPluginID(idString))
     }
 
-    func prepareLifecycleInstall(idString: String) {
-        // Script Plugins claim no closed commands and record no hotkeys, so there
-        // is no retained-hotkey conflict to resolve before install.
-    }
+    // `prepareLifecycleInstall`, `publishLifecycleSurfaces`, and
+    // `reconcileLifecycleImport` use the protocol's default no-ops: Script
+    // Plugins claim no closed commands, record no hotkeys, have no
+    // kind-specific surface beyond the core-owned palette, and keep their
+    // install state out of config backup.
 
     func registerLifecycleSurfaces(idString: String) {
         let id = ScriptPluginID(idString)
@@ -620,17 +621,6 @@ extension ScriptPluginRegistry: AnyPluginLifecycleHost {
         // a separate directory and is intentionally left in place.
         knownPackages.removeValue(forKey: id)
         try? FileManager.default.removeItem(at: packageDirectory(for: id))
-    }
-
-    func publishLifecycleSurfaces() {
-        // Script Plugins contribute no panel rows or hotkeys; the only surface is
-        // the palette row source, and the core recomposes a visible palette
-        // through `refreshCommandPalette`. Nothing kind-specific to publish.
-    }
-
-    func reconcileLifecycleImport(idString: String) {
-        // Script Plugin install state is excluded from config backup, so import
-        // reconciliation never reaches this kind.
     }
 
     func lifecycleTransitionInProgressError(idString: String) -> any Error {
