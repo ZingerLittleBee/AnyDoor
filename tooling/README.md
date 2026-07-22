@@ -28,6 +28,11 @@ directory. `pnpm verify` builds and asserts them alongside the scaffold template
   per-topic markdown Detail with image previews, scroll-paginated comments, and
   opt-in translation, plus an optional stored access token
   (`fetch` + `store` + `toast` + `openURL` + `translate`).
+- [`examples/hackernews`](examples/hackernews) — a Hacker News browser: five
+  public story feeds, per-story Detail with the full comment thread (fetched in
+  one Algolia request, paginated client-side), HTML-to-markdown conversion, and
+  opt-in translation — no token anywhere
+  (`fetch` + `store` + `toast` + `translate`).
 
 ## Requirements
 

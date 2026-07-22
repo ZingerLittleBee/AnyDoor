@@ -25,7 +25,7 @@ const examplesRoot = path.join(toolingRoot, "examples");
 
 // Worked-example plugins under examples/ that must install, typecheck, and build
 // into a valid package standalone (they are not pnpm workspace members).
-const EXAMPLES = ["v2ex"];
+const EXAMPLES = ["v2ex", "hackernews"];
 
 let failures = 0;
 function check(label, condition, detail = "") {
