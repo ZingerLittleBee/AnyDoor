@@ -28,11 +28,10 @@ enum SyncSettingsRegistry {
     /// Core-owned portable keys plus every plugin-declared preference. A Native
     /// Plugin declares its own `syncedDefaults` (aggregated through the
     /// catalog), so adding a plugin never edits this file.
-    static var entries: [Entry] {
+    static let entries: [Entry] =
         coreEntries + NativePluginCatalog.syncedDefaults.map {
             Entry(key: $0.key, type: ValueType($0.type))
         }
-    }
 
     private static let coreEntries: [Entry] = [
         // Installed Native Plugin ids. Import applies it through
@@ -68,9 +67,8 @@ enum SyncSettingsRegistry {
         Entry(key: "translation.services", type: .string),
     ]
 
-    private static var entriesByKey: [String: Entry] {
+    private static let entriesByKey: [String: Entry] =
         Dictionary(uniqueKeysWithValues: entries.map { ($0.key, $0) })
-    }
 
     /// Collect whitelisted keys that are actually present in `defaults`.
     static func read(from defaults: UserDefaults) -> [String: SettingValue] {
