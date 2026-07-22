@@ -129,10 +129,6 @@ final class ScriptPluginRegistry {
     @ObservationIgnored private let diagnostics: any ScriptPluginDiagnostics
     @ObservationIgnored private let paletteExtensions: CommandPaletteExtensions
     @ObservationIgnored private let languageCode: @MainActor () -> String?
-    /// Recomposes a visible palette from the live registrations (install/uninstall
-    /// and dev register/remove all use it). Held here as well as inside the core
-    /// so the dev-plugin paths can recompose without going through the core.
-    @ObservationIgnored private let refreshCommandPalette: @MainActor () -> Void
     /// Presents a Dev Plugin's action failure with full detail (the author wants
     /// the message and stack, not the generic toast a normal user sees).
     @ObservationIgnored private let presentDevActionFailure: @MainActor (ScriptPluginID, ScriptPluginError) -> Void
@@ -175,7 +171,6 @@ final class ScriptPluginRegistry {
         self.diagnostics = diagnostics
         self.paletteExtensions = paletteExtensions
         self.languageCode = languageCode
-        self.refreshCommandPalette = refreshCommandPalette
         self.notifyRowsChanged = notifyRowsChanged
         self.presentActionFailure = presentActionFailure
         self.presentDevActionFailure = presentDevActionFailure
@@ -321,7 +316,7 @@ final class ScriptPluginRegistry {
                 deactivateDevPlugin(id)
             }
         }
-        refreshCommandPalette()
+        core.publishSurfaces()
     }
 
     // MARK: - Dev Plugin registration (in place, never copied)
@@ -358,7 +353,7 @@ final class ScriptPluginRegistry {
         devDirectories[id] = standardized
         persistDevDirectories()
         activateDevPlugin(directory: standardized)
-        refreshCommandPalette()
+        core.publishSurfaces()
         return id
     }
 
@@ -370,7 +365,7 @@ final class ScriptPluginRegistry {
         deactivateDevPlugin(id)
         devDirectories.removeValue(forKey: id)
         persistDevDirectories()
-        refreshCommandPalette()
+        core.publishSurfaces()
     }
 
     /// Whether a plugin id is a registered Dev Plugin (installed-in-place).
@@ -423,20 +418,10 @@ final class ScriptPluginRegistry {
         } catch {
             return
         }
-        let source = ScriptPluginRowSource(
-            scriptID: id,
-            runtime: runtime,
-            sectionTitle: package.manifest.displayName(forLanguageCode: languageCode()),
-            surfacesErrorDetail: true,
-            onRowsChanged: notifyRowsChanged,
-            onActionError: { [presentDevActionFailure] error in presentDevActionFailure(id, error) }
-        )
-        rowSources[id] = source
+        let source = registerRowSource(for: package, surfacesErrorDetail: true)
         let watcher = makeDevWatcher(for: id, directory: directory)
         activeDevPlugins[id] = DevPluginState(id: id, source: source, watcher: watcher)
         activeDevPluginsObservationToken &+= 1
-        paletteExtensions.registerRowSource(source, ownerID: rowSourceOwnerID(for: id))
-        source.reload()
     }
 
     /// Tear down a Dev Plugin's active runtime state without touching its
@@ -445,9 +430,49 @@ final class ScriptPluginRegistry {
         guard let state = activeDevPlugins.removeValue(forKey: id) else { return }
         activeDevPluginsObservationToken &+= 1
         state.watcher?.cancel()
+        unregisterRowSource(for: id)
+        runtime.unload(id)
+    }
+
+    // MARK: - Row-source surface (shared by installed and Dev Plugins)
+
+    /// Build, index, and register the palette row source for a loaded plugin,
+    /// then kick its initial async fetch — the one implementation of bringing a
+    /// Script Plugin's palette surface up, used by the installed lifecycle hook
+    /// and the Dev Plugin path alike. Dev Plugins surface full error detail to
+    /// the author; installed plugins show the generic failure toast.
+    @discardableResult
+    private func registerRowSource(
+        for package: ScriptPluginPackage, surfacesErrorDetail: Bool
+    ) -> ScriptPluginRowSource {
+        let id = package.id
+        let onActionError: @MainActor @Sendable (ScriptPluginError) -> Void
+        if surfacesErrorDetail {
+            onActionError = { [presentDevActionFailure] error in presentDevActionFailure(id, error) }
+        } else {
+            onActionError = { [presentActionFailure] _ in presentActionFailure(id) }
+        }
+        let source = ScriptPluginRowSource(
+            scriptID: id,
+            runtime: runtime,
+            sectionTitle: package.manifest.displayName(forLanguageCode: languageCode()),
+            surfacesErrorDetail: surfacesErrorDetail,
+            onRowsChanged: notifyRowsChanged,
+            onActionError: onActionError
+        )
+        rowSources[id] = source
+        paletteExtensions.registerRowSource(source, ownerID: rowSourceOwnerID(for: id))
+        // Kick the initial async fetch so rows are ready by the time the user
+        // types into the palette.
+        source.reload()
+        return source
+    }
+
+    /// Drop a plugin's row source and revert its palette registration — the one
+    /// implementation of tearing a Script Plugin's palette surface down.
+    private func unregisterRowSource(for id: ScriptPluginID) {
         rowSources.removeValue(forKey: id)
         paletteExtensions.unregisterRowSource(key: rowSourceKey(for: id))
-        runtime.unload(id)
     }
 
     /// Overridden by ticket 023's watcher slice; nil keeps activation working
@@ -585,24 +610,12 @@ extension ScriptPluginRegistry: AnyPluginLifecycleHost {
     func registerLifecycleSurfaces(idString: String) {
         let id = ScriptPluginID(idString)
         guard let package = knownPackages[id] else { return }
-        let source = ScriptPluginRowSource(
-            scriptID: id,
-            runtime: runtime,
-            sectionTitle: package.manifest.displayName(forLanguageCode: languageCode()),
-            onRowsChanged: notifyRowsChanged,
-            onActionError: { [presentActionFailure] _ in presentActionFailure(id) }
-        )
-        rowSources[id] = source
-        paletteExtensions.registerRowSource(source, ownerID: rowSourceOwnerID(for: id))
-        // Kick the initial async fetch so rows are ready by the time the user
-        // types into the palette.
-        source.reload()
+        registerRowSource(for: package, surfacesErrorDetail: false)
     }
 
     func unregisterLifecycleSurfaces(idString: String) {
         let id = ScriptPluginID(idString)
-        rowSources.removeValue(forKey: id)
-        paletteExtensions.unregisterRowSource(key: rowSourceKey(for: id))
+        unregisterRowSource(for: id)
         // Remove the installed package copy; the private key-value store lives in
         // a separate directory and is intentionally left in place.
         knownPackages.removeValue(forKey: id)

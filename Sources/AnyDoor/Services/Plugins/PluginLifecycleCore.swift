@@ -241,7 +241,12 @@ final class PluginLifecycleCore {
         defaults.set(installedIDStrings.sorted(), forKey: installStateKey)
     }
 
-    private func publishSurfaces() {
+    /// Republish every live surface — the kind's own hook plus the shared
+    /// command palette. Lifecycle transitions call this internally; a kind's
+    /// non-lifecycle surface changes (Dev Plugins registering, reloading, or
+    /// tearing down) go through it too, so palette recomposition has a single
+    /// owning verb instead of per-path refresh handles.
+    func publishSurfaces() {
         host.publishLifecycleSurfaces()
         refreshCommandPalette()
     }
