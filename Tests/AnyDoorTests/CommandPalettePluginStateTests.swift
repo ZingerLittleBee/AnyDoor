@@ -211,6 +211,60 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertNil(state.beginDetailMore())
     }
 
+    // MARK: - Detail footer actions
+
+    @MainActor
+    func testDetailActionRebuildFlowsThroughLoadingBackToLoaded() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        XCTAssertTrue(state.detailActions.isEmpty, "a loading Detail shows no action bar")
+
+        state.updateDetail(
+            .loaded(title: "Post", markdown: "original"),
+            actions: [PluginRowDetailAction(id: "translate", label: "翻译")],
+            generation: generation)
+        XCTAssertEqual(state.detailActions.map(\.id), ["translate"])
+
+        // Claiming the rebuild drops to loading (bar hidden), refusing a second press.
+        let request = state.beginDetailAction()
+        XCTAssertEqual(request?.sourceKey, sourceKey)
+        XCTAssertEqual(request?.rowID, "row")
+        XCTAssertEqual(state.detailState, .loading(title: "Post"))
+        XCTAssertTrue(state.detailActions.isEmpty)
+        XCTAssertNil(state.beginDetailAction(), "no second rebuild while one is in flight")
+
+        // The rebuilt document replaces content, cursor, and actions wholesale.
+        state.updateDetail(
+            .loaded(title: "Post", markdown: "translated"),
+            more: "t:2",
+            actions: [PluginRowDetailAction(id: "original", label: "显示原文")],
+            generation: request!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "translated"))
+        XCTAssertEqual(state.detailMoreCursor, "t:2")
+        XCTAssertEqual(state.detailActions.map(\.id), ["original"])
+    }
+
+    @MainActor
+    func testLateDetailActionResultDoesNotLandOnALaterDrillIn() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let genA = state.enterDetail(sourceKey: sourceKey, rowID: "a", title: "A")
+        state.updateDetail(
+            .loaded(title: "A", markdown: "A body"),
+            actions: [PluginRowDetailAction(id: "translate", label: "翻译")],
+            generation: genA)
+        let requestA = state.beginDetailAction()
+        state.popToRoot()
+
+        let genB = state.enterDetail(sourceKey: sourceKey, rowID: "b", title: "B")
+        state.updateDetail(.loaded(title: "B", markdown: "B body"), generation: genB)
+
+        // A's slow rebuild arrives now — the generation token discards it.
+        state.updateDetail(
+            .loaded(title: "A", markdown: "A translated"),
+            generation: requestA!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "B", markdown: "B body"))
+    }
+
     // MARK: - Plugin list navigation
 
     @MainActor

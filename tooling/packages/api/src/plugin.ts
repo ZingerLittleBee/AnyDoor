@@ -13,15 +13,29 @@ import type { Manifest } from "./manifest.js";
 import type { Row } from "./rows.js";
 
 /**
- * What `detail` may return: a plain markdown string (a complete document), or
- * a chunk carrying a `more` cursor. A non-undefined `more` tells the host the
- * Detail has a further chunk; when the user scrolls to the bottom, the host
- * calls `detail(rowId, api, cursor)` again with that cursor and appends the
- * returned chunk's markdown to the rendered document. The cursor is opaque to
- * the host — encode whatever pagination state you need (a page number, an
- * API-issued token).
+ * A footer action a Detail document offers (e.g. a "翻译" button). When the
+ * user presses it, the host calls `detailAction(rowId, actionId, api)` and
+ * replaces the rendered document with the result.
  */
-export type DetailResult = string | { markdown: string; more?: string };
+export interface DetailAction {
+  id: string;
+  label: string;
+}
+
+/**
+ * What `detail` (and `detailAction`) may return: a plain markdown string (a
+ * complete document), or a chunk carrying a `more` cursor and/or footer
+ * `actions`. A non-undefined `more` tells the host the Detail has a further
+ * chunk; when the user scrolls to the bottom, the host calls
+ * `detail(rowId, api, cursor)` again with that cursor and appends the returned
+ * chunk's markdown to the rendered document. The cursor is opaque to the host —
+ * encode whatever pagination state you need (a page number, an API-issued
+ * token). `actions` render as a bottom action bar; they are read from full
+ * documents only (appended chunks' actions are ignored).
+ */
+export type DetailResult =
+  | string
+  | { markdown: string; more?: string; actions?: DetailAction[] };
 
 /** The entry points a plugin may implement. Each receives the declared capability API. */
 export interface PluginHandlers<C extends readonly Capability[]> {
@@ -40,6 +54,16 @@ export interface PluginHandlers<C extends readonly Capability[]> {
    */
   detail?: (rowId: string, api: DeclaredAPI<C>, cursor?: string) => DetailResult | Promise<DetailResult>;
   /**
+   * Run a Detail footer action (declared via a `DetailResult`'s `actions`)
+   * and build the replacement document. Required when any Detail declares
+   * actions; a press with no handler surfaces an inline error.
+   */
+  detailAction?: (
+    rowId: string,
+    actionId: string,
+    api: DeclaredAPI<C>,
+  ) => DetailResult | Promise<DetailResult>;
+  /**
    * Run a row action. `argument` is present only when the row used the
    * `argument` action and the user submitted text.
    */
@@ -56,6 +80,7 @@ interface RegisteredImpl {
   rows?: (query: string) => Row[] | Promise<Row[]>;
   list?: (listId: string, query: string) => Row[] | Promise<Row[]>;
   detail?: (rowId: string, cursor?: string) => DetailResult | Promise<DetailResult>;
+  detailAction?: (rowId: string, actionId: string) => DetailResult | Promise<DetailResult>;
   action?: (rowId: string, actionId: string, argument?: string) => unknown | Promise<unknown>;
 }
 
@@ -102,7 +127,7 @@ export function definePlugin<const C extends readonly Capability[]>(
   const api = globalThis.anydoor as unknown as DeclaredAPI<C>;
   const impl: RegisteredImpl = {};
 
-  const { rows, list, detail, action } = handlers;
+  const { rows, list, detail, detailAction, action } = handlers;
   if (rows) {
     impl.rows = (query) => rows(query, api);
   }
@@ -111,6 +136,9 @@ export function definePlugin<const C extends readonly Capability[]>(
   }
   if (detail) {
     impl.detail = (rowId, cursor) => detail(rowId, api, cursor);
+  }
+  if (detailAction) {
+    impl.detailAction = (rowId, actionId) => detailAction(rowId, actionId, api);
   }
   if (action) {
     impl.action = (rowId, actionId, argument) => action(rowId, actionId, argument, api);

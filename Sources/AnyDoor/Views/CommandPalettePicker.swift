@@ -14,6 +14,9 @@ struct CommandPalettePicker: View {
     /// Fired when the Detail's bottom sentinel scrolls into view; the
     /// controller fetches the next chunk through the state's load-more gate.
     let onLoadDetailMore: () -> Void
+    /// Fired when a Detail footer action is pressed; the controller rebuilds
+    /// the document through the plugin's `detailAction` entry point.
+    let onDetailAction: (String) -> Void
     /// Notifies the controller when the Detail level is entered/left so it can
     /// hide the overlaid AppKit search field (no text input in Detail) and
     /// restore focus on return.
@@ -373,7 +376,45 @@ struct CommandPalettePicker: View {
             }
             .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
         case .loaded(_, let markdown):
-            ScrollView {
+            VStack(spacing: 0) {
+                loadedDetailScroll(markdown: markdown)
+                if !state.detailActions.isEmpty {
+                    Divider().opacity(0.5)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        ForEach(state.detailActions, id: \.id) { action in
+                            Button(action.label) { onDetailAction(action.id) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
+            }
+        case .failed(_, let message):
+            VStack(spacing: 10) {
+                Spacer()
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+            .padding(.horizontal, 40)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    /// The loaded Detail's scrollable document (markdown blocks + the
+    /// load-more sentinel), extracted so the action bar can sit below it.
+    private func loadedDetailScroll(markdown: String) -> some View {
+        ScrollView {
                 // Lazy so the bottom sentinel's `onAppear` fires only when the
                 // user actually scrolls it into view (in a plain VStack every
                 // child "appears" immediately, which would eagerly page in the
@@ -407,23 +448,6 @@ struct CommandPalettePicker: View {
                 onOpenDetailLink(url)
                 return .handled
             })
-        case .failed(_, let message):
-            VStack(spacing: 10) {
-                Spacer()
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 28))
-                    .foregroundStyle(.secondary)
-                Text(message)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
-            .padding(.horizontal, 40)
-        case .none:
-            EmptyView()
-        }
     }
 
     private var optionList: some View {

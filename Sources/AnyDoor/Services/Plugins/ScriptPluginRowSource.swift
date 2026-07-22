@@ -108,7 +108,22 @@ final class ScriptPluginRowSource: PluginRowSource {
     func loadDetail(id: String, cursor: String?) async -> PluginRowDetailResult? {
         do {
             let chunk = try await runtime.buildDetail(pluginID: scriptID, rowID: id, cursor: cursor)
-            return .markdown(chunk.markdown, more: chunk.more)
+            return .markdown(chunk.markdown, more: chunk.more, actions: chunk.actions)
+        } catch {
+            return .failure(ScriptPluginErrorPresentation.message(
+                for: error,
+                surfacesDetail: surfacesErrorDetail,
+                generic: L(.commandPaletteDetailFailed)
+            ))
+        }
+    }
+
+    func loadDetailAction(id: String, actionID: String) async -> PluginRowDetailResult? {
+        guard runtime.isLoaded(scriptID) else { return nil }
+        do {
+            let chunk = try await runtime.buildDetailAction(
+                pluginID: scriptID, rowID: id, actionID: actionID)
+            return .markdown(chunk.markdown, more: chunk.more, actions: chunk.actions)
         } catch {
             return .failure(ScriptPluginErrorPresentation.message(
                 for: error,

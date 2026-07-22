@@ -179,6 +179,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onLoadDetailMore: { [weak self] in
                 self?.loadMoreDetail()
             },
+            onDetailAction: { [weak self] actionID in
+                self?.performDetailAction(actionID: actionID)
+            },
             onDetailActiveChange: { [weak self] inDetail in
                 self?.setSearchFieldActive(!inDetail)
             },
@@ -682,12 +685,42 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             // drill-in that requested it — never on a later Detail (A→back→B).
             guard let self, let state = self.state, self.window?.isVisible == true else { return }
             switch result {
-            case .markdown(let markdown, let more):
-                state.updateDetail(.loaded(title: title, markdown: markdown), more: more, generation: generation)
+            case .markdown(let markdown, let more, let actions):
+                state.updateDetail(
+                    .loaded(title: title, markdown: markdown),
+                    more: more, actions: actions, generation: generation)
             case .failure(let message):
                 state.updateDetail(.failed(title: title, message: message), generation: generation)
             case nil:
                 state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
+            }
+        }
+    }
+
+    /// Run a Detail footer action: the document drops to its loading state and
+    /// the action's result replaces it wholesale (its own markdown, cursor, and
+    /// actions). Same guards as the initial load — the generation token keys
+    /// the result to this exact drill-in, and `beginDetailAction` refuses a
+    /// second press while a rebuild is in flight.
+    private func performDetailAction(actionID: String) {
+        guard let state, let request = state.beginDetailAction() else { return }
+        let title = state.detailState?.title ?? ""
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: request.sourceKey) else {
+            state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: request.generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadDetailAction(id: request.rowID, actionID: actionID)
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .markdown(let markdown, let more, let actions):
+                state.updateDetail(
+                    .loaded(title: title, markdown: markdown),
+                    more: more, actions: actions, generation: request.generation)
+            case .failure(let message):
+                state.updateDetail(.failed(title: title, message: message), generation: request.generation)
+            case nil:
+                state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: request.generation)
             }
         }
     }
@@ -706,7 +739,9 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             let result = await source.loadDetail(id: request.rowID, cursor: request.cursor)
             guard let self, let state = self.state, self.window?.isVisible == true else { return }
             switch result {
-            case .markdown(let markdown, let more):
+            case .markdown(let markdown, let more, _):
+                // An appended chunk's actions are ignored: the footer bar
+                // belongs to the full document, not to a page of it.
                 state.appendDetailChunk(markdown, more: more, generation: request.generation)
             case .failure, nil:
                 // Keep what is already rendered; stop paginating quietly.

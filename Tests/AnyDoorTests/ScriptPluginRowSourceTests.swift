@@ -81,7 +81,7 @@ final class ScriptPluginRowSourceTests: XCTestCase {
         let source = makeSource(runtime: runtime, id: id)
 
         let result = await source.loadDetail(id: "a", cursor: nil)
-        XCTAssertEqual(result, .markdown("# Post a", more: nil))
+        XCTAssertEqual(result, .markdown("# Post a", more: nil, actions: []))
     }
 
     func testLoadDetailReturnsFailureWhenDetailThrows() async throws {

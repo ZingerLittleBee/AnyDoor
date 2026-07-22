@@ -2,6 +2,8 @@ import {
   definePlugin,
   actions,
   type Row,
+  type DetailAction,
+  type DetailResult,
   type FetchFn,
   type Store,
   type ToastFn,
@@ -241,7 +243,7 @@ function topicMarkdown(topic: Topic, body: string, comments: string | undefined)
 }
 
 /**
- * Build the Detail translator: identity when the toggle is off, otherwise one
+ * Build the Detail translator: identity when translation is off, otherwise one
  * `api.translate` call per rendered chunk (body, or a whole comment page —
  * never one call per comment, which would multiply quota spend by 20). A
  * failed translation toasts once and falls back to the original text, so a
@@ -261,6 +263,107 @@ function makeTranslator(
       await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
       return text;
     }
+  };
+}
+
+// The subset of the declared capability API the Detail builders need.
+type DetailAPI = { fetch: FetchFn; store: Store; toast: ToastFn; translate: TranslateFn };
+
+// Detail footer-action ids: each rebuilds the document in the other mode.
+const ACTION_TRANSLATE = "translate";
+const ACTION_ORIGINAL = "original";
+// A pagination cursor issued by a translated document carries this prefix so
+// scroll-loaded comment pages keep the mode the reader chose.
+const TRANSLATED_CURSOR_PREFIX = "t:";
+
+function detailCursor(page: number, translated: boolean): string {
+  return translated ? `${TRANSLATED_CURSOR_PREFIX}${page}` : String(page);
+}
+
+function parseDetailCursor(cursor: string): { page: number; translated: boolean } {
+  const translated = cursor.startsWith(TRANSLATED_CURSOR_PREFIX);
+  const raw = translated ? cursor.slice(TRANSLATED_CURSOR_PREFIX.length) : cursor;
+  return { page: Number.parseInt(raw, 10), translated };
+}
+
+/** The footer offers the switch to the mode the document is not in. */
+function detailActionsFor(translated: boolean): DetailAction[] {
+  return [
+    translated
+      ? { id: ACTION_ORIGINAL, label: "显示原文" }
+      : { id: ACTION_TRANSLATE, label: "翻译" },
+  ];
+}
+
+async function fetchRepliesPage(
+  fetch: FetchFn,
+  topicId: number,
+  page: number,
+  headers: Record<string, string>,
+): Promise<Reply[]> {
+  const response = await fetchJSON<V2Response<Reply[]>>(
+    fetch, `${V2_BASE}/topics/${topicId}/replies?p=${page}`, headers);
+  return response.result ?? [];
+}
+
+/** Build the full Detail document (initial load or a footer-action rebuild). */
+async function buildTopicDocument(
+  topic: Topic,
+  translated: boolean,
+  api: DetailAPI,
+): Promise<DetailResult> {
+  const token = await readToken(api.store);
+  const translate = makeTranslator(api, translated);
+
+  if (token === undefined) {
+    const body = topic.content.length > 0
+      ? await translate(withImagePreviews(topic.content))
+      : "";
+    return {
+      markdown: topicMarkdown(topic, body, undefined),
+      actions: detailActionsFor(translated),
+    };
+  }
+
+  // With a token: the v2 topic (fresher body/node/author) plus the first page
+  // of comments. A failed fetch throws, which the host surfaces inline.
+  const headers = { Authorization: `Bearer ${token}` };
+  const [detailResponse, replies] = await Promise.all([
+    fetchJSON<V2Response<Topic>>(api.fetch, `${V2_BASE}/topics/${topic.id}`, headers),
+    fetchRepliesPage(api.fetch, topic.id, 1, headers),
+  ]);
+  const enriched = detailResponse.result ?? topic;
+  const body = enriched.content.length > 0
+    ? await translate(withImagePreviews(enriched.content))
+    : "";
+  const comments = replies.length === 0
+    ? quoted("暂无评论")
+    : await translate(repliesMarkdown(replies, 1));
+  return {
+    markdown: topicMarkdown(enriched, body, comments),
+    more: replies.length >= REPLIES_PAGE_SIZE ? detailCursor(2, translated) : undefined,
+    actions: detailActionsFor(translated),
+  };
+}
+
+/** Build one scroll-loaded comment page, keeping the document's mode. */
+async function buildRepliesChunk(
+  topic: Topic,
+  page: number,
+  translated: boolean,
+  api: DetailAPI,
+): Promise<DetailResult> {
+  const token = await readToken(api.store);
+  if (token === undefined) {
+    // Cursors are only issued with a token; losing it mid-scroll ends cleanly.
+    return { markdown: "" };
+  }
+  const translate = makeTranslator(api, translated);
+  const replies = await fetchRepliesPage(
+    api.fetch, topic.id, page, { Authorization: `Bearer ${token}` });
+  return {
+    markdown: await translate(repliesMarkdown(replies, (page - 1) * REPLIES_PAGE_SIZE + 1)),
+    more: replies.length >= REPLIES_PAGE_SIZE ? detailCursor(page + 1, translated) : undefined,
   };
 }
 
@@ -335,51 +438,24 @@ definePlugin(manifest, {
       return "# 未找到\n\n请返回列表重新载入帖子。";
     }
 
-    const token = await readToken(api.store);
-    const translate = makeTranslator(api, await readTranslateEnabled(api.store));
-
-    if (token === undefined) {
-      const body = topic.content.length > 0
-        ? await translate(withImagePreviews(topic.content))
-        : "";
-      return topicMarkdown(topic, body, undefined);
-    }
-
-    const headers = { Authorization: `Bearer ${token}` };
-    const fetchRepliesPage = async (page: number): Promise<Reply[]> => {
-      const response = await fetchJSON<V2Response<Reply[]>>(
-        api.fetch, `${V2_BASE}/topics/${topic.id}/replies?p=${page}`, headers);
-      return response.result ?? [];
-    };
-
-    // A cursor requests one further page of comments; the host appends the
-    // returned chunk below the document it already renders.
+    // A cursor requests one further page of comments in the mode the cursor
+    // encodes; the host appends the chunk below the rendered document.
     if (cursor !== undefined) {
-      const page = Number.parseInt(cursor, 10);
-      const replies = await fetchRepliesPage(page);
-      return {
-        markdown: await translate(repliesMarkdown(replies, (page - 1) * REPLIES_PAGE_SIZE + 1)),
-        more: replies.length >= REPLIES_PAGE_SIZE ? String(page + 1) : undefined,
-      };
+      const { page, translated } = parseDetailCursor(cursor);
+      return buildRepliesChunk(topic, page, translated, api);
     }
 
-    // Initial document: the v2 topic (fresher body/node/author) plus the first
-    // page of comments. A failed fetch throws, which the host surfaces inline.
-    const [detailResponse, replies] = await Promise.all([
-      fetchJSON<V2Response<Topic>>(api.fetch, `${V2_BASE}/topics/${topic.id}`, headers),
-      fetchRepliesPage(1),
-    ]);
-    const enriched = detailResponse.result ?? topic;
-    const body = enriched.content.length > 0
-      ? await translate(withImagePreviews(enriched.content))
-      : "";
-    const comments = replies.length === 0
-      ? quoted("暂无评论")
-      : await translate(repliesMarkdown(replies, 1));
-    return {
-      markdown: topicMarkdown(enriched, body, comments),
-      more: replies.length >= REPLIES_PAGE_SIZE ? "2" : undefined,
-    };
+    // Initial document: the root toggle sets the default mode; the footer
+    // action rebuilds this one document in the other mode.
+    return buildTopicDocument(topic, await readTranslateEnabled(api.store), api);
+  },
+
+  async detailAction(rowId, actionId, api) {
+    const topic = topics.get(rowId);
+    if (topic === undefined) {
+      return "# 未找到\n\n请返回列表重新载入帖子。";
+    }
+    return buildTopicDocument(topic, actionId === ACTION_TRANSLATE, api);
   },
 
   async action(rowId, _actionId, argument, api) {

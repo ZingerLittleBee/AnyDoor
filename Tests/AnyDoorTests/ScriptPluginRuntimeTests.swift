@@ -91,6 +91,79 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         XCTAssertEqual(last, ScriptDetailChunk(markdown: "Last page", more: nil))
     }
 
+    func testDetailActionsDecodeAndDetailActionRebuildsTheDocument() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.detailactions",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () { return [{ id: "a", title: "A", action: { type: "detail" } }]; },
+              detail: function (rowId) {
+                return { markdown: "# Original", actions: [{ id: "translate", label: "翻译" }] };
+              },
+              detailAction: function (rowId, actionId) {
+                return { markdown: "# Rebuilt by " + actionId,
+                         actions: [{ id: "original", label: "显示原文" }] };
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+
+        let initial = try await runtime.buildDetail(pluginID: id, rowID: "a")
+        XCTAssertEqual(initial.actions, [PluginRowDetailAction(id: "translate", label: "翻译")])
+
+        let rebuilt = try await runtime.buildDetailAction(pluginID: id, rowID: "a", actionID: "translate")
+        XCTAssertEqual(rebuilt.markdown, "# Rebuilt by translate")
+        XCTAssertEqual(rebuilt.actions, [PluginRowDetailAction(id: "original", label: "显示原文")])
+    }
+
+    func testDetailActionWithoutHandlerFailsVisibly() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.nodetailaction",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () { return []; },
+              detail: function () { return "# Doc"; }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+
+        do {
+            _ = try await runtime.buildDetailAction(pluginID: id, rowID: "a", actionID: "x")
+            XCTFail("expected entryPointMissing")
+        } catch let error as ScriptPluginError {
+            guard case .entryPointMissing = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
+
+    func testDetailMalformedActionsFailDecoding() async throws {
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.badactions",
+            bundle: """
+            anydoor.registerPlugin({
+              rows: function () { return []; },
+              detail: function () { return { markdown: "x", actions: [{ id: "", label: "L" }] }; }
+            });
+            """
+        )
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: directory)
+
+        do {
+            _ = try await runtime.buildDetail(pluginID: id, rowID: "a")
+            XCTFail("expected resultDecodingFailed")
+        } catch let error as ScriptPluginError {
+            guard case .resultDecodingFailed = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+    }
+
     func testDetailChunkWithNonStringMoreFailsDecoding() async throws {
         let directory = try ScriptPluginFixture.writePackage(
             id: "com.example.badmore",

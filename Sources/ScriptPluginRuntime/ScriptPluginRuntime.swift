@@ -2,14 +2,18 @@ import Foundation
 import PluginInterface
 
 /// One chunk of a row's markdown Detail. `more` is the plugin's opaque cursor
-/// for the next chunk, or nil when the document is complete.
+/// for the next chunk, or nil when the document is complete; `actions` are the
+/// document's footer actions (meaningful on full documents, ignored by the
+/// palette on appended chunks).
 public struct ScriptDetailChunk: Sendable, Equatable {
     public let markdown: String
     public let more: String?
+    public let actions: [PluginRowDetailAction]
 
-    public init(markdown: String, more: String?) {
+    public init(markdown: String, more: String?, actions: [PluginRowDetailAction] = []) {
         self.markdown = markdown
         self.more = more
+        self.actions = actions
     }
 }
 
@@ -115,23 +119,64 @@ public final class ScriptPluginRuntime {
         var arguments: [ScriptValue] = [.string(rowID)]
         if let cursor { arguments.append(.string(cursor)) }
         let result = try await context(for: pluginID).invoke("detail", arguments: arguments)
+        return try Self.decodeDetailChunk(result, entryPoint: "detail")
+    }
+
+    /// Run a Detail footer action (entry point `detailAction`) and build the
+    /// replacement document. A plugin whose Detail declared actions but has no
+    /// `detailAction` handler surfaces `entryPointMissing` — a visible failure,
+    /// not a silent no-op.
+    public func buildDetailAction(
+        pluginID: ScriptPluginID, rowID: String, actionID: String
+    ) async throws -> ScriptDetailChunk {
+        let result = try await context(for: pluginID)
+            .invoke("detailAction", arguments: [.string(rowID), .string(actionID)])
+        return try Self.decodeDetailChunk(result, entryPoint: "detailAction")
+    }
+
+    /// Decode a detail-shaped result: a plain markdown string (complete
+    /// document, no cursor, no actions) or `{ markdown, more?, actions? }`.
+    private static func decodeDetailChunk(
+        _ result: ScriptValue, entryPoint: String
+    ) throws -> ScriptDetailChunk {
         if let markdown = result.stringValue {
             return ScriptDetailChunk(markdown: markdown, more: nil)
         }
-        if case .object(let fields) = result, let markdown = fields["markdown"]?.stringValue {
-            let more = fields["more"]
-            switch more {
-            case .none, .some(.null):
-                return ScriptDetailChunk(markdown: markdown, more: nil)
-            case .some(let value):
-                guard let cursor = value.stringValue else {
-                    throw ScriptPluginError.resultDecodingFailed("detail() 'more' must be a string")
-                }
-                return ScriptDetailChunk(markdown: markdown, more: cursor)
-            }
+        guard case .object(let fields) = result, let markdown = fields["markdown"]?.stringValue else {
+            throw ScriptPluginError.resultDecodingFailed(
+                "\(entryPoint)() must return a string or { markdown, more?, actions? }")
         }
-        throw ScriptPluginError.resultDecodingFailed(
-            "detail() must return a string or { markdown, more? }")
+
+        let more: String?
+        switch fields["more"] {
+        case .none, .some(.null):
+            more = nil
+        case .some(let value):
+            guard let cursor = value.stringValue else {
+                throw ScriptPluginError.resultDecodingFailed("\(entryPoint)() 'more' must be a string")
+            }
+            more = cursor
+        }
+
+        var actions: [PluginRowDetailAction] = []
+        switch fields["actions"] {
+        case .none, .some(.null):
+            break
+        case .some(.array(let items)):
+            actions = try items.map { item in
+                guard case .object(let action) = item,
+                      let id = action["id"]?.stringValue, !id.isEmpty,
+                      let label = action["label"]?.stringValue, !label.isEmpty else {
+                    throw ScriptPluginError.resultDecodingFailed(
+                        "\(entryPoint)() 'actions' entries must be { id, label } with non-empty strings")
+                }
+                return PluginRowDetailAction(id: id, label: label)
+            }
+        case .some:
+            throw ScriptPluginError.resultDecodingFailed("\(entryPoint)() 'actions' must be an array")
+        }
+
+        return ScriptDetailChunk(markdown: markdown, more: more, actions: actions)
     }
 
     /// Run a row action (entry point `action`) and return its decoded result.

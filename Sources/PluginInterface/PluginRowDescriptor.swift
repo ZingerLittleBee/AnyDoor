@@ -110,6 +110,19 @@ public enum PluginRowLoadState: Sendable, Equatable {
     case failed(String)
 }
 
+/// A footer action a Detail document offers (e.g. "翻译"). Invoking it calls
+/// `loadDetailAction(id:actionID:)` on the owning source; the returned document
+/// replaces the rendered Detail.
+public struct PluginRowDetailAction: Hashable, Sendable {
+    public let id: String
+    public let label: String
+
+    public init(id: String, label: String) {
+        self.id = id
+        self.label = label
+    }
+}
+
 /// The result of building a row's markdown Detail: the markdown to render, or
 /// a failure message to show inline. `nil` from `loadDetail` means the source
 /// has no Detail for that row at all.
@@ -118,8 +131,10 @@ public enum PluginRowLoadState: Sendable, Equatable {
 /// further chunk (e.g. the next page of comments), which the palette requests
 /// by calling `loadDetail(id:cursor:)` with it when the user scrolls to the
 /// bottom. The returned chunk's markdown is appended to the rendered document.
+/// `actions` are the document's footer actions; they are read from full
+/// documents (initial load and action results) and ignored on appended chunks.
 public enum PluginRowDetailResult: Sendable, Equatable {
-    case markdown(String, more: String?)
+    case markdown(String, more: String?, actions: [PluginRowDetailAction])
     case failure(String)
 }
 
@@ -177,6 +192,11 @@ public protocol PluginRowSource: AnyObject {
     /// the returned chunk is appended to the rendered document.
     func loadDetail(id: String, cursor: String?) async -> PluginRowDetailResult?
 
+    /// Runs a Detail footer action and builds the replacement document, or
+    /// `nil` when the source has no such action. Defaults to `nil`, so only
+    /// sources whose Detail declares actions implement it.
+    func loadDetailAction(id: String, actionID: String) async -> PluginRowDetailResult?
+
     /// Builds the second-level rows for a committed `.pushList` row's list id,
     /// or `nil` when the source has no list for that id. Defaults to `nil`, so
     /// only sources with a nested list level (a Script Plugin declaring a
@@ -192,5 +212,6 @@ extension PluginRowSource {
         await performRow(id: id)
     }
     public func loadDetail(id: String, cursor: String?) async -> PluginRowDetailResult? { nil }
+    public func loadDetailAction(id: String, actionID: String) async -> PluginRowDetailResult? { nil }
     public func loadList(id listID: String, query: String) async -> PluginRowListResult? { nil }
 }

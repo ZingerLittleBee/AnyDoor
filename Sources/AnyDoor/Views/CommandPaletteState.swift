@@ -60,6 +60,8 @@ final class CommandPaletteState {
         var moreCursor: String?
         /// A load-more fetch is in flight — `beginDetailMore` refuses a second.
         var isFetchingMore: Bool = false
+        /// The document's footer actions (empty = no action bar).
+        var actions: [PluginRowDetailAction] = []
     }
 
     /// The content of a pushed second-level plugin list (a `.pushList` drill-in).
@@ -149,6 +151,14 @@ final class CommandPaletteState {
         guard case .detail(let detailLevel) = level,
               case .loaded = detailLevel.content else { return nil }
         return detailLevel.moreCursor
+    }
+
+    /// The loaded Detail's footer actions, or empty when no bar should show
+    /// (loading, failed, or a document that declared none).
+    var detailActions: [PluginRowDetailAction] {
+        guard case .detail(let detailLevel) = level,
+              case .loaded = detailLevel.content else { return [] }
+        return detailLevel.actions
     }
     var argumentInputTitle: String? {
         switch level {
@@ -249,12 +259,34 @@ final class CommandPaletteState {
     /// dismissed, or superseded by a later drill-in, discards the stale result
     /// via the generation token. `more` is the pagination cursor the loaded
     /// chunk offered (nil for a complete document and for failures).
-    func updateDetail(_ state: DetailState, more: String? = nil, generation: Int) {
+    func updateDetail(
+        _ state: DetailState,
+        more: String? = nil,
+        actions: [PluginRowDetailAction] = [],
+        generation: Int
+    ) {
         guard case .detail(var detailLevel) = level, generation == navigationRevision else { return }
         detailLevel.content = state
         detailLevel.moreCursor = more
         detailLevel.isFetchingMore = false
+        detailLevel.actions = actions
         level = .detail(detailLevel)
+    }
+
+    /// Claim a footer-action run: put the Detail back into its loading state
+    /// (the action rebuilds the whole document) and return whom to ask. Nil
+    /// when no loaded Detail is showing — a second press while the first is
+    /// rebuilding finds `.loading` content and is refused. The result lands
+    /// through `updateDetail` under the same generation token.
+    func beginDetailAction() -> (sourceKey: PluginRowSourceKey, rowID: String, generation: Int)? {
+        guard case .detail(var detailLevel) = level,
+              case .loaded(let title, _) = detailLevel.content else { return nil }
+        detailLevel.content = .loading(title: title)
+        detailLevel.moreCursor = nil
+        detailLevel.isFetchingMore = false
+        detailLevel.actions = []
+        level = .detail(detailLevel)
+        return (detailLevel.sourceKey, detailLevel.rowID, navigationRevision)
     }
 
     /// Claim the next Detail chunk fetch: returns whom to ask and the cursor,

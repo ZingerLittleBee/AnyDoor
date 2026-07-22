@@ -110,6 +110,7 @@ user's paid API quota).
 | `rows` | `(query, api) => Row[] \| Promise<Row[]>` | Root palette rows for a query. |
 | `list` | `(listId, query, api) => Row[] \| Promise<Row[]>` | Second-level rows for a committed `list` action. |
 | `detail` | `(rowId, api, cursor?) => DetailResult \| Promise<DetailResult>` | Markdown Detail for a row, optionally chunked (see below). |
+| `detailAction` | `(rowId, actionId, api) => DetailResult \| Promise<DetailResult>` | Rebuild the Detail for a pressed footer action (see below). |
 | `action` | `(rowId, actionId, argument, api) => unknown` | Run a row action. |
 
 ## Detail markdown
@@ -156,3 +157,35 @@ async detail(rowId, api, cursor) {
 - An empty chunk ends pagination cleanly; a thrown error keeps what is already
   rendered and stops paginating. The host never issues more than one chunk
   fetch at a time.
+
+## Detail actions (footer buttons)
+
+A `DetailResult` may declare footer `actions` — buttons the host renders in a
+bar at the bottom of the Detail:
+
+```ts
+async detail(rowId, api) {
+  return {
+    markdown: renderOriginal(rowId),
+    actions: [{ id: "translate", label: "翻译" }],
+  };
+},
+async detailAction(rowId, actionId, api) {
+  // Rebuild the whole document for the pressed action; the result replaces
+  // the rendered Detail (its own markdown, `more` cursor, and next actions).
+  return {
+    markdown: await renderTranslated(rowId, api),
+    actions: [{ id: "original", label: "显示原文" }],
+  };
+},
+```
+
+- Pressing a button drops the Detail to its loading state and calls
+  `detailAction(rowId, actionId, api)`; the result replaces the document
+  wholesale. Declare the *next* mode's actions on each result to build a
+  toggle (翻译 ⇄ 显示原文).
+- Actions are read from full documents only — an appended pagination chunk's
+  `actions` are ignored. Encode any mode into your `more` cursor so
+  scroll-loaded pages stay consistent with the rebuilt document.
+- Declaring `actions` without implementing `detailAction` surfaces an inline
+  error when pressed.
