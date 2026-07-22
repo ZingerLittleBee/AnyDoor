@@ -716,4 +716,116 @@ final class CommandPalettePluginStateTests: XCTestCase {
         // title "V2EX" is not consulted at this level.
         XCTAssertEqual(state.flatEntries.count, 2)
     }
+
+    // MARK: - Resume across palette close/reopen
+
+    @MainActor
+    func testOnlyPluginSurfacesAreResumable() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        XCTAssertFalse(state.isResumablePluginSurface, "the root resets as before")
+
+        state.enterOptions(parentTitle: "Keep Awake", [])
+        XCTAssertFalse(state.isResumablePluginSurface, "options carry presentation closures")
+        state.popToRoot()
+
+        state.enterPluginArgumentInput(sourceKey: sourceKey, rowID: "set", title: "Set")
+        XCTAssertFalse(state.isResumablePluginSurface)
+        state.popToRoot()
+
+        state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        XCTAssertTrue(state.isResumablePluginSurface)
+
+        state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        XCTAssertTrue(state.isResumablePluginSurface)
+    }
+
+    @MainActor
+    func testCanResumeChecksEverySourceInTheNavigationStack() {
+        let otherKey = PluginRowSourceKey(
+            pluginID: NativePluginID(rawValue: "script:com.acme.other"), localID: "rows"
+        )
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([]), generation: generation)
+        state.enterDetail(sourceKey: otherKey, rowID: "row", title: "Post")
+
+        XCTAssertTrue(state.canResume(sourceExists: { [sourceKey, otherKey].contains($0) }))
+        // The stacked list's owner uninstalled while the palette was hidden:
+        // the retained navigation is discarded even though the Detail's owner
+        // is still registered.
+        XCTAssertFalse(state.canResume(sourceExists: { $0 == otherKey }))
+        XCTAssertFalse(state.canResume(sourceExists: { _ in false }))
+    }
+
+    @MainActor
+    func testPrepareForResumeInvalidatesPreCloseInFlightResults() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        state.updateDetail(.loaded(title: "Post", markdown: "# Body"), more: "2", generation: generation)
+        // A load-more fetch was in flight when the palette closed.
+        let request = state.beginDetailMore()
+        XCTAssertNotNil(request)
+
+        XCTAssertNil(state.prepareForResume(), "a loaded Detail needs no reload")
+
+        // The pre-close fetch settles after reopen: its generation is stale, so
+        // the append is rejected instead of double-landing next to a re-armed
+        // sentinel's fresh fetch.
+        state.appendDetailChunk("## Page 2", more: "3", generation: request!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "# Body"))
+
+        // The fetching flag was cleared, so the re-created sentinel can claim a
+        // fresh fetch with the same cursor.
+        let retry = state.beginDetailMore()
+        XCTAssertEqual(retry?.cursor, "2")
+    }
+
+    @MainActor
+    func testPrepareForResumeRequestsReloadForMidLoadDetail() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+
+        guard case .reloadDetail(let key, let rowID, let title, let generation)? = state.prepareForResume() else {
+            return XCTFail("a Detail that closed while loading must re-request its document")
+        }
+        XCTAssertEqual(key, sourceKey)
+        XCTAssertEqual(rowID, "row")
+        XCTAssertEqual(title, "Post")
+
+        // The repair's generation is current, so its result lands.
+        state.updateDetail(.loaded(title: "Post", markdown: "# Body"), generation: generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "# Body"))
+    }
+
+    @MainActor
+    func testPrepareForResumeRequestsReloadForMidLoadList() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+
+        guard case .reloadList(let key, let listID, let generation)? = state.prepareForResume() else {
+            return XCTFail("a list that closed while loading must re-request its rows")
+        }
+        XCTAssertEqual(key, sourceKey)
+        XCTAssertEqual(listID, "hot")
+
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+        XCTAssertEqual(state.flatEntries.count, 1)
+    }
+
+    @MainActor
+    func testPrepareForResumeDropsPendingConfirmation() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([]), generation: generation)
+        state.requestConfirmation(
+            CommandPaletteConfirmation(title: "t", message: "m", confirmLabel: "c"),
+            perform: {}
+        )
+        XCTAssertTrue(state.isConfirming)
+
+        _ = state.prepareForResume()
+        XCTAssertFalse(state.isConfirming, "the confirmation's closure belongs to the dismissed presentation")
+    }
 }

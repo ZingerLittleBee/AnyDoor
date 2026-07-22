@@ -17,6 +17,11 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     private weak var searchAnchor: CommandPaletteSearchAnchorView?
     private var keyMonitor: Any?
     private var isClosing = false
+    /// State retained across a close while the user sat on a plugin surface (a
+    /// pushed list or Detail), so the next plain open resumes there — hiding
+    /// the palette mid-read must not reset a v2ex post back to the root.
+    /// Validated against the live row-source registrations before reuse.
+    private var retainedState: CommandPaletteState?
     /// Last installed-apps scan, refreshed off the main actor on every open. Seeds
     /// the Applications section instantly so summoning the palette never blocks on
     /// a fresh `/Applications` walk; empty only before the very first scan returns.
@@ -144,13 +149,28 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
         let sections = collectSections(installedApps: cachedApps)
         prewarmIcons(for: sections)
-        let hyperFlags = HyperKeyService.shared.hyperModifierFlags
-        let pickerState = CommandPaletteState(
-            sections: sections,
-            hyperFlags: hyperFlags,
-            quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
-        )
-        initialMode.apply(to: pickerState)
+        let pickerState: CommandPaletteState
+        var resumeRepair: CommandPaletteState.ResumeRepair?
+        if case .root = initialMode, let resumed = takeRetainedState() {
+            // Resume the plugin surface the user was on when the palette closed.
+            // Root sections and row-source registrations are refreshed in place;
+            // the drill-in stack (list rows, Detail content) is kept as-is.
+            pickerState = resumed
+            pickerState.updateSections(
+                sections,
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates(),
+                pluginRowSources: CommandPaletteExtensions.shared.rowSources
+            )
+            resumeRepair = pickerState.prepareForResume()
+        } else {
+            retainedState = nil
+            pickerState = CommandPaletteState(
+                sections: sections,
+                hyperFlags: HyperKeyService.shared.hyperModifierFlags,
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+            )
+            initialMode.apply(to: pickerState)
+        }
         self.state = pickerState
         searchCoordinator.onChange = { [weak pickerState] text in
             guard let pickerState, pickerState.query != text else { return }
@@ -211,8 +231,41 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             guard let self, let pickerState, self.state === pickerState else { return }
             self.installKeyMonitor()
             self.window?.makeKeyAndOrderFront(nil)
-            self.focusSearchField()
+            if pickerState.isInDetail {
+                // Resumed straight into a Detail: `onDetailActiveChange` only
+                // fires on a change, so hide the overlaid field explicitly.
+                self.setSearchFieldActive(false)
+            } else {
+                self.focusSearchField()
+            }
             self.refreshSections(for: pickerState)
+            if let resumeRepair {
+                self.performResumeRepair(resumeRepair)
+            }
+        }
+    }
+
+    /// The retained navigation to resume, if it is still presentable — every
+    /// row source it references must remain registered (a plugin uninstalled
+    /// while the palette was hidden invalidates it). Consumes the slot either
+    /// way, so a discarded navigation cannot resurface on a later open.
+    private func takeRetainedState() -> CommandPaletteState? {
+        defer { retainedState = nil }
+        guard let retained = retainedState,
+              retained.canResume(sourceExists: { CommandPaletteExtensions.shared.rowSource(for: $0) != nil })
+        else { return nil }
+        return retained
+    }
+
+    /// Re-kick the fetch a resumed level lost to the close (its pre-close task
+    /// dropped the result behind the visibility guard, so the level would show
+    /// its loading placeholder forever).
+    private func performResumeRepair(_ repair: CommandPaletteState.ResumeRepair) {
+        switch repair {
+        case .reloadDetail(let sourceKey, let rowID, let title, let generation):
+            resolveDetail(sourceKey: sourceKey, rowID: rowID, title: title, generation: generation)
+        case .reloadList(let sourceKey, let listID, let generation):
+            resolveList(sourceKey: sourceKey, listID: listID, generation: generation)
         }
     }
 
@@ -675,6 +728,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     /// dismissed palette or a mid-flight uninstall can neither hang nor resurface.
     private func pushPluginDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
         guard let generation = state?.enterDetail(sourceKey: sourceKey, rowID: rowID, title: title) else { return }
+        resolveDetail(sourceKey: sourceKey, rowID: rowID, title: title, generation: generation)
+    }
+
+    /// Fetch a Detail's initial document and land it under `generation`. Shared
+    /// by the drill-in push and the resume repair (a Detail that closed while
+    /// still loading re-requests through here).
+    private func resolveDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String, generation: Int) {
         guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
             state?.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
             return
@@ -759,6 +819,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     private func pushPluginList(sourceKey: PluginRowSourceKey, listID: String, title: String) {
         let generation = state?.enterList(sourceKey: sourceKey, listID: listID, title: title)
         guard let generation else { return }
+        resolveList(sourceKey: sourceKey, listID: listID, generation: generation)
+    }
+
+    /// Build a pushed list's rows and land them under `generation`. Shared by
+    /// the drill-in push and the resume repair, mirroring `resolveDetail`.
+    private func resolveList(sourceKey: PluginRowSourceKey, listID: String, generation: Int) {
         guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
             state?.updateList(.failed(L(.commandPalettePluginRowError)), generation: generation)
             return
@@ -820,6 +886,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func resetPresentation() {
+        // Retain the state when the user was on a plugin surface so the next
+        // open resumes there; any other level (root, options, argument input)
+        // resets as before. A nil state (already-reset re-entry from
+        // `windowWillClose`) leaves the retained slot untouched.
+        if let state {
+            retainedState = state.isResumablePluginSurface ? state : nil
+        }
         activationGate.cancel()
         removeKeyMonitor()
         searchCoordinator.onChange = { _ in }

@@ -390,6 +390,80 @@ final class CommandPaletteState {
         return optionsLevel.optionsByID[id]
     }
 
+    // MARK: - Resume across palette close/reopen
+
+    /// Whether the current navigation position is a plugin surface (a pushed
+    /// list or markdown Detail) worth retaining when the palette closes, so
+    /// the next open resumes there instead of resetting to the root. Only
+    /// these two levels qualify: they hold value-only payloads, whereas the
+    /// options and argument levels carry closures tied to the dismissed
+    /// presentation and reset as before.
+    var isResumablePluginSurface: Bool {
+        switch level {
+        case .detail, .list: return true
+        case .root, .options, .argumentInput, .pluginArgumentInput: return false
+        }
+    }
+
+    /// Whether a retained navigation can actually be presented again: it must
+    /// sit on a plugin surface, and every row source it references — the
+    /// current level and the list frames stacked under it — must still be
+    /// registered. A plugin uninstalled while the palette was hidden therefore
+    /// discards the retained navigation instead of resuming into levels that
+    /// can no longer answer.
+    func canResume(sourceExists: (PluginRowSourceKey) -> Bool) -> Bool {
+        guard isResumablePluginSurface else { return false }
+        return (navigationStack + [level]).allSatisfy { frame in
+            switch frame {
+            case .detail(let detailLevel): return sourceExists(detailLevel.sourceKey)
+            case .list(let listLevel): return sourceExists(listLevel.sourceKey)
+            case .root, .options, .argumentInput, .pluginArgumentInput: return true
+            }
+        }
+    }
+
+    /// A level the controller must re-request after resuming: its async build
+    /// never resolved while the palette was hidden (the resolve task's
+    /// visibility guard dropped the result), so the level would show its
+    /// loading placeholder forever without a fresh fetch.
+    enum ResumeRepair: Equatable {
+        case reloadDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String, generation: Int)
+        case reloadList(sourceKey: PluginRowSourceKey, listID: String, generation: Int)
+    }
+
+    /// Prepare a retained navigation for a fresh presentation: drop any pending
+    /// confirmation (its perform closure belongs to the dismissed presentation),
+    /// bump the navigation revision so every pre-close in-flight result is
+    /// rejected by its generation token, and clear the Detail fetching flag so
+    /// the bottom sentinel can re-arm. Returns the reload the controller must
+    /// kick when the palette closed while the current level was still loading.
+    func prepareForResume() -> ResumeRepair? {
+        pendingConfirmation = nil
+        navigationRevision += 1
+        switch level {
+        case .detail(var detailLevel):
+            detailLevel.isFetchingMore = false
+            level = .detail(detailLevel)
+            if case .loading(let title) = detailLevel.content {
+                return .reloadDetail(
+                    sourceKey: detailLevel.sourceKey, rowID: detailLevel.rowID,
+                    title: title, generation: navigationRevision
+                )
+            }
+            return nil
+        case .list(let listLevel):
+            if case .loading = listLevel.content {
+                return .reloadList(
+                    sourceKey: listLevel.sourceKey, listID: listLevel.listID,
+                    generation: navigationRevision
+                )
+            }
+            return nil
+        case .root, .options, .argumentInput, .pluginArgumentInput:
+            return nil
+        }
+    }
+
     /// Replace the root sections after the off-main installed-apps scan resolves.
     /// `@Observable` re-renders the picker; `query`/`selectedIndex`/drill-in state
     /// are intentionally left untouched so a typing/drilling user isn't disturbed.
