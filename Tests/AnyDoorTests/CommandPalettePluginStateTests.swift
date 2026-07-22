@@ -717,6 +717,53 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertEqual(state.flatEntries.count, 2)
     }
 
+    // MARK: - Query restoration across drill-in round trips
+
+    @MainActor
+    func testPopRestoresTheQueryTypedAtEachLevel() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        // Root search -> drill into a list found by it.
+        state.query = "v2ex"
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        XCTAssertEqual(state.query, "", "the drilled-in level starts its own search empty")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+
+        // List search -> drill into a Detail found by it.
+        state.query = "alpha"
+        state.enterDetail(sourceKey: sourceKey, rowID: "1", title: "Alpha")
+        XCTAssertEqual(state.query, "")
+
+        // Each pop restores the search the user had typed at that level.
+        state.popLevel()
+        XCTAssertTrue(state.isInList)
+        XCTAssertEqual(state.query, "alpha")
+        XCTAssertEqual(state.selectedIndex, 0)
+
+        state.popLevel()
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertEqual(state.query, "v2ex")
+    }
+
+    @MainActor
+    func testEscapePopRestoresRootQueryThenClearsItBeforeDismissing() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        state.query = "hosts"
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([]), generation: generation)
+
+        // Esc pops back to the root with the search restored…
+        XCTAssertEqual(state.handleEscape(), .poppedToRoot)
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertEqual(state.query, "hosts")
+
+        // …then follows the standard cadence: clear first, dismiss after.
+        XCTAssertEqual(state.handleEscape(), .clearedQuery)
+        XCTAssertEqual(state.query, "")
+        XCTAssertEqual(state.handleEscape(), .dismiss)
+    }
+
     // MARK: - Resume across palette close/reopen
 
     @MainActor

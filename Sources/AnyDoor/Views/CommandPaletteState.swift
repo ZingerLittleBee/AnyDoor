@@ -114,11 +114,20 @@ final class CommandPaletteState {
     }
 
     private(set) var level: Level = .root
-    /// Levels below the current one, innermost last. Only `.root` and `.list`
+    /// One suspended navigation position: the level plus the search text the
+    /// user had typed there when drilling in, so popping back restores the
+    /// query (e.g. a root search survives a Detail round trip) instead of
+    /// clearing it.
+    private struct NavigationFrame {
+        let level: Level
+        let query: String
+    }
+
+    /// Frames below the current level, innermost last. Only `.root` and `.list`
     /// frames are ever pushed (options/argument/detail are navigation leaves),
     /// so restoring a frame yields a fully self-contained level. `popToRoot`
     /// clears the whole stack.
-    private var navigationStack: [Level] = []
+    private var navigationStack: [NavigationFrame] = []
 
     var isAtRoot: Bool { level == .root }
     var isInArgumentInput: Bool {
@@ -360,7 +369,7 @@ final class CommandPaletteState {
     /// of it, and level content (option lookup, list rows, detail state)
     /// travels inside the enum payload rather than in side slots.
     private func push(_ newLevel: Level) {
-        navigationStack.append(level)
+        navigationStack.append(NavigationFrame(level: level, query: query))
         level = newLevel
         activeDevToolScope = nil
         query = ""
@@ -368,19 +377,22 @@ final class CommandPaletteState {
         navigationRevision += 1
     }
 
-    /// Pop one navigation level: restore the frame just below, or fall back to the
-    /// root when the stack is empty. Clears the transient per-level state (scope,
-    /// query, selection); the restored level carries its own content (option
-    /// lookup, list rows, detail state) inside its enum payload, so a Detail
-    /// drilled out of a list returns to that list without a refetch.
+    /// Pop one navigation level: restore the frame just below — its level and
+    /// the search text the user had typed there, so a root search survives a
+    /// drill-in round trip — or fall back to the root when the stack is empty.
+    /// The restored level carries its own content (option lookup, list rows,
+    /// detail state) inside its enum payload, so a Detail drilled out of a list
+    /// returns to that list without a refetch. Selection restarts at the top:
+    /// the view resets it on the query change anyway, and the row set may have
+    /// shifted while drilled in.
     func popLevel() {
         guard let previous = navigationStack.popLast() else {
             popToRoot()
             return
         }
-        level = previous
+        level = previous.level
         activeDevToolScope = nil
-        query = ""
+        query = previous.query
         selectedIndex = 0
         navigationRevision += 1
     }
@@ -413,7 +425,7 @@ final class CommandPaletteState {
     /// can no longer answer.
     func canResume(sourceExists: (PluginRowSourceKey) -> Bool) -> Bool {
         guard isResumablePluginSurface else { return false }
-        return (navigationStack + [level]).allSatisfy { frame in
+        return (navigationStack.map(\.level) + [level]).allSatisfy { frame in
             switch frame {
             case .detail(let detailLevel): return sourceExists(detailLevel.sourceKey)
             case .list(let listLevel): return sourceExists(listLevel.sourceKey)
