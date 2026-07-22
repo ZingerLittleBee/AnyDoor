@@ -154,13 +154,13 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertNil(state.beginDetailMore(), "one fetch in flight at a time")
 
         // The chunk appends below the document and adopts the next cursor.
-        state.appendDetailChunk("page 2", more: "3", generation: request!.generation)
+        state.appendDetailChunk("page 2", more: "3", generation: request!.generation, document: request!.document)
         XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body\n\npage 2"))
         XCTAssertEqual(state.detailMoreCursor, "3")
 
         // The final chunk carries no cursor: pagination ends, sentinel gone.
         let last = state.beginDetailMore()
-        state.appendDetailChunk("page 3", more: nil, generation: last!.generation)
+        state.appendDetailChunk("page 3", more: nil, generation: last!.generation, document: last!.document)
         XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body\n\npage 2\n\npage 3"))
         XCTAssertNil(state.detailMoreCursor)
         XCTAssertNil(state.beginDetailMore())
@@ -174,7 +174,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
 
         // A source whose last page came back empty terminates cleanly.
         let request = state.beginDetailMore()
-        state.appendDetailChunk("  \n", more: nil, generation: request!.generation)
+        state.appendDetailChunk("  \n", more: nil, generation: request!.generation, document: request!.document)
         XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body"))
         XCTAssertNil(state.detailMoreCursor)
     }
@@ -192,7 +192,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         let genB = state.enterDetail(sourceKey: sourceKey, rowID: "b", title: "B")
         state.updateDetail(.loaded(title: "B", markdown: "B body"), generation: genB)
 
-        state.appendDetailChunk("A page 2", more: "3", generation: requestA!.generation)
+        state.appendDetailChunk("A page 2", more: "3", generation: requestA!.generation, document: requestA!.document)
         XCTAssertEqual(state.detailState, .loaded(title: "B", markdown: "B body"))
         XCTAssertNil(state.detailMoreCursor)
     }
@@ -204,7 +204,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         state.updateDetail(.loaded(title: "Post", markdown: "body"), more: "2", generation: generation)
 
         let request = state.beginDetailMore()
-        state.failDetailMore(generation: request!.generation)
+        state.failDetailMore(generation: request!.generation, document: request!.document)
 
         XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "body"))
         XCTAssertNil(state.detailMoreCursor, "a broken source stops paginating silently")
@@ -242,6 +242,49 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "translated"))
         XCTAssertEqual(state.detailMoreCursor, "t:2")
         XCTAssertEqual(state.detailActions.map(\.id), ["original"])
+    }
+
+    @MainActor
+    func testDetailActionOrphansAnInFlightChunkFetch() {
+        // Scrolled pagination and a footer action can race: a chunk claimed
+        // against the original document must not append to (or steal the
+        // cursor of) the document the action rebuilt — the document revision
+        // orphans it even though the navigation generation still matches.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        state.updateDetail(
+            .loaded(title: "Post", markdown: "original"),
+            more: "c1",
+            actions: [PluginRowDetailAction(id: "translate", label: "翻译")],
+            generation: generation)
+
+        let chunkRequest = state.beginDetailMore()      // chunk fetch in flight
+        let actionRequest = state.beginDetailAction()   // user presses 翻译
+        state.updateDetail(
+            .loaded(title: "Post", markdown: "translated"),
+            more: "t:2",
+            actions: [PluginRowDetailAction(id: "original", label: "显示原文")],
+            generation: actionRequest!.generation)
+
+        // The old chunk lands late: dropped wholesale.
+        state.appendDetailChunk(
+            "original page 2", more: "c2",
+            generation: chunkRequest!.generation, document: chunkRequest!.document)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "translated"))
+        XCTAssertEqual(state.detailMoreCursor, "t:2", "the rebuilt document keeps its own cursor")
+
+        // A stale chunk's failure must not kill the new document's pagination either.
+        state.failDetailMore(generation: chunkRequest!.generation, document: chunkRequest!.document)
+        XCTAssertEqual(state.detailMoreCursor, "t:2")
+
+        // The new document's own chain still works.
+        let next = state.beginDetailMore()
+        state.appendDetailChunk(
+            "translated page 2", more: nil,
+            generation: next!.generation, document: next!.document)
+        XCTAssertEqual(
+            state.detailState,
+            .loaded(title: "Post", markdown: "translated\n\ntranslated page 2"))
     }
 
     @MainActor
@@ -410,6 +453,32 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertNil(state.prepareForResume(), "a loaded list needs no reload")
         let request = try XCTUnwrap(state.beginListMore())
         XCTAssertEqual(request.cursor, "page2")
+    }
+
+    @MainActor
+    func testPopBackToAListReArmsAnInFlightPageFetch() throws {
+        // Drilling into a Detail while a list page fetch is in flight freezes
+        // the frame with `isFetchingMore = true` (the revision bump correctly
+        // orphans the fetch, so its completion can never clear the flag).
+        // Popping back must reset it, or the restored list's sentinel would
+        // spin forever with pagination dead.
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), more: "page2", generation: generation)
+        let inFlight = try XCTUnwrap(state.beginListMore())
+
+        state.enterDetail(sourceKey: sourceKey, rowID: "1", title: "Alpha")
+        // The orphaned fetch completes while the Detail is on top: rejected.
+        state.appendListRows([
+            PluginRowDescriptor(id: "2", title: "Beta", symbol: "doc", commit: .pushDetail),
+        ], more: nil, generation: inFlight.generation)
+
+        state.popLevel()
+        XCTAssertEqual(state.listMoreCursor, "page2", "the restored list keeps its cursor")
+        let retry = try XCTUnwrap(state.beginListMore(), "the sentinel can claim a fresh fetch")
+        XCTAssertEqual(retry.cursor, "page2")
     }
 
     @MainActor
@@ -907,7 +976,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         // The pre-close fetch settles after reopen: its generation is stale, so
         // the append is rejected instead of double-landing next to a re-armed
         // sentinel's fresh fetch.
-        state.appendDetailChunk("## Page 2", more: "3", generation: request!.generation)
+        state.appendDetailChunk("## Page 2", more: "3", generation: request!.generation, document: request!.document)
         XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "# Body"))
 
         // The fetching flag was cleared, so the re-created sentinel can claim a

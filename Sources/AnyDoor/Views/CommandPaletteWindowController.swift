@@ -795,7 +795,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     private func loadMoreDetail() {
         guard let state, let request = state.beginDetailMore() else { return }
         guard let source = CommandPaletteExtensions.shared.rowSource(for: request.sourceKey) else {
-            state.failDetailMore(generation: request.generation)
+            state.failDetailMore(generation: request.generation, document: request.document)
             return
         }
         Task { @MainActor [weak self] in
@@ -805,10 +805,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .markdown(let markdown, let more, _):
                 // An appended chunk's actions are ignored: the footer bar
                 // belongs to the full document, not to a page of it.
-                state.appendDetailChunk(markdown, more: more, generation: request.generation)
+                state.appendDetailChunk(
+                    markdown, more: more,
+                    generation: request.generation, document: request.document)
             case .failure, nil:
                 // Keep what is already rendered; stop paginating quietly.
-                state.failDetailMore(generation: request.generation)
+                state.failDetailMore(generation: request.generation, document: request.document)
             }
         }
     }

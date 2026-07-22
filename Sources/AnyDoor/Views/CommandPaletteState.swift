@@ -62,6 +62,13 @@ final class CommandPaletteState {
         var isFetchingMore: Bool = false
         /// The document's footer actions (empty = no action bar).
         var actions: [PluginRowDetailAction] = []
+        /// Which document the pagination chain belongs to. A footer action
+        /// rebuilds the whole document, so it bumps this; a chunk claimed
+        /// against the previous document then fails its token check instead
+        /// of appending old-chain pages to the rebuilt document. The
+        /// navigation generation cannot cover this: an action rebuild is a
+        /// content change, not a navigation change.
+        var documentRevision: Int = 0
     }
 
     /// The content of a pushed second-level plugin list (a `.pushList` drill-in).
@@ -344,7 +351,9 @@ final class CommandPaletteState {
     /// (the action rebuilds the whole document) and return whom to ask. Nil
     /// when no loaded Detail is showing — a second press while the first is
     /// rebuilding finds `.loading` content and is refused. The result lands
-    /// through `updateDetail` under the same generation token.
+    /// through `updateDetail` under the same generation token. Bumping the
+    /// document revision orphans any chunk fetch still in flight for the
+    /// previous document (see `DetailLevel.documentRevision`).
     func beginDetailAction() -> (sourceKey: PluginRowSourceKey, rowID: String, generation: Int)? {
         guard case .detail(var detailLevel) = level,
               case .loaded(let title, _) = detailLevel.content else { return nil }
@@ -352,30 +361,40 @@ final class CommandPaletteState {
         detailLevel.moreCursor = nil
         detailLevel.isFetchingMore = false
         detailLevel.actions = []
+        detailLevel.documentRevision += 1
         level = .detail(detailLevel)
         return (detailLevel.sourceKey, detailLevel.rowID, navigationRevision)
     }
 
-    /// Claim the next Detail chunk fetch: returns whom to ask and the cursor,
-    /// or nil when there is nothing to fetch (not a loaded Detail, no cursor,
-    /// or a fetch already in flight — the sentinel may fire more than once).
-    func beginDetailMore() -> (sourceKey: PluginRowSourceKey, rowID: String, cursor: String, generation: Int)? {
+    /// Claim the next Detail chunk fetch: returns whom to ask, the cursor, and
+    /// the tokens the append must present — the navigation generation (this
+    /// drill-in) plus the document revision (this document within it). Nil
+    /// when there is nothing to fetch (not a loaded Detail, no cursor, or a
+    /// fetch already in flight — the sentinel may fire more than once).
+    func beginDetailMore() -> (sourceKey: PluginRowSourceKey, rowID: String, cursor: String, generation: Int, document: Int)? {
         guard case .detail(var detailLevel) = level,
               case .loaded = detailLevel.content,
               let cursor = detailLevel.moreCursor,
               !detailLevel.isFetchingMore else { return nil }
         detailLevel.isFetchingMore = true
         level = .detail(detailLevel)
-        return (detailLevel.sourceKey, detailLevel.rowID, cursor, navigationRevision)
+        return (
+            detailLevel.sourceKey, detailLevel.rowID, cursor,
+            navigationRevision, detailLevel.documentRevision
+        )
     }
 
     /// Append a fetched Detail chunk to the loaded document and adopt the
-    /// chunk's own cursor (nil ends pagination). Generation-guarded like
-    /// `updateDetail`; an empty chunk only advances the cursor, so a source
+    /// chunk's own cursor (nil ends pagination). Guarded by the navigation
+    /// generation (like `updateDetail`) and the document revision, so a chunk
+    /// that was in flight when a footer action rebuilt the document is
+    /// dropped instead of splicing old-chain pages (and their cursor) into
+    /// the new document. An empty chunk only advances the cursor, so a source
     /// whose last page came back empty terminates cleanly without junk
     /// separators in the rendered markdown.
-    func appendDetailChunk(_ markdown: String, more: String?, generation: Int) {
+    func appendDetailChunk(_ markdown: String, more: String?, generation: Int, document: Int) {
         guard case .detail(var detailLevel) = level, generation == navigationRevision,
+              document == detailLevel.documentRevision,
               case .loaded(let title, let existing) = detailLevel.content else { return }
         let chunk = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
         if !chunk.isEmpty {
@@ -388,8 +407,11 @@ final class CommandPaletteState {
 
     /// A load-more fetch failed: stop paginating silently (the document shown
     /// so far stays; a retry loop against a broken source would be noise).
-    func failDetailMore(generation: Int) {
-        guard case .detail(var detailLevel) = level, generation == navigationRevision else { return }
+    /// Document-guarded like `appendDetailChunk`, so a stale chunk's failure
+    /// cannot kill the rebuilt document's own pagination.
+    func failDetailMore(generation: Int, document: Int) {
+        guard case .detail(var detailLevel) = level, generation == navigationRevision,
+              document == detailLevel.documentRevision else { return }
         detailLevel.moreCursor = nil
         detailLevel.isFetchingMore = false
         level = .detail(detailLevel)
@@ -449,6 +471,15 @@ final class CommandPaletteState {
             return
         }
         level = previous.level
+        // A frame pushed while a list page fetch was in flight froze
+        // `isFetchingMore = true`, and the revision bump that made the push
+        // safe also guaranteed the fetch's completion could never clear it.
+        // Reset it here so the restored list's sentinel can claim a fresh
+        // fetch instead of spinning forever.
+        if case .list(var listLevel) = level {
+            listLevel.isFetchingMore = false
+            level = .list(listLevel)
+        }
         activeDevToolScope = nil
         query = previous.query
         selectedIndex = 0
