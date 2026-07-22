@@ -250,12 +250,39 @@ function flattenComments(children: AlgoliaComment[], depth = 0, out: CommentNode
   return out;
 }
 
-/** Render one page of comments as per-comment blockquotes; `↳` marks depth. */
-function commentsMarkdown(comments: CommentNode[]): string {
+// The translator produced by `makeTranslator` (identity when the mode is off).
+type Translate = (text: string) => Promise<string>;
+
+// Comment bodies batch-translate through ONE call, joined by a standalone
+// separator line no comment is likely to contain. A translator that does not
+// return the separators intact fails the split, and the bodies fall back to
+// the original text.
+const COMMENT_SEPARATOR = "\n\n=====\n\n";
+const COMMENT_SEPARATOR_PATTERN = /\n\s*=====\s*\n/;
+
+/** Translate `bodies` in one batched call, falling back to the originals when
+ * the split does not round-trip. */
+async function translateBodies(bodies: string[], translate: Translate): Promise<string[]> {
+  if (bodies.length === 0) {
+    return bodies;
+  }
+  const translated = await translate(bodies.join(COMMENT_SEPARATOR));
+  const parts = translated.split(COMMENT_SEPARATOR_PATTERN).map((part) => part.trim());
+  return parts.length === bodies.length ? parts : bodies;
+}
+
+/** Render one page of comments as per-comment blockquotes; `↳` marks reply
+ * depth (one per nesting level). Author lines and depth markers are assembled
+ * from the original data — usernames are never sent to the translator. */
+async function renderComments(comments: CommentNode[], translate: Translate): Promise<string> {
+  const bodies = await translateBodies(
+    comments.map((comment) => htmlToMarkdown(comment.text)),
+    translate,
+  );
   return comments
-    .map((comment) => {
+    .map((comment, index) => {
       const marker = comment.depth > 0 ? `${"↳".repeat(comment.depth)} ` : "";
-      return quoted(`${marker}**${comment.author}**`, withImagePreviews(htmlToMarkdown(comment.text)));
+      return quoted(`${marker}**${comment.author}**`, withImagePreviews(bodies[index] ?? ""));
     })
     .join("\n\n");
 }
@@ -375,7 +402,7 @@ async function buildStoryDocument(
   const firstPage = comments.slice(0, COMMENTS_PAGE_SIZE);
   const rendered = firstPage.length === 0
     ? quoted("暂无评论")
-    : await translate(commentsMarkdown(firstPage));
+    : await renderComments(firstPage, translate);
 
   return {
     markdown: storyMarkdown(story, title, body, rendered),
@@ -400,7 +427,7 @@ async function buildCommentsChunk(
   }
   const translate = makeTranslator(api, translated);
   return {
-    markdown: await translate(commentsMarkdown(slice)),
+    markdown: await renderComments(slice, translate),
     more: nextCursor(comments.length, page, translated),
   };
 }

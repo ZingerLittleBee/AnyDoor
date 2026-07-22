@@ -242,13 +242,36 @@ function quoted(...paragraphs: string[]): string {
     .join("\n");
 }
 
+// The translator produced by `makeTranslator` (identity when the mode is off).
+type Translate = (text: string) => Promise<string>;
+
+// Reply bodies batch-translate through ONE call, joined by a standalone
+// separator line no reply is likely to contain. A translator that does not
+// return the separators intact fails the split, and the bodies fall back to
+// the original text.
+const REPLY_SEPARATOR = "\n\n=====\n\n";
+const REPLY_SEPARATOR_PATTERN = /\n\s*=====\s*\n/;
+
+/** Translate `bodies` in one batched call, falling back to the originals when
+ * the split does not round-trip. */
+async function translateBodies(bodies: string[], translate: Translate): Promise<string[]> {
+  if (bodies.length === 0) {
+    return bodies;
+  }
+  const translated = await translate(bodies.join(REPLY_SEPARATOR));
+  const parts = translated.split(REPLY_SEPARATOR_PATTERN).map((part) => part.trim());
+  return parts.length === bodies.length ? parts : bodies;
+}
+
 /** Render one page of replies as per-comment blockquotes; floor numbers
- * continue across pages via `startFloor`. */
-function repliesMarkdown(replies: Reply[], startFloor: number): string {
+ * continue across pages via `startFloor`. Author/floor lines are assembled
+ * from the original data — usernames are never sent to the translator. */
+async function renderReplies(replies: Reply[], startFloor: number, translate: Translate): Promise<string> {
+  const bodies = await translateBodies(replies.map((reply) => reply.content), translate);
   return replies
     .map((reply, index) => {
       const who = reply.member?.username ?? "匿名";
-      return quoted(`**${who}** · ${startFloor + index} 楼`, withImagePreviews(reply.content));
+      return quoted(`**${who}** · ${startFloor + index} 楼`, withImagePreviews(bodies[index] ?? ""));
     })
     .join("\n\n");
 }
@@ -394,7 +417,7 @@ async function buildTopicDocument(
     : "";
   const comments = replies.length === 0
     ? quoted("暂无评论")
-    : await translate(repliesMarkdown(replies, 1));
+    : await renderReplies(replies, 1, translate);
   return {
     markdown: topicMarkdown(enriched, await resolveTitle(enriched, translated, api), body, comments),
     more: replies.length >= REPLIES_PAGE_SIZE ? detailCursor(2, translated) : undefined,
@@ -418,7 +441,7 @@ async function buildRepliesChunk(
   const replies = await fetchRepliesPage(
     api.fetch, topic.id, page, { Authorization: `Bearer ${token}` });
   return {
-    markdown: await translate(repliesMarkdown(replies, (page - 1) * REPLIES_PAGE_SIZE + 1)),
+    markdown: await renderReplies(replies, (page - 1) * REPLIES_PAGE_SIZE + 1, translate),
     more: replies.length >= REPLIES_PAGE_SIZE ? detailCursor(page + 1, translated) : undefined,
   };
 }
