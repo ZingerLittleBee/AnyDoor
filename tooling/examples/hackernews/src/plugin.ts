@@ -44,9 +44,10 @@ const FEEDS: Record<string, string> = {
 const TRANSLATE_KEY = "translateDetail";
 const TRANSLATE_ROW_ID = "__translate__";
 
-// Cap the per-feed item fetches (one Firebase request per story) so a list
-// build stays well within the 30s watchdog.
-const MAX_STORIES = 25;
+// Stories per list page (one Firebase item request each, fetched in parallel,
+// so a page build stays well within the 30s watchdog). Scrolling to the bottom
+// loads the next page until the feed's ids run out.
+const STORIES_PAGE_SIZE = 25;
 
 // Comments render 20 per Detail chunk, paginated client-side from the cached
 // Algolia tree; the flattened thread is capped so a 1000-comment thread cannot
@@ -94,6 +95,9 @@ interface CommentNode {
 // id — and page comments — without refetching.
 const stories = new Map<string, HNItem>();
 const commentCache = new Map<string, CommentNode[]>();
+// A feed's story ids, fetched on the first page and reused by cursor pages so
+// pagination stays stable against the feed reordering between fetches.
+const feedIDs = new Map<string, number[]>();
 
 // MARK: - Helpers
 
@@ -164,14 +168,11 @@ function storySubtitle(story: HNItem): string {
   return [`${story.score ?? 0} 分`, `${story.descendants ?? 0} 评论`, `by ${author}`].join(" · ");
 }
 
-/** Cache the listed stories and map them to searchable palette rows. With
- * translation on, titles display from the translation cache (searchable in
- * both languages); the cache is display-only, so toggling off reverts. */
+/** Map stories to searchable palette rows. With translation on, titles display
+ * from the translation cache (searchable in both languages); the cache is
+ * display-only, so toggling off reverts. The `stories` lookup cache is
+ * maintained by `list()` (pages append; only a first page resets it). */
 function toRows(list: HNItem[], query: string, translated: boolean): Row[] {
-  stories.clear();
-  for (const story of list) {
-    stories.set(String(story.id), story);
-  }
   const needle = query.trim().toLowerCase();
   const rows: Row[] = [];
   for (const story of list) {
@@ -470,29 +471,49 @@ definePlugin(manifest, {
     return rows;
   },
 
-  async list(listId, query, api) {
+  async list(listId, query, api, cursor) {
     const feedURL = FEEDS[listId];
     if (feedURL === undefined) {
       // An unknown list id: surface an empty list rather than throwing.
       return [];
     }
-    const ids = await fetchJSON<number[]>(api.fetch, feedURL);
+    // First page: refresh the feed ids and reset the story lookup cache. A
+    // cursor page reuses the cached ids (refetched only if the context was
+    // recreated between pages).
+    let ids = feedIDs.get(listId);
+    if (cursor === undefined || ids === undefined) {
+      ids = await fetchJSON<number[]>(api.fetch, feedURL);
+      feedIDs.set(listId, ids);
+    }
+    const parsed = cursor === undefined ? 0 : Number.parseInt(cursor, 10);
+    const start = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+
     // One Firebase request per story; a single dead/deleted item must not sink
-    // the whole list, so per-item failures drop to undefined and are filtered.
+    // the whole page, so per-item failures drop to undefined and are filtered.
     const items = await Promise.all(
-      ids.slice(0, MAX_STORIES).map((id) =>
+      ids.slice(start, start + STORIES_PAGE_SIZE).map((id) =>
         fetchJSON<HNItem>(api.fetch, `${FIREBASE_BASE}/item/${id}.json`).catch(() => undefined),
       ),
     );
     const alive = items.filter(
       (item): item is HNItem => item !== undefined && item !== null && item.dead !== true && item.deleted !== true,
     );
+    if (start === 0) {
+      stories.clear();
+    }
+    for (const story of alive) {
+      stories.set(String(story.id), story);
+    }
     // With the translate toggle on, list titles render translated too.
     const translateOn = await readTranslateEnabled(api.store);
     if (translateOn) {
       await translateTitles(alive, api);
     }
-    return toRows(alive, query, translateOn);
+    const next = start + STORIES_PAGE_SIZE;
+    return {
+      rows: toRows(alive, query, translateOn),
+      more: next < ids.length ? String(next) : undefined,
+    };
   },
 
   async detail(rowId, api, cursor) {
