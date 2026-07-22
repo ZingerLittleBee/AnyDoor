@@ -220,12 +220,11 @@ function commentsMarkdown(comments: CommentNode[]): string {
     .join("\n\n");
 }
 
-/// Assemble the initial Detail document. `body` is the already-rendered (and
-/// possibly translated) Ask/Show text body, empty when the story has none;
-/// `comments` is the rendered first comment page. The title, meta line, and
-/// links deliberately stay untranslated.
-function storyMarkdown(story: HNItem, body: string, comments: string): string {
-  const title = story.title ?? `#${story.id}`;
+/// Assemble the initial Detail document. `title` and `body` are already
+/// rendered (and possibly translated); `body` is empty when the story has no
+/// Ask/Show text; `comments` is the rendered first comment page. The meta line
+/// and links deliberately stay untranslated.
+function storyMarkdown(story: HNItem, title: string, body: string, comments: string): string {
   const meta = [`**${story.by ?? "未知"}**`, `${story.score ?? 0} 分`, `${story.descendants ?? 0} 评论`].join(" · ");
   const discussion = `${HN_ITEM_URL}${story.id}`;
   const links = [
@@ -320,16 +319,19 @@ async function buildStoryDocument(
   const translate = makeTranslator(api, translated);
   const comments = await loadComments(String(story.id), api.fetch);
 
-  const body = typeof story.text === "string" && story.text.length > 0
-    ? await translate(withImagePreviews(htmlToMarkdown(story.text)))
-    : "";
+  const [title, body] = await Promise.all([
+    translate(story.title ?? `#${story.id}`),
+    typeof story.text === "string" && story.text.length > 0
+      ? translate(withImagePreviews(htmlToMarkdown(story.text)))
+      : Promise.resolve(""),
+  ]);
   const firstPage = comments.slice(0, COMMENTS_PAGE_SIZE);
   const rendered = firstPage.length === 0
     ? quoted("暂无评论")
     : await translate(commentsMarkdown(firstPage));
 
   return {
-    markdown: storyMarkdown(story, body, rendered),
+    markdown: storyMarkdown(story, title, body, rendered),
     more: nextCursor(comments.length, 1, translated),
     actions: detailActionsFor(translated),
   };
