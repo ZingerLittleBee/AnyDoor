@@ -47,6 +47,11 @@ export interface Row {
   actionLabel?: string;
   /** Leading checkmark, for option-style rows. */
   isChecked?: boolean;
+  /**
+   * Short status text rendered as a chip at the row's trailing edge (e.g.
+   * "开启" / "关闭" on a toggle-style row). Omit for no chip.
+   */
+  badge?: string;
   /** The row's commit action. Preferred over the legacy `commit` string. */
   action?: RowAction;
   /**

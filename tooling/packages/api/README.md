@@ -113,6 +113,19 @@ user's paid API quota).
 | `detailAction` | `(rowId, actionId, api) => DetailResult \| Promise<DetailResult>` | Rebuild the Detail for a pressed footer action (see below). |
 | `action` | `(rowId, actionId, argument, api) => unknown` | Run a row action. |
 
+### Row fields
+
+Beyond `id` / `title` / `subtitle` / `symbol` / `action`, a row may declare:
+
+- `actionLabel` — footer label for the row's primary action (e.g. "打开").
+- `badge` — short status text rendered as a chip at the row's trailing edge
+  (e.g. `badge: on ? "开启" : "关闭"` on a toggle-style row).
+- `isChecked` — leading checkmark, for second-level option-style rows.
+
+After a row's `action` completes, the host re-invokes `rows()` and re-renders
+the visible palette — so state the action just changed (a toggle's badge)
+updates immediately; a `run(false)` (stay-open) toggle needs no extra wiring.
+
 ## Detail markdown
 
 The host renders a Detail with the system markdown parser (no third-party

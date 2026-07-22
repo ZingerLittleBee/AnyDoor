@@ -395,7 +395,7 @@ definePlugin(manifest, {
       subtitle: translateOn ? "已开启 · Detail 将翻译正文与评论" : "使用设置中的翻译服务与目标语言",
       symbol: "character.bubble",
       actionLabel: translateOn ? "关闭" : "开启",
-      isChecked: translateOn,
+      badge: translateOn ? "开启" : "关闭",
       action: actions.run(false),
     });
     rows.push({
@@ -404,7 +404,7 @@ definePlugin(manifest, {
       subtitle: token ? "Token 已设置 · 详情将包含评论" : "可选 · 用于加载帖子正文与评论",
       symbol: "key",
       actionLabel: token ? "更新" : "设置",
-      isChecked: token !== undefined,
+      badge: token ? "已设置" : "未设置",
       action: actions.argument(),
     });
 

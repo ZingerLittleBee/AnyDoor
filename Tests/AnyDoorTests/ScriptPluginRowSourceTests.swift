@@ -180,6 +180,43 @@ final class ScriptPluginRowSourceTests: XCTestCase {
         }
     }
 
+    // MARK: - Row refresh after an action
+
+    func testPerformRowRefreshesRowsSoToggledStateRenders() async throws {
+        // A stayOpen toggle row flips plugin state its rows reflect (checkmark,
+        // badge). The source rebuilds its cache right after the action, so the
+        // visible palette re-renders the new state instead of waiting for the
+        // next open.
+        let runtime = makeRuntime()
+        let id = try runtime.load(fromDirectory: try ScriptPluginFixture.writePackage(
+            id: "com.acme.toggle",
+            bundle: """
+            var on = false;
+            anydoor.registerPlugin({
+              rows: function () {
+                return [{ id: "t", title: "Toggle", badge: on ? "On" : "Off",
+                          action: { type: "run", close: false } }];
+              },
+              action: function () { on = !on; }
+            });
+            """
+        ))
+        var rowsChangedCount = 0
+        let source = ScriptPluginRowSource(
+            scriptID: id, runtime: runtime, sectionTitle: "Fixture",
+            onRowsChanged: { rowsChangedCount += 1 }
+        )
+
+        await source.refresh()
+        XCTAssertEqual(source.rows().map(\.badge), ["Off"])
+        let changesBeforeAction = rowsChangedCount
+
+        await source.performRow(id: "t")
+        XCTAssertEqual(source.rows().map(\.badge), ["On"])
+        XCTAssertGreaterThan(rowsChangedCount, changesBeforeAction,
+                             "the visible palette must be nudged to re-render")
+    }
+
     // MARK: - Action failure toast
 
     func testFailingActionReportsFailureToInjectedHandler() async throws {

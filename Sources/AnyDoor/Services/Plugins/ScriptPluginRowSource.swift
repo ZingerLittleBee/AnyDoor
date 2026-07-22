@@ -174,6 +174,11 @@ final class ScriptPluginRowSource: PluginRowSource {
                 actionID: Self.defaultActionID,
                 argument: argument
             )
+            // Rebuild the cached rows so state a stayOpen action just changed
+            // (a toggle's checkmark or badge) re-renders immediately instead of
+            // waiting for the next palette open. The cache is replaced only
+            // when the fetch lands, so nothing flickers meanwhile.
+            await refresh()
         } catch let error as ScriptPluginError {
             // The plugin was unloaded mid-flight — not a plugin failure.
             if case .notLoaded = error { return }

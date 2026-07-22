@@ -75,6 +75,9 @@ public struct PluginRowDescriptor: Hashable, Sendable {
     /// Whether the row shows a leading checkmark (second-level option lists
     /// only — e.g. the active hosts profile, the current color format).
     public let isChecked: Bool
+    /// Short status text rendered as a chip at the row's trailing edge
+    /// (e.g. "开启" / "关闭" on a toggle-style row). Nil or empty shows none.
+    public let badge: String?
     public let commit: CommitSemantics
 
     public init(
@@ -84,6 +87,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         symbol: String,
         actionLabel: String? = nil,
         isChecked: Bool = false,
+        badge: String? = nil,
         commit: CommitSemantics
     ) {
         self.id = id
@@ -92,6 +96,7 @@ public struct PluginRowDescriptor: Hashable, Sendable {
         self.symbol = symbol
         self.actionLabel = actionLabel
         self.isChecked = isChecked
+        self.badge = badge
         self.commit = commit
     }
 }

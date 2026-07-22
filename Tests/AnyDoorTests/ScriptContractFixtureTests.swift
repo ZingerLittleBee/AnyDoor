@@ -68,10 +68,12 @@ final class ScriptContractFixtureTests: XCTestCase {
         XCTAssertEqual(full.symbol, "star")
         XCTAssertEqual(full.actionLabel, "Toggle")
         XCTAssertTrue(full.isChecked)
+        XCTAssertEqual(full.badge, "On")
 
         let bare = try XCTUnwrap(rows["bare"])
         XCTAssertNil(bare.subtitle)
         XCTAssertEqual(bare.symbol, "puzzlepiece.extension")
+        XCTAssertNil(bare.badge)
         XCTAssertFalse(bare.isChecked)
     }
 

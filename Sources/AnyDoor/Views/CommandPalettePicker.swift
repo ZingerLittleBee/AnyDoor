@@ -626,6 +626,16 @@ private struct CommandPaletteRow: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
+            } else if let badge = pluginBadge {
+                Text(badge)
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.secondary.opacity(0.12))
+                    )
+                    .foregroundStyle(.secondary)
             } else if let hotkey = entry.hotkey {
                 Text(hotkey.displayString(hyperFlags: hyperFlags))
                     .font(.system(size: 12, design: .rounded))
@@ -733,6 +743,14 @@ private struct CommandPaletteRow: View {
     /// accent-tinted on-state badge behind the icon.
     private var isToggleOn: Bool {
         entry.kind == .toggle && entry.toggleState == true
+    }
+
+    /// A plugin row's declared trailing status chip (e.g. "开启" on a
+    /// toggle-style row). Nil for every other row source and for empty text.
+    private var pluginBadge: String? {
+        guard case .pluginRow(_, let descriptor) = entry.source,
+              let badge = descriptor.badge, !badge.isEmpty else { return nil }
+        return badge
     }
 
     /// File path whose Finder icon backs this row, or nil when the row draws an

@@ -84,6 +84,7 @@
       "symbol": "star",
       "actionLabel": "Toggle",
       "isChecked": true,
+      "badge": "On",
       "action": {
         "type": "run",
         "close": false

@@ -49,6 +49,7 @@ export const contractRows: readonly Row[] = [
     symbol: "star",
     actionLabel: "Toggle",
     isChecked: true,
+    badge: "On",
     action: rowActionFixtures.run,
   },
   { id: "legacy-stayOpen", title: "Legacy stay-open row", commit: "stayOpen" },

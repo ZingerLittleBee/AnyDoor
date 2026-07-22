@@ -35,6 +35,7 @@ enum ScriptRowDecoder {
                 if case let .bool(checked) = fields["isChecked"] { return checked }
                 return false
             }(),
+            badge: fields["badge"]?.stringValue,
             commit: commit
         )
     }
