@@ -187,40 +187,50 @@ function toRows(list: Topic[], query: string, translated: boolean): Row[] {
   return rows;
 }
 
-// Translated topic titles by id. A palette query keystroke re-invokes `list`,
-// so without a cache every keystroke would re-translate the same titles.
+// Translated topic titles by id, shared by the list rows and the Detail, so a
+// Detail open reuses the list's work and a later list build does not
+// re-translate.
 const titleCache = new Map<string, string>();
 const TITLE_CACHE_LIMIT = 500;
 
 /**
  * Batch-translate the titles missing from the cache — ONE `api.translate` call
  * for the whole list (newline-joined, split back per line), never one per
- * topic. On failure, or when the provider does not preserve the line count,
- * the original titles are cached instead: the list degrades to untranslated
- * rather than retrying (and re-toasting) on every keystroke.
+ * topic. Blank lines are dropped before the count check, so a translator that
+ * appends a trailing newline cannot fail the round-trip. On failure or a
+ * count mismatch nothing is cached: the rows fall back to the original titles
+ * for this build, and the next list build retries — caching originals here
+ * would poison the cache and pin those titles untranslated for good.
  */
 async function translateTitles(list: Topic[], api: DetailAPI): Promise<void> {
+  // Evict before computing misses, so entries evicted here are re-translated
+  // in this same call instead of flashing back to their originals.
+  if (titleCache.size > TITLE_CACHE_LIMIT) {
+    titleCache.clear();
+  }
   const misses = list.filter((topic) => !titleCache.has(String(topic.id)));
   if (misses.length === 0) {
     return;
   }
-  if (titleCache.size > TITLE_CACHE_LIMIT) {
-    titleCache.clear();
-  }
   const originals = misses.map((topic) => topic.title);
   let lines: string[];
   try {
-    lines = (await api.translate(originals.join("\n"))).split("\n").map((line) => line.trim());
-    if (lines.length !== misses.length) {
-      lines = originals;
-    }
+    lines = (await api.translate(originals.join("\n")))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
   } catch (error) {
     await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
-    lines = originals;
+    return;
+  }
+  if (lines.length !== misses.length) {
+    return;
   }
   misses.forEach((topic, index) => {
     const line = lines[index];
-    titleCache.set(String(topic.id), line !== undefined && line.length > 0 ? line : originals[index] ?? "");
+    if (line !== undefined) {
+      titleCache.set(String(topic.id), line);
+    }
   });
 }
 
@@ -245,22 +255,50 @@ function quoted(...paragraphs: string[]): string {
 // The translator produced by `makeTranslator` (identity when the mode is off).
 type Translate = (text: string) => Promise<string>;
 
-// Reply bodies batch-translate through ONE call, joined by a standalone
-// separator line no reply is likely to contain. A translator that does not
-// return the separators intact fails the split, and the bodies fall back to
-// the original text.
+// Reply bodies batch-translate joined by a standalone separator line no reply
+// is likely to contain. A translator that does not return the separators
+// intact fails the split, and that batch falls back to the original text.
 const REPLY_SEPARATOR = "\n\n=====\n\n";
 const REPLY_SEPARATOR_PATTERN = /\n\s*=====\s*\n/;
+// The host rejects a single translate call over 10,000 characters; keep each
+// batched call safely under it (separators included).
+const TRANSLATE_BATCH_LIMIT = 9000;
 
-/** Translate `bodies` in one batched call, falling back to the originals when
- * the split does not round-trip. */
+/** Split bodies into order-preserving batches whose joined length stays under
+ * the host's per-call translate limit. A lone oversized body gets its own
+ * batch — its call fails and only that batch falls back to the original. */
+function batchBodies(bodies: string[]): string[][] {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let length = 0;
+  for (const body of bodies) {
+    const added = body.length + REPLY_SEPARATOR.length;
+    if (current.length > 0 && length + added > TRANSLATE_BATCH_LIMIT) {
+      batches.push(current);
+      current = [];
+      length = 0;
+    }
+    current.push(body);
+    length += added;
+  }
+  batches.push(current);
+  return batches;
+}
+
+/** Translate `bodies` in as few length-capped batched calls as possible,
+ * falling back to a batch's originals when its split does not round-trip. */
 async function translateBodies(bodies: string[], translate: Translate): Promise<string[]> {
   if (bodies.length === 0) {
     return bodies;
   }
-  const translated = await translate(bodies.join(REPLY_SEPARATOR));
-  const parts = translated.split(REPLY_SEPARATOR_PATTERN).map((part) => part.trim());
-  return parts.length === bodies.length ? parts : bodies;
+  const batches = await Promise.all(
+    batchBodies(bodies).map(async (batch) => {
+      const translated = await translate(batch.join(REPLY_SEPARATOR));
+      const parts = translated.split(REPLY_SEPARATOR_PATTERN).map((part) => part.trim());
+      return parts.length === batch.length ? parts : batch;
+    }),
+  );
+  return batches.flat();
 }
 
 /** Render one page of replies as per-comment blockquotes; floor numbers
@@ -306,11 +344,11 @@ function topicMarkdown(topic: Topic, title: string, body: string, comments: stri
 }
 
 /**
- * Build the Detail translator: identity when translation is off, otherwise one
- * `api.translate` call per rendered chunk (body, or a whole comment page —
- * never one call per comment, which would multiply quota spend by 20). A
- * failed translation toasts once and falls back to the original text, so a
- * broken service degrades the Detail instead of breaking it.
+ * Build the Detail translator: identity when translation is off, otherwise an
+ * `api.translate` call per rendered chunk (the body, or a length-capped batch
+ * of replies — never one call per reply, which would multiply quota spend by
+ * 20). A failed translation toasts once and falls back to the original text,
+ * so a broken service degrades the Detail instead of breaking it.
  */
 function makeTranslator(
   api: { translate: TranslateFn; toast: ToastFn },
@@ -369,9 +407,11 @@ async function fetchRepliesPage(
   return response.result ?? [];
 }
 
-/** The Detail title: original, or the (cached) translation. The list may have
+/** The Detail title: original, or its (cached) translation. The list may have
  * translated it already; a Detail translate fills the same cache, so drilling
- * back out to the list shows the same title. */
+ * back out to the list shows the same title. Cached only on success — a
+ * failed call falls back to the original without poisoning the cache (the
+ * body translation surfaces the failure toast). */
 async function resolveTitle(topic: Topic, translated: boolean, api: DetailAPI): Promise<string> {
   if (!translated) {
     return topic.title;
@@ -380,9 +420,13 @@ async function resolveTitle(topic: Topic, translated: boolean, api: DetailAPI): 
   if (cached !== undefined) {
     return cached;
   }
-  const title = await makeTranslator(api, true)(topic.title);
-  titleCache.set(String(topic.id), title);
-  return title;
+  try {
+    const title = await api.translate(topic.title);
+    titleCache.set(String(topic.id), title);
+    return title;
+  } catch {
+    return topic.title;
+  }
 }
 
 /** Build the full Detail document (initial load or a footer-action rebuild). */

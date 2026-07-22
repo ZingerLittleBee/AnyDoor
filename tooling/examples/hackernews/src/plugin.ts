@@ -194,40 +194,50 @@ function toRows(list: HNItem[], query: string, translated: boolean): Row[] {
   return rows;
 }
 
-// Translated story titles by id. A palette query keystroke re-invokes `list`,
-// so without a cache every keystroke would re-translate the same 25 titles.
+// Translated story titles by id, shared by the list rows and the Detail, so a
+// Detail open reuses the list's work and a later list build (pagination page,
+// re-drill) does not re-translate.
 const titleCache = new Map<string, string>();
 const TITLE_CACHE_LIMIT = 500;
 
 /**
  * Batch-translate the titles missing from the cache — ONE `api.translate` call
- * for the whole list (newline-joined, split back per line), never one per
- * story. On failure, or when the provider does not preserve the line count,
- * the original titles are cached instead: the list degrades to untranslated
- * rather than retrying (and re-toasting) on every keystroke.
+ * for the whole page (newline-joined, split back per line), never one per
+ * story. Blank lines are dropped before the count check, so a translator that
+ * appends a trailing newline cannot fail the round-trip. On failure or a
+ * count mismatch nothing is cached: the rows fall back to the original titles
+ * for this build, and the next list build retries — caching originals here
+ * would poison the cache and pin those titles untranslated for good.
  */
 async function translateTitles(list: HNItem[], api: DetailAPI): Promise<void> {
+  // Evict before computing misses, so entries evicted here are re-translated
+  // in this same call instead of flashing back to their originals.
+  if (titleCache.size > TITLE_CACHE_LIMIT) {
+    titleCache.clear();
+  }
   const misses = list.filter((story) => !titleCache.has(String(story.id)));
   if (misses.length === 0) {
     return;
   }
-  if (titleCache.size > TITLE_CACHE_LIMIT) {
-    titleCache.clear();
-  }
   const originals = misses.map((story) => story.title ?? `#${story.id}`);
   let lines: string[];
   try {
-    lines = (await api.translate(originals.join("\n"))).split("\n").map((line) => line.trim());
-    if (lines.length !== misses.length) {
-      lines = originals;
-    }
+    lines = (await api.translate(originals.join("\n")))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
   } catch (error) {
     await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
-    lines = originals;
+    return;
+  }
+  if (lines.length !== misses.length) {
+    return;
   }
   misses.forEach((story, index) => {
     const line = lines[index];
-    titleCache.set(String(story.id), line !== undefined && line.length > 0 ? line : originals[index] ?? "");
+    if (line !== undefined) {
+      titleCache.set(String(story.id), line);
+    }
   });
 }
 
@@ -254,22 +264,52 @@ function flattenComments(children: AlgoliaComment[], depth = 0, out: CommentNode
 // The translator produced by `makeTranslator` (identity when the mode is off).
 type Translate = (text: string) => Promise<string>;
 
-// Comment bodies batch-translate through ONE call, joined by a standalone
-// separator line no comment is likely to contain. A translator that does not
-// return the separators intact fails the split, and the bodies fall back to
-// the original text.
+// Comment bodies batch-translate joined by a standalone separator line no
+// comment is likely to contain. A translator that does not return the
+// separators intact fails the split, and that batch falls back to the
+// original text.
 const COMMENT_SEPARATOR = "\n\n=====\n\n";
 const COMMENT_SEPARATOR_PATTERN = /\n\s*=====\s*\n/;
+// The host rejects a single translate call over 10,000 characters; keep each
+// batched call safely under it (separators included). A hot HN page of 20
+// long comments easily exceeds the cap in one call.
+const TRANSLATE_BATCH_LIMIT = 9000;
 
-/** Translate `bodies` in one batched call, falling back to the originals when
- * the split does not round-trip. */
+/** Split bodies into order-preserving batches whose joined length stays under
+ * the host's per-call translate limit. A lone oversized body gets its own
+ * batch — its call fails and only that batch falls back to the original. */
+function batchBodies(bodies: string[]): string[][] {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let length = 0;
+  for (const body of bodies) {
+    const added = body.length + COMMENT_SEPARATOR.length;
+    if (current.length > 0 && length + added > TRANSLATE_BATCH_LIMIT) {
+      batches.push(current);
+      current = [];
+      length = 0;
+    }
+    current.push(body);
+    length += added;
+  }
+  batches.push(current);
+  return batches;
+}
+
+/** Translate `bodies` in as few length-capped batched calls as possible,
+ * falling back to a batch's originals when its split does not round-trip. */
 async function translateBodies(bodies: string[], translate: Translate): Promise<string[]> {
   if (bodies.length === 0) {
     return bodies;
   }
-  const translated = await translate(bodies.join(COMMENT_SEPARATOR));
-  const parts = translated.split(COMMENT_SEPARATOR_PATTERN).map((part) => part.trim());
-  return parts.length === bodies.length ? parts : bodies;
+  const batches = await Promise.all(
+    batchBodies(bodies).map(async (batch) => {
+      const translated = await translate(batch.join(COMMENT_SEPARATOR));
+      const parts = translated.split(COMMENT_SEPARATOR_PATTERN).map((part) => part.trim());
+      return parts.length === batch.length ? parts : batch;
+    }),
+  );
+  return batches.flat();
 }
 
 /** Render one page of comments as per-comment blockquotes; `↳` marks reply
@@ -313,11 +353,11 @@ function storyMarkdown(story: HNItem, title: string, body: string, comments: str
 }
 
 /**
- * Build the Detail translator: identity when translation is off, otherwise one
- * `api.translate` call per rendered chunk (body, or a whole comment page —
- * never one call per comment, which would multiply quota spend by 20). A
- * failed translation toasts once and falls back to the original text, so a
- * broken service degrades the Detail instead of breaking it.
+ * Build the Detail translator: identity when translation is off, otherwise an
+ * `api.translate` call per rendered chunk (the body, or a length-capped batch
+ * of comments — never one call per comment, which would multiply quota spend
+ * by 20). A failed translation toasts once and falls back to the original
+ * text, so a broken service degrades the Detail instead of breaking it.
  */
 function makeTranslator(
   api: { translate: TranslateFn; toast: ToastFn },
@@ -365,6 +405,29 @@ function detailActionsFor(translated: boolean): DetailAction[] {
   ];
 }
 
+/** The Detail title: original, or its (cached) translation. The list may have
+ * translated it already; a Detail translate fills the same cache, so drilling
+ * back out shows the same title. Cached only on success — a failed call falls
+ * back to the original without poisoning the cache (the body translation
+ * surfaces the failure toast). */
+async function resolveTitle(story: HNItem, translated: boolean, api: DetailAPI): Promise<string> {
+  const original = story.title ?? `#${story.id}`;
+  if (!translated) {
+    return original;
+  }
+  const cached = titleCache.get(String(story.id));
+  if (cached !== undefined) {
+    return cached;
+  }
+  try {
+    const title = await api.translate(original);
+    titleCache.set(String(story.id), title);
+    return title;
+  } catch {
+    return original;
+  }
+}
+
 /** Fetch the story's whole comment tree from Algolia, flatten, and cache it. */
 async function loadComments(storyId: string, fetch: FetchFn): Promise<CommentNode[]> {
   const item = await fetchJSON<AlgoliaItem>(fetch, `${ALGOLIA_ITEM_BASE}/${storyId}`);
@@ -387,19 +450,12 @@ async function buildStoryDocument(
   const translate = makeTranslator(api, translated);
   const comments = await loadComments(String(story.id), api.fetch);
 
-  // The list may already hold this title's translation; a Detail translate
-  // fills the cache too, so drilling back out shows the same title.
-  const originalTitle = story.title ?? `#${story.id}`;
-  const cachedTitle = translated ? titleCache.get(String(story.id)) : undefined;
   const [title, body] = await Promise.all([
-    cachedTitle !== undefined ? Promise.resolve(cachedTitle) : translate(originalTitle),
+    resolveTitle(story, translated, api),
     typeof story.text === "string" && story.text.length > 0
       ? translate(withImagePreviews(htmlToMarkdown(story.text)))
       : Promise.resolve(""),
   ]);
-  if (translated && cachedTitle === undefined) {
-    titleCache.set(String(story.id), title);
-  }
   const firstPage = comments.slice(0, COMMENTS_PAGE_SIZE);
   const rendered = firstPage.length === 0
     ? quoted("暂无评论")
