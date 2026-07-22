@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import PluginInterface
+import PluginSupport
 
 /// Identifies which kind of hover-anchored popover should be mounted next.
 ///

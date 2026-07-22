@@ -1,5 +1,6 @@
 import AppKit
 import PluginInterface
+import PluginSupport
 
 /// A bottom-center floating pill that shows the most recent keystroke combo during
 /// recording. The screen recording captures it on screen. Observes key events via

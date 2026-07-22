@@ -37,6 +37,18 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // Shared implementation support used on both sides of the plugin
+        // boundary: the plain-text editor, hover/glass shims, thumbnail cache,
+        // capture-filename helpers, and main-thread isolation. Deliberately a
+        // sibling of PluginInterface, which stays a pure contract — these are
+        // conveniences both Core and plugin modules happen to need, not part
+        // of the plugin interface.
+        .target(
+            name: "PluginSupport",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
         // Pure image-codec utilities shared by Core and the Image Conversion
         // plugin: the format whitelist and the ImageIO encode path plus the
         // shared lossy-quality setting. Core's screenshot Save As transcodes
@@ -59,6 +71,7 @@ let package = Package(
                 .product(name: "libwebp", package: "libwebp-Xcode"),
                 "ImageCodec",
                 "PluginInterface",
+                "PluginSupport",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -103,6 +116,7 @@ let package = Package(
             name: "HostsPlugin",
             dependencies: [
                 "PluginInterface",
+                "PluginSupport",
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
@@ -116,6 +130,7 @@ let package = Package(
                 "HostsHelperShared",
                 "ImageCodec",
                 "PluginInterface",
+                "PluginSupport",
                 "ImageConversionPlugin",
                 "HostsPlugin",
                 "ScriptPluginRuntime",
@@ -148,7 +163,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AnyDoorTests",
-            dependencies: ["AnyDoor", "ImageCodec", "PluginInterface", "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime"],
+            dependencies: ["AnyDoor", "ImageCodec", "PluginInterface", "PluginSupport", "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime"],
             resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),

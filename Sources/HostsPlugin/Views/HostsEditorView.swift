@@ -1,4 +1,5 @@
 import PluginInterface
+import PluginSupport
 import SwiftUI
 
 /// Master-detail editor: profile list on the left, content editor on the right.

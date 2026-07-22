@@ -2,6 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 import XCTest
 import PluginInterface
+import PluginSupport
 @testable import AnyDoor
 @testable import ImageConversionPlugin
 

@@ -1,4 +1,5 @@
 import PluginInterface
+import PluginSupport
 import SwiftUI
 
 /// Hover popover for the Hosts submenu. Matches the shared popover styling

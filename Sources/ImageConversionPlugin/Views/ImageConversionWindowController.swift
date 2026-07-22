@@ -1,6 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import PluginInterface
+import PluginSupport
 import SwiftUI
 
 @MainActor

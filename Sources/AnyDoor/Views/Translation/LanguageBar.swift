@@ -1,4 +1,5 @@
 import PluginInterface
+import PluginSupport
 import SwiftUI
 
 /// Source ⇄ target language selector. The source picker's first entry is

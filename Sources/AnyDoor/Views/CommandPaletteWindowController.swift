@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import PluginInterface
+import PluginSupport
 import ScriptPluginRuntime
 
 @MainActor

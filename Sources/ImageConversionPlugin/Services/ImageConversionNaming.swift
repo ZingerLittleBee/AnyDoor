@@ -1,5 +1,6 @@
 import ImageCodec
 import PluginInterface
+import PluginSupport
 import Foundation
 
 enum ImageConversionNaming {

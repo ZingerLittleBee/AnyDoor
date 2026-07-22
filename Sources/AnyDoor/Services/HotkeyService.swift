@@ -1,5 +1,6 @@
 import Cocoa
 import PluginInterface
+import PluginSupport
 
 /// Global hotkey listener service.
 ///

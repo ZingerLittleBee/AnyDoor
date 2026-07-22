@@ -1,5 +1,6 @@
 import Cocoa
 import PluginInterface
+import PluginSupport
 import SwiftData
 import SwiftUI
 import OSLog

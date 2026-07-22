@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import PluginInterface
+import PluginSupport
 
 struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared

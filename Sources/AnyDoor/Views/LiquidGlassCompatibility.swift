@@ -1,6 +1,6 @@
 import SwiftUI
 
-// `AdaptiveGlassEffectContainer` lives in PluginInterface so plugin modules
+// `AdaptiveGlassEffectContainer` lives in PluginSupport so plugin modules
 // can share the panel/popover styling; the surface helpers below stay Core.
 
 extension View {

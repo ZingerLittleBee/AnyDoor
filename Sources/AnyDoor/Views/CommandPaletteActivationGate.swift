@@ -1,5 +1,6 @@
 import AppKit
 import PluginInterface
+import PluginSupport
 
 /// Presents work only after AnyDoor has actually become the active application.
 /// A global hotkey can summon the palette while this accessory app is in the

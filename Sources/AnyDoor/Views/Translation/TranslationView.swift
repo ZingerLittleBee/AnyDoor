@@ -1,4 +1,5 @@
 import PluginInterface
+import PluginSupport
 import AppKit
 import SwiftUI
 
