@@ -87,11 +87,21 @@ async rows(query, api) {
 | `pasteboard` | `api.copy` | `(text) => Promise<void>` |
 | `delay` | `api.delay` | `(ms) => Promise<void>` |
 | `openURL` | `api.openURL` | `(url) => Promise<void>` |
+| `translate` | `api.translate` | `(text) => Promise<string>` |
 
 `openURL` accepts only `http` and `https` URLs — the host rejects any other
 scheme (e.g. `file:` or a custom app scheme) with a rejected promise, so a
 plugin cannot use it to reach the filesystem or launch arbitrary apps. The same
 restriction applies to a row's `openURL` commit action.
+
+`translate` translates text into the user's configured target language through
+the translation service the user set up in AnyDoor's Settings. The plugin
+cannot choose the direction or the service; the source language is
+auto-detected. The promise rejects when no usable translation service is
+configured, when the provider fails, or when the text exceeds 10,000
+characters (free providers have hard length limits and LLM providers bill by
+volume — which is also why this is a declared capability: it can spend the
+user's paid API quota).
 
 ### Entry points
 

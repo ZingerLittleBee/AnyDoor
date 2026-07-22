@@ -310,6 +310,7 @@ final class ScriptPluginContext: @unchecked Sendable {
         case .pasteboard: injectPasteboard(into: anydoor)
         case .delay: injectDelay(into: anydoor)
         case .openURL: injectOpenURL(into: anydoor)
+        case .translate: injectTranslate(into: anydoor)
         }
     }
 
@@ -415,6 +416,29 @@ final class ScriptPluginContext: @unchecked Sendable {
             }
         }
         anydoor.setObject(block, forKeyedSubscript: "copy" as NSString)
+    }
+
+    private func injectTranslate(into anydoor: JSValue) {
+        let translate = capabilityHost.translate
+        let block: @convention(block) (JSValue) -> JSValue = { [weak self] textValue in
+            guard let self, let context = self.context else { return JSValue() }
+            let text = textValue.toString() ?? ""
+            return self.settleFromTask(in: context) {
+                // Enforced runtime-side so the cap holds for every host:
+                // free providers have hard length limits and LLM providers
+                // bill by volume, so reject instead of truncating.
+                guard text.count <= ScriptCapabilityHost.maxTranslateCharacters else {
+                    return .failure(
+                        "translate: text exceeds \(ScriptCapabilityHost.maxTranslateCharacters) characters")
+                }
+                do {
+                    return .value(.string(try await translate(text)))
+                } catch {
+                    return .failure("translate failed: \(error.localizedDescription)")
+                }
+            }
+        }
+        anydoor.setObject(block, forKeyedSubscript: "translate" as NSString)
     }
 
     private func injectDelay(into anydoor: JSValue) {

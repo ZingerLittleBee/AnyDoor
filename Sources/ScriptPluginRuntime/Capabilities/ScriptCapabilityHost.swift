@@ -34,17 +34,31 @@ public struct ScriptCapabilityHost: Sendable {
     /// Opens a URL in the default browser (`anydoor.openURL`).
     public var openURL: @MainActor @Sendable (URL) -> Void
 
+    /// Translates text into the user's configured target language
+    /// (`anydoor.translate`), throwing when no translation service is usable
+    /// or the provider fails. The thrown error's description reaches the
+    /// plugin as its promise-rejection message.
+    public var translate: @MainActor @Sendable (String) async throws -> String
+
+    /// The per-call input cap for `anydoor.translate`, enforced by the runtime
+    /// before the host closure runs. Free providers have hard length limits and
+    /// LLM providers bill by volume, so an oversized payload is rejected
+    /// instead of truncated.
+    public static let maxTranslateCharacters = 10_000
+
     public init(
         transport: any ScriptFetchTransport,
         storeDirectory: URL,
         presentToast: @escaping @MainActor @Sendable (ScriptPluginID, PluginToast) -> Void,
         writePasteboard: @escaping @MainActor @Sendable (String) -> Void,
-        openURL: @escaping @MainActor @Sendable (URL) -> Void
+        openURL: @escaping @MainActor @Sendable (URL) -> Void,
+        translate: @escaping @MainActor @Sendable (String) async throws -> String
     ) {
         self.transport = transport
         self.storeDirectory = storeDirectory
         self.presentToast = presentToast
         self.writePasteboard = writePasteboard
         self.openURL = openURL
+        self.translate = translate
     }
 }

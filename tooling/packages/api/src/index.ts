@@ -16,6 +16,7 @@ export type {
   CopyFn,
   DelayFn,
   OpenURLFn,
+  TranslateFn,
   CapabilityAPI,
   DeclaredAPI,
 } from "./capabilities.js";

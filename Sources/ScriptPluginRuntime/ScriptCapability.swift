@@ -5,9 +5,9 @@ import Foundation
 /// manifest does not declare is never injected into the plugin's `JSContext`,
 /// so it does not exist for the plugin's code.
 ///
-/// Milestone A grants exactly these six. Refused for milestone A (and therefore
-/// absent here): shell execution, AppleScript, filesystem access, and
-/// pasteboard *reading*.
+/// Milestone A granted six; `translate` joined as the seventh (ADR-0009
+/// amendment). Refused (and therefore absent here): shell execution,
+/// AppleScript, filesystem access, and pasteboard *reading*.
 public enum ScriptCapability: String, CaseIterable, Sendable, Hashable {
     /// Network access through the host transport (`anydoor.fetch`).
     case fetch
@@ -25,6 +25,12 @@ public enum ScriptCapability: String, CaseIterable, Sendable, Hashable {
     /// `http`/`https` by ``ScriptOpenURLPolicy`` so it cannot reach the
     /// filesystem or launch arbitrary apps.
     case openURL
+    /// Translate text into the user's configured target language
+    /// (`anydoor.translate`), through the translation service the user set up
+    /// in Settings. Declared because it can spend the user's third-party API
+    /// quota; the target language is always the user's setting — a plugin
+    /// cannot choose the direction.
+    case translate
 
     /// The manifest string authors write. Distinct from `rawValue` only for
     /// `openURL`, whose wire form keeps the conventional casing.

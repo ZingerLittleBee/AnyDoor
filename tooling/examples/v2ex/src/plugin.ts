@@ -1,4 +1,12 @@
-import { definePlugin, actions, type Row, type FetchFn, type Store } from "@anydoor/api";
+import {
+  definePlugin,
+  actions,
+  type Row,
+  type FetchFn,
+  type Store,
+  type ToastFn,
+  type TranslateFn,
+} from "@anydoor/api";
 import manifest from "./manifest.js";
 
 // A real-world Script Plugin for V2EX (https://www.v2ex.com), shaped like the
@@ -29,11 +37,13 @@ const LIST_HOT = "hot";
 const LIST_LATEST = "latest";
 const LIST_NODE = "node";
 
-// Store keys + the sentinel token row id. A `__`-prefixed id cannot collide with
+// Store keys + the sentinel row ids. A `__`-prefixed id cannot collide with
 // a numeric topic id.
 const TOKEN_KEY = "token";
 const NODES_KEY = "nodes";
+const TRANSLATE_KEY = "translateDetail";
 const TOKEN_ROW_ID = "__set_token__";
+const TRANSLATE_ROW_ID = "__translate__";
 
 // The default node list mirrors the Raycast V2EX extension. Overridable through
 // the `nodes` store key (a space-separated list); a set-nodes UI is a follow-up.
@@ -107,6 +117,11 @@ async function fetchJSON<T>(
 async function readToken(store: Store): Promise<string | undefined> {
   const value = await store.get(TOKEN_KEY);
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/** Read the Detail-translation toggle (off unless explicitly enabled). */
+async function readTranslateEnabled(store: Store): Promise<boolean> {
+  return (await store.get(TRANSLATE_KEY)) === true;
 }
 
 /** Read the configured node list, falling back to the Raycast default set. */
@@ -196,7 +211,11 @@ function repliesMarkdown(replies: Reply[], startFloor: number): string {
     .join("\n\n");
 }
 
-function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
+/// Assemble the initial Detail document. `body` is the already-rendered (and
+/// possibly translated) topic body, empty when the topic has none; `comments`
+/// is the rendered comment-section content, or undefined for the no-token hint.
+/// The title, meta line, and origin link deliberately stay untranslated.
+function topicMarkdown(topic: Topic, body: string, comments: string | undefined): string {
   const node = topic.node?.title ?? topic.node?.name ?? "";
   const author = topic.member?.username ?? "未知";
   const meta = [node && `\`${node}\``, `**${author}**`, `${topic.replies} 回复`]
@@ -205,29 +224,52 @@ function topicMarkdown(topic: Topic, replies: Reply[] | undefined): string {
 
   const lines: string[] = [`# ${topic.title}`, "", meta, "", `[在浏览器中打开原帖](${topic.url})`];
 
-  if (topic.content.length > 0) {
-    lines.push("", "---", "", withImagePreviews(topic.content));
+  if (body.length > 0) {
+    lines.push("", "---", "", body);
   }
 
   // Comments render as one blockquote per reply — the host draws each quote
   // with a leading bar in secondary text, visually separating the comment
   // section from the plain-paragraph topic body and each comment from the next.
-  if (replies === undefined) {
+  if (comments === undefined) {
     lines.push("", "---", "", quoted("设置 V2EX Token 后可加载评论。"));
-  } else if (replies.length === 0) {
-    lines.push("", "---", "", "## 评论", "", quoted("暂无评论"));
   } else {
-    lines.push("", "---", "", "## 评论", "", repliesMarkdown(replies, 1));
+    lines.push("", "---", "", "## 评论", "", comments);
   }
 
   return lines.join("\n");
 }
 
+/**
+ * Build the Detail translator: identity when the toggle is off, otherwise one
+ * `api.translate` call per rendered chunk (body, or a whole comment page —
+ * never one call per comment, which would multiply quota spend by 20). A
+ * failed translation toasts once and falls back to the original text, so a
+ * broken service degrades the Detail instead of breaking it.
+ */
+function makeTranslator(
+  api: { translate: TranslateFn; toast: ToastFn },
+  enabled: boolean,
+): (text: string) => Promise<string> {
+  return async (text) => {
+    if (!enabled || text.length === 0) {
+      return text;
+    }
+    try {
+      return await api.translate(text);
+    } catch (error) {
+      await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
+      return text;
+    }
+  };
+}
+
 definePlugin(manifest, {
   async rows(query, api) {
-    // The root is instant: only command rows and the token row, no network.
-    // English subtitles keep the Raycast-style command names searchable.
+    // The root is instant: only command rows and the pinned settings rows, no
+    // network. English subtitles keep the Raycast-style command names searchable.
     const token = await readToken(api.store);
+    const translateOn = await readTranslateEnabled(api.store);
     const commands: Row[] = [
       { id: LIST_HOT, title: "热门主题", subtitle: "View Hot Topics",
         symbol: "flame", actionLabel: "查看", action: actions.list(LIST_HOT) },
@@ -242,7 +284,17 @@ definePlugin(manifest, {
       ? commands.filter((row) => `${row.title} ${row.subtitle ?? ""}`.toLowerCase().includes(needle))
       : commands;
 
-    // The token row is pinned last and always present, regardless of the query.
+    // The settings rows are pinned last and always present, regardless of the
+    // query. The translate toggle flips a store flag; Detail reads it per open.
+    rows.push({
+      id: TRANSLATE_ROW_ID,
+      title: "翻译帖子内容",
+      subtitle: translateOn ? "已开启 · Detail 将翻译正文与评论" : "使用设置中的翻译服务与目标语言",
+      symbol: "character.bubble",
+      actionLabel: translateOn ? "关闭" : "开启",
+      isChecked: translateOn,
+      action: actions.run(false),
+    });
     rows.push({
       id: TOKEN_ROW_ID,
       title: "设置 V2EX Token",
@@ -284,8 +336,13 @@ definePlugin(manifest, {
     }
 
     const token = await readToken(api.store);
+    const translate = makeTranslator(api, await readTranslateEnabled(api.store));
+
     if (token === undefined) {
-      return topicMarkdown(topic, undefined);
+      const body = topic.content.length > 0
+        ? await translate(withImagePreviews(topic.content))
+        : "";
+      return topicMarkdown(topic, body, undefined);
     }
 
     const headers = { Authorization: `Bearer ${token}` };
@@ -301,7 +358,7 @@ definePlugin(manifest, {
       const page = Number.parseInt(cursor, 10);
       const replies = await fetchRepliesPage(page);
       return {
-        markdown: repliesMarkdown(replies, (page - 1) * REPLIES_PAGE_SIZE + 1),
+        markdown: await translate(repliesMarkdown(replies, (page - 1) * REPLIES_PAGE_SIZE + 1)),
         more: replies.length >= REPLIES_PAGE_SIZE ? String(page + 1) : undefined,
       };
     }
@@ -312,14 +369,29 @@ definePlugin(manifest, {
       fetchJSON<V2Response<Topic>>(api.fetch, `${V2_BASE}/topics/${topic.id}`, headers),
       fetchRepliesPage(1),
     ]);
+    const enriched = detailResponse.result ?? topic;
+    const body = enriched.content.length > 0
+      ? await translate(withImagePreviews(enriched.content))
+      : "";
+    const comments = replies.length === 0
+      ? quoted("暂无评论")
+      : await translate(repliesMarkdown(replies, 1));
     return {
-      markdown: topicMarkdown(detailResponse.result ?? topic, replies),
+      markdown: topicMarkdown(enriched, body, comments),
       more: replies.length >= REPLIES_PAGE_SIZE ? "2" : undefined,
     };
   },
 
   async action(rowId, _actionId, argument, api) {
-    // Only the token row acts; topic and command rows drill in instead.
+    // The translate row toggles the Detail-translation store flag in place.
+    if (rowId === TRANSLATE_ROW_ID) {
+      const next = !(await readTranslateEnabled(api.store));
+      await api.store.set(TRANSLATE_KEY, next);
+      await api.toast("success", next ? "已开启帖子翻译" : "已关闭帖子翻译");
+      return;
+    }
+
+    // Otherwise only the token row acts; topic and command rows drill in instead.
     if (rowId !== TOKEN_ROW_ID) {
       return;
     }

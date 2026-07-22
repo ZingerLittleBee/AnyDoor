@@ -67,7 +67,8 @@ final class ScriptPluginRegistry {
                 }
             },
             writePasteboard: { text in ClipboardWatcher.selfWrite(string: text) },
-            openURL: { url in NSWorkspace.shared.open(url) }
+            openURL: { url in NSWorkspace.shared.open(url) },
+            translate: { text in try await PluginTranslator.translate(text) }
         )
         // One diagnostics log shared by the runtime (context-level refusals,
         // watchdog kills, capability errors) and the registry (dev-plugin reload

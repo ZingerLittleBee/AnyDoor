@@ -69,9 +69,13 @@ final class ScriptCapabilitySpy {
     private(set) var toasts: [(ScriptPluginID, PluginToast)] = []
     private(set) var pasteboardWrites: [String] = []
     private(set) var openedURLs: [URL] = []
+    private(set) var translatedTexts: [String] = []
 
     /// Optional override for the pasteboard write (e.g. route to the real funnel).
     var onPasteboardWrite: (@MainActor (String) -> Void)?
+    /// The translate back end: transforms the input, or throws. Defaults to a
+    /// marker transform so tests can assert the round trip.
+    var onTranslate: (@MainActor (String) throws -> String) = { "译:\($0)" }
 
     func recordToast(_ id: ScriptPluginID, _ toast: PluginToast) {
         toasts.append((id, toast))
@@ -84,6 +88,11 @@ final class ScriptCapabilitySpy {
     func recordPasteboard(_ text: String) {
         pasteboardWrites.append(text)
         onPasteboardWrite?(text)
+    }
+
+    func recordTranslate(_ text: String) throws -> String {
+        translatedTexts.append(text)
+        return try onTranslate(text)
     }
 }
 
@@ -124,7 +133,8 @@ enum ScriptRuntimeHarness {
             storeDirectory: storeDirectory,
             presentToast: { id, toast in spy.recordToast(id, toast) },
             writePasteboard: { text in spy.recordPasteboard(text) },
-            openURL: { url in spy.recordOpenURL(url) }
+            openURL: { url in spy.recordOpenURL(url) },
+            translate: { text in try spy.recordTranslate(text) }
         )
     }
 }

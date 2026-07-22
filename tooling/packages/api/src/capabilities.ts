@@ -1,4 +1,4 @@
-// The six capabilities a Script Plugin may declare (ADR-0009). The manifest's
+// The capabilities a Script Plugin may declare (ADR-0009). The manifest's
 // capability list *is* the security model: the host injects a capability into
 // the plugin's context only when the manifest declares it, so an undeclared
 // capability does not exist at runtime. This module types each capability's
@@ -8,8 +8,8 @@
 import type { JSONValue } from "./json.js";
 
 /**
- * A capability name, exactly as written in `manifest.json`. Only these six are
- * granted in milestone A; the host refuses a manifest naming anything else.
+ * A capability name, exactly as written in `manifest.json`. Only these are
+ * granted; the host refuses a manifest naming anything else.
  */
 export type Capability =
   | "fetch"
@@ -17,7 +17,8 @@ export type Capability =
   | "toast"
   | "pasteboard"
   | "delay"
-  | "openURL";
+  | "openURL"
+  | "translate";
 
 /** Every capability name, for runtime iteration (e.g. manifest validation). */
 export const CAPABILITIES: readonly Capability[] = [
@@ -27,6 +28,7 @@ export const CAPABILITIES: readonly Capability[] = [
   "pasteboard",
   "delay",
   "openURL",
+  "translate",
 ] as const;
 
 // MARK: - fetch
@@ -93,6 +95,19 @@ export type DelayFn = (milliseconds: number) => Promise<void>;
  */
 export type OpenURLFn = (url: string) => Promise<void>;
 
+// MARK: - translate
+
+/**
+ * Translate text into the user's configured target language, through the
+ * translation service the user set up in AnyDoor's Settings. The target
+ * language is always the user's setting — a plugin cannot choose the
+ * direction; the source language is auto-detected. Rejects when no usable
+ * translation service is configured, when the provider fails, or when the
+ * text exceeds 10,000 characters (free providers have hard length limits and
+ * LLM providers bill by volume).
+ */
+export type TranslateFn = (text: string) => Promise<string>;
+
 // MARK: - Capability surface
 
 /**
@@ -107,6 +122,7 @@ export interface CapabilityAPI {
   pasteboard: CopyFn;
   delay: DelayFn;
   openURL: OpenURLFn;
+  translate: TranslateFn;
 }
 
 /**

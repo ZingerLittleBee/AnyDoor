@@ -25,9 +25,9 @@ dependency, so `pnpm install && pnpm build` runs standalone inside the example
 directory. `pnpm verify` builds and asserts them alongside the scaffold template.
 
 - [`examples/v2ex`](examples/v2ex) — a V2EX viewer: merged hot/latest topic list,
-  per-topic markdown Detail with image previews and scroll-paginated comments,
-  and an optional stored access token
-  (`fetch` + `store` + `toast` + `openURL`).
+  per-topic markdown Detail with image previews, scroll-paginated comments, and
+  opt-in translation, plus an optional stored access token
+  (`fetch` + `store` + `toast` + `openURL` + `translate`).
 
 ## Requirements
 
@@ -84,8 +84,8 @@ capabilities. Using a capability the manifest does not declare is a compile-time
 error — the manifest is the security boundary (ADR-0009), and the types enforce
 it before the host ever does.
 
-The six capabilities: `fetch`, `store`, `toast`, `pasteboard` (exposed as
-`copy`), `delay`, `openURL`.
+The seven capabilities: `fetch`, `store`, `toast`, `pasteboard` (exposed as
+`copy`), `delay`, `openURL`, `translate`.
 
 ## Verification
 

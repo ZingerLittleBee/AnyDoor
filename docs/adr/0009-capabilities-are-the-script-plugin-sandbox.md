@@ -27,3 +27,16 @@ consent UI exists) but is deliberately required from the first plugin so the
 store milestone can render install-time permission prompts without a
 manifest-format migration. Widening the list is a per-capability decision
 with ADR-level scrutiny, not a default.
+
+## Amendment: `translate` (2026-07-22)
+
+A seventh capability, `translate`, grants translation of plugin-supplied
+text into the user's Settings target language through the user's own
+configured translation services. It went through the per-capability
+scrutiny this ADR requires: it is declared (it can spend the user's paid
+third-party API quota, which install-time consent must surface), the
+plugin cannot choose the language direction or the service (first enabled
+non-manual service, no fallback — manual-mode services exist precisely to
+prevent unattended spending), input is capped at 10,000 characters
+runtime-side, and API keys never cross into the `JSContext` — the plugin
+sees only text in, text out.

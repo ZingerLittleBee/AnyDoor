@@ -5,7 +5,8 @@
     "toast",
     "pasteboard",
     "delay",
-    "openURL"
+    "openURL",
+    "translate"
   ],
   "manifest": {
     "id": "dev.anydoor.contract-fixture",
@@ -20,7 +21,8 @@
       "toast",
       "pasteboard",
       "delay",
-      "openURL"
+      "openURL",
+      "translate"
     ],
     "localizedNames": {
       "zh": "契约夹具"

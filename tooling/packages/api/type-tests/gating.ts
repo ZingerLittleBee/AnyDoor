@@ -22,6 +22,8 @@ definePlugin(fetchOnly, {
     await api.toast("info", "nope");
     // @ts-expect-error store is not declared in the manifest
     api.store.keys();
+    // @ts-expect-error translate is not declared in the manifest
+    await api.translate("nope");
     return [];
   },
   async list(_listId, _query, api) {

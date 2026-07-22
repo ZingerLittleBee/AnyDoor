@@ -343,7 +343,8 @@ final class ScriptPluginRuntimeTests: XCTestCase {
             anydoor.registerPlugin({
               rows: function () {
                 var probe = [typeof anydoor.fetch, typeof anydoor.store, typeof anydoor.toast,
-                             typeof anydoor.copy, typeof anydoor.delay, typeof anydoor.openURL].join(",");
+                             typeof anydoor.copy, typeof anydoor.delay, typeof anydoor.openURL,
+                             typeof anydoor.translate].join(",");
                 return [{ id: "probe", title: probe, commit: "stayOpen" }];
               }
             });
@@ -352,7 +353,9 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         let runtime = makeRuntime()
         let id = try runtime.load(fromDirectory: directory)
         let rows = try await runtime.buildRows(pluginID: id, query: "")
-        XCTAssertEqual(rows.first?.title, "undefined,undefined,undefined,undefined,undefined,undefined")
+        XCTAssertEqual(
+            rows.first?.title,
+            "undefined,undefined,undefined,undefined,undefined,undefined,undefined")
     }
 
     func testDeclaredCapabilitiesArePresent() async throws {
@@ -487,6 +490,74 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         let id = try runtime.load(fromDirectory: directory)
         let result = try await runtime.performAction(pluginID: id, rowID: "r", actionID: "a")
         XCTAssertEqual(result, .string("awoke"))
+    }
+
+    // MARK: - translate
+
+    func testTranslateRoundTripsThroughTheHost() async throws {
+        let spy = ScriptCapabilitySpy()
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.translator",
+            capabilities: ["translate"],
+            bundle: #"anydoor.registerPlugin({ action: async function (rowId) { return await anydoor.translate(rowId); } });"#
+        )
+        let runtime = makeRuntime(spy: spy)
+        let id = try runtime.load(fromDirectory: directory)
+
+        let result = try await runtime.performAction(pluginID: id, rowID: "hello world", actionID: "a")
+        XCTAssertEqual(result, .string("译:hello world"))
+        XCTAssertEqual(spy.translatedTexts, ["hello world"])
+    }
+
+    func testTranslateHostFailureRejectsThePromise() async throws {
+        struct Boom: LocalizedError { var errorDescription: String? { "service down" } }
+        let spy = ScriptCapabilitySpy()
+        spy.onTranslate = { _ in throw Boom() }
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.translatefail",
+            capabilities: ["translate"],
+            bundle: #"anydoor.registerPlugin({ action: async function () { return await anydoor.translate("x"); } });"#
+        )
+        let runtime = makeRuntime(spy: spy)
+        let id = try runtime.load(fromDirectory: directory)
+
+        do {
+            _ = try await runtime.performAction(pluginID: id, rowID: "r", actionID: "a")
+            XCTFail("expected a rejected translate promise")
+        } catch let error as ScriptPluginError {
+            guard case .invocationFailed(let message) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(message.contains("service down"), message)
+        }
+    }
+
+    func testTranslateOversizedTextIsRejectedBeforeTheHost() async throws {
+        let spy = ScriptCapabilitySpy()
+        let directory = try ScriptPluginFixture.writePackage(
+            id: "com.example.translatecap",
+            capabilities: ["translate"],
+            bundle: """
+            anydoor.registerPlugin({
+              action: async function () {
+                return await anydoor.translate("x".repeat(\(ScriptCapabilityHost.maxTranslateCharacters + 1)));
+              }
+            });
+            """
+        )
+        let runtime = makeRuntime(spy: spy)
+        let id = try runtime.load(fromDirectory: directory)
+
+        do {
+            _ = try await runtime.performAction(pluginID: id, rowID: "r", actionID: "a")
+            XCTFail("expected the oversized payload to be rejected")
+        } catch let error as ScriptPluginError {
+            guard case .invocationFailed(let message) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(message.contains("exceeds"), message)
+        }
+        XCTAssertTrue(spy.translatedTexts.isEmpty, "the cap must trip before the host closure runs")
     }
 
     // MARK: - Key-value store persistence across teardown

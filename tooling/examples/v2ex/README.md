@@ -60,6 +60,7 @@ Declared in `src/manifest.ts` as `capabilities`. This plugin uses:
 - `store` — persist the optional personal access token across invocations.
 - `toast` — confirm token saves and settings-page opens.
 - `openURL` — open the V2EX token settings page from the token row.
+- `translate` — translate topic bodies and comments in Detail (opt-in row).
 
 A capability you did not declare there is a compile-time error if you try to use
 it in `plugin.ts` — the manifest is the security boundary.
@@ -83,6 +84,9 @@ it in `plugin.ts` — the manifest is the security boundary.
     评论）。
   - 留空直接回车，则在浏览器中打开 V2EX 的 token 设置页
     （https://v2ex.com/settings/tokens），方便你生成 token。
+- **翻译帖子内容**（根层开关行）：开启后 Detail 的正文与评论会通过 AnyDoor
+  设置中的翻译服务翻译为目标语言（标题与链接保持原文）；翻译失败时显示原文并
+  提示。需要在 AnyDoor 设置中配置至少一个可用的翻译服务。
 - **无需 token 也能使用**：主题列表与正文均来自公开的 v1 接口；token 仅用于
   加载 v2 的评论内容。
 
