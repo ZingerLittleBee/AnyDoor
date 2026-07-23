@@ -291,17 +291,23 @@ struct PluginsSettingsView: View {
 
     // MARK: - Script sideload / uninstall
 
-    /// Present a folder picker, then Sideload the chosen package. A refusal
-    /// (invalid manifest, unknown apiVersion, duplicate id) surfaces a clear
-    /// localized message and changes nothing.
+    /// Present a picker accepting a package folder or a `plugin-*.zip`, then
+    /// Sideload the chosen package. A refusal (invalid manifest, unknown
+    /// apiVersion, duplicate id, bad archive) surfaces a clear localized message
+    /// and changes nothing.
     private func sideload() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.zip]
         panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        guard panel.runModal() == .OK, let picked = panel.url else { return }
         do {
-            try scriptRegistry.sideload(fromDirectory: folder)
+            if picked.pathExtension.lowercased() == "zip" {
+                try scriptRegistry.sideload(fromZip: picked)
+            } else {
+                try scriptRegistry.sideload(fromDirectory: picked)
+            }
         } catch {
             ToastPresenter.shared.show(
                 .failure(L(.pluginsSideloadFailed, scriptSideloadFailureMessage(error)))

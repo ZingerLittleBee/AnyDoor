@@ -325,6 +325,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return decision.allowDefaultHandling
     }
 
+    /// `anydoor://` links (registered via `CFBundleURLTypes`; only the `.app`
+    /// identity receives them — a `swift run` process has no bundle to match).
+    /// The single supported command is the Script Plugin install link, handled
+    /// by `ScriptPluginURLInstaller` behind its own https + confirmation policy.
+    @MainActor
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            ScriptPluginURLInstaller.shared.handle(url)
+        }
+    }
+
     struct ReopenHandlingDecision: Equatable {
         let shouldOpenSettings: Bool
         let allowDefaultHandling: Bool

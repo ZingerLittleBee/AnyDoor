@@ -8,6 +8,15 @@ versioning.
 
 ### Added
 
+- Script Plugins: install directly from a `plugin-*.zip` — the Settings picker
+  now accepts the zip a release page offers (a wrapping folder inside the
+  archive is handled automatically), no manual unzipping needed.
+- Script Plugins: one-click install links. Opening
+  `anydoor://install-plugin?url=<https zip url>` downloads the package and asks
+  for confirmation — showing the plugin's name, id, version, download origin,
+  and the capabilities it declares — before installing. Links must be https;
+  anything else is refused.
+
 - Plugins: new 「插件」 tab in Settings. Image Conversion is the first Native
   Plugin — install or uninstall it with one click, no relaunch. While
   uninstalled it disappears everywhere (panel row, command palette, recorded

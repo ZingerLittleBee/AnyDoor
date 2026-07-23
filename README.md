@@ -243,8 +243,10 @@ when you need them.
   drill-in lists and paginated markdown detail pages.
 - Ready-to-install example plugins (V2EX and Hacker News browsers) are attached
   to each [release](https://github.com/ZingerLittleBee/AnyDoor/releases) as
-  `plugin-*.zip` — unzip, then pick the folder in **Settings → Plugins →
-  Install Script Plugin**.
+  `plugin-*.zip` — pick the zip (or an unzipped folder) in **Settings →
+  Plugins → Install Script Plugin**. An `anydoor://install-plugin?url=<https
+  zip url>` link installs in one click after a confirmation showing the
+  plugin's id, version, origin, and declared capabilities.
 - A script plugin can only use the capabilities its manifest declares — network
   fetch, a private key-value store, toasts, clipboard write, a one-shot delay,
   opening http(s) URLs, and translation through your configured services. No

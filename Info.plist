@@ -12,6 +12,17 @@
 	<string>AnyDoor</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>dev.bybee.AnyDoor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>anydoor</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleShortVersionString</key>
 	<string>3.7.0</string>
 	<key>CFBundleVersion</key>

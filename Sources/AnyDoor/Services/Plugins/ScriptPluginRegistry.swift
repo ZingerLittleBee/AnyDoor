@@ -283,6 +283,18 @@ final class ScriptPluginRegistry {
         return id
     }
 
+    /// Sideload a package from a zip archive (the `plugin-*.zip` a release
+    /// workflow attaches): extract to a temp directory, locate the package root
+    /// (a single wrapper folder is unwrapped), and install through the directory
+    /// path. The temp extraction is always removed, so a refused zip changes
+    /// nothing on disk beyond its own transient extraction.
+    @discardableResult
+    func sideload(fromZip zip: URL) throws -> ScriptPluginID {
+        let (tempRoot, packageRoot) = try ScriptPluginArchive.extract(zipURL: zip)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        return try sideload(fromDirectory: packageRoot)
+    }
+
     /// Uninstall a Script Plugin: tear down its context, remove the package copy
     /// and every surface, and retain its private key-value store so a reinstall
     /// of the same id restores prior data. Idempotent; a concurrent transition
@@ -572,6 +584,10 @@ func scriptSideloadFailureMessage(_ error: any Error) -> String {
         }
     case ScriptPluginError.duplicateID:
         return L(.pluginsSideloadErrorDuplicate)
+    case ScriptPluginArchive.ArchiveError.extractionFailed:
+        return L(.pluginsSideloadErrorUnzip)
+    case ScriptPluginArchive.ArchiveError.packageRootNotFound:
+        return L(.pluginsSideloadErrorNoPackageInZip)
     default:
         return error.localizedDescription
     }
