@@ -500,6 +500,7 @@ enum L10n {
         case commandPalettePluginRowLoading = "commandPalette.pluginRow.loading"
         case commandPalettePluginRowError = "commandPalette.pluginRow.error"
         case commandPaletteDetailFailed = "commandPalette.detail.failed"
+        case commandPaletteRetry = "commandPalette.retry"
         case pluginsActionFailed = "plugins.action.failed"
         case commandPaletteFooterRefreshRates = "commandPalette.footer.refreshRates"
         case toastRatesUpdated = "toast.rates.updated"

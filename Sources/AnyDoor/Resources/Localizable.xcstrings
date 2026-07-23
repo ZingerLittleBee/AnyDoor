@@ -12070,6 +12070,23 @@
         }
       }
     },
+    "commandPalette.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
     "commandPalette.detail.failed": {
       "extractionState": "manual",
       "localizations": {

@@ -205,6 +205,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             onDetailAction: { [weak self] actionID in
                 self?.performDetailAction(actionID: actionID)
             },
+            onRetryDetail: { [weak self] in
+                self?.retryDetail()
+            },
+            onRetryList: { [weak self] in
+                self?.retryList()
+            },
             onDetailActiveChange: { [weak self] inDetail in
                 self?.setSearchFieldActive(!inDetail)
             },
@@ -587,6 +593,16 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             state.moveUp()
             return true
         case 36, 76:
+            // A failed drill-in maps Return to retry: a Detail has no rows to
+            // commit, and a failed list's only row is the error placeholder.
+            if state.detailRetryAvailable {
+                retryDetail()
+                return true
+            }
+            if state.listRetryAvailable {
+                retryList()
+                return true
+            }
             if let entry = state.commitSelection() {
                 commit(entry)
             }
@@ -788,6 +804,17 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         }
     }
 
+    /// Re-request a failed Detail's document in place (the error state's retry
+    /// button, or Return while it shows). The state claim flips the level back
+    /// to loading and refuses anything but a failed Detail; the shared
+    /// `resolveDetail` lands the result under the same navigation generation.
+    private func retryDetail() {
+        guard let request = state?.retryDetail() else { return }
+        resolveDetail(
+            sourceKey: request.sourceKey, rowID: request.rowID,
+            title: request.title, generation: request.generation)
+    }
+
     /// Fetch the next Detail chunk when the user scrolls to the bottom sentinel.
     /// The state's `beginDetailMore` is the single gate (loaded Detail + cursor +
     /// no fetch in flight), so a sentinel that fires repeatedly cannot stack
@@ -846,6 +873,14 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 state.updateList(.failed(L(.commandPalettePluginRowError)), generation: generation)
             }
         }
+    }
+
+    /// Re-request a failed pushed list's rows in place. Mirrors `retryDetail`.
+    private func retryList() {
+        guard let request = state?.retryList() else { return }
+        resolveList(
+            sourceKey: request.sourceKey, listID: request.listID,
+            generation: request.generation)
     }
 
     /// Fetch the next list page when the user scrolls to the bottom sentinel.

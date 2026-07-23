@@ -328,6 +328,29 @@ final class CommandPaletteState {
         level = .list(listLevel)
     }
 
+    /// Whether the pushed list is showing its failed state — exactly when the
+    /// picker offers the retry affordance (and Return triggers it).
+    var listRetryAvailable: Bool {
+        if case .list(let listLevel) = level, case .failed = listLevel.content { return true }
+        return false
+    }
+
+    /// Re-claim a failed list's initial load for a retry: put the level back
+    /// into its loading state and return whom to ask. Nil unless the current
+    /// level is a list showing its failed state, so a retry can neither
+    /// interrupt a load in flight nor reload a healthy list. The result lands
+    /// through `updateList` under the unchanged navigation generation (a retry
+    /// is a content refresh, not a navigation change).
+    func retryList() -> (sourceKey: PluginRowSourceKey, listID: String, generation: Int)? {
+        guard case .list(var listLevel) = level,
+              case .failed = listLevel.content else { return nil }
+        listLevel.content = .loading
+        listLevel.moreCursor = nil
+        listLevel.isFetchingMore = false
+        level = .list(listLevel)
+        return (listLevel.sourceKey, listLevel.listID, navigationRevision)
+    }
+
     /// Replace the Detail presentation state once its markdown resolves (or
     /// fails). A no-op unless the same drill-in is still open: a Detail that was
     /// dismissed, or superseded by a later drill-in, discards the stale result
@@ -415,6 +438,32 @@ final class CommandPaletteState {
         detailLevel.moreCursor = nil
         detailLevel.isFetchingMore = false
         level = .detail(detailLevel)
+    }
+
+    /// Whether the Detail is showing its failed state — exactly when the
+    /// picker offers the retry affordance (and Return triggers it).
+    var detailRetryAvailable: Bool {
+        if case .detail(let detailLevel) = level, case .failed = detailLevel.content { return true }
+        return false
+    }
+
+    /// Re-claim a failed Detail's initial load for a retry: put the level back
+    /// into its loading state and return whom to ask. Nil unless the current
+    /// level is a Detail showing its failed state. Bumps the document revision
+    /// like `beginDetailAction` — the retried load is a new document, so
+    /// nothing claimed against the one that failed may splice into it. The
+    /// result lands through `updateDetail` under the unchanged navigation
+    /// generation (a retry is a content refresh, not a navigation change).
+    func retryDetail() -> (sourceKey: PluginRowSourceKey, rowID: String, title: String, generation: Int)? {
+        guard case .detail(var detailLevel) = level,
+              case .failed(let title, _) = detailLevel.content else { return nil }
+        detailLevel.content = .loading(title: title)
+        detailLevel.moreCursor = nil
+        detailLevel.isFetchingMore = false
+        detailLevel.actions = []
+        detailLevel.documentRevision += 1
+        level = .detail(detailLevel)
+        return (detailLevel.sourceKey, detailLevel.rowID, title, navigationRevision)
     }
 
     /// Return to the root level, clearing the whole navigation stack, the option

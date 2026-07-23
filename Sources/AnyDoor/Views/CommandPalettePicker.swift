@@ -20,6 +20,12 @@ struct CommandPalettePicker: View {
     /// Fired when a Detail footer action is pressed; the controller rebuilds
     /// the document through the plugin's `detailAction` entry point.
     let onDetailAction: (String) -> Void
+    /// Fired by the failed Detail's retry button; the controller re-requests
+    /// the document through the state's retry gate.
+    let onRetryDetail: () -> Void
+    /// Fired by a failed pushed list's retry button; the controller re-requests
+    /// the rows through the state's retry gate.
+    let onRetryList: () -> Void
     /// Notifies the controller when the Detail level is entered/left so it can
     /// hide the overlaid AppKit search field (no text input in Detail) and
     /// restore focus on return.
@@ -405,6 +411,8 @@ struct CommandPalettePicker: View {
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                retryButton(action: onRetryDetail)
+                    .padding(.top, 4)
                 Spacer()
             }
             .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
@@ -484,6 +492,14 @@ struct CommandPalettePicker: View {
                         .id(cursor)
                         .onAppear { onLoadListMore() }
                     }
+                    if state.listRetryAvailable {
+                        HStack {
+                            Spacer()
+                            retryButton(action: onRetryList)
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+                    }
                 }
                 .overlayScrollers()
             }
@@ -494,6 +510,18 @@ struct CommandPalettePicker: View {
                 proxy.scrollTo(entries[newIndex].id)
             }
         }
+    }
+
+    /// The retry affordance shown on a failed Detail and below a failed pushed
+    /// list's error row. Return triggers the same path via the key monitor.
+    private func retryButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label { LocalizedText(.commandPaletteRetry) } icon: {
+                Image(systemName: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     /// Resolve the option backing a `.paletteOption` entry so the row can render

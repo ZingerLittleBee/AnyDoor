@@ -135,6 +135,54 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertNil(state.detailState)
     }
 
+    @MainActor
+    func testRetryDetailReclaimsOnlyAFailedDetailAndLandsInPlace() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+
+        // Loading and loaded Details refuse a retry claim.
+        XCTAssertFalse(state.detailRetryAvailable)
+        XCTAssertNil(state.retryDetail())
+        state.updateDetail(.loaded(title: "Post", markdown: "body"), generation: generation)
+        XCTAssertNil(state.retryDetail())
+
+        state.updateDetail(.failed(title: "Post", message: "boom"), generation: generation)
+        XCTAssertTrue(state.detailRetryAvailable)
+
+        // The claim flips back to loading and hands out whom to ask; the
+        // navigation generation is unchanged (a content refresh, not a push).
+        let request = state.retryDetail()
+        XCTAssertEqual(request?.sourceKey, sourceKey)
+        XCTAssertEqual(request?.rowID, "row")
+        XCTAssertEqual(request?.title, "Post")
+        XCTAssertEqual(request?.generation, generation)
+        XCTAssertEqual(state.detailState, .loading(title: "Post"))
+        XCTAssertFalse(state.detailRetryAvailable)
+        // A second press while the retry is in flight finds loading and is refused.
+        XCTAssertNil(state.retryDetail())
+
+        state.updateDetail(
+            .loaded(title: "Post", markdown: "recovered"), more: "c1",
+            generation: request!.generation)
+        XCTAssertEqual(state.detailState, .loaded(title: "Post", markdown: "recovered"))
+        XCTAssertEqual(state.detailMoreCursor, "c1")
+    }
+
+    @MainActor
+    func testRetryDetailResultIsDroppedAfterNavigatingAway() {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Post")
+        state.updateDetail(.failed(title: "Post", message: "boom"), generation: generation)
+
+        let request = state.retryDetail()
+        state.popToRoot()
+
+        // The retried document resolves after the user left — dropped.
+        state.updateDetail(.loaded(title: "Post", markdown: "late"), generation: request!.generation)
+        XCTAssertTrue(state.isAtRoot)
+        XCTAssertNil(state.detailState)
+    }
+
     // MARK: - Detail load-more (comment pagination)
 
     @MainActor
@@ -495,6 +543,44 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertEqual(descriptor.symbol, "exclamationmark.triangle")
         XCTAssertEqual(descriptor.title, "network is down")
         XCTAssertEqual(descriptor.commit, .noAction)
+    }
+
+    @MainActor
+    func testRetryListReclaimsOnlyAFailedListAndLandsInPlace() throws {
+        let state = CommandPaletteState(sections: [], hyperFlags: 0)
+        let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot")
+
+        // Loading and loaded lists refuse a retry claim.
+        XCTAssertFalse(state.listRetryAvailable)
+        XCTAssertNil(state.retryList())
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), generation: generation)
+        XCTAssertNil(state.retryList())
+
+        state.updateList(.failed("network is down"), generation: generation)
+        XCTAssertTrue(state.listRetryAvailable)
+
+        // The claim flips back to loading and hands out whom to ask; the
+        // navigation generation is unchanged (a content refresh, not a push).
+        let request = try XCTUnwrap(state.retryList())
+        XCTAssertEqual(request.sourceKey, sourceKey)
+        XCTAssertEqual(request.listID, "hot")
+        XCTAssertEqual(request.generation, generation)
+        XCTAssertFalse(state.listRetryAvailable)
+        // A second press while the retry is in flight finds loading and is refused.
+        XCTAssertNil(state.retryList())
+
+        state.updateList(.loaded([
+            PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
+        ]), more: "page2", generation: request.generation)
+        XCTAssertEqual(state.flatEntries.count, 1)
+        XCTAssertEqual(state.listMoreCursor, "page2")
+
+        // A retried result that resolves after the user left is dropped.
+        state.updateList(.failed("again"), generation: generation)
+        state.popToRoot()
+        XCTAssertNil(state.retryList())
     }
 
     @MainActor
