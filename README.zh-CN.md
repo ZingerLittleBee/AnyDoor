@@ -99,6 +99,7 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 
 ### 图片转换
 
+- 以插件形式提供——在 设置 → 插件 中安装启用。
 - 独立的工作区窗口——可绑定全局快捷键，打开时会把当前 Finder 选中的图片带进待转列表；
   可折叠侧栏（⌘B）承载待转 / 转换记录切换，中间是原图 / 结果对比画布，底部是控制条。
 - 通过拖拽、⌘O 或 ⌘V（复制的图片文件或位图）添加图片。
@@ -124,6 +125,7 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 
 ### Hosts 管理
 
+- 以插件形式提供——在 设置 → 插件 中安装启用。
 - 用内置编辑器修改 `/etc/hosts`，支持多套命名配置和一键切换。
 - 写入通过特权 XPC 助手（`SMAppService` 守护进程）完成；未安装助手时回退到管理员授权的 AppleScript。
 
@@ -157,6 +159,8 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 - 内联开发者工具：`base64`、`url`，以及 `md5` / `sha1` / `sha256` 对其余输入做编码或哈希；
   粘贴 JSON 可美化 / 压缩，粘贴 Unix 时间戳可渲染本地 / UTC / ISO 8601。Raycast 风格的范围徽章
   会把关键词收进搜索框胶囊，让列表只显示该工具的结果。
+- 脚本插件可向面板贡献自己的条目——包括可搜索的二级列表和可分页的 markdown
+  详情页（见「插件」一节）。
 
 ### 快速入口（Quicklinks）
 
@@ -172,6 +176,53 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 - 支持拖拽排序、切换可见性，整套配置参与备份 / 同步。内置一组常用模板（Google、
   GitHub、YouTube、Stack Overflow、npm、MDN、Google 翻译、ChatGPT）开箱即用。
 
+### 插件
+
+- 可选功能以插件形式提供，在 **设置 → 插件** 中安装和卸载——目前包括图片转换和
+  Hosts 管理。卸载会从面板、命令面板和快捷键中彻底移除插件，但保留其数据和偏好，
+  重新安装即可恢复，无需重启应用。老版本升级时，用过的功能会按使用痕迹自动安装。
+- **脚本插件**：可侧载用 TypeScript 编写、打包为纯 JavaScript 的第三方插件，
+  运行在系统自带的 JavaScriptCore 上（不内置 JS 运行时）。脚本插件向命令面板
+  贡献条目，支持可搜索的二级列表和可分页的 markdown 详情页。
+- 脚本插件只能使用 manifest 中声明的能力——网络请求、插件私有的键值存储、toast、
+  写剪贴板、一次性延时、打开 http(s) 链接，以及通过你配置的翻译服务翻译文本。
+  没有 shell、文件系统和剪贴板读取；失控脚本会被 30 秒 watchdog 终止，不影响
+  其他插件。
+- **编写你自己的插件**：用 `pnpm create @anydoor-dev/plugin my-plugin` 生成
+  项目骨架（通过 [`@anydoor-dev/api`](https://www.npmjs.com/package/@anydoor-dev/api)
+  获得类型化的入口点），或直接从
+  [anydoor-plugin-template](https://github.com/ZingerLittleBee/anydoor-plugin-template)
+  模板仓库开始——它自带 release workflow，每次打版本 tag 都会自动构建并附上
+  可安装的 `plugin-*.zip`。开发者模式可将插件目录原地加载、每次构建后热重载；
+  完整示例见 [`tooling/examples`](tooling/examples)。
+
+#### 安装脚本插件
+
+每个 [release](https://github.com/ZingerLittleBee/AnyDoor/releases) 都附带
+开箱即用的示例插件——V2EX 浏览器和 Hacker News 浏览器，文件名为 `plugin-*.zip`。
+
+**通过 zip 安装：**
+
+1. 下载插件包，例如
+   [plugin-v2ex.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip)
+   或
+   [plugin-hackernews.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-hackernews.zip)。
+2. 打开 **设置 → 插件 → 安装脚本插件…**，直接选中该 zip——无需解压
+   （解压后的插件包文件夹也可以）。
+3. 插件的条目立即出现在命令面板中，无需重启应用。
+
+**通过安装链接：** 把 `anydoor://install-plugin?url=<https zip 地址>` 链接
+粘贴到浏览器地址栏，AnyDoor 会接管——下载插件包并弹出确认框，展示插件的
+名称、id、版本、下载来源和声明的能力，确认后才安装。只接受 https 的包地址。
+例如：
+
+```
+anydoor://install-plugin?url=https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip
+```
+
+随时可在 **设置 → 插件** 中卸载；脚本插件的私有数据会保留，重新安装同一
+插件时自动恢复。
+
 ### 菜单栏面板
 
 - 点击菜单栏图标弹出 Liquid Glass 面板，显示每个启用项的当前状态和快捷键。
@@ -186,6 +237,7 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 - **剪贴板** 标签页：历史监听、仅复制模式、保留时长、按来源排除应用，以及清空全部历史。
 - **截图** 标签页：保存位置、文件名模板、自动保存 / 自动复制、定时延迟预设、快捷操作浮层超时，以及录制选项。
 - **翻译** 标签页：目标语言、自动朗读、服务排序、provider / API key 配置、Apple 语言包下载，以及历史保留数量。
+- **插件** 标签页：安装 / 卸载插件、侧载脚本插件包，以及管理脚本插件开发者模式。
 - **通用** 标签页：开机自启、语言、菜单栏图标样式、Hyper Key、命令面板快捷键、定时关机、辅助功能 / 自动化 / 屏幕录制权限状态及一键申请、配置备份与恢复，以及自动更新配置。
 
 ### 自动更新
@@ -196,7 +248,7 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 
 ### 备份与恢复
 
-- 把应用快捷键、内置项偏好、剪贴板 / 截图设置、翻译目标语言、自动朗读、服务定义，以及白名单内的通用设置导出为带版本号的快照，并在另一台 Mac 上导入。
+- 把应用快捷键、内置项偏好、剪贴板 / 截图设置、翻译目标语言、自动朗读、服务定义、已安装插件集合，以及白名单内的通用设置导出为带版本号的快照，并在另一台 Mac 上导入。
 - 剪贴板历史、翻译历史、API keys 和机器相关的键不会导出；导入时按 bundle ID 重新解析应用路径，改动无需重启即可生效。
 
 ### 安全与权限
@@ -401,8 +453,9 @@ codesign，提交 Apple 公证，打包 DMG 和 zip，重新生成 Sparkle appca
 
 ## 技术栈
 
-- SwiftUI `Settings` 场景 + AppKit 菜单栏（`NSStatusItem` + `NSPanel`）
+- AppKit 窗口承载的 SwiftUI 视图 + AppKit 菜单栏（`NSStatusItem` + `NSPanel`）
 - SwiftData
+- JavaScriptCore（脚本插件运行时）
 - CGEvent tap（`.cghidEventTap`）
 - 写入 `/etc/hosts` 的特权 XPC 助手
 - Vision OCR、Natural Language 检测、AVFoundation 朗读，以及可用时的 Apple Translation framework

@@ -1,5 +1,6 @@
 import SwiftData
 import Foundation
+import PluginInterface
 
 /// Owns the hotkey side of the panel subsystem: compiles `HotkeySnapshot`s from
 /// every hotkey source and routes matched `HotkeyAction`s to their targets.
@@ -11,18 +12,25 @@ import Foundation
 /// - the Command Palette hotkey (`CommandPaletteService.shared.hotkey`)
 ///
 /// PanelStore mutations, config import (`BackupService`), and the palette
-/// hotkey setter all call `refresh()` after changing a source; hotkey sources
-/// never reach into PanelStore. `dispatch` is the single routing point bound
-/// to `HotkeyService.setDispatcher` in AppDelegate — only the builtin
-/// toggle/run cases touch PanelStore, everything else routes directly.
+/// hotkey setter all call `refresh()` after changing a source. `dispatch` is
+/// the single routing point bound to `HotkeyService.setDispatcher` in
+/// AppDelegate. PluginRegistry wires builtin toggle/run dispatch to the paired
+/// PanelStore during bootstrap; every other action routes directly.
 @MainActor
 final class HotkeyCoordinator {
     static let shared = HotkeyCoordinator()
 
     private var modelContainer: ModelContainer?
+    private var availableCommands: @MainActor () -> Set<BuiltinItem> = {
+        Set(BuiltinItem.allCases)
+    }
+    private var toggleBuiltin: @MainActor (BuiltinItem) async -> Void = { _ in }
+    private var runBuiltin: @MainActor (BuiltinItem) async -> Void = { _ in }
     private let quicklinkResolver: @MainActor (UUID) -> Quicklink?
     private let quicklinkOpener: @MainActor (Quicklink) -> Void
     private let quicklinkArgumentPresenter: @MainActor (UUID, String, String, String?) -> Void
+    private let paletteHotkeyResolver: @MainActor () -> HotkeyDescriptor?
+    private let snapshotUpdater: @MainActor ([HotkeySnapshot]) -> Void
 
     init(
         quicklinkResolver: @escaping @MainActor (UUID) -> Quicklink? = { QuicklinkStore.shared.quicklink(id: $0) },
@@ -34,15 +42,33 @@ final class HotkeyCoordinator {
                 link: $2,
                 openWithBundleID: $3
             )
+        },
+        paletteHotkeyResolver: @escaping @MainActor () -> HotkeyDescriptor? = {
+            CommandPaletteService.shared.hotkey
+        },
+        snapshotUpdater: @escaping @MainActor ([HotkeySnapshot]) -> Void = {
+            HotkeyService.shared.updateSnapshots($0)
         }
     ) {
         self.quicklinkResolver = quicklinkResolver
         self.quicklinkOpener = quicklinkOpener
         self.quicklinkArgumentPresenter = quicklinkArgumentPresenter
+        self.paletteHotkeyResolver = paletteHotkeyResolver
+        self.snapshotUpdater = snapshotUpdater
     }
 
-    func bootstrap(modelContainer: ModelContainer) {
+    func bootstrap(
+        modelContainer: ModelContainer,
+        availableCommands: @escaping @MainActor () -> Set<BuiltinItem> = {
+            PluginRegistry.shared.availableCommands
+        },
+        toggleBuiltin: @escaping @MainActor (BuiltinItem) async -> Void = { _ in },
+        runBuiltin: @escaping @MainActor (BuiltinItem) async -> Void = { _ in }
+    ) {
         self.modelContainer = modelContainer
+        self.availableCommands = availableCommands
+        self.toggleBuiltin = toggleBuiltin
+        self.runBuiltin = runBuiltin
     }
 
     /// Recompile the snapshot list from all sources and push it to
@@ -60,18 +86,84 @@ final class HotkeyCoordinator {
             bindings: bindings,
             prefs: prefs,
             quicklinks: quicklinks,
-            paletteHotkey: CommandPaletteService.shared.hotkey
+            paletteHotkey: paletteHotkeyResolver(),
+            availableCommands: availableCommands()
         )
-        HotkeyService.shared.updateSnapshots(snapshots)
+        snapshotUpdater(snapshots)
+    }
+
+    /// Drop retained plugin hotkeys claimed by another active source while
+    /// the plugin was uninstalled. This runs immediately before install, when
+    /// `activeCommands` excludes the returning plugin's claims.
+    @discardableResult
+    func resolveRetainedPluginHotkeyConflicts(
+        for returningCommands: Set<BuiltinItem>,
+        activeCommands: Set<BuiltinItem>
+    ) -> Int {
+        resolveRetainedPluginHotkeyConflicts(
+            for: returningCommands,
+            activeCommands: activeCommands,
+            paletteHotkey: paletteHotkeyResolver()
+        )
+    }
+
+    @discardableResult
+    func resolveRetainedPluginHotkeyConflicts(
+        for returningCommands: Set<BuiltinItem>,
+        activeCommands: Set<BuiltinItem>,
+        paletteHotkey: HotkeyDescriptor?
+    ) -> Int {
+        guard let container = modelContainer else { return 0 }
+        let context = container.mainContext
+        let bindings = (try? context.fetch(
+            FetchDescriptor<KeyBinding>(predicate: #Predicate { $0.isEnabled })
+        )) ?? []
+        let prefs = (try? context.fetch(FetchDescriptor<BuiltinPreference>())) ?? []
+        let quicklinks = (try? context.fetch(FetchDescriptor<Quicklink>())) ?? []
+
+        let activeDescriptors = Set(Self.compile(
+            bindings: bindings,
+            prefs: prefs,
+            quicklinks: quicklinks,
+            paletteHotkey: paletteHotkey,
+            availableCommands: activeCommands
+        ).map {
+            HotkeyDescriptor(keyCode: $0.keyCode, modifierFlags: $0.modifierFlags)
+        })
+
+        var cleared = 0
+        for pref in prefs {
+            guard let item = BuiltinItem(rawValue: pref.itemKey),
+                  returningCommands.contains(item),
+                  let keyCode = pref.keyCode,
+                  let modifierFlags = pref.modifierFlags,
+                  activeDescriptors.contains(HotkeyDescriptor(
+                      keyCode: keyCode,
+                      modifierFlags: modifierFlags
+                  )) else { continue }
+            pref.keyCode = nil
+            pref.modifierFlags = nil
+            cleared += 1
+        }
+        if cleared > 0 {
+            try? context.save()
+        }
+        return cleared
     }
 
     /// Pure snapshot compiler over already-fetched state, so it unit-tests
     /// without singletons or a live store.
+    ///
+    /// `availableCommands` is the installed set's view of the catalog
+    /// (`PluginRegistry.availableCommands`): a binding recorded for an
+    /// uninstalled plugin's command never compiles, so its hotkey neither
+    /// fires nor blocks the shortcut for other bindings.
     static func compile(
         bindings: [KeyBinding],
         prefs: [BuiltinPreference],
         quicklinks: [Quicklink],
-        paletteHotkey: HotkeyDescriptor?
+        paletteHotkey: HotkeyDescriptor?,
+        availableCommands: Set<BuiltinItem> = Set(BuiltinItem.allCases)
     ) -> [HotkeySnapshot] {
         var out: [HotkeySnapshot] = []
 
@@ -85,6 +177,7 @@ final class HotkeyCoordinator {
 
         for pref in prefs {
             guard let item = BuiltinItem(rawValue: pref.itemKey),
+                  availableCommands.contains(item),
                   let code = pref.keyCode,
                   let mods = pref.modifierFlags else { continue }
             let action: HotkeyAction
@@ -136,10 +229,10 @@ final class HotkeyCoordinator {
             AppSwitcher.toggle(bundleID: bundleID, appPath: path)
         case .toggleBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
-            Task { await PanelStore.shared.toggle(item) }
+            Task { await toggleBuiltin(item) }
         case .runBuiltin(let key):
             guard let item = BuiltinItem(rawValue: key) else { return }
-            Task { await PanelStore.shared.run(item) }
+            Task { await runBuiltin(item) }
         case .brightnessUp:
             DisplayBrightnessService.shared.bump(+1.0 / 16.0, target: .displayUnderMouse)
         case .brightnessDown:

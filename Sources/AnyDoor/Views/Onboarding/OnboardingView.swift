@@ -130,7 +130,6 @@ struct OnboardingView: View {
         case .capture:          OnboardingCaptureStep()
         case .clipboardPalette: OnboardingClipboardPaletteStep()
         case .translation:      OnboardingTranslationStep()
-        case .imageConversion:  OnboardingImageConversionStep()
         case .customize:        OnboardingCustomizeStep(onClose: onClose)
         }
     }

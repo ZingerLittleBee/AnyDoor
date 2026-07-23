@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Single source of truth for how built-in commands are grouped into themed
 /// sections. Shared by the command palette (`CommandPaletteWindowController`)

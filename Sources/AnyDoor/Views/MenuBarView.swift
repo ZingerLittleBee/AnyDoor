@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import PluginInterface
+import PluginSupport
 
 /// Identifies which kind of hover-anchored popover should be mounted next.
 ///
@@ -312,8 +314,9 @@ struct MenuBarView: View {
     ///
     /// Sole owner of `popover.show(anchoredTo:)` for hover-anchored content:
     /// submenu cases anchor at the end of their branch via `anchorPopover`;
-    /// `.history` and `.hostsManager` defer inside a `Task` so the popover only
-    /// appears after their store work completes. Invoked from `wireGate`'s
+    /// `.history` and refresh-bearing plugin popovers defer inside a `Task`
+    /// so the popover only appears (or re-measures) after their store work
+    /// completes. Invoked from `wireGate`'s
     /// `onShow` — once after the 400ms first-show delay, and again (coalesced
     /// one frame later by `HoverGate.scheduleRefresh`) when the gate is already
     /// shown and the user crosses to a new hover target.
@@ -388,40 +391,6 @@ struct MenuBarView: View {
                 )
             }
             anchorPopover(popover, to: target)
-        case .submenu(.hostsManager):
-            popover.needsKeyFocus = false
-            // Mount from already-loaded state first so the hover crossing never
-            // blocks on the synchronous SwiftData fetch + /etc/hosts read, then
-            // refresh off the tick and re-measure (profiles loading in would
-            // otherwise clip a popover sized to the stale list).
-            func mountHosts() {
-                popover.updateContent {
-                    HostsManagerPopoverView(
-                        manager: HostsManager.shared,
-                        onHoverChange: { gate.popoverHover($0) },
-                        onEdit: {
-                            gate.reset()
-                            popover.hide()
-                            HostsEditorWindowController.shared.show()
-                            onRequestClose()
-                        },
-                        onClose: {
-                            gate.reset()
-                            popover.hide()
-                        }
-                    )
-                }
-            }
-            mountHosts()
-            anchorPopover(popover, to: target)
-            Task { @MainActor in
-                HostsManager.shared.refresh()
-                guard activeHoverTarget == .submenu(.hostsManager) else { return }
-                mountHosts()
-                if let frame = convertedTriggerFrame(for: .submenu(.hostsManager)) {
-                    popover.show(anchoredTo: frame)
-                }
-            }
         case .submenu(.bluetoothBattery):
             popover.needsKeyFocus = false
             popover.updateContent {
@@ -432,9 +401,37 @@ struct MenuBarView: View {
             }
             Task { await BluetoothBatteryService.shared.refresh() }
             anchorPopover(popover, to: target)
-        case .submenu:
-            // Other builtin submenu items (none today) — nothing to mount.
-            break
+        case .submenu(let item):
+            // Any other submenu command belongs to an installed Native Plugin
+            // (Core rows all have named branches above); mount its contributed
+            // popover generically so Core control flow never names a plugin.
+            guard let spec = PluginRegistry.shared.panelPopover(for: item) else { break }
+            popover.needsKeyFocus = spec.needsKeyFocus
+            let context = PluginPanelPopoverContext(
+                onHoverChange: { gate.popoverHover($0) },
+                dismissPopover: {
+                    gate.reset()
+                    popover.hide()
+                },
+                closePanel: { onRequestClose() }
+            )
+            func mountPluginContent() {
+                popover.updateContent { spec.makeContent(context) }
+            }
+            mountPluginContent()
+            anchorPopover(popover, to: target)
+            if let refresh = spec.refresh {
+                // Refresh off the hover tick, then remount and re-anchor so the
+                // popover resizes to the fresh data (mirrors the hosts flow).
+                Task { @MainActor in
+                    await refresh()
+                    guard activeHoverTarget == target else { return }
+                    mountPluginContent()
+                    if let frame = convertedTriggerFrame(for: target) {
+                        popover.show(anchoredTo: frame)
+                    }
+                }
+            }
         case .history(let item):
             // Content is keyed by the kind (several items share `.screenshot`);
             // the anchor is keyed by the item so each row anchors to itself.

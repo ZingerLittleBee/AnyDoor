@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import PluginInterface
 
 /// Persists the Panel settings page's parent-row collapse state in UserDefaults
 /// (no SwiftData involvement). `@Observable` so the settings view re-renders when

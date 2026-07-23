@@ -1,5 +1,7 @@
 import XCTest
+import PluginInterface
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class BuiltinItemImageConversionTests: XCTestCase {
     func testImageConversionCaseExists() {

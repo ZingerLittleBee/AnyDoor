@@ -87,7 +87,6 @@ enum L10n {
         case panelFooterSettings = "panel.footer.settings"
         case panelRowNeedsPermission = "panel.row.needsPermission"
         case clipboardActionAddToTag = "clipboard.action.addToTag"
-        case clipboardActionConvertImage = "clipboard.action.convertImage"
         case clipboardActionCopy = "clipboard.action.copy"
         case clipboardActionDelete = "clipboard.action.delete"
         case clipboardActionEdit = "clipboard.action.edit"
@@ -141,53 +140,44 @@ enum L10n {
         case clipboardToastCopyFailed = "clipboard.toast.copyFailed"
         case clipboardToastFileMissing = "clipboard.toast.fileMissing"
         case clipboardToastSourceIgnored = "clipboard.toast.sourceIgnored"
-        case hostsProfileCopyName = "hosts.profile.copyName"
-        case hostsProfileDisable = "hosts.profile.disable"
-        case hostsProfileDuplicate = "hosts.profile.duplicate"
-        case hostsProfileEnable = "hosts.profile.enable"
-        case imageConversionBasketCount = "imageConversion.basket.count"
-        case imageConversionClear = "imageConversion.clear"
-        case imageConversionCompareEmpty = "imageConversion.compare.empty"
-        case imageConversionCompareOriginal = "imageConversion.compare.original"
-        case imageConversionCompareResult = "imageConversion.compare.result"
-        case imageConversionCompareUpdating = "imageConversion.compare.updating"
-        case imageConversionConvertAll = "imageConversion.convertAll"
-        case imageConversionSidebarBasket = "imageConversion.sidebar.basket"
-        case imageConversionClipboardItem = "imageConversion.clipboardItem"
-        case imageConversionConvert = "imageConversion.convert"
-        case imageConversionConverting = "imageConversion.converting"
-        case imageConversionCopyAsFile = "imageConversion.copyAsFile"
-        case imageConversionDropSubtitle = "imageConversion.drop.subtitle"
-        case imageConversionDropTitle = "imageConversion.drop.title"
-        case imageConversionFileMissing = "imageConversion.fileMissing"
-        case imageConversionHistoryClear = "imageConversion.history.clear"
-        case imageConversionHistoryEmpty = "imageConversion.history.empty"
-        case imageConversionHistorySaveFailed = "imageConversion.history.saveFailed"
-        case imageConversionHistoryTitle = "imageConversion.history.title"
-        case imageConversionModeFormat = "imageConversion.mode.format"
-        case imageConversionModeTargetSize = "imageConversion.mode.targetSize"
-        case imageConversionNoFormats = "imageConversion.noFormats"
-        case imageConversionOutputPanelMessage = "imageConversion.output.panelMessage"
-        case imageConversionOutputPanelPrompt = "imageConversion.output.panelPrompt"
-        case imageConversionQuality = "imageConversion.quality"
-        case imageConversionRemove = "imageConversion.remove"
-        case imageConversionSaveAnyway = "imageConversion.saveAnyway"
-        case imageConversionSavedAnyway = "imageConversion.savedAnyway"
-        case imageConversionSourceMissing = "imageConversion.sourceMissing"
-        case imageConversionStatusFailed = "imageConversion.status.failed"
-        case imageConversionStatusFirstFrameOnly = "imageConversion.status.firstFrameOnly"
-        case imageConversionStatusTargetMiss = "imageConversion.status.targetMiss"
-        case imageConversionStatusUnsupported = "imageConversion.status.unsupported"
-        case imageConversionStatusUnsupportedFormat = "imageConversion.status.unsupportedFormat"
-        case imageConversionStop = "imageConversion.stop"
-        case imageConversionTargetFormat = "imageConversion.targetFormat"
-        case imageConversionTargetInvalid = "imageConversion.targetInvalid"
-        case imageConversionTargetSizePNGNote = "imageConversion.targetSize.pngNote"
-        case imageConversionTargetSizeSameFormat = "imageConversion.targetSize.sameFormat"
-        case imageConversionTitle = "imageConversion.title"
-        case imageConversionToastSummary = "imageConversion.toast.summary"
-        case imageConversionToastSummaryWithHistoryWarnings = "imageConversion.toast.summaryWithHistoryWarnings"
-        case imageConversionUnattainableHint = "imageConversion.unattainableHint"
+        case pluginsInstall = "plugins.install"
+        case pluginsStateInstalled = "plugins.state.installed"
+        case pluginsTransitionInProgress = "plugins.transition.inProgress"
+        case pluginsUninstall = "plugins.uninstall"
+        case pluginsUninstallConfirmTitle = "plugins.uninstall.confirmTitle"
+        case pluginsUninstallDataRetained = "plugins.uninstall.dataRetained"
+        case pluginsUninstallFailed = "plugins.uninstall.failed"
+        case pluginsSectionNative = "plugins.section.native"
+        case pluginsSectionScript = "plugins.section.script"
+        case pluginsSideload = "plugins.sideload"
+        case pluginsScriptEmpty = "plugins.script.empty"
+        case pluginsVersion = "plugins.version"
+        case pluginsSideloadFailed = "plugins.sideload.failed"
+        case pluginsSideloadErrorMissingField = "plugins.sideload.error.missingField"
+        case pluginsSideloadErrorInvalidJSON = "plugins.sideload.error.invalidJSON"
+        case pluginsSideloadErrorFileUnreadable = "plugins.sideload.error.fileUnreadable"
+        case pluginsSideloadErrorUnknownAPIVersion = "plugins.sideload.error.unknownAPIVersion"
+        case pluginsSideloadErrorUnknownCapability = "plugins.sideload.error.unknownCapability"
+        case pluginsSideloadErrorDuplicate = "plugins.sideload.error.duplicate"
+        case pluginsSideloadErrorUnzip = "plugins.sideload.error.unzip"
+        case pluginsSideloadErrorNoPackageInZip = "plugins.sideload.error.noPackageInZip"
+        case pluginsUrlInstallInvalid = "plugins.urlInstall.invalid"
+        case pluginsUrlInstallInsecure = "plugins.urlInstall.insecure"
+        case pluginsUrlInstallDownloadFailed = "plugins.urlInstall.downloadFailed"
+        case pluginsUrlInstallTooLarge = "plugins.urlInstall.tooLarge"
+        case pluginsUrlInstallConfirmTitle = "plugins.urlInstall.confirmTitle"
+        case pluginsUrlInstallConfirmBody = "plugins.urlInstall.confirmBody"
+        case pluginsUrlInstallNoCapabilities = "plugins.urlInstall.noCapabilities"
+        case pluginsUrlInstallCancel = "plugins.urlInstall.cancel"
+        case pluginsUrlInstallSuccess = "plugins.urlInstall.success"
+        case pluginsDeveloperMode = "plugins.developerMode"
+        case pluginsDeveloperModeHint = "plugins.developerMode.hint"
+        case pluginsSectionDev = "plugins.section.dev"
+        case pluginsDevEmpty = "plugins.dev.empty"
+        case pluginsRegisterDev = "plugins.registerDev"
+        case pluginsRegisterDevFailed = "plugins.registerDev.failed"
+        case pluginsRemoveDev = "plugins.removeDev"
+        case pluginsStateDev = "plugins.state.dev"
         case portActionClearError = "port.action.clearError"
         case portActionCopyCommand = "port.action.copyCommand"
         case portActionCopyLocalhost = "port.action.copyLocalhost"
@@ -355,6 +345,7 @@ enum L10n {
         case settingsCaptureSaveSection = "settings.capture.saveSection"
         case settingsCaptureTimerDelay = "settings.capture.timerDelay"
         case settingsTabCapture = "settings.tab.capture"
+        case settingsTabPlugins = "settings.tab.plugins"
         case settingsTabQuicklinks = "settings.tab.quicklinks"
         case settingsTabTranslation = "settings.tab.translation"
         case settingsTranslationLanguageSection = "settings.translation.languageSection"
@@ -415,6 +406,7 @@ enum L10n {
         case settingsSyncExportSuccess = "settings.sync.exportSuccess"
         case settingsSyncImportButton = "settings.sync.importButton"
         case settingsSyncImportFailed = "settings.sync.importFailed"
+        case settingsSyncImportPartialFailure = "settings.sync.importPartialFailure"
         case settingsSyncImportSuccess = "settings.sync.importSuccess"
         case settingsSyncSection = "settings.sync.section"
         case settingsTabGeneral = "settings.tab.general"
@@ -478,14 +470,12 @@ enum L10n {
         case commandPaletteOptionBack = "commandPalette.option.back"
         case commandPaletteOptionSearchPlaceholder = "commandPalette.option.searchPlaceholder"
         case commandPaletteBrightnessLevel = "commandPalette.brightness.level"
-        case commandPaletteHostsEdit = "commandPalette.hosts.edit"
         case colorFormatHex = "colorFormat.hex"
         case colorFormatRGB = "colorFormat.rgb"
         case colorFormatHSL = "colorFormat.hsl"
         case colorFormatSwiftUI = "colorFormat.swiftUI"
         case colorFormatCSS = "colorFormat.css"
         case commandPaletteSectionHosts = "commandPalette.section.hosts"
-        case commandPaletteHostsActive = "commandPalette.hosts.active"
         case builtinMicrophoneMute = "builtin.microphoneMute"
         case panelAppShortcutEmpty = "panel.appShortcut.empty"
         case toastMicMuteUnsupported = "toast.micMute.unsupported"
@@ -518,6 +508,11 @@ enum L10n {
         case commandPaletteActionEnter = "commandPalette.action.enter"
         case commandPaletteActionSelect = "commandPalette.action.select"
         case commandPaletteActionQuit = "commandPalette.action.quit"
+        case commandPalettePluginRowLoading = "commandPalette.pluginRow.loading"
+        case commandPalettePluginRowError = "commandPalette.pluginRow.error"
+        case commandPaletteDetailFailed = "commandPalette.detail.failed"
+        case commandPaletteRetry = "commandPalette.retry"
+        case pluginsActionFailed = "plugins.action.failed"
         case commandPaletteFooterRefreshRates = "commandPalette.footer.refreshRates"
         case toastRatesUpdated = "toast.rates.updated"
         case toastRatesUpdateFailed = "toast.rates.updateFailed"
@@ -600,7 +595,6 @@ enum L10n {
         case onboardingSidebarCapture = "onboarding.sidebar.capture"
         case onboardingSidebarClipboard = "onboarding.sidebar.clipboard"
         case onboardingSidebarTranslation = "onboarding.sidebar.translation"
-        case onboardingSidebarImageConversion = "onboarding.sidebar.imageConversion"
         case onboardingSidebarCustomize = "onboarding.sidebar.customize"
         case onboardingMenuBarTitle = "onboarding.menuBar.title"
         case onboardingMenuBarSubtitle = "onboarding.menuBar.subtitle"
@@ -635,13 +629,9 @@ enum L10n {
         case onboardingPaletteHint = "onboarding.palette.hint"
         case onboardingDemoCurrencyResult = "onboarding.demo.currencyResult"
         case onboardingDemoPortResult = "onboarding.demo.portResult"
-        case onboardingDemoHostsResult = "onboarding.demo.hostsResult"
         case onboardingTranslationTitle = "onboarding.translation.title"
         case onboardingTranslationSubtitle = "onboarding.translation.subtitle"
         case onboardingTranslationHint = "onboarding.translation.hint"
-        case onboardingImageConversionTitle = "onboarding.imageConversion.title"
-        case onboardingImageConversionSubtitle = "onboarding.imageConversion.subtitle"
-        case onboardingImageConversionHint = "onboarding.imageConversion.hint"
         case onboardingCustomizeTitle = "onboarding.customize.title"
         case onboardingCustomizeSubtitle = "onboarding.customize.subtitle"
         case onboardingCustomizeDragHint = "onboarding.customize.dragHint"
@@ -707,14 +697,34 @@ func L(_ key: L10n.Key, _ args: CVarArg...) -> String {
     return String(format: template, locale: manager.effectiveLocale, arguments: args)
 }
 
+/// Raw-key variant of `L(_:)` for keys arriving from outside Core's typed
+/// catalog view (plugin-declared palette section titles). Falls back to the
+/// key itself when the catalog has no entry.
+@MainActor
+func L(raw rawKey: String) -> String {
+    NSLocalizedString(
+        rawKey,
+        tableName: nil,
+        bundle: LocalizationManager.shared.bundle,
+        value: rawKey,
+        comment: ""
+    )
+}
+
 /// SwiftUI Text wrapper that re-renders on `LocalizationManager` changes.
 /// Replaces raw `Text("中文")` everywhere in the view tree.
 @MainActor
 struct LocalizedText: View {
-    let key: L10n.Key
+    let rawKey: String
 
     init(_ key: L10n.Key) {
-        self.key = key
+        self.rawKey = key.rawValue
+    }
+
+    /// Raw-key variant for keys arriving from outside Core's typed catalog
+    /// view (plugin-declared palette section titles).
+    init(raw rawKey: String) {
+        self.rawKey = rawKey
     }
 
     var body: some View {
@@ -724,6 +734,6 @@ struct LocalizedText: View {
         // than via @Environment) keeps the view usable in test fixtures
         // that introspect `view.body` without an injected environment.
         _ = LocalizationManager.shared.preference
-        return Text(L(key))
+        return Text(L(raw: rawKey))
     }
 }

@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import PluginInterface
+import PluginSupport
 
 /// Hover popover content for the Window Layout submenu. Lists the four
 /// window-layout children with their assigned hotkeys; tapping a row

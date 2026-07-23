@@ -1,5 +1,6 @@
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 // Separator rule under test: parse accepts BOTH the ASCII "." and the locale's
 // decimal separator. Under a comma-separator locale (fr_FR) "1,5" and "1.5" both

@@ -1,4 +1,6 @@
 import Foundation
+import PluginInterface
+import ScriptPluginRuntime
 
 /// What committing a command-palette row means, declared in one place.
 ///
@@ -26,6 +28,22 @@ enum CommandPaletteCommitIntent: Equatable {
     case enterDevToolScope(DevToolScope)
     /// A Search Template Quicklink: enter argument-input mode.
     case enterQuicklinkArgument(id: UUID)
+    /// A plugin row that declared `.stayOpen`: run it through its owning
+    /// `PluginRowSource` while the palette remains visible.
+    case pluginRowStayOpen(sourceKey: PluginRowSourceKey, rowID: String)
+    /// A plugin row that declared `.pushDetail`: push its markdown Detail as a
+    /// new palette level while the palette remains visible.
+    case pluginRowPushDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String)
+    /// A plugin row that declared `.pushList`: push its searchable second-level
+    /// list as a new palette level while the palette remains visible. The list
+    /// id is carried so the host can ask the owning source to build it.
+    case pluginRowPushList(sourceKey: PluginRowSourceKey, listID: String, title: String)
+    /// A plugin row that declared `.enterArgument`: enter the palette's
+    /// Argument input mode bound to this row.
+    case pluginRowEnterArgument(sourceKey: PluginRowSourceKey, rowID: String, title: String)
+    /// A non-interactive plugin row (loading placeholder / inline error):
+    /// committing does nothing and the palette stays open.
+    case noAction
 
     // Close-then-act intents — the palette dismisses first.
     case launchAppShortcut(id: UUID)
@@ -33,7 +51,18 @@ enum CommandPaletteCommitIntent: Equatable {
     case toggleBuiltin(BuiltinItem)
     case runBuiltin(BuiltinItem)
     case copyToClipboard(text: String, toast: CopyToast)
-    case toggleHostProfile(id: UUID)
+    /// A plugin row that declared `.closeThenAct`: dismiss, then run it
+    /// through its owning `PluginRowSource` (e.g. toggle a hosts profile).
+    case pluginRowCloseThenAct(sourceKey: PluginRowSourceKey, rowID: String)
+    /// A plugin row materialized after Argument input: dismiss, then run its
+    /// plugin action with the captured argument text.
+    case pluginRowRunArgument(sourceKey: PluginRowSourceKey, rowID: String, argument: String)
+    /// A plugin row that declared `.openURL`: dismiss, then open the URL.
+    case openURL(url: String)
+    /// A plugin row that declared `.openURL` with a URL outside the openURL
+    /// capability's http/https surface (ADR-0009): dismiss and report a failure
+    /// toast rather than opening a `file://` or custom-scheme URL.
+    case openURLRejected
     case openQuicklink(id: UUID)
     case openQuicklinkArgument(id: UUID, argument: String)
     /// Close without acting (a submenu/brightness builtin that isn't an
@@ -49,13 +78,16 @@ enum CommandPaletteCommitIntent: Equatable {
     }
 
     @MainActor
-    static func classify(_ source: PanelEntry.Source) -> CommandPaletteCommitIntent {
+    static func classify(
+        _ source: PanelEntry.Source,
+        extensions: CommandPaletteExtensions = .shared
+    ) -> CommandPaletteCommitIntent {
         switch source {
         case .builtin(let item):
             // Option parents drill in regardless of kind — Keep Awake and
             // Scheduled Shutdown are toggle-kind but still open their
             // duration list instead of flipping directly.
-            if CommandPaletteOptions.isOptionParent(item) { return .drillIntoOptions(item) }
+            if extensions.isOptionParent(item) { return .drillIntoOptions(item) }
             switch item.kind {
             case .toggle: return .toggleBuiltin(item)
             case .action: return .runBuiltin(item)
@@ -77,8 +109,37 @@ enum CommandPaletteCommitIntent: Equatable {
             return .copyToClipboard(text: result.output, toast: .generic)
         case .conversion(let result):
             return .copyToClipboard(text: result.copyText, toast: .generic)
-        case .hostProfile(let id):
-            return .toggleHostProfile(id: id)
+        case .pluginRow(let sourceKey, let descriptor):
+            // Mapped by the descriptor's declared semantics alone (ADR-0007);
+            // exhaustive, so a new semantic must declare its intent here.
+            switch descriptor.commit {
+            case .stayOpen:
+                return .pluginRowStayOpen(sourceKey: sourceKey, rowID: descriptor.id)
+            case .closeThenAct:
+                return .pluginRowCloseThenAct(sourceKey: sourceKey, rowID: descriptor.id)
+            case .pushDetail:
+                return .pluginRowPushDetail(sourceKey: sourceKey, rowID: descriptor.id, title: descriptor.title)
+            case .pushList(let listID):
+                return .pluginRowPushList(sourceKey: sourceKey, listID: listID, title: descriptor.title)
+            case .enterArgument:
+                return .pluginRowEnterArgument(sourceKey: sourceKey, rowID: descriptor.id, title: descriptor.title)
+            case .openURL(let url):
+                // The URL is plugin-supplied; confine it to the openURL
+                // capability's http/https surface (ADR-0009) before the palette
+                // hands it to the default browser, the same guard the JS
+                // capability enforces. A rejected URL fails with a toast, never
+                // a silent no-op or a launch outside the declared surface.
+                guard let parsed = URL(string: url), ScriptOpenURLPolicy.allows(parsed) else {
+                    return .openURLRejected
+                }
+                return .openURL(url: url)
+            case .copy(let text):
+                return .copyToClipboard(text: text, toast: .generic)
+            case .noAction:
+                return .noAction
+            case .runArgument(let argument):
+                return .pluginRowRunArgument(sourceKey: sourceKey, rowID: descriptor.id, argument: argument)
+            }
         case .quicklink(let id):
             return .openQuicklink(id: id)
         case .quicklinkTemplate(let id):

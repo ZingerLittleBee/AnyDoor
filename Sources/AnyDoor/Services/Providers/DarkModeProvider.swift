@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Toggle macOS dark mode via AppleScript to System Events.
 ///

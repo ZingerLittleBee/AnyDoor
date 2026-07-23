@@ -1,4 +1,6 @@
 import Foundation
+import PluginInterface
+import PluginSupport
 import os
 
 enum BluetoothBatteryError: Equatable, Sendable {

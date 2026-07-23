@@ -1,5 +1,6 @@
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class TargetSizeResizeSearchTests: XCTestCase {
     private let original = PixelDimensions(width: 1_600, height: 1_200)

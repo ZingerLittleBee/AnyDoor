@@ -1,0 +1,108 @@
+{
+  "capabilities": [
+    "fetch",
+    "store",
+    "toast",
+    "pasteboard",
+    "delay",
+    "openURL",
+    "translate"
+  ],
+  "manifest": {
+    "id": "dev.anydoor.contract-fixture",
+    "name": "Contract Fixture",
+    "description": "Pins the Swift/TS behaviour contract.",
+    "version": "1.0.0",
+    "apiVersion": 1,
+    "entryPoint": "bundle.js",
+    "capabilities": [
+      "fetch",
+      "store",
+      "toast",
+      "pasteboard",
+      "delay",
+      "openURL",
+      "translate"
+    ],
+    "localizedNames": {
+      "zh": "契约夹具"
+    },
+    "localizedDescriptions": {
+      "zh": "钉住宿主与 TS 类型之间的行为契约。"
+    }
+  },
+  "rows": [
+    {
+      "id": "action-detail",
+      "title": "Detail row",
+      "action": {
+        "type": "detail"
+      }
+    },
+    {
+      "id": "action-list",
+      "title": "List row",
+      "action": {
+        "type": "list",
+        "id": "hot"
+      }
+    },
+    {
+      "id": "action-openURL",
+      "title": "Open URL row",
+      "action": {
+        "type": "openURL",
+        "url": "https://example.com"
+      }
+    },
+    {
+      "id": "action-copy",
+      "title": "Copy row",
+      "action": {
+        "type": "copy",
+        "text": "copied text"
+      }
+    },
+    {
+      "id": "action-argument",
+      "title": "Argument row",
+      "action": {
+        "type": "argument"
+      }
+    },
+    {
+      "id": "action-run-default",
+      "title": "Run row",
+      "action": {
+        "type": "run"
+      }
+    },
+    {
+      "id": "action-run-stay",
+      "title": "Run-and-stay row",
+      "subtitle": "keeps the palette open",
+      "symbol": "star",
+      "actionLabel": "Toggle",
+      "isChecked": true,
+      "badge": "On",
+      "action": {
+        "type": "run",
+        "close": false
+      }
+    },
+    {
+      "id": "legacy-stayOpen",
+      "title": "Legacy stay-open row",
+      "commit": "stayOpen"
+    },
+    {
+      "id": "legacy-closeThenAct",
+      "title": "Legacy close-then-act row",
+      "commit": "closeThenAct"
+    },
+    {
+      "id": "bare",
+      "title": "Bare row"
+    }
+  ]
+}

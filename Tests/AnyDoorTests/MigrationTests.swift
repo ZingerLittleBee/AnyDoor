@@ -1,6 +1,9 @@
 import XCTest
 import SwiftData
+import PluginInterface
 @testable import AnyDoor
+@testable import HostsPlugin
+@testable import ImageConversionPlugin
 
 final class MigrationTests: XCTestCase {
     func testKeyBindingDefaultsWhenInsertedWithoutOrder() throws {

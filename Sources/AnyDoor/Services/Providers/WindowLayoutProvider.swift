@@ -1,5 +1,6 @@
 import AppKit
 import OSLog
+import PluginInterface
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "windowLayout")
 

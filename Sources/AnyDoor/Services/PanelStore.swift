@@ -1,6 +1,7 @@
 import SwiftData
 import SwiftUI
 import OSLog
+import PluginInterface
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "panel")
 
@@ -41,6 +42,16 @@ final class PanelStore {
     private var providers: [BuiltinItem: any BuiltinProvider] = [:]
     private var modelContainer: ModelContainer?
 
+    /// Recompiles hotkey snapshots after a mutation changes a hotkey source.
+    /// PluginRegistry wires this to its paired HotkeyCoordinator at bootstrap.
+    private var refreshHotkeys: @MainActor () -> Void = {}
+
+    /// Whether a built-in command currently exists for the user. Wired to
+    /// `PluginRegistry.isAvailable` in the app: commands claimed by an
+    /// uninstalled Native Plugin are dropped from every rebuilt collection,
+    /// so no panel row, palette entry, or settings row surfaces them.
+    private var commandAvailability: @MainActor (BuiltinItem) -> Bool = { _ in true }
+
     /// Cached toggle states by item key. Refreshed on `refreshAll()`.
     private var toggleStates: [BuiltinItem: Bool] = [:]
 
@@ -68,18 +79,41 @@ final class PanelStore {
     /// (used by tests) cancels the previous loop instead of stacking another.
     private var languageObservationTask: Task<Void, Never>?
 
-    private init() {}
+    init() {}
 
     func bootstrap(
         modelContainer: ModelContainer,
-        providers: [any BuiltinProvider]
+        providers: [any BuiltinProvider],
+        commandAvailability: @escaping @MainActor (BuiltinItem) -> Bool = { _ in true },
+        refreshHotkeys: @escaping @MainActor () -> Void = {}
     ) {
         self.modelContainer = modelContainer
+        self.commandAvailability = commandAvailability
+        self.refreshHotkeys = refreshHotkeys
+        self.providers = [:]
         for provider in providers {
             self.providers[provider.itemKey] = provider
         }
         rebuild()
         observeLanguageChanges()
+    }
+
+    /// Register an installed plugin's providers (PluginRegistry install hook).
+    /// The caller triggers the rebuild via the refresh hook.
+    func registerProviders(_ newProviders: [any BuiltinProvider]) {
+        for provider in newProviders {
+            providers[provider.itemKey] = provider
+        }
+    }
+
+    /// Drop the providers of an uninstalled plugin's claimed commands
+    /// (PluginRegistry uninstall hook).
+    func unregisterProviders(for items: Set<BuiltinItem>) {
+        for item in items {
+            providers[item] = nil
+            toggleStates[item] = nil
+            permissionStates[item] = nil
+        }
     }
 
     /// Recompute `topLevelEntries`, `appShortcutChildren`, and `windowLayoutChildren`
@@ -97,6 +131,9 @@ final class PanelStore {
             for pref in prefs {
                 guard let item = BuiltinItem(rawValue: pref.itemKey) else { continue }
                 if item.kind == .hiddenHotkey { continue }
+                // Uninstalled-plugin commands are invisible everywhere; their
+                // preference row is retained so a reinstall restores it.
+                guard commandAvailability(item) else { continue }
                 let hotkey = pref.keyCode.flatMap { code in
                     pref.modifierFlags.map { mods in
                         HotkeyDescriptor(keyCode: code, modifierFlags: mods)
@@ -409,7 +446,7 @@ final class PanelStore {
             pref.isVisible = isVisible
             try? context.save()
             rebuild()
-            HotkeyCoordinator.shared.refresh()
+            refreshHotkeys()
         }
     }
 
@@ -425,7 +462,7 @@ final class PanelStore {
             pref.modifierFlags = hotkey?.modifierFlags
             try? context.save()
             rebuild()
-            HotkeyCoordinator.shared.refresh()
+            refreshHotkeys()
         }
     }
 
@@ -444,7 +481,7 @@ final class PanelStore {
         }
         try? container.mainContext.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Reorder the top-level entries as one flat list. Reassigns a global
@@ -465,7 +502,7 @@ final class PanelStore {
         }
         try? context.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Reorder app shortcuts by new id array (ordered).
@@ -503,7 +540,7 @@ final class PanelStore {
         }
         try? context.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Find which entry currently owns a given hotkey (used for conflict detection).
@@ -569,7 +606,7 @@ final class PanelStore {
         context.insert(new)
         try? context.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 
     /// Delete an app shortcut by id.
@@ -578,6 +615,6 @@ final class PanelStore {
         container.mainContext.delete(binding)
         try? container.mainContext.save()
         rebuild()
-        HotkeyCoordinator.shared.refresh()
+        refreshHotkeys()
     }
 }

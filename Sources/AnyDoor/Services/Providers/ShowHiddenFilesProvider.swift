@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Toggles `com.apple.finder.AppleShowAllFiles`. true = show hidden files.
 ///

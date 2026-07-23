@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Restart Finder by killing the process; launchd / the system relaunches it automatically.
 ///

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import PluginInterface
 @testable import AnyDoor
 
 /// `BuiltinGroup` is the single source of truth for command grouping, shared by

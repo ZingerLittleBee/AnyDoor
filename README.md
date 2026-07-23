@@ -123,6 +123,7 @@ when you need them.
 
 ### Image conversion
 
+- Ships as an installable plugin — enable it from Settings → Plugins.
 - A dedicated workspace window — bindable to a hotkey, which also echoes the
   current Finder selection into the basket — with a collapsible sidebar (⌘B)
   holding the pending basket and conversion history, an original/result
@@ -159,6 +160,7 @@ when you need them.
 
 ### Hosts management
 
+- Ships as an installable plugin — enable it from Settings → Plugins.
 - Edit `/etc/hosts` from a built-in editor with multiple named profiles and
   one-click switching.
 - Writes go through a privileged XPC helper (an `SMAppService` daemon),
@@ -206,6 +208,8 @@ when you need them.
   or hash the rest of the query; pasting JSON pretty-prints / minifies it and a
   Unix epoch renders local / UTC / ISO 8601. A Raycast-style scope badge turns a
   keyword into a search-bar pill so the list stays exclusive to that tool.
+- Script plugins add their own rows to the palette — searchable second-level
+  lists and paginated markdown detail pages included (see Plugins).
 
 ### Quicklinks
 
@@ -224,6 +228,62 @@ when you need them.
 - Drag to reorder, toggle visibility, and the whole configuration participates
   in backup / sync. A set of common templates (Google, GitHub, YouTube, Stack
   Overflow, npm, MDN, Google Translate, ChatGPT) is seeded out of the box.
+
+### Plugins
+
+- Optional features ship as installable plugins, managed from **Settings →
+  Plugins** — Image Conversion and Hosts management today. Uninstalling removes
+  a plugin's panel rows, palette commands, and hotkeys everywhere, but keeps its
+  data and preferences, so reinstalling restores them without a relaunch.
+  Upgrading users keep what they already used — prior usage installs those
+  plugins automatically.
+- **Script plugins**: sideload plugins authored in TypeScript and bundled to
+  plain JavaScript, executed on the system JavaScriptCore (no bundled JS
+  runtime). They contribute rows to the command palette, with searchable
+  drill-in lists and paginated markdown detail pages.
+- A script plugin can only use the capabilities its manifest declares — network
+  fetch, a private key-value store, toasts, clipboard write, a one-shot delay,
+  opening http(s) URLs, and translation through your configured services. No
+  shell, no filesystem, no clipboard read; a runaway script is killed by a
+  30-second watchdog without affecting other plugins.
+- **Write your own**: scaffold a plugin with
+  `pnpm create @anydoor-dev/plugin my-plugin` (typed entry points via
+  [`@anydoor-dev/api`](https://www.npmjs.com/package/@anydoor-dev/api)), or
+  start from the
+  [anydoor-plugin-template](https://github.com/ZingerLittleBee/anydoor-plugin-template)
+  repository, whose release workflow attaches the installable `plugin-*.zip` on
+  every version tag. A developer mode loads a plugin directory in place with hot
+  reload on every build; worked examples live under
+  [`tooling/examples`](tooling/examples).
+
+#### Installing a script plugin
+
+Ready-to-install example plugins — a V2EX browser and a Hacker News browser —
+are attached to every [release](https://github.com/ZingerLittleBee/AnyDoor/releases)
+as `plugin-*.zip`.
+
+**From a zip:**
+
+1. Download the plugin, e.g.
+   [plugin-v2ex.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip)
+   or
+   [plugin-hackernews.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-hackernews.zip).
+2. Open **Settings → Plugins → Install Script Plugin…** and pick the zip — no
+   unzipping needed (an unzipped package folder works too).
+3. The plugin's rows appear in the command palette immediately, no relaunch.
+
+**From an install link:** paste an `anydoor://install-plugin?url=<https zip url>`
+link into your browser's address bar and AnyDoor takes over — it downloads the
+package and shows a confirmation with the plugin's name, id, version, download
+origin, and declared capabilities before installing. Only https package URLs
+are accepted. For example:
+
+```
+anydoor://install-plugin?url=https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip
+```
+
+Uninstall any time from **Settings → Plugins**; a script plugin's private data
+is kept, so reinstalling the same plugin finds it again.
 
 ### Menu bar panel
 
@@ -247,6 +307,8 @@ when you need them.
   recording options.
 - **Translation** tab: target languages, auto-speak, service ordering,
   provider/API-key setup, Apple language-pack downloads, and history retention.
+- **Plugins** tab: install / uninstall plugins, sideload script plugin
+  packages, and manage script-plugin developer mode.
 - **General** tab: launch at login, language, menu bar icon style, Hyper
   Key, command palette hotkey, scheduled shutdown, accessibility /
   automation / screen-recording permission status with one-click request,
@@ -261,9 +323,9 @@ when you need them.
 ### Backup & restore
 
 - Export app shortcuts, built-in preferences, clipboard / capture settings,
-  translation target languages, auto-speak, service definitions, and other
-  whitelisted general settings into a versioned snapshot, and import it on
-  another Mac.
+  translation target languages, auto-speak, service definitions, the installed
+  plugin set, and other whitelisted general settings into a versioned snapshot,
+  and import it on another Mac.
 - Clipboard history, translation history, API keys, and machine-specific keys
   are excluded; app paths are re-resolved from bundle IDs on import, and
   changes apply without a relaunch.
@@ -475,8 +537,10 @@ publishes it.
 
 ## Tech Stack
 
-- SwiftUI `Settings` scene + AppKit menu bar (`NSStatusItem` + `NSPanel`)
+- SwiftUI views hosted in AppKit windows + AppKit menu bar (`NSStatusItem` +
+  `NSPanel`)
 - SwiftData
+- JavaScriptCore for the script plugin runtime
 - CGEvent tap (`.cghidEventTap`)
 - Privileged XPC helper for `/etc/hosts`
 - Vision OCR, Natural Language detection, AVFoundation speech, and Apple's

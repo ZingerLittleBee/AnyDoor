@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PluginInterface
 
 /// Reads the user's currently selected text (Accessibility first, clipboard
 /// copy fallback) and opens the translation window prefilled with it.

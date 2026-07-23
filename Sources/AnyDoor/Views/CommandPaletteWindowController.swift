@@ -1,5 +1,8 @@
 import AppKit
 import SwiftUI
+import PluginInterface
+import PluginSupport
+import ScriptPluginRuntime
 
 @MainActor
 final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate {
@@ -14,6 +17,11 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     private weak var searchAnchor: CommandPaletteSearchAnchorView?
     private var keyMonitor: Any?
     private var isClosing = false
+    /// State retained across a close while the user sat on a plugin surface (a
+    /// pushed list or Detail), so the next plain open resumes there — hiding
+    /// the palette mid-read must not reset a v2ex post back to the root.
+    /// Validated against the live row-source registrations before reuse.
+    private var retainedState: CommandPaletteState?
     /// Last installed-apps scan, refreshed off the main actor on every open. Seeds
     /// the Applications section instantly so summoning the palette never blocks on
     /// a fresh `/Applications` walk; empty only before the very first scan returns.
@@ -92,6 +100,24 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         ))
     }
 
+    /// Recompose a visible palette after the installed plugin set changes.
+    /// Root queries stay in place, while drill-in state is discarded because
+    /// it may hold option closures from a plugin that just uninstalled.
+    func refreshPluginSurfaces() {
+        guard let state, window?.isVisible == true else { return }
+        if !state.isAtRoot {
+            state.popToRoot()
+        }
+        let sections = collectSections(installedApps: cachedApps)
+        state.updateSections(
+            sections,
+            quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates(),
+            pluginRowSources: CommandPaletteExtensions.shared.rowSources
+        )
+        state.selectedIndex = 0
+        prewarmIcons(for: sections)
+    }
+
     private enum InitialMode {
         case root
         case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?)
@@ -123,13 +149,28 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
 
         let sections = collectSections(installedApps: cachedApps)
         prewarmIcons(for: sections)
-        let hyperFlags = HyperKeyService.shared.hyperModifierFlags
-        let pickerState = CommandPaletteState(
-            sections: sections,
-            hyperFlags: hyperFlags,
-            quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
-        )
-        initialMode.apply(to: pickerState)
+        let pickerState: CommandPaletteState
+        var resumeRepair: CommandPaletteState.ResumeRepair?
+        if case .root = initialMode, let resumed = takeRetainedState() {
+            // Resume the plugin surface the user was on when the palette closed.
+            // Root sections and row-source registrations are refreshed in place;
+            // the drill-in stack (list rows, Detail content) is kept as-is.
+            pickerState = resumed
+            pickerState.updateSections(
+                sections,
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates(),
+                pluginRowSources: CommandPaletteExtensions.shared.rowSources
+            )
+            resumeRepair = pickerState.prepareForResume()
+        } else {
+            retainedState = nil
+            pickerState = CommandPaletteState(
+                sections: sections,
+                hyperFlags: HyperKeyService.shared.hyperModifierFlags,
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+            )
+            initialMode.apply(to: pickerState)
+        }
         self.state = pickerState
         searchCoordinator.onChange = { [weak pickerState] text in
             guard let pickerState, pickerState.query != text else { return }
@@ -151,6 +192,30 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             },
             onRefreshRates: { [weak self] in
                 self?.refreshRates()
+            },
+            onOpenDetailLink: { [weak self] url in
+                self?.openDetailLink(url)
+            },
+            onLoadDetailMore: { [weak self] in
+                self?.loadMoreDetail()
+            },
+            onLoadListMore: { [weak self] in
+                self?.loadMoreList()
+            },
+            onDetailAction: { [weak self] actionID in
+                self?.performDetailAction(actionID: actionID)
+            },
+            onRetryDetail: { [weak self] in
+                self?.retryDetail()
+            },
+            onRetryList: { [weak self] in
+                self?.retryList()
+            },
+            onDetailActiveChange: { [weak self] inDetail in
+                self?.setSearchFieldActive(!inDetail)
+            },
+            onLevelChange: { [weak self] in
+                self?.relayoutSearchFieldSoon()
             },
             registerSearchAnchor: { [weak self] anchor, text, placeholder in
                 self?.registerSearchAnchor(anchor, text: text, placeholder: placeholder)
@@ -175,8 +240,41 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             guard let self, let pickerState, self.state === pickerState else { return }
             self.installKeyMonitor()
             self.window?.makeKeyAndOrderFront(nil)
-            self.focusSearchField()
+            if pickerState.isInDetail {
+                // Resumed straight into a Detail: `onDetailActiveChange` only
+                // fires on a change, so hide the overlaid field explicitly.
+                self.setSearchFieldActive(false)
+            } else {
+                self.focusSearchField()
+            }
             self.refreshSections(for: pickerState)
+            if let resumeRepair {
+                self.performResumeRepair(resumeRepair)
+            }
+        }
+    }
+
+    /// The retained navigation to resume, if it is still presentable — every
+    /// row source it references must remain registered (a plugin uninstalled
+    /// while the palette was hidden invalidates it). Consumes the slot either
+    /// way, so a discarded navigation cannot resurface on a later open.
+    private func takeRetainedState() -> CommandPaletteState? {
+        defer { retainedState = nil }
+        guard let retained = retainedState,
+              retained.canResume(sourceExists: { CommandPaletteExtensions.shared.rowSource(for: $0) != nil })
+        else { return nil }
+        return retained
+    }
+
+    /// Re-kick the fetch a resumed level lost to the close (its pre-close task
+    /// dropped the result behind the visibility guard, so the level would show
+    /// its loading placeholder forever).
+    private func performResumeRepair(_ repair: CommandPaletteState.ResumeRepair) {
+        switch repair {
+        case .reloadDetail(let sourceKey, let rowID, let title, let generation):
+            resolveDetail(sourceKey: sourceKey, rowID: rowID, title: title, generation: generation)
+        case .reloadList(let sourceKey, let listID, let generation):
+            resolveList(sourceKey: sourceKey, listID: listID, generation: generation)
         }
     }
 
@@ -203,7 +301,8 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             let refreshed = self.collectSections(installedApps: apps)
             pickerState.updateSections(
                 refreshed,
-                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates()
+                quicklinkTemplateCandidates: QuicklinkStore.shared.templateCandidates(),
+                pluginRowSources: CommandPaletteExtensions.shared.rowSources
             )
             self.prewarmIcons(for: refreshed)
         }
@@ -237,11 +336,59 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         searchField.frame = frame
     }
 
+    /// Re-anchor the overlaid AppKit search field one runloop after a navigation
+    /// transition. A second level inserts a back-header row that shifts the
+    /// field's SwiftUI slot down; returning to the root removes it. The SwiftUI
+    /// anchor's own `layout()` fires only when its own size changes, not when an
+    /// ancestor moves it, so `registerSearchAnchor` alone leaves the field one
+    /// transition behind. Deferring a runloop lets SwiftUI finish its layout pass
+    /// so the anchor reports its new frame, mirroring `setSearchFieldActive`.
+    /// A hidden field (Detail) is repositioned harmlessly and stays hidden.
+    private func relayoutSearchFieldSoon() {
+        DispatchQueue.main.async { [weak self] in
+            self?.layoutSearchField()
+        }
+    }
+
     private func focusSearchField() {
         guard let window, window.isKeyWindow, let searchField else { return }
         guard window.makeFirstResponder(searchField) else { return }
         let end = (searchField.stringValue as NSString).length
         searchField.currentEditor()?.selectedRange = NSRange(location: end, length: 0)
+    }
+
+    /// Show or hide the overlaid AppKit search field around the Detail level.
+    /// Detail has no text input, so its field is hidden and first responder is
+    /// dropped (no stray caret); returning to a searchable level re-shows and
+    /// refocuses it once SwiftUI has re-registered the anchor.
+    private func setSearchFieldActive(_ active: Bool) {
+        guard let searchField else { return }
+        if active {
+            searchField.isHidden = false
+            // Defer a runloop so the re-rendered SwiftUI anchor has registered
+            // its frame before we position and focus the field.
+            DispatchQueue.main.async { [weak self] in
+                self?.layoutSearchField()
+                self?.focusSearchField()
+            }
+        } else {
+            window?.makeFirstResponder(window)
+            searchField.isHidden = true
+        }
+    }
+
+    /// Open a markdown link tapped inside the Detail pane. The URL is
+    /// plugin-supplied, so it is confined to the `openURL` scheme allowlist
+    /// (ADR-0009) before opening; either way the palette dismisses, mirroring a
+    /// Row Action `openURL` commit.
+    private func openDetailLink(_ url: URL) {
+        guard ScriptOpenURLPolicy.allows(url) else {
+            close()
+            ToastPresenter.shared.show(.failure(L(.pluginsActionFailed)))
+            return
+        }
+        close()
+        NSWorkspace.shared.open(url)
     }
 
     /// Warm the icon cache for every app-backed row off the main thread, so the
@@ -253,7 +400,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             switch entry.source {
             case .installedApp(_, let path): return path
             case .appShortcut(let id): return PanelStore.shared.binding(id: id)?.appPath
-            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+            case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
                 return nil
             }
         })
@@ -268,16 +415,18 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         let store = PanelStore.shared
         var sections: [CommandPaletteSection] = []
 
-        // Refresh hosts profiles once at palette open so the root name-search
-        // section reflects the current set without a per-keystroke fetch.
-        HostsManager.shared.reload()
+        // Give every plugin row source one refresh at palette open (e.g. hosts
+        // profiles re-fetch) so the root name-search sections reflect current
+        // data without a per-keystroke fetch.
+        for registration in CommandPaletteExtensions.shared.rowSources {
+            registration.source.reload()
+        }
 
         // Kick a currency-rates refresh (at most once per day) so inline currency
         // conversion has a fresh table. Fire-and-forget; the cached table is used
         // immediately and updated rows appear as the user keeps typing.
         Task { await CurrencyRatesService.shared.refreshIfStale() }
 
-        let hasExternalDDC = DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC)
         let commands = store.topLevelEntries.filter { entry in
             guard entry.isVisible else { return false }
             guard case .builtin(let item) = entry.source else { return false }
@@ -285,9 +434,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .toggle, .action:
                 return true
             case .brightnessControl, .submenu:
-                // Only the option parents the palette drills into; App Shortcuts,
-                // Window Layout and Port Manager keep their own flat sections.
-                return CommandPaletteOptions.shouldListInPalette(item, hasExternalDDC: hasExternalDDC)
+                // Only the option parents the palette drills into; App Shortcuts
+                // and Window Layout keep their own flat sections. Brightness
+                // registers a DDC-gated listing policy.
+                return CommandPaletteExtensions.shared.listsAtRoot(item)
             case .hiddenHotkey:
                 return false
             }
@@ -347,18 +497,12 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             .filter { !boundBundleIDs.contains($0.bundleID) }
             .enumerated()
             .map { offset, app in
-                PanelEntry(
-                    id: PanelEntry.id(for: .installedApp(bundleID: app.bundleID, path: app.path)),
+                PanelEntry.paletteRow(
                     source: .installedApp(bundleID: app.bundleID, path: app.path),
                     displayOrder: unboundOrder + Double(offset),
-                    isVisible: true,
-                    hotkey: nil,
                     title: app.displayName,
-                    subtitle: nil,
                     symbol: "app.fill",
-                    kind: .submenu,
-                    toggleState: nil,
-                    permission: .notRequired
+                    kind: .submenu
                 )
             }
 
@@ -449,6 +593,16 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             state.moveUp()
             return true
         case 36, 76:
+            // A failed drill-in maps Return to retry: a Detail has no rows to
+            // commit, and a failed list's only row is the error placeholder.
+            if state.detailRetryAvailable {
+                retryDetail()
+                return true
+            }
+            if state.listRetryAvailable {
+                retryList()
+                return true
+            }
             if let entry = state.commitSelection() {
                 commit(entry)
             }
@@ -467,7 +621,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                 return true
             }
             if !state.isAtRoot, state.query.isEmpty {
-                state.popToRoot()
+                state.popLevel()
                 return true
             }
             return false // otherwise let the search field delete a character
@@ -486,7 +640,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         case .drillIntoOptions(let item):
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                let options = await CommandPaletteOptions.options(for: item)
+                let options = await CommandPaletteExtensions.shared.options(for: item)
                 // Re-check after the await: the window may have resigned key and
                 // closed (which nils `state`) during option building.
                 guard let state = self.state, self.window?.isVisible == true else { return }
@@ -547,13 +701,33 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             case .generic:
                 ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
             }
-        case .toggleHostProfile(let id):
+        case .pluginRowStayOpen(let sourceKey, let rowID):
+            guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
+            Task { await source.performRow(id: rowID) }
+        case .pluginRowCloseThenAct(let sourceKey, let rowID):
             close()
-            // Toggle the named profile's activation directly (same as the
-            // drill-in hosts options — no privileged-write confirmation).
-            if let profile = HostsManager.shared.profiles.first(where: { $0.id == id }) {
-                Task { await HostsManager.shared.setActive(profile, !profile.isActive) }
-            }
+            guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
+            Task { await source.performRow(id: rowID) }
+        case .pluginRowPushDetail(let sourceKey, let rowID, let title):
+            pushPluginDetail(sourceKey: sourceKey, rowID: rowID, title: title)
+        case .pluginRowPushList(let sourceKey, let listID, let title):
+            pushPluginList(sourceKey: sourceKey, listID: listID, title: title)
+        case .pluginRowEnterArgument(let sourceKey, let rowID, let title):
+            state?.enterPluginArgumentInput(sourceKey: sourceKey, rowID: rowID, title: title)
+        case .pluginRowRunArgument(let sourceKey, let rowID, let argument):
+            close()
+            guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else { return }
+            Task { await source.performRow(id: rowID, argument: argument) }
+        case .noAction:
+            // A loading placeholder / inline error row: keep the palette open.
+            break
+        case .openURL(let url):
+            close()
+            guard let parsed = URL(string: url) else { return }
+            NSWorkspace.shared.open(parsed)
+        case .openURLRejected:
+            close()
+            ToastPresenter.shared.show(.failure(L(.pluginsActionFailed)))
         case .openQuicklink(let id):
             close()
             guard let quicklink = QuicklinkStore.shared.quicklink(id: id) else { return }
@@ -565,6 +739,180 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         case .dismiss:
             close()
         }
+    }
+
+    /// Push a plugin row's markdown Detail: show the loading level immediately,
+    /// then resolve the markdown off the row source and update in place. Guards
+    /// re-check that the same Detail is still visible after the await, so a
+    /// dismissed palette or a mid-flight uninstall can neither hang nor resurface.
+    private func pushPluginDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String) {
+        guard let generation = state?.enterDetail(sourceKey: sourceKey, rowID: rowID, title: title) else { return }
+        resolveDetail(sourceKey: sourceKey, rowID: rowID, title: title, generation: generation)
+    }
+
+    /// Fetch a Detail's initial document and land it under `generation`. Shared
+    /// by the drill-in push and the resume repair (a Detail that closed while
+    /// still loading re-requests through here).
+    private func resolveDetail(sourceKey: PluginRowSourceKey, rowID: String, title: String, generation: Int) {
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
+            state?.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadDetail(id: rowID, cursor: nil)
+            // The generation token ensures a slow result only lands on the exact
+            // drill-in that requested it — never on a later Detail (A→back→B).
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .markdown(let markdown, let more, let actions):
+                state.updateDetail(
+                    .loaded(title: title, markdown: markdown),
+                    more: more, actions: actions, generation: generation)
+            case .failure(let message):
+                state.updateDetail(.failed(title: title, message: message), generation: generation)
+            case nil:
+                state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: generation)
+            }
+        }
+    }
+
+    /// Run a Detail footer action: the document drops to its loading state and
+    /// the action's result replaces it wholesale (its own markdown, cursor, and
+    /// actions). Same guards as the initial load — the generation token keys
+    /// the result to this exact drill-in, and `beginDetailAction` refuses a
+    /// second press while a rebuild is in flight.
+    private func performDetailAction(actionID: String) {
+        guard let state, let request = state.beginDetailAction() else { return }
+        let title = state.detailState?.title ?? ""
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: request.sourceKey) else {
+            state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: request.generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadDetailAction(id: request.rowID, actionID: actionID)
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .markdown(let markdown, let more, let actions):
+                state.updateDetail(
+                    .loaded(title: title, markdown: markdown),
+                    more: more, actions: actions, generation: request.generation)
+            case .failure(let message):
+                state.updateDetail(.failed(title: title, message: message), generation: request.generation)
+            case nil:
+                state.updateDetail(.failed(title: title, message: L(.commandPaletteDetailFailed)), generation: request.generation)
+            }
+        }
+    }
+
+    /// Re-request a failed Detail's document in place (the error state's retry
+    /// button, or Return while it shows). The state claim flips the level back
+    /// to loading and refuses anything but a failed Detail; the shared
+    /// `resolveDetail` lands the result under the same navigation generation.
+    private func retryDetail() {
+        guard let request = state?.retryDetail() else { return }
+        resolveDetail(
+            sourceKey: request.sourceKey, rowID: request.rowID,
+            title: request.title, generation: request.generation)
+    }
+
+    /// Fetch the next Detail chunk when the user scrolls to the bottom sentinel.
+    /// The state's `beginDetailMore` is the single gate (loaded Detail + cursor +
+    /// no fetch in flight), so a sentinel that fires repeatedly cannot stack
+    /// requests; the generation token keys the append to this exact drill-in.
+    private func loadMoreDetail() {
+        guard let state, let request = state.beginDetailMore() else { return }
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: request.sourceKey) else {
+            state.failDetailMore(generation: request.generation, document: request.document)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadDetail(id: request.rowID, cursor: request.cursor)
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .markdown(let markdown, let more, _):
+                // An appended chunk's actions are ignored: the footer bar
+                // belongs to the full document, not to a page of it.
+                state.appendDetailChunk(
+                    markdown, more: more,
+                    generation: request.generation, document: request.document)
+            case .failure, nil:
+                // Keep what is already rendered; stop paginating quietly.
+                state.failDetailMore(generation: request.generation, document: request.document)
+            }
+        }
+    }
+
+    /// Push a plugin row's searchable second-level list: show the loading level
+    /// immediately, then build the rows off the row source and update in place.
+    /// Guards re-check that the same list is still visible after the await, so a
+    /// dismissed palette or a mid-flight uninstall can neither hang nor resurface;
+    /// the generation token keys a slow result to the exact drill-in that asked
+    /// for it (list A -> back -> list B). Mirrors `pushPluginDetail`.
+    private func pushPluginList(sourceKey: PluginRowSourceKey, listID: String, title: String) {
+        let generation = state?.enterList(sourceKey: sourceKey, listID: listID, title: title)
+        guard let generation else { return }
+        resolveList(sourceKey: sourceKey, listID: listID, generation: generation)
+    }
+
+    /// Build a pushed list's rows and land them under `generation`. Shared by
+    /// the drill-in push and the resume repair, mirroring `resolveDetail`.
+    private func resolveList(sourceKey: PluginRowSourceKey, listID: String, generation: Int) {
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: sourceKey) else {
+            state?.updateList(.failed(L(.commandPalettePluginRowError)), generation: generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadList(id: listID, query: "", cursor: nil)
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .rows(let rows, let more):
+                state.updateList(.loaded(rows), more: more, generation: generation)
+            case .failure(let message):
+                state.updateList(.failed(message), generation: generation)
+            case nil:
+                state.updateList(.failed(L(.commandPalettePluginRowError)), generation: generation)
+            }
+        }
+    }
+
+    /// Re-request a failed pushed list's rows in place. Mirrors `retryDetail`.
+    private func retryList() {
+        guard let request = state?.retryList() else { return }
+        resolveList(
+            sourceKey: request.sourceKey, listID: request.listID,
+            generation: request.generation)
+    }
+
+    /// Fetch the next list page when the user scrolls to the bottom sentinel.
+    /// The state's `beginListMore` is the single gate (loaded list + cursor +
+    /// no fetch in flight), so a sentinel that fires repeatedly cannot stack
+    /// requests; the generation token keys the append to this exact drill-in.
+    /// Mirrors `loadMoreDetail`.
+    private func loadMoreList() {
+        guard let state, let request = state.beginListMore() else { return }
+        guard let source = CommandPaletteExtensions.shared.rowSource(for: request.sourceKey) else {
+            state.failListMore(generation: request.generation)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let result = await source.loadList(
+                id: request.listID, query: "", cursor: request.cursor)
+            guard let self, let state = self.state, self.window?.isVisible == true else { return }
+            switch result {
+            case .rows(let rows, let more):
+                state.appendListRows(rows, more: more, generation: request.generation)
+            case .failure, nil:
+                // Keep what is already shown; stop paginating quietly.
+                state.failListMore(generation: request.generation)
+            }
+        }
+    }
+
+    /// Recompute a visible palette's rows in place after an async plugin row
+    /// source finishes loading — no popToRoot, so a drilled-in Detail survives.
+    func refreshVisibleRows() {
+        guard let state, window?.isVisible == true else { return }
+        state.notePluginRowsChanged()
     }
 
     /// Run the pending confirmation's action, then dismiss. Reads `perform`
@@ -603,6 +951,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     }
 
     private func resetPresentation() {
+        // Retain the state when the user was on a plugin surface so the next
+        // open resumes there; any other level (root, options, argument input)
+        // resets as before. A nil state (already-reset re-entry from
+        // `windowWillClose`) leaves the retained slot untouched.
+        if let state {
+            retainedState = state.isResumablePluginSurface ? state : nil
+        }
         activationGate.cancel()
         removeKeyMonitor()
         searchCoordinator.onChange = { _ in }

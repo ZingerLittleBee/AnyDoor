@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Block all keyboard input by routing key events through the existing CGEvent tap
 /// in `HotkeyService` and dropping anything that isn't a registered AnyDoor hotkey.

@@ -1,7 +1,9 @@
 import CoreGraphics
+import ImageCodec
 import ImageIO
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class ImageIOCandidateEncoderTests: XCTestCase {
 

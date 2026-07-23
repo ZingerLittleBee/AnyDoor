@@ -1,3 +1,4 @@
+import PluginInterface
 import SwiftUI
 
 struct PortTreeView: View {

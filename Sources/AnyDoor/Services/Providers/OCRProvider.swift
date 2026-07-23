@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PluginInterface
 
 /// Captures a screen region, recognizes its text with Vision, copies the text to
 /// the clipboard, and shows a bottom-center toast reporting the outcome.

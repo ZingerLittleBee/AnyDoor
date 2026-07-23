@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import PluginInterface
+import PluginSupport
 
 struct PanelSettingsView: View {
     @State private var panel = PanelStore.shared
@@ -389,7 +391,7 @@ struct PanelSettingsView: View {
             panel.setBuiltinHotkey(item, hotkey: hotkey)
         case let .appShortcut(id):
             panel.updateAppShortcut(id: id, hotkey: hotkey)
-        case .installedApp, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+        case .installedApp, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
             // Command-palette-only source; never surfaces in the settings UI.
             break
         }
@@ -401,7 +403,7 @@ struct PanelSettingsView: View {
             panel.setBuiltinHotkey(item, hotkey: nil)
         case let .appShortcut(id):
             panel.updateAppShortcut(id: id, hotkey: nil)
-        case .installedApp, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+        case .installedApp, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
             // Command-palette-only source; never surfaces in the settings UI.
             break
         }

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PluginInterface
 
 /// Captures a screen region, recognizes its text with Vision, then opens the
 /// translation window prefilled with that text (auto-translating immediately).

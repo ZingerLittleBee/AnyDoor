@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Thin adapter so the panel row + global hotkey route through the standard
 /// PanelStore toggle machinery. All real state lives in

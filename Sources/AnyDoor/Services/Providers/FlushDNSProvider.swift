@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Flush the macOS DNS resolver cache.
 ///

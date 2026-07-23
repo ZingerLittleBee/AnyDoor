@@ -1,3 +1,5 @@
+import PluginInterface
+import PluginSupport
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -14,7 +16,9 @@ struct ClipboardCardView: View {
     /// Context-menu actions; nil hides the matching menu item (previews/tests).
     var onEdit: (() -> Void)? = nil
     var onCopy: (() -> Void)? = nil
-    var onConvertImage: (() -> Void)? = nil
+    /// Commit handler for a plugin-contributed context-menu action; nil hides
+    /// all plugin actions (previews/tests).
+    var onPluginAction: ((NativePluginID, PluginClipboardAction) -> Void)? = nil
     var onRevealInFinder: (() -> Void)? = nil
     var onToggleTag: ((String) -> Void)? = nil
     var onNewTag: (() -> Void)? = nil
@@ -62,12 +66,17 @@ struct ClipboardCardView: View {
                 title: L(.clipboardActionCopy), systemImage: "doc.on.doc", handler: onCopy
             ))
         }
-        if let onConvertImage,
-           ClipboardImageConversionEntry.isConvertible(kind: item.historyKind, files: item.files) {
-            menu.addItem(ClosureMenuItem(
-                title: L(.clipboardActionConvertImage), systemImage: "arrow.left.arrow.right.square",
-                handler: onConvertImage
-            ))
+        // Plugin-contributed actions (e.g. Convert Image Format), rendered
+        // generically: installed plugins decide from the payload whether an
+        // action applies; Core never names the plugin behind a menu item.
+        if let onPluginAction,
+           let payload = ClipboardPluginPayloadMapper.payload(for: item, historyDirectory: historyDirectory) {
+            for (owner, action) in PluginRegistry.shared.clipboardActions(for: payload) {
+                menu.addItem(ClosureMenuItem(
+                    title: L(raw: action.titleKey), systemImage: action.symbol,
+                    handler: { onPluginAction(owner, action) }
+                ))
+            }
         }
         if item.historyKind == .file, let onRevealInFinder {
             menu.addItem(ClosureMenuItem(
@@ -226,7 +235,7 @@ struct ClipboardCardView: View {
         UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) ?? false
     }
 
-    /// Image/file-card thumbnail decoded off the main thread via `ClipboardThumbnail`:
+    /// Image/file-card thumbnail decoded off the main thread via `FileThumbnailCache`:
     /// reads the warm cache synchronously in `body`, and only kicks off the async
     /// decode on a miss, so many image cards sliding in no longer each run a
     /// full-resolution decode on the main thread. Unlike the lightweight source-app
@@ -238,7 +247,7 @@ struct ClipboardCardView: View {
 
         var body: some View {
             Group {
-                if let image = loaded ?? ClipboardThumbnail.cached(at: url) {
+                if let image = loaded ?? FileThumbnailCache.cached(at: url) {
                     // Color.clear takes the offered preview frame; the image fills it
                     // as an overlay and is clipped to those bounds, so a large image
                     // can't overflow and cover the header.
@@ -251,8 +260,8 @@ struct ClipboardCardView: View {
                 }
             }
             .task(id: url) {
-                if loaded == nil, ClipboardThumbnail.cached(at: url) == nil {
-                    loaded = await ClipboardThumbnail.thumbnail(at: url)
+                if loaded == nil, FileThumbnailCache.cached(at: url) == nil {
+                    loaded = await FileThumbnailCache.thumbnail(at: url)
                 }
             }
         }

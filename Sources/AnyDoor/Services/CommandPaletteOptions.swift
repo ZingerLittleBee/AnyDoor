@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import PluginInterface
 
 /// One selectable entry on the command palette's second level. `perform` runs the
 /// action (delegating to the relevant service); it is not `Sendable`, so options
@@ -48,57 +49,12 @@ struct CommandPaletteOption: Identifiable {
     }
 }
 
-/// Source of truth for which commands expose a second-level menu and what those
-/// options are. Pure per-item builders take already-fetched state so they unit
-/// test without singletons; `options(for:)` gathers that state on the MainActor
-/// and dispatches.
+/// The Core's second-level option builders. Which commands expose a second
+/// level is declared by registration in `CommandPaletteExtensions.core()`
+/// below; the pure per-item builders here take already-fetched state so they
+/// unit test without singletons.
 @MainActor
 enum CommandPaletteOptions {
-
-    /// Items that drill into a second level instead of acting directly.
-    static func isOptionParent(_ item: BuiltinItem) -> Bool {
-        switch item {
-        case .keepAwake, .scheduledShutdown, .brightness, .hostsManager, .portManager, .pickColor, .captureTimer: return true
-        default: return false
-        }
-    }
-
-    /// Whether the command palette should list `item` as a row. Brightness only
-    /// appears when an external DDC display exists; the other parents are always
-    /// listed (Keep Awake / Scheduled Shutdown are already listed as toggles, so
-    /// this gate matters for Brightness and Hosts, which `collectSections` adds).
-    static func shouldListInPalette(_ item: BuiltinItem, hasExternalDDC: Bool) -> Bool {
-        switch item {
-        case .brightness: return hasExternalDDC
-        case .hostsManager, .portManager: return true
-        default: return false
-        }
-    }
-
-    /// Options for an option-bearing builtin, or nil if it has none right now
-    /// (brightness with no external DDC display).
-    static func options(for item: BuiltinItem) async -> [CommandPaletteOption]? {
-        switch item {
-        case .keepAwake:
-            return keepAwakeOptions(isOn: PanelStore.shared.keepAwakeState.isOn)
-        case .scheduledShutdown:
-            return scheduledShutdownOptions(isArmed: ScheduledShutdownService.shared.state.isArmed)
-        case .brightness:
-            return brightnessOptions(displays: DisplayBrightnessService.shared.displays)
-        case .hostsManager:
-            HostsManager.shared.reload()
-            return hostsOptions(profiles: HostsManager.shared.profiles)
-        case .portManager:
-            await PortInventory.shared.refresh()
-            return portOptions(records: PortInventory.shared.records)
-        case .pickColor:
-            return colorFormatOptions(current: ColorFormat.current)
-        case .captureTimer:
-            return captureTimerOptions()
-        default:
-            return nil
-        }
-    }
 
     // MARK: - Pure per-item builders
 
@@ -172,25 +128,6 @@ enum CommandPaletteOptions {
                 }
             )
         }
-    }
-
-    /// One option per profile (checkmark = active, selecting toggles), plus an
-    /// always-present "Edit hosts…" entry that opens the editor window.
-    static func hostsOptions(profiles: [HostProfile]) -> [CommandPaletteOption] {
-        var options: [CommandPaletteOption] = profiles.map { profile in
-            CommandPaletteOption(
-                id: "hosts.\(profile.id.uuidString)",
-                title: profile.name,
-                symbol: "list.bullet.rectangle",
-                isChecked: profile.isActive,
-                perform: { await HostsManager.shared.setActive(profile, !profile.isActive) }
-            )
-        }
-        options.append(CommandPaletteOption(
-            id: "hosts.edit", title: L(.commandPaletteHostsEdit), symbol: "pencil",
-            perform: { HostsEditorWindowController.shared.show() }
-        ))
-        return options
     }
 
     /// One option per listening port (sorted by port, then process name, then
@@ -275,5 +212,53 @@ enum CommandPaletteOptions {
         case .swiftUI: return .colorFormatSwiftUI
         case .css: return .colorFormatCSS
         }
+    }
+}
+
+extension CommandPaletteExtensions {
+    /// The Core's palette declarations: every option parent and plugin row
+    /// source the Core owns today. Each parent pairs its root-listing policy
+    /// with a builder that gathers live state on the MainActor and
+    /// dispatches to the pure per-item builders above. Native Plugins
+    /// register and unregister through the same API when they claim a
+    /// parent or a row source.
+    static func core() -> CommandPaletteExtensions {
+        let registry = CommandPaletteExtensions()
+        registry.registerOptionParent(for: .keepAwake, CommandPaletteOptionParent(
+            buildOptions: {
+                CommandPaletteOptions.keepAwakeOptions(isOn: PanelStore.shared.keepAwakeState.isOn)
+            }
+        ))
+        registry.registerOptionParent(for: .scheduledShutdown, CommandPaletteOptionParent(
+            buildOptions: {
+                CommandPaletteOptions.scheduledShutdownOptions(
+                    isArmed: ScheduledShutdownService.shared.state.isArmed
+                )
+            }
+        ))
+        registry.registerOptionParent(for: .brightness, CommandPaletteOptionParent(
+            listsAtRoot: { DisplayBrightnessService.shared.displays.contains(where: \.supportsDDC) },
+            buildOptions: {
+                CommandPaletteOptions.brightnessOptions(displays: DisplayBrightnessService.shared.displays)
+            }
+        ))
+        registry.registerOptionParent(for: .portManager, CommandPaletteOptionParent(
+            listsAtRoot: { true },
+            buildOptions: {
+                await PortInventory.shared.refresh()
+                return CommandPaletteOptions.portOptions(records: PortInventory.shared.records)
+            }
+        ))
+        registry.registerOptionParent(for: .pickColor, CommandPaletteOptionParent(
+            buildOptions: {
+                CommandPaletteOptions.colorFormatOptions(current: ColorFormat.current)
+            }
+        ))
+        registry.registerOptionParent(for: .captureTimer, CommandPaletteOptionParent(
+            buildOptions: {
+                CommandPaletteOptions.captureTimerOptions()
+            }
+        ))
+        return registry
     }
 }

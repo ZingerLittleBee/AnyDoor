@@ -1,4 +1,6 @@
 import AppKit
+import PluginInterface
+import PluginSupport
 import SwiftData
 import SwiftUI
 
@@ -146,7 +148,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // Esc closes, unless a focused control should consume it first (a text
         // field cancelling its edit, a list clearing its selection).
         if event.keyCode == 53 {
-            if ImageConversionWindowController.shouldDeferToFocusedControl(
+            if FocusedControlKeyPolicy.shouldDefer(
                 keyCode: Int(event.keyCode),
                 firstResponder: window?.firstResponder
             ) {

@@ -1,6 +1,7 @@
 import XCTest
 import SwiftData
 @testable import AnyDoor
+@testable import HostsPlugin
 
 final class HostProfileTests: XCTestCase {
     func test_init_setsDefaultsAndTimestamps() throws {

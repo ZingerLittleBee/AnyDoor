@@ -1,0 +1,41 @@
+{
+  "name": "@anydoor-dev/api",
+  "version": "0.1.0",
+  "description": "Typed API for authoring AnyDoor Script Plugins (apiVersion 1).",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZingerLittleBee/AnyDoor.git",
+    "directory": "tooling/packages/api"
+  },
+  "homepage": "https://github.com/ZingerLittleBee/AnyDoor/tree/main/tooling/packages/api#readme",
+  "keywords": [
+    "anydoor",
+    "plugin",
+    "macos"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.type-tests.json",
+    "prepare": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -51,4 +51,32 @@ final class HelperManager {
     func openApprovalSettings() {
         SMAppService.openSystemSettingsLoginItems()
     }
+
+    /// Unregister the daemon (Hosts uninstall, once no other consumer needs
+    /// it — see `PrivilegedHelperRelease`). No-op when it isn't registered.
+    func unregister() throws {
+        switch service.status {
+        case .notRegistered, .notFound:
+            return
+        default:
+            try service.unregister()
+        }
+    }
+}
+
+/// Decides whether the shared privileged helper daemon may be unregistered
+/// (amended ADR-0005): the daemon serves both Hosts and forced Scheduled
+/// Shutdown, so releasing it is allowed only while no other consumer needs
+/// it. Closure-injected so the policy tests without SMAppService.
+@MainActor
+struct PrivilegedHelperRelease {
+    /// True while a Core consumer other than the caller still needs the
+    /// daemon (forced Scheduled Shutdown today).
+    var otherConsumersActive: () -> Bool
+    var unregister: () throws -> Void
+
+    func releaseIfUnneeded() throws {
+        guard !otherConsumersActive() else { return }
+        try unregister()
+    }
 }

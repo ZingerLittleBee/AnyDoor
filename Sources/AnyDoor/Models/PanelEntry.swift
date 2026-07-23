@@ -1,13 +1,6 @@
 import Foundation
 import AppKit
-
-/// Permission state for a built-in item that requires external authorization.
-enum PermissionStatus: Sendable, Hashable {
-    case granted
-    case denied
-    case undetermined
-    case notRequired
-}
+import PluginInterface
 
 /// A hotkey binding for display and comparison.
 struct HotkeyDescriptor: Hashable, Sendable {
@@ -54,7 +47,7 @@ struct PanelEntry: Identifiable, Hashable {
         case devToolScopeSuggestion(DevToolScope)      // Command-palette-only: keyword-prefix tool hint
         case conversion(ConversionResult)              // Command-palette-only: unit/time-zone/currency conversion
         case paletteOption(id: String)                 // Command-palette-only: a drilled-in second-level option
-        case hostProfile(id: UUID)                     // Command-palette-only: a hosts profile, toggled by name
+        case pluginRow(sourceKey: PluginRowSourceKey, descriptor: PluginRowDescriptor) // Command-palette-only: a plugin-contributed row (ADR-0007)
         case quicklink(id: UUID)                       // Command-palette-only: user-defined Link
         case quicklinkTemplate(id: UUID)               // Command-palette-only: user-defined Search Template
         case quicklinkArgument(id: UUID, argument: String) // Command-palette-only: synthesized template+argument row
@@ -104,6 +97,37 @@ struct PanelEntry: Identifiable, Hashable {
         self.permission = permission
     }
 
+    /// A palette-synthesized row (drilled-in option, calc result, dev tool,
+    /// port, plugin row, installed app, …). These rows share fixed values for
+    /// the panel-only fields and derive their id from the source; the factory
+    /// keeps the full initializer out of every palette builder.
+    static func paletteRow(
+        source: Source,
+        displayOrder: Double,
+        title: String,
+        subtitle: String? = nil,
+        searchAliases: [String] = [],
+        symbol: String,
+        quicklinkIcon: QuicklinkIconRequest? = nil,
+        kind: BuiltinItem.Kind = .action
+    ) -> PanelEntry {
+        PanelEntry(
+            id: id(for: source),
+            source: source,
+            displayOrder: displayOrder,
+            isVisible: true,
+            hotkey: nil,
+            title: title,
+            subtitle: subtitle,
+            searchAliases: searchAliases,
+            symbol: symbol,
+            quicklinkIcon: quicklinkIcon,
+            kind: kind,
+            toggleState: nil,
+            permission: .notRequired
+        )
+    }
+
     static func id(for source: Source) -> String {
         switch source {
         case .appShortcut(let id):                return "app:\(id.uuidString)"
@@ -115,7 +139,8 @@ struct PanelEntry: Identifiable, Hashable {
         case .devToolScopeSuggestion(let scope):  return "devToolScope:\(scope.rawValue)"
         case .conversion(let result):             return "conversion:\(result.kind.rawValue):\(result.copyText):\(result.display)"
         case .paletteOption(let id):              return "option:\(id)"
-        case .hostProfile(let id):                return "hostProfile:\(id.uuidString)"
+        case .pluginRow(let sourceKey, let descriptor):
+            return "pluginRow:\(sourceKey.pluginID.rawValue):\(sourceKey.localID):\(descriptor.id)"
         case .quicklink(let id):                  return "quicklink:\(id.uuidString)"
         case .quicklinkTemplate(let id):          return "quicklinkTemplate:\(id.uuidString)"
         case .quicklinkArgument(let id, let argument):
@@ -138,7 +163,7 @@ struct PanelEntry: Identifiable, Hashable {
         case .devToolScopeSuggestion(let scope): return scope.badgeLabel
         case .conversion(let result): return result.display
         case .paletteOption: return title
-        case .hostProfile: return title
+        case .pluginRow: return title
         case .quicklink: return title
         case .quicklinkTemplate: return title
         case .quicklinkArgument: return title

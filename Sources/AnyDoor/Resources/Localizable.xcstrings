@@ -4081,6 +4081,139 @@
         }
       }
     },
+    "hosts.action.authorize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Authorize" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "授权" } }
+      }
+    },
+    "hosts.action.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Cancel" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "取消" } }
+      }
+    },
+    "hosts.action.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除" } }
+      }
+    },
+    "hosts.action.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Edit" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "编辑" } }
+      }
+    },
+    "hosts.action.openDefaultEditor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open in Default Editor" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用默认编辑器打开" } }
+      }
+    },
+    "hosts.action.rename": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Rename" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "重命名" } }
+      }
+    },
+    "hosts.action.restore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restore" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "恢复" } }
+      }
+    },
+    "hosts.action.restoreFirstBackup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restore Initial Backup" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "恢复首次备份" } }
+      }
+    },
+    "hosts.action.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Save" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "保存" } }
+      }
+    },
+    "hosts.dialog.deleteProfile": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Delete profile ‘%@’? This action cannot be undone." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除配置「%@」？此操作不可撤销。" } }
+      }
+    },
+    "hosts.dialog.restoreBackup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restore /etc/hosts from the initial backup? External changes will be lost." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "覆盖 /etc/hosts 为首次备份？外部改动将丢失。" } }
+      }
+    },
+    "hosts.error.backupFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Failed to create a backup. A complete restore may not be possible." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "备份创建失败，可能无法完整恢复" } }
+      }
+    },
+    "hosts.error.deleteFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Failed to delete the profile. Please try again." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "删除配置失败，请重试" } }
+      }
+    },
+    "hosts.error.liveReadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Unable to read the system hosts file." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无法读取系统 hosts 文件" } }
+      }
+    },
+    "hosts.error.noBackup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No backup is available." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "无可用备份" } }
+      }
+    },
+    "hosts.field.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Name" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "名称" } }
+      }
+    },
+    "hosts.helper.approval": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Authorize the background helper in System Settings" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "需要在系统设置中授权后台帮助程序" } }
+      }
+    },
+    "hosts.manager.openHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open Hosts Manager" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "打开 Hosts 管理窗口" } }
+      }
+    },
+    "hosts.manager.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Hosts Manager" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Hosts 管理" } }
+      }
+    },
     "hosts.profile.copyName": {
       "extractionState": "manual",
       "localizations": {
@@ -4147,6 +4280,27 @@
             "value": "启用"
           }
         }
+      }
+    },
+    "hosts.profile.newName": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "New Profile" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "新配置" } }
+      }
+    },
+    "hosts.system.openHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open in Default Editor" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用默认编辑器打开" } }
+      }
+    },
+    "hosts.system.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "System Hosts" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "系统 Hosts" } }
       }
     },
     "hotkey.recorder.clear": {
@@ -5679,23 +5833,6 @@
         }
       }
     },
-    "onboarding.demo.hostsResult": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "staging · hosts profile"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "staging · hosts 配置"
-          }
-        }
-      }
-    },
     "onboarding.demo.portResult": {
       "extractionState": "manual",
       "localizations": {
@@ -5828,57 +5965,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "触发键"
-          }
-        }
-      }
-    },
-    "onboarding.imageConversion.hint": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "PNG, JPEG, HEIC, AVIF, TIFF, GIF, BMP, PDF, and ICO."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "支持 PNG、JPEG、HEIC、AVIF、TIFF、GIF、BMP、PDF 和 ICO。"
-          }
-        }
-      }
-    },
-    "onboarding.imageConversion.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Drop images into the basket, pick a format and quality, convert in one click — every result lands in history, ready to reveal or copy."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "把图片拖进篮子,选好格式和质量,一键转换,每个结果都会进入历史,随时定位或复制。"
-          }
-        }
-      }
-    },
-    "onboarding.imageConversion.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Convert images by drag & drop"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "拖进来,就能转格式"
           }
         }
       }
@@ -6274,23 +6360,6 @@
         }
       }
     },
-    "onboarding.sidebar.imageConversion": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Image Conversion"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "图片转换"
-          }
-        }
-      }
-    },
     "onboarding.sidebar.menuBar": {
       "extractionState": "manual",
       "localizations": {
@@ -6559,6 +6628,618 @@
           "stringUnit": {
             "state": "translated",
             "value": "将于 %@ 关机"
+          }
+        }
+      }
+    },
+    "plugin.hosts.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage /etc/hosts with switchable profiles: toggle them from the panel and command palette, edit in a dedicated window, and write through the privileged helper."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "管理 /etc/hosts 配置：多套配置一键切换，支持从面板与命令面板快速启停，并通过后台帮助程序安全写入。"
+          }
+        }
+      }
+    },
+    "plugin.hosts.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hosts Manager"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hosts 管理"
+          }
+        }
+      }
+    },
+    "plugin.hosts.uninstallImpact": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active hosts entries stay in the hosts file and remain in effect; reinstall the plugin to manage them again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已激活的 hosts 条目将保留在系统 hosts 文件中并继续生效；重新安装插件即可再次管理。"
+          }
+        }
+      }
+    },
+    "plugin.imageConversion.description": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batch-convert images between formats or compress them to a target size, with history and clipboard integration."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "批量转换图片格式或压缩到目标大小，支持历史记录与剪贴板集成。"
+          }
+        }
+      }
+    },
+    "plugin.imageConversion.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Image Conversion"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "图片格式转换"
+          }
+        }
+      }
+    },
+    "plugin.imageConversion.uninstallImpact": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An in-progress conversion will be stopped."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在进行的转换将被停止。"
+          }
+        }
+      }
+    },
+    "plugins.install": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装"
+          }
+        }
+      }
+    },
+    "plugins.state.installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装"
+          }
+        }
+      }
+    },
+    "plugins.transition.inProgress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Another plugin change is still in progress. Try again when it finishes."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个插件变更仍在进行中，请等待完成后重试。"
+          }
+        }
+      }
+    },
+    "plugins.uninstall": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uninstall"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "卸载"
+          }
+        }
+      }
+    },
+    "plugins.uninstall.confirmTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uninstall “%@”?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "卸载「%@」？"
+          }
+        }
+      }
+    },
+    "plugins.uninstall.dataRetained": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin data is kept and restored when you reinstall."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件数据将保留，重新安装后自动恢复。"
+          }
+        }
+      }
+    },
+    "plugins.uninstall.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Uninstall failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "卸载失败：%@"
+          }
+        }
+      }
+    },
+    "plugins.section.native": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Native Plugins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "原生插件"
+          }
+        }
+      }
+    },
+    "plugins.section.script": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Script Plugins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "脚本插件"
+          }
+        }
+      }
+    },
+    "plugins.sideload": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install Script Plugin…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装脚本插件…"
+          }
+        }
+      }
+    },
+    "plugins.script.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No Script Plugins installed yet."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未安装脚本插件。"
+          }
+        }
+      }
+    },
+    "plugins.version": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Version %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "版本 %@"
+          }
+        }
+      }
+    },
+    "plugins.sideload.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install failed: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装失败：%@"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.missingField": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin manifest is missing the field \"%@\"."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件清单缺少字段“%@”。"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.invalidJSON": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin manifest is not valid JSON."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件清单不是有效的 JSON。"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.fileUnreadable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The folder has no readable manifest.json."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "该文件夹没有可读取的 manifest.json。"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.unknownAPIVersion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unsupported apiVersion %lld."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不支持的 apiVersion %lld。"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.unknownCapability": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown capability \"%@\"."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知的能力“%@”。"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.duplicate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A plugin with the same ID is already installed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装相同 ID 的插件。"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.unzip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not extract the plugin zip."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法解压插件 zip。"
+          }
+        }
+      }
+    },
+    "plugins.sideload.error.noPackageInZip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No plugin package found in the zip (missing manifest.json)."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "zip 中未找到插件包（缺少 manifest.json）。"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.invalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Invalid plugin install link."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无效的插件安装链接。"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.insecure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin install links must use https."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件安装链接必须使用 https。"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.downloadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugin download failed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件下载失败。"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.tooLarge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin package is too large."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件包过大。"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.confirmTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Install Script Plugin “%@”?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安装脚本插件「%@」？"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.confirmBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ID: %1$@\nVersion: %2$@\nSource: %3$@\nCapabilities: %4$@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ID：%1$@\n版本：%2$@\n来源：%3$@\n权限：%4$@"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.noCapabilities": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "None"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消"
+          }
+        }
+      }
+    },
+    "plugins.urlInstall.success": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed plugin “%@”"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已安装插件「%@」"
           }
         }
       }
@@ -9266,6 +9947,23 @@
         }
       }
     },
+    "settings.sync.importPartialFailure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import completed, but some plugin changes could not be applied: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入已完成，但部分插件变更无法应用：%@"
+          }
+        }
+      }
+    },
     "settings.sync.importSuccess": {
       "extractionState": "manual",
       "localizations": {
@@ -9364,6 +10062,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "面板"
+          }
+        }
+      }
+    },
+    "settings.tab.plugins": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plugins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件"
           }
         }
       }
@@ -11504,6 +12219,227 @@
           "stringUnit": {
             "state": "translated",
             "value": "查看并安装更新"
+          }
+        }
+      }
+    },
+    "commandPalette.pluginRow.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加载中…"
+          }
+        }
+      }
+    },
+    "commandPalette.pluginRow.error": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed to load"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加载失败"
+          }
+        }
+      }
+    },
+    "commandPalette.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
+    "commandPalette.detail.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t load details"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法加载详情"
+          }
+        }
+      }
+    },
+    "plugins.action.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plugin action failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插件操作失败"
+          }
+        }
+      }
+    },
+    "plugins.developerMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Developer Mode"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开发者模式"
+          }
+        }
+      }
+    },
+    "plugins.developerMode.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load a plugin directly from a development folder, with automatic reload on change."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "直接从开发目录加载插件，文件变更时自动重新加载。"
+          }
+        }
+      }
+    },
+    "plugins.section.dev": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dev Plugins"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开发插件"
+          }
+        }
+      }
+    },
+    "plugins.dev.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No dev plugins registered."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "尚未注册开发插件。"
+          }
+        }
+      }
+    },
+    "plugins.registerDev": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Register Dev Plugin…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "注册开发插件…"
+          }
+        }
+      }
+    },
+    "plugins.registerDev.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Failed to register the dev plugin: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "注册开发插件失败：%@"
+          }
+        }
+      }
+    },
+    "plugins.removeDev": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除"
+          }
+        }
+      }
+    },
+    "plugins.state.dev": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dev"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开发中"
           }
         }
       }

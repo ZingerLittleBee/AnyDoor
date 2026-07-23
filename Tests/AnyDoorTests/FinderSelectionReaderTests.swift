@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class FinderSelectionReaderTests: XCTestCase {
     func testParseReturnsImageURLsForMultiLinePaths() {

@@ -1,8 +1,10 @@
 import CoreGraphics
+import ImageCodec
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class ImageConversionPreflightTests: XCTestCase {
     private var tempDirectory: URL!

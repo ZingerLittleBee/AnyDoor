@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import PluginInterface
 
 /// Presents the macOS system color-sampling loupe, copies the picked color to
 /// the clipboard as an uppercase HEX string, and shows a bottom-center toast

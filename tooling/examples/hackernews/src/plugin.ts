@@ -1,0 +1,611 @@
+import {
+  definePlugin,
+  actions,
+  type Row,
+  type DetailAction,
+  type DetailResult,
+  type FetchFn,
+  type Store,
+  type ToastFn,
+  type TranslateFn,
+} from "@anydoor-dev/api";
+import manifest from "./manifest.js";
+
+// A real-world Script Plugin for Hacker News (https://news.ycombinator.com),
+// shaped like the v2ex example next door:
+//   - the palette ROOT shows only command rows — 热门 / 最新 / 最佳 / Ask HN /
+//     Show HN — so opening Hacker News is instant (no network),
+//   - committing a feed command drills into a searchable second-level LIST of
+//     stories built by `list(listId, query)`,
+//   - a story row there drills into a per-story markdown Detail (the Ask/Show
+//     text body when present, plus the comment thread).
+//
+// Everything is public: story feeds come from the official Firebase API, and
+// the Algolia item API returns the FULL comment tree in one request — so unlike
+// V2EX there is no token row anywhere. Comments paginate client-side from that
+// one response as the user scrolls.
+
+const FIREBASE_BASE = "https://hacker-news.firebaseio.com/v0";
+const ALGOLIA_ITEM_BASE = "https://hn.algolia.com/api/v1/items";
+const HN_ITEM_URL = "https://news.ycombinator.com/item?id=";
+
+// The list ids the root command rows commit to, matched in `list()`. Each maps
+// to a Firebase feed of story ids.
+const FEEDS: Record<string, string> = {
+  top: `${FIREBASE_BASE}/topstories.json`,
+  new: `${FIREBASE_BASE}/newstories.json`,
+  best: `${FIREBASE_BASE}/beststories.json`,
+  ask: `${FIREBASE_BASE}/askstories.json`,
+  show: `${FIREBASE_BASE}/showstories.json`,
+};
+
+// Store key + the sentinel row id. A `__`-prefixed id cannot collide with a
+// numeric story id.
+const TRANSLATE_KEY = "translateDetail";
+const TRANSLATE_ROW_ID = "__translate__";
+
+// Stories per list page (one Firebase item request each, fetched in parallel,
+// so a page build stays well within the 30s watchdog). Scrolling to the bottom
+// loads the next page until the feed's ids run out.
+const STORIES_PAGE_SIZE = 25;
+
+// Comments render 20 per Detail chunk, paginated client-side from the cached
+// Algolia tree; the flattened thread is capped so a 1000-comment thread cannot
+// balloon the document.
+const COMMENTS_PAGE_SIZE = 20;
+const MAX_COMMENTS = 200;
+
+// MARK: - API shapes (only the fields this plugin reads)
+
+/** A Firebase item — the feeds resolve to arrays of ids pointing at these. */
+interface HNItem {
+  id: number;
+  by?: string;
+  title?: string;
+  url?: string;
+  text?: string;
+  score?: number;
+  descendants?: number;
+  type?: string;
+  dead?: boolean;
+  deleted?: boolean;
+}
+
+/** An Algolia item: the same story, but carrying its whole comment tree. */
+interface AlgoliaItem {
+  text?: string | null;
+  children?: AlgoliaComment[];
+}
+
+interface AlgoliaComment {
+  author?: string | null;
+  text?: string | null;
+  children?: AlgoliaComment[];
+}
+
+/** One flattened comment, depth preserved for the thread markers. */
+interface CommentNode {
+  author: string;
+  text: string;
+  depth: number;
+}
+
+// The context persists between invocations, so caching the last listed stories
+// and each opened story's flattened comment thread lets `detail` resolve a row
+// id — and page comments — without refetching.
+const stories = new Map<string, HNItem>();
+const commentCache = new Map<string, CommentNode[]>();
+// A feed's story ids, fetched on the first page and reused by cursor pages so
+// pagination stays stable against the feed reordering between fetches.
+const feedIDs = new Map<string, number[]>();
+
+// MARK: - Helpers
+
+/** GET `url` and parse the JSON body, throwing on a non-2xx status. */
+async function fetchJSON<T>(fetch: FetchFn, url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Hacker News request failed (${response.status}): ${url}`);
+  }
+  return JSON.parse(response.body) as T;
+}
+
+/** Read the Detail-translation toggle (off unless explicitly enabled). */
+async function readTranslateEnabled(store: Store): Promise<boolean> {
+  return (await store.get(TRANSLATE_KEY)) === true;
+}
+
+/** Decode the HTML entities HN text uses (`&#x27;`, `&quot;`, …). */
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number.parseInt(dec, 10)))
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Convert an HN HTML fragment (`<p>`, `<i>`, `<a>`, `<pre><code>`) into the
+ * markdown subset the host renders. Structure first, then a single entity
+ * decode at the end — decoding once keeps `&amp;lt;` inside code samples from
+ * collapsing twice.
+ */
+function htmlToMarkdown(html: string): string {
+  const structured = html
+    .replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/g, (_, code: string) => `\n\`\`\`\n${code}\n\`\`\`\n`)
+    .replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g, (_, href: string, label: string) => `[${label}](${href})`)
+    .replace(/<i>([\s\S]*?)<\/i>/g, "*$1*")
+    .replace(/<b>([\s\S]*?)<\/b>/g, "**$1**")
+    .replace(/<code>([\s\S]*?)<\/code>/g, (_, code: string) => `\`${code}\``)
+    .replace(/<p>/g, "\n\n")
+    .replace(/<br\s*\/?>/g, "\n")
+    .replace(/<[^>]+>/g, "");
+  return decodeEntities(structured).trim();
+}
+
+// A bare image URL in converted text. The lookbehind skips URLs already inside
+// `![…](…)` / `[…](…)` markdown produced by the HTML conversion.
+const BARE_IMAGE_URL = /(?<![([])\bhttps?:\/\/\S+\.(?:png|jpe?g|gif|webp)(?:\?\S*)?/gi;
+
+/** Turn bare image URLs into markdown images so the host renders previews. */
+function withImagePreviews(text: string): string {
+  return text.replace(BARE_IMAGE_URL, (url) => `![](${url})`);
+}
+
+/** Wrap `paragraphs` into one markdown blockquote (every line `>`-prefixed). */
+function quoted(...paragraphs: string[]): string {
+  return paragraphs
+    .flatMap((paragraph) => ["", ...paragraph.split("\n")])
+    .slice(1)
+    .map((line) => (line.length > 0 ? `> ${line}` : ">"))
+    .join("\n");
+}
+
+function storySubtitle(story: HNItem): string {
+  const author = story.by ?? "未知";
+  return [`${story.score ?? 0} 分`, `${story.descendants ?? 0} 评论`, `by ${author}`].join(" · ");
+}
+
+/** Map stories to searchable palette rows. With translation on, titles display
+ * from the translation cache (searchable in both languages); the cache is
+ * display-only, so toggling off reverts. The `stories` lookup cache is
+ * maintained by `list()` (pages append; only a first page resets it). */
+function toRows(list: HNItem[], query: string, translated: boolean): Row[] {
+  const needle = query.trim().toLowerCase();
+  const rows: Row[] = [];
+  for (const story of list) {
+    const original = story.title ?? `#${story.id}`;
+    const title = translated ? titleCache.get(String(story.id)) ?? original : original;
+    const subtitle = storySubtitle(story);
+    if (needle.length > 0 && !`${original} ${title} ${subtitle}`.toLowerCase().includes(needle)) {
+      continue;
+    }
+    rows.push({
+      id: String(story.id),
+      title,
+      subtitle,
+      symbol: "newspaper",
+      actionLabel: "详情",
+      action: actions.detail(),
+    });
+  }
+  return rows;
+}
+
+// Translated story titles by id, shared by the list rows and the Detail, so a
+// Detail open reuses the list's work and a later list build (pagination page,
+// re-drill) does not re-translate.
+const titleCache = new Map<string, string>();
+const TITLE_CACHE_LIMIT = 500;
+
+/**
+ * Batch-translate the titles missing from the cache — ONE `api.translate` call
+ * for the whole page (newline-joined, split back per line), never one per
+ * story. Blank lines are dropped before the count check, so a translator that
+ * appends a trailing newline cannot fail the round-trip. On failure or a
+ * count mismatch nothing is cached: the rows fall back to the original titles
+ * for this build, and the next list build retries — caching originals here
+ * would poison the cache and pin those titles untranslated for good.
+ */
+async function translateTitles(list: HNItem[], api: DetailAPI): Promise<void> {
+  // Evict before computing misses, so entries evicted here are re-translated
+  // in this same call instead of flashing back to their originals.
+  if (titleCache.size > TITLE_CACHE_LIMIT) {
+    titleCache.clear();
+  }
+  const misses = list.filter((story) => !titleCache.has(String(story.id)));
+  if (misses.length === 0) {
+    return;
+  }
+  const originals = misses.map((story) => story.title ?? `#${story.id}`);
+  let lines: string[];
+  try {
+    lines = (await api.translate(originals.join("\n")))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+  } catch (error) {
+    await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+  if (lines.length !== misses.length) {
+    return;
+  }
+  misses.forEach((story, index) => {
+    const line = lines[index];
+    if (line !== undefined) {
+      titleCache.set(String(story.id), line);
+    }
+  });
+}
+
+/**
+ * Depth-first flatten of the Algolia comment tree, capped at `MAX_COMMENTS`.
+ * A deleted comment (null text) contributes nothing itself but its children
+ * stay, promoted to its depth so the thread does not dangle.
+ */
+function flattenComments(children: AlgoliaComment[], depth = 0, out: CommentNode[] = []): CommentNode[] {
+  for (const child of children) {
+    if (out.length >= MAX_COMMENTS) {
+      break;
+    }
+    if (typeof child.text === "string" && child.text.length > 0) {
+      out.push({ author: child.author ?? "匿名", text: child.text, depth });
+      flattenComments(child.children ?? [], depth + 1, out);
+    } else {
+      flattenComments(child.children ?? [], depth, out);
+    }
+  }
+  return out;
+}
+
+// The translator produced by `makeTranslator` (identity when the mode is off).
+type Translate = (text: string) => Promise<string>;
+
+// Comment bodies batch-translate joined by a standalone separator line no
+// comment is likely to contain. A translator that does not return the
+// separators intact fails the split, and that batch falls back to the
+// original text.
+const COMMENT_SEPARATOR = "\n\n=====\n\n";
+const COMMENT_SEPARATOR_PATTERN = /\n\s*=====\s*\n/;
+// The host rejects a single translate call over 10,000 characters; keep each
+// batched call safely under it (separators included). A hot HN page of 20
+// long comments easily exceeds the cap in one call.
+const TRANSLATE_BATCH_LIMIT = 9000;
+
+/** Split bodies into order-preserving batches whose joined length stays under
+ * the host's per-call translate limit. A lone oversized body gets its own
+ * batch — its call fails and only that batch falls back to the original. */
+function batchBodies(bodies: string[]): string[][] {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let length = 0;
+  for (const body of bodies) {
+    const added = body.length + COMMENT_SEPARATOR.length;
+    if (current.length > 0 && length + added > TRANSLATE_BATCH_LIMIT) {
+      batches.push(current);
+      current = [];
+      length = 0;
+    }
+    current.push(body);
+    length += added;
+  }
+  batches.push(current);
+  return batches;
+}
+
+/** Translate `bodies` in as few length-capped batched calls as possible,
+ * falling back to a batch's originals when its split does not round-trip. */
+async function translateBodies(bodies: string[], translate: Translate): Promise<string[]> {
+  if (bodies.length === 0) {
+    return bodies;
+  }
+  const batches = await Promise.all(
+    batchBodies(bodies).map(async (batch) => {
+      const translated = await translate(batch.join(COMMENT_SEPARATOR));
+      const parts = translated.split(COMMENT_SEPARATOR_PATTERN).map((part) => part.trim());
+      return parts.length === batch.length ? parts : batch;
+    }),
+  );
+  return batches.flat();
+}
+
+/** Render one page of comments as per-comment blockquotes; `↳` marks reply
+ * depth (one per nesting level). Author lines and depth markers are assembled
+ * from the original data — usernames are never sent to the translator. */
+async function renderComments(comments: CommentNode[], translate: Translate): Promise<string> {
+  const bodies = await translateBodies(
+    comments.map((comment) => htmlToMarkdown(comment.text)),
+    translate,
+  );
+  return comments
+    .map((comment, index) => {
+      const marker = comment.depth > 0 ? `${"↳".repeat(comment.depth)} ` : "";
+      return quoted(`${marker}**${comment.author}**`, withImagePreviews(bodies[index] ?? ""));
+    })
+    .join("\n\n");
+}
+
+/// Assemble the initial Detail document. `title` and `body` are already
+/// rendered (and possibly translated); `body` is empty when the story has no
+/// Ask/Show text; `comments` is the rendered first comment page. The meta line
+/// and links deliberately stay untranslated.
+function storyMarkdown(story: HNItem, title: string, body: string, comments: string): string {
+  const meta = [`**${story.by ?? "未知"}**`, `${story.score ?? 0} 分`, `${story.descendants ?? 0} 评论`].join(" · ");
+  const discussion = `${HN_ITEM_URL}${story.id}`;
+  const links = [
+    story.url !== undefined && `[阅读原文](${story.url})`,
+    `[在 HN 中查看讨论](${discussion})`,
+  ]
+    .filter((part): part is string => typeof part === "string")
+    .join(" · ");
+
+  const lines: string[] = [`# ${title}`, "", meta, "", links];
+
+  if (body.length > 0) {
+    lines.push("", "---", "", body);
+  }
+
+  lines.push("", "---", "", "## 评论", "", comments);
+  return lines.join("\n");
+}
+
+/**
+ * Build the Detail translator: identity when translation is off, otherwise an
+ * `api.translate` call per rendered chunk (the body, or a length-capped batch
+ * of comments — never one call per comment, which would multiply quota spend
+ * by 20). A failed translation toasts once and falls back to the original
+ * text, so a broken service degrades the Detail instead of breaking it.
+ */
+function makeTranslator(
+  api: { translate: TranslateFn; toast: ToastFn },
+  enabled: boolean,
+): (text: string) => Promise<string> {
+  return async (text) => {
+    if (!enabled || text.length === 0) {
+      return text;
+    }
+    try {
+      return await api.translate(text);
+    } catch (error) {
+      await api.toast("failure", `翻译失败：${error instanceof Error ? error.message : String(error)}`);
+      return text;
+    }
+  };
+}
+
+// The subset of the declared capability API the Detail builders need.
+type DetailAPI = { fetch: FetchFn; store: Store; toast: ToastFn; translate: TranslateFn };
+
+// Detail footer-action ids: each rebuilds the document in the other mode.
+const ACTION_TRANSLATE = "translate";
+const ACTION_ORIGINAL = "original";
+// A pagination cursor issued by a translated document carries this prefix so
+// scroll-loaded comment pages keep the mode the reader chose.
+const TRANSLATED_CURSOR_PREFIX = "t:";
+
+function detailCursor(page: number, translated: boolean): string {
+  return translated ? `${TRANSLATED_CURSOR_PREFIX}${page}` : String(page);
+}
+
+function parseDetailCursor(cursor: string): { page: number; translated: boolean } {
+  const translated = cursor.startsWith(TRANSLATED_CURSOR_PREFIX);
+  const raw = translated ? cursor.slice(TRANSLATED_CURSOR_PREFIX.length) : cursor;
+  return { page: Number.parseInt(raw, 10), translated };
+}
+
+/** The footer offers the switch to the mode the document is not in. */
+function detailActionsFor(translated: boolean): DetailAction[] {
+  return [
+    translated
+      ? { id: ACTION_ORIGINAL, label: "显示原文" }
+      : { id: ACTION_TRANSLATE, label: "翻译" },
+  ];
+}
+
+/** The Detail title: original, or its (cached) translation. The list may have
+ * translated it already; a Detail translate fills the same cache, so drilling
+ * back out shows the same title. Cached only on success — a failed call falls
+ * back to the original without poisoning the cache (the body translation
+ * surfaces the failure toast). */
+async function resolveTitle(story: HNItem, translated: boolean, api: DetailAPI): Promise<string> {
+  const original = story.title ?? `#${story.id}`;
+  if (!translated) {
+    return original;
+  }
+  const cached = titleCache.get(String(story.id));
+  if (cached !== undefined) {
+    return cached;
+  }
+  try {
+    const title = await api.translate(original);
+    titleCache.set(String(story.id), title);
+    return title;
+  } catch {
+    return original;
+  }
+}
+
+/** Fetch the story's whole comment tree from Algolia, flatten, and cache it. */
+async function loadComments(storyId: string, fetch: FetchFn): Promise<CommentNode[]> {
+  const item = await fetchJSON<AlgoliaItem>(fetch, `${ALGOLIA_ITEM_BASE}/${storyId}`);
+  const flattened = flattenComments(item.children ?? []);
+  commentCache.set(storyId, flattened);
+  return flattened;
+}
+
+/** The cursor for the page after `page`, if the thread extends past it. */
+function nextCursor(total: number, page: number, translated: boolean): string | undefined {
+  return total > page * COMMENTS_PAGE_SIZE ? detailCursor(page + 1, translated) : undefined;
+}
+
+/** Build the full Detail document (initial load or a footer-action rebuild). */
+async function buildStoryDocument(
+  story: HNItem,
+  translated: boolean,
+  api: DetailAPI,
+): Promise<DetailResult> {
+  const translate = makeTranslator(api, translated);
+  const comments = await loadComments(String(story.id), api.fetch);
+
+  const [title, body] = await Promise.all([
+    resolveTitle(story, translated, api),
+    typeof story.text === "string" && story.text.length > 0
+      ? translate(withImagePreviews(htmlToMarkdown(story.text)))
+      : Promise.resolve(""),
+  ]);
+  const firstPage = comments.slice(0, COMMENTS_PAGE_SIZE);
+  const rendered = firstPage.length === 0
+    ? quoted("暂无评论")
+    : await renderComments(firstPage, translate);
+
+  return {
+    markdown: storyMarkdown(story, title, body, rendered),
+    more: nextCursor(comments.length, 1, translated),
+    actions: detailActionsFor(translated),
+  };
+}
+
+/** Build one scroll-loaded comment page, keeping the document's mode. */
+async function buildCommentsChunk(
+  storyId: string,
+  page: number,
+  translated: boolean,
+  api: DetailAPI,
+): Promise<DetailResult> {
+  // The cache normally holds the tree from the initial document build; a miss
+  // (context recreated between chunks) refetches it.
+  const comments = commentCache.get(storyId) ?? (await loadComments(storyId, api.fetch));
+  const slice = comments.slice((page - 1) * COMMENTS_PAGE_SIZE, page * COMMENTS_PAGE_SIZE);
+  if (slice.length === 0) {
+    return { markdown: "" };
+  }
+  const translate = makeTranslator(api, translated);
+  return {
+    markdown: await renderComments(slice, translate),
+    more: nextCursor(comments.length, page, translated),
+  };
+}
+
+definePlugin(manifest, {
+  async rows(query, api) {
+    // The root is instant: only command rows and the pinned translate toggle,
+    // no network. English subtitles keep the feed names searchable both ways.
+    const translateOn = await readTranslateEnabled(api.store);
+    const commands: Row[] = [
+      { id: "top", title: "热门文章", subtitle: "Top Stories",
+        symbol: "flame", actionLabel: "查看", action: actions.list("top") },
+      { id: "new", title: "最新文章", subtitle: "New Stories",
+        symbol: "clock", actionLabel: "查看", action: actions.list("new") },
+      { id: "best", title: "最佳文章", subtitle: "Best Stories",
+        symbol: "star", actionLabel: "查看", action: actions.list("best") },
+      { id: "ask", title: "问答 Ask HN", subtitle: "Ask HN",
+        symbol: "questionmark.bubble", actionLabel: "查看", action: actions.list("ask") },
+      { id: "show", title: "作品 Show HN", subtitle: "Show HN",
+        symbol: "hammer", actionLabel: "查看", action: actions.list("show") },
+    ];
+
+    const needle = query.trim().toLowerCase();
+    const rows = needle.length > 0
+      ? commands.filter((row) => `${row.title} ${row.subtitle ?? ""}`.toLowerCase().includes(needle))
+      : commands;
+
+    // The translate toggle is pinned last and always present, regardless of
+    // the query. It flips a store flag; Detail reads it per open.
+    rows.push({
+      id: TRANSLATE_ROW_ID,
+      title: "翻译帖子内容",
+      subtitle: translateOn ? "已开启 · 列表标题与 Detail 均会翻译" : "使用设置中的翻译服务与目标语言",
+      symbol: "character.bubble",
+      actionLabel: translateOn ? "关闭" : "开启",
+      badge: translateOn ? "开启" : "关闭",
+      action: actions.run(false),
+    });
+
+    return rows;
+  },
+
+  async list(listId, query, api, cursor) {
+    const feedURL = FEEDS[listId];
+    if (feedURL === undefined) {
+      // An unknown list id: surface an empty list rather than throwing.
+      return [];
+    }
+    // First page: refresh the feed ids and reset the story lookup cache. A
+    // cursor page reuses the cached ids (refetched only if the context was
+    // recreated between pages).
+    let ids = feedIDs.get(listId);
+    if (cursor === undefined || ids === undefined) {
+      ids = await fetchJSON<number[]>(api.fetch, feedURL);
+      feedIDs.set(listId, ids);
+    }
+    const parsed = cursor === undefined ? 0 : Number.parseInt(cursor, 10);
+    const start = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+
+    // One Firebase request per story; a single dead/deleted item must not sink
+    // the whole page, so per-item failures drop to undefined and are filtered.
+    const items = await Promise.all(
+      ids.slice(start, start + STORIES_PAGE_SIZE).map((id) =>
+        fetchJSON<HNItem>(api.fetch, `${FIREBASE_BASE}/item/${id}.json`).catch(() => undefined),
+      ),
+    );
+    const alive = items.filter(
+      (item): item is HNItem => item !== undefined && item !== null && item.dead !== true && item.deleted !== true,
+    );
+    if (start === 0) {
+      stories.clear();
+    }
+    for (const story of alive) {
+      stories.set(String(story.id), story);
+    }
+    // With the translate toggle on, list titles render translated too.
+    const translateOn = await readTranslateEnabled(api.store);
+    if (translateOn) {
+      await translateTitles(alive, api);
+    }
+    const next = start + STORIES_PAGE_SIZE;
+    return {
+      rows: toRows(alive, query, translateOn),
+      more: next < ids.length ? String(next) : undefined,
+    };
+  },
+
+  async detail(rowId, api, cursor) {
+    const story = stories.get(rowId);
+    if (story === undefined) {
+      return "# 未找到\n\n请返回列表重新载入文章。";
+    }
+
+    // A cursor requests one further page of comments in the mode the cursor
+    // encodes; the host appends the chunk below the rendered document.
+    if (cursor !== undefined) {
+      const { page, translated } = parseDetailCursor(cursor);
+      return buildCommentsChunk(rowId, page, translated, api);
+    }
+
+    // Initial document: the root toggle sets the default mode; the footer
+    // action rebuilds this one document in the other mode.
+    return buildStoryDocument(story, await readTranslateEnabled(api.store), api);
+  },
+
+  async detailAction(rowId, actionId, api) {
+    const story = stories.get(rowId);
+    if (story === undefined) {
+      return "# 未找到\n\n请返回列表重新载入文章。";
+    }
+    return buildStoryDocument(story, actionId === ACTION_TRANSLATE, api);
+  },
+
+  async action(rowId, _actionId, _argument, api) {
+    // The translate row toggles the Detail-translation store flag in place;
+    // feed and story rows drill in instead of acting.
+    if (rowId !== TRANSLATE_ROW_ID) {
+      return;
+    }
+    const next = !(await readTranslateEnabled(api.store));
+    await api.store.set(TRANSLATE_KEY, next);
+    await api.toast("success", next ? "已开启帖子翻译" : "已关闭帖子翻译");
+  },
+});

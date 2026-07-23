@@ -1,7 +1,10 @@
 import Foundation
+import PluginInterface
 
-/// Builds the full production provider set — one provider per actionable
-/// (toggle/action-kind) `BuiltinItem`.
+/// Builds the Core's production provider set — one provider per actionable
+/// (toggle/action-kind) `BuiltinItem` the Core claims. Plugin-claimed commands
+/// (e.g. Image Conversion) contribute their providers through their
+/// `NativePlugin.providers` instead.
 ///
 /// Extracted from AppDelegate so tests can assert catalog coverage: a new
 /// BuiltinItem case registered here with the wrong protocol, or not registered
@@ -65,7 +68,6 @@ enum BuiltinProviderRegistry {
             TranslateProvider(),
             ScreenshotTranslateProvider(),
             TranslateSelectionProvider(),
-            ImageConversionProvider(),
         ]
     }
 }

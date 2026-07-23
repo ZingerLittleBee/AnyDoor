@@ -8,9 +8,163 @@ versioning.
 
 ### Added
 
+- Script Plugins: install directly from a `plugin-*.zip` — the Settings picker
+  now accepts the zip a release page offers (a wrapping folder inside the
+  archive is handled automatically), no manual unzipping needed.
+- Script Plugins: one-click install links. Opening
+  `anydoor://install-plugin?url=<https zip url>` downloads the package and asks
+  for confirmation — showing the plugin's name, id, version, download origin,
+  and the capabilities it declares — before installing. Links must be https;
+  anything else is refused.
+
+- Plugins: new 「插件」 tab in Settings. Image Conversion is the first Native
+  Plugin — install or uninstall it with one click, no relaunch. While
+  uninstalled it disappears everywhere (panel row, command palette, recorded
+  hotkeys, the workspace window, and the clipboard-history convert action);
+  uninstalling cancels an in-progress conversion first. Conversion history,
+  preferences, and hotkeys are kept, so reinstalling restores your exact
+  previous setup. Screenshot "Save As" is a core feature and is unaffected:
+  it keeps its full format list and quality setting either way. Pending Finder
+  window presentation, file/output-folder pickers, previews, preflight, Save
+  Anyway, and maintenance work are cancelled or drained before uninstall
+  completes, and stale presentation work cannot reopen the window afterward.
+- Plugins: Hosts management is now the second Native Plugin. Uninstalling it
+  never touches `/etc/hosts` and never asks for administrator authorization:
+  active profiles stay active and their entries remain in effect (the
+  confirmation says so) until a reinstall brings back the managing UI with
+  your exact previous setup. The privileged helper is unregistered when
+  nothing else needs it (forced Scheduled Shutdown shares the helper
+  daemon); if that fails the uninstall aborts, leaving the plugin fully
+  installed. While uninstalled the panel popover, palette entries, profile
+  rows, hotkey, and helper approval banner all disappear. Host profiles and
+  hosts backups are kept, so reinstalling restores everything without a
+  relaunch. Pending Hosts writes are cancelled before they start; a write
+  already handed to the system is drained before the helper is released.
+  If a retained plugin shortcut was rebound while the plugin was absent, the
+  newer binding wins and the old plugin shortcut is cleared on reinstall.
+- Plugins: the clipboard-history context menu is now a generic plugin
+  surface — installed plugins contribute actions through descriptors, and
+  the Image Conversion entry (「图片格式转换」) is its first contribution.
+  Behavior is unchanged; internally the Core no longer hardwires the Image
+  Conversion module, closing the plugin architecture's registered debt.
+- Plugins: upgrading users keep the features they were using — on the first
+  launch after the update, Hosts is installed automatically when host profiles
+  exist or the privileged helper is registered, and Image Conversion when
+  conversion history exists. Fresh installs start with both uninstalled, and
+  later updates never change your installed set.
+- Plugins: the installed-plugin set now travels in config backup. Importing a
+  backup installs or uninstalls plugins to match, with their windows, panel
+  rows, palette entries, and hotkeys appearing or disappearing without a
+  relaunch. Helper approval stays per-machine and is never carried by a
+  backup.
 - Command Palette now opens where you last left it, including after restarting
   AnyDoor. If that monitor is no longer connected, the palette returns to its
   default position.
+- Plugins: Script Plugins are the second plugin kind. Install one from
+  Settings → 插件 by picking a local package folder; it appears grouped under
+  「脚本插件」 with its name, description, and version (each shown in your
+  language when the manifest provides it). Its rows are searchable at the
+  command-palette root right away — no relaunch. An invalid package (missing
+  manifest fields, an unsupported apiVersion, or a duplicate id) is refused
+  with a clear message and changes nothing. Uninstalling removes the package
+  copy and every palette row at once, including from an open palette, while
+  the plugin's private data is kept — reinstalling the same plugin finds it
+  again. Script Plugin install state and data stay on this machine and never
+  travel in a config backup.
+- Plugins: Script Plugin rows are now interactive in the command palette.
+  Selecting a row can open a markdown Detail in place (Esc or Backspace walk
+  back), open a URL, copy text, or run a plugin function; a row that needs
+  input drops into the palette's argument field and hands the text to the
+  plugin. While a plugin builds its rows or a Detail the palette shows a
+  loading state, a build failure shows an inline error row, and a failed
+  action shows a failure toast — none of which hang or close the palette.
+  Uninstalling a plugin while its Detail is open discards the drill-in and
+  removes its rows immediately.
+- Plugins: a Script Plugin row can push a searchable second-level list with
+  its own query field, and both lists and markdown Details load more on
+  scroll when the plugin paginates — one page at a time, duplicate rows
+  dropped, and a failed page keeping what is already shown. A Detail or
+  pushed list that fails to load offers a Retry button in place.
+- Plugins: Detail pages render styled markdown — headings, lists, fenced code
+  blocks, blockquotes drawn with a leading bar, and inline image previews
+  (https images only; other schemes are never fetched). A Detail can declare
+  footer action buttons (for example 翻译 ⇄ 显示原文) that rebuild the
+  document in place.
+- Plugins: a new `translate` capability lets a Script Plugin translate text
+  through your configured translation services into your Settings target
+  language. Like every capability it must be declared in the manifest, and a
+  plugin can never pick the service or the direction.
+- Plugins: Script Plugin rows can show a trailing status badge, and a
+  completed row action refreshes the visible rows immediately — a stay-open
+  toggle re-renders its badge without closing the palette.
+- Command Palette: closing the palette while reading a plugin list or Detail
+  resumes right there on the next open (a plugin uninstalled in between
+  resets to the root instead), and walking back from a drill-in restores the
+  search text you had typed at that level.
+- For plugin authors: the typed authoring API is published on npm as
+  `@anydoor-dev/api`, `pnpm create @anydoor-dev/plugin` scaffolds a
+  ready-to-build project, and a GitHub template repository
+  (anydoor-plugin-template) ships with a tag-triggered release workflow that
+  attaches the installable `plugin-*.zip`. The V2EX and Hacker News example
+  plugins are attached to each AnyDoor release the same way.
+- Plugins: a per-machine Developer Mode switch (Settings → 插件) unlocks Dev
+  Plugins for plugin authors — with it off, no Dev Plugin affordance appears
+  anywhere. Register a local development folder as a Dev Plugin and it loads
+  in place, never copied; editing its bundle reloads the plugin automatically,
+  so an edit shows up in already-open palette rows within seconds. A Dev Plugin
+  surfaces its error detail (message and stack) to the author, while a normally
+  installed plugin keeps the plain inline error. Removing the registration
+  removes its surfaces and never modifies the development folder. Developer Mode
+  and Dev Plugin registrations are machine-local and never travel in a config
+  backup.
+- Plugins: every Script Plugin now keeps a per-plugin diagnostics log file
+  capturing load refusals, watchdog kills, and capability errors, so a failure
+  is diagnosable after the fact instead of only as a transient toast.
+
+### Changed
+
+- Native Plugin lifecycle and surface composition now live behind one
+  `PluginRegistry` boundary, with consistent activation ordering across cold
+  launch, install, uninstall, and backup import.
+- Backup restore now reports success only after imported settings, plugin
+  lifecycle, cleanup, panel rows, and hotkeys have all converged.
+- Native Plugins now have one compile-time catalog for both SwiftData schema
+  participation and runtime construction.
+- Removed unused speculative window and Settings requirements from the Native
+  Plugin interface; new surfaces will be added only with a real Core caller.
+- Panel and hotkey coordination is now wired explicitly at plugin-registry
+  bootstrap instead of reaching across a two-way global-singleton dependency.
+- Native Plugin host capabilities are now scoped to each plugin instance;
+  windows, services, writers, and localized views no longer depend on mutable
+  process-wide host or plugin-window singletons.
+- Image Conversion history is now owned by the plugin instance and bound to
+  its captured data container, so concurrent plugin instances cannot replace
+  one another's persistence context.
+- Plugin palette row sources are now namespaced by plugin id, preventing two
+  plugins with the same local source id from replacing or routing into one
+  another.
+- Fresh-install onboarding now presents Core features only; optional Native
+  Plugins remain discoverable exclusively from Settings → Plugins until
+  installed.
+
+### Fixed
+
+- Backup import now reports a partial failure when a plugin cannot be removed,
+  while still applying the remaining settings and persisting the plugin state
+  that actually converged.
+- Backup import no longer reports success while another plugin lifecycle
+  transition can still reverse the imported installed set.
+- An open Command Palette now removes uninstalled plugin commands, options,
+  and searchable rows immediately instead of leaving dead results behind.
+- Fresh-install onboarding no longer advertises the uninstalled Hosts plugin.
+- Script Plugin `fetch` no longer serves day-old cached HTTP responses.
+- Every plugin URL boundary (the `openURL` capability, a row's open-URL
+  action, and tapped Detail links) is confined to http/https; `file:` and
+  custom app schemes are refused everywhere.
+- Command palette root search now also matches a plugin's section title, so
+  typing the plugin's name surfaces its rows.
+- Plugin list and Detail pagination ignores stale in-flight fetches after
+  navigating away, so a slow page can never land on the wrong level.
 
 ## [3.7.0] - 2026-07-12
 

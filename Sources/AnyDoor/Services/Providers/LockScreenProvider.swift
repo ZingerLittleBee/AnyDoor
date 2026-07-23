@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Lock the screen via `CGSession -suspend`.
 ///

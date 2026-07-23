@@ -1,5 +1,6 @@
 import CoreAudio
 import Foundation
+import PluginInterface
 
 /// Toggle the system default input device's mute property.
 ///

@@ -1,5 +1,6 @@
 import XCTest
 @testable import AnyDoor
+@testable import ImageConversionPlugin
 
 final class ImageConversionNamingTests: XCTestCase {
     func testOutputURLUsesSourceBasenameAndTargetExtension() {

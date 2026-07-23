@@ -1,0 +1,35 @@
+{
+  "name": "@anydoor-dev/create-plugin",
+  "version": "0.1.0",
+  "description": "Scaffold a new AnyDoor Script Plugin: manifest, typed entry point, esbuild bundling.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ZingerLittleBee/AnyDoor.git",
+    "directory": "tooling/packages/create-plugin"
+  },
+  "homepage": "https://github.com/ZingerLittleBee/AnyDoor/tree/main/tooling/packages/create-plugin#readme",
+  "keywords": [
+    "anydoor",
+    "plugin",
+    "scaffold",
+    "macos"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "create-anydoor-plugin": "bin/create.mjs"
+  },
+  "files": [
+    "bin",
+    "template"
+  ],
+  "scripts": {
+    "typecheck": "node --check bin/create.mjs"
+  },
+  "dependencies": {
+    "@anydoor-dev/api": "workspace:*"
+  }
+}

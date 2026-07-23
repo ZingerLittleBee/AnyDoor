@@ -1,4 +1,6 @@
 import AppKit
+import PluginInterface
+import PluginSupport
 import SwiftUI
 
 /// A floating, click-through countdown shown during a self-timer capture. It sits

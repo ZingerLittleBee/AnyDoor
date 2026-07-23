@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import PluginInterface
 
 /// Errors surfaced by the OCR capture pipeline.
 enum OCRError: Error {

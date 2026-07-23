@@ -30,7 +30,6 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
     case capture
     case clipboardPalette
     case translation
-    case imageConversion
     case customize
 
     var id: Int { rawValue }
@@ -45,7 +44,6 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .capture:          return .onboardingSidebarCapture
         case .clipboardPalette: return .onboardingSidebarClipboard
         case .translation:      return .onboardingSidebarTranslation
-        case .imageConversion:  return .onboardingSidebarImageConversion
         case .customize:        return .onboardingSidebarCustomize
         }
     }
@@ -59,7 +57,6 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .capture:          return .onboardingCaptureTitle
         case .clipboardPalette: return .onboardingClipboardTitle
         case .translation:      return .onboardingTranslationTitle
-        case .imageConversion:  return .onboardingImageConversionTitle
         case .customize:        return .onboardingCustomizeTitle
         }
     }
@@ -73,7 +70,6 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .capture:          return .onboardingCaptureSubtitle
         case .clipboardPalette: return .onboardingClipboardSubtitle
         case .translation:      return .onboardingTranslationSubtitle
-        case .imageConversion:  return .onboardingImageConversionSubtitle
         case .customize:        return .onboardingCustomizeSubtitle
         }
     }
@@ -88,7 +84,6 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .capture:          return "camera.viewfinder"
         case .clipboardPalette: return "doc.on.clipboard"
         case .translation:      return "character.bubble"
-        case .imageConversion:  return "photo.on.rectangle"
         case .customize:        return "slider.horizontal.3"
         }
     }
@@ -102,7 +97,6 @@ enum OnboardingStep: Int, CaseIterable, Identifiable, Sendable {
         case .capture:          return .orange
         case .clipboardPalette: return .teal
         case .translation:      return .indigo
-        case .imageConversion:  return .cyan
         case .customize:        return .pink
         }
     }

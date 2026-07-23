@@ -1,3 +1,5 @@
+import PluginInterface
+import PluginSupport
 import AVFoundation
 import AppKit
 

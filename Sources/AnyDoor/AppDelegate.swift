@@ -1,4 +1,6 @@
 import Cocoa
+import PluginInterface
+import PluginSupport
 import SwiftData
 import SwiftUI
 import OSLog
@@ -42,11 +44,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
             let config = ModelConfiguration(url: storeURL)
-            modelContainer = try ModelContainer(
-                for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, HostProfile.self,
-                TranslationRecord.self, ImageConversionRecord.self, Quicklink.self,
-                configurations: config
+            // Core-owned model types plus every plugin's (ADR-0005: plugin
+            // schema is registered unconditionally, so user data survives
+            // Uninstall and a later Install restores it).
+            let schema = Schema(
+                [
+                    KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
+                    TranslationRecord.self, Quicklink.self,
+                ]
+                + NativePluginCatalog.modelSchemaTypes
             )
+            modelContainer = try ModelContainer(for: schema, configurations: config)
 
             let legacyURL = appSupport.appendingPathComponent("default.store")
             if FileManager.default.fileExists(atPath: legacyURL.path) {
@@ -92,29 +100,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ClipboardWatcher.shared = watcher
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
-        // Register providers
-        let providers = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
+        // Native Plugins: the registry loads the installed set, activates the
+        // installed plugins, and owns surface composition for launch and
+        // later lifecycle changes. Core control flow names no plugin beyond
+        // this list (ADR-0007).
+        let pluginHost = CorePluginHost(modelContainer: modelContainer)
+        let plugins = NativePluginCatalog.makePlugins(host: pluginHost)
+        // One-time usage-trace migration writes the install state directly and
+        // must precede the bootstrap, which activates the migrated-installed
+        // plugins through the normal launch path.
+        PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
+        let coreProviders = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
             PanelStore.shared.onKeepAwakeStateChange(state)
         })
-        PanelStore.shared.bootstrap(modelContainer: modelContainer, providers: providers)
-        HotkeyCoordinator.shared.bootstrap(modelContainer: modelContainer)
-        HostsManager.shared.bootstrap(modelContainer: modelContainer)
+        PluginRegistry.shared.bootstrap(
+            plugins: plugins,
+            modelContainer: modelContainer,
+            coreProviders: coreProviders
+        )
+        // Script Plugins: the second plugin kind. Discover Sideloaded packages
+        // in storage, activate the installed ones, and register their palette
+        // row sources. Independent of the Native registry — its own lifecycle
+        // core and install-state key (machine-local, out of config backup).
+        ScriptPluginRegistry.shared.bootstrap()
         QuicklinkStore.shared.bootstrap(modelContainer: modelContainer)
 
         // Translation history: give the store the shared container, then point
         // the coordinator at it so successful translations get recorded.
         TranslationHistoryStore.shared.configure(modelContainer: modelContainer)
         TranslationCoordinator.shared.history = TranslationHistoryStore.shared
-
-        // Image Conversion history: wire the shared container so completed
-        // conversions get recorded from the conversion view model.
-        ImageConversionHistoryStore.shared.configure(modelContainer: modelContainer)
-
-        // Sweep candidate session directories a previous process left behind:
-        // deinit/reset cleanup never runs on process exit or crash.
-        Task.detached(priority: .background) {
-            CandidateArtifactStore.cleanupStaleSessions()
-        }
 
         // Scheduled Shutdown: push state to the panel and re-arm any persisted
         // schedule (or cancel a deadline missed while the app was quit).
@@ -309,6 +323,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
         }
         return decision.allowDefaultHandling
+    }
+
+    /// `anydoor://` links (registered via `CFBundleURLTypes`; only the `.app`
+    /// identity receives them — a `swift run` process has no bundle to match).
+    /// The single supported command is the Script Plugin install link, handled
+    /// by `ScriptPluginURLInstaller` behind its own https + confirmation policy.
+    @MainActor
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            ScriptPluginURLInstaller.shared.handle(url)
+        }
     }
 
     struct ReopenHandlingDecision: Equatable {

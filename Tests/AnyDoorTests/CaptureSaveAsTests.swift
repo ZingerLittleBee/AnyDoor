@@ -1,5 +1,6 @@
 import AppKit
 import CoreGraphics
+import ImageCodec
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest
@@ -7,8 +8,11 @@ import XCTest
 
 /// Covers the pure, testable seams of the screenshot "Save As" path: the
 /// extension -> format resolution policy, the `UTType` accessor that widens the
-/// save panel, and the transcode-on-write helper (temp file + atomic move,
-/// nothing left behind on failure). The `NSSavePanel` itself is GUI-manual.
+/// save panel, and the transcode-on-write helper (encode fully in memory,
+/// atomic write, nothing left behind on failure). Save As is a Core feature:
+/// it depends only on the shared `ImageCodec` target, never on the Image
+/// Conversion plugin module, so it behaves identically whether or not that
+/// plugin is installed. The `NSSavePanel` itself is GUI-manual.
 final class CaptureSaveAsTests: XCTestCase {
     // MARK: - Extension -> format resolution
 

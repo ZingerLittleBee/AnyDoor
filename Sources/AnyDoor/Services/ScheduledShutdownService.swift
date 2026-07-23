@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
 import OSLog
+import PluginInterface
+import PluginSupport
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "shutdown")
 

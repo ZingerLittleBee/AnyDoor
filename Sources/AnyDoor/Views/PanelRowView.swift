@@ -1,3 +1,4 @@
+import PluginInterface
 import SwiftUI
 
 /// Renders a single PanelEntry in the menu bar panel.

@@ -77,6 +77,7 @@ struct SettingsView: View {
         case .clipboard: groupedFormPane { ClipboardSettingsView() }
         case .capture: groupedFormPane { CaptureSettingsView() }
         case .translation: groupedFormPane { TranslationSettingsView() }
+        case .plugins: groupedFormPane { PluginsSettingsView() }
         case .general: groupedFormPane { GeneralSettingsView() }
         }
     }
@@ -133,6 +134,7 @@ private extension SettingsTab {
         case .clipboard: .settingsTabClipboard
         case .capture: .settingsTabCapture
         case .translation: .settingsTabTranslation
+        case .plugins: .settingsTabPlugins
         case .general: .settingsTabGeneral
         }
     }
@@ -144,6 +146,7 @@ private extension SettingsTab {
         case .clipboard: "doc.on.clipboard"
         case .capture: "camera.viewfinder"
         case .translation: "character.bubble"
+        case .plugins: "puzzlepiece.extension"
         case .general: "gear"
         }
     }

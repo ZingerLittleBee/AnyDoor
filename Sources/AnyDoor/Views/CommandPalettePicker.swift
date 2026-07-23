@@ -1,667 +1,6 @@
 import SwiftUI
 import AppKit
-
-/// One labelled group of rows in the command palette.
-struct CommandPaletteSection: Identifiable {
-    let titleKey: L10n.Key
-    let entries: [PanelEntry]
-    var id: String { titleKey.rawValue }
-}
-
-/// Mutable state shared between the SwiftUI command palette view and the
-/// AppKit window controller. Mirrors `SpotlightPickerState`, with the
-/// addition of sectioned grouping (Raycast-style).
-@MainActor
-@Observable
-final class CommandPaletteState {
-    var query: String = ""
-    var selectedIndex: Int = 0
-
-    enum Level: Equatable {
-        case root
-        case options(parentTitle: String)
-        case argumentInput(quicklinkID: UUID, title: String, link: String, openWithBundleID: String?, badge: String)
-    }
-
-    private(set) var level: Level = .root
-    private var optionsByID: [String: CommandPaletteOption] = [:]
-    private var optionEntries: [PanelEntry] = []
-
-    var isAtRoot: Bool { level == .root }
-    var isInArgumentInput: Bool {
-        if case .argumentInput = level { return true }
-        return false
-    }
-    var argumentInputTitle: String? {
-        if case .argumentInput(_, let title, _, _, _) = level { return title }
-        return nil
-    }
-
-    /// The pill label shown in the search field while in argument-input mode —
-    /// the Quicklink's keyword when known (what the user typed before Tab),
-    /// otherwise its title. Nil at every other level.
-    var argumentBadge: String? {
-        if case .argumentInput(_, _, _, _, let badge) = level { return badge }
-        return nil
-    }
-
-    /// Push a second level built from `options`; resets the search + selection.
-    func enterOptions(parentTitle: String, _ options: [CommandPaletteOption]) {
-        optionsByID = Dictionary(uniqueKeysWithValues: options.map { ($0.id, $0) })
-        optionEntries = options.enumerated().map { index, option in
-            PanelEntry(
-                id: PanelEntry.id(for: .paletteOption(id: option.id)),
-                source: .paletteOption(id: option.id),
-                displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
-                title: option.title,
-                subtitle: option.subtitle,
-                symbol: option.symbol,
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
-            )
-        }
-        level = .options(parentTitle: parentTitle)
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
-    }
-
-    /// Push argument-input mode for a Search Template Quicklink. `keyword`, when
-    /// present, becomes the search-field badge (so a Tab-absorbed keyword stays
-    /// visible); otherwise the title is badged.
-    func enterArgumentInput(
-        quicklinkID: UUID,
-        title: String,
-        link: String,
-        openWithBundleID: String? = nil,
-        keyword: String? = nil
-    ) {
-        optionsByID = [:]
-        optionEntries = []
-        let trimmedKeyword = keyword?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        level = .argumentInput(
-            quicklinkID: quicklinkID,
-            title: title,
-            link: link,
-            openWithBundleID: openWithBundleID,
-            badge: trimmedKeyword.isEmpty ? title : trimmedKeyword
-        )
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
-    }
-
-    /// Return to the root level, clearing the option state + search + selection.
-    func popToRoot() {
-        level = .root
-        optionsByID = [:]
-        optionEntries = []
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
-    }
-
-    func option(id: String) -> CommandPaletteOption? { optionsByID[id] }
-
-    /// Replace the root sections after the off-main installed-apps scan resolves.
-    /// `@Observable` re-renders the picker; `query`/`selectedIndex`/drill-in state
-    /// are intentionally left untouched so a typing/drilling user isn't disturbed.
-    func updateSections(
-        _ sections: [CommandPaletteSection],
-        quicklinkTemplateCandidates: [QuicklinkTemplateCandidate]? = nil
-    ) {
-        allSections = sections
-        if let quicklinkTemplateCandidates {
-            self.quicklinkTemplateCandidates = quicklinkTemplateCandidates
-        }
-    }
-
-    // MARK: - Dev-tool scope badge (Raycast-style)
-
-    /// The active dev-tool scope. When set, the search bar shows a badge instead
-    /// of the magnifying glass and the list is exclusive to that tool's rows.
-    private(set) var activeDevToolScope: DevToolScope?
-
-    /// Space trigger: if the query is `<keyword> …`, absorb the keyword into a
-    /// scope badge and keep only the remainder as the body. Re-entrant-safe (it
-    /// no-ops once a scope is active). Call from the query `.onChange`.
-    func absorbDevToolScopeIfNeeded() {
-        guard isAtRoot, activeDevToolScope == nil else { return }
-        guard let spaceIndex = query.firstIndex(where: \.isWhitespace) else { return }
-        let keyword = String(query[query.startIndex..<spaceIndex])
-        guard let scope = DevToolScope(keyword: keyword) else { return }
-        activeDevToolScope = scope
-        query = String(query[query.index(after: spaceIndex)...])
-        selectedIndex = 0
-    }
-
-    /// Tab trigger: when the whole query is exactly a scoped keyword, absorb it.
-    /// Returns whether a scope was absorbed.
-    @discardableResult
-    func tryAbsorbDevToolScope() -> Bool {
-        guard isAtRoot, activeDevToolScope == nil else { return false }
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard let scope = DevToolScope(keyword: trimmed) else { return false }
-        activeDevToolScope = scope
-        query = ""
-        selectedIndex = 0
-        return true
-    }
-
-    /// Drop the active scope (Backspace on an empty body, or Esc).
-    func removeDevToolScope() {
-        activeDevToolScope = nil
-        query = ""
-        selectedIndex = 0
-    }
-
-    // MARK: - Quicklink keyword badge (Raycast-style)
-
-    /// Tab trigger: when the whole query is exactly a Search Template Quicklink's
-    /// keyword, absorb it into an argument-input badge so the user types only the
-    /// query next. Returns whether one was absorbed. Mirrors
-    /// `tryAbsorbDevToolScope`; call it only after the dev-tool attempt so a
-    /// dev-tool keyword still wins a collision.
-    @discardableResult
-    func tryAbsorbQuicklinkKeyword() -> Bool {
-        guard isAtRoot, activeDevToolScope == nil else { return false }
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return false }
-        guard let candidate = quicklinkTemplateCandidates.first(where: { candidate in
-            guard let keyword = candidate.keyword else { return false }
-            return keyword.compare(trimmed, options: .caseInsensitive) == .orderedSame
-        }) else { return false }
-        enterArgumentInput(
-            quicklinkID: candidate.id,
-            title: candidate.title,
-            link: candidate.link,
-            openWithBundleID: candidate.openWithBundleID,
-            keyword: candidate.keyword
-        )
-        return true
-    }
-
-    /// Scoped tools whose keyword starts with the current (unscoped) query — the
-    /// completion hints shown while the user is still typing a keyword.
-    func devToolScopeSuggestions(matching query: String) -> [DevToolScope] {
-        guard activeDevToolScope == nil else { return [] }
-        let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !needle.isEmpty else { return [] }
-        return DevToolScope.allCases.filter { $0.keyword.hasPrefix(needle) }
-    }
-
-    /// Whether the bottom toolbar (the "更新汇率" footer) should show — only in a
-    /// currency context: a currency conversion row is visible, or the query is a
-    /// currency-shaped expression with no rate table yet (so the user can refresh
-    /// to recover). Unit / time-zone / plain search keep the toolbar hidden.
-    var isCurrencyContext: Bool {
-        guard isAtRoot else { return false }
-        let hasCurrencyRow = flatEntries.contains { entry in
-            if case .conversion(let result) = entry.source { return result.kind == .currency }
-            return false
-        }
-        if hasCurrencyRow { return true }
-        return currencyRatesProvider() == nil && CurrencyConversion.isCurrencyQuery(query)
-    }
-
-    /// Enter a scope directly (committing a suggestion row), clearing the body so
-    /// the user types only the conversion input next.
-    func enterDevToolScope(_ scope: DevToolScope) {
-        activeDevToolScope = scope
-        query = ""
-        selectedIndex = 0
-    }
-
-    // MARK: - Destructive-action confirmation
-
-    /// A confirmation awaiting the user's decision. Held on the MainActor (like
-    /// `CommandPaletteOption`) because `perform` is a non-Sendable closure.
-    struct PendingConfirmation {
-        let confirmation: CommandPaletteConfirmation
-        let perform: @MainActor () async -> Void
-    }
-
-    private(set) var pendingConfirmation: PendingConfirmation?
-    var isConfirming: Bool { pendingConfirmation != nil }
-
-    /// Hold a destructive action behind a confirmation card instead of running
-    /// it immediately. The window controller runs `perform` on confirm.
-    func requestConfirmation(_ confirmation: CommandPaletteConfirmation,
-                             perform: @escaping @MainActor () async -> Void) {
-        pendingConfirmation = PendingConfirmation(confirmation: confirmation, perform: perform)
-    }
-
-    func cancelConfirmation() { pendingConfirmation = nil }
-
-    /// What the window controller should do after applying the Esc-key policy.
-    enum EscapeOutcome: Equatable { case clearedQuery, poppedToRoot, dismiss }
-
-    /// Esc-key policy: a non-empty query is cleared first (at either level); an
-    /// empty query pops to the root from the second level, or asks the window to
-    /// dismiss at the root.
-    @discardableResult
-    func handleEscape() -> EscapeOutcome {
-        if !query.isEmpty {
-            query = ""
-            // Reset the selection ourselves rather than relying on the view's
-            // `.onChange(of: query)`, matching popToRoot()/enterOptions().
-            selectedIndex = 0
-            return .clearedQuery
-        }
-        // Empty body but a dev-tool scope is active: shed the badge first.
-        if activeDevToolScope != nil {
-            removeDevToolScope()
-            return .poppedToRoot
-        }
-        if isAtRoot { return .dismiss }
-        popToRoot()
-        return .poppedToRoot
-    }
-
-    /// Option entries filtered by the second-level query.
-    var filteredOptionEntries: [PanelEntry] {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return optionEntries }
-        return optionEntries.filter {
-            $0.title.localizedCaseInsensitiveContains(trimmed)
-                || ($0.subtitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
-        }
-    }
-
-    private(set) var allSections: [CommandPaletteSection]
-    private(set) var quicklinkTemplateCandidates: [QuicklinkTemplateCandidate]
-    let hyperFlags: Int
-    private let portInventory: PortInventory
-    private var portRefreshTask: Task<Void, Never>?
-    /// Source of the hosts profiles searchable at the root. Injected so the
-    /// hosts section is unit-testable without the HostsManager singleton.
-    private let hostProfilesProvider: () -> [HostProfile]
-    /// Source of the currency rate table for inline currency conversion. Injected
-    /// (like `hostProfilesProvider`) so conversion tests stay deterministic.
-    private let currencyRatesProvider: () -> RateTable?
-
-    init(
-        sections: [CommandPaletteSection],
-        hyperFlags: Int,
-        quicklinkTemplateCandidates: [QuicklinkTemplateCandidate] = [],
-        portInventory: PortInventory = .shared,
-        hostProfilesProvider: @escaping () -> [HostProfile] = { HostsManager.shared.profiles },
-        currencyRatesProvider: @escaping () -> RateTable? = { CurrencyRatesService.shared.rateTable }
-    ) {
-        self.allSections = sections
-        self.quicklinkTemplateCandidates = quicklinkTemplateCandidates
-        self.hyperFlags = hyperFlags
-        self.portInventory = portInventory
-        self.hostProfilesProvider = hostProfilesProvider
-        self.currencyRatesProvider = currencyRatesProvider
-    }
-
-    /// Sections after applying the query filter, with empty sections dropped.
-    var filteredSections: [CommandPaletteSection] {
-        guard isAtRoot else { return [] }
-        // Scope mode: the list is exclusive to the badged tool's rows; no app /
-        // command / port search leaks in. An empty body shows an empty list.
-        if let scope = activeDevToolScope {
-            let results = DevTools.results(scope: scope, body: query)
-            return results.isEmpty ? [] : [makeDevToolsSection(from: results)]
-        }
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return allSections }
-        var sections = allSections.compactMap { section in
-            let matched = section.entries.filter { entry in
-                rootEntry(entry, matches: trimmed)
-            }
-            return matched.isEmpty ? nil : CommandPaletteSection(titleKey: section.titleKey, entries: matched)
-        }
-        // Insert special sections at index 0 in reverse priority order, so the
-        // last inserted ends up on top. Final order: quicklink argument, dev-tool
-        // keyword-completion hint, calc, conversion, ports, hosts, dev tools.
-        if let dev = devToolsSection(matching: trimmed) {
-            sections.insert(dev, at: 0)
-        }
-        if let hosts = hostsSection(matching: trimmed) {
-            sections.insert(hosts, at: 0)
-        }
-        if let ports = portSection(matching: trimmed) {
-            sections.insert(ports, at: 0)
-        }
-        if let conversion = conversionSection(matching: trimmed) {
-            sections.insert(conversion, at: 0)
-        }
-        if let calc = calcSection(matching: trimmed) {
-            sections.insert(calc, at: 0)
-        }
-        // Keyword-completion hint sits on top so it is selected by default:
-        // pressing Return enters the scope while the user is still typing.
-        if let suggestions = devToolSuggestionSection(matching: trimmed) {
-            sections.insert(suggestions, at: 0)
-        }
-        if let quicklinkArgument = quicklinkArgumentSection(matching: trimmed) {
-            sections.insert(quicklinkArgument, at: 0)
-        }
-        return sections
-    }
-
-    private func rootEntry(_ entry: PanelEntry, matches query: String) -> Bool {
-        entry.localizedTitle().localizedCaseInsensitiveContains(query)
-            || entry.title.localizedCaseInsensitiveContains(query)
-            || entry.searchAliases.contains { $0.localizedCaseInsensitiveContains(query) }
-    }
-
-    /// Builds a "Hosts" section listing every profile whose name contains the
-    /// query, so a profile is reachable by name from the root. Committing a row
-    /// toggles that profile's activation.
-    private func hostsSection(matching query: String) -> CommandPaletteSection? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let entries = hostProfilesProvider()
-            .filter { $0.name.localizedCaseInsensitiveContains(trimmed) }
-            .sorted { $0.displayOrder < $1.displayOrder }
-            .map { Self.hostEntry(for: $0) }
-        guard !entries.isEmpty else { return nil }
-        return CommandPaletteSection(titleKey: .commandPaletteSectionHosts, entries: entries)
-    }
-
-    private static func hostEntry(for profile: HostProfile) -> PanelEntry {
-        PanelEntry(
-            id: PanelEntry.id(for: .hostProfile(id: profile.id)),
-            source: .hostProfile(id: profile.id),
-            displayOrder: profile.displayOrder,
-            isVisible: true,
-            hotkey: nil,
-            title: profile.name,
-            subtitle: profile.isActive ? L(.commandPaletteHostsActive) : nil,
-            symbol: profile.isActive ? "checkmark.circle.fill" : "circle",
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
-        )
-    }
-
-    private func quicklinkArgumentSection(matching query: String) -> CommandPaletteSection? {
-        guard let match = QuicklinkInlineArgumentResolver.resolve(
-            query: query,
-            candidates: quicklinkTemplateCandidates
-        ) else { return nil }
-        return CommandPaletteSection(
-            titleKey: .commandPaletteSectionCommands,
-            entries: [
-                Self.quicklinkArgumentEntry(
-                    quicklinkID: match.quicklinkID,
-                    title: match.title,
-                    argument: match.argument,
-                    substitutedLink: match.substitutedLink,
-                    openWithBundleID: match.openWithBundleID
-                )
-            ]
-        )
-    }
-
-    private static func quicklinkArgumentEntry(
-        quicklinkID: UUID,
-        title: String,
-        argument: String,
-        substitutedLink: String?,
-        openWithBundleID: String?
-    ) -> PanelEntry {
-        let source = PanelEntry.Source.quicklinkArgument(id: quicklinkID, argument: argument)
-        return PanelEntry(
-            id: PanelEntry.id(for: source),
-            source: source,
-            displayOrder: 0,
-            isVisible: true,
-            hotkey: nil,
-            title: "\(title) — \(argument)",
-            subtitle: substitutedLink,
-            symbol: "link",
-            quicklinkIcon: substitutedLink.map {
-                QuicklinkIconRequest(link: $0, openWithBundleID: openWithBundleID)
-            },
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
-        )
-    }
-
-    /// Builds a one-row "Calculator" section when `query` is a calc expression.
-    /// Inserted at the top of `filteredSections`, so it is selected by default
-    /// and Return copies the result immediately.
-    private func calcSection(matching query: String) -> CommandPaletteSection? {
-        guard let result = Calculator.evaluate(query: query) else { return nil }
-        let entry = PanelEntry(
-            id: PanelEntry.id(for: .calcResult(result)),
-            source: .calcResult(result),
-            displayOrder: 0,
-            isVisible: true,
-            hotkey: nil,
-            title: result.display,
-            subtitle: query.trimmingCharacters(in: .whitespacesAndNewlines),
-            symbol: "function",
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
-        )
-        return CommandPaletteSection(titleKey: .commandPaletteSectionCalculator, entries: [entry])
-    }
-
-    /// Builds a "Developer Tools" section from `DevTools.detect`, one row per
-    /// conversion (Base64 / URL / JSON / hash / timestamp). Committing a row
-    /// copies its output. The tool name is resolved to a localized subtitle here
-    /// so the pure `DevTools` core stays free of UI/localization concerns.
-    private func devToolsSection(matching query: String) -> CommandPaletteSection? {
-        let results = DevTools.detect(query: query)
-        return results.isEmpty ? nil : makeDevToolsSection(from: results)
-    }
-
-    /// Builds a "Conversion" section from `Conversions.detect` (unit / time-zone /
-    /// currency). Currency rates come from the injected provider; time-zone rows
-    /// use the live clock. Committing a row copies its value.
-    private func conversionSection(matching query: String) -> CommandPaletteSection? {
-        let results = Conversions.detect(
-            query: query,
-            rates: currencyRatesProvider(),
-            now: Date(),
-            localZone: .current
-        )
-        guard !results.isEmpty else { return nil }
-        let entries = results.enumerated().map { index, result in
-            PanelEntry(
-                id: PanelEntry.id(for: .conversion(result)),
-                source: .conversion(result),
-                displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
-                title: result.display,
-                subtitle: Self.conversionSubtitle(for: result),
-                symbol: result.symbol,
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
-            )
-        }
-        return CommandPaletteSection(titleKey: .commandPaletteSectionConversion, entries: entries)
-    }
-
-    /// The row subtitle for a conversion. Currency wraps its rate date in a
-    /// localized "as of …"; unit / time-zone rows show their plain detail string.
-    static func conversionSubtitle(for result: ConversionResult) -> String {
-        switch result.kind {
-        case .currency: return L(.conversionCurrencyAsOf, result.detail)
-        case .unit, .timeZone: return result.detail
-        }
-    }
-
-    /// Builds a "Developer Tools" hint section while the query is still a prefix
-    /// of one or more scoped keywords. Committing a row enters that scope.
-    private func devToolSuggestionSection(matching query: String) -> CommandPaletteSection? {
-        let scopes = devToolScopeSuggestions(matching: query)
-        guard !scopes.isEmpty else { return nil }
-        let entries = scopes.enumerated().map { index, scope in
-            PanelEntry(
-                id: PanelEntry.id(for: .devToolScopeSuggestion(scope)),
-                source: .devToolScopeSuggestion(scope),
-                displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
-                title: scope.badgeLabel,
-                subtitle: L(.commandPaletteDevToolScopeSuggestionHint),
-                symbol: "hammer",
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
-            )
-        }
-        return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
-    }
-
-    /// Builds the "Developer Tools" section from already-evaluated results.
-    /// Shared by the auto-detect path (`devToolsSection`) and the scope path.
-    private func makeDevToolsSection(from results: [DevToolResult]) -> CommandPaletteSection {
-        let entries = results.enumerated().map { index, result in
-            PanelEntry(
-                id: PanelEntry.id(for: .devTool(result)),
-                source: .devTool(result),
-                displayOrder: Double(index),
-                isVisible: true,
-                hotkey: nil,
-                title: result.output,
-                subtitle: L(Self.devToolLabelKey(result.toolID)),
-                symbol: "hammer",
-                kind: .action,
-                toggleState: nil,
-                permission: .notRequired
-            )
-        }
-        return CommandPaletteSection(titleKey: .commandPaletteSectionDevTools, entries: entries)
-    }
-
-    /// Maps a `DevToolResult.toolID` to its localized tool-name label key.
-    static func devToolLabelKey(_ toolID: String) -> L10n.Key {
-        switch toolID {
-        case "base64.encode": return .devToolBase64Encode
-        case "base64.decode": return .devToolBase64Decode
-        case "url.encode": return .devToolURLEncode
-        case "url.decode": return .devToolURLDecode
-        case "json.pretty": return .devToolJSONPretty
-        case "json.minify": return .devToolJSONMinify
-        case "hash.md5": return .devToolHashMD5
-        case "hash.sha1": return .devToolHashSHA1
-        case "hash.sha256": return .devToolHashSHA256
-        case "ts.local": return .devToolTimestampLocal
-        case "ts.utc": return .devToolTimestampUTC
-        case "ts.iso": return .devToolTimestampISO
-        default: return .commandPaletteSectionDevTools
-        }
-    }
-
-    /// Refresh the listening-port inventory when the query looks like a port
-    /// number, so the "Ports" section reflects the live state. Coalesced so a
-    /// burst of keystrokes triggers at most one in-flight scan.
-    func refreshPortsIfNeeded() {
-        // In dev-tool scope mode the list is exclusive to that tool, so ports can
-        // never surface — skip the scan even if the body looks like a port number.
-        guard isAtRoot else { return }
-        guard activeDevToolScope == nil else { return }
-        guard Self.portSearchNeedle(from: query) != nil else { return }
-        guard !portInventory.isRefreshing, portRefreshTask == nil else { return }
-
-        portRefreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.portInventory.refresh()
-            self.portRefreshTask = nil
-        }
-    }
-
-    /// Builds a "Ports" section listing every listening TCP port whose number
-    /// contains the (numeric) query. Inserted at the top of `filteredSections`
-    /// so a port lookup surfaces immediately; Return on a row kills the process.
-    private func portSection(matching query: String) -> CommandPaletteSection? {
-        guard let needle = Self.portSearchNeedle(from: query) else { return nil }
-        let entries = portInventory.records
-            .filter { String($0.port).contains(needle) }
-            .sorted(by: Self.sortPorts)
-            .map { Self.portEntry(for: $0) }
-        guard !entries.isEmpty else { return nil }
-        return CommandPaletteSection(titleKey: .commandPaletteSectionPorts, entries: entries)
-    }
-
-    private static func portSearchNeedle(from query: String) -> String? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawNeedle = trimmed.hasPrefix(":") ? String(trimmed.dropFirst()) : trimmed
-        guard !rawNeedle.isEmpty, rawNeedle.allSatisfy(\.isNumber) else { return nil }
-        return rawNeedle
-    }
-
-    private static func sortPorts(_ lhs: PortRecord, _ rhs: PortRecord) -> Bool {
-        if lhs.port != rhs.port { return lhs.port < rhs.port }
-        let nameOrder = lhs.processName.localizedCaseInsensitiveCompare(rhs.processName)
-        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-        return lhs.pid < rhs.pid
-    }
-
-    private static func portEntry(for record: PortRecord) -> PanelEntry {
-        PanelEntry(
-            id: PanelEntry.id(for: .portRecord(record)),
-            source: .portRecord(record),
-            displayOrder: Double(record.port),
-            isVisible: true,
-            hotkey: nil,
-            title: record.processName,
-            subtitle: L(.commandPalettePortSubtitle, String(record.port), String(record.pid)),
-            symbol: "xmark.circle.fill",
-            kind: .action,
-            toggleState: nil,
-            permission: .notRequired
-        )
-    }
-
-    /// Flat list driving keyboard navigation. Sections are conceptual; the
-    /// selection index is global across all visible entries.
-    var flatEntries: [PanelEntry] {
-        switch level {
-        case .root: return filteredSections.flatMap(\.entries)
-        case .options: return filteredOptionEntries
-        case .argumentInput: return argumentInputEntry().map { [$0] } ?? []
-        }
-    }
-
-    private func argumentInputEntry() -> PanelEntry? {
-        guard case .argumentInput(let quicklinkID, let title, let link, let openWithBundleID, _) = level else {
-            return nil
-        }
-        let argument = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !argument.isEmpty else { return nil }
-        return Self.quicklinkArgumentEntry(
-            quicklinkID: quicklinkID,
-            title: title,
-            argument: argument,
-            substitutedLink: QuicklinkOpener.substitutedTemplateLink(link: link, argument: argument),
-            openWithBundleID: openWithBundleID
-        )
-    }
-
-    func moveDown() {
-        let count = flatEntries.count
-        guard count > 0 else { return }
-        selectedIndex = min(selectedIndex + 1, count - 1)
-    }
-
-    func moveUp() {
-        let count = flatEntries.count
-        guard count > 0 else { return }
-        selectedIndex = max(selectedIndex - 1, 0)
-    }
-
-    func commitSelection() -> PanelEntry? {
-        let list = flatEntries
-        guard list.indices.contains(selectedIndex) else { return list.first }
-        return list[selectedIndex]
-    }
-
-}
+import PluginInterface
 
 struct CommandPalettePicker: View {
     @Bindable var state: CommandPaletteState
@@ -669,33 +8,69 @@ struct CommandPalettePicker: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
     let onRefreshRates: () -> Void
+    /// Opens a markdown link tapped inside the Detail pane. The controller
+    /// scheme-guards and dismisses (plugin-supplied URLs, ADR-0009).
+    let onOpenDetailLink: (URL) -> Void
+    /// Fired when the Detail's bottom sentinel scrolls into view; the
+    /// controller fetches the next chunk through the state's load-more gate.
+    let onLoadDetailMore: () -> Void
+    /// Fired when a pushed list's bottom sentinel scrolls into view; the
+    /// controller fetches the next page through the state's load-more gate.
+    let onLoadListMore: () -> Void
+    /// Fired when a Detail footer action is pressed; the controller rebuilds
+    /// the document through the plugin's `detailAction` entry point.
+    let onDetailAction: (String) -> Void
+    /// Fired by the failed Detail's retry button; the controller re-requests
+    /// the document through the state's retry gate.
+    let onRetryDetail: () -> Void
+    /// Fired by a failed pushed list's retry button; the controller re-requests
+    /// the rows through the state's retry gate.
+    let onRetryList: () -> Void
+    /// Notifies the controller when the Detail level is entered/left so it can
+    /// hide the overlaid AppKit search field (no text input in Detail) and
+    /// restore focus on return.
+    let onDetailActiveChange: (Bool) -> Void
+    /// Notifies the controller after any navigation-position change (drill-in or
+    /// pop) so it can re-anchor the overlaid AppKit search field below the new
+    /// back header — or back at the top when returning to the root.
+    let onLevelChange: () -> Void
     let registerSearchAnchor: (CommandPaletteSearchAnchorView, String, String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
-            // Argument-input mode carries its own search-field badge (Raycast
-            // style), so only the options level shows the back header.
-            if case .options = state.level { backHeader }
-
-            searchField
-
-            Divider().opacity(0.4)
-
-            if state.flatEntries.isEmpty {
-                if let scope = state.activeDevToolScope {
-                    scopeTips(for: scope)
-                } else {
-                    emptyState
-                }
-            } else if state.isAtRoot {
-                entryList
-            } else {
-                optionList
-            }
-
-            if state.isCurrencyContext {
+            if state.isInDetail {
+                // The Detail level replaces the root search chrome entirely: only
+                // the back header and the rendered markdown occupy the surface, so
+                // the search field, its placeholder/caret, and the root list can
+                // neither show through nor accept stray input.
+                backHeader
                 Divider().opacity(0.4)
-                footerBar
+                detailView
+            } else {
+                // Argument-input mode carries its own search-field badge (Raycast
+                // style), so only the options level shows the back header.
+                if backHeaderTitle != nil { backHeader }
+
+                searchField
+
+                Divider().opacity(0.4)
+
+                if state.flatEntries.isEmpty {
+                    if let scope = state.activeDevToolScope {
+                        scopeTips(for: scope)
+                    } else {
+                        emptyState
+                    }
+                } else if state.isAtRoot {
+                    entryList
+                } else {
+                    optionList
+                }
+
+                if state.isCurrencyContext {
+                    Divider().opacity(0.4)
+                    footerBar
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -723,6 +98,12 @@ struct CommandPalettePicker: View {
             state.absorbDevToolScopeIfNeeded()
             state.selectedIndex = 0
             state.refreshPortsIfNeeded()
+        }
+        .onChange(of: state.isInDetail) { _, inDetail in
+            onDetailActiveChange(inDetail)
+        }
+        .onChange(of: state.navigationRevision) { _, _ in
+            onLevelChange()
         }
         .focusEffectDisabled()
     }
@@ -935,8 +316,8 @@ struct CommandPalettePicker: View {
             return L(.commandPaletteActionCopy)
         case .devToolScopeSuggestion:
             return L(.commandPaletteActionEnter)
-        case .hostProfile:
-            return L(.commandPaletteActionToggle)
+        case .pluginRow(_, let descriptor):
+            return descriptor.actionLabel ?? L(.commandPaletteActionSelect)
         case .paletteOption(let id):
             if state.option(id: id)?.role == .destructive { return L(.commandPaletteActionQuit) }
             return L(.commandPaletteActionSelect)
@@ -950,15 +331,26 @@ struct CommandPalettePicker: View {
         }
     }
 
+    /// The back-header title for the second-level view, or nil at levels that
+    /// carry no header (root, and the badge-bearing argument-input modes).
+    private var backHeaderTitle: String? {
+        switch state.level {
+        case .options(let optionsLevel): return optionsLevel.parentTitle
+        case .detail(let detailLevel): return detailLevel.content.title
+        case .list(let listLevel): return listLevel.title
+        case .root, .argumentInput, .pluginArgumentInput: return nil
+        }
+    }
+
     private var backHeader: some View {
         Button {
-            state.popToRoot()
+            state.popLevel()
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 13, weight: .semibold))
-                if case let .options(parentTitle) = state.level {
-                    Text(parentTitle)
+                if let title = backHeaderTitle {
+                    Text(title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
                 }
@@ -972,6 +364,101 @@ struct CommandPalettePicker: View {
         .padding(.top, 14)
         .padding(.bottom, 2)
         .help(L(.commandPaletteOptionBack))
+    }
+
+    /// The pushed markdown Detail: a loading placeholder, the rendered markdown,
+    /// or an inline error — parsed with the system markdown parser (no
+    /// third-party renderer). SwiftUI view internals are untested per repo
+    /// convention; the loading/error state transitions are pinned at the state
+    /// layer.
+    @ViewBuilder
+    private var detailView: some View {
+        switch state.detailState {
+        case .loading:
+            VStack(spacing: 12) {
+                Spacer()
+                ProgressView()
+                LocalizedText(.commandPalettePluginRowLoading)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+        case .loaded(_, let markdown):
+            VStack(spacing: 0) {
+                loadedDetailScroll(markdown: markdown)
+                if !state.detailActions.isEmpty {
+                    Divider().opacity(0.5)
+                    HStack(spacing: 8) {
+                        Spacer()
+                        ForEach(state.detailActions, id: \.id) { action in
+                            Button(action.label) { onDetailAction(action.id) }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                }
+            }
+        case .failed(_, let message):
+            VStack(spacing: 10) {
+                Spacer()
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.secondary)
+                Text(message)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                retryButton(action: onRetryDetail)
+                    .padding(.top, 4)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, minHeight: 320, maxHeight: .infinity)
+            .padding(.horizontal, 40)
+        case .none:
+            EmptyView()
+        }
+    }
+
+    /// The loaded Detail's scrollable document (markdown blocks + the
+    /// load-more sentinel), extracted so the action bar can sit below it.
+    private func loadedDetailScroll(markdown: String) -> some View {
+        ScrollView {
+                // Lazy so the bottom sentinel's `onAppear` fires only when the
+                // user actually scrolls it into view (in a plain VStack every
+                // child "appears" immediately, which would eagerly page in the
+                // whole document).
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    MarkdownBlocksView(blocks: MarkdownBlocks.blocks(from: markdown))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let cursor = state.detailMoreCursor {
+                        HStack {
+                            Spacer()
+                            ProgressView().controlSize(.small)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
+                        // Identity per cursor: each appended chunk re-arms the
+                        // sentinel, so it can trigger the next page when it is
+                        // still (or again) visible.
+                        .id(cursor)
+                        .onAppear { onLoadDetailMore() }
+                    }
+                }
+                .padding(.horizontal, 22)
+                .padding(.vertical, 16)
+                .overlayScrollers()
+            }
+            .frame(minHeight: 320, maxHeight: .infinity)
+            // Markdown links open through the environment so the controller can
+            // scheme-guard the plugin-supplied URL and dismiss the palette.
+            .environment(\.openURL, OpenURLAction { url in
+                onOpenDetailLink(url)
+                return .handled
+            })
     }
 
     private var optionList: some View {
@@ -992,6 +479,27 @@ struct CommandPalettePicker: View {
                         )
                         .id(entry.id)
                     }
+                    if let cursor = state.listMoreCursor {
+                        HStack {
+                            Spacer()
+                            ProgressView().controlSize(.small)
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+                        // Identity per cursor: each appended page re-arms the
+                        // sentinel, so it can trigger the next page when it is
+                        // still (or again) visible. Mirrors the Detail sentinel.
+                        .id(cursor)
+                        .onAppear { onLoadListMore() }
+                    }
+                    if state.listRetryAvailable {
+                        HStack {
+                            Spacer()
+                            retryButton(action: onRetryList)
+                            Spacer()
+                        }
+                        .padding(.vertical, 10)
+                    }
                 }
                 .overlayScrollers()
             }
@@ -1002,6 +510,18 @@ struct CommandPalettePicker: View {
                 proxy.scrollTo(entries[newIndex].id)
             }
         }
+    }
+
+    /// The retry affordance shown on a failed Detail and below a failed pushed
+    /// list's error row. Return triggers the same path via the key monitor.
+    private func retryButton(action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label { LocalizedText(.commandPaletteRetry) } icon: {
+                Image(systemName: "arrow.clockwise")
+            }
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
     }
 
     /// Resolve the option backing a `.paletteOption` entry so the row can render
@@ -1118,8 +638,8 @@ struct CommandPalettePicker: View {
         }
     }
 
-    private func sectionHeader(titleKey: L10n.Key) -> some View {
-        LocalizedText(titleKey)
+    private func sectionHeader(titleKey: String) -> some View {
+        LocalizedText(raw: titleKey)
             .font(.system(size: 11, weight: .semibold))
             .textCase(.uppercase)
             .foregroundStyle(.secondary)
@@ -1149,6 +669,16 @@ private struct CommandPaletteRow: View {
             if let option, option.isChecked {
                 Image(systemName: "checkmark")
                     .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            } else if let badge = pluginBadge {
+                Text(badge)
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.secondary.opacity(0.12))
+                    )
                     .foregroundStyle(.secondary)
             } else if let hotkey = entry.hotkey {
                 Text(hotkey.displayString(hyperFlags: hyperFlags))
@@ -1259,6 +789,14 @@ private struct CommandPaletteRow: View {
         entry.kind == .toggle && entry.toggleState == true
     }
 
+    /// A plugin row's declared trailing status chip (e.g. "开启" on a
+    /// toggle-style row). Nil for every other row source and for empty text.
+    private var pluginBadge: String? {
+        guard case .pluginRow(_, let descriptor) = entry.source,
+              let badge = descriptor.badge, !badge.isEmpty else { return nil }
+        return badge
+    }
+
     /// File path whose Finder icon backs this row, or nil when the row draws an
     /// SF Symbol instead. App shortcuts and installed apps resolve a real icon;
     /// built-ins and port records use a symbol.
@@ -1268,19 +806,19 @@ private struct CommandPaletteRow: View {
             return PanelStore.shared.binding(id: bindingID).map(\.appPath)
         case .installedApp(_, let path):
             return path
-        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument:
+        case .builtin, .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument:
             return nil
         }
     }
 
     /// Port records, calculator results, dev-tool conversions, unit/time/currency
-    /// conversions, host profiles, and second-level options render their subtitle
+    /// conversions, plugin rows, and second-level options render their subtitle
     /// (the port detail line, the original expression for a calc result, the
-    /// conversion source/rate-date for a conversion row, the tool name for a dev-tool row,
-    /// the host profile's entry summary, or a port option's detail).
+    /// conversion source/rate-date for a conversion row, the tool name for a
+    /// dev-tool row, a plugin row's declared subtitle, or a port option's detail).
     private var showsSubtitle: Bool {
         switch entry.source {
-        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .hostProfile, .quicklink, .quicklinkTemplate, .quicklinkArgument: return true
+        case .portRecord, .calcResult, .devTool, .devToolScopeSuggestion, .conversion, .paletteOption, .pluginRow, .quicklink, .quicklinkTemplate, .quicklinkArgument: return true
         default: return false
         }
     }
@@ -1303,5 +841,111 @@ private struct CommandPaletteRow: View {
             return Color.primary.opacity(0.08)
         }
         return Color.clear
+    }
+}
+
+/// Lays out `MarkdownBlocks` output as a modest styled document for the palette
+/// Detail: headings, paragraphs, bulleted/numbered lists, code blocks,
+/// thematic rules, blockquotes, and http(s) image previews. Deliberately not a
+/// full renderer — inline styling (bold /
+/// italic / inline-code / links) is carried by each block's `AttributedString`
+/// and rendered by `Text`; block structure is what this view adds back.
+private struct MarkdownBlocksView: View {
+    let blocks: [MarkdownBlock]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                blockView(block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func blockView(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case .heading(let level, let text):
+            Text(text)
+                .font(.system(size: Self.headingSize(level), weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, level <= 2 ? 4 : 1)
+        case .paragraph(let text):
+            Text(text)
+                .font(.system(size: 14))
+                .fixedSize(horizontal: false, vertical: true)
+        case .listItem(let ordinal, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(ordinal.map { "\($0)." } ?? "•")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 16, alignment: .trailing)
+                Text(text)
+                    .font(.system(size: 14))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.leading, 6)
+        case .codeBlock(let code):
+            Text(code)
+                .font(.system(size: 12.5, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                )
+        case .thematicBreak:
+            Divider().opacity(0.5).padding(.vertical, 2)
+        case .blockquote(let text):
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                    .fill(Color.secondary.opacity(0.35))
+                    .frame(width: 3)
+                Text(text)
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 1)
+        case .image(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image.resizable()
+                        .scaledToFit()
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                case .failure:
+                    // Keep the information reachable when loading fails: a
+                    // tappable link in place of the preview.
+                    Link(destination: url) {
+                        Label(url.absoluteString, systemImage: "photo")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                case .empty:
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.06))
+                        .frame(height: 120)
+                        .overlay(ProgressView().controlSize(.small))
+                @unknown default:
+                    EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: 280, alignment: .leading)
+        }
+    }
+
+    /// Heading point sizes, tapering h1→h6 down toward body size (14pt).
+    private static func headingSize(_ level: Int) -> CGFloat {
+        switch level {
+        case 1: return 22
+        case 2: return 18
+        case 3: return 16
+        case 4: return 15
+        default: return 14
+        }
     }
 }

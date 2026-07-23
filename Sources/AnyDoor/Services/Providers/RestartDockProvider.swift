@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Restart the Dock process; the system relaunches it automatically.
 ///

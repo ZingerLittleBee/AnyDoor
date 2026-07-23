@@ -1,4 +1,5 @@
 import AppKit
+import PluginInterface
 
 /// Bridges the translation window into the panel's `ActionProvider` surface so
 /// it gets a panel row, settings visibility/order, and a bindable hotkey via

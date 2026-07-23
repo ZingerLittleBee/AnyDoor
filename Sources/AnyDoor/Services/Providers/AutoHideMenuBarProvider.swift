@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Toggles macOS "Automatically hide and show the menu bar".
 ///

@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// Empty the Trash via AppleScript to Finder. Requires Automation permission.
 ///

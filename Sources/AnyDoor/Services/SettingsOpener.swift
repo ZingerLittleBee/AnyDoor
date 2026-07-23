@@ -11,6 +11,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
     case clipboard
     case capture
     case translation
+    case plugins
     case general
 }
 

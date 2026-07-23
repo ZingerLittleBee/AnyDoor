@@ -70,13 +70,27 @@ struct SyncSettingsView: View {
             let data = try LocalFileBackend(url: url).downloadSync() ?? Data()
             let snapshot = try BackupCodec.decode(data)
             let service = makeService()
-            let summary = try service.importSnapshot(snapshot)
-            Task { await service.reconcileAfterImport() }
-            statusMessage = L(.settingsSyncImportSuccess,
-                              summary.shortcutsUpdated + summary.shortcutsInserted,
-                              summary.preferencesUpdated,
-                              summary.quicklinksUpdated + summary.quicklinksInserted)
-            isError = false
+            Task {
+                do {
+                    let summary = try await service.restore(snapshot)
+                    statusMessage = L(.settingsSyncImportSuccess,
+                                      summary.shortcutsUpdated + summary.shortcutsInserted,
+                                      summary.preferencesUpdated,
+                                      summary.quicklinksUpdated + summary.quicklinksInserted)
+                    isError = false
+                } catch let error as PluginImportReconciliationError {
+                    logger.error("Import completed with plugin failures: \(error)")
+                    statusMessage = L(
+                        .settingsSyncImportPartialFailure,
+                        error.localizedDescription
+                    )
+                    isError = true
+                } catch {
+                    logger.error("Import failed: \(error)")
+                    statusMessage = L(.settingsSyncImportFailed, error.localizedDescription)
+                    isError = true
+                }
+            }
         } catch {
             logger.error("Import failed: \(error)")
             statusMessage = L(.settingsSyncImportFailed, error.localizedDescription)

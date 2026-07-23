@@ -1,6 +1,7 @@
 import Foundation
 import IOKit.pwr_mgt
 import OSLog
+import PluginInterface
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "keepawake")
 

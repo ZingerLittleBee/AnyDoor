@@ -1,4 +1,5 @@
 import Foundation
+import PluginInterface
 
 /// A single flat row in the Panel settings list: a top-level / child entry, or a
 /// non-draggable adornment.

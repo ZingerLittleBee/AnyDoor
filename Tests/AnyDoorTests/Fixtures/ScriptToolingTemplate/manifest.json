@@ -1,0 +1,17 @@
+{
+  "id": "dev.anydoor.hn-top",
+  "name": "Hacker News Top",
+  "description": "Top stories from Hacker News as a searchable list.",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "capabilities": [
+    "fetch",
+    "openURL"
+  ],
+  "localizedNames": {
+    "zh": "Hacker News 热门"
+  },
+  "localizedDescriptions": {
+    "zh": "以可搜索列表展示 Hacker News 热门文章。"
+  }
+}
