@@ -241,6 +241,10 @@ when you need them.
   plain JavaScript, executed on the system JavaScriptCore (no bundled JS
   runtime). They contribute rows to the command palette, with searchable
   drill-in lists and paginated markdown detail pages.
+- Ready-to-install example plugins (V2EX and Hacker News browsers) are attached
+  to each [release](https://github.com/ZingerLittleBee/AnyDoor/releases) as
+  `plugin-*.zip` — unzip, then pick the folder in **Settings → Plugins →
+  Install Script Plugin**.
 - A script plugin can only use the capabilities its manifest declares — network
   fetch, a private key-value store, toasts, clipboard write, a one-shot delay,
   opening http(s) URLs, and translation through your configured services. No

@@ -87,6 +87,9 @@ gh auth status -h github.com >/dev/null 2>&1 || die "gh CLI is not authenticated
 command -v create-dmg >/dev/null 2>&1 \
   || die "create-dmg not found in PATH — run: brew install create-dmg"
 
+command -v pnpm >/dev/null 2>&1 \
+  || die "pnpm not found in PATH — required to build the example Script Plugin packages"
+
 # The build step force-overrides LC_BUILD_VERSION `minos` to MIN_MACOS via
 # `-platform_version`. The linker applies that value unconditionally (only a
 # warning if the compiled objects target a newer min), so a Package.swift
@@ -276,6 +279,27 @@ codesign --force --sign "$SIGNING_IDENTITY" "$DMG"
 xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$DMG"
 
+# Example Script Plugin packages. `pnpm verify` is the tooling gate and builds
+# every example's dist/ in place as a side effect; each zip holds the package
+# contents at its root (manifest.json + bundle.js), the layout Settings →
+# Plugins expects after unzipping.
+log "Package example Script Plugins (pnpm verify)"
+(cd "$REPO_ROOT/tooling" && pnpm install --frozen-lockfile && pnpm verify)
+PLUGIN_ZIPS=()
+for example_dist in "$REPO_ROOT"/tooling/examples/*/dist; do
+  [[ -f "$example_dist/manifest.json" ]] \
+    || die "no manifest.json in $example_dist — pnpm verify should have built it"
+  plugin_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$example_dist/manifest.json")"
+  plugin_zip="$DIST/plugin-$plugin_id.zip"
+  log "Package $plugin_zip"
+  rm -f "$plugin_zip"
+  # --norsrc/--noextattr keep AppleDouble (._*) sidecars out of the archive so
+  # an unzipped package holds exactly manifest.json + bundle.js.
+  ditto -c -k --norsrc --noextattr "$example_dist" "$plugin_zip"
+  PLUGIN_ZIPS+=("$plugin_zip")
+done
+[[ ${#PLUGIN_ZIPS[@]} -gt 0 ]] || die "no example Script Plugins found under tooling/examples/"
+
 # --- 9. Sparkle EdDSA sign ----------------------------------------------
 LAST_STEP=9
 RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
@@ -386,7 +410,7 @@ gh release create "v$VER" \
   --draft \
   --title "AnyDoor $VER" \
   --notes-file "$DIST/release-notes.md" \
-  "$DMG" "$ZIP" "$APPCAST"
+  "$DMG" "$ZIP" "$APPCAST" "${PLUGIN_ZIPS[@]}"
 
 log "Publish release"
 gh release edit "v$VER" --draft=false

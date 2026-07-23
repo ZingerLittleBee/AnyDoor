@@ -184,6 +184,9 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 - **脚本插件**：可侧载用 TypeScript 编写、打包为纯 JavaScript 的第三方插件，
   运行在系统自带的 JavaScriptCore 上（不内置 JS 运行时）。脚本插件向命令面板
   贡献条目，支持可搜索的二级列表和可分页的 markdown 详情页。
+- 每个 [release](https://github.com/ZingerLittleBee/AnyDoor/releases) 都附带
+  开箱即用的示例插件（V2EX 和 Hacker News 浏览器），文件名为 `plugin-*.zip`——
+  解压后在 **设置 → 插件 → 安装脚本插件** 中选择该文件夹即可。
 - 脚本插件只能使用 manifest 中声明的能力——网络请求、插件私有的键值存储、toast、
   写剪贴板、一次性延时、打开 http(s) 链接，以及通过你配置的翻译服务翻译文本。
   没有 shell、文件系统和剪贴板读取；失控脚本会被 30 秒 watchdog 终止，不影响
