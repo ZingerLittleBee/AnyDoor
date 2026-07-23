@@ -184,11 +184,6 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
 - **脚本插件**：可侧载用 TypeScript 编写、打包为纯 JavaScript 的第三方插件，
   运行在系统自带的 JavaScriptCore 上（不内置 JS 运行时）。脚本插件向命令面板
   贡献条目，支持可搜索的二级列表和可分页的 markdown 详情页。
-- 每个 [release](https://github.com/ZingerLittleBee/AnyDoor/releases) 都附带
-  开箱即用的示例插件（V2EX 和 Hacker News 浏览器），文件名为 `plugin-*.zip`——
-  在 **设置 → 插件 → 安装脚本插件** 中直接选择该 zip（或解压后的文件夹）即可。
-  也支持 `anydoor://install-plugin?url=<https zip 地址>` 链接一键安装，安装前
-  会弹出确认框展示插件的 id、版本、来源和声明的能力。
 - 脚本插件只能使用 manifest 中声明的能力——网络请求、插件私有的键值存储、toast、
   写剪贴板、一次性延时、打开 http(s) 链接，以及通过你配置的翻译服务翻译文本。
   没有 shell、文件系统和剪贴板读取；失控脚本会被 30 秒 watchdog 终止，不影响
@@ -200,6 +195,33 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
   模板仓库开始——它自带 release workflow，每次打版本 tag 都会自动构建并附上
   可安装的 `plugin-*.zip`。开发者模式可将插件目录原地加载、每次构建后热重载；
   完整示例见 [`tooling/examples`](tooling/examples)。
+
+#### 安装脚本插件
+
+每个 [release](https://github.com/ZingerLittleBee/AnyDoor/releases) 都附带
+开箱即用的示例插件——V2EX 浏览器和 Hacker News 浏览器，文件名为 `plugin-*.zip`。
+
+**通过 zip 安装：**
+
+1. 下载插件包，例如
+   [plugin-v2ex.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip)
+   或
+   [plugin-hackernews.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-hackernews.zip)。
+2. 打开 **设置 → 插件 → 安装脚本插件…**，直接选中该 zip——无需解压
+   （解压后的插件包文件夹也可以）。
+3. 插件的条目立即出现在命令面板中，无需重启应用。
+
+**通过安装链接：** 把 `anydoor://install-plugin?url=<https zip 地址>` 链接
+粘贴到浏览器地址栏，AnyDoor 会接管——下载插件包并弹出确认框，展示插件的
+名称、id、版本、下载来源和声明的能力，确认后才安装。只接受 https 的包地址。
+例如：
+
+```
+anydoor://install-plugin?url=https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip
+```
+
+随时可在 **设置 → 插件** 中卸载；脚本插件的私有数据会保留，重新安装同一
+插件时自动恢复。
 
 ### 菜单栏面板
 

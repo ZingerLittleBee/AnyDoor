@@ -241,12 +241,6 @@ when you need them.
   plain JavaScript, executed on the system JavaScriptCore (no bundled JS
   runtime). They contribute rows to the command palette, with searchable
   drill-in lists and paginated markdown detail pages.
-- Ready-to-install example plugins (V2EX and Hacker News browsers) are attached
-  to each [release](https://github.com/ZingerLittleBee/AnyDoor/releases) as
-  `plugin-*.zip` — pick the zip (or an unzipped folder) in **Settings →
-  Plugins → Install Script Plugin**. An `anydoor://install-plugin?url=<https
-  zip url>` link installs in one click after a confirmation showing the
-  plugin's id, version, origin, and declared capabilities.
 - A script plugin can only use the capabilities its manifest declares — network
   fetch, a private key-value store, toasts, clipboard write, a one-shot delay,
   opening http(s) URLs, and translation through your configured services. No
@@ -261,6 +255,35 @@ when you need them.
   every version tag. A developer mode loads a plugin directory in place with hot
   reload on every build; worked examples live under
   [`tooling/examples`](tooling/examples).
+
+#### Installing a script plugin
+
+Ready-to-install example plugins — a V2EX browser and a Hacker News browser —
+are attached to every [release](https://github.com/ZingerLittleBee/AnyDoor/releases)
+as `plugin-*.zip`.
+
+**From a zip:**
+
+1. Download the plugin, e.g.
+   [plugin-v2ex.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip)
+   or
+   [plugin-hackernews.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-hackernews.zip).
+2. Open **Settings → Plugins → Install Script Plugin…** and pick the zip — no
+   unzipping needed (an unzipped package folder works too).
+3. The plugin's rows appear in the command palette immediately, no relaunch.
+
+**From an install link:** paste an `anydoor://install-plugin?url=<https zip url>`
+link into your browser's address bar and AnyDoor takes over — it downloads the
+package and shows a confirmation with the plugin's name, id, version, download
+origin, and declared capabilities before installing. Only https package URLs
+are accepted. For example:
+
+```
+anydoor://install-plugin?url=https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip
+```
+
+Uninstall any time from **Settings → Plugins**; a script plugin's private data
+is kept, so reinstalling the same plugin finds it again.
 
 ### Menu bar panel
 
