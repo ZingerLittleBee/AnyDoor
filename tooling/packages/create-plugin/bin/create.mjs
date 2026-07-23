@@ -7,10 +7,11 @@
 // Options:
 //   --id <id>          Plugin id (manifest id). Default: derived from the dir name.
 //   --name <name>      Display name. Default: derived from the dir name.
-//   --api-spec <spec>  Dependency spec for @anydoor/api. Default: a file: path to
-//                      the @anydoor/api package resolved next to this CLI, so a
-//                      freshly scaffolded project installs against the local build
-//                      without a published registry (milestone A has no store).
+//   --api-spec <spec>  Dependency spec for @anydoor/api. Default: a caret range
+//                      (`^x.y.z`) on the npm-published @anydoor/api, versioned
+//                      from the copy resolved next to this CLI. Pass a `file:`
+//                      spec to build against a local checkout instead (the
+//                      monorepo's verify script does this).
 //   --force            Allow scaffolding into a non-empty directory.
 //
 // The output is a ready-to-build project: `pnpm install && pnpm build` produces
@@ -67,8 +68,10 @@ function deriveNames(dirName) {
   return { slug: safeSlug, displayName };
 }
 
-/** Resolve a default `file:` dependency spec pointing at the local @anydoor/api. */
-function defaultApiSpec(targetDir) {
+/** Resolve the default npm dependency spec for @anydoor/api: a caret range on
+ * the version bundled next to this CLI, so a scaffolded project installs the
+ * published package and stands alone outside the tooling tree. */
+function defaultApiSpec() {
   let apiPackageJson;
   try {
     apiPackageJson = require.resolve("@anydoor/api/package.json");
@@ -77,11 +80,11 @@ function defaultApiSpec(targetDir) {
       "could not resolve @anydoor/api; pass --api-spec <spec> to point at your API build",
     );
   }
-  const apiDir = path.dirname(apiPackageJson);
-  // A relative file: spec keeps the scaffolded project portable if it is moved
-  // together with the tooling tree; still absolute-resolvable at install time.
-  const relative = path.relative(targetDir, apiDir) || ".";
-  return `file:${relative}`;
+  const { version } = JSON.parse(fs.readFileSync(apiPackageJson, "utf8"));
+  if (typeof version !== "string" || version.length === 0) {
+    fail("resolved @anydoor/api has no version; pass --api-spec <spec>");
+  }
+  return `^${version}`;
 }
 
 function copyTemplate(srcDir, destDir, replace) {
@@ -121,7 +124,7 @@ function main() {
   const packageName = slug;
   const pluginID = options.id ?? `dev.anydoor.${slug}`;
   const pluginName = options.name ?? displayName;
-  const apiSpec = options.apiSpec ?? defaultApiSpec(targetDir);
+  const apiSpec = options.apiSpec ?? defaultApiSpec();
 
   const replacements = {
     __PACKAGE_NAME__: packageName,
