@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-07-24
+
 ### Added
 
 - Script Plugins: install directly from a `plugin-*.zip` — the Settings picker
