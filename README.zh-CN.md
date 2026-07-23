@@ -191,8 +191,13 @@ AnyDoor 是一款由全局快捷键驱动的 macOS 菜单栏控制中心。把�
   写剪贴板、一次性延时、打开 http(s) 链接，以及通过你配置的翻译服务翻译文本。
   没有 shell、文件系统和剪贴板读取；失控脚本会被 30 秒 watchdog 终止，不影响
   其他插件。
-- 面向作者：`tooling/` 下提供类型化 API 包、create-plugin 脚手架和完整示例，
-  开发者模式可将插件目录原地加载，并在每次构建后热重载。
+- **编写你自己的插件**：用 `pnpm create @anydoor-dev/plugin my-plugin` 生成
+  项目骨架（通过 [`@anydoor-dev/api`](https://www.npmjs.com/package/@anydoor-dev/api)
+  获得类型化的入口点），或直接从
+  [anydoor-plugin-template](https://github.com/ZingerLittleBee/anydoor-plugin-template)
+  模板仓库开始——它自带 release workflow，每次打版本 tag 都会自动构建并附上
+  可安装的 `plugin-*.zip`。开发者模式可将插件目录原地加载、每次构建后热重载；
+  完整示例见 [`tooling/examples`](tooling/examples)。
 
 ### 菜单栏面板
 

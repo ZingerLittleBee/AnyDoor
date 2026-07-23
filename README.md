@@ -250,9 +250,15 @@ when you need them.
   opening http(s) URLs, and translation through your configured services. No
   shell, no filesystem, no clipboard read; a runaway script is killed by a
   30-second watchdog without affecting other plugins.
-- For authors: a typed API package, a `create-plugin` scaffold, and worked
-  examples live under `tooling/`, and a developer mode loads a plugin directory
-  in place with hot reload on every build.
+- **Write your own**: scaffold a plugin with
+  `pnpm create @anydoor-dev/plugin my-plugin` (typed entry points via
+  [`@anydoor-dev/api`](https://www.npmjs.com/package/@anydoor-dev/api)), or
+  start from the
+  [anydoor-plugin-template](https://github.com/ZingerLittleBee/anydoor-plugin-template)
+  repository, whose release workflow attaches the installable `plugin-*.zip` on
+  every version tag. A developer mode loads a plugin directory in place with hot
+  reload on every build; worked examples live under
+  [`tooling/examples`](tooling/examples).
 
 ### Menu bar panel
 
