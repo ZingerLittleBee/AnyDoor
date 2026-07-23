@@ -80,6 +80,33 @@ versioning.
   action shows a failure toast — none of which hang or close the palette.
   Uninstalling a plugin while its Detail is open discards the drill-in and
   removes its rows immediately.
+- Plugins: a Script Plugin row can push a searchable second-level list with
+  its own query field, and both lists and markdown Details load more on
+  scroll when the plugin paginates — one page at a time, duplicate rows
+  dropped, and a failed page keeping what is already shown. A Detail or
+  pushed list that fails to load offers a Retry button in place.
+- Plugins: Detail pages render styled markdown — headings, lists, fenced code
+  blocks, blockquotes drawn with a leading bar, and inline image previews
+  (https images only; other schemes are never fetched). A Detail can declare
+  footer action buttons (for example 翻译 ⇄ 显示原文) that rebuild the
+  document in place.
+- Plugins: a new `translate` capability lets a Script Plugin translate text
+  through your configured translation services into your Settings target
+  language. Like every capability it must be declared in the manifest, and a
+  plugin can never pick the service or the direction.
+- Plugins: Script Plugin rows can show a trailing status badge, and a
+  completed row action refreshes the visible rows immediately — a stay-open
+  toggle re-renders its badge without closing the palette.
+- Command Palette: closing the palette while reading a plugin list or Detail
+  resumes right there on the next open (a plugin uninstalled in between
+  resets to the root instead), and walking back from a drill-in restores the
+  search text you had typed at that level.
+- For plugin authors: the typed authoring API is published on npm as
+  `@anydoor-dev/api`, `pnpm create @anydoor-dev/plugin` scaffolds a
+  ready-to-build project, and a GitHub template repository
+  (anydoor-plugin-template) ships with a tag-triggered release workflow that
+  attaches the installable `plugin-*.zip`. The V2EX and Hacker News example
+  plugins are attached to each AnyDoor release the same way.
 - Plugins: a per-machine Developer Mode switch (Settings → 插件) unlocks Dev
   Plugins for plugin authors — with it off, no Dev Plugin affordance appears
   anywhere. Register a local development folder as a Dev Plugin and it loads
@@ -130,6 +157,14 @@ versioning.
 - An open Command Palette now removes uninstalled plugin commands, options,
   and searchable rows immediately instead of leaving dead results behind.
 - Fresh-install onboarding no longer advertises the uninstalled Hosts plugin.
+- Script Plugin `fetch` no longer serves day-old cached HTTP responses.
+- Every plugin URL boundary (the `openURL` capability, a row's open-URL
+  action, and tapped Detail links) is confined to http/https; `file:` and
+  custom app schemes are refused everywhere.
+- Command palette root search now also matches a plugin's section title, so
+  typing the plugin's name surfaces its rows.
+- Plugin list and Detail pagination ignores stale in-flight fetches after
+  navigating away, so a slow page can never land on the wrong level.
 
 ## [3.7.0] - 2026-07-12
 
