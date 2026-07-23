@@ -1,9 +1,40 @@
 # @anydoor/api
 
-Typed authoring API for AnyDoor **Script Plugins**. Type definitions plus a thin
-runtime shim (`definePlugin`) and row descriptor builders (`actions`).
+Typed authoring API for [AnyDoor](https://github.com/ZingerLittleBee/AnyDoor)
+**Script Plugins** — type definitions plus a thin runtime shim (`definePlugin`)
+and row descriptor builders (`actions`).
+
+[AnyDoor](https://github.com/ZingerLittleBee/AnyDoor) is a macOS menu-bar
+toolbox with a Raycast-style command palette. A Script Plugin adds rows to that
+palette: searchable lists, paginated markdown detail pages, and row actions —
+authored in TypeScript, bundled to a single plain-JS file with esbuild, and
+executed on the system JavaScriptCore inside a capability sandbox (a plugin can
+only use what its manifest declares; no shell, no filesystem, no clipboard
+read).
 
 Targets the host `apiVersion: 1`. Milestone A makes no compatibility promise.
+
+## Getting started
+
+Scaffold a ready-to-build plugin project (TypeScript + esbuild, this package
+already wired in):
+
+```bash
+pnpm dlx @anydoor/create-plugin my-plugin
+cd my-plugin
+pnpm install
+pnpm build   # → dist/manifest.json + dist/bundle.js
+```
+
+`dist/` is a complete plugin package. Load it in AnyDoor either way:
+
+- **Install**: Settings → Plugins → Install Script Plugin… and pick `dist/`.
+- **Develop**: enable developer mode in Settings → Plugins, register the
+  directory as a Dev Plugin, and run `pnpm dev` — every rebuild hot-reloads in
+  the palette, with full error detail (message + stack) surfaced inline.
+
+Worked examples (a V2EX browser and a Hacker News browser) live in
+[`tooling/examples`](https://github.com/ZingerLittleBee/AnyDoor/tree/main/tooling/examples).
 
 ## Install
 
