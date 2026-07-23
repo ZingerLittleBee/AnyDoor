@@ -8,7 +8,7 @@ importers:
 
   .:
     dependencies:
-      '@anydoor/api':
+      '@anydoor-dev/api':
         specifier: file:../../packages/api
         version: file:../../packages/api
     devDependencies:
@@ -21,7 +21,7 @@ importers:
 
 packages:
 
-  '@anydoor/api@file:../../packages/api':
+  '@anydoor-dev/api@file:../../packages/api':
     resolution: {directory: ../../packages/api, type: directory}
 
   '@esbuild/aix-ppc64@0.24.2':
@@ -186,7 +186,7 @@ packages:
 
 snapshots:
 
-  '@anydoor/api@file:../../packages/api': {}
+  '@anydoor-dev/api@file:../../packages/api': {}
 
   '@esbuild/aix-ppc64@0.24.2':
     optional: true

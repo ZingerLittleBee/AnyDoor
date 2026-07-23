@@ -1,5 +1,5 @@
 // Regenerate the committed Swift↔TS behaviour-contract fixture: transpile the
-// typed fixture source (type-checked against @anydoor/api, so a fixture that no
+// typed fixture source (type-checked against @anydoor-dev/api, so a fixture that no
 // longer matches the TS contract fails to compile), execute it, and emit the
 // JSON that ScriptContractFixtureTests decodes. Run whenever the row action /
 // manifest / capability contract changes; `pnpm verify` fails when the

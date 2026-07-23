@@ -1,4 +1,4 @@
-# @anydoor/api
+# @anydoor-dev/api
 
 Typed authoring API for [AnyDoor](https://github.com/ZingerLittleBee/AnyDoor)
 **Script Plugins** — type definitions plus a thin runtime shim (`definePlugin`)
@@ -20,7 +20,7 @@ Scaffold a ready-to-build plugin project (TypeScript + esbuild, this package
 already wired in):
 
 ```bash
-pnpm dlx @anydoor/create-plugin my-plugin
+pnpm dlx @anydoor-dev/create-plugin my-plugin
 cd my-plugin
 pnpm install
 pnpm build   # → dist/manifest.json + dist/bundle.js
@@ -39,17 +39,17 @@ Worked examples (a V2EX browser and a Hacker News browser) live in
 ## Install
 
 Scaffolded projects depend on this package automatically
-(`@anydoor/create-plugin`). To add it by hand:
+(`@anydoor-dev/create-plugin`). To add it by hand:
 
 ```bash
-pnpm add @anydoor/api
+pnpm add @anydoor-dev/api
 ```
 
 ## Usage
 
 ```ts
 // src/manifest.ts
-import { defineManifest } from "@anydoor/api";
+import { defineManifest } from "@anydoor-dev/api";
 
 export default defineManifest({
   id: "dev.anydoor.hn-top",
@@ -63,7 +63,7 @@ export default defineManifest({
 
 ```ts
 // src/plugin.ts
-import { definePlugin, actions } from "@anydoor/api";
+import { definePlugin, actions } from "@anydoor-dev/api";
 import manifest from "./manifest.js";
 
 definePlugin(manifest, {

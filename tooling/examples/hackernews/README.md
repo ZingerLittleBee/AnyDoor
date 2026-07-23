@@ -33,7 +33,7 @@ pnpm build
 
 This example lives inside the tooling tree but is **not** a member of its pnpm
 workspace (the workspace only globs `packages/*`). Its own `pnpm-workspace.yaml`
-sentinel keeps `pnpm install` local to this directory, and it wires `@anydoor/api`
+sentinel keeps `pnpm install` local to this directory, and it wires `@anydoor-dev/api`
 through a `file:` dependency at `../../packages/api`, so the two build in the same
 tree without a published registry.
 

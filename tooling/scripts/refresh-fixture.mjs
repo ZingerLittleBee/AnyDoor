@@ -3,7 +3,7 @@
 //
 // The Swift test (ScriptPluginToolingTemplateTests) loads that prebuilt package
 // through the real ScriptPluginRuntime, so `swift test` never needs Node or
-// pnpm. Run this whenever the template or @anydoor/api changes.
+// pnpm. Run this whenever the template or @anydoor-dev/api changes.
 
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";

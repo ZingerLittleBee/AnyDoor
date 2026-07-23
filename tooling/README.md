@@ -13,14 +13,14 @@ This is a standalone pnpm workspace. It does not participate in the SwiftPM buil
 
 | Package | What it is |
 | --- | --- |
-| [`@anydoor/api`](packages/api) | The typed authoring API: type definitions plus the thin runtime shim (`definePlugin`) and descriptor builders (`actions`). |
-| [`@anydoor/create-plugin`](packages/create-plugin) | The scaffold. Generates a building TypeScript plugin: manifest, typed entry point, esbuild bundle. |
+| [`@anydoor-dev/api`](packages/api) | The typed authoring API: type definitions plus the thin runtime shim (`definePlugin`) and descriptor builders (`actions`). |
+| [`@anydoor-dev/create-plugin`](packages/create-plugin) | The scaffold. Generates a building TypeScript plugin: manifest, typed entry point, esbuild bundle. |
 
 ## Examples
 
 Worked-example plugins live under [`examples/`](examples). They are **not** pnpm
 workspace members (the workspace only globs `packages/*`): each carries its own
-`pnpm-workspace.yaml` sentinel and wires `@anydoor/api` through a `file:`
+`pnpm-workspace.yaml` sentinel and wires `@anydoor-dev/api` through a `file:`
 dependency, so `pnpm install && pnpm build` runs standalone inside the example
 directory. `pnpm verify` builds and asserts them alongside the scaffold template.
 
@@ -44,7 +44,7 @@ directory. `pnpm verify` builds and asserts them alongside the scaffold template
 ```bash
 cd tooling
 pnpm install
-pnpm build                      # build @anydoor/api
+pnpm build                      # build @anydoor-dev/api
 
 # Scaffold a new plugin next to the tooling tree
 node packages/create-plugin/bin/create.mjs ../my-first-plugin
@@ -98,7 +98,7 @@ The seven capabilities: `fetch`, `store`, `toast`, `pasteboard` (exposed as
 pnpm verify
 ```
 
-`scripts/verify.mjs` builds `@anydoor/api`, scaffolds the template into a temp
+`scripts/verify.mjs` builds `@anydoor-dev/api`, scaffolds the template into a temp
 directory, installs and builds it, and asserts the output:
 
 - `manifest.json` validates against the documented manifest shape,
@@ -116,6 +116,6 @@ that runs a committed prebuilt copy of the template output through the real
 
 ## Versioning
 
-`@anydoor/api` targets the host `apiVersion: 1`. Milestone A makes **no
+`@anydoor-dev/api` targets the host `apiVersion: 1`. Milestone A makes **no
 compatibility promise**: the API may break freely alongside the host until the
 store milestone.

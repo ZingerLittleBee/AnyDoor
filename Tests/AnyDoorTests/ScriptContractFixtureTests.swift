@@ -7,7 +7,7 @@ import XCTest
 /// Decodes the committed Swift↔TS behaviour-contract fixture
 /// (`Fixtures/ScriptContract/contract.json`). The fixture's source of truth is
 /// `tooling/packages/api/type-tests/contract-fixtures.ts` — values type-checked
-/// against `@anydoor/api` and emitted by
+/// against `@anydoor-dev/api` and emitted by
 /// `tooling/scripts/refresh-contract-fixtures.mjs` — so the same bytes are
 /// pinned on both sides of the contract: TS types on emit, the host decoder
 /// here. A contract change that only lands on one side fails a machine (this

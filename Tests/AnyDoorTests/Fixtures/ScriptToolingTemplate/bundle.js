@@ -1,15 +1,19 @@
-// node_modules/.pnpm/@anydoor+api@file+..+..+..+..+..+..+..+..+Users+zingerbee+Bee+AnyDoor+tooling+packages+_1a4f113716af56204d27f47309c25752/node_modules/@anydoor/api/dist/manifest.js
+// node_modules/.pnpm/@anydoor-dev+api@file+..+..+..+..+..+..+..+..+Users+zingerbee+Bee+AnyDoor+tooling+packa_a5431f8435ef80cd64b40cf1f1a2159f/node_modules/@anydoor-dev/api/dist/manifest.js
 function defineManifest(manifest) {
   return manifest;
 }
 
-// node_modules/.pnpm/@anydoor+api@file+..+..+..+..+..+..+..+..+Users+zingerbee+Bee+AnyDoor+tooling+packages+_1a4f113716af56204d27f47309c25752/node_modules/@anydoor/api/dist/rows.js
+// node_modules/.pnpm/@anydoor-dev+api@file+..+..+..+..+..+..+..+..+Users+zingerbee+Bee+AnyDoor+tooling+packa_a5431f8435ef80cd64b40cf1f1a2159f/node_modules/@anydoor-dev/api/dist/rows.js
 var actions = {
   /** Push the row's markdown Detail. Requires the plugin to implement `detail`. */
   detail() {
     return { type: "detail" };
   },
-  /** Close the palette and open `url`. */
+  /** Push a searchable second-level list. Requires the plugin to implement `list`. */
+  list(id) {
+    return { type: "list", id };
+  },
+  /** Close the palette and open `url` (only `http`/`https` URLs are permitted). */
   openURL(url) {
     return { type: "openURL", url };
   },
@@ -27,16 +31,22 @@ var actions = {
   }
 };
 
-// node_modules/.pnpm/@anydoor+api@file+..+..+..+..+..+..+..+..+Users+zingerbee+Bee+AnyDoor+tooling+packages+_1a4f113716af56204d27f47309c25752/node_modules/@anydoor/api/dist/plugin.js
+// node_modules/.pnpm/@anydoor-dev+api@file+..+..+..+..+..+..+..+..+Users+zingerbee+Bee+AnyDoor+tooling+packa_a5431f8435ef80cd64b40cf1f1a2159f/node_modules/@anydoor-dev/api/dist/plugin.js
 function definePlugin(_manifest, handlers) {
   const api = globalThis.anydoor;
   const impl = {};
-  const { rows, detail, action } = handlers;
+  const { rows, list, detail, detailAction, action } = handlers;
   if (rows) {
     impl.rows = (query) => rows(query, api);
   }
+  if (list) {
+    impl.list = (listId, query, cursor) => list(listId, query, api, cursor);
+  }
   if (detail) {
-    impl.detail = (rowId) => detail(rowId, api);
+    impl.detail = (rowId, cursor) => detail(rowId, api, cursor);
+  }
+  if (detailAction) {
+    impl.detailAction = (rowId, actionId) => detailAction(rowId, actionId, api);
   }
   if (action) {
     impl.action = (rowId, actionId, argument) => action(rowId, actionId, argument, api);

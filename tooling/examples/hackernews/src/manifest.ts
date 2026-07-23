@@ -1,4 +1,4 @@
-import { defineManifest } from "@anydoor/api";
+import { defineManifest } from "@anydoor-dev/api";
 
 // The Hacker News plugin manifest. `defineManifest` captures the declared
 // capability list so `definePlugin` (in plugin.ts) narrows the capability API

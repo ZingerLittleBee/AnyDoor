@@ -1,4 +1,4 @@
-import { definePlugin, actions, type Row } from "@anydoor/api";
+import { definePlugin, actions, type Row } from "@anydoor-dev/api";
 import manifest from "./manifest.js";
 
 // A working miniature of the target plugin shape:

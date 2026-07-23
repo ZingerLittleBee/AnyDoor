@@ -20,7 +20,7 @@ importers:
 
   packages/create-plugin:
     dependencies:
-      '@anydoor/api':
+      '@anydoor-dev/api':
         specifier: workspace:*
         version: link:../api
 

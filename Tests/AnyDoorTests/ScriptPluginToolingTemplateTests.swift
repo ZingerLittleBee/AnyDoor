@@ -7,7 +7,7 @@ import XCTest
 /// loads and runs on the real Script Plugin runtime.
 ///
 /// The fixture under `Fixtures/ScriptToolingTemplate/` is the committed, prebuilt
-/// output of `@anydoor/create-plugin`'s default template (regenerated with
+/// output of `@anydoor-dev/create-plugin`'s default template (regenerated with
 /// `tooling/scripts/refresh-fixture.mjs`). This test loads that manifest + bundle
 /// through the real `ScriptPluginRuntime` — real JavaScriptCore underneath — so
 /// `swift test` needs no Node or pnpm, yet the generated bundle is exercised for

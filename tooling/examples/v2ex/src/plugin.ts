@@ -8,7 +8,7 @@ import {
   type Store,
   type ToastFn,
   type TranslateFn,
-} from "@anydoor/api";
+} from "@anydoor-dev/api";
 import manifest from "./manifest.js";
 
 // A real-world Script Plugin for V2EX (https://www.v2ex.com), shaped like the

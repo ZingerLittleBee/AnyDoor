@@ -1,5 +1,5 @@
 {
-  "name": "@anydoor/create-plugin",
+  "name": "@anydoor-dev/create-plugin",
   "version": "0.1.0",
   "description": "Scaffold a new AnyDoor Script Plugin: manifest, typed entry point, esbuild bundling.",
   "type": "module",
@@ -30,6 +30,6 @@
     "typecheck": "node --check bin/create.mjs"
   },
   "dependencies": {
-    "@anydoor/api": "workspace:*"
+    "@anydoor-dev/api": "workspace:*"
   }
 }

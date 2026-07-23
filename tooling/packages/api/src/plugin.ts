@@ -124,7 +124,7 @@ declare global {
  * undeclared capability inside a handler is a compile-time error.
  *
  * ```ts
- * import { definePlugin, actions } from "@anydoor/api";
+ * import { definePlugin, actions } from "@anydoor-dev/api";
  * import manifest from "./manifest.js";
  *
  * definePlugin(manifest, {

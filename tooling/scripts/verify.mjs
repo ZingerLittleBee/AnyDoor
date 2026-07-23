@@ -42,10 +42,10 @@ function run(command, args, cwd) {
 }
 
 export async function buildTemplate(outDir) {
-  process.stdout.write("[verify] building @anydoor/api\n");
-  run("pnpm", ["--filter", "@anydoor/api", "build"], toolingRoot);
-  process.stdout.write("[verify] type-checking @anydoor/api (incl. capability gating)\n");
-  run("pnpm", ["--filter", "@anydoor/api", "typecheck"], toolingRoot);
+  process.stdout.write("[verify] building @anydoor-dev/api\n");
+  run("pnpm", ["--filter", "@anydoor-dev/api", "build"], toolingRoot);
+  process.stdout.write("[verify] type-checking @anydoor-dev/api (incl. capability gating)\n");
+  run("pnpm", ["--filter", "@anydoor-dev/api", "typecheck"], toolingRoot);
 
   const projectDir = path.join(outDir, "hn-top");
   process.stdout.write(`[verify] scaffolding template into ${projectDir}\n`);

@@ -1,5 +1,5 @@
 {
-  "name": "@anydoor/api",
+  "name": "@anydoor-dev/api",
   "version": "0.1.0",
   "description": "Typed API for authoring AnyDoor Script Plugins (apiVersion 1).",
   "type": "module",

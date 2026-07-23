@@ -8,7 +8,7 @@ import {
   type Store,
   type ToastFn,
   type TranslateFn,
-} from "@anydoor/api";
+} from "@anydoor-dev/api";
 import manifest from "./manifest.js";
 
 // A real-world Script Plugin for Hacker News (https://news.ycombinator.com),

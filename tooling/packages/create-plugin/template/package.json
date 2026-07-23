@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@anydoor/api": "__API_SPEC__"
+    "@anydoor-dev/api": "__API_SPEC__"
   },
   "devDependencies": {
     "esbuild": "^0.24.0",

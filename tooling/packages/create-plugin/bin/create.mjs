@@ -7,8 +7,8 @@
 // Options:
 //   --id <id>          Plugin id (manifest id). Default: derived from the dir name.
 //   --name <name>      Display name. Default: derived from the dir name.
-//   --api-spec <spec>  Dependency spec for @anydoor/api. Default: a caret range
-//                      (`^x.y.z`) on the npm-published @anydoor/api, versioned
+//   --api-spec <spec>  Dependency spec for @anydoor-dev/api. Default: a caret range
+//                      (`^x.y.z`) on the npm-published @anydoor-dev/api, versioned
 //                      from the copy resolved next to this CLI. Pass a `file:`
 //                      spec to build against a local checkout instead (the
 //                      monorepo's verify script does this).
@@ -68,21 +68,21 @@ function deriveNames(dirName) {
   return { slug: safeSlug, displayName };
 }
 
-/** Resolve the default npm dependency spec for @anydoor/api: a caret range on
+/** Resolve the default npm dependency spec for @anydoor-dev/api: a caret range on
  * the version bundled next to this CLI, so a scaffolded project installs the
  * published package and stands alone outside the tooling tree. */
 function defaultApiSpec() {
   let apiPackageJson;
   try {
-    apiPackageJson = require.resolve("@anydoor/api/package.json");
+    apiPackageJson = require.resolve("@anydoor-dev/api/package.json");
   } catch {
     fail(
-      "could not resolve @anydoor/api; pass --api-spec <spec> to point at your API build",
+      "could not resolve @anydoor-dev/api; pass --api-spec <spec> to point at your API build",
     );
   }
   const { version } = JSON.parse(fs.readFileSync(apiPackageJson, "utf8"));
   if (typeof version !== "string" || version.length === 0) {
-    fail("resolved @anydoor/api has no version; pass --api-spec <spec>");
+    fail("resolved @anydoor-dev/api has no version; pass --api-spec <spec>");
   }
   return `^${version}`;
 }

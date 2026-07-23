@@ -1,4 +1,4 @@
-// @anydoor/api — typed authoring surface for AnyDoor Script Plugins.
+// @anydoor-dev/api — typed authoring surface for AnyDoor Script Plugins.
 //
 // Versioned against the host's `apiVersion: 1`. Milestone A makes no
 // compatibility promise: this package may break freely alongside the host until
