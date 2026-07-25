@@ -44,9 +44,12 @@ jobs:
         run: |
           set -o pipefail
           swift build --build-tests 2>&1 | tee /tmp/build.log
-          # Dependency warnings are not ours to fix, so ignore anything under
-          # .build/checkouts; the package's own targets must stay clean.
-          warnings="$(grep 'warning:' /tmp/build.log | grep -v '/\.build/' || true)"
+          # Match only compiler diagnostics anchored to a file in this package:
+          # dependency sources live under .build/checkouts and are not ours to
+          # fix, and SwiftPM's own bookkeeping warnings ("skipping cache due to
+          # an error") carry no source location at all.
+          warnings="$(grep -E '^/.+/(Sources|Tests|Plugins)/.+:[0-9]+:[0-9]+: warning: ' /tmp/build.log \
+            | grep -v '/\.build/' | sort -u || true)"
           if [ -n "$warnings" ]; then
             printf '%s\n' "$warnings"
             echo "::error::first-party build warnings — new code must be warning-free (see CONTRIBUTING.md)"
