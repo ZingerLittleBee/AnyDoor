@@ -20,6 +20,15 @@ let package = Package(
             url: "https://github.com/SDWebImage/libwebp-Xcode.git",
             from: "1.5.0"
         ),
+        // TestClock for time-dependent tests (MIT). Test-target only: production
+        // code takes the stdlib `Clock` protocol and defaults to
+        // `ContinuousClock`, so nothing from this package reaches the app
+        // binary. A test that drives a fake clock cannot race a real one, which
+        // is the difference between an unlikely flake and an impossible one.
+        .package(
+            url: "https://github.com/pointfreeco/swift-clocks",
+            from: "1.1.0"
+        ),
     ],
     targets: [
         .plugin(
@@ -163,7 +172,11 @@ let package = Package(
         ),
         .testTarget(
             name: "AnyDoorTests",
-            dependencies: ["AnyDoor", "ImageCodec", "PluginInterface", "PluginSupport", "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime"],
+            dependencies: [
+                .product(name: "Clocks", package: "swift-clocks"),
+                "AnyDoor", "ImageCodec", "PluginInterface", "PluginSupport",
+                "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime",
+            ],
             resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
