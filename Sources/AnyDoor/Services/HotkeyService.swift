@@ -257,6 +257,7 @@ private func hotkeyCallback(
 
     let virtKey = service.hyperVirtualKeyCode
     let recording = service.recordingObserver
+    let locked = service.keyboardLocked
 
     // 1. Hyper trigger keyDown — set held, swallow.
     if virtKey >= 0 && type == .keyDown
@@ -273,7 +274,9 @@ private func hotkeyCallback(
     }
 
     // 2. Hyper trigger keyUp — possibly fire Quick Press (suppressed in
-    //    recording mode so a stray Quick Press doesn't escape into the field).
+    //    recording mode so a stray Quick Press doesn't escape into the field,
+    //    and while the keyboard is locked since Quick Press synthesizes real
+    //    key events — a locked keyboard must emit nothing).
     if virtKey >= 0 && type == .keyUp
        && Int(event.getIntegerValueField(.keyboardEventKeycode)) == virtKey {
         let wasHeld = service.hyperHeld
@@ -282,7 +285,7 @@ private func hotkeyCallback(
         service.hyperConsumedByOther = false
         if let observer = recording {
             if wasHeld { DispatchQueue.main.async { observer(false) } }
-        } else if wasHeld && !consumedOther {
+        } else if wasHeld && !consumedOther && !locked {
             let qp = service.hyperQuickPress
             let dispatcher = service.quickPressDispatcher
             DispatchQueue.main.async { dispatcher?(qp) }
@@ -308,6 +311,7 @@ private func hotkeyCallback(
         for snapshot in service.snapshots {
             if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
                 let action = snapshot.action
+                guard KeyboardLockPolicy.allowsDispatch(action, locked: locked) else { break }
                 let dispatcher = service.dispatcher
                 DispatchQueue.main.async { dispatcher?(action) }
                 break
@@ -333,6 +337,7 @@ private func hotkeyCallback(
         for snapshot in service.snapshots {
             if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
                 let action = snapshot.action
+                guard KeyboardLockPolicy.allowsDispatch(action, locked: locked) else { break }
                 let dispatcher = service.dispatcher
                 DispatchQueue.main.async { dispatcher?(action) }
                 return nil
@@ -341,9 +346,10 @@ private func hotkeyCallback(
     }
 
     // Keyboard-lock mode: swallow any keyDown / keyUp / flagsChanged that
-    // didn't match. Registered hotkeys above still fire so the user can
-    // toggle the lock back off.
-    if service.keyboardLocked && (type == .keyDown || type == .flagsChanged || type == .keyUp) {
+    // didn't match, plus the matches KeyboardLockPolicy refused to dispatch.
+    // Only the keyboard-lock toggle itself survives, so the same shortcut can
+    // release the lock.
+    if locked && (type == .keyDown || type == .flagsChanged || type == .keyUp) {
         return nil
     }
 
