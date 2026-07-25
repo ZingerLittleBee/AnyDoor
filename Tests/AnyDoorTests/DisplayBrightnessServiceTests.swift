@@ -31,8 +31,10 @@ final class DisplayBrightnessServiceTests: XCTestCase {
         service.setBrightness(0.1, for: displayID)
         service.setBrightness(0.2, for: displayID)
         service.setBrightness(0.3, for: displayID)
-        // wait for debounce window (30 ms) + execution slack
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Wait for the 30ms debounce to land its write, then settle briefly so a
+        // second write would still be observed by the count assertion below.
+        await waitUntil("the debounced write") { !backend.writeCalls.isEmpty }
+        try await Task.sleep(for: .milliseconds(100))
 
         XCTAssertEqual(backend.writeCalls.count, 1, "expected one consolidated write")
         XCTAssertEqual(backend.writeCalls.last?.value, 30) // 0.3 * 100
@@ -53,8 +55,10 @@ final class DisplayBrightnessServiceTests: XCTestCase {
         service.bumpForTesting(+0.0625, displayID: displayID)
         service.bumpForTesting(+0.0625, displayID: displayID)
         service.bumpForTesting(+0.0625, displayID: displayID)
-        // wait for debounce window (30 ms) + execution slack
-        try await Task.sleep(nanoseconds: 200_000_000)
+        // Same shape as the debounce test: wait for the write, then settle so an
+        // uncoalesced second write would be caught rather than raced past.
+        await waitUntil("the coalesced write") { !backend.writeCalls.isEmpty }
+        try await Task.sleep(for: .milliseconds(100))
 
         XCTAssertEqual(backend.writeCalls.count, 1, "rapid bumps must collapse to one write")
         XCTAssertEqual(backend.writeCalls.last?.value, 69) // 0.6875 * 100, rounded

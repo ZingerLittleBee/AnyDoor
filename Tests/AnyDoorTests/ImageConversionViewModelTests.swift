@@ -130,8 +130,9 @@ final class ImageConversionViewModelTests: XCTestCase {
         }
         XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.contains(item.id))
         model.clear()
-        try await Task.sleep(for: .milliseconds(50))
-        XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.isEmpty)
+        await waitUntil("clear() to drop the first-frame notice") {
+            model.qualityFirstFrameOnlyItemIDs.isEmpty
+        }
     }
 
     @MainActor
@@ -326,7 +327,9 @@ final class ImageConversionViewModelTests: XCTestCase {
         model.resetSidebarForPresentation()
 
         await model.cancelActiveWork()
-        try await Task.sleep(for: .milliseconds(100))
+        await waitUntil("cancellation to clear the preview and preflight state") {
+            model.previewState == .empty && model.qualityFirstFrameOnlyItemIDs.isEmpty
+        }
 
         XCTAssertEqual(model.previewState, .empty)
         XCTAssertTrue(model.qualityFirstFrameOnlyItemIDs.isEmpty)

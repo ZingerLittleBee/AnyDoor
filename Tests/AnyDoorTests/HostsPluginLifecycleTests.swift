@@ -213,7 +213,10 @@ final class HostsPluginLifecycleTests: XCTestCase {
     }
 
     func testUninstallCancelsPendingApplyBeforeReleasingHelper() async throws {
-        let f = try makeFixture(debounceInterval: .milliseconds(100))
+        // A long debounce makes the pending-apply window wide enough that the
+        // uninstall below cannot lose a race with it: the claim under test is
+        // that uninstall cancels a pending apply, not that it beats 100ms.
+        let f = try makeFixture(debounceInterval: .seconds(5))
         defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
@@ -224,7 +227,11 @@ final class HostsPluginLifecycleTests: XCTestCase {
                 await f.manager.setActive(profile, true)
             }
         }
-        try await Task.sleep(for: .milliseconds(20))
+        // setActive flips isActive before scheduling the debounced apply, so this
+        // is the in-flight signal the fixed sleep was approximating.
+        await waitUntil("the activation to schedule its apply") {
+            f.manager.profiles.first(where: { $0.id == profileID })?.isActive == true
+        }
 
         try await f.registry.uninstall(f.plugin.id)
         await activation.value

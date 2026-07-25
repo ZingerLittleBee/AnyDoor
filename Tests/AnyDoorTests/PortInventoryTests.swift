@@ -85,6 +85,9 @@ final class PortInventoryTests: XCTestCase {
         }
         private var queue: [Pending] = []
         private(set) var calls = 0
+        /// How many scans are parked on a continuation — lets a test wait for a
+        /// refresh to actually reach the scanner instead of sleeping for it.
+        var pendingCount: Int { queue.count }
         func resolve(with records: [PortRecord]) async {
             calls += 1
             if let next = queue.first {
@@ -348,17 +351,18 @@ final class PortInventoryTests: XCTestCase {
 
         // Start refresh #1 — it blocks awaiting the scanner.
         let t1: Task<Void, Never> = Task { @MainActor in await inv.refresh() }
-        try await Task.sleep(for: .milliseconds(50))
+        await waitUntil("refresh #1 to reach the scanner") { await scanner.pendingCount == 1 }
         XCTAssertTrue(inv.isRefreshing, "first refresh should mark isRefreshing")
 
         // Start refresh #2 — also blocked.
         let t2: Task<Void, Never> = Task { @MainActor in await inv.refresh() }
-        try await Task.sleep(for: .milliseconds(50))
+        await waitUntil("refresh #2 to reach the scanner") { await scanner.pendingCount == 2 }
         XCTAssertTrue(inv.isRefreshing, "still refreshing with two in flight")
 
-        // Resolve the older one (refresh #1) first.
+        // Resolve the older one (refresh #1) first and let it finish completely —
+        // awaiting the task is the exact signal a sleep was approximating.
         await scanner.resolve(with: [])
-        try await Task.sleep(for: .milliseconds(50))
+        await t1.value
         XCTAssertTrue(inv.isRefreshing, "stale completion must NOT clear isRefreshing while #2 is still running")
 
         // Resolve the newer one.
@@ -367,7 +371,6 @@ final class PortInventoryTests: XCTestCase {
                        executablePath: nil, commandLine: nil,
                        binds: [PortBind(address: "*", family: .ipv4)])
         ])
-        await t1.value
         await t2.value
         XCTAssertFalse(inv.isRefreshing)
         XCTAssertEqual(inv.records.count, 1)
