@@ -8,13 +8,9 @@ versioning.
 
 ### Fixed
 
-- Disable Keyboard now really disables the keyboard. Global hotkeys (the
-  command palette among them), Hyper Key combos, and the Hyper trigger's quick
-  press all kept working while the lock was on — the quick press even
-  synthesized real key events into a keyboard that was supposed to be inert.
-  Every key, key-release, and modifier event is now dropped while locked, so
-  wiping the keyboard can't trigger anything. Turn the lock off by clicking the
-  menu bar icon and toggling the row; quitting AnyDoor also releases it.
+- Disable Keyboard now blocks everything: global hotkeys, Hyper Key combos, and
+  quick press kept working while the lock was on. Turn it off from the menu bar
+  icon (quitting AnyDoor also releases it).
 
 ## [4.0.0] - 2026-07-24
 
