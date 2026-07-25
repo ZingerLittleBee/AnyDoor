@@ -83,6 +83,19 @@ User-visible changes get an entry in `CHANGELOG.md` under the
 `## [x.y.z]` heading — the release script rewrites `[Unreleased]` at release
 time.
 
+## Continuous integration
+
+Every pull request runs two jobs:
+
+- **Build and test** — `swift build --build-tests` on macOS 26, where **any
+  warning from a target in this package fails the build**, followed by
+  `swift test`. Pushes to `main` additionally repeat the release script's
+  universal `arm64 + x86_64` build, which is where the Intel-only code paths
+  get compiled.
+- **Script Plugin tooling** — `pnpm verify` in `tooling/`.
+
+A pull request that touches `landing/` also build-checks the marketing site.
+
 ## Pull requests
 
 1. Fork the repository and create a branch from `main`.

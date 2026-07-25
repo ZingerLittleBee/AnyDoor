@@ -1,0 +1,41 @@
+# Monthly and grouped: dependency PRs should be a short chore, not a stream.
+# Dependabot does not support Swift Package Manager, so the SPM dependencies
+# (Sparkle, libwebp-Xcode, AskForPermission) stay pinned and updated by hand —
+# Sparkle in particular must move together with the CLI version pinned in the
+# Makefile (SPARKLE_VERSION).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ['*']
+
+  # Script Plugin authoring toolchain (pnpm workspace).
+  - package-ecosystem: npm
+    directory: /tooling
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      tooling:
+        patterns: ['*']
+
+  # Marketing landing page (Astro + Cloudflare Workers, Bun lockfile).
+  - package-ecosystem: bun
+    directory: /landing
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      landing:
+        patterns: ['*']
