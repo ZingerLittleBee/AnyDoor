@@ -19,7 +19,14 @@ final class HoverGateTests: XCTestCase {
     func testTriggerHoverRefreshesContentWhenAlreadyShownButCoalesced() async {
         let gate = HoverGate()
         var showCount = 0
-        gate.onShow = { showCount += 1 }
+        // Wait for the re-mount instead of sleeping past its 16ms coalescing
+        // window: on a loaded machine the deferred task can land much later, and
+        // a fixed sleep turns that into a flake rather than a real signal.
+        let remounted = expectation(description: "coalesced re-mount")
+        gate.onShow = {
+            showCount += 1
+            if showCount == 2 { remounted.fulfill() }
+        }
 
         gate.showImmediately()        // synchronous first show
         XCTAssertEqual(showCount, 1)
@@ -27,8 +34,7 @@ final class HoverGateTests: XCTestCase {
         gate.triggerHover(true)       // already shown -> coalesced re-mount, deferred off the tick
         XCTAssertEqual(showCount, 1, "re-mount while shown must be deferred, not synchronous")
 
-        // The coalesced refresh fires on a later runloop turn.
-        try? await Task.sleep(nanoseconds: 80_000_000)
+        await fulfillment(of: [remounted], timeout: 2)
         XCTAssertEqual(showCount, 2)
     }
 
@@ -36,7 +42,14 @@ final class HoverGateTests: XCTestCase {
     func testRapidCrossingsWhileShownCoalesceIntoOneRemount() async {
         let gate = HoverGate()
         var showCount = 0
-        gate.onShow = { showCount += 1 }
+        let remounted = expectation(description: "one coalesced re-mount")
+        let extraRemount = expectation(description: "no further re-mount")
+        extraRemount.isInverted = true
+        gate.onShow = {
+            showCount += 1
+            if showCount == 2 { remounted.fulfill() }
+            if showCount > 2 { extraRemount.fulfill() }
+        }
 
         gate.showImmediately()        // count 1
         // Simulate a fast sweep across several already-shown hover rows in one burst.
@@ -44,8 +57,10 @@ final class HoverGateTests: XCTestCase {
         gate.triggerHover(true)
         gate.triggerHover(true)
 
-        try? await Task.sleep(nanoseconds: 80_000_000)
-        // The three crossings collapse into a single re-mount (count 1 + 1), not three.
+        // The three crossings collapse into a single re-mount (count 1 + 1), not
+        // three: each crossing replaces the pending refresh task.
+        await fulfillment(of: [remounted], timeout: 2)
+        await fulfillment(of: [extraRemount], timeout: 0.2)
         XCTAssertEqual(showCount, 2)
     }
 
