@@ -6,6 +6,12 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Disable Keyboard now blocks everything: global hotkeys, Hyper Key combos, and
+  quick press kept working while the lock was on. Turn it off from the menu bar
+  icon (quitting AnyDoor also releases it).
+
 ## [4.0.0] - 2026-07-24
 
 ### Added
