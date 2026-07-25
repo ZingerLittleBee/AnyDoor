@@ -1,0 +1,132 @@
+name: CI
+
+# The one gate every pull request has to pass. scripts/release.sh never runs
+# the test suite, so nothing else stands between a red suite and a release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test (debug, arm64)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Toolchain versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      # Cache only SwiftPM's clone/manifest cache — never `.build`. A restored
+      # `.build` would skip recompiling unchanged modules, and the warning gate
+      # below only sees warnings that are actually re-emitted.
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
+
+      - name: Build (first-party warnings are errors)
+        run: |
+          set -o pipefail
+          swift build --build-tests 2>&1 | tee /tmp/build.log
+          # Match only compiler diagnostics anchored to a file in this package:
+          # dependency sources live under .build/checkouts and are not ours to
+          # fix, and SwiftPM's own bookkeeping warnings ("skipping cache due to
+          # an error") carry no source location at all.
+          warnings="$(grep -E '^/.+/(Sources|Tests|Plugins)/.+:[0-9]+:[0-9]+: warning: ' /tmp/build.log \
+            | grep -v '/\.build/' | sort -u || true)"
+          if [ -n "$warnings" ]; then
+            printf '%s\n' "$warnings"
+            echo "::error::first-party build warnings — new code must be warning-free (see CONTRIBUTING.md)"
+            exit 1
+          fi
+
+      # TranslationKeychainStore's tests write real kSecClassGenericPassword
+      # items to the default keychain. A headless runner's login keychain may be
+      # locked, which makes SecItemAdd fail with errSecInteractionNotAllowed, so
+      # point the session at a throwaway unlocked keychain instead.
+      - name: Prepare a throwaway default keychain
+        run: |
+          security create-keychain -p ci ci.keychain
+          security set-keychain-settings -lut 7200 ci.keychain
+          security unlock-keychain -p ci ci.keychain
+          security list-keychains -d user -s ci.keychain
+          security default-keychain -s ci.keychain
+
+      - name: Test
+        run: swift test --skip-build
+
+  tooling:
+    name: Script Plugin tooling
+    # `pnpm verify` builds the authoring API, the scaffold template and both
+    # worked examples, and fails when the committed Swift/TS contract fixture no
+    # longer matches its typed source — a staleness check the Swift tests cannot
+    # do, since they only decode the committed JSON. Plain Node, so it runs on
+    # Linux alongside the macOS job instead of gating it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tooling
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: tooling/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify
+        run: pnpm verify
+
+  universal-build:
+    name: Universal release build (arm64 + x86_64)
+    # Mirrors step 4 of scripts/release.sh. The debug job only compiles arm64,
+    # so the x86_64 halves of every `#if arch(arm64)` else-branch (the Intel DDC
+    # brightness backend, most notably) are type-checked nowhere else until
+    # release day. Too slow for every PR, cheap once per merge.
+    if: github.event_name != 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: swiftpm-${{ runner.os }}-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            swiftpm-${{ runner.os }}-
+
+      # The release script additionally pins the deployment target via linker
+      # flags; that is a packaging concern, irrelevant to a compile check.
+      - name: Build
+        run: swift build -c release --build-system swiftbuild --arch arm64 --arch x86_64

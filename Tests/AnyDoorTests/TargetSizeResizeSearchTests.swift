@@ -12,10 +12,10 @@ final class TargetSizeResizeSearchTests: XCTestCase {
         }
     }
 
-    func test_originalFits_returnsImmediately() throws {
+    func test_originalFits_returnsImmediately() {
         var probes = 0
         let search = TargetSizeResizeSearch(targetBytes: 10_000_000, originalDimensions: original)
-        let result = try search.run { request in
+        let result = search.run { request in
             probes += 1
             return self.areaBytes(scale: 1.0)(request)
         }
@@ -26,10 +26,10 @@ final class TargetSizeResizeSearchTests: XCTestCase {
         XCTAssertEqual(probes, 1, "a fitting original needs no further probes")
     }
 
-    func test_floorUnfit_missesWithTheFloorProbe() throws {
+    func test_floorUnfit_missesWithTheFloorProbe() {
         // Even the 640px floor is oversized.
         let search = TargetSizeResizeSearch(targetBytes: 1_000, originalDimensions: original)
-        let result = try search.run(measure: areaBytes(scale: 1.0))
+        let result = search.run(measure: areaBytes(scale: 1.0))
         guard case .bestEffort(let smallest) = result else {
             return XCTFail("expected bestEffort")
         }
@@ -40,11 +40,11 @@ final class TargetSizeResizeSearchTests: XCTestCase {
         )
     }
 
-    func test_originalAtOrBelowFloor_missesWithoutResizeProbes() throws {
+    func test_originalAtOrBelowFloor_missesWithoutResizeProbes() {
         var probes = 0
         let small = PixelDimensions(width: 320, height: 240)
         let search = TargetSizeResizeSearch(targetBytes: 1_000, originalDimensions: small)
-        let result = try search.run { request in
+        let result = search.run { request in
             probes += 1
             return self.areaBytes(scale: 1.0)(request)
         }
@@ -54,11 +54,11 @@ final class TargetSizeResizeSearchTests: XCTestCase {
         XCTAssertEqual(probes, 1, "below the floor only the original may be probed")
     }
 
-    func test_bisection_maximizesFittingEdgeWithinBudget() throws {
+    func test_bisection_maximizesFittingEdgeWithinBudget() {
         // 1 byte per pixel, target 600_000: fitting edges satisfy
         // edge * (edge * 0.75) <= 600_000 → edge <= 894.
         let search = TargetSizeResizeSearch(targetBytes: 600_000, originalDimensions: original)
-        let result = try search.run(measure: areaBytes(scale: 1.0))
+        let result = search.run(measure: areaBytes(scale: 1.0))
         guard case .reached(let candidate) = result else {
             return XCTFail("expected reached")
         }
@@ -71,19 +71,19 @@ final class TargetSizeResizeSearchTests: XCTestCase {
         XCTAssertLessThanOrEqual(candidate.request.dimensions.longestEdge, 894)
     }
 
-    func test_attemptBudget_isNeverExceeded() throws {
+    func test_attemptBudget_isNeverExceeded() {
         var probes = 0
         let search = TargetSizeResizeSearch(targetBytes: 600_000, originalDimensions: original)
-        _ = try search.run { request in
+        _ = search.run { request in
             probes += 1
             return self.areaBytes(scale: 1.0)(request)
         }
         XCTAssertLessThanOrEqual(probes, TargetSizePolicy.maxResizeOnlyAttempts)
     }
 
-    func test_candidatesCarryTheLosslessQualityMarker() throws {
+    func test_candidatesCarryTheLosslessQualityMarker() {
         let search = TargetSizeResizeSearch(targetBytes: 600_000, originalDimensions: original)
-        let result = try search.run(measure: areaBytes(scale: 1.0))
+        let result = search.run(measure: areaBytes(scale: 1.0))
         guard case .reached(let candidate) = result else {
             return XCTFail("expected reached")
         }

@@ -1,29 +1,39 @@
-name: Deploy Landing
+name: Landing
 
-# Rebuild and deploy the marketing landing page to Cloudflare Workers
-# whenever a release tag (v*) is pushed. release.sh pushes such a tag at
-# the end of every release, so a new version automatically refreshes the site.
-# Also exposed as a manual trigger for ad-hoc redeploys.
+# Rebuild and deploy the marketing landing page to Cloudflare Workers whenever a
+# release tag (v*) is pushed. release.sh pushes such a tag at the end of every
+# release, so a new version automatically refreshes the site. Also exposed as a
+# manual trigger for ad-hoc redeploys.
+#
+# A pull request that touches landing/ runs the same build without deploying, so
+# a broken site surfaces on the PR instead of during a release.
 on:
   push:
     tags:
       - 'v*'
+  pull_request:
+    paths:
+      - 'landing/**'
+      - '.github/workflows/deploy-landing.yml'
   workflow_dispatch:
 
 # Avoid overlapping deploys; let the newest tag win.
 concurrency:
-  group: deploy-landing
+  group: landing-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  deploy:
+  landing:
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: landing
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -31,7 +41,14 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Build
+        if: github.event_name == 'pull_request'
+        run: bun run build
+
+      # `bun run deploy` builds and then deploys, so the two paths are mutually
+      # exclusive rather than building twice.
       - name: Build and deploy to Cloudflare
+        if: github.event_name != 'pull_request'
         run: bun run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

@@ -2,6 +2,7 @@
 
 [English](README.md) | **简体中文**
 
+[![CI](https://img.shields.io/github/actions/workflow/status/ZingerLittleBee/AnyDoor/ci.yml?branch=main&style=for-the-badge&label=CI)](https://github.com/ZingerLittleBee/AnyDoor/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ZingerLittleBee/AnyDoor?style=for-the-badge&cacheSeconds=3600)](https://github.com/ZingerLittleBee/AnyDoor/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/ZingerLittleBee/AnyDoor/total?style=for-the-badge&cacheSeconds=3600)](https://github.com/ZingerLittleBee/AnyDoor/releases)
 [![License](https://img.shields.io/github/license/ZingerLittleBee/AnyDoor?style=for-the-badge&cacheSeconds=3600)](LICENSE)
