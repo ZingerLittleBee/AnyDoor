@@ -103,6 +103,11 @@ final class HotkeyService {
 
     func setKeyboardLocked(_ locked: Bool) {
         keyboardLocked = locked
+        // The lock swallows the trigger's keyUp, so a Hyper combo that armed it
+        // would leave hyperHeld stuck and eat every keystroke after unlocking.
+        hyperHeld = false
+        hyperConsumedByOther = false
+        suppressedKeyCodes.removeAll()
     }
 
     var isKeyboardLocked: Bool { keyboardLocked }
@@ -255,9 +260,19 @@ private func hotkeyCallback(
         return Unmanaged.passUnretained(event)
     }
 
+    // Keyboard lock: the keyboard produces nothing at all — no characters, no
+    // modifier-state changes, no hotkeys, no Hyper combos, and no Quick Press
+    // (which would otherwise synthesize real key events). This has to come
+    // before every matching branch below, otherwise a match returns first and
+    // the lock never sees the event. Releasing the lock is mouse-only, and
+    // quitting AnyDoor drops it too, so the keyboard can't be bricked.
+    if service.keyboardLocked {
+        if type == .keyDown || type == .keyUp || type == .flagsChanged { return nil }
+        return Unmanaged.passUnretained(event)
+    }
+
     let virtKey = service.hyperVirtualKeyCode
     let recording = service.recordingObserver
-    let locked = service.keyboardLocked
 
     // 1. Hyper trigger keyDown — set held, swallow.
     if virtKey >= 0 && type == .keyDown
@@ -274,9 +289,7 @@ private func hotkeyCallback(
     }
 
     // 2. Hyper trigger keyUp — possibly fire Quick Press (suppressed in
-    //    recording mode so a stray Quick Press doesn't escape into the field,
-    //    and while the keyboard is locked since Quick Press synthesizes real
-    //    key events — a locked keyboard must emit nothing).
+    //    recording mode so a stray Quick Press doesn't escape into the field).
     if virtKey >= 0 && type == .keyUp
        && Int(event.getIntegerValueField(.keyboardEventKeycode)) == virtKey {
         let wasHeld = service.hyperHeld
@@ -285,7 +298,7 @@ private func hotkeyCallback(
         service.hyperConsumedByOther = false
         if let observer = recording {
             if wasHeld { DispatchQueue.main.async { observer(false) } }
-        } else if wasHeld && !consumedOther && !locked {
+        } else if wasHeld && !consumedOther {
             let qp = service.hyperQuickPress
             let dispatcher = service.quickPressDispatcher
             DispatchQueue.main.async { dispatcher?(qp) }
@@ -311,7 +324,6 @@ private func hotkeyCallback(
         for snapshot in service.snapshots {
             if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
                 let action = snapshot.action
-                guard KeyboardLockPolicy.allowsDispatch(action, locked: locked) else { break }
                 let dispatcher = service.dispatcher
                 DispatchQueue.main.async { dispatcher?(action) }
                 break
@@ -337,20 +349,11 @@ private func hotkeyCallback(
         for snapshot in service.snapshots {
             if snapshot.keyCode == keyCode && snapshot.modifierFlags == modifiers {
                 let action = snapshot.action
-                guard KeyboardLockPolicy.allowsDispatch(action, locked: locked) else { break }
                 let dispatcher = service.dispatcher
                 DispatchQueue.main.async { dispatcher?(action) }
                 return nil
             }
         }
-    }
-
-    // Keyboard-lock mode: swallow any keyDown / keyUp / flagsChanged that
-    // didn't match, plus the matches KeyboardLockPolicy refused to dispatch.
-    // Only the keyboard-lock toggle itself survives, so the same shortcut can
-    // release the lock.
-    if locked && (type == .keyDown || type == .flagsChanged || type == .keyUp) {
-        return nil
     }
 
     return Unmanaged.passUnretained(event)

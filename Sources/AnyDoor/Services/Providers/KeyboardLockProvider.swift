@@ -5,9 +5,9 @@ import PluginInterface
 /// in `HotkeyService` and dropping anything that isn't a registered AnyDoor hotkey.
 ///
 /// Designed for keyboard cleaning: once enabled, key presses produce no characters,
-/// no modifier-state changes, no Hyper combos and no Quick Press. Only this item's own
-/// hotkey still fires (see `KeyboardLockPolicy`) so the same shortcut can toggle the
-/// lock back off. Quitting AnyDoor also releases the lock, since the
+/// no modifier-state changes, no hotkeys, no Hyper combos and no Quick Press — the
+/// keyboard is inert. Releasing the lock is therefore mouse-only: click the menu bar
+/// icon and toggle the row off. Quitting AnyDoor also releases the lock, since the
 /// state lives only in the running process — there's no way to brick the keyboard.
 actor KeyboardLockProvider: ToggleProvider {
     let itemKey: BuiltinItem = .keyboardLock
