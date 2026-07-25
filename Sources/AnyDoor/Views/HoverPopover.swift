@@ -201,13 +201,21 @@ final class KeyableHoverPanel: NSPanel {
 @Observable
 final class HoverGate {
     /// Hover-intent debounce before the first popover appears.
-    private static let showDelayNanos: UInt64 = 400_000_000
+    static let showDelay: Duration = .milliseconds(400)
     /// Grace period before the popover auto-hides once nothing is hovered.
-    private static let hideDelayNanos: UInt64 = 300_000_000
+    static let hideDelay: Duration = .milliseconds(300)
     /// Coalescing window for re-mounts while the popover is already shown.
     /// Collapses a fast sweep across several hover rows into one mount and
     /// keeps the work off the AppKit mouse-event tick (~one display frame).
-    private static let refreshDelayNanos: UInt64 = 16_000_000
+    static let refreshDelay: Duration = .milliseconds(16)
+
+    /// Injected so tests can drive these deadlines with a fake clock instead of
+    /// sleeping for real. Production always gets `ContinuousClock`.
+    private let clock: any Clock<Duration>
+
+    init(clock: any Clock<Duration> = ContinuousClock()) {
+        self.clock = clock
+    }
 
     private(set) var isShown = false
     private var triggerHovered = false
@@ -276,8 +284,9 @@ final class HoverGate {
         // the 400ms countdown on every crossing. Whichever row the cursor rests
         // on when the timer fires is shown via the caller's latest target.
         guard showTask == nil else { return }
+        let clock = clock
         showTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.showDelayNanos)
+            try? await clock.sleep(for: Self.showDelay)
             guard let self else { return }
             self.showTask = nil
             guard !Task.isCancelled, self.triggerHovered else { return }
@@ -288,8 +297,9 @@ final class HoverGate {
 
     private func scheduleRefresh() {
         refreshTask?.cancel()
+        let clock = clock
         refreshTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.refreshDelayNanos)
+            try? await clock.sleep(for: Self.refreshDelay)
             guard let self else { return }
             self.refreshTask = nil
             guard !Task.isCancelled, self.isShown else { return }
@@ -300,8 +310,9 @@ final class HoverGate {
     private func scheduleHide() {
         guard isShown else { return }
         hideTask?.cancel()
+        let clock = clock
         hideTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: Self.hideDelayNanos)
+            try? await clock.sleep(for: Self.hideDelay)
             guard let self, !Task.isCancelled else { return }
             guard !self.triggerHovered && !self.popoverHovered else { return }
             self.isShown = false
