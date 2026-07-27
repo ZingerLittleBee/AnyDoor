@@ -8,6 +8,13 @@ versioning.
 
 ### Fixed
 
+- Clipboard wall: Space now closes an image / file preview again. The preview
+  used to swallow the keyboard, so it could only be dismissed with the mouse.
+  Esc closes it too, the arrow keys move the preview through the cards, and
+  Return still pastes — all while the preview is up. Images are also previewed
+  at their own aspect ratio instead of inside a fixed landscape box.
+- Clipboard wall: image and screenshot cards are no longer blurry. Their
+  thumbnails were decoded smaller than the card draws them and got upscaled.
 - Disable Keyboard now blocks everything: global hotkeys, Hyper Key combos, and
   quick press kept working while the lock was on. Turn it off from the menu bar
   icon (quitting AnyDoor also releases it).
