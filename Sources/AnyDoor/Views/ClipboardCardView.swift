@@ -242,20 +242,18 @@ struct ClipboardCardView: View {
     /// icon (resolved inline), the thumbnail decode is heavy enough to keep async.
     /// Shows a `photo` placeholder while the first decode is in flight.
     private struct ThumbnailView: View {
-        /// The card's preview box is ~230x190pt and the image is cropped
-        /// `scaledToFill`, so the source needs more pixels than the box is
-        /// wide: a landscape shot is height-constrained, and filling 190pt at
-        /// 2x with a 16:9 image needs ≈676px across. The default 384px budget
-        /// was sized for a small row and got upscaled ~1.5x here, which is
-        /// exactly the softness you see next to the crisp Space preview.
-        private static let maxPixel = 768
+        /// The card's preview box is ~230x200pt. The cache combines this rendered
+        /// size with the source aspect ratio, so `scaledToFill` has enough pixels
+        /// on its constrained axis even for ultrawide or tall screenshots.
+        private static let previewPointSize = CGSize(width: 230, height: 200)
 
         let url: URL
         @State private var loaded: NSImage?
+        @Environment(\.displayScale) private var displayScale
 
         var body: some View {
             Group {
-                if let image = loaded ?? FileThumbnailCache.cached(at: url, maxPixel: Self.maxPixel) {
+                if let image = loaded ?? FileThumbnailCache.cached(at: url, filling: targetPixelSize) {
                     // Color.clear takes the offered preview frame; the image fills it
                     // as an overlay and is clipped to those bounds, so a large image
                     // can't overflow and cover the header.
@@ -270,11 +268,24 @@ struct ClipboardCardView: View {
                     Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
                 }
             }
-            .task(id: url) {
-                if loaded == nil, FileThumbnailCache.cached(at: url, maxPixel: Self.maxPixel) == nil {
-                    loaded = await FileThumbnailCache.thumbnail(at: url, maxPixel: Self.maxPixel)
+            .task(id: requestID) {
+                loaded = FileThumbnailCache.cached(at: url, filling: targetPixelSize)
+                if loaded == nil {
+                    loaded = await FileThumbnailCache.thumbnail(at: url, filling: targetPixelSize)
                 }
             }
+        }
+
+        private var targetPixelSize: CGSize {
+            CGSize(
+                width: Self.previewPointSize.width * displayScale,
+                height: Self.previewPointSize.height * displayScale
+            )
+        }
+
+        private var requestID: String {
+            let size = targetPixelSize
+            return "\(url.path)#\(Int(ceil(size.width)))x\(Int(ceil(size.height)))"
         }
     }
 

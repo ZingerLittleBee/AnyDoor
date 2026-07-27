@@ -164,8 +164,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// once focus has returned. No-op if already hidden or mid-animation.
     private func dismiss(restoreFocus: Bool, completion: (@Sendable () -> Void)? = nil) {
         // The floating panels have no life of their own once the wall goes away.
-        ClipboardTextWindow.shared.close()
-        ClipboardQuickLookWindow.shared.close()
+        closePreviews()
         guard !isAnimating, let window, window.isVisible, let screen = NSScreen.main else {
             completion?()
             return

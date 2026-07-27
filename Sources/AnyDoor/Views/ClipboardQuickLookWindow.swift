@@ -19,36 +19,28 @@ final class ClipboardQuickLookWindow {
     static let shared = ClipboardQuickLookWindow()
 
     private var panel: NSPanel?
+    private var containerView: NSView?
     private var previewView: QLPreviewView?
     private var mouseMonitors: [Any] = []
     /// The file currently previewed, so a repeated request for the same URL is
     /// a no-op instead of a flicker-inducing rebuild.
-    private(set) var previewedURL: URL?
+    private var previewedURL: URL?
 
     private init() {}
 
     var isVisible: Bool { panel?.isVisible == true }
 
-    /// Whether `window` is this preview panel (mouse routing in the wall).
-    func owns(_ window: NSWindow?) -> Bool {
-        window != nil && window === panel
-    }
-
     /// Shows `url`, or swaps the content of an open preview (arrow-key follow).
     /// The panel is resized to the new item so a portrait shot doesn't sit in a
     /// landscape box.
     func show(url: URL) {
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            close()
-            return
-        }
         if isVisible, previewedURL == url { return }
-        if let panel, let previewView {
+        if let panel, let containerView {
             previewedURL = url
             if let screen = panel.screen ?? NSScreen.main {
                 panel.setFrame(Self.panelRect(for: url, on: screen), display: true, animate: false)
             }
-            previewView.previewItem = url as NSURL
+            replaceContent(with: url, in: containerView)
             return
         }
         present(url: url)
@@ -60,6 +52,7 @@ final class ClipboardQuickLookWindow {
         // Releases the preview item and its (possibly out-of-process) renderer.
         previewView?.close()
         previewView = nil
+        containerView = nil
         panel?.orderOut(nil)
         panel = nil
         previewedURL = nil
@@ -95,19 +88,11 @@ final class ClipboardQuickLookWindow {
         container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
         container.autoresizingMask = [.width, .height]
 
-        let preview = QLPreviewView(frame: container.bounds, style: .normal) ?? QLPreviewView()
-        preview.frame = container.bounds
-        preview.autoresizingMask = [.width, .height]
-        // Media must not start playing under a preview the user only glanced at.
-        preview.autostarts = false
-        preview.shouldCloseWithWindow = false
-        preview.previewItem = url as NSURL
-        container.addSubview(preview)
-
         p.contentView = container
         panel = p
-        previewView = preview
+        containerView = container
         previewedURL = url
+        replaceContent(with: url, in: container)
 
         // orderFrontRegardless: the app is not active (the wall is a
         // non-activating panel), and the preview must still show.
@@ -136,23 +121,71 @@ final class ClipboardQuickLookWindow {
         mouseMonitors = [local, global].compactMap { $0 }
     }
 
+    /// Replaces the rendered item without rebuilding the panel. Missing files
+    /// stay visible as an inline failure state so Space never appears to do
+    /// nothing and arrow navigation can continue to the next card.
+    private func replaceContent(with url: URL, in container: NSView) {
+        previewView?.close()
+        previewView = nil
+        container.subviews.forEach { $0.removeFromSuperview() }
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            container.addSubview(Self.missingFileView(frame: container.bounds))
+            return
+        }
+
+        let preview = QLPreviewView(frame: container.bounds, style: .normal) ?? QLPreviewView()
+        preview.frame = container.bounds
+        preview.autoresizingMask = [.width, .height]
+        // Media must not start playing under a preview the user only glanced at.
+        preview.autostarts = false
+        preview.shouldCloseWithWindow = false
+        preview.previewItem = url as NSURL
+        container.addSubview(preview)
+        previewView = preview
+    }
+
+    private static func missingFileView(frame: NSRect) -> NSView {
+        let image = NSImageView()
+        image.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle",
+            accessibilityDescription: L(.clipboardPreviewMissingFile)
+        )
+        image.contentTintColor = .secondaryLabelColor
+        image.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 28, weight: .regular)
+
+        let label = NSTextField(wrappingLabelWithString: L(.clipboardPreviewMissingFile))
+        label.alignment = .center
+        label.textColor = .secondaryLabelColor
+
+        let stack = NSStackView(views: [image, label])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        let view = NSView(frame: frame)
+        view.autoresizingMask = [.width, .height]
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            label.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -40),
+        ])
+        return view
+    }
+
     /// Centered frame for `url`: an image is previewed at its natural point size
     /// (pixels ÷ the screen's backing scale, so a 2x screenshot shows at 1:1
-    /// rather than double size), shrunk to fit the screen budget and never
-    /// upscaled. Anything Quick Look renders as a document falls back to a
-    /// generic box.
+    /// rather than double size), uniformly scaled to fit the screen budget while
+    /// preserving its aspect ratio. Anything Quick Look renders as a document
+    /// falls back to a generic box.
     private static func panelRect(for url: URL, on screen: NSScreen) -> NSRect {
         let visible = screen.visibleFrame
-        let budget = NSSize(width: visible.width * 0.6, height: visible.height * 0.7)
-        guard let pixels = pixelSize(of: url) else {
-            return centered(NSSize(width: visible.width * 0.6, height: visible.height * 0.6), in: visible)
-        }
-        let scale = max(screen.backingScaleFactor, 1)
-        let natural = NSSize(width: pixels.width / scale, height: pixels.height / scale)
-        let fit = min(1, min(budget.width / natural.width, budget.height / natural.height))
-        let size = NSSize(
-            width: max(240, (natural.width * fit).rounded()),
-            height: max(160, (natural.height * fit).rounded())
+        let size = ClipboardQuickLookGeometry.panelSize(
+            pixelSize: pixelSize(of: url),
+            backingScale: screen.backingScaleFactor,
+            visibleSize: visible.size
         )
         return centered(size, in: visible)
     }
@@ -178,6 +211,37 @@ final class ClipboardQuickLookWindow {
         return (5...8).contains(orientation)
             ? CGSize(width: height, height: width)
             : CGSize(width: width, height: height)
+    }
+}
+
+enum ClipboardQuickLookGeometry {
+    private static let minimumSize = CGSize(width: 240, height: 160)
+
+    /// Returns an aspect-preserving panel size. Small images are uniformly
+    /// enlarged enough to meet the preferred minimum when the screen permits;
+    /// large or extreme-aspect images always prioritize fitting the screen.
+    static func panelSize(
+        pixelSize: CGSize?,
+        backingScale: CGFloat,
+        visibleSize: CGSize
+    ) -> CGSize {
+        let budget = CGSize(width: visibleSize.width * 0.6, height: visibleSize.height * 0.7)
+        guard let pixelSize, pixelSize.width > 0, pixelSize.height > 0 else {
+            return CGSize(width: visibleSize.width * 0.6, height: visibleSize.height * 0.6)
+        }
+
+        let scale = max(backingScale, 1)
+        let natural = CGSize(width: pixelSize.width / scale, height: pixelSize.height / scale)
+        let fitScale = min(budget.width / natural.width, budget.height / natural.height)
+        let minimumScale = max(
+            minimumSize.width / natural.width,
+            minimumSize.height / natural.height
+        )
+        let appliedScale = min(fitScale, max(1, minimumScale))
+        return CGSize(
+            width: (natural.width * appliedScale).rounded(),
+            height: (natural.height * appliedScale).rounded()
+        )
     }
 }
 
