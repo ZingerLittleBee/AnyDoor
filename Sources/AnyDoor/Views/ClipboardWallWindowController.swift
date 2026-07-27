@@ -2,7 +2,6 @@ import AppKit
 import PluginInterface
 import PluginSupport
 import QuartzCore
-import QuickLookUI
 import SwiftData
 import SwiftUI
 
@@ -10,7 +9,7 @@ import SwiftUI
 /// the clipboard-wall hotkey (via ClipboardWallProvider) or the panel row.
 /// Mirrors CommandPaletteWindowController's activation/key-monitor pattern.
 @MainActor
-final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate, QLPreviewPanelDataSource {
+final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate {
     static let shared = ClipboardWallWindowController()
 
     /// The shared SwiftData container, injected by AppDelegate. Needed so the
@@ -37,7 +36,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// scrolls belong to the tab row's own horizontal ScrollView, not card
     /// navigation. Keep in sync with ClipboardWallView's layout.
     private static let topStripHeight: CGFloat = 48
-    private var previewURL: URL?
 
     /// The app that was frontmost when the wall opened. The wall activates
     /// AnyDoor so its panel can become key (a background .accessory app's panel
@@ -165,8 +163,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     /// `completion` runs after the window has ordered out, so paste can post ⌘V
     /// once focus has returned. No-op if already hidden or mid-animation.
     private func dismiss(restoreFocus: Bool, completion: (@Sendable () -> Void)? = nil) {
-        // The floating text panel has no life of its own once the wall goes away.
+        // The floating panels have no life of their own once the wall goes away.
         ClipboardTextWindow.shared.close()
+        ClipboardQuickLookWindow.shared.close()
         guard !isAnimating, let window, window.isVisible, let screen = NSScreen.main else {
             completion?()
             return
@@ -214,8 +213,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
                 Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tagID) }
             },
             onNewTag: { [weak self] item in
-                // A floating text preview must not stay over the modal overlay,
+                // A floating preview must not stay over the modal overlay,
                 // but a dirty editor resolves its discard prompt first.
+                ClipboardQuickLookWindow.shared.close()
                 guard ClipboardTextWindow.shared.yieldToModal() else { return }
                 self?.state.presentTagDialog(.create(item: item))
             },
@@ -270,7 +270,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         ) { [weak self] _ in
             MainThreadIsolation.run {
                 guard let self else { return }
-                if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
                 // Don't throw away an in-progress edit on a stray outside click.
                 if ClipboardTextWindow.shared.isEditing { return }
                 self.dismiss(restoreFocus: false)
@@ -317,7 +316,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         scrollAccum += delta
         while scrollAccum <= -Self.scrollStep { state.moveRight(); scrollAccum += Self.scrollStep }
         while scrollAccum >= Self.scrollStep { state.moveLeft(); scrollAccum -= Self.scrollStep }
-        syncTextPreview()
+        syncPreview()
         return true
     }
 
@@ -375,7 +374,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         let inputMode = state.isSearchFocused
         switch event.keyCode {
         case 53:                                         // esc — staged exit
-            if state.query.isEmpty {
+            // An open Quick Look preview is the first thing Esc steps back
+            // through (the floating text panel handles its own Esc in
+            // routeToTextWindow above); the wall stays up.
+            if ClipboardQuickLookWindow.shared.isVisible {
+                ClipboardQuickLookWindow.shared.close()
+            } else if state.query.isEmpty {
                 // Nothing to step back through: close outright, in either mode.
                 dismiss(restoreFocus: true)
             } else if inputMode {
@@ -396,12 +400,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             if inputMode { return false }                // move the text caret
             if event.modifierFlags.contains(.command) { state.moveToStart() }
             else { state.moveLeft() }
-            syncTextPreview(); return true
+            syncPreview(); return true
         case 124:                                        // → / ⌘→ (jump to last)
             if inputMode { return false }                // move the text caret
             if event.modifierFlags.contains(.command) { state.moveToEnd() }
             else { state.moveRight() }
-            syncTextPreview(); return true
+            syncPreview(); return true
         case 125:                                        // ↓ — leave the search field
             guard inputMode else { return false }
             // Hand the keyboard back to card navigation. Resign synchronously
@@ -414,9 +418,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             togglePreview(); return true
         case 48:                                         // tab — cycle category tabs
             // Works in both modes; the field never needs a literal tab. The
-            // filtered list changes, so drop an open text preview rather than
-            // leave it showing an item from the previous tab.
-            if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
+            // filtered list changes, so drop an open preview rather than leave
+            // it showing an item from the previous tab.
+            closePreviews()
             if event.modifierFlags.contains(.shift) {
                 state.selectPreviousCategory()
             } else {
@@ -427,7 +431,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             if inputMode { return false }                // delete a character
             if let item = state.selectedItem {
                 // The preview would otherwise keep showing the deleted item.
-                if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
+                closePreviews()
                 Task { await ClipboardHistoryStore.shared.delete(item) }
             }
             return true
@@ -507,7 +511,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         // Focus is moving into the search field; a floating preview would now
         // swallow Space/Esc meant for the query, so drop it (it's stale anyway —
         // searching is about to change the selection).
-        if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
+        closePreviews()
         guard let field = searchField, field.window === window else {
             // The reference can lag a host rebuild; command focus through
             // state and let updateNSView grab first responder on the next
@@ -687,11 +691,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
     // MARK: - Quick Look (space)
 
     /// Space: text-bearing kinds open the floating text panel; image/screenshot/
-    /// file go through system Quick Look; color has no preview (the card already
-    /// shows the value).
+    /// file open the Quick Look panel; color has no preview (the card already
+    /// shows the value). Pressing Space again closes whichever is up.
     private func togglePreview() {
         guard let item = state.selectedItem else { return }
         if item.historyKind?.isTextBearing == true {
+            ClipboardQuickLookWindow.shared.close()
             if ClipboardTextWindow.shared.isPreviewVisible {
                 ClipboardTextWindow.shared.close()
             } else {
@@ -699,30 +704,41 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
             }
             return
         }
-        toggleQuickLook()
-    }
-
-    /// Keep an open text preview in step with the keyboard selection (Finder
-    /// Quick Look behavior). Closes it when the selection leaves text kinds.
-    private func syncTextPreview() {
-        guard ClipboardTextWindow.shared.isPreviewVisible else { return }
-        if let item = state.selectedItem, item.historyKind?.isTextBearing == true {
-            ClipboardTextWindow.shared.showPreview(item: item)
-        } else {
-            ClipboardTextWindow.shared.close()
-        }
-    }
-
-    private func toggleQuickLook() {
-        guard let panel = QLPreviewPanel.shared() else { return }
-        if QLPreviewPanel.sharedPreviewPanelExists() && panel.isVisible {
-            panel.orderOut(nil)
+        if ClipboardQuickLookWindow.shared.isVisible {
+            ClipboardQuickLookWindow.shared.close()
             return
         }
-        previewURL = quickLookURL(for: state.selectedItem)
-        guard previewURL != nil else { return }
-        panel.dataSource = self
-        panel.makeKeyAndOrderFront(nil)
+        guard let url = quickLookURL(for: item) else { return }
+        ClipboardTextWindow.shared.close()
+        ClipboardQuickLookWindow.shared.show(url: url)
+    }
+
+    /// Keep an open preview in step with the keyboard selection (Finder Quick
+    /// Look behavior): the text panel follows text-bearing kinds, the Quick Look
+    /// panel follows file-backed ones, and each closes when the selection moves
+    /// to a kind it can't show.
+    private func syncPreview() {
+        if ClipboardTextWindow.shared.isPreviewVisible {
+            if let item = state.selectedItem, item.historyKind?.isTextBearing == true {
+                ClipboardTextWindow.shared.showPreview(item: item)
+            } else {
+                ClipboardTextWindow.shared.close()
+            }
+        }
+        if ClipboardQuickLookWindow.shared.isVisible {
+            if let url = quickLookURL(for: state.selectedItem) {
+                ClipboardQuickLookWindow.shared.show(url: url)
+            } else {
+                ClipboardQuickLookWindow.shared.close()
+            }
+        }
+    }
+
+    /// Drops both floating previews. Used wherever the selection or the visible
+    /// item set is about to change under them (delete, tab switch, search).
+    private func closePreviews() {
+        if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
+        ClipboardQuickLookWindow.shared.close()
     }
 
     private func quickLookURL(for item: ClipboardHistoryItem?) -> URL? {
@@ -740,23 +756,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
-    // QLPreviewPanelDataSource is not main-actor annotated, but Quick Look only
-    // invokes these on the main thread. Mark them nonisolated and hop back onto
-    // the main actor to read the main-actor-isolated previewURL.
-    nonisolated func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        MainThreadIsolation.run { previewURL == nil ? 0 : 1 }
-    }
-    nonisolated func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> QLPreviewItem! {
-        MainThreadIsolation.run { previewURL as NSURL? }
-    }
-
     func windowWillClose(_ notification: Notification) {
         removeMonitors()
     }
     func windowDidResignKey(_ notification: Notification) {
-        // Don't close while Quick Look or the floating text panel is up — the
-        // text editor takes key status while the wall stays open behind it.
-        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { return }
+        // Don't close while the floating text panel is up — the text editor takes
+        // key status while the wall stays open behind it. (The Quick Look panel
+        // never takes key, so it can't be the reason the wall resigned.)
         if ClipboardTextWindow.shared.isVisible { return }
         // Ignore the resign that the slide-out animation itself triggers.
         guard !isAnimating else { return }
