@@ -35,7 +35,7 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.engine)
         XCTAssertEqual(coordinator.status, .idle)
 
-        coordinator.enable(folderURL: folder)
+        coordinator.configureFolder(folder)
         XCTAssertTrue(coordinator.isEnabled)
         XCTAssertTrue(defaults.bool(forKey: SyncDefaultsKeys.enabled))
         XCTAssertEqual(defaults.string(forKey: SyncDefaultsKeys.folderPath), folder.path)
@@ -49,6 +49,47 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.status, .idle)
         // The folder choice is kept for the next enable.
         XCTAssertEqual(coordinator.folderPath, folder.path)
+    }
+
+    func testConfigureWebDAVValidationAndPersistence() async throws {
+        let service = "SyncCoordinatorTests-\(UUID().uuidString)"
+        let credentials = SyncWebDAVCredentialStore(service: service)
+        defer { credentials.deletePassword() }
+        let coordinator = SyncCoordinator(defaults: defaults, credentialStore: credentials)
+        coordinator.bootstrap(modelContainer: container)
+
+        // http and empty usernames are rejected without enabling anything.
+        XCTAssertFalse(coordinator.configureWebDAV(
+            urlString: "http://insecure.example.com/dav", username: "bee", password: "pw"
+        ))
+        XCTAssertFalse(coordinator.configureWebDAV(
+            urlString: "https://dav.example.invalid/AnyDoor", username: " ", password: "pw"
+        ))
+        guard case .failed(_, .invalidConfiguration) = coordinator.status else {
+            return XCTFail("expected invalidConfiguration, got \(coordinator.status)")
+        }
+        XCTAssertFalse(coordinator.isEnabled)
+        XCTAssertNil(coordinator.engine)
+
+        XCTAssertTrue(coordinator.configureWebDAV(
+            urlString: "https://dav.example.invalid/AnyDoor", username: "bee", password: "pw"
+        ))
+        XCTAssertTrue(coordinator.isEnabled)
+        XCTAssertEqual(coordinator.transportKind, .webdav)
+        XCTAssertEqual(
+            defaults.string(forKey: SyncDefaultsKeys.webdavURL),
+            "https://dav.example.invalid/AnyDoor"
+        )
+        XCTAssertEqual(credentials.password(), "pw")
+        XCTAssertNotNil(coordinator.engine)
+
+        // Re-saving with a blank password keeps the stored secret.
+        XCTAssertTrue(coordinator.configureWebDAV(
+            urlString: "https://dav.example.invalid/Other", username: "bee", password: "  "
+        ))
+        XCTAssertEqual(credentials.password(), "pw")
+
+        coordinator.disable()
     }
 
     func testBootstrapWithMissingFolderReportsFailure() async throws {

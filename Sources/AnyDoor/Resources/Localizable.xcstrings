@@ -8315,6 +8315,40 @@
         }
       }
     },
+    "settings.configSync.failure.invalidConfiguration": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "invalid sync configuration (https URL and username required)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步配置无效(需要 https 地址和用户名)"
+          }
+        }
+      }
+    },
+    "settings.configSync.failure.unauthorized": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "authentication failed — check username or app password"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "认证失败,请检查用户名或应用密码"
+          }
+        }
+      }
+    },
     "settings.configSync.folder": {
       "extractionState": "manual",
       "localizations": {
@@ -8413,6 +8447,125 @@
           "stringUnit": {
             "state": "translated",
             "value": "等待首次同步…"
+          }
+        }
+      }
+    },
+    "settings.configSync.transport": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync via"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步方式"
+          }
+        }
+      }
+    },
+    "settings.configSync.transportFolder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Folder"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件夹"
+          }
+        }
+      }
+    },
+    "settings.configSync.transportWebDAV": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WebDAV"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WebDAV"
+          }
+        }
+      }
+    },
+    "settings.configSync.webdavConnect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save & Connect"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保存并连接"
+          }
+        }
+      }
+    },
+    "settings.configSync.webdavPassword": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "App password"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用密码"
+          }
+        }
+      }
+    },
+    "settings.configSync.webdavURL": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Server URL"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "服务器地址"
+          }
+        }
+      }
+    },
+    "settings.configSync.webdavUsername": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Username"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "用户名"
           }
         }
       }

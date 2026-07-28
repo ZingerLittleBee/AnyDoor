@@ -17,6 +17,11 @@ versioning.
   Machine-local state (helper approval, Script Plugins, the sync folder
   choice itself) stays local; the manual export/import backup remains for
   one-shot migration.
+- Config sync over WebDAV: pick WebDAV as the sync transport and enter a
+  server URL (https), username, and app password to sync through Nextcloud,
+  坚果云, Synology, or any other WebDAV server — no cloud-drive client
+  needed. The password lives in the Keychain, and the target directory is
+  created automatically on first sync.
 
 ### Fixed
 

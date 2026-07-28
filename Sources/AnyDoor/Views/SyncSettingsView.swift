@@ -12,6 +12,10 @@ struct SyncSettingsView: View {
     private let coordinator = SyncCoordinator.shared
     @State private var statusMessage: String?
     @State private var isError = false
+    @State private var selectedTransport = SyncCoordinator.shared.transportKind
+    @State private var webdavURL = SyncCoordinator.shared.webdavURLString ?? ""
+    @State private var webdavUsername = SyncCoordinator.shared.webdavUsername ?? ""
+    @State private var webdavPassword = ""
 
     // Renders plain Sections so it can be embedded inside the General tab's
     // Form rather than living in its own tab.
@@ -32,28 +36,73 @@ struct SyncSettingsView: View {
                 LocalizedText(.settingsConfigSyncEnable)
             }
 
-            HStack {
-                LocalizedText(.settingsConfigSyncFolder)
-                Spacer()
-                if let path = coordinator.folderPath {
-                    Text((path as NSString).abbreviatingWithTildeInPath)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                } else {
-                    LocalizedText(.settingsConfigSyncNotSet)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                Button { chooseFolder() } label: {
-                    LocalizedText(.settingsConfigSyncChooseFolder)
-                }
+            Picker(selection: $selectedTransport) {
+                LocalizedText(.settingsConfigSyncTransportFolder)
+                    .tag(SyncTransportKind.folder)
+                LocalizedText(.settingsConfigSyncTransportWebDAV)
+                    .tag(SyncTransportKind.webdav)
+            } label: {
+                LocalizedText(.settingsConfigSyncTransport)
+            }
+            .pickerStyle(.segmented)
+
+            switch selectedTransport {
+            case .folder: folderRow
+            case .webdav: webdavRows
             }
 
             syncStatusLine
         } header: {
             LocalizedText(.settingsConfigSyncSection)
+        }
+    }
+
+    private var folderRow: some View {
+        HStack {
+            LocalizedText(.settingsConfigSyncFolder)
+            Spacer()
+            if let path = coordinator.folderPath {
+                Text((path as NSString).abbreviatingWithTildeInPath)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else {
+                LocalizedText(.settingsConfigSyncNotSet)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Button { chooseFolder() } label: {
+                LocalizedText(.settingsConfigSyncChooseFolder)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var webdavRows: some View {
+        TextField(text: $webdavURL, prompt: Text(verbatim: "https://dav.example.com/AnyDoor")) {
+            LocalizedText(.settingsConfigSyncWebdavURL)
+        }
+        .autocorrectionDisabled()
+        TextField(text: $webdavUsername) {
+            LocalizedText(.settingsConfigSyncWebdavUsername)
+        }
+        .autocorrectionDisabled()
+        SecureField(text: $webdavPassword) {
+            LocalizedText(.settingsConfigSyncWebdavPassword)
+        }
+        HStack {
+            Spacer()
+            Button {
+                coordinator.configureWebDAV(
+                    urlString: webdavURL,
+                    username: webdavUsername,
+                    password: webdavPassword
+                )
+                webdavPassword = ""
+            } label: {
+                LocalizedText(.settingsConfigSyncWebdavConnect)
+            }
         }
     }
 
@@ -83,6 +132,8 @@ struct SyncSettingsView: View {
         case .folderMissing: .settingsConfigSyncFailureFolderMissing
         case .folderUnreachable: .settingsConfigSyncFailureFolderUnreachable
         case .folderNotWritable: .settingsConfigSyncFailureFolderNotWritable
+        case .unauthorized: .settingsConfigSyncFailureUnauthorized
+        case .invalidConfiguration: .settingsConfigSyncFailureInvalidConfiguration
         case .applyFailed: .settingsConfigSyncFailureApplyFailed
         }
     }
@@ -92,11 +143,11 @@ struct SyncSettingsView: View {
             get: { coordinator.isEnabled },
             set: { enabled in
                 if enabled {
-                    if let path = coordinator.folderPath {
-                        coordinator.enable(folderURL: URL(fileURLWithPath: path, isDirectory: true))
-                    } else {
+                    if selectedTransport == .folder, coordinator.folderPath == nil {
                         // No folder yet: enabling starts with picking one.
                         chooseFolder()
+                    } else {
+                        coordinator.enable()
                     }
                 } else {
                     coordinator.disable()
@@ -112,7 +163,7 @@ struct SyncSettingsView: View {
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        coordinator.enable(folderURL: url)
+        coordinator.configureFolder(url)
     }
 
     // MARK: - Config Backup (manual one-shot export/import)

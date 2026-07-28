@@ -250,7 +250,7 @@ final class SyncEngineTests: XCTestCase {
             clock: SyncTimestamp(wallMillis: 9_000, counter: 0, deviceID: "device-c")
         )
         try SyncStateCodec.encode(peer).write(
-            to: folder.appendingPathComponent(SyncFolderTransport.fileName(forDeviceID: "device-c")),
+            to: folder.appendingPathComponent(SyncStateFile.name(forDeviceID: "device-c")),
             options: .atomic
         )
 
@@ -273,7 +273,7 @@ final class SyncEngineTests: XCTestCase {
         await a.engine.tick()
 
         let ownFile = folder.appendingPathComponent(
-            SyncFolderTransport.fileName(forDeviceID: "device-a")
+            SyncStateFile.name(forDeviceID: "device-a")
         )
         let bytesBefore = try Data(contentsOf: ownFile)
         let entriesBefore = a.engine.document.entries

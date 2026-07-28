@@ -3,8 +3,45 @@ import OSLog
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "sync")
 
-enum SyncTransportError: Error {
+enum SyncTransportError: Error, Equatable {
     case timedOut
+    case unauthorized
+    case http(Int)
+    case badResponse
+}
+
+/// Where sync state lives. A transport moves whole state files; document
+/// semantics stay in the engine. Implementations: `SyncFolderTransport`
+/// (cloud-drive folder) and `SyncWebDAVTransport` (self-hosted servers).
+protocol SyncTransport: Sendable {
+    /// Read every peer document. Per-file tolerant; throws only when the
+    /// location itself is unreachable (or rejects the credentials).
+    func readPeerDocuments(excludingDeviceID: String) async throws -> [SyncDocument]
+    func writeOwnDocument(_ data: Data, deviceID: String) async throws
+    /// A local directory the engine can watch for changes, when the transport
+    /// is backed by one; nil means the engine relies on periodic polling.
+    var watchableDirectory: URL? { get }
+}
+
+/// The state-file naming policy shared by every transport. Strict pattern
+/// gate: anything else at the location — user files, a cloud client's
+/// "conflicted copy" artifacts — is invisible.
+enum SyncStateFile {
+    static let prefix = "AnyDoor-SyncState-"
+    static let suffix = ".json"
+
+    static func name(forDeviceID deviceID: String) -> String {
+        prefix + deviceID + suffix
+    }
+
+    static func deviceID(fromFileName name: String) -> String? {
+        guard name.hasPrefix(prefix), name.hasSuffix(suffix) else { return nil }
+        let id = String(name.dropFirst(prefix.count).dropLast(suffix.count))
+        guard !id.isEmpty,
+              id.allSatisfy({ ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" })
+        else { return nil }
+        return id
+    }
 }
 
 /// Stable JSON encoding for sync state. `sortedKeys` makes encoding
@@ -29,27 +66,11 @@ enum SyncStateCodec {
 /// File Provider defense: any call can hang on a dataless file or a stalled
 /// mount, so every filesystem touch races a timeout. A timed-out or corrupt
 /// peer file is skipped — that only delays convergence, it never corrupts it.
-struct SyncFolderTransport: Sendable {
+struct SyncFolderTransport: SyncTransport {
     let folderURL: URL
     var timeout: TimeInterval = 5
 
-    private static let filePrefix = "AnyDoor-SyncState-"
-    private static let fileSuffix = ".json"
-
-    static func fileName(forDeviceID deviceID: String) -> String {
-        filePrefix + deviceID + fileSuffix
-    }
-
-    /// Strict pattern gate: anything else in the folder — the user's own
-    /// files, a cloud client's "conflicted copy" artifacts — is invisible.
-    static func deviceID(fromFileName name: String) -> String? {
-        guard name.hasPrefix(filePrefix), name.hasSuffix(fileSuffix) else { return nil }
-        let id = String(name.dropFirst(filePrefix.count).dropLast(fileSuffix.count))
-        guard !id.isEmpty,
-              id.allSatisfy({ ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "-" })
-        else { return nil }
-        return id
-    }
+    var watchableDirectory: URL? { folderURL }
 
     /// Read every peer document currently in the folder. Per-file tolerant:
     /// unreadable, timed-out, corrupt, or wrong-schema files are logged and
@@ -63,7 +84,7 @@ struct SyncFolderTransport: Sendable {
 
         var documents: [SyncDocument] = []
         for name in names.sorted() {
-            guard let deviceID = Self.deviceID(fromFileName: name), deviceID != own else { continue }
+            guard let deviceID = SyncStateFile.deviceID(fromFileName: name), deviceID != own else { continue }
             let url = folder.appendingPathComponent(name)
             do {
                 let data = try await Self.withTimeout(timeout) { try Data(contentsOf: url) }
@@ -81,7 +102,7 @@ struct SyncFolderTransport: Sendable {
     }
 
     func writeOwnDocument(_ data: Data, deviceID: String) async throws {
-        let url = folderURL.appendingPathComponent(Self.fileName(forDeviceID: deviceID))
+        let url = folderURL.appendingPathComponent(SyncStateFile.name(forDeviceID: deviceID))
         try await Self.withTimeout(timeout) {
             try data.write(to: url, options: .atomic)
         }

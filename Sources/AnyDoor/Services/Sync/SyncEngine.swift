@@ -15,9 +15,14 @@ extension Notification.Name {
 
 /// Machine-local defaults keys configuring sync. Deliberately not in
 /// `SyncSettingsRegistry` — the sync configuration itself never travels.
+/// The WebDAV password lives in the Keychain (`SyncWebDAVCredentialStore`),
+/// never here.
 enum SyncDefaultsKeys {
     static let enabled = "sync.enabled"
+    static let transport = "sync.transport"
     static let folderPath = "sync.folderPath"
+    static let webdavURL = "sync.webdav.url"
+    static let webdavUsername = "sync.webdav.username"
     static let deviceID = "sync.deviceID"
 }
 
@@ -27,6 +32,8 @@ enum SyncFailureReason: Equatable, Sendable {
     case folderMissing
     case folderUnreachable
     case folderNotWritable
+    case unauthorized
+    case invalidConfiguration
     case applyFailed
 }
 
@@ -61,7 +68,7 @@ final class SyncEngine {
     private let config: Configuration
     private let context: ModelContext
     private let defaults: UserDefaults
-    private let transport: SyncFolderTransport
+    private let transport: any SyncTransport
     private let stateStore: SyncLocalStateStore
     private let appPathResolver: (String) -> String?
     private let reconcileRuntime: @MainActor () async throws -> Void
@@ -84,7 +91,7 @@ final class SyncEngine {
         config: Configuration,
         context: ModelContext,
         defaults: UserDefaults,
-        transport: SyncFolderTransport,
+        transport: any SyncTransport,
         stateStore: SyncLocalStateStore,
         appPathResolver: @escaping (String) -> String? = { bundleID in
             NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID)?.path
@@ -140,8 +147,10 @@ final class SyncEngine {
         ) { [weak self] _ in
             Task { @MainActor in self?.tickSoon() }
         })
-        watcher = DirectoryWatcher(directory: transport.folderURL, debounce: 2) { [weak self] in
-            self?.tickSoon()
+        if let directory = transport.watchableDirectory {
+            watcher = DirectoryWatcher(directory: directory, debounce: 2) { [weak self] in
+                self?.tickSoon()
+            }
         }
         let interval = config.periodicInterval
         periodicTask = Task { @MainActor [weak self] in
@@ -210,8 +219,9 @@ final class SyncEngine {
         do {
             peers = try await transport.readPeerDocuments(excludingDeviceID: config.deviceID)
         } catch {
-            logger.warning("sync folder listing failed: \(error)")
-            failure = .folderUnreachable
+            logger.warning("sync peer listing failed: \(error)")
+            failure = (error as? SyncTransportError) == .unauthorized
+                ? .unauthorized : .folderUnreachable
         }
         var merged = document
         for peer in peers {
@@ -494,7 +504,8 @@ final class SyncEngine {
             return nil
         } catch {
             logger.warning("writing own sync state failed: \(error)")
-            return .folderNotWritable
+            return (error as? SyncTransportError) == .unauthorized
+                ? .unauthorized : .folderNotWritable
         }
     }
 }

@@ -288,7 +288,8 @@ records: [docs/plugins.md](docs/plugins.md).
 ### Config sync
 
 Point every Mac at one folder inside your cloud drive (Google Drive, Dropbox,
-iCloud Drive, NAS…) and AnyDoor keeps app shortcuts, built-in preferences,
+iCloud Drive, NAS…) — or at a WebDAV directory (Nextcloud, 坚果云,
+Synology…) — and AnyDoor keeps app shortcuts, built-in preferences,
 Quicklinks, and portable settings in sync — no account, no server, offline
 gaps tolerated. Concurrent edits merge automatically: changes to different
 items all survive, deletions hold everywhere, and cloud clients never see

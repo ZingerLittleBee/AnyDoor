@@ -26,6 +26,22 @@ your cloud client. macOS File Provider can evict file contents ("dataless"
 files); AnyDoor defends with timeouts and retries, but a locally-materialized
 folder syncs noticeably faster.
 
+### WebDAV instead of a folder
+
+If you'd rather not run a cloud-drive client — or you self-host — switch
+*Sync via* to **WebDAV** and enter the server URL of a directory (https
+only), your username, and an app password. This covers Nextcloud, 坚果云
+(create an app password under 安全选项), Synology, and any other WebDAV
+server. Notes:
+
+- The password is stored in the macOS Keychain, never in preferences, and
+  never travels in backups. Leaving the password field blank when re-saving
+  keeps the stored one.
+- The target directory is created automatically on first sync if missing.
+- With no file-system events to listen to, the engine polls the server about
+  every 90 seconds (plus the usual on-change and wake triggers), so
+  convergence is a little slower than the folder transport.
+
 ## What syncs
 
 - App shortcuts (hotkey → app bindings; app paths are re-resolved per machine
@@ -106,5 +122,6 @@ resumes where it left off.
   shared file; why record-level last-writer-wins is enough.
 - [`CONTEXT.md`](../CONTEXT.md) — canonical vocabulary under *Config Sync &
   Backup* (Sync Folder, Device State File, Sync Document, Tombstone, …).
-- Planned second transport: WebDAV (self-hosted Nextcloud / NAS / 坚果云),
-  behind the same engine.
+- Both transports (folder and WebDAV) implement the same `SyncTransport`
+  seam and share the one-state-file-per-device layout; the merge engine is
+  transport-agnostic.
