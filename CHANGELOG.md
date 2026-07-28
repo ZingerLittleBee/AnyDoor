@@ -6,6 +6,33 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Config sync across Macs (Settings → Sync): pick a folder inside
+  your cloud drive (Google Drive, Dropbox, iCloud Drive, NAS…) and every Mac
+  pointing at it keeps app shortcuts, builtin preferences, Quicklinks, and
+  portable settings in sync automatically. Each machine writes only its own
+  state file and merges the others (record-level last-writer-wins with
+  tombstoned deletions), so cloud clients never see conflicting writes.
+  Machine-local state (helper approval, Script Plugins, the sync folder
+  choice itself) stays local; the manual export/import backup remains for
+  one-shot migration.
+- Config sync over WebDAV: pick WebDAV as the sync transport and enter a
+  server URL (https; plain http is accepted for loopback test servers),
+  username, and app password to sync through Nextcloud, 坚果云, Synology,
+  or any other WebDAV server — no cloud-drive client needed. The password
+  lives in the Keychain, and the target directory is created automatically
+  on first sync.
+- Sync now has its own Settings tab (previously a section inside General),
+  including the manual backup export/import and a link to the setup guide
+  explaining how sync works.
+
+### Fixed
+
+- Settings → Sync: the WebDAV server-address placeholder no longer jiggles
+  when the field gains focus (it is now drawn as a static overlay instead of
+  the native prompt, which macOS re-renders on focus in grouped forms).
+
 ## [4.0.1] - 2026-07-28
 
 ### Fixed

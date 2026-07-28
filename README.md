@@ -232,59 +232,23 @@ when you need them.
 
 ### Plugins
 
-- Optional features ship as installable plugins, managed from **Settings →
-  Plugins** — Image Conversion and Hosts management today. Uninstalling removes
-  a plugin's panel rows, palette commands, and hotkeys everywhere, but keeps its
-  data and preferences, so reinstalling restores them without a relaunch.
-  Upgrading users keep what they already used — prior usage installs those
-  plugins automatically.
-- **Script plugins**: sideload plugins authored in TypeScript and bundled to
-  plain JavaScript, executed on the system JavaScriptCore (no bundled JS
-  runtime). They contribute rows to the command palette, with searchable
-  drill-in lists and paginated markdown detail pages.
-- A script plugin can only use the capabilities its manifest declares — network
-  fetch, a private key-value store, toasts, clipboard write, a one-shot delay,
-  opening http(s) URLs, and translation through your configured services. No
-  shell, no filesystem, no clipboard read; a runaway script is killed by a
-  30-second watchdog without affecting other plugins.
-- **Write your own**: scaffold a plugin with
-  `pnpm create @anydoor-dev/plugin my-plugin` (typed entry points via
-  [`@anydoor-dev/api`](https://www.npmjs.com/package/@anydoor-dev/api)), or
-  start from the
-  [anydoor-plugin-template](https://github.com/ZingerLittleBee/anydoor-plugin-template)
-  repository, whose release workflow attaches the installable `plugin-*.zip` on
-  every version tag. A developer mode loads a plugin directory in place with hot
-  reload on every build; worked examples live under
-  [`tooling/examples`](tooling/examples).
+Optional features are plugins, managed from **Settings → Plugins**, in two
+kinds:
 
-#### Installing a script plugin
+- **Native plugins** ship inside the app and toggle on and off — Image
+  Conversion and Hosts management today. Uninstalling removes every surface
+  (panel rows, palette commands, hotkeys) but keeps the plugin's data, so
+  reinstalling restores it without a relaunch.
+- **Script plugins** are packages you install yourself — authored in
+  TypeScript, run on the system JavaScriptCore, and confined to the
+  capabilities their manifest declares (no shell, no filesystem, no clipboard
+  read; runaway scripts are killed by a watchdog). They extend the command
+  palette with searchable rows, drill-in lists, and markdown detail pages.
+  Install from a zip or an `anydoor://install-plugin` link; write your own
+  with `pnpm create @anydoor-dev/plugin` and iterate live via developer mode.
 
-Ready-to-install example plugins — a V2EX browser and a Hacker News browser —
-are attached to every [release](https://github.com/ZingerLittleBee/AnyDoor/releases)
-as `plugin-*.zip`.
-
-**From a zip:**
-
-1. Download the plugin, e.g.
-   [plugin-v2ex.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip)
-   or
-   [plugin-hackernews.zip](https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-hackernews.zip).
-2. Open **Settings → Plugins → Install Script Plugin…** and pick the zip — no
-   unzipping needed (an unzipped package folder works too).
-3. The plugin's rows appear in the command palette immediately, no relaunch.
-
-**From an install link:** paste an `anydoor://install-plugin?url=<https zip url>`
-link into your browser's address bar and AnyDoor takes over — it downloads the
-package and shows a confirmation with the plugin's name, id, version, download
-origin, and declared capabilities before installing. Only https package URLs
-are accepted. For example:
-
-```
-anydoor://install-plugin?url=https://github.com/ZingerLittleBee/AnyDoor/releases/latest/download/plugin-v2ex.zip
-```
-
-Uninstall any time from **Settings → Plugins**; a script plugin's private data
-is kept, so reinstalling the same plugin finds it again.
+Installation steps, the full capability table, authoring guide, and design
+records: [docs/plugins.md](docs/plugins.md).
 
 ### Menu bar panel
 
@@ -321,6 +285,21 @@ is kept, so reinstalling the same plugin finds it again.
 - Configurable check frequency (daily / weekly / off) and manual check.
 - Update banner surfaces new versions inside the menu bar panel.
 
+### Config sync
+
+Point every Mac at one folder inside your cloud drive (Google Drive, Dropbox,
+iCloud Drive, NAS…) — or at a WebDAV directory (Nextcloud, 坚果云,
+Synology…) — and AnyDoor keeps app shortcuts, built-in preferences,
+Quicklinks, and portable settings in sync — no account, no server, offline
+gaps tolerated. Concurrent edits merge automatically: changes to different
+items all survive, deletions hold everywhere, and cloud clients never see
+conflicting writes because each Mac only writes its own state file. Optional
+and off by default; machine-local state (helper approval, Script Plugins, the
+folder choice itself) never travels.
+
+Setup, what syncs, conflict semantics, and troubleshooting:
+[docs/config-sync.md](docs/config-sync.md).
+
 ### Backup & restore
 
 - Export app shortcuts, built-in preferences, clipboard / capture settings,
@@ -330,6 +309,8 @@ is kept, so reinstalling the same plugin finds it again.
 - Clipboard history, translation history, API keys, and machine-specific keys
   are excluded; app paths are re-resolved from bundle IDs on import, and
   changes apply without a relaunch.
+- For continuous multi-Mac convergence use [Config sync](docs/config-sync.md)
+  instead; backup stays the one-shot migration/sharing tool.
 
 ### Security & permissions
 

@@ -225,5 +225,6 @@ final class QuicklinkStore {
         try modelContext?.save()
         rebuild()
         refreshHotkeys()
+        NotificationCenter.default.post(name: .portableConfigDidChange, object: nil)
     }
 }

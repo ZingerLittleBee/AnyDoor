@@ -205,6 +205,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         bootstrapUpdater()
 
+        // Config Sync (ADR-0010). Started last so its initial tick captures
+        // fully seeded stores; no-op unless the user enabled sync.
+        SyncCoordinator.shared.bootstrap(modelContainer: modelContainer)
+
         // First-run onboarding. Shows once on a clean install; afterwards it is
         // only reachable from Settings (the window opts out of state restoration
         // and reverts the app to `.accessory` when closed).

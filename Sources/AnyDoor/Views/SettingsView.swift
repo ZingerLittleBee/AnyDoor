@@ -78,6 +78,7 @@ struct SettingsView: View {
         case .capture: groupedFormPane { CaptureSettingsView() }
         case .translation: groupedFormPane { TranslationSettingsView() }
         case .plugins: groupedFormPane { PluginsSettingsView() }
+        case .sync: groupedFormPane { SyncSettingsView() }
         case .general: groupedFormPane { GeneralSettingsView() }
         }
     }
@@ -135,6 +136,7 @@ private extension SettingsTab {
         case .capture: .settingsTabCapture
         case .translation: .settingsTabTranslation
         case .plugins: .settingsTabPlugins
+        case .sync: .settingsTabSync
         case .general: .settingsTabGeneral
         }
     }
@@ -147,6 +149,7 @@ private extension SettingsTab {
         case .capture: "camera.viewfinder"
         case .translation: "character.bubble"
         case .plugins: "puzzlepiece.extension"
+        case .sync: "arrow.triangle.2.circlepath"
         case .general: "gear"
         }
     }

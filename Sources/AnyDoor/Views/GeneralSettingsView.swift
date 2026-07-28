@@ -195,8 +195,6 @@ struct GeneralSettingsView: View {
                 LocalizedText(.settingsGeneralPermissionsSection)
             }
 
-            SyncSettingsView()
-
             Section {
                 Button {
                     OnboardingWindowController.shared.show()

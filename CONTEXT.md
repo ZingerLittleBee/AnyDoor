@@ -156,3 +156,32 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 - **Conversion Record** (转换记录) — A history entry describing one completed
   Image Conversion output and its user-relevant configuration/outcome. Records
   do not own their files and are created only when an output exists.
+
+## Config Sync & Backup
+
+- **Config Sync** (配置同步) — Optional automatic convergence of Portable
+  Settings across a user's machines through a shared storage location. Off by
+  default; requires no account. Distinct from **Config Backup**.
+  _Avoid_: calling manual export/import "同步".
+- **Config Backup** (配置备份) — A one-shot manual export or import of the
+  portable configuration as a single file, for migration or sharing. It does
+  not converge machines; that is Config Sync's job.
+- **Sync Folder** (同步文件夹) — The user-chosen folder that brokers Config
+  Sync, typically inside a cloud drive's local mount. AnyDoor only reads and
+  writes local files there; whatever syncs the folder is the transport.
+- **Device State File** (设备状态文件) — The single file in the Sync Folder
+  that one machine writes: its full Sync Document. Every machine writes only
+  its own file and reads all others, so no file ever has two writers.
+- **Sync Document** (同步文档) — A machine's mergeable view of its portable
+  configuration: one entry per configuration record, each carrying a
+  modification clock and possibly a Tombstone. Merging two documents is
+  deterministic and order-independent; concurrent edits to the same record
+  resolve to the newer clock.
+- **Tombstone** (墓碑) — A retained deletion marker in a Sync Document. It
+  stops a deleted record from being resurrected by a machine that still
+  carries it; expired Tombstones are garbage-collected.
+- **Portable Setting** (可携带设置) — A configuration value allowed to travel
+  between machines, enumerated by a single whitelist.
+- **Machine-Local Setting** (机器本地设置) — A setting that deliberately never
+  travels (e.g. helper approval, Script Plugin state, the Sync Folder choice
+  itself). Not a Portable Setting.

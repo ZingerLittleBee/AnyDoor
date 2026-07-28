@@ -70,6 +70,12 @@ enum SyncSettingsRegistry {
     private static let entriesByKey: [String: Entry] =
         Dictionary(uniqueKeysWithValues: entries.map { ($0.key, $0) })
 
+    /// Whether `key` is a Portable Setting this build knows. Config Sync uses
+    /// this to avoid tombstoning entries from newer app versions.
+    static func contains(_ key: String) -> Bool {
+        entriesByKey[key] != nil
+    }
+
     /// Collect whitelisted keys that are actually present in `defaults`.
     static func read(from defaults: UserDefaults) -> [String: SettingValue] {
         var out: [String: SettingValue] = [:]
