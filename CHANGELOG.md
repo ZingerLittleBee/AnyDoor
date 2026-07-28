@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-07-28
+
 ### Added
 
 - Config sync across Macs (Settings → Sync): pick a folder inside

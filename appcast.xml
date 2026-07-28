@@ -3,27 +3,50 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>4.1.0</title>
+            <pubDate>Tue, 28 Jul 2026 23:38:50 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>4.1.0</sparkle:version>
+            <sparkle:shortVersionString>4.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[
+### Added
+
+- Config sync across Macs (Settings → Sync): pick a folder inside
+  your cloud drive (Google Drive, Dropbox, iCloud Drive, NAS…) and every Mac
+  pointing at it keeps app shortcuts, builtin preferences, Quicklinks, and
+  portable settings in sync automatically. Each machine writes only its own
+  state file and merges the others (record-level last-writer-wins with
+  tombstoned deletions), so cloud clients never see conflicting writes.
+  Machine-local state (helper approval, Script Plugins, the sync folder
+  choice itself) stays local; the manual export/import backup remains for
+  one-shot migration.
+- Config sync over WebDAV: pick WebDAV as the sync transport and enter a
+  server URL (https; plain http is accepted for loopback test servers),
+  username, and app password to sync through Nextcloud, 坚果云, Synology,
+  or any other WebDAV server — no cloud-drive client needed. The password
+  lives in the Keychain, and the target directory is created automatically
+  on first sync.
+- Sync now has its own Settings tab (previously a section inside General),
+  including the manual backup export/import and a link to the setup guide
+  explaining how sync works.
+
+### Fixed
+
+- Settings → Sync: the WebDAV server-address placeholder no longer jiggles
+  when the field gains focus (it is now drawn as a static overlay instead of
+  the native prompt, which macOS re-renders on focus in grouped forms).
+]]></description>
+<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.1.0/AnyDoor-4.1.0.zip" length="13728766" type="application/octet-stream" sparkle:edSignature="0S/yNbL8bLtxRLwycjHUaqMtBijA3VizI0vzscp4zBJJfNuMPU/slW8+xFtyw6AQW1gHRjtAxgDy3HV5LjjVDw=="/>
+        </item>
+        <item>
             <title>4.0.1</title>
             <pubDate>Tue, 28 Jul 2026 18:16:36 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
             <sparkle:version>4.0.1</sparkle:version>
             <sparkle:shortVersionString>4.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Fixed
-
-- Clipboard wall: Space now closes an image / file preview again. The preview
-  used to swallow the keyboard, so it could only be dismissed with the mouse.
-  Esc closes it too, the arrow keys move the preview through the cards, and
-  Return still pastes — all while the preview is up. Images are also previewed
-  at their own aspect ratio instead of inside a fixed landscape box.
-- Clipboard wall: image and screenshot cards are no longer blurry. Their
-  thumbnails were decoded smaller than the card draws them and got upscaled.
-- Disable Keyboard now blocks everything: global hotkeys, Hyper Key combos, and
-  quick press kept working while the lock was on. Turn it off from the menu bar
-  icon (quitting AnyDoor also releases it).
-]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.0.1/AnyDoor-4.0.1.zip" length="13392550" type="application/octet-stream" sparkle:edSignature="dHPJj5a4zSyt1l1qvGfUPfQW1EiSQ2tUdKZHdJXWImNxirw9RfhxJ/DSja1bPeaH+2C+Ett5mQMVh26KxBXFBw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.0.1/AnyDoor-4.0.1.zip" length="13392550" type="application/octet-stream" sparkle:edSignature="dHPJj5a4zSyt1l1qvGfUPfQW1EiSQ2tUdKZHdJXWImNxirw9RfhxJ/DSja1bPeaH+2C+Ett5mQMVh26KxBXFBw=="/>
         </item>
         <item>
             <title>4.0.0</title>
@@ -33,15 +56,6 @@
             <sparkle:shortVersionString>4.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.0.0/AnyDoor-4.0.0.zip" length="13366846" type="application/octet-stream" sparkle:edSignature="IhNq4yKmPH0RSnpxzHr+5Nc3ReOqDNW24ntHMuED+rcWc1mB5hJSg7+9BOx/s/t1UNdtM93plA8clm6+fO1+BQ=="/>
-        </item>
-        <item>
-            <title>3.7.0</title>
-            <pubDate>Sun, 12 Jul 2026 21:28:28 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>3.7.0</sparkle:version>
-            <sparkle:shortVersionString>3.7.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v3.7.0/AnyDoor-3.7.0.zip" length="12319713" type="application/octet-stream" sparkle:edSignature="fIdWtY18KZYfO59ZQLQssartFrnx09RoFPjGvMqZyuafzNLygO20GtC78AS7d8NW+MlO83M4GRu/k+fsymkTBQ=="/>
         </item>
         <item>
             <title>1.2.0</title>
