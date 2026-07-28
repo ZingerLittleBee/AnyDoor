@@ -6,6 +6,18 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Config sync across Macs (Settings → General → Sync): pick a folder inside
+  your cloud drive (Google Drive, Dropbox, iCloud Drive, NAS…) and every Mac
+  pointing at it keeps app shortcuts, builtin preferences, Quicklinks, and
+  portable settings in sync automatically. Each machine writes only its own
+  state file and merges the others (record-level last-writer-wins with
+  tombstoned deletions), so cloud clients never see conflicting writes.
+  Machine-local state (helper approval, Script Plugins, the sync folder
+  choice itself) stays local; the manual export/import backup remains for
+  one-shot migration.
+
 ### Fixed
 
 - Clipboard wall: Space now closes an image / file preview again. The preview

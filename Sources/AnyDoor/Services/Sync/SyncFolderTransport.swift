@@ -53,17 +53,12 @@ struct SyncFolderTransport: Sendable {
 
     /// Read every peer document currently in the folder. Per-file tolerant:
     /// unreadable, timed-out, corrupt, or wrong-schema files are logged and
-    /// skipped.
-    func readPeerDocuments(excludingDeviceID own: String) async -> [SyncDocument] {
+    /// skipped. Throws only when the folder itself cannot be listed (missing,
+    /// unmounted, hung) — the one condition worth surfacing in the UI.
+    func readPeerDocuments(excludingDeviceID own: String) async throws -> [SyncDocument] {
         let folder = folderURL
-        let names: [String]
-        do {
-            names = try await Self.withTimeout(timeout) {
-                try FileManager.default.contentsOfDirectory(atPath: folder.path)
-            }
-        } catch {
-            logger.warning("sync folder listing failed: \(error)")
-            return []
+        let names = try await Self.withTimeout(timeout) {
+            try FileManager.default.contentsOfDirectory(atPath: folder.path)
         }
 
         var documents: [SyncDocument] = []

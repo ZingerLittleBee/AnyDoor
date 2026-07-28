@@ -21,6 +21,21 @@ enum SyncDefaultsKeys {
     static let deviceID = "sync.deviceID"
 }
 
+/// Why a tick (or engine start) failed, for the Settings status line. An enum
+/// so the UI layer owns the localized wording.
+enum SyncFailureReason: Equatable, Sendable {
+    case folderMissing
+    case folderUnreachable
+    case folderNotWritable
+    case applyFailed
+}
+
+/// Outcome of one tick, reported to the owner for the Settings status line.
+enum SyncEngineStatus: Equatable, Sendable {
+    case synced(Date)
+    case failed(Date, SyncFailureReason)
+}
+
 /// The Config Sync engine (ADR-0010). Owns this machine's Sync Document and
 /// drives the tick pipeline:
 ///
@@ -62,6 +77,9 @@ final class SyncEngine {
     private var watcher: DirectoryWatcher?
     private var periodicTask: Task<Void, Never>?
 
+    /// Set by the owner before `start()`; called after every tick.
+    var onStatus: @MainActor (SyncEngineStatus) -> Void = { _ in }
+
     init(
         config: Configuration,
         context: ModelContext,
@@ -96,34 +114,6 @@ final class SyncEngine {
     }
 
     // MARK: - Lifecycle
-
-    /// Create and start the production engine when sync is enabled and the
-    /// configured folder exists. Called from AppDelegate at launch.
-    static func bootstrapIfEnabled(modelContainer: ModelContainer) -> SyncEngine? {
-        let defaults = UserDefaults.standard
-        guard defaults.bool(forKey: SyncDefaultsKeys.enabled),
-              let path = defaults.string(forKey: SyncDefaultsKeys.folderPath)
-        else { return nil }
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-              isDirectory.boolValue
-        else {
-            logger.warning("sync folder missing, engine not started: \(path)")
-            return nil
-        }
-        let engine = SyncEngine(
-            config: Configuration(
-                deviceID: ensuredDeviceID(in: defaults),
-                deviceName: Host.current().localizedName
-            ),
-            context: modelContainer.mainContext,
-            defaults: defaults,
-            transport: SyncFolderTransport(folderURL: URL(fileURLWithPath: path, isDirectory: true)),
-            stateStore: SyncLocalStateStore(url: SyncLocalStateStore.defaultURL())
-        )
-        engine.start()
-        return engine
-    }
 
     static func ensuredDeviceID(in defaults: UserDefaults) -> String {
         if let existing = defaults.string(forKey: SyncDefaultsKeys.deviceID) { return existing }
@@ -215,7 +205,14 @@ final class SyncEngine {
         // it becomes authoritative in apply.
         captureLocalChanges()
 
-        let peers = await transport.readPeerDocuments(excludingDeviceID: config.deviceID)
+        var failure: SyncFailureReason?
+        var peers: [SyncDocument] = []
+        do {
+            peers = try await transport.readPeerDocuments(excludingDeviceID: config.deviceID)
+        } catch {
+            logger.warning("sync folder listing failed: \(error)")
+            failure = .folderUnreachable
+        }
         var merged = document
         for peer in peers {
             merged = merged.merged(with: peer)
@@ -233,6 +230,7 @@ final class SyncEngine {
                 }
             } catch {
                 logger.error("sync apply failed: \(error)")
+                failure = failure ?? .applyFailed
             }
         }
 
@@ -240,7 +238,10 @@ final class SyncEngine {
             before: wallNow() - config.tombstoneRetentionMillis
         )
         persistState()
-        await writeOwnDocumentIfNeeded()
+        if let writeFailure = await writeOwnDocumentIfNeeded() {
+            failure = failure ?? writeFailure
+        }
+        onStatus(failure.map { .failed(Date(), $0) } ?? .synced(Date()))
     }
 
     // MARK: - Change capture
@@ -483,14 +484,17 @@ final class SyncEngine {
         }
     }
 
-    private func writeOwnDocumentIfNeeded() async {
+    /// Returns a failure reason, nil on success or no-op.
+    private func writeOwnDocumentIfNeeded() async -> SyncFailureReason? {
         do {
             let data = try SyncStateCodec.encode(document)
-            guard data != lastWrittenData else { return }
+            guard data != lastWrittenData else { return nil }
             try await transport.writeOwnDocument(data, deviceID: config.deviceID)
             lastWrittenData = data
+            return nil
         } catch {
             logger.warning("writing own sync state failed: \(error)")
+            return .folderNotWritable
         }
     }
 }

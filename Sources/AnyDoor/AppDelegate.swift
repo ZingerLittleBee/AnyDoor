@@ -14,7 +14,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
-    private var syncEngine: SyncEngine?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
     private var clipboardWatcher: ClipboardWatcher?
@@ -208,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Config Sync (ADR-0010). Started last so its initial tick captures
         // fully seeded stores; no-op unless the user enabled sync.
-        syncEngine = SyncEngine.bootstrapIfEnabled(modelContainer: modelContainer)
+        SyncCoordinator.shared.bootstrap(modelContainer: modelContainer)
 
         // First-run onboarding. Shows once on a clean install; afterwards it is
         // only reachable from Settings (the window opts out of state restoration
