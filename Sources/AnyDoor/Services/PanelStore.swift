@@ -435,6 +435,17 @@ final class PanelStore {
 
     // MARK: - Mutations
 
+    /// Shared tail of every mutation: persist, rebuild view state, refresh
+    /// hotkey snapshots (skipped by display-order-only mutations), and nudge
+    /// the sync engine. All SwiftData writes must exit through here.
+    private func persistMutation(refreshingHotkeys: Bool = true) {
+        guard let container = modelContainer else { return }
+        try? container.mainContext.save()
+        rebuild()
+        if refreshingHotkeys { refreshHotkeys() }
+        NotificationCenter.default.post(name: .portableConfigDidChange, object: nil)
+    }
+
     /// Update visibility for a built-in.
     func setBuiltinVisibility(_ item: BuiltinItem, isVisible: Bool) {
         guard let container = modelContainer else { return }
@@ -444,9 +455,7 @@ final class PanelStore {
             FetchDescriptor<BuiltinPreference>(predicate: #Predicate { $0.itemKey == key })
         ).first {
             pref.isVisible = isVisible
-            try? context.save()
-            rebuild()
-            refreshHotkeys()
+            persistMutation()
         }
     }
 
@@ -460,9 +469,7 @@ final class PanelStore {
         ).first {
             pref.keyCode = hotkey?.keyCode
             pref.modifierFlags = hotkey?.modifierFlags
-            try? context.save()
-            rebuild()
-            refreshHotkeys()
+            persistMutation()
         }
     }
 
@@ -472,16 +479,14 @@ final class PanelStore {
     /// (created via the settings UI with the sentinel `isEnabled: false`) become
     /// active as soon as the user records a hotkey.
     func updateAppShortcut(id: UUID, isVisible: Bool? = nil, hotkey: HotkeyDescriptor? = nil) {
-        guard let binding = binding(id: id), let container = modelContainer else { return }
+        guard let binding = binding(id: id) else { return }
         if let v = isVisible { binding.isVisible = v }
         if let hk = hotkey {
             binding.keyCode = hk.keyCode
             binding.modifierFlags = hk.modifierFlags
             binding.isEnabled = true
         }
-        try? container.mainContext.save()
-        rebuild()
-        refreshHotkeys()
+        persistMutation()
     }
 
     /// Reorder the top-level entries as one flat list. Reassigns a global
@@ -500,15 +505,12 @@ final class PanelStore {
                 order += 100
             }
         }
-        try? context.save()
-        rebuild()
-        refreshHotkeys()
+        persistMutation()
     }
 
     /// Reorder app shortcuts by new id array (ordered).
     func reorderAppShortcuts(by newOrder: [UUID]) {
-        guard let container = modelContainer else { return }
-        let context = container.mainContext
+        guard modelContainer != nil else { return }
         var order: Double = 100
         for id in newOrder {
             if let binding = binding(id: id) {
@@ -516,8 +518,7 @@ final class PanelStore {
                 order += 100
             }
         }
-        try? context.save()
-        rebuild()
+        persistMutation(refreshingHotkeys: false)
     }
 
     /// Reorder the four window-layout children by new keys array (ordered).
@@ -538,9 +539,7 @@ final class PanelStore {
                 order += 100
             }
         }
-        try? context.save()
-        rebuild()
-        refreshHotkeys()
+        persistMutation()
     }
 
     /// Find which entry currently owns a given hotkey (used for conflict detection).
@@ -604,17 +603,13 @@ final class PanelStore {
             displayOrder: nextOrder
         )
         context.insert(new)
-        try? context.save()
-        rebuild()
-        refreshHotkeys()
+        persistMutation()
     }
 
     /// Delete an app shortcut by id.
     func deleteAppShortcut(id: UUID) {
         guard let binding = binding(id: id), let container = modelContainer else { return }
         container.mainContext.delete(binding)
-        try? container.mainContext.save()
-        rebuild()
-        refreshHotkeys()
+        persistMutation()
     }
 }

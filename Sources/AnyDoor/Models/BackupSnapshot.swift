@@ -74,6 +74,47 @@ struct QuicklinkDTO: Codable, Equatable, Sendable {
     var createdAt: Date
 }
 
+// Row → DTO constructors shared by Config Backup export and Config Sync
+// change capture, so the two features cannot disagree on a record's shape.
+
+extension AppShortcutDTO {
+    init(_ row: KeyBinding) {
+        self.init(
+            appBundleID: row.appBundleID, appName: row.appName,
+            keyCode: row.keyCode, modifierFlags: row.modifierFlags,
+            isEnabled: row.isEnabled, isVisible: row.isVisible,
+            displayOrder: row.displayOrder
+        )
+    }
+}
+
+extension BuiltinPreferenceDTO {
+    init(_ row: BuiltinPreference) {
+        self.init(
+            itemKey: row.itemKey, isVisible: row.isVisible,
+            displayOrder: row.displayOrder,
+            keyCode: row.keyCode, modifierFlags: row.modifierFlags
+        )
+    }
+}
+
+extension QuicklinkDTO {
+    init(_ row: Quicklink) {
+        self.init(
+            id: row.id,
+            name: row.name,
+            keyword: row.keyword,
+            link: row.link,
+            openWithBundleID: row.openWithBundleID,
+            keyCode: row.keyCode,
+            modifierFlags: row.modifierFlags,
+            isVisible: row.isVisible,
+            displayOrder: row.displayOrder,
+            createdAt: row.createdAt
+        )
+    }
+}
+
 /// The portable backup payload. `schemaVersion` gates future format migrations.
 struct BackupSnapshot: Codable, Equatable, Sendable {
     static let currentSchemaVersion = 2

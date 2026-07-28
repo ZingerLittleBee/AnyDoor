@@ -49,25 +49,12 @@ final class BackupService {
         let bindings = try context.fetch(
             FetchDescriptor<KeyBinding>(sortBy: [SortDescriptor(\.displayOrder)])
         )
-        let shortcuts = bindings.map { b in
-            AppShortcutDTO(
-                appBundleID: b.appBundleID, appName: b.appName,
-                keyCode: b.keyCode, modifierFlags: b.modifierFlags,
-                isEnabled: b.isEnabled, isVisible: b.isVisible,
-                displayOrder: b.displayOrder
-            )
-        }
+        let shortcuts = bindings.map(AppShortcutDTO.init)
 
         let prefs = try context.fetch(
             FetchDescriptor<BuiltinPreference>(sortBy: [SortDescriptor(\.displayOrder)])
         )
-        let preferences = prefs.map { p in
-            BuiltinPreferenceDTO(
-                itemKey: p.itemKey, isVisible: p.isVisible,
-                displayOrder: p.displayOrder,
-                keyCode: p.keyCode, modifierFlags: p.modifierFlags
-            )
-        }
+        let preferences = prefs.map(BuiltinPreferenceDTO.init)
 
         let quicklinkRows = try context.fetch(
             FetchDescriptor<Quicklink>(
@@ -77,20 +64,7 @@ final class BackupService {
                 ]
             )
         )
-        let quicklinks = quicklinkRows.map { row in
-            QuicklinkDTO(
-                id: row.id,
-                name: row.name,
-                keyword: row.keyword,
-                link: row.link,
-                openWithBundleID: row.openWithBundleID,
-                keyCode: row.keyCode,
-                modifierFlags: row.modifierFlags,
-                isVisible: row.isVisible,
-                displayOrder: row.displayOrder,
-                createdAt: row.createdAt
-            )
-        }
+        let quicklinks = quicklinkRows.map(QuicklinkDTO.init)
 
         let appVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
 
@@ -115,6 +89,9 @@ final class BackupService {
     func restore(_ snapshot: BackupSnapshot) async throws -> ImportSummary {
         let summary = try apply(snapshot)
         try await reconcileRuntime()
+        // Restored rows are portable config the sync engine (if running)
+        // must capture; settings writes already fired the defaults notification.
+        NotificationCenter.default.post(name: .portableConfigDidChange, object: nil)
         return summary
     }
 
@@ -219,8 +196,9 @@ final class BackupService {
     }
 
     /// Re-read settings into the modules whose setters carry side effects that
-    /// raw UserDefaults writes bypass, then rebuild derived surfaces.
-    private static func reconcileLiveRuntime() async throws {
+    /// raw UserDefaults writes bypass, then rebuild derived surfaces. Shared
+    /// with `SyncEngine`, whose applies bypass the same setters.
+    static func reconcileLiveRuntime() async throws {
         CommandPaletteService.shared.reloadFromDefaults()
         LocalizationManager.shared.reloadFromDefaults()
         await HyperKeyService.shared.reloadFromDefaults()
