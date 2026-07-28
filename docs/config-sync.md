@@ -7,13 +7,13 @@ Syncthing…), point every Mac at it, and app shortcuts, built-in preferences,
 Quicklinks, and portable settings converge automatically.
 
 Sync is **off by default** and fully optional. The manual export/import flow
-(Settings → General → Backup & Restore) is unrelated: it produces a one-shot
+(Settings → Sync → Backup & Restore) is unrelated: it produces a one-shot
 snapshot file for migration or sharing, and stays available whether or not
 sync is enabled.
 
 ## Setup
 
-1. On your first Mac: **Settings → General → Sync**, turn on *Sync
+1. On your first Mac: **Settings → Sync**, turn on *Sync
    automatically*, and choose a folder inside your cloud drive's local mount
    (e.g. a `AnyDoor` folder in `~/Library/CloudStorage/GoogleDrive-…` or
    `~/Dropbox`).

@@ -8,7 +8,7 @@ versioning.
 
 ### Added
 
-- Config sync across Macs (Settings → General → Sync): pick a folder inside
+- Config sync across Macs (Settings → Sync): pick a folder inside
   your cloud drive (Google Drive, Dropbox, iCloud Drive, NAS…) and every Mac
   pointing at it keeps app shortcuts, builtin preferences, Quicklinks, and
   portable settings in sync automatically. Each machine writes only its own
@@ -22,6 +22,9 @@ versioning.
   坚果云, Synology, or any other WebDAV server — no cloud-drive client
   needed. The password lives in the Keychain, and the target directory is
   created automatically on first sync.
+- Sync now has its own Settings tab (previously a section inside General),
+  including the manual backup export/import and a link to the setup guide
+  explaining how sync works.
 
 ### Fixed
 

@@ -8230,6 +8230,23 @@
         }
       }
     },
+    "settings.configSync.docsLink": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup guide & how sync works"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "设置指南与同步原理说明"
+          }
+        }
+      }
+    },
     "settings.configSync.enable": {
       "extractionState": "manual",
       "localizations": {
@@ -10470,6 +10487,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "快速入口"
+          }
+        }
+      }
+    },
+    "settings.tab.sync": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同步"
           }
         }
       }

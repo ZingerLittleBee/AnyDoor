@@ -12,6 +12,7 @@ enum SettingsTab: String, Hashable, CaseIterable {
     case capture
     case translation
     case plugins
+    case sync
     case general
 }
 

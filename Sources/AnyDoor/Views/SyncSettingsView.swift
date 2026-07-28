@@ -17,8 +17,6 @@ struct SyncSettingsView: View {
     @State private var webdavUsername = SyncCoordinator.shared.webdavUsername ?? ""
     @State private var webdavPassword = ""
 
-    // Renders plain Sections so it can be embedded inside the General tab's
-    // Form rather than living in its own tab.
     var body: some View {
         configSyncSection
         backupSection
@@ -26,11 +24,22 @@ struct SyncSettingsView: View {
 
     // MARK: - Config Sync (ADR-0010)
 
+    private static let docsURL =
+        URL(string: "https://github.com/ZingerLittleBee/AnyDoor/blob/main/docs/config-sync.md")!
+
     private var configSyncSection: some View {
         Section {
-            LocalizedText(.settingsConfigSyncDescription)
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 4) {
+                LocalizedText(.settingsConfigSyncDescription)
+                Link(destination: Self.docsURL) {
+                    HStack(spacing: 3) {
+                        LocalizedText(.settingsConfigSyncDocsLink)
+                        Image(systemName: "arrow.up.right.square")
+                    }
+                }
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
 
             Toggle(isOn: syncEnabledBinding) {
                 LocalizedText(.settingsConfigSyncEnable)
