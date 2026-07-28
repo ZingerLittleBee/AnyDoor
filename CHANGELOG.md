@@ -18,10 +18,11 @@ versioning.
   choice itself) stays local; the manual export/import backup remains for
   one-shot migration.
 - Config sync over WebDAV: pick WebDAV as the sync transport and enter a
-  server URL (https), username, and app password to sync through Nextcloud,
-  坚果云, Synology, or any other WebDAV server — no cloud-drive client
-  needed. The password lives in the Keychain, and the target directory is
-  created automatically on first sync.
+  server URL (https; plain http is accepted for loopback test servers),
+  username, and app password to sync through Nextcloud, 坚果云, Synology,
+  or any other WebDAV server — no cloud-drive client needed. The password
+  lives in the Keychain, and the target directory is created automatically
+  on first sync.
 - Sync now has its own Settings tab (previously a section inside General),
   including the manual backup export/import and a link to the setup guide
   explaining how sync works.

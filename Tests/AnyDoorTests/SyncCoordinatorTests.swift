@@ -58,7 +58,8 @@ final class SyncCoordinatorTests: XCTestCase {
         let coordinator = SyncCoordinator(defaults: defaults, credentialStore: credentials)
         coordinator.bootstrap(modelContainer: container)
 
-        // http and empty usernames are rejected without enabling anything.
+        // Non-loopback http and empty usernames are rejected without
+        // enabling anything.
         XCTAssertFalse(coordinator.configureWebDAV(
             urlString: "http://insecure.example.com/dav", username: "bee", password: "pw"
         ))
@@ -89,7 +90,27 @@ final class SyncCoordinatorTests: XCTestCase {
         ))
         XCTAssertEqual(credentials.password(), "pw")
 
+        // Loopback hosts are the one http exception (local dev/test servers).
+        XCTAssertTrue(coordinator.configureWebDAV(
+            urlString: "http://127.0.0.1:8480/anydoor", username: "bee", password: "pw"
+        ))
+        XCTAssertEqual(coordinator.transportKind, .webdav)
+
         coordinator.disable()
+    }
+
+    func testAcceptableWebDAVURLPolicy() {
+        func accepted(_ string: String) -> Bool {
+            SyncCoordinator.isAcceptableWebDAVURL(URL(string: string)!)
+        }
+        XCTAssertTrue(accepted("https://dav.jianguoyun.com/dav/AnyDoor"))
+        XCTAssertTrue(accepted("http://localhost:8480/dav"))
+        XCTAssertTrue(accepted("http://127.0.0.1/dav"))
+        XCTAssertTrue(accepted("http://[::1]:8480/dav"))
+        XCTAssertFalse(accepted("http://192.168.1.10/dav"))
+        XCTAssertFalse(accepted("http://nas.local/dav"))
+        XCTAssertFalse(accepted("ftp://127.0.0.1/dav"))
+        XCTAssertFalse(accepted("file:///tmp/dav"))
     }
 
     func testBootstrapWithMissingFolderReportsFailure() async throws {

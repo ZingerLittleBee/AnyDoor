@@ -74,14 +74,13 @@ final class SyncCoordinator {
 
     /// Point sync at a WebDAV directory. Returns false (and reports
     /// `.invalidConfiguration`) without enabling when the URL is not https
-    /// or the username is empty.
+    /// (loopback http excepted) or the username is empty.
     @discardableResult
     func configureWebDAV(urlString: String, username: String, password: String) -> Bool {
         let trimmedURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedUser = username.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmedURL),
-              url.scheme?.lowercased() == "https",
-              url.host != nil,
+              Self.isAcceptableWebDAVURL(url),
               !trimmedUser.isEmpty
         else {
             status = .failed(Date(), .invalidConfiguration)
@@ -153,6 +152,19 @@ final class SyncCoordinator {
         self.engine = engine
         status = .waitingFirstSync
         engine.start()
+    }
+
+    /// Basic-auth credentials must not travel over the open network, so the
+    /// server URL must be https — except loopback hosts, which browsers
+    /// likewise treat as a secure context (lets a local dev/test server run
+    /// without TLS).
+    static func isAcceptableWebDAVURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        switch url.scheme?.lowercased() {
+        case "https": return true
+        case "http": return host == "localhost" || host == "::1" || host.hasPrefix("127.")
+        default: return false
+        }
     }
 
     private func makeFolderTransport() -> (any SyncTransport)? {

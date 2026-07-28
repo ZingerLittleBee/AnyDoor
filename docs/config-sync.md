@@ -30,7 +30,8 @@ folder syncs noticeably faster.
 
 If you'd rather not run a cloud-drive client — or you self-host — switch
 *Sync via* to **WebDAV** and enter the server URL of a directory (https
-only), your username, and an app password. This covers Nextcloud, 坚果云
+only; plain http is accepted for loopback hosts so a local test server
+works), your username, and an app password. This covers Nextcloud, 坚果云
 (create an app password under 安全选项), Synology, and any other WebDAV
 server. Notes:
 

@@ -5,7 +5,8 @@ import Security
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "sync")
 
 /// Connection settings for a WebDAV sync location. `baseURL` is the directory
-/// that holds the state files (https only — enforced by the coordinator).
+/// that holds the state files (https only, loopback http excepted — enforced
+/// by the coordinator).
 struct SyncWebDAVConfiguration: Equatable, Sendable {
     var baseURL: URL
     var username: String
