@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.0.1] - 2026-07-28
+
 ### Fixed
 
 - Clipboard wall: Space now closes an image / file preview again. The preview
