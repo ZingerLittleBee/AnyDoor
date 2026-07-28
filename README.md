@@ -321,6 +321,17 @@ is kept, so reinstalling the same plugin finds it again.
 - Configurable check frequency (daily / weekly / off) and manual check.
 - Update banner surfaces new versions inside the menu bar panel.
 
+### Config sync
+
+- Keep configuration in sync across Macs through any cloud-synced folder
+  (Google Drive, Dropbox, iCloud Drive, NAS…) — no account, no server.
+- Each Mac writes only its own state file and merges the others
+  (record-level last-writer-wins with tombstoned deletions), so cloud
+  clients never see conflicting writes.
+- Optional and off by default; machine-local state (helper approval, Script
+  Plugins, the folder choice itself) never travels.
+- Details, setup, and conflict semantics: [docs/config-sync.md](docs/config-sync.md).
+
 ### Backup & restore
 
 - Export app shortcuts, built-in preferences, clipboard / capture settings,
@@ -330,6 +341,8 @@ is kept, so reinstalling the same plugin finds it again.
 - Clipboard history, translation history, API keys, and machine-specific keys
   are excluded; app paths are re-resolved from bundle IDs on import, and
   changes apply without a relaunch.
+- For continuous multi-Mac convergence use [Config sync](docs/config-sync.md)
+  instead; backup stays the one-shot migration/sharing tool.
 
 ### Security & permissions
 
