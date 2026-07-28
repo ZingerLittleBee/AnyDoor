@@ -27,6 +27,12 @@ versioning.
   including the manual backup export/import and a link to the setup guide
   explaining how sync works.
 
+### Fixed
+
+- Settings → Sync: the WebDAV server-address placeholder no longer jiggles
+  when the field gains focus (it is now drawn as a static overlay instead of
+  the native prompt, which macOS re-renders on focus in grouped forms).
+
 ## [4.0.1] - 2026-07-28
 
 ### Fixed

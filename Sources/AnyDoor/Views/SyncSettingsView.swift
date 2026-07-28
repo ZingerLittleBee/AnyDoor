@@ -93,10 +93,20 @@ struct SyncSettingsView: View {
 
     @ViewBuilder
     private var webdavRows: some View {
-        TextField(text: $webdavURL, prompt: Text(verbatim: "https://dav.example.com/AnyDoor")) {
+        // The native prompt re-renders (and visibly jiggles) when the field
+        // editor takes focus — a macOS grouped-Form quirk — so the prompt is
+        // suppressed and the placeholder drawn as a static overlay instead.
+        TextField(text: $webdavURL, prompt: Text(verbatim: "")) {
             LocalizedText(.settingsConfigSyncWebdavURL)
         }
         .autocorrectionDisabled()
+        .overlay(alignment: .trailing) {
+            if webdavURL.isEmpty {
+                Text(verbatim: "https://dav.example.com/AnyDoor")
+                    .foregroundStyle(Color(nsColor: .placeholderTextColor))
+                    .allowsHitTesting(false)
+            }
+        }
         TextField(text: $webdavUsername) {
             LocalizedText(.settingsConfigSyncWebdavUsername)
         }
