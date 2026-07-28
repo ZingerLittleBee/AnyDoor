@@ -18,8 +18,12 @@ struct SyncSettingsView: View {
     @State private var webdavPassword = ""
 
     var body: some View {
-        configSyncSection
-        backupSection
+        Form {
+            configSyncSection
+            backupSection
+        }
+        .formStyle(.grouped)
+        .overlayScrollers()
     }
 
     // MARK: - Config Sync (ADR-0010)
