@@ -169,6 +169,7 @@ public enum ClipboardHistoryCaptureSourceProvenance: String, Sendable {
     case declared
     case copyEvent
     case observation
+    case legacy
     case unknown
 }
 
@@ -450,6 +451,8 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case invalidTagIDs(Set<String>)
     case invalidTextEdit
     case invalidConfirmation
+    case unsupportedLegacyTransferVersion(Int)
+    case legacyMigrationFailed
 }
 
 public enum ClipboardHistoryResetConfirmation: Sendable {
@@ -463,5 +466,171 @@ public struct ClipboardHistoryMaintenanceReport: Equatable, Sendable {
     public init(reclaimedPayloadCount: Int, storageBytes: UInt64) {
         self.reclaimedPayloadCount = reclaimedPayloadCount
         self.storageBytes = storageBytes
+    }
+}
+
+public enum ClipboardHistoryLegacyKind: String, Codable, Sendable {
+    case text
+    case color
+    case qrCode
+    case ocr
+    case image
+    case screenshot
+    case file
+}
+
+public struct ClipboardHistoryLegacyFileMember:
+    Equatable,
+    Codable,
+    Sendable
+{
+    public let storedName: String?
+    public let originalName: String
+    public let originalPath: String
+
+    public init(
+        storedName: String?,
+        originalName: String,
+        originalPath: String
+    ) {
+        self.storedName = storedName
+        self.originalName = originalName
+        self.originalPath = originalPath
+    }
+}
+
+public struct ClipboardHistoryLegacyEntry: Equatable, Sendable {
+    public let id: UUID
+    public let kind: ClipboardHistoryLegacyKind
+    public let text: String?
+    public let fileName: String?
+    public let colorHex: String?
+    public let previewText: String?
+    public let capturedAt: Date
+    public let richData: Data?
+    public let richType: String?
+    public let source: ClipboardHistoryCaptureSource
+    public let isFavorite: Bool
+    public let tagIDs: [String]
+    public let files: [ClipboardHistoryLegacyFileMember]
+
+    public init(
+        id: UUID,
+        kind: ClipboardHistoryLegacyKind,
+        text: String?,
+        fileName: String?,
+        colorHex: String?,
+        previewText: String?,
+        capturedAt: Date,
+        richData: Data?,
+        richType: String?,
+        source: ClipboardHistoryCaptureSource,
+        isFavorite: Bool,
+        tagIDs: [String],
+        files: [ClipboardHistoryLegacyFileMember]
+    ) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+        self.fileName = fileName
+        self.colorHex = colorHex
+        self.previewText = previewText
+        self.capturedAt = capturedAt
+        self.richData = richData
+        self.richType = richType
+        self.source = source
+        self.isFavorite = isFavorite
+        self.tagIDs = tagIDs
+        self.files = files
+    }
+}
+
+public struct ClipboardHistoryLegacyTag: Equatable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+public struct ClipboardHistoryLegacyTransfer: Equatable, Sendable {
+    public static let currentVersion = 1
+
+    public let version: Int
+    public let entries: [ClipboardHistoryLegacyEntry]
+    public let tags: [ClipboardHistoryLegacyTag]
+    public let categoryOrder: [String]
+    public let retentionPeriod: ClipboardHistoryRetentionPeriod
+
+    public init(
+        version: Int = Self.currentVersion,
+        entries: [ClipboardHistoryLegacyEntry],
+        tags: [ClipboardHistoryLegacyTag],
+        categoryOrder: [String],
+        retentionPeriod: ClipboardHistoryRetentionPeriod
+    ) {
+        self.version = version
+        self.entries = entries
+        self.tags = tags
+        self.categoryOrder = categoryOrder
+        self.retentionPeriod = retentionPeriod
+    }
+}
+
+public struct ClipboardHistoryLegacyMigrationRequest:
+    Equatable,
+    Sendable
+{
+    public let transfer: ClipboardHistoryLegacyTransfer
+    public let payloadDirectory: URL
+
+    public init(
+        transfer: ClipboardHistoryLegacyTransfer,
+        payloadDirectory: URL
+    ) {
+        self.transfer = transfer
+        self.payloadDirectory = payloadDirectory
+    }
+}
+
+public struct ClipboardHistoryLegacyMigrationReport:
+    Equatable,
+    Sendable
+{
+    public let retainedEntryCount: Int
+    public let omittedExpiredEntryCount: Int
+    public let ownedPayloadCount: Int
+    public let redundantLegacyPayloadCount: Int
+
+    public init(
+        retainedEntryCount: Int,
+        omittedExpiredEntryCount: Int,
+        ownedPayloadCount: Int,
+        redundantLegacyPayloadCount: Int
+    ) {
+        self.retainedEntryCount = retainedEntryCount
+        self.omittedExpiredEntryCount = omittedExpiredEntryCount
+        self.ownedPayloadCount = ownedPayloadCount
+        self.redundantLegacyPayloadCount = redundantLegacyPayloadCount
+    }
+}
+
+public enum ClipboardHistoryLegacyMigrationOutcome:
+    Equatable,
+    Sendable
+{
+    case published(ClipboardHistoryLegacyMigrationReport)
+    case alreadyPublished(ClipboardHistoryLegacyMigrationReport)
+}
+
+public struct ClipboardHistoryTagDefinition: Equatable, Sendable {
+    public let id: String
+    public let displayName: String
+
+    public init(id: String, displayName: String) {
+        self.id = id
+        self.displayName = displayName
     }
 }

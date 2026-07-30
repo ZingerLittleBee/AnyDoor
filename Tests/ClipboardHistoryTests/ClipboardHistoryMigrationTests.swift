@@ -1,0 +1,417 @@
+import Foundation
+import Security
+import XCTest
+
+@testable import ClipboardHistory
+
+final class ClipboardHistoryMigrationTests: XCTestCase {
+    func testMigrationPreservesLegacyRowsAndMapsKindsWithoutDerivedBackfill()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let source = ClipboardHistoryCaptureSource(
+            bundleIdentifier: "com.example.source",
+            displayName: "Source",
+            provenance: .legacy
+        )
+        let imageName = "legacy-image.png"
+        try fixture.writeLegacyPayload(
+            named: imageName,
+            data: try XCTUnwrap(
+                Data(
+                    base64Encoded:
+                        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )
+            )
+        )
+        let entries = [
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                kind: .text,
+                text: "https://example.com",
+                capturedAt: now.addingTimeInterval(-10),
+                source: source,
+                isFavorite: true,
+                tagIDs: ["work"]
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+                kind: .color,
+                colorHex: "#AABBCC",
+                capturedAt: now.addingTimeInterval(-20)
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+                kind: .qrCode,
+                text: "mailto:person@example.com",
+                capturedAt: now.addingTimeInterval(-30)
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+                kind: .ocr,
+                text: "https://ocr.example",
+                capturedAt: now.addingTimeInterval(-40)
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000005")!,
+                kind: .image,
+                fileName: imageName,
+                capturedAt: now.addingTimeInterval(-50)
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!,
+                kind: .screenshot,
+                fileName: imageName,
+                capturedAt: now.addingTimeInterval(-60)
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000007")!,
+                kind: .text,
+                text: "duplicate",
+                capturedAt: now.addingTimeInterval(-70)
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-000000000008")!,
+                kind: .text,
+                text: "duplicate",
+                capturedAt: now.addingTimeInterval(-80)
+            ),
+        ]
+        let module = fixture.makeModule(now: now)
+
+        let outcome = try await module.migrateLegacy(
+            fixture.request(
+                entries: entries,
+                tags: [
+                    ClipboardHistoryLegacyTag(id: "work", name: "Work"),
+                    ClipboardHistoryLegacyTag(id: "later", name: "Later"),
+                ],
+                categoryOrder: [
+                    "all", "kind:text", "tag:later", "favorites",
+                    "tag:work", "tag:missing",
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .published(
+                ClipboardHistoryLegacyMigrationReport(
+                    retainedEntryCount: 8,
+                    omittedExpiredEntryCount: 0,
+                    ownedPayloadCount: 2,
+                    redundantLegacyPayloadCount: 0
+                )
+            )
+        )
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id.value), entries.map(\.id))
+        let byID = Dictionary(
+            uniqueKeysWithValues: page.entries.map {
+                ($0.id.value, $0)
+            })
+        XCTAssertEqual(
+            byID[entries[0].id]?.facets,
+            [.text, .link]
+        )
+        XCTAssertEqual(byID[entries[0].id]?.source, source)
+        XCTAssertEqual(byID[entries[0].id]?.isFavorite, true)
+        XCTAssertEqual(byID[entries[0].id]?.tagIDs, ["work"])
+        XCTAssertEqual(byID[entries[1].id]?.facets, [.text, .color])
+        XCTAssertEqual(byID[entries[2].id]?.facets, [.text, .qrCode])
+        XCTAssertEqual(byID[entries[3].id]?.facets, [.text])
+        XCTAssertEqual(byID[entries[4].id]?.facets, [.image])
+        XCTAssertEqual(byID[entries[5].id]?.facets, [.image, .screenshot])
+        let migratedTags = try await module.tagDefinitions()
+        XCTAssertEqual(
+            migratedTags,
+            [
+                ClipboardHistoryTagDefinition(
+                    id: "later",
+                    displayName: "Later"
+                ),
+                ClipboardHistoryTagDefinition(
+                    id: "work",
+                    displayName: "Work"
+                ),
+            ]
+        )
+        for entry in entries[4...5] {
+            let diagnostics = try await module.derivedIndexingDiagnostics(
+                for: ClipboardHistoryEntryID(entry.id)
+            )
+            XCTAssertEqual(diagnostics.jobs, [])
+        }
+        let duplicatePage = try await module.page(
+            ClipboardHistoryQuery(text: "duplicate")
+        )
+        XCTAssertEqual(duplicatePage.entries.count, 2)
+    }
+
+    func testMigrationAppliesExpiryAndResetsRetentionForOrphanProtection()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let now = Date(timeIntervalSince1970: 5_000_000)
+        let old = now.addingTimeInterval(-8 * 86_400)
+        let expiredID = UUID()
+        let favoriteID = UUID()
+        let validTagID = UUID()
+        let orphanID = UUID()
+        let module = fixture.makeModule(now: now)
+
+        let outcome = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: expiredID,
+                        kind: .text,
+                        text: "expired",
+                        capturedAt: old
+                    ),
+                    legacyEntry(
+                        id: favoriteID,
+                        kind: .text,
+                        text: "favorite",
+                        capturedAt: old,
+                        isFavorite: true
+                    ),
+                    legacyEntry(
+                        id: validTagID,
+                        kind: .text,
+                        text: "valid tag",
+                        capturedAt: old,
+                        tagIDs: ["valid"]
+                    ),
+                    legacyEntry(
+                        id: orphanID,
+                        kind: .text,
+                        text: "orphan",
+                        capturedAt: old,
+                        tagIDs: ["deleted"]
+                    ),
+                ],
+                tags: [
+                    ClipboardHistoryLegacyTag(id: "valid", name: "Valid")
+                ],
+                categoryOrder: ["tag:valid"],
+                retentionPeriod: .sevenDays
+            )
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .published(
+                ClipboardHistoryLegacyMigrationReport(
+                    retainedEntryCount: 3,
+                    omittedExpiredEntryCount: 1,
+                    ownedPayloadCount: 0,
+                    redundantLegacyPayloadCount: 0
+                )
+            )
+        )
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(
+            Set(page.entries.map(\.id.value)),
+            [favoriteID, validTagID, orphanID]
+        )
+        XCTAssertEqual(
+            page.entries.first { $0.id.value == orphanID }?.tagIDs,
+            []
+        )
+        let diagnostics = try await module.legacyMigrationDiagnostics()
+        XCTAssertEqual(
+            diagnostics.retentionStartByEntryID[orphanID],
+            now
+        )
+        XCTAssertEqual(
+            diagnostics.retentionStartByEntryID[validTagID],
+            old
+        )
+    }
+
+    func testCorruptOwnedImageNeverPublishesPartialStagingStore()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        try fixture.writeLegacyPayload(
+            named: "corrupt.png",
+            data: Data("not a png".utf8)
+        )
+        let module = fixture.makeModule()
+        let request = fixture.request(
+            entries: [
+                legacyEntry(
+                    kind: .text,
+                    text: "must not publish",
+                    capturedAt: fixture.now
+                ),
+                legacyEntry(
+                    kind: .image,
+                    fileName: "corrupt.png",
+                    capturedAt: fixture.now.addingTimeInterval(-1)
+                ),
+            ]
+        )
+
+        do {
+            _ = try await module.migrateLegacy(request)
+            XCTFail("Expected corrupt legacy payload migration to fail")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyMigrationFailed
+            )
+        }
+        XCTAssertEqual(
+            try Data(contentsOf: fixture.legacyPayloadURL("corrupt.png")),
+            Data("not a png".utf8)
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: fixture.storeRoot
+                    .appendingPathComponent("history.sqlite").path
+            )
+        )
+    }
+
+    func testMigrationPreservesLegacyRecencyOrderWhenTimestampsTie()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let ids = [
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+            UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+        ]
+        let module = fixture.makeModule()
+
+        _ = try await module.migrateLegacy(
+            fixture.request(
+                entries: ids.enumerated().map { index, id in
+                    legacyEntry(
+                        id: id,
+                        kind: .text,
+                        text: "same time \(index)",
+                        capturedAt: fixture.now
+                    )
+                },
+                retentionPeriod: .unlimited
+            )
+        )
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id.value), ids)
+    }
+}
+
+private final class LegacyMigrationFixture {
+    let root: URL
+    let storeRoot: URL
+    let legacyPayloadRoot: URL
+    let now = Date(timeIntervalSince1970: 8_000_000)
+    private let keyStore = LegacyMigrationKeyStore()
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "AnyDoor-ClipboardLegacyMigration-\(UUID().uuidString)"
+        )
+        storeRoot = root.appendingPathComponent("ClipboardHistory")
+        legacyPayloadRoot = root.appendingPathComponent("LegacyPayloads")
+        try FileManager.default.createDirectory(
+            at: legacyPayloadRoot,
+            withIntermediateDirectories: true
+        )
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func makeModule(now: Date? = nil) -> ClipboardHistoryModule {
+        let currentDate = now ?? self.now
+        return ClipboardHistoryModule(
+            testingStoreRoot: storeRoot,
+            keyStore: keyStore,
+            now: { currentDate }
+        )
+    }
+
+    func request(
+        entries: [ClipboardHistoryLegacyEntry],
+        tags: [ClipboardHistoryLegacyTag] = [],
+        categoryOrder: [String] = [],
+        retentionPeriod: ClipboardHistoryRetentionPeriod = .thirtyDays
+    ) -> ClipboardHistoryLegacyMigrationRequest {
+        ClipboardHistoryLegacyMigrationRequest(
+            transfer: ClipboardHistoryLegacyTransfer(
+                version: 1,
+                entries: entries,
+                tags: tags,
+                categoryOrder: categoryOrder,
+                retentionPeriod: retentionPeriod
+            ),
+            payloadDirectory: legacyPayloadRoot
+        )
+    }
+
+    func writeLegacyPayload(named name: String, data: Data) throws {
+        try data.write(to: legacyPayloadURL(name))
+    }
+
+    func legacyPayloadURL(_ name: String) -> URL {
+        legacyPayloadRoot.appendingPathComponent(name)
+    }
+}
+
+private final class LegacyMigrationKeyStore:
+    ClipboardHistoryMasterKeyStoring,
+    Sendable
+{
+    private let key = Data(repeating: 0x71, count: 32)
+
+    func load() -> ClipboardHistoryMasterKeyResult {
+        .key(key)
+    }
+
+    func create() -> ClipboardHistoryMasterKeyResult {
+        .key(key)
+    }
+
+    func delete() -> ClipboardHistoryMasterKeyResult {
+        .missing
+    }
+}
+
+private func legacyEntry(
+    id: UUID = UUID(),
+    kind: ClipboardHistoryLegacyKind,
+    text: String? = nil,
+    fileName: String? = nil,
+    colorHex: String? = nil,
+    capturedAt: Date,
+    richData: Data? = nil,
+    richType: String? = nil,
+    source: ClipboardHistoryCaptureSource = .unknown,
+    isFavorite: Bool = false,
+    tagIDs: [String] = [],
+    files: [ClipboardHistoryLegacyFileMember] = []
+) -> ClipboardHistoryLegacyEntry {
+    ClipboardHistoryLegacyEntry(
+        id: id,
+        kind: kind,
+        text: text,
+        fileName: fileName,
+        colorHex: colorHex,
+        previewText: text ?? colorHex,
+        capturedAt: capturedAt,
+        richData: richData,
+        richType: richType,
+        source: source,
+        isFavorite: isFavorite,
+        tagIDs: tagIDs,
+        files: files
+    )
+}

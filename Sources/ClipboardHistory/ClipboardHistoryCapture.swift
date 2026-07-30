@@ -739,13 +739,13 @@ extension ClipboardHistoryModule {
         let representationIndex: Int
     }
 
-    fileprivate struct CanonicalBitmap {
+    struct CanonicalBitmap {
         let png: Data
         let thumbnail: Data
         let pixelCount: Int
     }
 
-    fileprivate static func canonicalBitmap(
+    static func canonicalBitmap(
         from sourceData: Data
     ) throws -> CanonicalBitmap {
         guard let source = CGImageSourceCreateWithData(sourceData as CFData, nil),
@@ -908,7 +908,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    fileprivate static func derivedRichText(
+    static func derivedRichText(
         from data: Data,
         typeIdentifier: String
     ) -> String? {

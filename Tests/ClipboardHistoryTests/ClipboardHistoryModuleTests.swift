@@ -750,6 +750,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v5_indexed_search",
                 "v6_retention_and_mutations",
                 "v7_derived_indexing",
+                "v8_legacy_migration",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -786,6 +787,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v5_indexed_search",
                 "v6_retention_and_mutations",
                 "v7_derived_indexing",
+                "v8_legacy_migration",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

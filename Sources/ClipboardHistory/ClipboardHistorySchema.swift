@@ -52,6 +52,48 @@ extension ClipboardHistoryModule {
                     """
             )
         }
+        migrator.registerMigration("v8_legacy_migration") { database in
+            try database.alter(table: "clipboard_entries") { table in
+                table.add(
+                    column: "recency_order",
+                    .integer
+                ).notNull().defaults(to: 0)
+            }
+            try database.alter(table: "clipboard_file_members") { table in
+                table.add(
+                    column: "reference_provenance",
+                    .text
+                ).notNull().defaults(to: "ordinary")
+            }
+            try database.alter(table: "clipboard_tag_definitions") { table in
+                table.add(
+                    column: "display_name",
+                    .text
+                ).notNull().defaults(to: "")
+                table.add(
+                    column: "display_order",
+                    .integer
+                ).notNull().defaults(to: 0)
+            }
+            try database.create(
+                table: "clipboard_legacy_cleanup",
+                options: .withoutRowID
+            ) { table in
+                table.primaryKey("relative_path", .text)
+                table.column("proof_kind", .text).notNull()
+                table.column("payload_id", .text)
+                    .references(
+                        "clipboard_payloads",
+                        onDelete: .cascade
+                    )
+                table.column("current_path", .text)
+                table.column("plaintext_byte_count", .integer).notNull()
+                table.column("sha256", .blob).notNull()
+                table.column("is_cleaned", .boolean)
+                    .notNull()
+                    .defaults(to: false)
+            }
+        }
         return migrator
     }
 

@@ -157,7 +157,13 @@ extension ClipboardHistoryModule {
                     entry.last_captured_at < ?
                     OR (
                         entry.last_captured_at = ?
-                        AND entry.id < ?
+                        AND (
+                            entry.recency_order < ?
+                            OR (
+                                entry.recency_order = ?
+                                AND entry.id < ?
+                            )
+                        )
                     )
                 )
                 """
@@ -165,6 +171,8 @@ extension ClipboardHistoryModule {
             arguments += [
                 cursor.lastCapturedAt,
                 cursor.lastCapturedAt,
+                cursor.recencyOrder,
+                cursor.recencyOrder,
                 cursor.entryID,
             ]
         }
@@ -175,12 +183,15 @@ extension ClipboardHistoryModule {
             database,
             sql: """
                 SELECT entry.id, entry.captured_at, entry.last_captured_at,
+                       entry.recency_order,
                        entry.preview_text, entry.is_favorite,
                        entry.source_bundle_id, entry.source_display_name,
                        entry.source_provenance
                 FROM clipboard_entries AS entry
                 \(predicate)
-                ORDER BY entry.last_captured_at DESC, entry.id DESC
+                ORDER BY entry.last_captured_at DESC,
+                         entry.recency_order DESC,
+                         entry.id DESC
                 LIMIT 101
                 """,
             arguments: arguments
@@ -196,6 +207,7 @@ extension ClipboardHistoryModule {
                     binding: binding,
                     rank: nil,
                     lastCapturedAt: $0["last_captured_at"],
+                    recencyOrder: $0["recency_order"],
                     entryID: $0["id"]
                 )
             }
@@ -314,6 +326,7 @@ extension ClipboardHistoryModule {
                     row: row,
                     rank: rank,
                     lastCapturedAt: row["last_captured_at"],
+                    recencyOrder: row["recency_order"],
                     entryID: entryID
                 )
             )
@@ -324,6 +337,7 @@ extension ClipboardHistoryModule {
                 !$0.isAfter(
                     rank: lastRank,
                     lastCapturedAt: cursor.lastCapturedAt,
+                    recencyOrder: cursor.recencyOrder,
                     entryID: cursor.entryID
                 )
             }
@@ -340,6 +354,7 @@ extension ClipboardHistoryModule {
                     binding: binding,
                     rank: $0.rank,
                     lastCapturedAt: $0.lastCapturedAt,
+                    recencyOrder: $0.recencyOrder,
                     entryID: $0.entryID
                 )
             }
@@ -409,7 +424,8 @@ extension ClipboardHistoryModule {
                 database,
                 sql: """
                     SELECT entry.id, entry.captured_at,
-                           entry.last_captured_at, entry.preview_text,
+                           entry.last_captured_at, entry.recency_order,
+                           entry.preview_text,
                            entry.is_favorite, entry.source_bundle_id,
                            entry.source_display_name,
                            entry.source_provenance
@@ -544,6 +560,7 @@ extension ClipboardHistoryModule {
         binding: SearchCursorBinding,
         rank: SearchRank?,
         lastCapturedAt: Double,
+        recencyOrder: Int,
         entryID: String
     ) throws -> ClipboardHistoryCursor {
         let encoder = JSONEncoder()
@@ -554,6 +571,7 @@ extension ClipboardHistoryModule {
                     binding: binding,
                     rank: rank,
                     lastCapturedAt: lastCapturedAt,
+                    recencyOrder: recencyOrder,
                     entryID: entryID
                 )
             )
@@ -625,6 +643,7 @@ private struct RankedSearchEntry: Comparable {
     let row: Row
     let rank: SearchRank
     let lastCapturedAt: Double
+    let recencyOrder: Int
     let entryID: String
 
     static func < (lhs: Self, rhs: Self) -> Bool {
@@ -634,12 +653,16 @@ private struct RankedSearchEntry: Comparable {
         if lhs.lastCapturedAt != rhs.lastCapturedAt {
             return lhs.lastCapturedAt > rhs.lastCapturedAt
         }
+        if lhs.recencyOrder != rhs.recencyOrder {
+            return lhs.recencyOrder > rhs.recencyOrder
+        }
         return lhs.entryID > rhs.entryID
     }
 
     func isAfter(
         rank cursorRank: SearchRank,
         lastCapturedAt cursorCapturedAt: Double,
+        recencyOrder cursorRecencyOrder: Int,
         entryID cursorEntryID: String
     ) -> Bool {
         if rank != cursorRank {
@@ -647,6 +670,9 @@ private struct RankedSearchEntry: Comparable {
         }
         if lastCapturedAt != cursorCapturedAt {
             return lastCapturedAt < cursorCapturedAt
+        }
+        if recencyOrder != cursorRecencyOrder {
+            return recencyOrder < cursorRecencyOrder
         }
         return entryID < cursorEntryID
     }
@@ -696,5 +722,6 @@ private struct SearchCursorPayload: Codable {
     let binding: SearchCursorBinding
     let rank: SearchRank?
     let lastCapturedAt: Double
+    let recencyOrder: Int
     let entryID: String
 }

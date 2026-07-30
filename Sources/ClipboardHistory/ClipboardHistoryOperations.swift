@@ -771,7 +771,7 @@ private struct EntryDeletionResult: Sendable {
 }
 
 extension ClipboardHistoryPayloadKind {
-    fileprivate init?(databaseValue: String) {
+    init?(databaseValue: String) {
         switch databaseValue {
         case "bitmap":
             self = .bitmap
