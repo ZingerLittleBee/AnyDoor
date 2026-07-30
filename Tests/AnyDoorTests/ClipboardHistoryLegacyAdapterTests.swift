@@ -744,6 +744,54 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         )
     }
 
+    /// A single row the current schema cannot describe must not cost the user
+    /// their whole history: a thrown transfer would fail migration on every
+    /// retry, since each retry re-reads the same snapshot row.
+    func testUndecodableLegacyRowsAreSkippedInsteadOfFailingTheTransfer() throws {
+        let container = try ModelContainer(
+            for: ClipboardHistoryItem.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let keptID = UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!
+        context.insert(
+            ClipboardHistoryItem(
+                id: keptID,
+                kind: .text,
+                text: "keep me",
+                previewTitle: "Keep",
+                createdAt: Date(timeIntervalSince1970: 300)
+            )
+        )
+        let unknownKind = ClipboardHistoryItem(
+            kind: .text,
+            text: "unmappable",
+            previewTitle: "Unknown kind",
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        context.insert(unknownKind)
+        unknownKind.kind = "kindFromAnotherBuild"
+        context.insert(
+            ClipboardHistoryItem(
+                kind: .file,
+                previewTitle: "Broken manifest",
+                createdAt: Date(timeIntervalSince1970: 100),
+                filesManifest: Data("not json".utf8)
+            )
+        )
+        try context.save()
+
+        let defaults = try makeDefaults()
+        let request = try ClipboardHistoryLegacyAdapter.makeMigrationRequest(
+            modelContext: context,
+            defaults: defaults,
+            payloadDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
+
+        XCTAssertEqual(request.transfer.entries.map(\.id), [keptID])
+    }
+
     private func makeDefaults() throws -> UserDefaults {
         let suiteName = "ClipboardHistoryLegacySourceTests-\(UUID())"
         let defaults = try XCTUnwrap(

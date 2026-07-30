@@ -1,16 +1,19 @@
 import ClipboardHistory
 import Foundation
+import OSLog
 import SwiftData
 
 enum ClipboardHistoryLegacyAdapterError: Error {
-    case invalidKind(String)
-    case invalidFileManifest(UUID)
     case invalidTags
     case invalidCategoryOrder
 }
 
 @MainActor
 enum ClipboardHistoryLegacyAdapter {
+    private static let logger = Logger(
+        subsystem: "dev.bybee.AnyDoor",
+        category: "clipboard-history-migration"
+    )
     static func makeMigrationRequest(
         modelContext: ModelContext,
         defaults: UserDefaults = .standard,
@@ -23,7 +26,19 @@ enum ClipboardHistoryLegacyAdapter {
                 ]
             )
         )
-        let entries = try rows.map(makeLegacyEntry)
+        // A row the v1 schema can no longer describe (unknown kind, unreadable
+        // file manifest) is dropped, not fatal. Failing the whole transfer
+        // would leave the user with no history at all and no way forward: the
+        // retry re-reads the same snapshot and hits the same row every time.
+        let entries = rows.compactMap(makeLegacyEntry)
+        if entries.count != rows.count {
+            logger.error(
+                """
+                Skipped \(rows.count - entries.count, privacy: .public) \
+                undecodable legacy clipboard rows during migration
+                """
+            )
+        }
         let tags = try legacyTags(from: defaults)
         let categoryOrder = try legacyCategoryOrder(from: defaults)
         let retention = legacyRetention(from: defaults)
@@ -40,9 +55,12 @@ enum ClipboardHistoryLegacyAdapter {
 
     private static func makeLegacyEntry(
         _ row: ClipboardHistoryItem
-    ) throws -> ClipboardHistoryLegacyEntry {
+    ) -> ClipboardHistoryLegacyEntry? {
         guard let kind = ClipboardHistoryKind(rawValue: row.kind) else {
-            throw ClipboardHistoryLegacyAdapterError.invalidKind(row.kind)
+            logger.error(
+                "Legacy row \(row.id, privacy: .public) has unknown kind"
+            )
+            return nil
         }
         let legacyKind: ClipboardHistoryLegacyKind
         switch kind {
@@ -70,8 +88,13 @@ enum ClipboardHistoryLegacyAdapter {
                 ),
                 !decoded.isEmpty
             else {
-                throw ClipboardHistoryLegacyAdapterError
-                    .invalidFileManifest(row.id)
+                logger.error(
+                    """
+                    Legacy row \(row.id, privacy: .public) has an unreadable \
+                    file manifest
+                    """
+                )
+                return nil
             }
             files = decoded.map {
                 ClipboardHistoryLegacyFileMember(
