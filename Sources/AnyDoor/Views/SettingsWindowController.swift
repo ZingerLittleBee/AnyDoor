@@ -86,7 +86,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         guard let window else { return }
         window.title = L(.panelFooterSettings)
         presentation.recordShow()
-        mountContentIfNeeded()
+        let didMountContent = mountContentIfNeeded()
         restorePosition()
         installKeyMonitor()
         // Normal-level window of an accessory app: adopt .regular policy while
@@ -94,9 +94,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         RegularWindowCoordinator.shared.track(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        // Drop the initial first responder so no control renders a focus ring
-        // when the window appears (keyboard focus returns on first Tab).
-        window.makeFirstResponder(nil)
+        if SettingsWindowFocusPolicy.shouldClearInitialFocus(
+            didMountContent: didMountContent
+        ) {
+            // Drop only the hosting view's initial responder. Reopening this
+            // reused window must preserve the user's control and navigation
+            // focus.
+            window.makeFirstResponder(nil)
+        }
     }
 
     override func close() {
@@ -106,15 +111,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window?.close()
     }
 
-    private func mountContentIfNeeded() {
+    @discardableResult
+    private func mountContentIfNeeded() -> Bool {
         guard let window,
-              window.contentView == nil || !(window.contentView is NSHostingView<SettingsRoot>) else { return }
+              window.contentView == nil
+                || !(window.contentView is NSHostingView<SettingsRoot>)
+        else {
+            return false
+        }
         guard let container = Self.modelContainer,
             let module = Self.clipboardHistoryModule,
             let lifecycle = Self.clipboardHistoryLifecycle
         else {
             assertionFailure("SettingsWindowController.bootstrap was not called before show()")
-            return
+            return false
         }
         let host = NSHostingView(
             rootView: SettingsRoot(
@@ -131,6 +141,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         host.frame = window.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         window.contentView = host
+        return true
     }
 
     /// The window's size is fixed; only its position is remembered.
@@ -198,6 +209,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
+enum SettingsWindowFocusPolicy {
+    static func shouldClearInitialFocus(
+        didMountContent: Bool
+    ) -> Bool {
+        didMountContent
+    }
+}
+
 /// Root view for the hosted Settings window. Reading `effectiveLocale` inside
 /// `body` keeps the locale environment live when the user switches the app
 /// language (a static `NSHostingView` rootView would otherwise freeze the
@@ -231,6 +250,11 @@ private struct SettingsRoot: View {
 @Observable
 final class SettingsPresentation {
     private(set) var showGeneration: UInt64 = 0
+    var selectedTab: SettingsTab
+
+    init(selectedTab: SettingsTab = .panel) {
+        self.selectedTab = selectedTab
+    }
 
     func recordShow() {
         showGeneration &+= 1

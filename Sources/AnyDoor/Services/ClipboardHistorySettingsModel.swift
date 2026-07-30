@@ -20,14 +20,54 @@ struct ClipboardHistoryClearConfirmation: Identifiable {
     }
 }
 
+struct ClipboardHistorySettingsRefreshOperations: Sendable {
+    let retentionPeriod:
+        @Sendable () async throws -> ClipboardHistoryRetentionPeriod
+    let automaticImageTextIndexingEnabled:
+        @Sendable () async throws -> Bool
+    let storageUsage: @Sendable () async throws -> UInt64
+
+    init(module: ClipboardHistoryModule) {
+        retentionPeriod = {
+            try await module.retentionStatus().period
+        }
+        automaticImageTextIndexingEnabled = {
+            try await module.isAutomaticImageTextIndexingEnabled()
+        }
+        storageUsage = {
+            try await module.storageUsage()
+        }
+    }
+
+    init(
+        retentionPeriod:
+            @escaping @Sendable () async throws
+                -> ClipboardHistoryRetentionPeriod,
+        automaticImageTextIndexingEnabled:
+            @escaping @Sendable () async throws -> Bool,
+        storageUsage:
+            @escaping @Sendable () async throws -> UInt64
+    ) {
+        self.retentionPeriod = retentionPeriod
+        self.automaticImageTextIndexingEnabled =
+            automaticImageTextIndexingEnabled
+        self.storageUsage = storageUsage
+    }
+}
+
 @MainActor
 @Observable
 final class ClipboardHistorySettingsModel {
     private let module: ClipboardHistoryModule
     let lifecycle: ClipboardHistoryLifecycle
+    private let presentation: SettingsPresentation
     private let defaults: UserDefaults
+    private let refreshOperations:
+        ClipboardHistorySettingsRefreshOperations
     @ObservationIgnored private var latestSettingsAppearanceGeneration:
         UInt64 = 0
+    @ObservationIgnored private var settingsAppearanceRefreshTask:
+        Task<Void, Never>?
 
     private(set) var retention: ClipboardHistoryRetentionPeriod = .default
     private(set) var automaticImageTextIndexingEnabled = false
@@ -46,11 +86,17 @@ final class ClipboardHistorySettingsModel {
     init(
         module: ClipboardHistoryModule,
         lifecycle: ClipboardHistoryLifecycle,
-        defaults: UserDefaults = .standard
+        presentation: SettingsPresentation,
+        defaults: UserDefaults = .standard,
+        refreshOperations: ClipboardHistorySettingsRefreshOperations? = nil
     ) {
         self.module = module
         self.lifecycle = lifecycle
+        self.presentation = presentation
         self.defaults = defaults
+        self.refreshOperations =
+            refreshOperations
+            ?? ClipboardHistorySettingsRefreshOperations(module: module)
         monitoringEnabled = ClipboardPreferences.monitoringEnabled(
             from: defaults
         )
@@ -66,14 +112,34 @@ final class ClipboardHistorySettingsModel {
         await refresh(expectedSettingsAppearanceGeneration: nil)
     }
 
-    /// Refreshes the settings-derived state for one visible Settings
-    /// presentation. A reused Settings host can request a newer generation
-    /// while a previous read is suspended; only the newest result may update
-    /// this UI model.
-    func refreshForSettingsAppearance(_ generation: UInt64) async {
+    /// Refreshes only while Clipboard is the selected Settings pane. The model
+    /// owns the underlying task so a newer presentation can cancel a suspended
+    /// read even when the storage boundary does not complete immediately.
+    func refreshForSettingsPresentation() async {
+        guard presentation.selectedTab == .clipboard else {
+            settingsAppearanceRefreshTask?.cancel()
+            settingsAppearanceRefreshTask = nil
+            return
+        }
+        let generation = presentation.showGeneration
         guard generation > latestSettingsAppearanceGeneration else { return }
         latestSettingsAppearanceGeneration = generation
-        await refresh(expectedSettingsAppearanceGeneration: generation)
+        settingsAppearanceRefreshTask?.cancel()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.refresh(
+                expectedSettingsAppearanceGeneration: generation
+            )
+        }
+        settingsAppearanceRefreshTask = task
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+        if latestSettingsAppearanceGeneration == generation {
+            settingsAppearanceRefreshTask = nil
+        }
     }
 
     private func refresh(
@@ -83,16 +149,17 @@ final class ClipboardHistorySettingsModel {
             guard shouldApplyRefresh(
                 expectedSettingsAppearanceGeneration
             ) else { return }
-            let retention = try await module.retentionStatus().period
+            let retention = try await refreshOperations.retentionPeriod()
             guard shouldApplyRefresh(
                 expectedSettingsAppearanceGeneration
             ) else { return }
             let automaticImageTextIndexingEnabled =
-                try await module.isAutomaticImageTextIndexingEnabled()
+                try await refreshOperations
+                    .automaticImageTextIndexingEnabled()
             guard shouldApplyRefresh(
                 expectedSettingsAppearanceGeneration
             ) else { return }
-            let storageBytes = try await module.storageUsage()
+            let storageBytes = try await refreshOperations.storageUsage()
             guard shouldApplyRefresh(
                 expectedSettingsAppearanceGeneration
             ) else { return }
@@ -269,7 +336,7 @@ final class ClipboardHistorySettingsModel {
 
     func refreshStorageUsage() async {
         do {
-            storageBytes = try await module.storageUsage()
+            storageBytes = try await refreshOperations.storageUsage()
         } catch {
             operationFailed = true
         }

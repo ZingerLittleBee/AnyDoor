@@ -18,7 +18,8 @@ struct ClipboardSettingsView: View {
         _model = State(
             initialValue: ClipboardHistorySettingsModel(
                 module: module,
-                lifecycle: lifecycle
+                lifecycle: lifecycle,
+                presentation: presentation
             )
         )
     }
@@ -155,9 +156,7 @@ struct ClipboardSettingsView: View {
         .formStyle(.grouped)
         .overlayScrollers()
         .task(id: presentation.showGeneration) {
-            await model.refreshForSettingsAppearance(
-                presentation.showGeneration
-            )
+            await model.refreshForSettingsPresentation()
         }
         .task {
             installedApps = await Task.detached {

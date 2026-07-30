@@ -89,12 +89,10 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
         async throws
     {
         let fixture = try SettingsFixture()
-        let presentation = SettingsPresentation()
+        fixture.presentation.selectedTab = .clipboard
 
-        presentation.recordShow()
-        await fixture.model.refreshForSettingsAppearance(
-            presentation.showGeneration
-        )
+        fixture.presentation.recordShow()
+        await fixture.model.refreshForSettingsPresentation()
         let firstUsage = fixture.model.storageBytes
 
         let entry = try await fixture.module.capture(
@@ -102,10 +100,8 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
         )
         let expectedUsage = try await fixture.module.storageUsage()
 
-        presentation.recordShow()
-        await fixture.model.refreshForSettingsAppearance(
-            presentation.showGeneration
-        )
+        fixture.presentation.recordShow()
+        await fixture.model.refreshForSettingsPresentation()
 
         XCTAssertEqual(fixture.model.storageBytes, expectedUsage)
         XCTAssertGreaterThan(fixture.model.storageBytes, firstUsage)
@@ -123,19 +119,83 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
         XCTAssertEqual(presentation.showGeneration, 3)
     }
 
-    func testHiddenClipboardPaneDoesNotRefreshOrMutateForSettingsShows()
+    func testClipboardRefreshRequiresSelectionAndStartsWhenPaneIsSelected()
         async throws
     {
-        let fixture = try SettingsFixture()
-        let presentation = SettingsPresentation()
-        let entry = try await fixture.module.capture(request("preserve me"))
+        let usageReader = ControlledStorageUsageReader()
+        let fixture = try SettingsFixture(
+            refreshOperations: usageReader.operations
+        )
 
-        presentation.recordShow()
-        presentation.recordShow()
+        fixture.presentation.recordShow()
+        await fixture.model.refreshForSettingsPresentation()
 
-        XCTAssertEqual(fixture.model.storageBytes, 0)
-        let page = try await fixture.module.page(ClipboardHistoryQuery())
-        XCTAssertEqual(page.entries.map(\.id), [entry.entryID])
+        let hiddenRequestCount = await usageReader.requestCount
+        XCTAssertEqual(hiddenRequestCount, 0)
+
+        fixture.presentation.selectedTab = .clipboard
+        let refresh = Task { @MainActor in
+            await fixture.model.refreshForSettingsPresentation()
+        }
+        await waitUntil("selected Clipboard pane storage read") {
+            await usageReader.requestCount == 1
+        }
+        await usageReader.release(requestID: 0, with: .value(41))
+        await refresh.value
+
+        XCTAssertEqual(fixture.model.storageBytes, 41)
+    }
+
+    func testRapidVisibleShowsCancelStaleRefreshAndOnlyPublishLatest()
+        async throws
+    {
+        for staleResponse in [
+            ControlledStorageUsageReader.Response.value(101),
+            .failure,
+        ] {
+            let usageReader = ControlledStorageUsageReader()
+            let presentation = SettingsPresentation(
+                selectedTab: .clipboard
+            )
+            let fixture = try SettingsFixture(
+                presentation: presentation,
+                refreshOperations: usageReader.operations
+            )
+
+            presentation.recordShow()
+            let staleRefresh = Task { @MainActor in
+                await fixture.model.refreshForSettingsPresentation()
+            }
+            await waitUntil("first storage read") {
+                await usageReader.requestCount == 1
+            }
+
+            presentation.recordShow()
+            let latestRefresh = Task { @MainActor in
+                await fixture.model.refreshForSettingsPresentation()
+            }
+            await waitUntil("replacement storage read") {
+                await usageReader.requestCount == 2
+            }
+            await waitUntil("stale storage read cancellation") {
+                await usageReader.cancelledRequestIDs.contains(0)
+            }
+
+            await usageReader.release(
+                requestID: 0,
+                with: staleResponse
+            )
+            await staleRefresh.value
+
+            XCTAssertEqual(fixture.model.storageBytes, 0)
+            XCTAssertFalse(fixture.model.operationFailed)
+
+            await usageReader.release(requestID: 1, with: .value(202))
+            await latestRefresh.value
+
+            XCTAssertEqual(fixture.model.storageBytes, 202)
+            XCTAssertFalse(fixture.model.operationFailed)
+        }
     }
 
     private func request(
@@ -153,9 +213,13 @@ private struct SettingsFixture {
     let module: ClipboardHistoryModule
     let defaults: UserDefaults
     let lifecycle: ClipboardHistoryLifecycle
+    let presentation: SettingsPresentation
     let model: ClipboardHistorySettingsModel
 
-    init() throws {
+    init(
+        presentation: SettingsPresentation = SettingsPresentation(),
+        refreshOperations: ClipboardHistorySettingsRefreshOperations? = nil
+    ) throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
@@ -185,10 +249,74 @@ private struct SettingsFixture {
                 )
             }
         )
+        self.presentation = presentation
         model = ClipboardHistorySettingsModel(
             module: module,
             lifecycle: lifecycle,
-            defaults: defaults
+            presentation: presentation,
+            defaults: defaults,
+            refreshOperations: refreshOperations
         )
+    }
+}
+
+private actor ControlledStorageUsageReader {
+    enum Response: Sendable {
+        case value(UInt64)
+        case failure
+    }
+
+    private enum Failure: Error {
+        case injected
+    }
+
+    private var nextRequestID = 0
+    private var continuations:
+        [Int: CheckedContinuation<Response, Never>] = [:]
+    private(set) var requestCount = 0
+    private(set) var cancelledRequestIDs: Set<Int> = []
+
+    nonisolated var operations: ClipboardHistorySettingsRefreshOperations {
+        ClipboardHistorySettingsRefreshOperations(
+            retentionPeriod: { .thirtyDays },
+            automaticImageTextIndexingEnabled: { false },
+            storageUsage: {
+                try await self.storageUsage()
+            }
+        )
+    }
+
+    func release(
+        requestID: Int,
+        with response: Response
+    ) {
+        continuations.removeValue(forKey: requestID)?.resume(
+            returning: response
+        )
+    }
+
+    private func storageUsage() async throws -> UInt64 {
+        let requestID = nextRequestID
+        nextRequestID += 1
+        requestCount += 1
+        let response = await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                continuations[requestID] = continuation
+            }
+        } onCancel: {
+            Task {
+                await self.recordCancellation(requestID)
+            }
+        }
+        switch response {
+        case .value(let bytes):
+            return bytes
+        case .failure:
+            throw Failure.injected
+        }
+    }
+
+    private func recordCancellation(_ requestID: Int) {
+        cancelledRequestIDs.insert(requestID)
     }
 }
