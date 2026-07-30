@@ -17,13 +17,12 @@ enum ClipboardHistoryLegacyAdapter {
         payloadDirectory: URL
     ) throws -> ClipboardHistoryLegacyMigrationRequest {
         let rows = try modelContext.fetch(
-            FetchDescriptor<ClipboardHistoryItem>()
-        ).sorted {
-            if $0.createdAt != $1.createdAt {
-                return $0.createdAt > $1.createdAt
-            }
-            return $0.id.uuidString < $1.id.uuidString
-        }
+            FetchDescriptor<ClipboardHistoryItem>(
+                sortBy: [
+                    SortDescriptor(\.createdAt, order: .reverse)
+                ]
+            )
+        )
         let entries = try rows.map(makeLegacyEntry)
         let tags = try legacyTags(from: defaults)
         let categoryOrder = try legacyCategoryOrder(from: defaults)
