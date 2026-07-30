@@ -1,36 +1,21 @@
 import Foundation
 import SwiftData
 
-enum ClipboardHistoryKind: String, CaseIterable, Sendable {
-    case ocr
-    case color
-    case qrcode
-    case screenshot
-    case text
-    case image
-    case file
+@testable import AnyDoor
 
-    var titleKey: L10n.Key {
-        switch self {
-        case .ocr:        return .clipboardKindOcr
-        case .color:      return .clipboardKindColor
-        case .qrcode:     return .clipboardKindQrcode
-        case .screenshot: return .clipboardKindScreenshot
-        case .text:       return .clipboardKindText
-        case .image:      return .clipboardKindImage
-        case .file:       return .clipboardKindFile
-        }
-    }
-
-    /// Kinds whose payload is a plain string in `text` — the ones the floating
-    /// text panel can preview and edit.
-    var isTextBearing: Bool {
-        switch self {
-        case .text, .ocr, .qrcode: return true
-        case .color, .screenshot, .image, .file: return false
-        }
-    }
-}
+// The pre-v2 clipboard-history schema, kept alive only as a test fixture.
+//
+// Production no longer models the legacy store at all: migration reads the
+// snapshot as plain SQLite (`ClipboardHistoryLegacyStoreReader`) because
+// Core Data's row cache makes a SwiftData read peak at roughly twice the store
+// size. Keeping the `@Model` here lets the migration tests build their input
+// with real SwiftData, so the reader is exercised against a genuine
+// Core Data-produced file rather than a layout we hand-rolled to match it.
+//
+// The class and property names below *are* the contract: Core Data derives
+// `ZCLIPBOARDHISTORYITEM` and its `Z`-prefixed columns from them. Renaming
+// anything here breaks the reader's SQL, and the migration tests fail loudly
+// rather than quietly dropping history.
 
 /// One file inside a `.file` clipboard entry. `storedName` is the copy held in
 /// the history directory; `originalName` is shown on the card. For
@@ -112,7 +97,10 @@ final class ClipboardHistoryItem {
     var tagIDs: [String] {
         get {
             guard let tagIDsJSON else { return [] }
-            return (try? JSONDecoder().decode([String].self, from: Data(tagIDsJSON.utf8))) ?? []
+            return (try? JSONDecoder().decode(
+                [String].self,
+                from: Data(tagIDsJSON.utf8)
+            )) ?? []
         }
         set {
             if newValue.isEmpty {
@@ -121,15 +109,5 @@ final class ClipboardHistoryItem {
                 tagIDsJSON = String(data: data, encoding: .utf8)
             }
         }
-    }
-
-    @Transient var historyKind: ClipboardHistoryKind? {
-        ClipboardHistoryKind(rawValue: kind)
-    }
-
-    /// Decoded file manifest for `.file` entries, or `[]`.
-    @Transient var files: [ClipboardFileEntry] {
-        guard let filesManifest else { return [] }
-        return (try? JSONDecoder().decode([ClipboardFileEntry].self, from: filesManifest)) ?? []
     }
 }

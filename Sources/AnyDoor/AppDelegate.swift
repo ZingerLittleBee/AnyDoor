@@ -26,14 +26,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let storeURL = storeDirectory.appendingPathComponent(
             "AnyDoor.store"
         )
-        let legacySchema = Schema(
-            [
-                KeyBinding.self, BuiltinPreference.self,
-                ClipboardHistoryItem.self, TranslationRecord.self,
-                Quicklink.self,
-            ]
-                + NativePluginCatalog.modelSchemaTypes
-        )
         return ClipboardHistoryLifecycle(
             module: clipboardHistoryModule,
             legacyCleanupState: {
@@ -51,7 +43,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     try ClipboardHistoryLegacySource.openForMigration(
                         applicationSupportDirectory: storeDirectory,
                         productionStoreURL: storeURL,
-                        legacySchema: legacySchema,
                         payloadDirectory:
                             ClipboardHistoryModule.defaultStoreRoot
                     )

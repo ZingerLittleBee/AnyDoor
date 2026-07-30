@@ -29,16 +29,6 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
             ClipboardHistoryLegacySource.openIfNeeded(
                 applicationSupportDirectory: storeDirectory,
                 productionStoreURL: storeURL,
-                legacySchema: Schema(
-                    [
-                        KeyBinding.self,
-                        BuiltinPreference.self,
-                        ClipboardHistoryItem.self,
-                        TranslationRecord.self,
-                        Quicklink.self,
-                    ]
-                        + NativePluginCatalog.modelSchemaTypes
-                ),
                 payloadDirectory: ClipboardHistoryModule.defaultStoreRoot
             )
         )

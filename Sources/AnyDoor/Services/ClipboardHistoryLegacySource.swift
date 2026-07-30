@@ -1,7 +1,6 @@
 import ClipboardHistory
 import Darwin
 import Foundation
-import SwiftData
 
 enum ClipboardHistoryLegacySourceError: Error {
     case incompleteSnapshot
@@ -31,18 +30,18 @@ final class ClipboardHistoryLegacySource {
 
     private let payloadDirectory: URL
     private let snapshotDirectory: URL
-    private let container: ModelContainer?
+    /// The copied v1 store, or nil when there was never one to migrate.
+    private let snapshotStoreURL: URL?
 
-    /// Resolves the cutover before any legacy `ModelContainer` is opened.
+    /// Resolves the cutover before the legacy snapshot is opened.
     ///
     /// A completed marker is authoritative because `finishMigration()` makes
     /// it durable only after publication and cleanup have succeeded. A
     /// leftover snapshot is retried as a visible filesystem operation, never
-    /// a reason to reopen the removed schema.
+    /// a reason to reread the removed schema.
     static func openIfNeeded(
         applicationSupportDirectory: URL,
         productionStoreURL: URL,
-        legacySchema: Schema,
         payloadDirectory: URL
     ) throws -> ClipboardHistoryLegacySource? {
         switch cleanupState(in: applicationSupportDirectory) {
@@ -57,7 +56,6 @@ final class ClipboardHistoryLegacySource {
             return try openForMigration(
                 applicationSupportDirectory: applicationSupportDirectory,
                 productionStoreURL: productionStoreURL,
-                legacySchema: legacySchema,
                 payloadDirectory: payloadDirectory
             )
         }
@@ -66,7 +64,6 @@ final class ClipboardHistoryLegacySource {
     static func openForMigration(
         applicationSupportDirectory: URL,
         productionStoreURL: URL,
-        legacySchema: Schema,
         payloadDirectory: URL
     ) throws -> ClipboardHistoryLegacySource {
         guard cleanupState(in: applicationSupportDirectory) == .incomplete
@@ -77,7 +74,6 @@ final class ClipboardHistoryLegacySource {
         return try ClipboardHistoryLegacySource(
             applicationSupportDirectory: applicationSupportDirectory,
             productionStoreURL: productionStoreURL,
-            legacySchema: legacySchema,
             payloadDirectory: payloadDirectory
         )
     }
@@ -85,7 +81,6 @@ final class ClipboardHistoryLegacySource {
     private init(
         applicationSupportDirectory: URL,
         productionStoreURL: URL,
-        legacySchema: Schema,
         payloadDirectory legacyPayloadDirectory: URL
     ) throws {
         snapshotDirectory = applicationSupportDirectory
@@ -101,19 +96,16 @@ final class ClipboardHistoryLegacySource {
             sourceStoreURL: productionStoreURL,
             snapshotDirectory: snapshotDirectory
         )
-        let snapshotStoreURL = snapshotDirectory
+        let storeURL = snapshotDirectory
             .appendingPathComponent(Self.snapshotStoreName)
-        if FileManager.default.fileExists(atPath: snapshotStoreURL.path) {
+        if FileManager.default.fileExists(atPath: storeURL.path) {
             try Self.moveLegacyPayloadsIntoSnapshot(
                 from: legacyPayloadDirectory,
                 to: payloadDirectory
             )
-            container = try ModelContainer(
-                for: legacySchema,
-                configurations: ModelConfiguration(url: snapshotStoreURL)
-            )
+            snapshotStoreURL = storeURL
         } else {
-            container = nil
+            snapshotStoreURL = nil
         }
     }
 
@@ -177,7 +169,10 @@ final class ClipboardHistoryLegacySource {
     func makeMigrationRequest(
         defaults: UserDefaults = .standard
     ) throws -> ClipboardHistoryLegacyMigrationRequest {
-        guard let container else {
+        // No snapshot means there was never a v1 store, so there is nothing to
+        // carry over — not even the v1 settings, which only ever described
+        // history this install never had.
+        guard let snapshotStoreURL else {
             return ClipboardHistoryLegacyMigrationRequest(
                 transfer: ClipboardHistoryLegacyTransfer(
                     entries: [],
@@ -189,7 +184,7 @@ final class ClipboardHistoryLegacySource {
             )
         }
         return try ClipboardHistoryLegacyAdapter.makeMigrationRequest(
-            modelContext: container.mainContext,
+            storeURL: snapshotStoreURL,
             defaults: defaults,
             payloadDirectory: payloadDirectory
         )

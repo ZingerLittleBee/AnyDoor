@@ -111,7 +111,6 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
                 ClipboardHistoryLegacySource.openIfNeeded(
                     applicationSupportDirectory: root,
                     productionStoreURL: storeURL,
-                    legacySchema: legacySchema,
                     payloadDirectory: payloadDirectory
                 )
             )
@@ -137,7 +136,6 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             ClipboardHistoryLegacySource.openIfNeeded(
                 applicationSupportDirectory: root,
                 productionStoreURL: storeURL,
-                legacySchema: legacySchema,
                 payloadDirectory: payloadDirectory
             )
         )
@@ -229,7 +227,6 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
                 .openForMigration(
                     applicationSupportDirectory: root,
                     productionStoreURL: storeURL,
-                    legacySchema: legacySchema,
                     payloadDirectory: payloadDirectory
                 )
             return try firstLaunch.makeMigrationRequest(
@@ -292,8 +289,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
                     try ClipboardHistoryLegacySource.openForMigration(
                         applicationSupportDirectory: root,
                         productionStoreURL: storeURL,
-                        legacySchema: legacySchema,
-                        payloadDirectory: payloadDirectory
+                            payloadDirectory: payloadDirectory
                     )
                 return try source.makeMigrationRequest(
                     defaults: defaults
@@ -421,7 +417,6 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             ClipboardHistoryLegacySource.openIfNeeded(
                 applicationSupportDirectory: root,
                 productionStoreURL: storeURL,
-                legacySchema: legacySchema,
                 payloadDirectory: payloadDirectory
             )
         )
@@ -441,7 +436,6 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         let secondLaunch = try ClipboardHistoryLegacySource.openIfNeeded(
             applicationSupportDirectory: root,
             productionStoreURL: storeURL,
-            legacySchema: legacySchema,
             payloadDirectory: payloadDirectory
         )
 
@@ -547,7 +541,6 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         let source = try ClipboardHistoryLegacySource.openForMigration(
             applicationSupportDirectory: root,
             productionStoreURL: storeURL,
-            legacySchema: legacySchema,
             payloadDirectory: legacyPayloadDirectory
         )
         XCTAssertEqual(
@@ -607,12 +600,10 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             "owned-copy"
         )
         try Data("legacy bytes".utf8).write(to: legacyPayload)
-        let configuration = ModelConfiguration(
-            isStoredInMemoryOnly: true
-        )
+        let storeURL = try makeLegacyStoreURL()
         let container = try ModelContainer(
             for: ClipboardHistoryItem.self,
-            configurations: configuration
+            configurations: ModelConfiguration(url: storeURL)
         )
         let context = container.mainContext
         let olderID = UUID(
@@ -688,7 +679,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         )
         let request = try ClipboardHistoryLegacyAdapter
             .makeMigrationRequest(
-                modelContext: context,
+                storeURL: storeURL,
                 defaults: defaults,
                 payloadDirectory: payloadDirectory
             )
@@ -749,9 +740,10 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
     /// just for the two-row fixtures above. This pins the contract against any
     /// future change to how the snapshot is read.
     func testTransferPreservesNewestFirstOrderAtScale() throws {
+        let storeURL = try makeLegacyStoreURL()
         let container = try ModelContainer(
             for: ClipboardHistoryItem.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            configurations: ModelConfiguration(url: storeURL)
         )
         let context = container.mainContext
         let rowCount = 500
@@ -775,7 +767,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         try context.save()
 
         let request = try ClipboardHistoryLegacyAdapter.makeMigrationRequest(
-            modelContext: context,
+            storeURL: storeURL,
             defaults: try makeDefaults(),
             payloadDirectory: FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -789,9 +781,10 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
     /// their whole history: a thrown transfer would fail migration on every
     /// retry, since each retry re-reads the same snapshot row.
     func testUndecodableLegacyRowsAreSkippedInsteadOfFailingTheTransfer() throws {
+        let storeURL = try makeLegacyStoreURL()
         let container = try ModelContainer(
             for: ClipboardHistoryItem.self,
-            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+            configurations: ModelConfiguration(url: storeURL)
         )
         let context = container.mainContext
         let keptID = UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!
@@ -824,13 +817,31 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
 
         let defaults = try makeDefaults()
         let request = try ClipboardHistoryLegacyAdapter.makeMigrationRequest(
-            modelContext: context,
+            storeURL: storeURL,
             defaults: defaults,
             payloadDirectory: FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
         )
 
         XCTAssertEqual(request.transfer.entries.map(\.id), [keptID])
+    }
+
+    /// The reader opens the store file, so these fixtures cannot be in-memory.
+    /// The directory is torn down when the test run's temporary directory is.
+    private func makeLegacyStoreURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-LegacyStore-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        return directory.appendingPathComponent("AnyDoor.store")
     }
 
     private func makeDefaults() throws -> UserDefaults {
