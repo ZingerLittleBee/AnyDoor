@@ -418,32 +418,17 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
-        let previousSchedule = try database.read {
-            try Self.maintenanceScheduleSnapshot(in: $0)
-        }
         try database.writeWithoutTransaction { database in
             try database.execute(sql: "PRAGMA incremental_vacuum")
             try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
         }
+        let storageBytes = try storageUsage()
         try database.write { database in
             try Self.recordMaintenanceSuccess(in: database, at: now())
         }
-        do {
-            try database.writeWithoutTransaction { database in
-                try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
-            }
-        } catch {
-            try? database.write { database in
-                try Self.restoreMaintenanceSchedule(
-                    previousSchedule,
-                    in: database
-                )
-            }
-            throw error
-        }
         return ClipboardHistoryMaintenanceReport(
             reclaimedPayloadCount: reclaimed,
-            storageBytes: try storageUsage()
+            storageBytes: storageBytes
         )
     }
 

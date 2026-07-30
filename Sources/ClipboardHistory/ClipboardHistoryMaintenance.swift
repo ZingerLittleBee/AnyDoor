@@ -45,11 +45,6 @@ struct SystemClipboardHistoryMaintenanceScheduler:
 }
 
 extension ClipboardHistoryModule {
-    struct MaintenanceScheduleSnapshot: Sendable {
-        let lastSuccess: Double?
-        let nextDeadline: Double?
-    }
-
     static let maintenanceInterval: TimeInterval = 24 * 60 * 60
     static let initialMaintenanceRetryDelay: TimeInterval = 5 * 60
     static let maximumMaintenanceRetryDelay: TimeInterval = 60 * 60
@@ -220,62 +215,6 @@ extension ClipboardHistoryModule {
                         real_value = excluded.real_value,
                         text_value = NULL,
                         data_value = NULL
-                    """,
-                arguments: [key, value]
-            )
-        }
-    }
-
-    static func maintenanceScheduleSnapshot(
-        in database: Database
-    ) throws -> MaintenanceScheduleSnapshot {
-        let values = Dictionary(
-            uniqueKeysWithValues: try Row.fetchAll(
-                database,
-                sql: """
-                    SELECT key, real_value
-                    FROM clipboard_maintenance_metadata
-                    WHERE key IN (
-                        'lastMaintenanceSucceededAt',
-                        'nextMaintenanceDeadline'
-                    )
-                    """
-            ).compactMap { row -> (String, Double)? in
-                guard let value: Double = row["real_value"] else {
-                    return nil
-                }
-                return (row["key"], value)
-            }
-        )
-        return MaintenanceScheduleSnapshot(
-            lastSuccess: values["lastMaintenanceSucceededAt"],
-            nextDeadline: values["nextMaintenanceDeadline"]
-        )
-    }
-
-    static func restoreMaintenanceSchedule(
-        _ snapshot: MaintenanceScheduleSnapshot,
-        in database: Database
-    ) throws {
-        try database.execute(
-            sql: """
-                DELETE FROM clipboard_maintenance_metadata
-                WHERE key IN (
-                    'lastMaintenanceSucceededAt',
-                    'nextMaintenanceDeadline'
-                )
-                """
-        )
-        for (key, value) in [
-            ("lastMaintenanceSucceededAt", snapshot.lastSuccess),
-            ("nextMaintenanceDeadline", snapshot.nextDeadline),
-        ] {
-            guard let value else { continue }
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_maintenance_metadata(
-                        key, real_value
-                    ) VALUES (?, ?)
                     """,
                 arguments: [key, value]
             )

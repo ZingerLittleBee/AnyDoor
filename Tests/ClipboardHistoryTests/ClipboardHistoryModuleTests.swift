@@ -1422,7 +1422,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertEqual(try fixture.payloadFiles().count, 0)
     }
 
-    func testMaintenanceTruncatesEncryptedWALAndReportsAllocatedUsage() async throws {
+    func testMaintenanceCheckpointsEncryptedWALBeforeRecordingSuccess() async throws {
         let fixture = try TemporaryStore()
         let module = makeReadyModule(in: fixture)
         let plaintext = "wal plaintext sentinel"
@@ -1442,11 +1442,9 @@ final class ClipboardHistoryModuleTests: XCTestCase {
 
         let report = try await module.performMaintenance(orphanGracePeriod: 0)
 
-        let walSize =
-            (try? walURL.resourceValues(
-                forKeys: [.fileSizeKey]
-            ).fileSize) ?? 0
-        XCTAssertEqual(walSize, 0)
+        let walAfter = try Data(contentsOf: walURL)
+        XCTAssertLessThan(walAfter.count, walBefore.count)
+        XCTAssertNil(walAfter.range(of: Data(plaintext.utf8)))
         XCTAssertGreaterThan(report.storageBytes, 0)
         let databaseBytes = try Data(
             contentsOf: fixture.url.appendingPathComponent("history.sqlite")

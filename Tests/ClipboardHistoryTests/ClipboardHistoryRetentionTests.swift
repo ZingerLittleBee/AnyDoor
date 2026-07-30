@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import GRDB
 import XCTest
@@ -503,28 +504,20 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
         try await second.closeStoreForTesting()
     }
 
-    func testAutomaticMaintenanceRetriesFailureAndPersistsNextSuccessDeadline()
+    func testAutomaticMaintenanceRetriesStorageUsageFailureBeforeAdvancingSchedule()
         async throws
     {
         let start = Date(timeIntervalSince1970: 10_000_000)
         let clock = RetentionTestClock(start)
         let fixture = try RetentionTemporaryStore()
-        let fault = OneShotMaintenanceFault()
+        let fault = OneShotStorageTraversalFailure()
         let scheduler = MaintenanceTestScheduler(now: start)
         let module = fixture.makeModule(
             clock: clock,
             maintenanceScheduler: scheduler,
-            faultInjector: ClipboardHistoryFaultInjector {
-                fault.shouldFail($0)
+            storageTraversalHook: { _ in
+                try fault.failOnce()
             }
-        )
-        let orphan = fixture.url
-            .appendingPathComponent("payloads")
-            .appendingPathComponent("automatic-retry.payload")
-        try Data(repeating: 0xD4, count: 4_096).write(to: orphan)
-        try FileManager.default.setAttributes(
-            [.modificationDate: start],
-            ofItemAtPath: orphan.path
         )
 
         await waitForMaintenanceScheduler(scheduler, sleepCount: 1)
@@ -532,7 +525,13 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
         clock.now = deadline
         await scheduler.advance(to: deadline)
         await waitForMaintenanceScheduler(scheduler, sleepCount: 2)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: orphan.path))
+        let failedSchedule = try await module.maintenanceScheduleForTesting()
+        XCTAssertNil(failedSchedule.lastSuccess)
+        XCTAssertEqual(
+            failedSchedule.nextDeadline,
+            deadline.timeIntervalSince1970
+        )
+        XCTAssertEqual(fault.failureCount, 1)
         let retryDeadlines = await scheduler.recordedDeadlines
         let retryDeadline = try XCTUnwrap(retryDeadlines.last)
         XCTAssertEqual(
@@ -543,8 +542,16 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
 
         clock.now = retryDeadline
         await scheduler.advance(to: retryDeadline)
-        await waitUntil { !FileManager.default.fileExists(atPath: orphan.path) }
         await waitForMaintenanceScheduler(scheduler, sleepCount: 3)
+        let successfulSchedule = try await module.maintenanceScheduleForTesting()
+        XCTAssertEqual(
+            successfulSchedule.lastSuccess,
+            retryDeadline.timeIntervalSince1970
+        )
+        XCTAssertEqual(
+            successfulSchedule.nextDeadline,
+            retryDeadline.addingTimeInterval(86_400).timeIntervalSince1970
+        )
         let successDeadlines = await scheduler.recordedDeadlines
         let nextDeadline = try XCTUnwrap(successDeadlines.last)
         XCTAssertEqual(
@@ -555,7 +562,53 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
         try await module.closeStoreForTesting()
     }
 
-    func testCloseAndRetryKeepExactlyOneMaintenanceTask()
+    func testManualMaintenanceReportsStorageFailureBeforeRecordingSuccess()
+        async throws
+    {
+        let start = Date(timeIntervalSince1970: 10_500_000)
+        let clock = RetentionTestClock(start)
+        let fixture = try RetentionTemporaryStore()
+        let fault = OneShotStorageTraversalFailure()
+        let module = fixture.makeModule(
+            clock: clock,
+            storageTraversalHook: { _ in
+                try fault.failOnce()
+            }
+        )
+        let initialSchedule = try await module.maintenanceScheduleForTesting()
+
+        do {
+            _ = try await module.performMaintenance()
+            XCTFail("Expected storage usage failure")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryStorageError,
+                .fileOperationFailed(EIO)
+            )
+        }
+        let failedSchedule = try await module.maintenanceScheduleForTesting()
+        XCTAssertEqual(failedSchedule.lastSuccess, initialSchedule.lastSuccess)
+        XCTAssertEqual(
+            failedSchedule.nextDeadline,
+            initialSchedule.nextDeadline
+        )
+
+        let report = try await module.performMaintenance()
+        XCTAssertEqual(report.reclaimedPayloadCount, 0)
+        XCTAssertGreaterThan(report.storageBytes, 0)
+        XCTAssertEqual(fault.failureCount, 1)
+        let successfulSchedule = try await module.maintenanceScheduleForTesting()
+        XCTAssertEqual(
+            successfulSchedule.lastSuccess,
+            start.timeIntervalSince1970
+        )
+        XCTAssertEqual(
+            successfulSchedule.nextDeadline,
+            start.addingTimeInterval(86_400).timeIntervalSince1970
+        )
+    }
+
+    func testCloseRetryAndResetKeepExactlyOneMaintenanceTask()
         async throws
     {
         let start = Date(timeIntervalSince1970: 11_000_000)
@@ -585,7 +638,18 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
         let secondCancellationCount = await scheduler.cancellationCount
         XCTAssertEqual(secondRetryWaiterCount, 1)
         XCTAssertEqual(secondCancellationCount, 2)
+
+        try await module.reset(confirmation: .confirmed)
+        await waitForMaintenanceScheduler(scheduler, sleepCount: 4)
+        let resetWaiterCount = await scheduler.activeWaiterCount
+        let resetCancellationCount = await scheduler.cancellationCount
+        XCTAssertEqual(resetWaiterCount, 1)
+        XCTAssertEqual(resetCancellationCount, 3)
+
         try await module.closeStoreForTesting()
+        await waitUntil { await scheduler.activeWaiterCount == 0 }
+        let finalCancellationCount = await scheduler.cancellationCount
+        XCTAssertEqual(finalCancellationCount, 4)
     }
 
     func testStorageUsageIncludesEveryOwnedArtifactAndDoesNotFollowSymlinks()
@@ -984,17 +1048,24 @@ private actor MaintenanceTestScheduler:
     }
 }
 
-private final class OneShotMaintenanceFault: @unchecked Sendable {
+private final class OneShotStorageTraversalFailure: @unchecked Sendable {
     private let lock = NSLock()
     private var remainingFailures = 1
+    private var recordedFailureCount = 0
 
-    func shouldFail(_ point: ClipboardHistoryFaultPoint) -> Bool {
-        guard point == .orphanReconciliation else { return false }
+    var failureCount: Int {
         lock.lock()
         defer { lock.unlock() }
-        guard remainingFailures > 0 else { return false }
+        return recordedFailureCount
+    }
+
+    func failOnce() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard remainingFailures > 0 else { return }
         remainingFailures -= 1
-        return true
+        recordedFailureCount += 1
+        throw ClipboardHistoryStorageError.fileOperationFailed(EIO)
     }
 }
 
@@ -1061,7 +1132,41 @@ private struct TextEditDiagnostics {
     let searchKinds: [String]
 }
 
+private struct MaintenanceScheduleDiagnostics {
+    let lastSuccess: Double?
+    let nextDeadline: Double?
+}
+
 extension ClipboardHistoryModule {
+    fileprivate func maintenanceScheduleForTesting()
+        throws -> MaintenanceScheduleDiagnostics
+    {
+        try requiredDatabase().read { database in
+            let values = Dictionary(
+                uniqueKeysWithValues: try Row.fetchAll(
+                    database,
+                    sql: """
+                        SELECT key, real_value
+                        FROM clipboard_maintenance_metadata
+                        WHERE key IN (
+                            'lastMaintenanceSucceededAt',
+                            'nextMaintenanceDeadline'
+                        )
+                        """
+                ).compactMap { row -> (String, Double)? in
+                    guard let value: Double = row["real_value"] else {
+                        return nil
+                    }
+                    return (row["key"], value)
+                }
+            )
+            return MaintenanceScheduleDiagnostics(
+                lastSuccess: values["lastMaintenanceSucceededAt"],
+                nextDeadline: values["nextMaintenanceDeadline"]
+            )
+        }
+    }
+
     fileprivate func editDiagnosticsForTesting(
         _ entryID: ClipboardHistoryEntryID
     ) throws -> TextEditDiagnostics? {
