@@ -375,6 +375,7 @@ extension ClipboardHistoryModule {
                 matching: identity,
                 source: source,
                 capturedAt: capturedAt,
+                facets: facets,
                 containsBitmap: snapshot.items
                     .flatMap(\.representations)
                     .contains { representation in

@@ -6,6 +6,7 @@ extension ClipboardHistoryModule {
         matching identity: CanonicalIdentity,
         source: ClipboardHistoryCaptureSource,
         capturedAt: Date,
+        facets: Set<ClipboardHistoryFacet>,
         containsBitmap: Bool,
         refreshOCRBudget: Bool,
         database: DatabasePool,
@@ -73,6 +74,22 @@ extension ClipboardHistoryModule {
                             storedID,
                         ]
                     )
+                    try database.execute(
+                        sql: """
+                            DELETE FROM clipboard_entry_facets
+                            WHERE entry_id = ?
+                            """,
+                        arguments: [storedID]
+                    )
+                    for facet in facets {
+                        try database.execute(
+                            sql: """
+                                INSERT INTO clipboard_entry_facets(entry_id, facet)
+                                VALUES (?, ?)
+                                """,
+                            arguments: [storedID, facet.rawValue]
+                        )
+                    }
                     if containsBitmap {
                         try database.execute(
                             sql: """
@@ -132,7 +149,6 @@ extension ClipboardHistoryModule {
             database -> (
                 itemIndexes: [Int],
                 representations: [StoredRepresentation],
-                screenshot: Bool,
                 thumbnailPath: String?
             ) in
             let itemIndexes = try Int.fetchAll(
@@ -173,16 +189,6 @@ extension ClipboardHistoryModule {
                     payloadKind: row["payload_kind"]
                 )
             }
-            let screenshot =
-                try Int.fetchOne(
-                    database,
-                    sql: """
-                        SELECT 1
-                        FROM clipboard_entry_facets
-                        WHERE entry_id = ? AND facet = 'screenshot'
-                        """,
-                    arguments: [storedID]
-                ) == 1
             let thumbnailPath = try String.fetchOne(
                 database,
                 sql: """
@@ -197,7 +203,6 @@ extension ClipboardHistoryModule {
             return (
                 itemIndexes,
                 representations,
-                screenshot,
                 thumbnailPath
             )
         }
@@ -262,7 +267,7 @@ extension ClipboardHistoryModule {
                         .bitmap(
                             png: png,
                             thumbnail: Data(),
-                            isScreenshot: stored.screenshot
+                            isScreenshot: false
                         )
                     )
                 case "fileReference":

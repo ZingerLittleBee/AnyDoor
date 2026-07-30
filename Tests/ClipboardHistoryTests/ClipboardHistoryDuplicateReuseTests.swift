@@ -150,6 +150,49 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
         XCTAssertNotEqual(different.entryID, first.entryID)
     }
 
+    func testCanonicalBitmapReuseIgnoresScreenshotProvenanceAndRefreshesLatestMetadata()
+        async throws
+    {
+        let fixture = try DuplicateReuseTemporaryStore()
+        let module = makeDuplicateReuseModule(in: fixture)
+        let bitmap = try makeEquivalentBitmapEncodings().png
+
+        let first = try await module.capture(
+            bitmapRequest(
+                bitmap,
+                sourceBundleID: "dev.bybee.image-source",
+                sourceName: "Image Source"
+            )
+        )
+        let beforeValue = try await module.duplicateReuseDiagnosticsForTesting(
+            first.entryID
+        )
+        let before = try XCTUnwrap(beforeValue)
+
+        let second = try await module.capture(
+            bitmapRequest(
+                bitmap,
+                sourceBundleID: "dev.bybee.AnyDoor",
+                sourceName: "AnyDoor",
+                provenance: .anyDoorScreenshot
+            )
+        )
+
+        XCTAssertEqual(second.entryID, first.entryID)
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id), [first.entryID])
+        XCTAssertEqual(page.entries[0].facets, [.image, .screenshot])
+
+        let afterValue = try await module.duplicateReuseDiagnosticsForTesting(
+            first.entryID
+        )
+        let after = try XCTUnwrap(afterValue)
+        XCTAssertEqual(after.sourceBundleID, "dev.bybee.AnyDoor")
+        XCTAssertEqual(after.sourceDisplayName, "AnyDoor")
+        XCTAssertEqual(after.payloadIDs, before.payloadIDs)
+        XCTAssertEqual(try fixture.payloadFiles().count, 2)
+    }
+
     @MainActor
     func testFileIdentityUsesStandardizedCapturePathsAndPreservesOrder()
         async throws
@@ -783,14 +826,15 @@ extension ClipboardHistoryDuplicateReuseTests {
     fileprivate func bitmapRequest(
         _ value: Data,
         sourceBundleID: String = "dev.bybee.tests",
-        sourceName: String = "Tests"
+        sourceName: String = "Tests",
+        provenance: ClipboardHistoryBitmapProvenance = .image
     ) -> ClipboardHistoryCaptureRequest {
         ClipboardHistoryCaptureRequest(
             source: ClipboardHistoryCaptureSource(
                 bundleIdentifier: sourceBundleID,
                 displayName: sourceName
             ),
-            content: .bitmap(value, provenance: .image)
+            content: .bitmap(value, provenance: provenance)
         )
     }
 

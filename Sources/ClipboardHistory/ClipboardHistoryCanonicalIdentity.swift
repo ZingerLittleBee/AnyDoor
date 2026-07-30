@@ -101,13 +101,10 @@ extension ClipboardHistoryModule {
                 self.typeIdentifier = typeIdentifier
                 metadata = Data()
                 payload = value
-            case .bitmap(let png, _, let isScreenshot):
+            case .bitmap(let png, _, _):
                 kind = "bitmap"
                 typeIdentifier = UTType.png.identifier
-                metadata = try Self.bitmapMetadata(
-                    from: png,
-                    isScreenshot: isScreenshot
-                )
+                metadata = try Self.bitmapMetadata(from: png)
                 payload = png
             case .file(let reference):
                 kind = "fileReference"
@@ -125,10 +122,7 @@ extension ClipboardHistoryModule {
             }
         }
 
-        private static func bitmapMetadata(
-            from png: Data,
-            isScreenshot: Bool
-        ) throws -> Data {
+        private static func bitmapMetadata(from png: Data) throws -> Data {
             guard let source = CGImageSourceCreateWithData(png as CFData, nil),
                 let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
             else {
@@ -136,7 +130,6 @@ extension ClipboardHistoryModule {
             }
 
             var encoding = LengthPrefixedEncoding()
-            encoding.append(isScreenshot ? UInt64(1) : UInt64(0))
             encoding.append(UInt64(image.width))
             encoding.append(UInt64(image.height))
             encoding.append(UInt64(image.bitsPerComponent))
