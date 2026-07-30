@@ -221,6 +221,11 @@ final class BackupService {
         ScheduledShutdownService.shared.reloadFromDefaults()
         CaptureSettings.shared.reloadFromDefaults()
         TranslationSettings.shared.reloadFromDefaults()
+        // Both reconcilers are best-effort across every requested transition:
+        // a failure must not skip the remaining live refreshes below, or an
+        // import would silently leave quicklinks, panel rows, and hotkeys
+        // stale. Failures are collected and rethrown once everything else has
+        // converged.
         let pluginError: (any Error)?
         do {
             try await PluginRegistry.shared.reconcileAfterImport()
@@ -228,13 +233,22 @@ final class BackupService {
         } catch {
             pluginError = error
         }
-        try await reconcileClipboardHistory()
+        let clipboardHistoryError: (any Error)?
+        do {
+            try await reconcileClipboardHistory()
+            clipboardHistoryError = nil
+        } catch {
+            clipboardHistoryError = error
+        }
         QuicklinkStore.shared.rebuild()
         PanelStore.shared.rebuild()
         HotkeyCoordinator.shared.refresh()
 
         if let pluginError {
             throw pluginError
+        }
+        if let clipboardHistoryError {
+            throw clipboardHistoryError
         }
     }
 
