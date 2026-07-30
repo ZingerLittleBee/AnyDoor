@@ -20,6 +20,7 @@ enum ClipboardHistoryPayloadKind: UInt8, Sendable {
 }
 
 enum ClipboardHistoryFaultPoint: Hashable, Sendable {
+    case diskFull
     case payloadWrite
     case payloadAuthentication
     case payloadDurability

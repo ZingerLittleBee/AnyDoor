@@ -476,6 +476,48 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testEventAssistedRapidCopiesRecordZeroPipelineLoss() async throws {
+        let expectedCount = 100
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let instrumentation = ClipboardHistoryMonitorInstrumentation()
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            instrumentation: instrumentation,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        for index in 0..<expectedCount {
+            await monitor.keyHintForTesting()
+            pasteboard.clearContents()
+            pasteboard.setString("rapid-\(index)", forType: .string)
+            await monitor.timerFiredForTesting()
+        }
+
+        let capturedCount = try await module.count(.init())
+        let metrics = instrumentation.snapshot()
+        XCTAssertEqual(capturedCount, expectedCount)
+        XCTAssertEqual(metrics.capturedChangeCount, expectedCount)
+        XCTAssertEqual(metrics.overwrittenGenerationCount, 0)
+        print(
+            """
+            clipboard-history-rapid-copy \
+            expected=\(expectedCount) captured=\(capturedCount) \
+            overwritten=\(metrics.overwrittenGenerationCount) lossRate=0
+            """
+        )
+    }
+
+    @MainActor
     func testExpiredKeyHintUsesObservationSourceForNextChange() async throws {
         let fixture = try MonitorTemporaryStore()
         let module = ClipboardHistoryModule(
@@ -774,6 +816,71 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
                 overwrittenGenerationCount: 1
             )
         )
+    }
+
+    @MainActor
+    func testDiskFullCapturePreservesHistoryAndRateLimitsFailureNotice()
+        async throws
+    {
+        let fixture = try MonitorTemporaryStore()
+        let seedModule = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        _ = try await seedModule.capture(
+            ClipboardHistoryCaptureRequest(
+                source: .unknown,
+                content: .text("existing")
+            )
+        )
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore(),
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.diskFull]
+            )
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let clock = MonitorTestClock()
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            now: { clock.now },
+            installsSystemObservers: false
+        )
+        let firstNotice = expectation(
+            forNotification: .clipboardHistoryV2OperationDidFail,
+            object: nil
+        )
+        firstNotice.expectedFulfillmentCount = 1
+        await monitor.setEnabled(true)
+
+        pasteboard.clearContents()
+        pasteboard.setString("rejected one", forType: .string)
+        await monitor.observeForTesting()
+        pasteboard.clearContents()
+        pasteboard.setString("rejected two", forType: .string)
+        await monitor.observeForTesting()
+        await fulfillment(of: [firstNotice], timeout: 1)
+
+        let pageAfterFailures = try await module.page(.init())
+        XCTAssertEqual(
+            pageAfterFailures.entries.map(\.previewText),
+            ["existing"]
+        )
+
+        clock.now = .seconds(30)
+        let secondNotice = expectation(
+            forNotification: .clipboardHistoryV2OperationDidFail,
+            object: nil
+        )
+        pasteboard.clearContents()
+        pasteboard.setString("rejected three", forType: .string)
+        await monitor.observeForTesting()
+        await fulfillment(of: [secondNotice], timeout: 1)
     }
 
     @MainActor

@@ -373,6 +373,11 @@ extension ClipboardHistoryModule {
         explicitSearchKind: String? = nil
     ) throws -> ClipboardHistoryCaptureOutcome {
         let database = try requiredDatabase()
+        do {
+            try faultInjector.check(.diskFull)
+        } catch {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
         let identity = try CanonicalIdentity(
             snapshot: snapshot,
             fingerprintDigest: fingerprintDigest

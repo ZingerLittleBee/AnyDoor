@@ -47,6 +47,9 @@ final class ClipboardHistoryCaptureMonitor {
     private var workspaceObservers: [NSObjectProtocol] = []
     private var eventHintSource: ClipboardHistoryCopyEventHintSource?
     private var scheduledTimerIsIdle = true
+    private var lastOperationFailureReportAt: Duration?
+
+    private static let operationFailureReportInterval: Duration = .seconds(30)
 
     init(
         module: ClipboardHistoryModule,
@@ -271,9 +274,7 @@ final class ClipboardHistoryCaptureMonitor {
                         )
                     }
                 } catch {
-                    // The module owns operation error presentation. Monitoring
-                    // advances its observation baseline and remains available
-                    // for the next generation.
+                    reportOperationFailureIfNeeded(at: now())
                 }
             }
 
@@ -284,6 +285,20 @@ final class ClipboardHistoryCaptureMonitor {
                 )
             )
         } while observationRequested
+    }
+
+    private func reportOperationFailureIfNeeded(at instant: Duration) {
+        if let lastOperationFailureReportAt,
+            instant - lastOperationFailureReportAt
+                < Self.operationFailureReportInterval
+        {
+            return
+        }
+        lastOperationFailureReportAt = instant
+        NotificationCenter.default.post(
+            name: .clipboardHistoryV2OperationDidFail,
+            object: nil
+        )
     }
 
     private func readMetadata(

@@ -1299,6 +1299,7 @@ extension ClipboardHistoryModule {
     ) throws -> [String] {
         let entryIDs = Array(Set(entryIDs)).sorted()
         guard !entryIDs.isEmpty else { return [] }
+        let rebuildsSearchIndexes = entryIDs.count >= 512
         let encodedIDs = Self.jsonArray(Set(entryIDs))
         let payloads = try Row.fetchAll(
             database,
@@ -1331,12 +1332,21 @@ extension ClipboardHistoryModule {
                 """,
             arguments: [encodedIDs, encodedIDs, encodedIDs]
         )
-        for entryID in entryIDs {
-            try Self.deleteSearchFields(
-                forEntryID: entryID,
-                from: database,
-                faultInjector: faultInjector
+        if rebuildsSearchIndexes {
+            try database.execute(
+                sql: "DROP TABLE clipboard_search_trigram"
             )
+            try database.execute(
+                sql: "DROP TABLE clipboard_search_short_grams"
+            )
+        } else {
+            for entryID in entryIDs {
+                try Self.deleteSearchFields(
+                    forEntryID: entryID,
+                    from: database,
+                    faultInjector: faultInjector
+                )
+            }
         }
         try faultInjector.check(.logicalDeletionAfterSearchIndexes)
         try database.execute(
@@ -1349,6 +1359,11 @@ extension ClipboardHistoryModule {
             arguments: [encodedIDs]
         )
         try faultInjector.check(.logicalDeletionAfterEntries)
+        if rebuildsSearchIndexes {
+            try Self.createSearchIndexSchemaAfterBulkDeletion(
+                in: database
+            )
+        }
 
         var reclaimedPaths: [String] = []
         for payload in payloads {
@@ -1385,6 +1400,27 @@ extension ClipboardHistoryModule {
         try Self.bumpHistoryRevision(in: database)
         try Self.bumpSearchIndexGeneration(in: database)
         return reclaimedPaths
+    }
+
+    private nonisolated static func createSearchIndexSchemaAfterBulkDeletion(
+        in database: Database
+    ) throws {
+        try createSearchVirtualTables(in: database)
+        let fields = try Row.fetchAll(
+            database,
+            sql: """
+                SELECT id, normalized_value
+                FROM clipboard_search_fields
+                ORDER BY id
+                """
+        )
+        for field in fields {
+            try insertSearchIndexEntries(
+                fieldID: field["id"],
+                normalizedValue: field["normalized_value"],
+                into: database
+            )
+        }
     }
 
     func enqueueReclamation(for paths: [String]) async {

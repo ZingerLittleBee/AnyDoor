@@ -33,12 +33,24 @@ install: swift-release
 	  .build/release/PackageFrameworks/Sparkle.framework; do \
 	  if [ -d "$$cand" ]; then SPARKLE_FW="$$cand"; break; fi; \
 	done; \
-	if [ -n "$$SPARKLE_FW" ]; then \
-	  rm -rf $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
-	  ditto "$$SPARKLE_FW" $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
-	fi
+	if [ -z "$$SPARKLE_FW" ]; then echo "Missing Sparkle.framework" >&2; exit 1; fi; \
+	rm -rf $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
+	ditto "$$SPARKLE_FW" $(APP_DIR)/Contents/Frameworks/Sparkle.framework
+	@SQLCIPHER_FW=""; for cand in \
+	  .build/release/SQLCipher.framework \
+	  .build/release/PackageFrameworks/SQLCipher.framework \
+	  .build/artifacts/sqlcipher.swift/SQLCipher/SQLCipher.xcframework/macos-arm64_x86_64/SQLCipher.framework; do \
+	  if [ -d "$$cand" ]; then SQLCIPHER_FW="$$cand"; break; fi; \
+	done; \
+	if [ -z "$$SQLCIPHER_FW" ]; then echo "Missing SQLCipher.framework" >&2; exit 1; fi; \
+	rm -rf $(APP_DIR)/Contents/Frameworks/SQLCipher.framework; \
+	ditto "$$SQLCIPHER_FW" $(APP_DIR)/Contents/Frameworks/SQLCipher.framework
 	@if ! otool -l $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then \
 	  install_name_tool -add_rpath "@executable_path/../Frameworks" $(APP_DIR)/Contents/MacOS/$(APP_NAME); \
+	fi
+	@otool -L $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -q '@rpath/SQLCipher.framework/Versions/A/SQLCipher'
+	@if otool -L $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -q '/usr/lib/libsqlite3'; then \
+	  echo "AnyDoor must not bind the system SQLite library" >&2; exit 1; \
 	fi
 	@codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 || true
 	@touch $(APP_DIR)
