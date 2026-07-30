@@ -83,7 +83,9 @@ final class ClipboardWallStateTests: XCTestCase {
 
     func testCyclingIncludesCustomTags() async {
         let state = await makeState()
-        let tags = [ClipboardTag(id: "t1", name: "工作")]
+        let tags = [
+            ClipboardHistoryTagDefinition(id: "t1", displayName: "工作")
+        ]
         state.setCategories(ClipboardWallState.order(tags: tags))
         state.selectNextCategory()   // .all → .favorites
         state.selectNextCategory()   // .favorites → .tag("t1")
@@ -92,7 +94,16 @@ final class ClipboardWallStateTests: XCTestCase {
 
     func testSetCategoriesFallsBackToAllWhenActiveTagRemoved() async {
         let state = await makeState()
-        state.setCategories(ClipboardWallState.order(tags: [ClipboardTag(id: "t1", name: "工作")]))
+        state.setCategories(
+            ClipboardWallState.order(
+                tags: [
+                    ClipboardHistoryTagDefinition(
+                        id: "t1",
+                        displayName: "工作"
+                    )
+                ]
+            )
+        )
         state.category = .tag("t1")
         state.setCategories(ClipboardWallState.order(tags: []))
         XCTAssertEqual(state.category, .all)
@@ -100,10 +111,21 @@ final class ClipboardWallStateTests: XCTestCase {
 
     func testSetCategoriesKeepsActiveTagWhenStillPresent() async {
         let state = await makeState()
-        let tags = [ClipboardTag(id: "t1", name: "工作")]
+        let tags = [
+            ClipboardHistoryTagDefinition(id: "t1", displayName: "工作")
+        ]
         state.setCategories(ClipboardWallState.order(tags: tags))
         state.category = .tag("t1")
-        state.setCategories(ClipboardWallState.order(tags: tags + [ClipboardTag(id: "t2", name: "生活")]))
+        state.setCategories(
+            ClipboardWallState.order(
+                tags: tags + [
+                    ClipboardHistoryTagDefinition(
+                        id: "t2",
+                        displayName: "生活"
+                    )
+                ]
+            )
+        )
         XCTAssertEqual(state.category, .tag("t1"))
     }
 

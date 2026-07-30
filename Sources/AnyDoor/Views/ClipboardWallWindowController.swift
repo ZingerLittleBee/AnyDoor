@@ -561,9 +561,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                     )
                 }
             } catch {
-                ToastPresenter.shared.show(
-                    .failure(L(.clipboardToastCopyFailed))
-                )
+                ClipboardHistoryActionFailurePresenter.present(.unknown)
                 return
             }
             // Slide out first; reactivating the prior app returns focus there,
@@ -633,9 +631,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                     .success(L(.toastCopiedToClipboard))
                 )
             } catch {
-                ToastPresenter.shared.show(
-                    .failure(L(.clipboardToastCopyFailed))
-                )
+                ClipboardHistoryActionFailurePresenter.present(.unknown)
             }
         }
     }
@@ -667,21 +663,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func presentActionFailure() {
-        let message: String
-        switch state.presentation.actionFailure {
-        case .fileReferencesUnavailable(let count):
-            message = "\(L(.clipboardToastFileMissing)) (\(count))"
-        case .fileCollectionRequiresRestore(
-            let ownedCount,
-            let unavailableCount
-        ):
-            message =
-                "\(L(.clipboardToastFileMissing)) "
-                + "(\(ownedCount + unavailableCount))"
-        default:
-            message = L(.clipboardToastCopyFailed)
-        }
-        ToastPresenter.shared.show(.failure(message))
+        ClipboardHistoryActionFailurePresenter.present(
+            state.presentation.actionFailure
+        )
     }
 
     /// A plugin-contributed action from a card's context menu, routed back
@@ -730,8 +714,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             }
             let urls = materialization.fileURLs
             guard !urls.isEmpty else {
-                ToastPresenter.shared.show(
-                    .failure(L(.clipboardToastFileMissing))
+                ClipboardHistoryActionFailurePresenter.present(
+                    .operationUnavailable
                 )
                 return
             }
@@ -750,58 +734,48 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
 
     // MARK: - Tag dialog
 
-    /// Commit the in-wall tag dialog. Create assigns the new (or existing
-    /// same-named) tag to the right-clicked item in one step; rename and
-    /// delete go through the registry, and delete additionally sweeps the id
-    /// off all items so they regain prunability.
+    /// Commit the in-wall tag dialog through the module-owned definition
+    /// operations. The dialog closes only after the module accepts the change.
     private func commitTagDialog() {
         guard let dialog = state.tagDialog else { return }
-        switch dialog {
-        case .create(let entryID):
-            // Empty name → keep the dialog open instead of silently closing.
-            guard let tag = ClipboardTagStore.shared.createTag(name: state.tagDialogText) else { return }
-            let tagIDs = Set(ClipboardTagStore.shared.tags.map(\.id))
-            Task {
-                guard await state.presentation.replaceTagDefinitions(
-                    with: tagIDs
-                ) else {
-                    presentActionFailure()
-                    return
-                }
-                guard let entry = state.items.first(where: {
-                    $0.id == entryID
-                }) else {
-                    return
-                }
-                await state.presentation.apply(
-                    .setTags(entryID, entry.tagIDs.union([tag.id]))
-                )
-                if state.presentation.actionFailure != nil {
-                    presentActionFailure()
-                } else {
-                    await state.presentation.reload()
-                }
-            }
-        case .rename(let tagID):
-            let trimmed = state.tagDialogText.trimmingCharacters(
-                in: CharacterSet.whitespacesAndNewlines
-            )
-            guard !trimmed.isEmpty else { return }
-            ClipboardTagStore.shared.renameTag(id: tagID, to: trimmed)
-        case .confirmDelete(let tagID):
-            ClipboardTagStore.shared.deleteTag(id: tagID)
-            let tagIDs = Set(ClipboardTagStore.shared.tags.map(\.id))
-            Task {
-                guard await state.presentation.replaceTagDefinitions(
-                    with: tagIDs
-                ) else {
-                    presentActionFailure()
-                    return
-                }
-                await state.presentation.reload()
-            }
+        let name = state.tagDialogText
+        if case .create = dialog,
+            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return
         }
-        cancelTagDialog()
+        if case .rename = dialog,
+            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return
+        }
+        Task {
+            let succeeded: Bool
+            switch dialog {
+            case .create(let entryID):
+                succeeded =
+                    await state.presentation.createTagDefinition(
+                        named: name,
+                        assigningTo: entryID
+                    )
+            case .rename(let tagID):
+                succeeded =
+                    await state.presentation.renameTagDefinition(
+                        id: tagID,
+                        to: name
+                    )
+            case .confirmDelete(let tagID):
+                succeeded =
+                    await state.presentation.deleteTagDefinition(
+                        id: tagID
+                    )
+            }
+            guard succeeded else {
+                presentActionFailure()
+                return
+            }
+            cancelTagDialog()
+        }
     }
 
     private func cancelTagDialog() {

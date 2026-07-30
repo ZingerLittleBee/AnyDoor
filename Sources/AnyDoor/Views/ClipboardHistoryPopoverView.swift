@@ -164,8 +164,8 @@ struct ClipboardHistoryPopoverView: View {
                 purpose: .normalPaste,
                 usesCache: false
             ) else {
-                ToastPresenter.shared.show(
-                    .failure(L(.clipboardToastCopyFailed))
+                ClipboardHistoryActionFailurePresenter.present(
+                    presentation.actionFailure
                 )
                 return
             }
@@ -178,9 +178,7 @@ struct ClipboardHistoryPopoverView: View {
                 }
                 onCopyAndClosePanel()
             } catch {
-                ToastPresenter.shared.show(
-                    .failure(L(.clipboardToastCopyFailed))
-                )
+                ClipboardHistoryActionFailurePresenter.present(.unknown)
             }
         }
     }
@@ -345,8 +343,8 @@ private struct KeyboardMonitor: NSViewRepresentable {
                         purpose: .normalPaste,
                         usesCache: false
                     ) else {
-                        ToastPresenter.shared.show(
-                            .failure(L(.clipboardToastCopyFailed))
+                        ClipboardHistoryActionFailurePresenter.present(
+                            presentation.actionFailure
                         )
                         return
                     }
@@ -359,8 +357,8 @@ private struct KeyboardMonitor: NSViewRepresentable {
                         }
                         onCopyAndClosePanel()
                     } catch {
-                        ToastPresenter.shared.show(
-                            .failure(L(.clipboardToastCopyFailed))
+                        ClipboardHistoryActionFailurePresenter.present(
+                            .unknown
                         )
                     }
                 }

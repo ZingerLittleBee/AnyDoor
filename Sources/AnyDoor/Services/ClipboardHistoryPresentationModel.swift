@@ -19,9 +19,19 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         ) async throws -> ClipboardHistoryMaterialization
     let tagDefinitions:
         @Sendable () async throws -> [ClipboardHistoryTagDefinition]
-    let replaceTagDefinitions:
+    let createTagDefinition:
         @Sendable (
-            Set<String>
+            String,
+            ClipboardHistoryEntryID
+        ) async throws -> ClipboardHistoryTagAssignment
+    let renameTagDefinition:
+        @Sendable (
+            String,
+            String
+        ) async throws -> ClipboardHistoryTagDefinition
+    let deleteTagDefinition:
+        @Sendable (
+            String
         ) async throws -> ClipboardHistoryTagDefinitionUpdate
 
     init(module: ClipboardHistoryModule) {
@@ -38,8 +48,17 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         tagDefinitions = {
             try await module.tagDefinitions()
         }
-        replaceTagDefinitions = { tagIDs in
-            try await module.replaceTagDefinitions(with: tagIDs)
+        createTagDefinition = { name, entryID in
+            try await module.createTagDefinition(
+                named: name,
+                assigningTo: entryID
+            )
+        }
+        renameTagDefinition = { id, name in
+            try await module.renameTagDefinition(id: id, to: name)
+        }
+        deleteTagDefinition = { id in
+            try await module.deleteTagDefinition(id: id)
         }
     }
 
@@ -61,14 +80,25 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         tagDefinitions:
             @escaping @Sendable () async throws
                 -> [ClipboardHistoryTagDefinition],
-        replaceTagDefinitions:
+        createTagDefinition:
             @escaping @Sendable (
-                Set<String>
+                String,
+                ClipboardHistoryEntryID
+            ) async throws -> ClipboardHistoryTagAssignment = { _, _ in
+                throw ClipboardHistoryModuleError.operationUnavailable
+            },
+        renameTagDefinition:
+            @escaping @Sendable (
+                String,
+                String
+            ) async throws -> ClipboardHistoryTagDefinition = { _, _ in
+                throw ClipboardHistoryModuleError.operationUnavailable
+            },
+        deleteTagDefinition:
+            @escaping @Sendable (
+                String
             ) async throws -> ClipboardHistoryTagDefinitionUpdate = { _ in
-                ClipboardHistoryTagDefinitionUpdate(
-                    removedMembershipCount: 0,
-                    unprotectedEntryCount: 0
-                )
+                throw ClipboardHistoryModuleError.operationUnavailable
             }
     ) {
         self.status = status
@@ -76,7 +106,9 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.apply = apply
         self.materialize = materialize
         self.tagDefinitions = tagDefinitions
-        self.replaceTagDefinitions = replaceTagDefinitions
+        self.createTagDefinition = createTagDefinition
+        self.renameTagDefinition = renameTagDefinition
+        self.deleteTagDefinition = deleteTagDefinition
     }
 }
 
@@ -109,6 +141,7 @@ enum ClipboardHistoryActionFailure: Equatable {
         unavailableCount: Int
     )
     case invalidTagIDs
+    case invalidTagDefinition
     case invalidTextEdit
     case searchIndexFailed(ClipboardHistorySearchIndexFailure)
     case unknown
@@ -144,6 +177,10 @@ enum ClipboardHistoryActionFailure: Equatable {
             )
         case .invalidTagIDs:
             self = .invalidTagIDs
+        case .invalidTagName,
+             .duplicateTagName,
+             .tagDefinitionNotFound:
+            self = .invalidTagDefinition
         case .invalidTextEdit:
             self = .invalidTextEdit
         case .resetFailed,
@@ -168,6 +205,16 @@ final class ClipboardHistoryPresentationModel {
     private var nextCursor: ClipboardHistoryCursor?
     private var revision = 0
     private var isLoadingMore = false
+    private var firstPageTask:
+        Task<
+            (
+                ClipboardHistoryStatus,
+                ClipboardHistoryPage?,
+                [ClipboardHistoryTagDefinition]
+            ),
+            any Error
+        >?
+    private var prefetchTask: Task<ClipboardHistoryPage, any Error>?
     private var materializationCache:
         [MaterializationKey: ClipboardHistoryMaterialization] = [:]
     private var sourceNames: [String: String] = [:]
@@ -222,11 +269,60 @@ final class ClipboardHistoryPresentationModel {
         actionFailure = nil
     }
 
-    func replaceTagDefinitions(with tagIDs: Set<String>) async -> Bool {
+    func createTagDefinition(
+        named name: String,
+        assigningTo entryID: ClipboardHistoryEntryID
+    ) async -> Bool {
         actionFailure = nil
         do {
-            _ = try await operations.replaceTagDefinitions(tagIDs)
-            tags = try await operations.tagDefinitions()
+            let assignment = try await operations.createTagDefinition(
+                name,
+                entryID
+            )
+            upsertTagDefinition(assignment.definition)
+            replaceEntry(assignment.entry)
+            return true
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
+    }
+
+    func renameTagDefinition(
+        id: String,
+        to name: String
+    ) async -> Bool {
+        actionFailure = nil
+        do {
+            let definition = try await operations.renameTagDefinition(
+                id,
+                name
+            )
+            upsertTagDefinition(definition)
+            return true
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
+    }
+
+    func deleteTagDefinition(id: String) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.deleteTagDefinition(id)
+            tags.removeAll { $0.id == id }
+            entries = entries.map { entry in
+                guard entry.tagIDs.contains(id) else { return entry }
+                return ClipboardHistoryEntry(
+                    id: entry.id,
+                    capturedAt: entry.capturedAt,
+                    previewText: entry.previewText,
+                    facets: entry.facets,
+                    isFavorite: entry.isFavorite,
+                    tagIDs: entry.tagIDs.subtracting([id]),
+                    source: entry.source
+                )
+            }
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -271,13 +367,18 @@ final class ClipboardHistoryPresentationModel {
         let requestRevision = revision
         let requestQuery = query
         isLoadingMore = true
+        let task = Task {
+            try await operations.page(requestQuery, cursor)
+        }
+        prefetchTask = task
         defer {
             if requestRevision == revision {
                 isLoadingMore = false
+                prefetchTask = nil
             }
         }
         do {
-            let page = try await operations.page(requestQuery, cursor)
+            let page = try await task.value
             guard requestRevision == revision, requestQuery == query else {
                 return
             }
@@ -299,7 +400,11 @@ final class ClipboardHistoryPresentationModel {
                 nextCursor = nil
             }
         } catch {
-            guard requestRevision == revision else { return }
+            guard requestRevision == revision,
+                !(error is CancellationError)
+            else {
+                return
+            }
             actionFailure = ClipboardHistoryActionFailure(error)
         }
     }
@@ -365,7 +470,7 @@ final class ClipboardHistoryPresentationModel {
             }
             return value
         } catch {
-            if recordsFailure {
+            if recordsFailure, requestRevision == revision {
                 actionFailure = ClipboardHistoryActionFailure(error)
             }
             return nil
@@ -395,6 +500,9 @@ final class ClipboardHistoryPresentationModel {
     }
 
     private func loadFirstPage(preservingSelection: Bool) async {
+        firstPageTask?.cancel()
+        prefetchTask?.cancel()
+        prefetchTask = nil
         revision += 1
         let requestRevision = revision
         let preferredSelection = preservingSelection ? selectedID : nil
@@ -406,20 +514,41 @@ final class ClipboardHistoryPresentationModel {
             contentState = .loading
         }
 
-        let status = await operations.status()
-        guard requestRevision == revision else { return }
-        guard status.availability == .ready else {
-            entries = []
-            selectedID = nil
-            contentState = .unavailable(status.reason)
-            return
-        }
-
-        do {
+        let task = Task {
+            () throws -> (
+                ClipboardHistoryStatus,
+                ClipboardHistoryPage?,
+                [ClipboardHistoryTagDefinition]
+            ) in
+            let status = await operations.status()
+            try Task.checkCancellation()
+            guard status.availability == .ready else {
+                return (status, nil, [])
+            }
             async let page = operations.page(requestQuery, nil)
             async let definitions = operations.tagDefinitions()
             let (loadedPage, loadedTags) = try await (page, definitions)
+            try Task.checkCancellation()
+            return (status, loadedPage, loadedTags)
+        }
+        firstPageTask = task
+        defer {
+            if requestRevision == revision {
+                firstPageTask = nil
+            }
+        }
+        do {
+            let (status, page, loadedTags) = try await task.value
             guard requestRevision == revision, requestQuery == query else {
+                return
+            }
+            guard status.availability == .ready else {
+                entries = []
+                selectedID = nil
+                contentState = .unavailable(status.reason)
+                return
+            }
+            guard let loadedPage = page else {
                 return
             }
             tags = loadedTags
@@ -451,7 +580,11 @@ final class ClipboardHistoryPresentationModel {
                 actionFailure = .searchIndexFailed(failure)
             }
         } catch {
-            guard requestRevision == revision else { return }
+            guard requestRevision == revision,
+                !(error is CancellationError)
+            else {
+                return
+            }
             entries = []
             selectedID = nil
             nextCursor = nil
@@ -478,6 +611,28 @@ final class ClipboardHistoryPresentationModel {
         materializationCache = materializationCache.filter {
             $0.key.entryID != entryID
         }
+    }
+
+    private func upsertTagDefinition(
+        _ definition: ClipboardHistoryTagDefinition
+    ) {
+        if let index = tags.firstIndex(where: {
+            $0.id == definition.id
+        }) {
+            tags[index] = definition
+        } else {
+            tags.append(definition)
+        }
+    }
+
+    private func replaceEntry(_ entry: ClipboardHistoryEntry) {
+        guard let index = entries.firstIndex(where: {
+            $0.id == entry.id
+        }) else {
+            return
+        }
+        entries[index] = entry
+        invalidateMaterializations(for: entry.id)
     }
 
     private func mergeSources(from entries: [ClipboardHistoryEntry]) {

@@ -6,6 +6,157 @@ import XCTest
 @testable import ClipboardHistory
 
 final class ClipboardHistoryRetentionTests: XCTestCase {
+    func testTagDefinitionOperationsOwnNamesAndEntryMembership() async throws {
+        let fixture = try RetentionTemporaryStore()
+        let module = fixture.makeModule()
+        let first = try await module.capture(textRequest("first"))
+        let second = try await module.capture(textRequest("second"))
+
+        let created = try await module.createTagDefinition(
+            named: "  Work  ",
+            assigningTo: first.entryID
+        )
+        XCTAssertEqual(created.definition.displayName, "Work")
+        XCTAssertEqual(created.entry.tagIDs, [created.definition.id])
+        let definitions = try await module.tagDefinitions()
+        XCTAssertEqual(definitions, [created.definition])
+
+        let reused = try await module.createTagDefinition(
+            named: "Work",
+            assigningTo: second.entryID
+        )
+        XCTAssertEqual(reused.definition, created.definition)
+        XCTAssertEqual(reused.entry.tagIDs, [created.definition.id])
+
+        let renamed = try await module.renameTagDefinition(
+            id: created.definition.id,
+            to: "Focused"
+        )
+        XCTAssertEqual(
+            renamed,
+            ClipboardHistoryTagDefinition(
+                id: created.definition.id,
+                displayName: "Focused"
+            )
+        )
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(
+            page.entries.map(\.tagIDs),
+            [
+                [created.definition.id],
+                [created.definition.id],
+            ]
+        )
+    }
+
+    func testDeleteTagDefinitionRemovesMembershipAndRestartsRetention()
+        async throws
+    {
+        let start = Date(timeIntervalSince1970: 900_000)
+        let clock = RetentionTestClock(start)
+        let fixture = try RetentionTemporaryStore()
+        let module = fixture.makeModule(clock: clock)
+        let captured = try await module.capture(textRequest("protected"))
+        let created = try await module.createTagDefinition(
+            named: "Work",
+            assigningTo: captured.entryID
+        )
+        clock.now = start.addingTimeInterval(100 * 86_400)
+
+        let deletion = try await module.deleteTagDefinition(
+            id: created.definition.id
+        )
+
+        XCTAssertEqual(
+            deletion,
+            ClipboardHistoryTagDefinitionUpdate(
+                removedMembershipCount: 1,
+                unprotectedEntryCount: 1
+            )
+        )
+        let definitions = try await module.tagDefinitions()
+        XCTAssertEqual(definitions, [])
+        let updated = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(updated.entries.first?.tagIDs, [])
+
+        clock.now = clock.now.addingTimeInterval(30 * 86_400 - 1)
+        let countBeforeBoundary = try await module.count(
+            ClipboardHistoryQuery()
+        )
+        XCTAssertEqual(countBeforeBoundary, 1)
+        clock.now = clock.now.addingTimeInterval(1)
+        let countAtBoundary = try await module.count(
+            ClipboardHistoryQuery()
+        )
+        XCTAssertEqual(countAtBoundary, 0)
+    }
+
+    func testRejectedTagDefinitionChangesLeaveModuleStateUnchanged()
+        async throws
+    {
+        let fixture = try RetentionTemporaryStore()
+        let module = fixture.makeModule()
+        do {
+            _ = try await module.createTagDefinition(
+                named: "Orphan",
+                assigningTo: ClipboardHistoryEntryID(UUID())
+            )
+            XCTFail("Expected a missing entry to reject tag creation")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .entryNotFound
+            )
+        }
+        let definitionsAfterRejectedCreate =
+            try await module.tagDefinitions()
+        XCTAssertEqual(definitionsAfterRejectedCreate, [])
+
+        let first = try await module.capture(textRequest("first"))
+        let second = try await module.capture(textRequest("second"))
+        let work = try await module.createTagDefinition(
+            named: "Work",
+            assigningTo: first.entryID
+        )
+        let personal = try await module.createTagDefinition(
+            named: "Personal",
+            assigningTo: second.entryID
+        )
+        do {
+            _ = try await module.renameTagDefinition(
+                id: personal.definition.id,
+                to: work.definition.displayName
+            )
+            XCTFail("Expected a duplicate name to reject tag rename")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .duplicateTagName
+            )
+        }
+
+        let definitionsAfterRejectedRename =
+            try await module.tagDefinitions()
+        XCTAssertEqual(
+            definitionsAfterRejectedRename,
+            [work.definition, personal.definition]
+        )
+        let page = try await module.page(ClipboardHistoryQuery())
+        let tagIDsByEntry = Dictionary(
+            uniqueKeysWithValues: page.entries.map {
+                ($0.id, $0.tagIDs)
+            }
+        )
+        XCTAssertEqual(
+            tagIDsByEntry[first.entryID],
+            [work.definition.id]
+        )
+        XCTAssertEqual(
+            tagIDsByEntry[second.entryID],
+            [personal.definition.id]
+        )
+    }
+
     func testRetentionOffersEveryPresetAndDefaultsToThirtyDays() async throws {
         let fixture = try RetentionTemporaryStore()
         let module = fixture.makeModule()

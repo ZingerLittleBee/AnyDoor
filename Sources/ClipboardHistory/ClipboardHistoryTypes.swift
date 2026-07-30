@@ -308,6 +308,19 @@ public struct ClipboardHistoryTagDefinitionUpdate: Equatable, Sendable {
     }
 }
 
+public struct ClipboardHistoryTagAssignment: Equatable, Sendable {
+    public let definition: ClipboardHistoryTagDefinition
+    public let entry: ClipboardHistoryEntry
+
+    public init(
+        definition: ClipboardHistoryTagDefinition,
+        entry: ClipboardHistoryEntry
+    ) {
+        self.definition = definition
+        self.entry = entry
+    }
+}
+
 public enum ClipboardHistoryClearScope: String, Codable, Sendable {
     case unprotectedOnly
     case includingProtected
@@ -454,6 +467,9 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     )
     case resetFailed
     case invalidTagIDs(Set<String>)
+    case invalidTagName
+    case duplicateTagName
+    case tagDefinitionNotFound
     case invalidTextEdit
     case invalidConfirmation
     case unsupportedLegacyTransferVersion(Int)

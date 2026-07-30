@@ -110,11 +110,16 @@ struct ClipboardWallView: View {
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
         .task {
-            state.setCategories(ClipboardCategoryOrder.apply(
-                to: ClipboardWallState.order(tags: ClipboardTagStore.shared.tags)))
             await state.reload()
+            state.setCategories(
+                ClipboardCategoryOrder.apply(
+                    to: ClipboardWallState.order(
+                        tags: state.presentation.tags
+                    )
+                )
+            )
         }
-        .onChange(of: ClipboardTagStore.shared.tags) { _, newTags in
+        .onChange(of: state.presentation.tags) { _, newTags in
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: newTags)))
         }
@@ -395,7 +400,7 @@ struct ClipboardWallView: View {
             if let key = cat.titleKey {
                 LocalizedText(key)
             } else if let id = cat.tagFilter {
-                Text(ClipboardTagStore.shared.name(for: id) ?? "")
+                Text(tagName(for: id))
             }
         }
         .font(.caption)
@@ -603,7 +608,7 @@ struct ClipboardWallView: View {
             // but a dirty editor resolves its discard prompt first.
             guard ClipboardTextWindow.shared.yieldToModal() else { return }
             state.presentTagDialog(.rename(tagID: tagID),
-                                   initialText: ClipboardTagStore.shared.name(for: tagID) ?? "")
+                                   initialText: tagName(for: tagID))
         })
         menu.addItem(ClosureMenuItem(title: L(.clipboardTagDelete), systemImage: "trash") {
             guard ClipboardTextWindow.shared.yieldToModal() else { return }
@@ -732,7 +737,12 @@ struct ClipboardWallView: View {
                     LocalizedText(.clipboardTagRenameTitle).font(.headline)
                     tagNameField
                 case .confirmDelete(let tagID):
-                    Text(L(.clipboardTagDeletePrompt, ClipboardTagStore.shared.name(for: tagID) ?? ""))
+                    Text(
+                        L(
+                            .clipboardTagDeletePrompt,
+                            tagName(for: tagID)
+                        )
+                    )
                         .font(.callout)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -763,5 +773,9 @@ struct ClipboardWallView: View {
             .textFieldStyle(.roundedBorder)
             .focused($tagFieldFocused)
             .onAppear { tagFieldFocused = true }
+    }
+
+    private func tagName(for id: String) -> String {
+        state.presentation.tags.first { $0.id == id }?.displayName ?? ""
     }
 }

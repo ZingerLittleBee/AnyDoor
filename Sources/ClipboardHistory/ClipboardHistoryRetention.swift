@@ -36,6 +36,286 @@ extension ClipboardHistoryModule {
         try indexedCount(query)
     }
 
+    public func createTagDefinition(
+        named name: String,
+        assigningTo entryID: ClipboardHistoryEntryID
+    ) throws -> ClipboardHistoryTagAssignment {
+        let displayName = name.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !displayName.isEmpty else {
+            throw ClipboardHistoryModuleError.invalidTagName
+        }
+        let database = try requiredDatabase()
+        let storedEntryID = entryID.value.uuidString.lowercased()
+        let timestamp = now()
+        return try mapMutationStorageFailure {
+            try database.write { database in
+                guard try isLiveEntry(
+                    storedEntryID,
+                    at: timestamp,
+                    in: database
+                ) else {
+                    throw ClipboardHistoryModuleError.entryNotFound
+                }
+                let existing = try Row.fetchOne(
+                    database,
+                    sql: """
+                        SELECT id, display_name
+                        FROM clipboard_tag_definitions
+                        WHERE display_name = ?
+                        ORDER BY display_order, id
+                        LIMIT 1
+                        """,
+                    arguments: [displayName]
+                )
+                let definition: ClipboardHistoryTagDefinition
+                let insertedDefinition: Bool
+                if let existing {
+                    definition = ClipboardHistoryTagDefinition(
+                        id: existing["id"],
+                        displayName: existing["display_name"]
+                    )
+                    insertedDefinition = false
+                } else {
+                    let id = UUID().uuidString.lowercased()
+                    let displayOrder =
+                        (try Int.fetchOne(
+                            database,
+                            sql: """
+                                SELECT MAX(display_order)
+                                FROM clipboard_tag_definitions
+                                """
+                        ) ?? -1) + 1
+                    try database.execute(
+                        sql: """
+                            INSERT INTO clipboard_tag_definitions(
+                                id, display_name, display_order
+                            ) VALUES (?, ?, ?)
+                            """,
+                        arguments: [id, displayName, displayOrder]
+                    )
+                    definition = ClipboardHistoryTagDefinition(
+                        id: id,
+                        displayName: displayName
+                    )
+                    insertedDefinition = true
+                }
+                let hadMembership =
+                    (try Bool.fetchOne(
+                        database,
+                        sql: """
+                            SELECT EXISTS(
+                                SELECT 1
+                                FROM clipboard_entry_tags
+                                WHERE entry_id = ? AND tag_id = ?
+                            )
+                            """,
+                        arguments: [storedEntryID, definition.id]
+                    )) ?? false
+                if !hadMembership {
+                    try database.execute(
+                        sql: """
+                            INSERT INTO clipboard_entry_tags(entry_id, tag_id)
+                            VALUES (?, ?)
+                            """,
+                        arguments: [storedEntryID, definition.id]
+                    )
+                    _ = try recomputeProtection(
+                        for: storedEntryID,
+                        in: database
+                    )
+                }
+                if insertedDefinition || !hadMembership {
+                    try Self.bumpHistoryRevision(in: database)
+                    try Self.bumpSearchIndexGeneration(in: database)
+                }
+                return ClipboardHistoryTagAssignment(
+                    definition: definition,
+                    entry: try Self.entry(
+                        from: try requiredEntryRow(
+                            storedEntryID,
+                            in: database
+                        ),
+                        in: database
+                    )
+                )
+            }
+        }
+    }
+
+    public func renameTagDefinition(
+        id: String,
+        to name: String
+    ) throws -> ClipboardHistoryTagDefinition {
+        let displayName = name.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        guard !displayName.isEmpty else {
+            throw ClipboardHistoryModuleError.invalidTagName
+        }
+        let database = try requiredDatabase()
+        return try mapMutationStorageFailure {
+            try database.write { database in
+                guard
+                    let currentName = try String.fetchOne(
+                        database,
+                        sql: """
+                            SELECT display_name
+                            FROM clipboard_tag_definitions
+                            WHERE id = ?
+                            """,
+                        arguments: [id]
+                    )
+                else {
+                    throw ClipboardHistoryModuleError
+                        .tagDefinitionNotFound
+                }
+                let duplicateExists =
+                    (try Bool.fetchOne(
+                        database,
+                        sql: """
+                            SELECT EXISTS(
+                                SELECT 1
+                                FROM clipboard_tag_definitions
+                                WHERE id != ? AND display_name = ?
+                            )
+                            """,
+                        arguments: [id, displayName]
+                    )) ?? false
+                guard !duplicateExists else {
+                    throw ClipboardHistoryModuleError.duplicateTagName
+                }
+                if currentName != displayName {
+                    try database.execute(
+                        sql: """
+                            UPDATE clipboard_tag_definitions
+                            SET display_name = ?
+                            WHERE id = ?
+                            """,
+                        arguments: [displayName, id]
+                    )
+                    try Self.bumpHistoryRevision(in: database)
+                }
+                return ClipboardHistoryTagDefinition(
+                    id: id,
+                    displayName: displayName
+                )
+            }
+        }
+    }
+
+    public func deleteTagDefinition(
+        id: String
+    ) throws -> ClipboardHistoryTagDefinitionUpdate {
+        let database = try requiredDatabase()
+        let timestamp = now().timeIntervalSince1970
+        return try mapMutationStorageFailure {
+            try database.write { database in
+                let definitionExists =
+                    (try Bool.fetchOne(
+                        database,
+                        sql: """
+                            SELECT EXISTS(
+                                SELECT 1
+                                FROM clipboard_tag_definitions
+                                WHERE id = ?
+                            )
+                            """,
+                        arguments: [id]
+                    )) ?? false
+                let removedMembershipCount =
+                    try Int.fetchOne(
+                        database,
+                        sql: """
+                            SELECT COUNT(*)
+                            FROM clipboard_entry_tags
+                            WHERE tag_id = ?
+                            """,
+                        arguments: [id]
+                    ) ?? 0
+                let previouslyProtected = Set(
+                    try String.fetchAll(
+                        database,
+                        sql: """
+                            SELECT entry_id
+                            FROM clipboard_retention_state
+                            WHERE is_protected = 1
+                            """
+                    )
+                )
+                try database.execute(
+                    sql: """
+                        DELETE FROM clipboard_entry_tags
+                        WHERE tag_id = ?
+                        """,
+                    arguments: [id]
+                )
+                try database.execute(
+                    sql: """
+                        DELETE FROM clipboard_tag_definitions
+                        WHERE id = ?
+                        """,
+                    arguments: [id]
+                )
+                try database.execute(
+                    sql: """
+                        UPDATE clipboard_retention_state
+                        SET is_protected = (
+                            SELECT CASE
+                                WHEN entry.is_favorite = 1
+                                  OR EXISTS (
+                                      SELECT 1
+                                      FROM clipboard_entry_tags AS assignment
+                                      JOIN clipboard_tag_definitions AS definition
+                                        ON definition.id = assignment.tag_id
+                                      WHERE assignment.entry_id =
+                                            clipboard_retention_state.entry_id
+                                  )
+                                THEN 1
+                                ELSE 0
+                            END
+                            FROM clipboard_entries AS entry
+                            WHERE entry.id =
+                                  clipboard_retention_state.entry_id
+                        )
+                        """
+                )
+                let currentlyProtected = Set(
+                    try String.fetchAll(
+                        database,
+                        sql: """
+                            SELECT entry_id
+                            FROM clipboard_retention_state
+                            WHERE is_protected = 1
+                            """
+                    )
+                )
+                let newlyUnprotected = previouslyProtected.subtracting(
+                    currentlyProtected
+                )
+                for entryID in newlyUnprotected {
+                    try database.execute(
+                        sql: """
+                            UPDATE clipboard_retention_state
+                            SET retention_started_at = ?
+                            WHERE entry_id = ?
+                            """,
+                        arguments: [timestamp, entryID]
+                    )
+                }
+                if definitionExists || removedMembershipCount > 0 {
+                    try Self.bumpHistoryRevision(in: database)
+                    try Self.bumpSearchIndexGeneration(in: database)
+                }
+                return ClipboardHistoryTagDefinitionUpdate(
+                    removedMembershipCount: removedMembershipCount,
+                    unprotectedEntryCount: newlyUnprotected.count
+                )
+            }
+        }
+    }
+
     public func replaceTagDefinitions(
         with tagIDs: Set<String>
     ) throws -> ClipboardHistoryTagDefinitionUpdate {

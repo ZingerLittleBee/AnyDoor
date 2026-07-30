@@ -3078,6 +3078,23 @@
         }
       }
     },
+    "clipboard.toast.legacyOwnedCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files requiring restore: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待恢复文件：%lld"
+          }
+        }
+      }
+    },
     "clipboard.toast.sourceIgnored": {
       "extractionState": "manual",
       "localizations": {
@@ -3091,6 +3108,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已忽略来自 %@ 的后续复制"
+          }
+        }
+      }
+    },
+    "clipboard.toast.unavailableCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable files: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用文件：%lld"
           }
         }
       }

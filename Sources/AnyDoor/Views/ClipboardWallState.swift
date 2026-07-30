@@ -140,7 +140,9 @@ final class ClipboardWallState {
         tagDialog = dialog
     }
 
-    static func order(tags: [ClipboardTag]) -> [ClipboardWallCategory] {
+    static func order(
+        tags: [ClipboardHistoryTagDefinition]
+    ) -> [ClipboardWallCategory] {
         [.all, .favorites]
             + tags.map { .tag($0.id) }
             + [

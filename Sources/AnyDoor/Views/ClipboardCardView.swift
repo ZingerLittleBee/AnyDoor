@@ -169,8 +169,8 @@ struct ClipboardCardView: View {
             accessibilityDescription: nil
         )
         let submenu = NSMenu()
-        for tag in ClipboardTagStore.shared.tags {
-            let item = ClosureMenuItem(title: tag.name) {
+        for tag in presentation.tags {
+            let item = ClosureMenuItem(title: tag.displayName) {
                 onToggleTag(tag.id)
             }
             item.state = entry.tagIDs.contains(tag.id) ? .on : .off

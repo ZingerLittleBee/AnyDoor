@@ -100,4 +100,29 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
             )
         )
     }
+
+    func testActionFailureNoticePresentsOwnedAndUnavailableCountsSeparately() {
+        let notice = ClipboardHistoryActionFailureNotice(
+            .fileCollectionRequiresRestore(
+                ownedCount: 2,
+                unavailableCount: 4
+            )
+        )
+
+        XCTAssertEqual(notice.titleKey, .clipboardToastCopyFailed)
+        XCTAssertEqual(
+            notice.details,
+            [
+                .legacyOwned(count: 2),
+                .unavailable(count: 4),
+            ]
+        )
+        let message = notice.message
+        XCTAssertTrue(
+            message.contains(L(.clipboardToastLegacyOwnedCount, 2))
+        )
+        XCTAssertTrue(
+            message.contains(L(.clipboardToastUnavailableCount, 4))
+        )
+    }
 }
