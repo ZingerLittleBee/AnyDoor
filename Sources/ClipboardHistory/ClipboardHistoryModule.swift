@@ -11,6 +11,13 @@ public actor ClipboardHistoryModule {
 
     var database: DatabasePool?
     var monitoringEnabled = false
+    var monitoringRequested = false
+    var monitoringConfiguration = ClipboardHistoryMonitoringConfiguration()
+    var captureMonitor: ClipboardHistoryCaptureMonitor?
+    let selfWriteSuppression: ClipboardHistorySelfWriteSuppression
+    let monitorInstrumentation: ClipboardHistoryMonitorInstrumentation
+    public nonisolated let pasteboardSelfWrites:
+        ClipboardHistoryPasteboardSelfWriteFunnel
     let storeRoot: URL
     let keyStore: (any ClipboardHistoryMasterKeyStoring)?
     let faultInjector: ClipboardHistoryFaultInjector
@@ -24,6 +31,12 @@ public actor ClipboardHistoryModule {
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
 
     public init() {
+        let suppression = ClipboardHistorySelfWriteSuppression()
+        selfWriteSuppression = suppression
+        monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
+            suppression: suppression
+        )
         let root = Self.defaultStoreRoot
         let keyStore = ClipboardHistoryKeychainStore()
         let resolution = Self.resolveStore(at: root, keyStore: keyStore)
@@ -40,6 +53,12 @@ public actor ClipboardHistoryModule {
     }
 
     init(testingDatabaseURL: URL, databaseKey: Data) throws {
+        let suppression = ClipboardHistorySelfWriteSuppression()
+        selfWriteSuppression = suppression
+        monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
+            suppression: suppression
+        )
         storeRoot = testingDatabaseURL.deletingLastPathComponent()
         keyStore = nil
         faultInjector = ClipboardHistoryFaultInjector()
@@ -73,6 +92,12 @@ public actor ClipboardHistoryModule {
             CanonicalIdentity.sha256,
         duplicateReuseEnabled: Bool = true
     ) {
+        let suppression = ClipboardHistorySelfWriteSuppression()
+        selfWriteSuppression = suppression
+        monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
+            suppression: suppression
+        )
         let resolution = Self.resolveStore(
             at: testingStoreRoot,
             keyStore: keyStore
@@ -90,13 +115,53 @@ public actor ClipboardHistoryModule {
     }
 
     public func setMonitoring(
-        _ command: ClipboardHistoryMonitoringCommand
-    ) -> ClipboardHistoryStatus {
-        monitoringEnabled = command == .start && availability == .ready
+        _ command: ClipboardHistoryMonitoringCommand,
+        configuration: ClipboardHistoryMonitoringConfiguration? = nil
+    ) async -> ClipboardHistoryStatus {
+        if let configuration {
+            monitoringConfiguration = configuration
+        }
+        let monitor: ClipboardHistoryCaptureMonitor
+        if let captureMonitor {
+            monitor = captureMonitor
+            await monitor.updateConfiguration(monitoringConfiguration)
+        } else {
+            monitor = await ClipboardHistoryCaptureMonitor(
+                module: self,
+                suppression: selfWriteSuppression,
+                instrumentation: monitorInstrumentation,
+                configuration: monitoringConfiguration
+            )
+            captureMonitor = monitor
+        }
+
+        switch command {
+        case .start:
+            monitoringRequested = true
+            monitoringEnabled = availability == .ready
+            await monitor.setEnabled(
+                monitoringEnabled,
+                configuration: monitoringConfiguration
+            )
+        case .stop:
+            monitoringRequested = false
+            monitoringEnabled = false
+            await monitor.setEnabled(false)
+        case .migrationStarted:
+            monitoringEnabled = false
+            await monitor.handleLifecycle(.migrationStarted)
+        case .migrationCompleted:
+            monitoringEnabled = monitoringRequested && availability == .ready
+            await monitor.handleLifecycle(.migrationCompleted)
+            await monitor.setEnabled(
+                monitoringEnabled,
+                configuration: monitoringConfiguration
+            )
+        }
         return status()
     }
 
-    public func retry() {
+    public func retry() async {
         guard let keyStore else { return }
         if let database {
             try? database.close()
@@ -108,6 +173,10 @@ public actor ClipboardHistoryModule {
         availabilityReason = resolution.reason
         if availability != .ready {
             monitoringEnabled = false
+            await captureMonitor?.setEnabled(false)
+        } else if monitoringRequested {
+            monitoringEnabled = true
+            await captureMonitor?.setEnabled(true)
         }
     }
 
@@ -117,6 +186,10 @@ public actor ClipboardHistoryModule {
             reason: availabilityReason,
             isMonitoring: monitoringEnabled
         )
+    }
+
+    public func monitorMetrics() -> ClipboardHistoryMonitorMetrics {
+        monitorInstrumentation.snapshot()
     }
 }
 

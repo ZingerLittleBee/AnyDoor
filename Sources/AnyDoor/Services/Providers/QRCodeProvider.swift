@@ -29,7 +29,7 @@ actor QRCodeProvider: ActionProvider {
             let text = payloads.joined(separator: "\n")
             // Self-write so the watcher doesn't re-capture this QR payload as
             // a generic text entry.
-            await ClipboardWatcher.selfWrite(string: text)
+            await ClipboardSelfWrites.write(string: text)
             await ClipboardHistoryStore.shared.recordText(kind: .qrcode, text: text)
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
             await ToastPresenter.shared.show(.success(successMsg))

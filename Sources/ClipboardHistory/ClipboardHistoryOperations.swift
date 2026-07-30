@@ -56,7 +56,9 @@ extension ClipboardHistoryModule {
             let rows = try Row.fetchAll(
                 database,
                 sql: """
-                    SELECT id, captured_at, preview_text, is_favorite
+                    SELECT id, captured_at, preview_text, is_favorite,
+                           source_bundle_id, source_display_name,
+                           source_provenance
                     FROM clipboard_entries
                     \(predicate)
                     ORDER BY last_captured_at DESC, id DESC
@@ -82,7 +84,15 @@ extension ClipboardHistoryModule {
                     ),
                     previewText: row["preview_text"],
                     facets: Set(facets.compactMap(ClipboardHistoryFacet.init)),
-                    isFavorite: row["is_favorite"]
+                    isFavorite: row["is_favorite"],
+                    source: ClipboardHistoryCaptureSource(
+                        bundleIdentifier: row["source_bundle_id"],
+                        displayName: row["source_display_name"],
+                        provenance:
+                            ClipboardHistoryCaptureSourceProvenance(
+                                rawValue: row["source_provenance"]
+                            ) ?? .unknown
+                    )
                 )
             }
             return ClipboardHistoryPage(entries: entries, nextCursor: nil)
@@ -504,7 +514,7 @@ extension ClipboardHistoryModule {
 
     public func reset(
         confirmation: ClipboardHistoryResetConfirmation
-    ) throws {
+    ) async throws {
         switch confirmation {
         case .confirmed:
             break
@@ -512,7 +522,9 @@ extension ClipboardHistoryModule {
         guard let keyStore else {
             throw ClipboardHistoryModuleError.resetFailed
         }
+        monitoringRequested = false
         monitoringEnabled = false
+        await captureMonitor?.setEnabled(false)
         try database?.close()
         database = nil
         derivedKeys = nil

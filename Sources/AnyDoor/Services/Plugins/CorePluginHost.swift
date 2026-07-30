@@ -43,7 +43,7 @@ final class CorePluginHost: PluginHostServices {
     }
 
     func pasteboardSelfWrite(_ body: (NSPasteboard) throws -> Void) rethrows {
-        try ClipboardWatcher.selfWrite(body)
+        try ClipboardSelfWrites.perform(body)
     }
 
     func runAppleScript(_ source: String) async throws -> String {

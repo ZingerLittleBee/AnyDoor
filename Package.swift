@@ -149,6 +149,7 @@ let package = Package(
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                "ClipboardHistory",
                 "HostsHelperShared",
                 "ImageCodec",
                 "PluginInterface",

@@ -611,7 +611,7 @@ final class ClipboardHistoryStore {
 
     func copyToPasteboard(_ item: ClipboardHistoryItem) async throws {
         guard let kind = item.historyKind else { throw ClipboardHistoryError.missingText }
-        try ClipboardWatcher.selfWrite { pasteboard in
+        try ClipboardSelfWrites.perform { pasteboard in
             pasteboard.clearContents()
 
             switch kind {

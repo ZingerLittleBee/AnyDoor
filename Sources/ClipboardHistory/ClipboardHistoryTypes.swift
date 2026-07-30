@@ -14,19 +14,22 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
     public let previewText: String?
     public let facets: Set<ClipboardHistoryFacet>
     public let isFavorite: Bool
+    public let source: ClipboardHistoryCaptureSource
 
     public init(
         id: ClipboardHistoryEntryID,
         capturedAt: Date,
         previewText: String?,
         facets: Set<ClipboardHistoryFacet>,
-        isFavorite: Bool
+        isFavorite: Bool,
+        source: ClipboardHistoryCaptureSource
     ) {
         self.id = id
         self.capturedAt = capturedAt
         self.previewText = previewText
         self.facets = facets
         self.isFavorite = isFavorite
+        self.source = source
     }
 }
 
@@ -87,6 +90,8 @@ public struct ClipboardHistoryPage: Equatable, Sendable {
 public enum ClipboardHistoryMonitoringCommand: Sendable {
     case start
     case stop
+    case migrationStarted
+    case migrationCompleted
 }
 
 public struct ClipboardHistoryCaptureRequest: Equatable, Sendable {
@@ -105,10 +110,65 @@ public struct ClipboardHistoryCaptureRequest: Equatable, Sendable {
 public struct ClipboardHistoryCaptureSource: Equatable, Sendable {
     public let bundleIdentifier: String?
     public let displayName: String?
+    public let provenance: ClipboardHistoryCaptureSourceProvenance
 
-    public init(bundleIdentifier: String?, displayName: String?) {
+    public init(
+        bundleIdentifier: String?,
+        displayName: String?,
+        provenance: ClipboardHistoryCaptureSourceProvenance = .declared
+    ) {
         self.bundleIdentifier = bundleIdentifier
         self.displayName = displayName
+        self.provenance = provenance
+    }
+
+    public static let universalClipboard = Self(
+        bundleIdentifier: nil,
+        displayName: nil,
+        provenance: .universalClipboard
+    )
+
+    public static let unknown = Self(
+        bundleIdentifier: nil,
+        displayName: nil,
+        provenance: .unknown
+    )
+}
+
+public enum ClipboardHistoryCaptureSourceProvenance: String, Sendable {
+    case universalClipboard
+    case declared
+    case copyEvent
+    case observation
+    case unknown
+}
+
+public struct ClipboardHistoryApplicationSource: Equatable, Sendable {
+    public let bundleIdentifier: String
+    public let displayName: String?
+
+    public init(bundleIdentifier: String, displayName: String?) {
+        self.bundleIdentifier = bundleIdentifier
+        self.displayName = displayName
+    }
+}
+
+public struct ClipboardHistoryMonitoringConfiguration: Equatable, Sendable {
+    public static let defaultExcludedBundleIdentifiers: Set<String> = [
+        "com.apple.Passwords",
+        "com.apple.keychainaccess",
+    ]
+
+    public var excludedBundleIdentifiers: Set<String>
+    public var ignoresUniversalClipboard: Bool
+
+    public init(
+        excludedBundleIdentifiers: Set<String> =
+            Self.defaultExcludedBundleIdentifiers,
+        ignoresUniversalClipboard: Bool = false
+    ) {
+        self.excludedBundleIdentifiers = excludedBundleIdentifiers
+        self.ignoresUniversalClipboard = ignoresUniversalClipboard
     }
 }
 

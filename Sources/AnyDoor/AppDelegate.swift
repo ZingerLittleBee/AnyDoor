@@ -5,12 +5,14 @@ import SwiftData
 import SwiftUI
 import OSLog
 import AskForPermission
+import ClipboardHistory
 import Sparkle
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
+    let clipboardHistoryModule = ClipboardHistoryModule()
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
@@ -93,11 +95,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         // Start the clipboard watcher. Internal pasteboard writes suppress
-        // their own capture through `ClipboardWatcher.selfWrite`.
-        let watcher = ClipboardWatcher(store: ClipboardHistoryStore.shared)
+        // their own capture through `ClipboardSelfWrites.perform`.
+        let watcher = ClipboardWatcher(
+            store: ClipboardHistoryStore.shared,
+            selfWrites: clipboardHistoryModule.pasteboardSelfWrites
+        )
         watcher.start()
         clipboardWatcher = watcher
-        ClipboardWatcher.shared = watcher
         ClipboardWallWindowController.shared.modelContainer = modelContainer
 
         // Native Plugins: the registry loads the installed set, activates the
@@ -251,6 +255,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UpdateService.shared.automaticChecksEnabled {
             UpdateService.shared.checkForUpdatesInBackground()
         }
+    }
+
+    @MainActor
+    func pollClipboardNow() async {
+        await clipboardWatcher?.poll()
     }
 
     private func shouldStartUpdater() -> Bool {

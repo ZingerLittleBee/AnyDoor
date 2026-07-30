@@ -25,7 +25,7 @@ actor OCRProvider: ActionProvider {
             let text = lines.joined(separator: "\n")
             // Self-write so the watcher doesn't re-capture this OCR result as
             // a generic text entry.
-            await ClipboardWatcher.selfWrite(string: text)
+            await ClipboardSelfWrites.write(string: text)
             await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text)
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
             await ToastPresenter.shared.show(.success(successMsg))

@@ -1,0 +1,428 @@
+import AppKit
+import Foundation
+import os
+
+private let clipboardMonitorSignpostLog = OSLog(
+    subsystem: "dev.bybee.AnyDoor",
+    category: "ClipboardHistoryMonitor"
+)
+
+@MainActor
+final class ClipboardHistoryCaptureMonitor {
+    enum LifecycleEvent: Sendable {
+        case willSleep
+        case didWake
+        case screenLocked
+        case screenUnlocked
+        case migrationStarted
+        case migrationCompleted
+    }
+
+    private let module: ClipboardHistoryModule
+    private let pasteboard: NSPasteboard
+    private let suppression: ClipboardHistorySelfWriteSuppression
+    private let instrumentation: ClipboardHistoryMonitorInstrumentation
+    private let sourceProvider:
+        @MainActor () -> ClipboardHistoryApplicationSource?
+    private let policy = ClipboardHistoryObservationPolicy()
+
+    private var configuration: ClipboardHistoryMonitoringConfiguration
+    private var scheduler = ClipboardHistoryMonitorScheduler()
+    private var lastGeneration: Int?
+    private var pendingCopyEventSource: ClipboardHistoryApplicationSource?
+    private var observationInFlight = false
+    private var observationRequested = false
+    private var isEnabled = false
+    private var isActive = false
+    private var timer: Timer?
+    private var workspaceObservers: [NSObjectProtocol] = []
+    private var eventHintSource: ClipboardHistoryCopyEventHintSource?
+    private var scheduledTimerIsIdle = true
+
+    init(
+        module: ClipboardHistoryModule,
+        pasteboard: NSPasteboard = .general,
+        suppression: ClipboardHistorySelfWriteSuppression? = nil,
+        instrumentation: ClipboardHistoryMonitorInstrumentation? = nil,
+        configuration: ClipboardHistoryMonitoringConfiguration = .init(),
+        sourceProvider: @escaping @MainActor
+            () -> ClipboardHistoryApplicationSource? =
+            ClipboardHistoryCaptureMonitor.frontmostApplicationSource,
+        installsSystemObservers: Bool = true
+    ) {
+        self.module = module
+        self.pasteboard = pasteboard
+        self.suppression = suppression ?? module.selfWriteSuppression
+        self.instrumentation =
+            instrumentation ?? module.monitorInstrumentation
+        self.configuration = configuration
+        self.sourceProvider = sourceProvider
+        if installsSystemObservers {
+            installSystemObservers()
+            eventHintSource = ClipboardHistoryCopyEventHintSource { [weak self] in
+                Task { @MainActor in
+                    await self?.handleKeyHint()
+                }
+            }
+        }
+    }
+
+    func setEnabled(
+        _ enabled: Bool,
+        configuration: ClipboardHistoryMonitoringConfiguration? = nil
+    ) async {
+        if let configuration {
+            self.configuration = configuration
+        }
+        isEnabled = enabled
+        if enabled {
+            eventHintSource?.start()
+        } else {
+            eventHintSource?.stop()
+        }
+        let plan = scheduler.handle(.setEnabled(enabled), at: now())
+        apply(plan)
+    }
+
+    func handleLifecycle(_ event: LifecycleEvent) async {
+        let schedulerEvent: ClipboardHistoryMonitorScheduler.Event
+        switch event {
+        case .willSleep:
+            schedulerEvent = .willSleep
+            eventHintSource?.stop()
+        case .didWake:
+            schedulerEvent = .didWake
+            if isEnabled {
+                eventHintSource?.start()
+            }
+        case .screenLocked:
+            schedulerEvent = .screenLocked
+            eventHintSource?.stop()
+        case .screenUnlocked:
+            schedulerEvent = .screenUnlocked
+            if isEnabled {
+                eventHintSource?.start()
+            }
+        case .migrationStarted:
+            schedulerEvent = .migrationStarted
+        case .migrationCompleted:
+            schedulerEvent = .migrationCompleted
+        }
+        apply(scheduler.handle(schedulerEvent, at: now()))
+    }
+
+    func updateConfiguration(
+        _ configuration: ClipboardHistoryMonitoringConfiguration
+    ) {
+        self.configuration = configuration
+    }
+
+    func observeForTesting() async {
+        await observe()
+    }
+
+    func keyHintForTesting() async {
+        await handleKeyHint()
+    }
+
+    func timerFiredForTesting() async {
+        await timerFired()
+    }
+
+    private func handleKeyHint() async {
+        os_signpost(
+            .event,
+            log: clipboardMonitorSignpostLog,
+            name: "CopyKeyHint"
+        )
+        instrumentation.recordKeyHint()
+        pendingCopyEventSource = sourceProvider()
+        let plan = scheduler.handle(.keyHint, at: now())
+        apply(plan)
+        if plan.observeNow {
+            await observe()
+        }
+    }
+
+    private func timerFired() async {
+        os_signpost(
+            .event,
+            log: clipboardMonitorSignpostLog,
+            name: scheduledTimerIsIdle ? "IdleTimerFire" : "BoostedTimerFire"
+        )
+        instrumentation.recordTimerFire(isIdle: scheduledTimerIsIdle)
+        let plan = scheduler.handle(.timerFired, at: now())
+        apply(plan)
+        if plan.observeNow {
+            await observe()
+        }
+    }
+
+    private func observe() async {
+        guard isActive else { return }
+        if observationInFlight {
+            observationRequested = true
+            return
+        }
+        observationInFlight = true
+        defer { observationInFlight = false }
+        let signpostID = OSSignpostID(log: clipboardMonitorSignpostLog)
+        os_signpost(
+            .begin,
+            log: clipboardMonitorSignpostLog,
+            name: "PasteboardObservation",
+            signpostID: signpostID
+        )
+        defer {
+            os_signpost(
+                .end,
+                log: clipboardMonitorSignpostLog,
+                name: "PasteboardObservation",
+                signpostID: signpostID
+            )
+        }
+
+        repeat {
+            observationRequested = false
+            let generation = pasteboard.changeCount
+            guard generation != lastGeneration else { break }
+            instrumentation.recordObservedGeneration(
+                previous: lastGeneration,
+                current: generation
+            )
+
+            if suppression.shouldSuppress(generation: generation) {
+                lastGeneration = generation
+                pendingCopyEventSource = nil
+                apply(
+                    scheduler.handle(
+                        .observationCompleted(changed: true),
+                        at: now()
+                    )
+                )
+                continue
+            }
+
+            let metadata = readMetadata(generation: generation)
+            let decision = policy.evaluate(
+                metadata,
+                copyEventSource: pendingCopyEventSource,
+                observationSource: sourceProvider(),
+                configuration: configuration
+            )
+            guard pasteboard.changeCount == generation else {
+                observationRequested = true
+                continue
+            }
+            pendingCopyEventSource = nil
+            lastGeneration = generation
+
+            switch decision {
+            case .exclude:
+                break
+            case .capture(let source):
+                do {
+                    let outcome = try await module.capture(
+                        ClipboardHistoryPasteboardCaptureRequest(
+                            pasteboard: pasteboard
+                        ),
+                        source: source
+                    )
+                    if outcome == .skipped(.generationChanged) {
+                        observationRequested = true
+                    } else if case .captured = outcome {
+                        instrumentation.recordCapture()
+                    }
+                } catch {
+                    // The module owns operation error presentation. Monitoring
+                    // advances its observation baseline and remains available
+                    // for the next generation.
+                }
+            }
+
+            apply(
+                scheduler.handle(
+                    .observationCompleted(changed: true),
+                    at: now()
+                )
+            )
+        } while observationRequested
+    }
+
+    private func readMetadata(
+        generation: Int
+    ) -> ClipboardHistoryPasteboardMetadata {
+        let items = pasteboard.pasteboardItems ?? []
+        let advertisedTypes = Set(
+            items.flatMap(\.types).map(\.rawValue)
+        )
+        let sourceType = NSPasteboard.PasteboardType(
+            "org.nspasteboard.source"
+        )
+        let declaredSource = items.lazy.compactMap {
+            $0.string(forType: sourceType)
+        }.first
+        return ClipboardHistoryPasteboardMetadata(
+            generation: generation,
+            advertisedTypeIdentifiers: advertisedTypes,
+            declaredSourceBundleIdentifier: declaredSource
+        )
+    }
+
+    private func apply(_ plan: ClipboardHistoryMonitorScheduler.Plan) {
+        isActive = plan.nextFire != nil
+        if plan.establishBaseline {
+            lastGeneration = pasteboard.changeCount
+            pendingCopyEventSource = nil
+        }
+        schedule(plan.nextFire)
+    }
+
+    private func schedule(
+        _ scheduledFire: ClipboardHistoryMonitorScheduler.ScheduledFire?
+    ) {
+        timer?.invalidate()
+        timer = nil
+        guard let scheduledFire else { return }
+        scheduledTimerIsIdle =
+            scheduledFire.tolerance >= .milliseconds(50)
+
+        let delay = max(0, (scheduledFire.deadline - now()).timeInterval)
+        let timer = Timer(timeInterval: delay, repeats: false) {
+            [weak self] _ in
+            Task { @MainActor in
+                await self?.timerFired()
+            }
+        }
+        timer.tolerance = scheduledFire.tolerance.timeInterval
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    private func installSystemObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        let mappings: [(Notification.Name, LifecycleEvent)] = [
+            (NSWorkspace.willSleepNotification, .willSleep),
+            (NSWorkspace.didWakeNotification, .didWake),
+            (NSWorkspace.sessionDidResignActiveNotification, .screenLocked),
+            (NSWorkspace.sessionDidBecomeActiveNotification, .screenUnlocked),
+        ]
+        workspaceObservers = mappings.map { name, event in
+            center.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    await self?.handleLifecycle(event)
+                }
+            }
+        }
+    }
+
+    private func now() -> Duration {
+        .nanoseconds(Int64(clamping: DispatchTime.now().uptimeNanoseconds))
+    }
+
+    private static func frontmostApplicationSource()
+        -> ClipboardHistoryApplicationSource?
+    {
+        guard let application = NSWorkspace.shared.frontmostApplication,
+            let bundleIdentifier = application.bundleIdentifier
+        else {
+            return nil
+        }
+        return ClipboardHistoryApplicationSource(
+            bundleIdentifier: bundleIdentifier,
+            displayName: application.localizedName
+        )
+    }
+}
+
+@MainActor
+private final class ClipboardHistoryCopyEventHintSource {
+    private nonisolated let scheduleHint: @Sendable () -> Void
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+
+    init(scheduleHint: @escaping @Sendable () -> Void) {
+        self.scheduleHint = scheduleHint
+    }
+
+    func start() {
+        guard eventTap == nil else { return }
+        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: mask,
+            callback: clipboardHistoryCopyEventCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            return
+        }
+        let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        eventTap = tap
+        runLoopSource = source
+    }
+
+    func stop() {
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+        if let runLoopSource {
+            CFRunLoopRemoveSource(
+                CFRunLoopGetMain(),
+                runLoopSource,
+                .commonModes
+            )
+        }
+        eventTap = nil
+        runLoopSource = nil
+    }
+
+    nonisolated func receive(_ event: CGEvent) {
+        let flags = event.flags.intersection(
+            [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        )
+        guard flags.contains(.maskCommand),
+            !flags.contains(.maskControl),
+            !flags.contains(.maskAlternate),
+            event.getIntegerValueField(.keyboardEventKeycode) == 8
+                || event.getIntegerValueField(.keyboardEventKeycode) == 7
+        else {
+            return
+        }
+        // The callback only enqueues the immutable hint closure. Pasteboard
+        // access, source sampling, canonicalization, and persistence all happen
+        // later on the monitor's serialized path.
+        scheduleHint()
+    }
+}
+
+private func clipboardHistoryCopyEventCallback(
+    proxy: CGEventTapProxy,
+    type: CGEventType,
+    event: CGEvent,
+    userInfo: UnsafeMutableRawPointer?
+) -> Unmanaged<CGEvent>? {
+    guard type == .keyDown, let userInfo else {
+        return Unmanaged.passUnretained(event)
+    }
+    let source = Unmanaged<ClipboardHistoryCopyEventHintSource>
+        .fromOpaque(userInfo)
+        .takeUnretainedValue()
+    source.receive(event)
+    return Unmanaged.passUnretained(event)
+}
+
+private extension Duration {
+    var timeInterval: TimeInterval {
+        let components = self.components
+        return TimeInterval(components.seconds)
+            + TimeInterval(components.attoseconds) / 1e18
+    }
+}

@@ -25,7 +25,7 @@ actor PickColorProvider: ActionProvider {
             let formatted = ColorFormat.current.format(hex: hex) ?? hex
             // Self-write so the watcher doesn't re-capture this picked color
             // as a generic text entry.
-            await ClipboardWatcher.selfWrite(string: formatted)
+            await ClipboardSelfWrites.write(string: formatted)
             await ClipboardHistoryStore.shared.recordColor(hex: hex)
             let colorMsg = await MainActor.run { L(.toastColorCopied, formatted) }
             await ToastPresenter.shared.show(

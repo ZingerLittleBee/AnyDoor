@@ -108,7 +108,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // Force the watcher to capture immediately so content copied just before
         // opening shows up now, rather than after the next ~0.5s poll tick. The
         // @Query-backed view re-renders on its own once the store changes.
-        Task { await ClipboardWatcher.shared?.poll() }
+        Task {
+            await (NSApplication.shared.delegate as? AppDelegate)?
+                .pollClipboardNow()
+        }
         installHostingView()
         installMonitors()
         // Preview → editor handoff ("e" key / the preview header's edit
@@ -538,7 +541,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
             return
         }
-        ClipboardWatcher.selfWrite { pb in
+        ClipboardSelfWrites.perform { pb in
             ClipboardPasteService.writePayload(for: item, asPlainText: plain, to: pb, historyDirectory: historyDirectory)
         }
         // Slide out first; reactivating the prior app returns focus there, so
@@ -570,7 +573,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
             return
         }
-        ClipboardWatcher.selfWrite { pb in
+        ClipboardSelfWrites.perform { pb in
             ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: historyDirectory)
         }
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
@@ -587,7 +590,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             }
             return
         }
-        ClipboardWatcher.selfWrite(string: selection)
+        ClipboardSelfWrites.write(string: selection)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 

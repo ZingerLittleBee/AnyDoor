@@ -744,6 +744,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v1_foundation",
                 "v2_encrypted_store",
                 "v3_file_reference_identity",
+                "v4_capture_source_provenance",
             ]
         )
         XCTAssertEqual(
@@ -792,6 +793,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v1_foundation",
                 "v2_encrypted_store",
                 "v3_file_reference_identity",
+                "v4_capture_source_provenance",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import Foundation
 import SwiftData
 import XCTest
@@ -8,7 +9,7 @@ import ScriptPluginRuntime
 /// The pasteboard capability must route through the host's real self-write
 /// funnel, so a plugin's copy never lands in clipboard history (user story 13).
 /// This test wires the runtime's `writePasteboard` to the production
-/// `ClipboardWatcher.selfWrite` and drives the real watcher.
+/// module-facing self-write funnel and drives the real watcher.
 @MainActor
 final class ScriptPluginPasteboardTests: XCTestCase {
     private func makeStore() throws -> ClipboardHistoryStore {
@@ -22,14 +23,18 @@ final class ScriptPluginPasteboardTests: XCTestCase {
     func testPluginCopySuppressesClipboardHistory() async throws {
         let store = try makeStore()
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("AnyDoorScript-\(UUID().uuidString)"))
-        let watcher = ClipboardWatcher(store: store, pasteboard: pasteboard, sourceProvider: { nil })
-        ClipboardWatcher.shared = watcher
-        defer { ClipboardWatcher.shared = nil }
+        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pasteboard,
+            selfWrites: funnel,
+            sourceProvider: { nil }
+        )
 
         let spy = ScriptCapabilitySpy()
         // Route the pasteboard capability at the real self-write funnel.
         spy.onPasteboardWrite = { text in
-            ClipboardWatcher.selfWrite(string: text, to: pasteboard)
+            funnel.write(string: text, to: pasteboard)
         }
         let host = ScriptRuntimeHarness.makeCapabilityHost(
             spy: spy,

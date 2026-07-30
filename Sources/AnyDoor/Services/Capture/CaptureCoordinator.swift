@@ -298,7 +298,7 @@ final class CaptureCoordinator {
         // encodes the bitmap lazily) so the clipboard is ready the instant the
         // shot lands, before the PNG encode below.
         if settings.autoCopy {
-            ClipboardWatcher.selfWrite { pb in
+            ClipboardSelfWrites.perform { pb in
                 pb.clearContents()
                 pb.writeObjects([image])
             }
@@ -435,7 +435,7 @@ final class CaptureCoordinator {
     }
 
     private func copyToPasteboard(_ image: NSImage) {
-        ClipboardWatcher.selfWrite { pb in
+        ClipboardSelfWrites.perform { pb in
             pb.clearContents()
             pb.writeObjects([image])
         }
@@ -454,7 +454,7 @@ final class CaptureCoordinator {
                         ToastPresenter.shared.show(.failure(L(.toastOcrNoText)))
                         return
                     }
-                    ClipboardWatcher.selfWrite(string: text)
+                    ClipboardSelfWrites.write(string: text)
                     Task { await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text) }
                     ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
                 }

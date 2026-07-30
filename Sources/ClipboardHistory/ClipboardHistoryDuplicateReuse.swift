@@ -52,7 +52,8 @@ extension ClipboardHistoryModule {
                         sql: """
                             UPDATE clipboard_entries
                             SET captured_at = ?, last_captured_at = ?,
-                                source_bundle_id = ?, source_display_name = ?
+                                source_bundle_id = ?, source_display_name = ?,
+                                source_provenance = ?
                             WHERE id = ?
                             """,
                         arguments: [
@@ -60,6 +61,7 @@ extension ClipboardHistoryModule {
                             capturedAt.timeIntervalSince1970,
                             source.bundleIdentifier,
                             source.displayName,
+                            source.provenance.rawValue,
                             storedID,
                         ]
                     )

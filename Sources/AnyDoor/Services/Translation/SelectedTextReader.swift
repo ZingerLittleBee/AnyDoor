@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import ClipboardHistory
 import Foundation
 
 /// Reads the user's current text selection: the Accessibility
@@ -68,14 +69,15 @@ enum SelectedTextReader {
     @MainActor
     static func readViaClipboard(
         pasteboard: NSPasteboard,
+        selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel? =
+            ClipboardSelfWrites.current,
         copy: () -> Void,
         settle: () async -> Void
     ) async -> String? {
         let previous = PasteboardSnapshot(pasteboard)
         let beforeCount = pasteboard.changeCount
-        let watcher = ClipboardWatcher.shared
-        watcher?.beginSelfWrite()
-        defer { watcher?.endSelfWrite(changeCount: pasteboard.changeCount) }
+        let selfWrite = selfWrites?.begin()
+        defer { selfWrite?.finish(pasteboard: pasteboard) }
 
         copy()
         await settle()
@@ -90,8 +92,8 @@ enum SelectedTextReader {
 
         // Restore the caller's pasteboard only when the synthetic copy actually
         // changed it. Preserve every pasteboard item/type, not just plain text.
-        // No explicit noteSelfWrite here: the deferred endSelfWrite above runs
-        // after this restore and records the final changeCount.
+        // The scoped self-write token finishes after this restore and records
+        // the final generation while also suppressing intermediate writes.
         if pasteboard.changeCount != beforeCount {
             previous.restore(to: pasteboard)
         }

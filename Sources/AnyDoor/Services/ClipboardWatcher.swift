@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import Foundation
 import PluginInterface
 
@@ -7,31 +8,27 @@ import PluginInterface
 /// a repeating timer started by `start()`.
 @MainActor
 final class ClipboardWatcher {
-    /// Weak handle to the live watcher so other code (providers that write to the
-    /// general pasteboard) can call `noteSelfWrite`. `AppDelegate` owns the strong
-    /// reference; this must stay weak to avoid a retain cycle.
-    @MainActor static weak var shared: ClipboardWatcher?
-
     private let store: ClipboardHistoryStore
     private let pasteboard: NSPasteboard
+    private let selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel
     private let sourceProvider: () -> ClipboardSource?
     private let isExcluded: (String) -> Bool
     private let isEnabled: () -> Bool
 
     private var lastChangeCount: Int
-    private var suppressedChangeCount: Int?
-    private var selfWriteDepth = 0
     private var timer: Timer?
 
     init(
         store: ClipboardHistoryStore,
         pasteboard: NSPasteboard = .general,
+        selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel,
         sourceProvider: @escaping () -> ClipboardSource? = ClipboardWatcher.frontmostSource,
         isExcluded: @escaping (String) -> Bool = { ClipboardPreferences.excludedBundleIDs.contains($0) },
         isEnabled: @escaping () -> Bool = { ClipboardPreferences.monitoringEnabled }
     ) {
         self.store = store
         self.pasteboard = pasteboard
+        self.selfWrites = selfWrites
         self.sourceProvider = sourceProvider
         self.isExcluded = isExcluded
         self.isEnabled = isEnabled
@@ -61,66 +58,13 @@ final class ClipboardWatcher {
         timer = nil
     }
 
-    /// Record the changeCount produced by AnyDoor's own pasteboard write so the
-    /// next poll does not re-record it (avoids the paste-from-history loop).
-    func noteSelfWrite(changeCount: Int) {
-        suppressedChangeCount = changeCount
-    }
-
-    /// Suppress AnyDoor-owned pasteboard writes that span an async window.
-    /// `noteSelfWrite` handles a single completed write; this scoped form also
-    /// covers intermediate states that a timer tick can observe before cleanup.
-    func beginSelfWrite() {
-        selfWriteDepth += 1
-    }
-
-    func endSelfWrite(changeCount: Int) {
-        if selfWriteDepth > 0 {
-            selfWriteDepth -= 1
-        }
-        noteSelfWrite(changeCount: changeCount)
-    }
-
-    /// Perform an AnyDoor-originated pasteboard write and suppress the watcher
-    /// so the write isn't re-captured as a history entry.
-    ///
-    /// The body and the suppression run in the same synchronous MainActor turn,
-    /// so the 0.5s poll can never observe the write before the suppression is
-    /// recorded — callers don't need to re-derive that argument at every site.
-    /// The body owns `clearContents()` (some callers delegate the whole write to
-    /// `ClipboardPasteService.writePayload`, which clears internally; Clear
-    /// Clipboard writes nothing after clearing).
-    ///
-    /// Suppression is recorded in a `defer` so a throwing body — e.g. a history
-    /// row with a missing payload, discovered after `clearContents()` already
-    /// bumped the changeCount — still suppresses the partial write.
-    @discardableResult
-    static func selfWrite<T>(
-        to pasteboard: NSPasteboard = .general,
-        _ body: (NSPasteboard) throws -> T
-    ) rethrows -> T {
-        defer { shared?.noteSelfWrite(changeCount: pasteboard.changeCount) }
-        return try body(pasteboard)
-    }
-
-    /// Convenience for the most common self-write: replace the pasteboard
-    /// contents with a plain string.
-    static func selfWrite(string: String, to pasteboard: NSPasteboard = .general) {
-        selfWrite(to: pasteboard) { pb in
-            pb.clearContents()
-            pb.setString(string, forType: .string)
-        }
-    }
-
     func poll() async {
         let current = pasteboard.changeCount
         guard current != lastChangeCount else { return }
         lastChangeCount = current
 
-        guard selfWriteDepth == 0 else { return }
         guard isEnabled() else { return }
-        if let suppressed = suppressedChangeCount, suppressed == current {
-            suppressedChangeCount = nil
+        if selfWrites.consumesSuppressedGeneration(current) {
             return
         }
 

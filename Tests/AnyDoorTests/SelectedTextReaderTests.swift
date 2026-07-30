@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import SwiftData
 import XCTest
 @testable import AnyDoor
@@ -60,13 +61,17 @@ final class SelectedTextReaderTests: XCTestCase {
         let container = try ModelContainer(for: ClipboardHistoryItem.self, configurations: config)
         let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
         store.bootstrap(modelContainer: container)
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
-        let previousWatcher = ClipboardWatcher.shared
-        defer { ClipboardWatcher.shared = previousWatcher }
-        ClipboardWatcher.shared = watcher
+        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pb,
+            selfWrites: funnel,
+            sourceProvider: { nil }
+        )
 
         _ = await SelectedTextReader.readViaClipboard(
             pasteboard: pb,
+            selfWrites: funnel,
             copy: {
                 pb.clearContents()
                 pb.setString("SELECTED", forType: .string)
@@ -88,13 +93,17 @@ final class SelectedTextReaderTests: XCTestCase {
         let container = try ModelContainer(for: ClipboardHistoryItem.self, configurations: config)
         let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
         store.bootstrap(modelContainer: container)
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
-        let previousWatcher = ClipboardWatcher.shared
-        defer { ClipboardWatcher.shared = previousWatcher }
-        ClipboardWatcher.shared = watcher
+        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pb,
+            selfWrites: funnel,
+            sourceProvider: { nil }
+        )
 
         _ = await SelectedTextReader.readViaClipboard(
             pasteboard: pb,
+            selfWrites: funnel,
             copy: {
                 pb.clearContents()
                 pb.setString("SELECTED", forType: .string)

@@ -438,8 +438,9 @@ extension ClipboardHistoryModule {
                     sql: """
                         INSERT INTO clipboard_entries(
                             id, captured_at, last_captured_at, source_bundle_id,
-                            source_display_name, preview_text, thumbnail_payload_id
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                            source_display_name, source_provenance, preview_text,
+                            thumbnail_payload_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                     arguments: [
                         storedID,
@@ -447,6 +448,7 @@ extension ClipboardHistoryModule {
                         capturedAt.timeIntervalSince1970,
                         source.bundleIdentifier,
                         source.displayName,
+                        source.provenance.rawValue,
                         previewText,
                         entryThumbnailID?.uuidString.lowercased(),
                     ]

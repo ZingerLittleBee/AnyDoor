@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import SwiftData
 import XCTest
 @testable import AnyDoor
@@ -16,7 +17,12 @@ final class ClipboardWatcherTests: XCTestCase {
     func testPollRecordsNewTextOnce() async throws {
         let store = try makeStore()
         let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pb,
+            selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel(),
+            sourceProvider: { nil }
+        )
 
         pb.clearContents(); pb.setString("hello", forType: .string)
         await watcher.poll()
@@ -31,6 +37,7 @@ final class ClipboardWatcherTests: XCTestCase {
         let watcher = ClipboardWatcher(
             store: store,
             pasteboard: pb,
+            selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel(),
             sourceProvider: { ClipboardSource(bundleID: "com.banking.secure", appName: "Bank") },
             isExcluded: { $0 == "com.banking.secure" }
         )
@@ -43,11 +50,15 @@ final class ClipboardWatcherTests: XCTestCase {
     func testSelfWriteIsSuppressed() async throws {
         let store = try makeStore()
         let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
+        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pb,
+            selfWrites: funnel,
+            sourceProvider: { nil }
+        )
 
-        // Simulate AnyDoor writing the pasteboard during a paste, then noting it.
-        pb.clearContents(); let cc = pb.setString("from-history", forType: .string) ? pb.changeCount : 0
-        watcher.noteSelfWrite(changeCount: cc)
+        funnel.write(string: "from-history", to: pb)
         await watcher.poll()
         await store.reload(kind: .text)
         XCTAssertTrue(store.items(for: .text).isEmpty)   // our own write was ignored
@@ -56,11 +67,15 @@ final class ClipboardWatcherTests: XCTestCase {
     func testSelfWriteFunnelWritesAndSuppresses() async throws {
         let store = try makeStore()
         let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
-        ClipboardWatcher.shared = watcher
-        defer { ClipboardWatcher.shared = nil }
+        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pb,
+            selfWrites: funnel,
+            sourceProvider: { nil }
+        )
 
-        ClipboardWatcher.selfWrite(string: "internal", to: pb)
+        funnel.write(string: "internal", to: pb)
         XCTAssertEqual(pb.string(forType: .string), "internal")
         await watcher.poll()
         await store.reload(kind: .text)
@@ -70,13 +85,17 @@ final class ClipboardWatcherTests: XCTestCase {
     func testSelfWriteThrowingBodyStillSuppresses() async throws {
         let store = try makeStore()
         let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
-        ClipboardWatcher.shared = watcher
-        defer { ClipboardWatcher.shared = nil }
+        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pb,
+            selfWrites: funnel,
+            sourceProvider: { nil }
+        )
 
         // A body that clears (bumping changeCount) and then fails must still
         // suppress the partial write.
-        XCTAssertThrowsError(try ClipboardWatcher.selfWrite(to: pb) { p -> Void in
+        XCTAssertThrowsError(try funnel.perform(to: pb) { p -> Void in
             p.clearContents()
             throw ClipboardHistoryError.missingText
         })
@@ -88,11 +107,15 @@ final class ClipboardWatcherTests: XCTestCase {
     func testExternalWriteAfterSelfWriteIsStillRecorded() async throws {
         let store = try makeStore()
         let pb = NSPasteboard(name: NSPasteboard.Name("AnyDoorWatch-\(UUID().uuidString)"))
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
-        ClipboardWatcher.shared = watcher
-        defer { ClipboardWatcher.shared = nil }
+        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
+        let watcher = ClipboardWatcher(
+            store: store,
+            pasteboard: pb,
+            selfWrites: funnel,
+            sourceProvider: { nil }
+        )
 
-        ClipboardWatcher.selfWrite(string: "internal", to: pb)
+        funnel.write(string: "internal", to: pb)
         // A later "external" copy advances changeCount past the suppressed one.
         pb.clearContents(); pb.setString("external", forType: .string)
         await watcher.poll()

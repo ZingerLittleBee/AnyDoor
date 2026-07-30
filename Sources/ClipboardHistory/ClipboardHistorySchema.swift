@@ -29,6 +29,14 @@ extension ClipboardHistoryModule {
                 table.add(column: "identity_data", .blob)
             }
         }
+        migrator.registerMigration("v4_capture_source_provenance") { database in
+            try database.alter(table: "clipboard_entries") { table in
+                table.add(
+                    column: "source_provenance",
+                    .text
+                ).notNull().defaults(to: "unknown")
+            }
+        }
         return migrator
     }
 

@@ -694,7 +694,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             Task { await PanelStore.shared.run(item) }
         case .copyToClipboard(let text, let toast):
             close()
-            ClipboardWatcher.selfWrite(string: text)
+            ClipboardSelfWrites.write(string: text)
             switch toast {
             case .calc(let display):
                 ToastPresenter.shared.show(.success(L(.toastCalcCopied, display)))
