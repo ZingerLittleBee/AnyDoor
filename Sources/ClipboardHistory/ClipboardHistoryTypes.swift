@@ -188,10 +188,16 @@ public enum ClipboardHistoryMaterializedRepresentation: Equatable, Sendable {
 
 public struct ClipboardHistoryStatus: Equatable, Sendable {
     public let availability: Availability
+    public let reason: AvailabilityReason?
     public let isMonitoring: Bool
 
-    public init(availability: Availability, isMonitoring: Bool) {
+    public init(
+        availability: Availability,
+        reason: AvailabilityReason? = nil,
+        isMonitoring: Bool
+    ) {
         self.availability = availability
+        self.reason = reason
         self.isMonitoring = isMonitoring
     }
 
@@ -200,10 +206,39 @@ public struct ClipboardHistoryStatus: Equatable, Sendable {
         case paused
         case unavailable
     }
+
+    public enum AvailabilityReason: Equatable, Sendable {
+        case keychainLocked
+        case missingKey
+        case keyAccessDenied
+        case keychainFailure
+        case databaseAuthenticationFailed
+        case databaseCorrupt
+        case databaseIntegrityFailed
+        case storeIOFailure
+    }
 }
 
 public enum ClipboardHistoryModuleError: Error, Equatable {
     case operationUnavailable
     case entryNotFound
     case storeUnavailable
+    case storageFailure
+    case payloadAuthenticationFailed(ClipboardHistoryEntryID)
+    case payloadUnavailable(ClipboardHistoryEntryID)
+    case resetFailed
+}
+
+public enum ClipboardHistoryResetConfirmation: Sendable {
+    case confirmed
+}
+
+public struct ClipboardHistoryMaintenanceReport: Equatable, Sendable {
+    public let reclaimedPayloadCount: Int
+    public let storageBytes: UInt64
+
+    public init(reclaimedPayloadCount: Int, storageBytes: UInt64) {
+        self.reclaimedPayloadCount = reclaimedPayloadCount
+        self.storageBytes = storageBytes
+    }
 }
