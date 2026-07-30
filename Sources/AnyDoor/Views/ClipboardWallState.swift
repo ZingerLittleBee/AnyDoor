@@ -87,8 +87,21 @@ final class ClipboardWallState {
         ClipboardWallState.order(tags: [])
     private(set) var sourceMenuOpenToken = 0
 
-    init(presentation: ClipboardHistoryPresentationModel) {
+    /// How long typing has to settle before a search runs. Long enough to
+    /// swallow a burst of keystrokes, short enough not to read as lag.
+    private static let searchDebounce = Duration.milliseconds(150)
+
+    /// Injected so tests can drive the debounce with a fake clock instead of
+    /// sleeping for real. Production always gets `ContinuousClock`.
+    private let clock: any Clock<Duration>
+    private var searchTask: Task<Void, Never>?
+
+    init(
+        presentation: ClipboardHistoryPresentationModel,
+        clock: any Clock<Duration> = ContinuousClock()
+    ) {
         self.presentation = presentation
+        self.clock = clock
     }
 
     var items: [ClipboardHistoryEntry] {
@@ -123,7 +136,47 @@ final class ClipboardWallState {
     }
 
     func refreshQuery() async {
+        searchTask?.cancel()
+        searchTask = nil
         await presentation.setQuery(moduleQuery)
+    }
+
+    /// A keystroke. Each search costs tens of milliseconds on the module actor
+    /// that also serves capture, and a run of keystrokes only ever wants the
+    /// last one, so typing coalesces into a single search.
+    ///
+    /// Clearing the field is exempt: it falls back to the unfiltered browse
+    /// query, which is cheap, and delaying it would just feel broken.
+    func queryTextDidChange() {
+        searchTask?.cancel()
+        guard !query.isEmpty else {
+            applyQuery()
+            return
+        }
+        searchTask = Task { [weak self, clock] in
+            try? await clock.sleep(for: Self.searchDebounce)
+            guard !Task.isCancelled, let self else { return }
+            await presentation.setQuery(moduleQuery)
+        }
+    }
+
+    /// A category or source click. Discrete and deliberate, so it applies
+    /// immediately — and it drops any keystroke still waiting, whose text is
+    /// already part of the query being applied.
+    func filtersDidChange() {
+        searchTask?.cancel()
+        applyQuery()
+    }
+
+    private func applyQuery() {
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+            await presentation.setQuery(moduleQuery)
+        }
+    }
+
+    func awaitPendingSearchForTesting() async {
+        await searchTask?.value
     }
 
     func prefetchIfNeeded(visibleID: ClipboardHistoryEntryID) async {

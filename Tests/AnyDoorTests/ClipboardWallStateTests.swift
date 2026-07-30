@@ -1,3 +1,4 @@
+import Clocks
 import XCTest
 import ClipboardHistory
 @testable import AnyDoor
@@ -192,6 +193,107 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(query?.facet, .image)
         XCTAssertEqual(query?.sourceID, "com.example.Source")
     }
+
+    /// Every keystroke used to fire its own search on the module actor that
+    /// also serves capture. A run of them only ever wants the last one.
+    func testATypingBurstCoalescesIntoASingleSearch() async throws {
+        let clock = TestClock()
+        let recorder = ClipboardWallQueryRecorder()
+        let state = ClipboardWallState(
+            presentation: makeRecordingPresentation(recorder),
+            clock: clock
+        )
+
+        for text in ["s", "sw", "swi", "swif", "swift"] {
+            state.query = text
+            state.queryTextDidChange()
+        }
+        await clock.advance(by: .milliseconds(149))
+        var recorded = await recorder.count
+        XCTAssertEqual(recorded, 0)
+
+        await clock.advance(by: .milliseconds(1))
+        await state.awaitPendingSearchForTesting()
+        let texts = await recorder.queryTexts
+        XCTAssertEqual(texts, ["swift"])
+    }
+
+    /// Clearing the field falls back to the cheap browse query; making the
+    /// user wait out the debounce for that would just read as a stall.
+    func testClearingTheQueryAppliesWithoutWaitingOutTheDebounce() async {
+        let clock = TestClock()
+        let recorder = ClipboardWallQueryRecorder()
+        let state = ClipboardWallState(
+            presentation: makeRecordingPresentation(recorder),
+            clock: clock
+        )
+
+        state.query = "swift"
+        state.queryTextDidChange()
+        await clock.advance(by: .milliseconds(150))
+        await state.awaitPendingSearchForTesting()
+
+        state.query = ""
+        state.queryTextDidChange()
+        await state.awaitPendingSearchForTesting()
+
+        // Note the second entry landed without the clock moving at all.
+        let texts = await recorder.queryTexts
+        XCTAssertEqual(texts, ["swift", ""])
+    }
+
+    /// A category click is discrete and deliberate, and it carries whatever
+    /// text is already typed, so a pending keystroke must not land after it.
+    func testAFilterClickAppliesImmediatelyAndDropsAPendingKeystroke() async {
+        let clock = TestClock()
+        let recorder = ClipboardWallQueryRecorder()
+        let state = ClipboardWallState(
+            presentation: makeRecordingPresentation(recorder),
+            clock: clock
+        )
+
+        state.query = "swift"
+        state.queryTextDidChange()
+        state.category = .kind(.image)
+        state.filtersDidChange()
+        await state.awaitPendingSearchForTesting()
+
+        var recorded = await recorder.count
+        XCTAssertEqual(recorded, 1)
+        let query = await recorder.lastQuery
+        XCTAssertEqual(query?.text, "swift")
+        XCTAssertEqual(query?.facet, .image)
+
+        // The cancelled keystroke must stay cancelled once its deadline passes.
+        await clock.advance(by: .milliseconds(500))
+        recorded = await recorder.count
+        XCTAssertEqual(recorded, 1)
+    }
+
+    private func makeRecordingPresentation(
+        _ recorder: ClipboardWallQueryRecorder
+    ) -> ClipboardHistoryPresentationModel {
+        ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: {
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: true,
+                        searchIndex: .ready
+                    )
+                },
+                page: { query, _ in
+                    await recorder.record(query)
+                    return ClipboardHistoryPage(entries: [], nextCursor: nil)
+                },
+                apply: { _ in .notFound },
+                materialize: { _ in
+                    ClipboardHistoryMaterialization(items: [])
+                },
+                tagDefinitions: { [] }
+            )
+        )
+    }
 }
 
 private actor ClipboardWallQueryRecorder {
@@ -203,5 +305,13 @@ private actor ClipboardWallQueryRecorder {
 
     var lastQuery: ClipboardHistoryQuery? {
         queries.last
+    }
+
+    var queryTexts: [String] {
+        queries.map(\.text)
+    }
+
+    var count: Int {
+        queries.count
     }
 }

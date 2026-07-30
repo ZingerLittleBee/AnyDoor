@@ -129,13 +129,13 @@ struct ClipboardWallView: View {
             }
         }
         .onChange(of: state.query) { _, _ in
-            Task { await state.refreshQuery() }
+            state.queryTextDidChange()
         }
         .onChange(of: state.category) { _, _ in
-            Task { await state.refreshQuery() }
+            state.filtersDidChange()
         }
         .onChange(of: state.sourceFilterBundleID) { _, _ in
-            Task { await state.refreshQuery() }
+            state.filtersDidChange()
         }
         // The ⌘K shortcut (handled by the window controller) bumps this token;
         // open the native source menu in response, when there is anything to filter.
