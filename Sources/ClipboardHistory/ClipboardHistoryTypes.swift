@@ -116,7 +116,7 @@ public enum ClipboardHistorySearchIndexFailure: Equatable, Sendable {
     case stateUnavailable
 }
 
-public enum ClipboardHistoryMonitoringCommand: Sendable {
+public enum ClipboardHistoryMonitoringCommand: Equatable, Sendable {
     case start
     case stop
     case migrationStarted
