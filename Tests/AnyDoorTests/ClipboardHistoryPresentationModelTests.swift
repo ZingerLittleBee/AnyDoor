@@ -558,6 +558,129 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         )
     }
 
+    func testRefetchPolicyOnlyTriggersWhenQueryMembershipCanChange() {
+        typealias Model = ClipboardHistoryPresentationModel
+        let id = entry(0).id
+        let unfiltered = ClipboardHistoryQuery()
+
+        // A delete is always patched in place — the row leaves every view.
+        XCTAssertFalse(
+            Model.requiresRefetch(for: .delete(id), query: unfiltered)
+        )
+        XCTAssertFalse(
+            Model.requiresRefetch(
+                for: .delete(id),
+                query: ClipboardHistoryQuery(favoritesOnly: true)
+            )
+        )
+
+        // Content-only edits keep membership unless the query filters on
+        // exactly the attribute that changed.
+        XCTAssertFalse(
+            Model.requiresRefetch(for: .setFavorite(id, false), query: unfiltered)
+        )
+        XCTAssertTrue(
+            Model.requiresRefetch(
+                for: .setFavorite(id, false),
+                query: ClipboardHistoryQuery(favoritesOnly: true)
+            )
+        )
+        XCTAssertFalse(
+            Model.requiresRefetch(for: .setTags(id, []), query: unfiltered)
+        )
+        XCTAssertTrue(
+            Model.requiresRefetch(
+                for: .setTags(id, []),
+                query: ClipboardHistoryQuery(tagID: "work")
+            )
+        )
+        XCTAssertFalse(
+            Model.requiresRefetch(for: .editText(id, "next"), query: unfiltered)
+        )
+        XCTAssertTrue(
+            Model.requiresRefetch(
+                for: .editText(id, "next"),
+                query: ClipboardHistoryQuery(text: "needle")
+            )
+        )
+    }
+
+    func testDeletingDeepEntryKeepsLoadedPagesInsteadOfRefetching() async {
+        let firstPage = (0..<100).map(entry)
+        let second = entry(100)
+        let cursor = ClipboardHistoryCursor(token: Data("next".utf8))
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(entries: firstPage, nextCursor: cursor),
+                ClipboardHistoryPage(entries: [second], nextCursor: nil),
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+        await model.prefetchIfNeeded(visibleID: firstPage[99].id)
+        XCTAssertEqual(model.entries.count, 101)
+
+        await model.apply(.delete(second.id))
+
+        XCTAssertEqual(model.entries.count, 100)
+        XCTAssertFalse(model.entries.contains { $0.id == second.id })
+        let requests = await client.pageRequests
+        XCTAssertEqual(
+            requests.count,
+            2,
+            "a delete must patch the loaded pages, not snap back to page one"
+        )
+    }
+
+    func testMaterializationCacheEvictsLeastRecentlyUsedEntries() async {
+        let entries = (0..<40).map(entry)
+        let counter = MaterializeCounter()
+        let model = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: {
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: true,
+                        searchIndex: .ready
+                    )
+                },
+                page: { _, _ in
+                    ClipboardHistoryPage(entries: entries, nextCursor: nil)
+                },
+                apply: { _ in .notFound },
+                materialize: { request in
+                    await counter.record(request.entryID)
+                    return ClipboardHistoryMaterialization(items: [])
+                },
+                tagDefinitions: { [] }
+            )
+        )
+        await model.load()
+
+        for entry in entries.prefix(20) {
+            _ = await model.materialization(for: entry.id, purpose: .preview)
+        }
+
+        // 20 previews against a 16-slot cache: the oldest were evicted and
+        // have to be materialized again, the newest are still resident.
+        XCTAssertNil(
+            model.cachedMaterialization(for: entries[0].id, purpose: .preview)
+        )
+        XCTAssertNotNil(
+            model.cachedMaterialization(for: entries[19].id, purpose: .preview)
+        )
+
+        _ = await model.materialization(for: entries[0].id, purpose: .preview)
+        _ = await model.materialization(for: entries[19].id, purpose: .preview)
+
+        let evicted = await counter.count(for: entries[0].id)
+        let resident = await counter.count(for: entries[19].id)
+        XCTAssertEqual(evicted, 2)
+        XCTAssertEqual(resident, 1)
+    }
+
     private func entry(_ index: Int) -> ClipboardHistoryEntry {
         ClipboardHistoryEntry(
             id: ClipboardHistoryEntryID(
@@ -769,6 +892,18 @@ private actor TagPresentationClient {
             removedMembershipCount: 1,
             unprotectedEntryCount: 1
         )
+    }
+}
+
+private actor MaterializeCounter {
+    private var counts: [ClipboardHistoryEntryID: Int] = [:]
+
+    func record(_ entryID: ClipboardHistoryEntryID) {
+        counts[entryID, default: 0] += 1
+    }
+
+    func count(for entryID: ClipboardHistoryEntryID) -> Int {
+        counts[entryID] ?? 0
     }
 }
 

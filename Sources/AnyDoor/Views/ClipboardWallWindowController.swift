@@ -656,14 +656,16 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 
+    /// `apply` already patches the loaded page (and refetches itself when the
+    /// mutation can change page membership), so this must not reload on top of
+    /// it — that would snap a deep scroll position back to the first page after
+    /// every delete or favourite toggle.
     private func performMutation(_ mutation: ClipboardHistoryMutation) {
         Task {
             await state.presentation.apply(mutation)
-            guard state.presentation.actionFailure == nil else {
+            if state.presentation.actionFailure != nil {
                 presentActionFailure()
-                return
             }
-            await state.presentation.reload()
         }
     }
 

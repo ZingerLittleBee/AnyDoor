@@ -260,6 +260,11 @@ enum ClipboardHistoryActionFailure: Equatable {
 @Observable
 final class ClipboardHistoryPresentationModel {
     private static let prefetchDistance = 6
+    /// A materialization holds the decrypted payload — for an image entry that
+    /// is the whole bitmap. Paging is unbounded, so the cache has to be bounded
+    /// explicitly or scrolling a long history with previews open grows the
+    /// resident set without limit.
+    private static let materializationCacheLimit = 16
 
     private let operations: ClipboardHistoryPresentationOperations
     private var nextCursor: ClipboardHistoryCursor?
@@ -278,6 +283,9 @@ final class ClipboardHistoryPresentationModel {
     private var prefetchTask: Task<ClipboardHistoryPage, any Error>?
     private var materializationCache:
         [MaterializationKey: ClipboardHistoryMaterialization] = [:]
+    /// Least-recently-used first. Kept in step with `materializationCache` by
+    /// `cacheMaterialization` / `pruneMaterializations`.
+    private var materializationOrder: [MaterializationKey] = []
     private(set) var entries: [ClipboardHistoryEntry] = []
     private(set) var query = ClipboardHistoryQuery()
     private(set) var selectedID: ClipboardHistoryEntryID?
@@ -344,9 +352,7 @@ final class ClipboardHistoryPresentationModel {
         actionFailure = nil
         do {
             _ = try await operations.restoreLegacyOwnedFiles(request)
-            materializationCache = materializationCache.filter {
-                $0.key.entryID != request.entryID
-            }
+            invalidateMaterializations(for: request.entryID)
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -496,6 +502,27 @@ final class ClipboardHistoryPresentationModel {
         }
     }
 
+    /// Whether `mutation` can change *which* entries satisfy `query`, in which
+    /// case the page has to be refetched instead of patched in place. Patching
+    /// is the common path and is what keeps a deep scroll position (and the
+    /// neighbouring selection) after deleting or favouriting one row — a blanket
+    /// refetch would snap the wall back to the first page every time.
+    static func requiresRefetch(
+        for mutation: ClipboardHistoryMutation,
+        query: ClipboardHistoryQuery
+    ) -> Bool {
+        switch mutation {
+        case .delete:
+            false
+        case .setFavorite:
+            query.favoritesOnly
+        case .setTags:
+            query.tagID != nil
+        case .editText:
+            !query.text.isEmpty
+        }
+    }
+
     func apply(_ mutation: ClipboardHistoryMutation) async {
         actionFailure = nil
         do {
@@ -507,6 +534,9 @@ final class ClipboardHistoryPresentationModel {
                 }
                 invalidateMaterializations(for: entry.id)
                 notifyMutation()
+                if Self.requiresRefetch(for: mutation, query: query) {
+                    await loadFirstPage(preservingSelection: true)
+                }
             case .deleted:
                 let entryID = mutation.entryID
                 let deletedIndex = entries.firstIndex { $0.id == entryID }
@@ -547,6 +577,7 @@ final class ClipboardHistoryPresentationModel {
     ) async -> ClipboardHistoryMaterialization? {
         let key = MaterializationKey(entryID: entryID, purpose: purpose)
         if usesCache, let cached = materializationCache[key] {
+            touchMaterialization(key)
             return cached
         }
         let requestRevision = revision
@@ -561,7 +592,7 @@ final class ClipboardHistoryPresentationModel {
                 )
             )
             if usesCache, requestRevision == revision {
-                materializationCache[key] = value
+                cacheMaterialization(value, for: key)
             }
             return value
         } catch {
@@ -668,9 +699,7 @@ final class ClipboardHistoryPresentationModel {
                 contentState = entries.isEmpty ? .empty : .content
                 reconcileSelection(preferredID: preferredSelection)
                 let currentIDs = Set(entries.map(\.id))
-                materializationCache = materializationCache.filter {
-                    currentIDs.contains($0.key.entryID)
-                }
+                pruneMaterializations { currentIDs.contains($0.entryID) }
             case .indexing:
                 entries = []
                 selectedID = nil
@@ -712,9 +741,36 @@ final class ClipboardHistoryPresentationModel {
     private func invalidateMaterializations(
         for entryID: ClipboardHistoryEntryID
     ) {
-        materializationCache = materializationCache.filter {
-            $0.key.entryID != entryID
+        pruneMaterializations { $0.entryID != entryID }
+    }
+
+    private func cacheMaterialization(
+        _ value: ClipboardHistoryMaterialization,
+        for key: MaterializationKey
+    ) {
+        if materializationCache.updateValue(value, forKey: key) == nil {
+            materializationOrder.append(key)
+        } else {
+            touchMaterialization(key)
         }
+        while materializationOrder.count > Self.materializationCacheLimit {
+            let evicted = materializationOrder.removeFirst()
+            materializationCache.removeValue(forKey: evicted)
+        }
+    }
+
+    private func touchMaterialization(_ key: MaterializationKey) {
+        guard let index = materializationOrder.firstIndex(of: key) else {
+            return
+        }
+        materializationOrder.append(materializationOrder.remove(at: index))
+    }
+
+    private func pruneMaterializations(
+        keeping isKept: (MaterializationKey) -> Bool
+    ) {
+        materializationCache = materializationCache.filter { isKept($0.key) }
+        materializationOrder.removeAll { !isKept($0) }
     }
 
     private func upsertTagDefinition(
