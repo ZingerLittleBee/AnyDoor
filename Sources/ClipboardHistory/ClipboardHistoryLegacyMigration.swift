@@ -93,10 +93,12 @@ extension ClipboardHistoryModule {
             )
             try staged.close()
             stagingDatabase = nil
+            try faultInjector.check(.legacyMigrationBeforePublication)
             try FileManager.default.moveItem(
                 at: stagingRoot,
                 to: storeRoot
             )
+            try faultInjector.check(.legacyMigrationAfterPublication)
 
             let published = try Self.openDatabase(
                 at: Self.databaseURL(in: storeRoot),
@@ -1155,7 +1157,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private func safeLegacyPayloadURL(
+    func safeLegacyPayloadURL(
         named name: String,
         in directory: URL
     ) throws -> URL {
@@ -1172,7 +1174,7 @@ extension ClipboardHistoryModule {
         return url
     }
 
-    private func validateLegacyPayloadName(_ name: String) throws {
+    func validateLegacyPayloadName(_ name: String) throws {
         guard !name.isEmpty,
             name == URL(fileURLWithPath: name).lastPathComponent
         else {
@@ -1333,7 +1335,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func currentLegacyMigrationReport() throws
+    func currentLegacyMigrationReport() throws
         -> ClipboardHistoryLegacyMigrationReport?
     {
         guard let database else { return nil }

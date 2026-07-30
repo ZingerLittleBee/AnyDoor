@@ -461,6 +461,7 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case invalidLegacyFileRestore
     case legacyFileRestoreCollision(URL)
     case legacyFileRestoreFailed
+    case legacyCleanupFailed
 }
 
 public enum ClipboardHistoryResetConfirmation: Sendable {
@@ -696,6 +697,28 @@ public enum ClipboardHistoryLegacyFileRestoreOutcome:
 {
     case restored(memberCount: Int)
     case alreadyRestored(memberCount: Int)
+}
+
+public struct ClipboardHistoryLegacyCleanupReport:
+    Equatable,
+    Sendable
+{
+    public let removedPayloadCount: Int
+    public let alreadyMissingPayloadCount: Int
+    public let pendingPayloadCount: Int
+    public let canDeleteLegacyRows: Bool
+
+    public init(
+        removedPayloadCount: Int,
+        alreadyMissingPayloadCount: Int,
+        pendingPayloadCount: Int,
+        canDeleteLegacyRows: Bool
+    ) {
+        self.removedPayloadCount = removedPayloadCount
+        self.alreadyMissingPayloadCount = alreadyMissingPayloadCount
+        self.pendingPayloadCount = pendingPayloadCount
+        self.canDeleteLegacyRows = canDeleteLegacyRows
+    }
 }
 
 public struct ClipboardHistoryTagDefinition: Equatable, Sendable {

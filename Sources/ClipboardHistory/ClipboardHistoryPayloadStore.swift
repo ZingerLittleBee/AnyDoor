@@ -41,6 +41,10 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case logicalDeletionAfterPayloadRows
     case payloadDeletion
     case orphanReconciliation
+    case legacyMigrationBeforePublication
+    case legacyMigrationAfterPublication
+    case legacyCleanupBeforeDelete
+    case legacyCleanupAfterDelete
 }
 
 struct ClipboardHistoryFaultInjector: Sendable {

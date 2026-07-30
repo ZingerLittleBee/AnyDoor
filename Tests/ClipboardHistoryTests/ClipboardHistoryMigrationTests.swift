@@ -742,6 +742,178 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             [.ordinary, .ordinary]
         )
     }
+
+    func testMigrationPublicationCrashBoundariesAreRetrySafe()
+        async throws
+    {
+        for point in [
+            ClipboardHistoryFaultPoint.legacyMigrationBeforePublication,
+            .legacyMigrationAfterPublication,
+        ] {
+            let fixture = try LegacyMigrationFixture()
+            let entry = legacyEntry(
+                kind: .text,
+                text: "survives publication fault",
+                capturedAt: fixture.now
+            )
+            let request = fixture.request(
+                entries: [entry],
+                retentionPeriod: .unlimited
+            )
+            let failingModule = fixture.makeModule(
+                faultInjector: ClipboardHistoryFaultInjector(
+                    points: [point]
+                )
+            )
+
+            do {
+                _ = try await failingModule.migrateLegacy(request)
+                XCTFail("Expected migration publication fault")
+            } catch {
+                XCTAssertEqual(
+                    error as? ClipboardHistoryModuleError,
+                    .legacyMigrationFailed
+                )
+            }
+
+            let retryingModule = fixture.makeModule()
+            let outcome = try await retryingModule.migrateLegacy(request)
+            switch point {
+            case .legacyMigrationBeforePublication:
+                guard case .published = outcome else {
+                    return XCTFail("Expected an unpublished stage to rebuild")
+                }
+            case .legacyMigrationAfterPublication:
+                guard case .alreadyPublished = outcome else {
+                    return XCTFail("Expected published store discovery")
+                }
+            default:
+                XCTFail("Unexpected fault point")
+            }
+            let page = try await retryingModule.page(
+                ClipboardHistoryQuery()
+            )
+            XCTAssertEqual(page.entries.map(\.id.value), [entry.id])
+        }
+    }
+
+    func testLegacyCleanupRequiresProofAndRecoversAcrossDeleteFaults()
+        async throws
+    {
+        for point in [
+            ClipboardHistoryFaultPoint.legacyCleanupBeforeDelete,
+            .legacyCleanupAfterDelete,
+        ] {
+            let fixture = try LegacyMigrationFixture()
+            let payloadName = "owned-copy"
+            try fixture.writeLegacyPayload(
+                named: payloadName,
+                data: Data("captured bytes".utf8)
+            )
+            let module = fixture.makeModule(
+                faultInjector: ClipboardHistoryFaultInjector(
+                    points: [point]
+                )
+            )
+            _ = try await module.migrateLegacy(
+                fixture.request(
+                    entries: [
+                        legacyEntry(
+                            kind: .file,
+                            capturedAt: fixture.now,
+                            files: [
+                                legacyFile(
+                                    storedName: payloadName,
+                                    originalURL: fixture.root
+                                        .appendingPathComponent("missing.txt")
+                                )
+                            ]
+                        )
+                    ],
+                    retentionPeriod: .unlimited
+                )
+            )
+
+            do {
+                _ = try await module.cleanupLegacyPayloads(
+                    in: fixture.legacyPayloadRoot
+                )
+                XCTFail("Expected cleanup fault")
+            } catch {
+                XCTAssertEqual(
+                    error as? ClipboardHistoryModuleError,
+                    .legacyCleanupFailed
+                )
+            }
+            XCTAssertEqual(
+                FileManager.default.fileExists(
+                    atPath: fixture.legacyPayloadURL(payloadName).path
+                ),
+                point == .legacyCleanupBeforeDelete
+            )
+
+            let retryingModule = fixture.makeModule()
+            let report = try await retryingModule.cleanupLegacyPayloads(
+                in: fixture.legacyPayloadRoot
+            )
+            XCTAssertEqual(report.pendingPayloadCount, 0)
+            XCTAssertTrue(report.canDeleteLegacyRows)
+            XCTAssertFalse(
+                FileManager.default.fileExists(
+                    atPath: fixture.legacyPayloadURL(payloadName).path
+                )
+            )
+        }
+    }
+
+    func testLegacyCleanupRetainsPlaintextWhenRedundancyProofDrifts()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let original = fixture.root.appendingPathComponent("equal.txt")
+        let payloadName = "equal-copy"
+        try Data("equal at migration".utf8).write(to: original)
+        try fixture.writeLegacyPayload(
+            named: payloadName,
+            data: Data("equal at migration".utf8)
+        )
+        let module = fixture.makeModule()
+        _ = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: payloadName,
+                                originalURL: original
+                            )
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+        try Data("changed after migration".utf8).write(to: original)
+
+        do {
+            _ = try await module.cleanupLegacyPayloads(
+                in: fixture.legacyPayloadRoot
+            )
+            XCTFail("Expected proof drift to block cleanup")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyCleanupFailed
+            )
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: fixture.legacyPayloadURL(payloadName).path
+            )
+        )
+    }
 }
 
 private final class LegacyMigrationFixture {
