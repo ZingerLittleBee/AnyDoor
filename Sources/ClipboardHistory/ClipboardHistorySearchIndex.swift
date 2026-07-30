@@ -638,6 +638,12 @@ extension ClipboardHistoryModule {
         )
     }
 
+    /// Search ranking packs `matchClass * radix + rankingGroup` into one
+    /// integer so SQL's `MIN` picks a single winning field. Every value
+    /// `searchRankingGroup` can return must stay below this, or the packing
+    /// bleeds into the match class — `ClipboardHistorySearchTests` pins it.
+    static let rankingGroupRadix = 8
+
     static func searchRankingGroup(for kind: String) -> Int {
         switch kind {
         case "ocr":

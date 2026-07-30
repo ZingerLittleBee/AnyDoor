@@ -1134,6 +1134,26 @@ final class ClipboardHistorySearchTests: XCTestCase {
         }
         return captured.entryID
     }
+
+    /// Ranking packs `matchClass * radix + rankingGroup` into one integer so
+    /// SQL's `MIN` can pick a single winning field. A ranking group that
+    /// reached the radix would carry into the match class and silently
+    /// reorder results, so the bound is pinned rather than assumed.
+    func testRankingGroupsStayBelowThePackingRadix() {
+        let kinds = [
+            "text", "ocr", "capturedPath", "currentPath", "qr", "url",
+            "unrecognizedKindFromALaterBuild",
+        ]
+        for kind in kinds {
+            let group = ClipboardHistoryModule.searchRankingGroup(for: kind)
+            XCTAssertGreaterThanOrEqual(group, 0, kind)
+            XCTAssertLessThan(
+                group,
+                ClipboardHistoryModule.rankingGroupRadix,
+                kind
+            )
+        }
+    }
 }
 
 private final class SearchTemporaryDatabase {

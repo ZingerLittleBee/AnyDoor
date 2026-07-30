@@ -83,34 +83,32 @@ extension ClipboardHistoryModule {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
             let terms = normalizedQuery.split(separator: " ").map(String.init)
-            var matchingIDs: Set<String>?
-            for term in terms {
-                let termIDs = Set(
-                    try Self.candidateFields(
-                        matching: term,
-                        in: database
-                    ).compactMap { row -> String? in
-                        let value: String = row["normalized_value"]
-                        guard value.range(of: term) != nil else {
-                            return nil
-                        }
-                        return row["entry_id"]
-                    }
-                )
-                matchingIDs = matchingIDs.map {
-                    $0.intersection(termIDs)
-                } ?? termIDs
-                if matchingIDs?.isEmpty == true {
-                    return 0
-                }
+            guard let plan = Self.makeTermPlan(terms: terms) else {
+                return 0
             }
-            guard let matchingIDs, !matchingIDs.isEmpty else { return 0 }
-            return try Self.filteredEntryRows(
-                ids: Array(matchingIDs),
-                query: query,
-                expiryCutoff: expiryCutoff,
-                in: database
-            ).count
+            var conditions: [String] = []
+            var arguments = plan.arguments
+            Self.appendTypedFilters(
+                query,
+                entryAlias: "entry",
+                to: &conditions,
+                arguments: &arguments,
+                expiryCutoff: expiryCutoff
+            )
+            let predicate = conditions.isEmpty
+                ? ""
+                : "WHERE \(conditions.joined(separator: " AND "))"
+            return try Int.fetchOne(
+                database,
+                sql: """
+                    WITH \(plan.ctes)
+                    SELECT COUNT(*)
+                    FROM clipboard_entries AS entry
+                    \(plan.joins)
+                    \(predicate)
+                    """,
+                arguments: arguments
+            ) ?? 0
         }
     }
 
@@ -281,126 +279,94 @@ extension ClipboardHistoryModule {
                 in: database
             )
         }
-
-        var matchesByEntry: [String: [String: [SearchFieldMatch]]] = [:]
-        for term in terms {
-            let candidateRows = try candidateFields(
-                matching: term,
-                in: database
-            )
-            var matchedEntryIDs = Set<String>()
-            for row in candidateRows {
-                let normalizedValue: String = row["normalized_value"]
-                guard normalizedValue.range(of: term) != nil else {
-                    continue
-                }
-                let entryID: String = row["entry_id"]
-                matchedEntryIDs.insert(entryID)
-                matchesByEntry[entryID, default: [:]][term, default: []]
-                    .append(
-                        SearchFieldMatch(
-                            normalizedValue: normalizedValue,
-                            rankingGroup: row["ranking_group"]
-                        )
-                    )
-            }
-            if matchesByEntry.isEmpty {
-                return ClipboardHistoryPage(entries: [], nextCursor: nil)
-            }
-            matchesByEntry = matchesByEntry.filter {
-                matchedEntryIDs.contains($0.key)
-            }
+        guard let plan = makeRankedPlan(
+            terms: terms,
+            normalizedQuery: normalizedQuery
+        ) else {
+            return ClipboardHistoryPage(entries: [], nextCursor: nil)
         }
 
-        let metadata = try filteredEntryRows(
-            ids: Array(matchesByEntry.keys),
-            query: query,
-            expiryCutoff: expiryCutoff,
-            in: database
+        var conditions: [String] = []
+        var arguments = plan.arguments
+        appendTypedFilters(
+            query,
+            entryAlias: "entry",
+            to: &conditions,
+            arguments: &arguments,
+            expiryCutoff: expiryCutoff
         )
-        var ranked: [RankedSearchEntry] = []
-        for row in metadata {
-            let entryID: String = row["id"]
-            guard let termMatches = matchesByEntry[entryID],
-                terms.allSatisfy({ termMatches[$0]?.isEmpty == false })
-            else {
-                continue
-            }
-            let allMatches = termMatches.values.flatMap { $0 }
-            let completeMatches = allMatches.filter {
-                $0.normalizedValue.range(of: normalizedQuery) != nil
-            }
-            let rank: SearchRank
-            if let complete = completeMatches.min(by: {
-                $0.completeRank(for: normalizedQuery)
-                    < $1.completeRank(for: normalizedQuery)
-            }) {
-                let completeRank = complete.completeRank(
-                    for: normalizedQuery
-                )
-                rank = SearchRank(
-                    completeQueryTier: 0,
-                    weakestMatchClass: completeRank.matchClass,
-                    aggregateMatchClass: completeRank.matchClass,
-                    fieldPriority: complete.rankingGroup
-                )
-            } else {
-                let bestTermMatches = terms.compactMap { term in
-                    termMatches[term]?.min {
-                        $0.termRank(for: term) < $1.termRank(for: term)
-                    }
-                }
-                guard bestTermMatches.count == terms.count else {
-                    continue
-                }
-                let termRanks = zip(terms, bestTermMatches).map {
-                    $1.termRank(for: $0)
-                }
-                rank = SearchRank(
-                    completeQueryTier: 1,
-                    weakestMatchClass:
-                        termRanks.map(\.matchClass).max() ?? 2,
-                    aggregateMatchClass:
-                        termRanks.map(\.matchClass).reduce(0, +),
-                    fieldPriority:
-                        bestTermMatches.map(\.rankingGroup).reduce(0, +)
-                )
-            }
-            ranked.append(
-                RankedSearchEntry(
-                    row: row,
-                    rank: rank,
-                    lastCapturedAt: row["last_captured_at"],
-                    recencyOrder: row["recency_order"],
-                    entryID: entryID
-                )
+        let predicate = conditions.isEmpty
+            ? ""
+            : "WHERE \(conditions.joined(separator: " AND "))"
+
+        // The cursor is a WHERE clause over the same key the ORDER BY uses,
+        // which is what lets SQLite stop at 101 rows instead of handing every
+        // match back for Swift to sort and then discard.
+        var cursorPredicate = ""
+        if let cursor, let rank = cursor.rank {
+            let (sql, cursorArguments) = strictlyAfterPredicate(
+                keys: [
+                    ("rank_tier", true, rank.completeQueryTier),
+                    ("rank_weakest", true, rank.weakestMatchClass),
+                    ("rank_aggregate", true, rank.aggregateMatchClass),
+                    ("rank_priority", true, rank.fieldPriority),
+                    ("last_captured_at", false, cursor.lastCapturedAt),
+                    ("recency_order", false, cursor.recencyOrder),
+                    ("id", false, cursor.entryID),
+                ]
             )
-        }
-        ranked.sort()
-        if let cursor, let lastRank = cursor.rank {
-            ranked.removeAll {
-                !$0.isAfter(
-                    rank: lastRank,
-                    lastCapturedAt: cursor.lastCapturedAt,
-                    recencyOrder: cursor.recencyOrder,
-                    entryID: cursor.entryID
-                )
-            }
+            cursorPredicate = "WHERE \(sql)"
+            arguments += cursorArguments
         }
 
-        let hasMore = ranked.count > 100
-        let pageRows = Array(ranked.prefix(100))
-        let entries = try pageRows.map {
-            try entry(from: $0.row, in: database)
-        }
+        let rows = try Row.fetchAll(
+            database,
+            sql: """
+                WITH \(plan.ctes),
+                ranked AS (
+                    SELECT entry.id AS id,
+                           entry.captured_at AS captured_at,
+                           entry.last_captured_at AS last_captured_at,
+                           entry.recency_order AS recency_order,
+                           entry.preview_text AS preview_text,
+                           entry.is_favorite AS is_favorite,
+                           entry.source_bundle_id AS source_bundle_id,
+                           entry.source_display_name AS source_display_name,
+                           entry.source_provenance AS source_provenance,
+                           \(plan.tier) AS rank_tier,
+                           \(plan.weakestMatchClass) AS rank_weakest,
+                           \(plan.aggregateMatchClass) AS rank_aggregate,
+                           \(plan.fieldPriority) AS rank_priority
+                    FROM clipboard_entries AS entry
+                    \(plan.joins)
+                    \(predicate)
+                )
+                SELECT * FROM ranked
+                \(cursorPredicate)
+                ORDER BY rank_tier, rank_weakest, rank_aggregate,
+                         rank_priority, last_captured_at DESC,
+                         recency_order DESC, id DESC
+                LIMIT 101
+                """,
+            arguments: arguments
+        )
+
+        let hasMore = rows.count > 100
+        let pageRows = Array(rows.prefix(100))
+        let entries = try pageRows.map { try entry(from: $0, in: database) }
         let nextCursor = hasMore
             ? try pageRows.last.map {
                 try makeCursor(
                     binding: binding,
-                    rank: $0.rank,
-                    lastCapturedAt: $0.lastCapturedAt,
-                    recencyOrder: $0.recencyOrder,
-                    entryID: $0.entryID
+                    rank: SearchRank(
+                        completeQueryTier: $0["rank_tier"],
+                        weakestMatchClass: $0["rank_weakest"],
+                        aggregateMatchClass: $0["rank_aggregate"],
+                        fieldPriority: $0["rank_priority"]
+                    ),
+                    lastCapturedAt: $0["last_captured_at"],
+                    recencyOrder: $0["recency_order"],
+                    entryID: $0["id"]
                 )
             }
             : nil
@@ -410,77 +376,155 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private static func candidateFields(
-        matching term: String,
-        in database: Database
-    ) throws -> [Row] {
-        if term.unicodeScalars.count <= 2 {
-            guard let token = encodedShortTerm(term) else { return [] }
-            return try Row.fetchAll(
-                database,
-                sql: """
-                    SELECT field.entry_id, field.normalized_value,
-                           field.ranking_group
-                    FROM clipboard_search_short_grams AS candidate
-                    JOIN clipboard_search_fields AS field
-                      ON field.id = candidate.rowid
-                    WHERE clipboard_search_short_grams MATCH ?
-                    """,
-                arguments: [ftsLiteral(token)]
-            )
+    /// Matching only: one CTE per term, joined so an entry must satisfy every
+    /// term. Used by `indexedCount`, which needs no ranking.
+    private static func makeTermPlan(terms: [String]) -> SearchPlan? {
+        guard !terms.isEmpty else { return nil }
+        var ctes: [String] = []
+        var joins: [String] = []
+        var arguments: StatementArguments = []
+        for (index, term) in terms.enumerated() {
+            let name = "term_\(index)"
+            guard let cte = bestMatchCTE(
+                name: name,
+                needle: term,
+                candidateTerm: term
+            ) else {
+                return nil
+            }
+            ctes.append(cte.sql)
+            arguments += cte.arguments
+            joins.append("JOIN \(name) ON \(name).entry_id = entry.id")
         }
-        return try Row.fetchAll(
-            database,
-            sql: """
-                SELECT field.entry_id, field.normalized_value,
-                       field.ranking_group
-                FROM clipboard_search_trigram AS candidate
-                JOIN clipboard_search_fields AS field
-                  ON field.id = candidate.rowid
-                WHERE clipboard_search_trigram MATCH ?
-                """,
-            arguments: [ftsLiteral(term)]
+        return SearchPlan(
+            ctes: ctes.joined(separator: ",\n"),
+            joins: joins.joined(separator: "\n"),
+            arguments: arguments,
+            tier: "0",
+            weakestMatchClass: "0",
+            aggregateMatchClass: "0",
+            fieldPriority: "0"
         )
     }
 
-    private static func filteredEntryRows(
-        ids: [String],
-        query: ClipboardHistoryQuery,
-        expiryCutoff: Double?,
-        in database: Database
-    ) throws -> [Row] {
-        var result: [Row] = []
-        for chunkStart in stride(from: 0, to: ids.count, by: 500) {
-            let chunk = Array(
-                ids[chunkStart..<min(chunkStart + 500, ids.count)]
-            )
-            var conditions = [
-                "entry.id IN (\(Array(repeating: "?", count: chunk.count).joined(separator: ", ")))"
-            ]
-            var arguments = StatementArguments(chunk)
-            appendTypedFilters(
-                query,
-                entryAlias: "entry",
-                to: &conditions,
-                arguments: &arguments,
-                expiryCutoff: expiryCutoff
-            )
-            result += try Row.fetchAll(
-                database,
-                sql: """
-                    SELECT entry.id, entry.captured_at,
-                           entry.last_captured_at, entry.recency_order,
-                           entry.preview_text,
-                           entry.is_favorite, entry.source_bundle_id,
-                           entry.source_display_name,
-                           entry.source_provenance
-                    FROM clipboard_entries AS entry
-                    WHERE \(conditions.joined(separator: " AND "))
-                    """,
-                arguments: arguments
-            )
+    /// Matching plus the ranking key, as SQL expressions over the term CTEs.
+    ///
+    /// An entry whose single field contains the whole query outranks one that
+    /// only satisfies the terms separately, which is the `complete` CTE. For a
+    /// single-term query the whole query *is* the term, so that CTE is skipped
+    /// and every match is a complete one.
+    private static func makeRankedPlan(
+        terms: [String],
+        normalizedQuery: String
+    ) -> SearchPlan? {
+        guard var plan = makeTermPlan(terms: terms) else { return nil }
+        let radix = rankingGroupRadix
+        let matchClasses = terms.indices.map { "term_\($0).packed / \(radix)" }
+        let priorities = terms.indices.map { "term_\($0).packed % \(radix)" }
+        if terms.count == 1 {
+            plan.tier = "0"
+            plan.weakestMatchClass = matchClasses[0]
+            plan.aggregateMatchClass = matchClasses[0]
+            plan.fieldPriority = priorities[0]
+            return plan
         }
-        return result
+        // A field holding the whole query holds the first term too, so the
+        // complete match reuses that term's FTS candidates instead of a
+        // second index scan.
+        guard let complete = bestMatchCTE(
+            name: "complete",
+            needle: normalizedQuery,
+            candidateTerm: terms[0]
+        ) else {
+            return nil
+        }
+        plan.ctes += ",\n" + complete.sql
+        plan.arguments += complete.arguments
+        plan.joins += "\nLEFT JOIN complete ON complete.entry_id = entry.id"
+        let completeClass = "complete.packed / \(radix)"
+        plan.tier = "CASE WHEN complete.packed IS NULL THEN 1 ELSE 0 END"
+        plan.weakestMatchClass = """
+            CASE WHEN complete.packed IS NULL
+                 THEN max(\(matchClasses.joined(separator: ", ")))
+                 ELSE \(completeClass) END
+            """
+        plan.aggregateMatchClass = """
+            CASE WHEN complete.packed IS NULL
+                 THEN (\(matchClasses.joined(separator: " + ")))
+                 ELSE \(completeClass) END
+            """
+        plan.fieldPriority = """
+            CASE WHEN complete.packed IS NULL
+                 THEN (\(priorities.joined(separator: " + ")))
+                 ELSE complete.packed % \(radix) END
+            """
+        return plan
+    }
+
+    /// An entry's best field for one needle, as a single packed integer so
+    /// `MIN` picks the field that wins on match class first and ranking group
+    /// second — two independent `MIN`s could take each half from a different
+    /// field. Match class is 0 exact, 1 prefix, 2 substring.
+    ///
+    /// The FTS index only narrows candidates (trigram matching is a superset),
+    /// so `instr` still decides membership — the same check the Swift side
+    /// used to do, on values it no longer has to load.
+    private static func bestMatchCTE(
+        name: String,
+        needle: String,
+        candidateTerm: String
+    ) -> (sql: String, arguments: StatementArguments)? {
+        let source: String
+        let ftsArgument: String
+        if candidateTerm.unicodeScalars.count <= 2 {
+            guard let token = encodedShortTerm(candidateTerm) else {
+                return nil
+            }
+            source = "clipboard_search_short_grams"
+            ftsArgument = ftsLiteral(token)
+        } else {
+            source = "clipboard_search_trigram"
+            ftsArgument = ftsLiteral(candidateTerm)
+        }
+        let sql = """
+            \(name) AS (
+                SELECT field.entry_id AS entry_id,
+                       MIN(
+                           (CASE
+                                WHEN field.normalized_value = ? THEN 0
+                                WHEN instr(field.normalized_value, ?) = 1
+                                    THEN 1
+                                ELSE 2
+                            END) * \(rankingGroupRadix)
+                           + field.ranking_group
+                       ) AS packed
+                FROM \(source) AS candidate
+                JOIN clipboard_search_fields AS field
+                  ON field.id = candidate.rowid
+                WHERE \(source) MATCH ?
+                  AND instr(field.normalized_value, ?) > 0
+                GROUP BY field.entry_id
+            )
+            """
+        return (sql, [needle, needle, ftsArgument, needle])
+    }
+
+    /// Keyset pagination for a mixed-direction ORDER BY: the rows strictly
+    /// after `keys`, compared in the order given. Hand-writing the nesting for
+    /// seven keys is how off-by-one page boundaries get in.
+    private static func strictlyAfterPredicate(
+        keys: [(column: String, ascending: Bool, value: any DatabaseValueConvertible)]
+    ) -> (sql: String, arguments: StatementArguments) {
+        // All keys equal means the row *is* the cursor, which is not after it.
+        var sql = "0"
+        for key in keys.reversed() {
+            let comparison = key.ascending ? ">" : "<"
+            sql = """
+                (\(key.column) \(comparison) ? \
+                OR (\(key.column) = ? AND \(sql)))
+                """
+        }
+        return (sql, StatementArguments(keys.flatMap { [$0.value, $0.value] }))
     }
 
     private static func appendTypedFilters(
@@ -624,103 +668,25 @@ extension ClipboardHistoryModule {
     }
 }
 
-private struct SearchFieldMatch {
-    let normalizedValue: String
-    let rankingGroup: Int
-
-    func completeRank(for query: String) -> SearchMatchRank {
-        SearchMatchRank(
-            matchClass: matchClass(for: query),
-            fieldPriority: rankingGroup
-        )
-    }
-
-    func termRank(for term: String) -> SearchMatchRank {
-        SearchMatchRank(
-            matchClass: matchClass(for: term),
-            fieldPriority: rankingGroup
-        )
-    }
-
-    private func matchClass(for value: String) -> Int {
-        if normalizedValue == value {
-            return 0
-        }
-        if normalizedValue.hasPrefix(value) {
-            return 1
-        }
-        return 2
-    }
+/// The SQL a search compiles to: the term CTEs, how they join onto
+/// `clipboard_entries`, and the ranking key as expressions over them.
+private struct SearchPlan {
+    var ctes: String
+    var joins: String
+    var arguments: StatementArguments
+    var tier: String
+    var weakestMatchClass: String
+    var aggregateMatchClass: String
+    var fieldPriority: String
 }
 
-private struct SearchMatchRank: Comparable {
-    let matchClass: Int
-    let fieldPriority: Int
-
-    static func < (lhs: Self, rhs: Self) -> Bool {
-        (lhs.matchClass, lhs.fieldPriority)
-            < (rhs.matchClass, rhs.fieldPriority)
-    }
-}
-
-private struct SearchRank: Codable, Equatable, Comparable {
+/// The ranking key, carried in the cursor so the next page resumes exactly
+/// where the last one stopped.
+private struct SearchRank: Codable {
     let completeQueryTier: Int
     let weakestMatchClass: Int
     let aggregateMatchClass: Int
     let fieldPriority: Int
-
-    static func < (lhs: Self, rhs: Self) -> Bool {
-        (
-            lhs.completeQueryTier,
-            lhs.weakestMatchClass,
-            lhs.aggregateMatchClass,
-            lhs.fieldPriority
-        ) < (
-            rhs.completeQueryTier,
-            rhs.weakestMatchClass,
-            rhs.aggregateMatchClass,
-            rhs.fieldPriority
-        )
-    }
-}
-
-private struct RankedSearchEntry: Comparable {
-    let row: Row
-    let rank: SearchRank
-    let lastCapturedAt: Double
-    let recencyOrder: Int
-    let entryID: String
-
-    static func < (lhs: Self, rhs: Self) -> Bool {
-        if lhs.rank != rhs.rank {
-            return lhs.rank < rhs.rank
-        }
-        if lhs.lastCapturedAt != rhs.lastCapturedAt {
-            return lhs.lastCapturedAt > rhs.lastCapturedAt
-        }
-        if lhs.recencyOrder != rhs.recencyOrder {
-            return lhs.recencyOrder > rhs.recencyOrder
-        }
-        return lhs.entryID > rhs.entryID
-    }
-
-    func isAfter(
-        rank cursorRank: SearchRank,
-        lastCapturedAt cursorCapturedAt: Double,
-        recencyOrder cursorRecencyOrder: Int,
-        entryID cursorEntryID: String
-    ) -> Bool {
-        if rank != cursorRank {
-            return rank > cursorRank
-        }
-        if lastCapturedAt != cursorCapturedAt {
-            return lastCapturedAt < cursorCapturedAt
-        }
-        if recencyOrder != cursorRecencyOrder {
-            return recencyOrder < cursorRecencyOrder
-        }
-        return entryID < cursorEntryID
-    }
 }
 
 private struct SearchCursorBinding: Codable, Equatable {
