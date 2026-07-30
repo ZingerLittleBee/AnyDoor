@@ -466,6 +466,228 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
         XCTAssertEqual(provenances, ["copyEvent", "copyEvent"])
     }
 
+    @MainActor
+    func testGenerationChangeBeforeSnapshotRetriesWithoutMixingSourceAndContent()
+        async throws
+    {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        writeMonitorPasteboard(
+            pasteboard,
+            text: "baseline",
+            declaredSource: "dev.bybee.baseline"
+        )
+        var requestedGenerations: [Int] = []
+        var shouldReplaceGeneration = true
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            snapshotRequest: { pasteboard, generation in
+                requestedGenerations.append(generation)
+                if shouldReplaceGeneration {
+                    shouldReplaceGeneration = false
+                    self.writeMonitorPasteboard(
+                        pasteboard,
+                        text: "latest stable",
+                        declaredSource: "dev.bybee.latest"
+                    )
+                }
+                return ClipboardHistoryPasteboardCaptureRequest(
+                    pasteboard: pasteboard,
+                    expectedGeneration: generation
+                )
+            },
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        writeMonitorPasteboard(
+            pasteboard,
+            text: "overwritten during snapshot",
+            declaredSource: "dev.bybee.overwritten"
+        )
+        let overwrittenGeneration = pasteboard.changeCount
+        await monitor.observeForTesting()
+
+        let page = try await module.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(page.entries.count, 1)
+        XCTAssertEqual(entry.previewText, "latest stable")
+        XCTAssertEqual(
+            entry.source.bundleIdentifier,
+            "dev.bybee.latest"
+        )
+        XCTAssertEqual(entry.source.provenance, .declared)
+        XCTAssertEqual(
+            requestedGenerations,
+            [overwrittenGeneration, pasteboard.changeCount]
+        )
+    }
+
+    @MainActor
+    func testGenerationChangeDuringSnapshotRetriesLatestStableGeneration()
+        async throws
+    {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        writeMonitorPasteboard(
+            pasteboard,
+            text: "baseline",
+            declaredSource: "dev.bybee.baseline"
+        )
+        var requestedGenerations: [Int] = []
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            snapshotRequest: { pasteboard, generation in
+                requestedGenerations.append(generation)
+                return ClipboardHistoryPasteboardCaptureRequest(
+                    pasteboard: pasteboard,
+                    expectedGeneration: generation
+                )
+            },
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        let unstableItem = NSPasteboardItem()
+        unstableItem.setString(
+            "dev.bybee.overwritten",
+            forType: .init("org.nspasteboard.source")
+        )
+        let provider = MonitorChangingPasteboardDataProvider(
+            replacementText: "latest stable",
+            replacementSource: "dev.bybee.latest"
+        )
+        unstableItem.setDataProvider(provider, forTypes: [.string])
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.writeObjects([unstableItem]))
+        let overwrittenGeneration = pasteboard.changeCount
+        await monitor.observeForTesting()
+
+        let page = try await module.page(.init())
+        XCTAssertEqual(provider.callCount, 1)
+        XCTAssertEqual(
+            requestedGenerations,
+            [overwrittenGeneration, pasteboard.changeCount]
+        )
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(page.entries.count, 1)
+        XCTAssertEqual(entry.previewText, "latest stable")
+        XCTAssertEqual(
+            entry.source.bundleIdentifier,
+            "dev.bybee.latest"
+        )
+    }
+
+    @MainActor
+    func testGenerationJumpCapturesOnlyLatestAndRecordsOverwrittenCount()
+        async throws
+    {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        writeMonitorPasteboard(
+            pasteboard,
+            text: "baseline",
+            declaredSource: "dev.bybee.baseline"
+        )
+        let instrumentation = ClipboardHistoryMonitorInstrumentation()
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            instrumentation: instrumentation,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        writeMonitorPasteboard(
+            pasteboard,
+            text: "overwritten before observation",
+            declaredSource: "dev.bybee.intermediate"
+        )
+        writeMonitorPasteboard(
+            pasteboard,
+            text: "latest stable",
+            declaredSource: "dev.bybee.latest"
+        )
+        await monitor.observeForTesting()
+
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries.count, 1)
+        XCTAssertEqual(page.entries.first?.previewText, "latest stable")
+        XCTAssertEqual(
+            instrumentation.snapshot(),
+            ClipboardHistoryMonitorMetrics(
+                keyHintCount: 0,
+                idleTimerFireCount: 0,
+                boostedTimerFireCount: 0,
+                observedChangeCount: 1,
+                capturedChangeCount: 1,
+                overwrittenGenerationCount: 1
+            )
+        )
+    }
+
+    @MainActor
+    private func writeMonitorPasteboard(
+        _ pasteboard: NSPasteboard,
+        text: String,
+        declaredSource: String
+    ) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+        pasteboard.setString(
+            declaredSource,
+            forType: .init("org.nspasteboard.source")
+        )
+    }
+}
+
+private final class MonitorChangingPasteboardDataProvider: NSObject,
+    NSPasteboardItemDataProvider
+{
+    nonisolated(unsafe) private(set) var callCount = 0
+    private let replacementText: String
+    private let replacementSource: String
+
+    init(replacementText: String, replacementSource: String) {
+        self.replacementText = replacementText
+        self.replacementSource = replacementSource
+    }
+
+    func pasteboard(
+        _ pasteboard: NSPasteboard?,
+        item: NSPasteboardItem,
+        provideDataForType type: NSPasteboard.PasteboardType
+    ) {
+        guard let pasteboard else { return }
+        callCount += 1
+        pasteboard.clearContents()
+        pasteboard.setString(replacementText, forType: .string)
+        pasteboard.setString(
+            replacementSource,
+            forType: .init("org.nspasteboard.source")
+        )
+        item.setString("overwritten during snapshot", forType: type)
+    }
 }
 
 private final class MonitorTemporaryStore {

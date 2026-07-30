@@ -24,6 +24,9 @@ final class ClipboardHistoryCaptureMonitor {
     private let instrumentation: ClipboardHistoryMonitorInstrumentation
     private let sourceProvider:
         @MainActor () -> ClipboardHistoryApplicationSource?
+    private let snapshotRequest:
+        @MainActor (NSPasteboard, Int) ->
+            ClipboardHistoryPasteboardCaptureRequest
     private let policy = ClipboardHistoryObservationPolicy()
 
     private var configuration: ClipboardHistoryMonitoringConfiguration
@@ -48,6 +51,15 @@ final class ClipboardHistoryCaptureMonitor {
         sourceProvider: @escaping @MainActor
             () -> ClipboardHistoryApplicationSource? =
             ClipboardHistoryCaptureMonitor.frontmostApplicationSource,
+        snapshotRequest: @escaping @MainActor (NSPasteboard, Int) ->
+            ClipboardHistoryPasteboardCaptureRequest = {
+                pasteboard,
+                generation in
+                ClipboardHistoryPasteboardCaptureRequest(
+                    pasteboard: pasteboard,
+                    expectedGeneration: generation
+                )
+            },
         installsSystemObservers: Bool = true
     ) {
         self.module = module
@@ -57,6 +69,7 @@ final class ClipboardHistoryCaptureMonitor {
             instrumentation ?? module.monitorInstrumentation
         self.configuration = configuration
         self.sourceProvider = sourceProvider
+        self.snapshotRequest = snapshotRequest
         if installsSystemObservers {
             installSystemObservers()
             eventHintSource = ClipboardHistoryCopyEventHintSource { [weak self] in
@@ -223,9 +236,7 @@ final class ClipboardHistoryCaptureMonitor {
             case .capture(let source):
                 do {
                     let outcome = try await module.capture(
-                        ClipboardHistoryPasteboardCaptureRequest(
-                            pasteboard: pasteboard
-                        ),
+                        snapshotRequest(pasteboard, generation),
                         source: source
                     )
                     if outcome == .skipped(.generationChanged) {

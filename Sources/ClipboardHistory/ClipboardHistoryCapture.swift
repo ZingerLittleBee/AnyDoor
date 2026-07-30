@@ -10,7 +10,18 @@ public struct ClipboardHistoryPasteboardCaptureRequest: Sendable {
 
     @MainActor
     public init(pasteboard: NSPasteboard) {
-        snapshotRead = ClipboardHistoryModule.readSnapshot(from: pasteboard)
+        snapshotRead = ClipboardHistoryModule.readSnapshot(
+            from: pasteboard,
+            expectedGeneration: nil
+        )
+    }
+
+    @MainActor
+    init(pasteboard: NSPasteboard, expectedGeneration: Int) {
+        snapshotRead = ClipboardHistoryModule.readSnapshot(
+            from: pasteboard,
+            expectedGeneration: expectedGeneration
+        )
     }
 }
 
@@ -126,9 +137,15 @@ extension ClipboardHistoryModule {
 
     @MainActor
     fileprivate static func readSnapshot(
-        from pasteboard: NSPasteboard
+        from pasteboard: NSPasteboard,
+        expectedGeneration: Int?
     ) -> PasteboardSnapshotRead {
         let initialChangeCount = pasteboard.changeCount
+        if let expectedGeneration,
+            expectedGeneration != initialChangeCount
+        {
+            return .rejected(.generationChanged)
+        }
         guard let pasteboardItems = pasteboard.pasteboardItems,
             !pasteboardItems.isEmpty
         else {
