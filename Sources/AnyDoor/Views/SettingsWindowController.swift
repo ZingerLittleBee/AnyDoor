@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import PluginInterface
 import PluginSupport
 import SwiftData
@@ -23,9 +24,17 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// SwiftUI's own delegate wrapper, and the cast to `AppDelegate` fails —
     /// which would leave the window mounting nothing (a bare empty shell).
     private static var modelContainer: ModelContainer?
+    private static var clipboardHistoryModule: ClipboardHistoryModule?
+    private static var clipboardHistoryLifecycle: ClipboardHistoryLifecycle?
 
-    static func bootstrap(modelContainer: ModelContainer) {
+    static func bootstrap(
+        modelContainer: ModelContainer,
+        clipboardHistoryModule: ClipboardHistoryModule,
+        clipboardHistoryLifecycle: ClipboardHistoryLifecycle
+    ) {
         self.modelContainer = modelContainer
+        self.clipboardHistoryModule = clipboardHistoryModule
+        self.clipboardHistoryLifecycle = clipboardHistoryLifecycle
     }
 
     private var keyMonitor: Any?
@@ -95,11 +104,20 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func mountContentIfNeeded() {
         guard let window,
               window.contentView == nil || !(window.contentView is NSHostingView<SettingsRoot>) else { return }
-        guard let container = Self.modelContainer else {
+        guard let container = Self.modelContainer,
+            let module = Self.clipboardHistoryModule,
+            let lifecycle = Self.clipboardHistoryLifecycle
+        else {
             assertionFailure("SettingsWindowController.bootstrap was not called before show()")
             return
         }
-        let host = NSHostingView(rootView: SettingsRoot(container: container))
+        let host = NSHostingView(
+            rootView: SettingsRoot(
+                container: container,
+                clipboardHistoryModule: module,
+                clipboardHistoryLifecycle: lifecycle
+            )
+        )
         // Let SwiftUI install the (item-less) NavigationSplitView toolbar —
         // its presence is what grants the full-height sidebar treatment that
         // wraps the traffic lights, same as the Image Conversion window.
@@ -180,10 +198,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 /// value captured at mount time).
 private struct SettingsRoot: View {
     let container: ModelContainer
+    let clipboardHistoryModule: ClipboardHistoryModule
+    let clipboardHistoryLifecycle: ClipboardHistoryLifecycle
 
     var body: some View {
         let localization = LocalizationManager.shared
-        SettingsView()
+        SettingsView(
+            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardHistoryLifecycle: clipboardHistoryLifecycle
+        )
             .modelContainer(container)
             .environment(localization)
             .environment(\.locale, localization.effectiveLocale)

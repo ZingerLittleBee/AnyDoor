@@ -13,12 +13,22 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule = ClipboardHistoryModule()
+    @MainActor lazy var clipboardHistoryLifecycle =
+        ClipboardHistoryLifecycle(
+            module: clipboardHistoryModule,
+            migrationRequest: { [unowned self] in
+                try ClipboardHistoryLegacyAdapter.makeMigrationRequest(
+                    modelContext: modelContainer.mainContext,
+                    payloadDirectory:
+                        ClipboardHistoryStore.defaultHistoryDirectory()
+                )
+            }
+        )
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
-    private var clipboardWatcher: ClipboardWatcher?
 
     /// Monotonic process-launch reference (seconds since boot). Captured at
     /// instantiation — the earliest reliable point, since the delegate exists
@@ -72,7 +82,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         AskForPermission.configure(appName: "AnyDoor")
-        SettingsWindowController.bootstrap(modelContainer: modelContainer)
+        ClipboardPreferences.mergeDefaultExclusionsIfNeeded()
+        ClipboardSelfWrites.configure(
+            clipboardHistoryModule.pasteboardSelfWrites
+        )
+        BackupService.configureClipboardHistoryRuntime(
+            module: clipboardHistoryModule,
+            lifecycle: clipboardHistoryLifecycle
+        )
+        SettingsWindowController.bootstrap(
+            modelContainer: modelContainer,
+            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardHistoryLifecycle: clipboardHistoryLifecycle
+        )
+        ClipboardWallWindowController.shared.configure(
+            module: clipboardHistoryModule,
+            lifecycle: clipboardHistoryLifecycle
+        )
+        CaptureCoordinator.shared.configure(
+            clipboardHistoryModule: clipboardHistoryModule
+        )
 
         // Run migrations / seeding on the main context
         let context = modelContainer.mainContext
@@ -80,41 +109,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BuiltinPreferenceSeeder.seedIfNeeded(in: context)
         QuicklinkSeeder.seedIfNeeded(in: context)
 
-        // Bootstrap clipboard history store so providers can record entries.
-        ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
-        ClipboardHistoryStore.shared.setMaxAge(ClipboardPreferences.retention.maxAge)
-        // First drop tag ids whose definition no longer exists (crash between
-        // a registry delete and the item sweep), then run the forced prune so
-        // rows that were exempt only by a ghost tag are reclaimed — including
-        // their on-disk payloads — right at launch.
-        Task {
-            await ClipboardHistoryStore.shared.cleanUpUnknownTags(
-                validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
-            )
-            await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
-        }
-
-        // Start the clipboard watcher. Internal pasteboard writes suppress
-        // their own capture through `ClipboardSelfWrites.perform`.
-        let watcher = ClipboardWatcher(
-            store: ClipboardHistoryStore.shared,
-            selfWrites: clipboardHistoryModule.pasteboardSelfWrites
-        )
-        watcher.start()
-        clipboardWatcher = watcher
+        // The v2 lifecycle owns migration and passive observation. It never
+        // starts the monitor before the encrypted store and migration are
+        // ready, and it leaves failures explicit for Settings to recover.
+        clipboardHistoryLifecycle.start()
         // Native Plugins: the registry loads the installed set, activates the
         // installed plugins, and owns surface composition for launch and
         // later lifecycle changes. Core control flow names no plugin beyond
         // this list (ADR-0007).
-        let pluginHost = CorePluginHost(modelContainer: modelContainer)
+        let pluginHost = CorePluginHost(
+            modelContainer: modelContainer,
+            selfWrites: clipboardHistoryModule.pasteboardSelfWrites
+        )
         let plugins = NativePluginCatalog.makePlugins(host: pluginHost)
         // One-time usage-trace migration writes the install state directly and
         // must precede the bootstrap, which activates the migrated-installed
         // plugins through the normal launch path.
         PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
-        let coreProviders = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
-            PanelStore.shared.onKeepAwakeStateChange(state)
-        })
+        let coreProviders = BuiltinProviderRegistry.makeAll(
+            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardHistoryLifecycle: clipboardHistoryLifecycle,
+            onKeepAwakeChange: { state in
+                PanelStore.shared.onKeepAwakeStateChange(state)
+            }
+        )
         PluginRegistry.shared.bootstrap(
             plugins: plugins,
             modelContainer: modelContainer,
@@ -191,7 +209,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Menu bar status item. Replaces SwiftUI `MenuBarExtra`, whose
         // `isInserted: false` state infinite-loops the scene graph on macOS 26.
-        let menuBar = MenuBarController(modelContainer: modelContainer)
+        let menuBar = MenuBarController(
+            modelContainer: modelContainer,
+            clipboardHistoryModule: clipboardHistoryModule
+        )
         menuBar.install()
         menuBarController = menuBar
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -255,11 +276,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @MainActor
-    func pollClipboardNow() async {
-        await clipboardWatcher?.poll()
-    }
-
     private func shouldStartUpdater() -> Bool {
         let info = Bundle.main.infoDictionary ?? [:]
         let hasFeed = !((info["SUFeedURL"] as? String) ?? "").isEmpty
@@ -271,7 +287,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         HotkeyService.shared.stop()
-        clipboardWatcher?.stop()
     }
 
     // MARK: - State restoration
@@ -291,19 +306,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard HyperKeyController.shared.hasPersistedSignatures else {
-            return .terminateNow
-        }
-        Task {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    try? await HyperKeyController.shared.clear()
+        let lifecycle = clipboardHistoryLifecycle
+        Task { @MainActor in
+            await lifecycle.stop()
+            if HyperKeyController.shared.hasPersistedSignatures {
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try? await HyperKeyController.shared.clear()
+                    }
+                    group.addTask {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                    }
+                    await group.next()
+                    group.cancelAll()
                 }
-                group.addTask {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                }
-                await group.next()
-                group.cancelAll()
             }
             NSApp.reply(toApplicationShouldTerminate: true)
         }

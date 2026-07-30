@@ -1,3 +1,4 @@
+import ClipboardHistory
 import SwiftUI
 
 /// Settings content: a fixed-width, non-collapsible sidebar on the left with
@@ -7,6 +8,8 @@ import SwiftUI
 /// transparent titlebar), so the sidebar runs full height and wraps the
 /// traffic lights at their standard position.
 struct SettingsView: View {
+    let clipboardHistoryModule: ClipboardHistoryModule
+    let clipboardHistoryLifecycle: ClipboardHistoryLifecycle
     @State private var opener = SettingsOpener.shared
     @State private var selectedTab: SettingsTab = .panel
 
@@ -74,7 +77,13 @@ struct SettingsView: View {
         // own top margin reads as a large blank strip. A fixed padding then
         // aligns their first header with the ScrollView panes (panel /
         // quicklinks), which already sit right and keep the inset.
-        case .clipboard: groupedFormPane { ClipboardSettingsView() }
+        case .clipboard:
+            groupedFormPane {
+                ClipboardSettingsView(
+                    module: clipboardHistoryModule,
+                    lifecycle: clipboardHistoryLifecycle
+                )
+            }
         case .capture: groupedFormPane { CaptureSettingsView() }
         case .translation: groupedFormPane { TranslationSettingsView() }
         case .plugins: groupedFormPane { PluginsSettingsView() }

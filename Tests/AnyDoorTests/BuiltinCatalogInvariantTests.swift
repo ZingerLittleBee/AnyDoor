@@ -1,4 +1,5 @@
 import CoreGraphics
+import ClipboardHistory
 import Foundation
 import SwiftData
 import Testing
@@ -51,7 +52,10 @@ struct BuiltinCatalogInvariantTests {
     /// The full production provider set: Core providers plus every plugin's.
     @MainActor
     private static func allProviders() throws -> [any BuiltinProvider] {
-        try BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { _ in })
+        try BuiltinProviderRegistry.makeAll(
+            clipboardHistoryModule: ClipboardHistoryModule(),
+            onKeepAwakeChange: { _ in }
+        )
             + makeProductionPlugins().flatMap(\.providers)
     }
 

@@ -13,6 +13,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     static let shared = ClipboardWallWindowController()
 
     private var configuredState: ClipboardWallState?
+    private var clipboardHistoryLifecycle: ClipboardHistoryLifecycle?
     private var state: ClipboardWallState {
         guard let configuredState else {
             preconditionFailure(
@@ -80,11 +81,15 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(module: ClipboardHistoryModule) {
+    func configure(
+        module: ClipboardHistoryModule,
+        lifecycle: ClipboardHistoryLifecycle
+    ) {
         guard configuredState == nil else { return }
         configuredState = ClipboardWallState(
             presentation: ClipboardHistoryPresentationModel(module: module)
         )
+        clipboardHistoryLifecycle = lifecycle
     }
 
     func toggle() {
@@ -663,9 +668,167 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     }
 
     private func presentActionFailure() {
+        if case .fileCollectionRequiresRestore(
+            let entryID,
+            let ownedCount,
+            _
+        ) = state.presentation.actionFailure,
+            ownedCount > 0
+        {
+            Task { await restoreLegacyFiles(for: entryID) }
+            return
+        }
         ClipboardHistoryActionFailurePresenter.present(
             state.presentation.actionFailure
         )
+    }
+
+    private func restoreLegacyFiles(
+        for entryID: ClipboardHistoryEntryID
+    ) async {
+        guard let plan =
+            await state.presentation.legacyFileRestorePlan(for: entryID),
+            !plan.ownedMembers.isEmpty
+        else {
+            ClipboardHistoryActionFailurePresenter.present(
+                state.presentation.actionFailure
+            )
+            return
+        }
+        guard let destinations = chooseRestoreDestinations(for: plan) else {
+            return
+        }
+        await performRestore(plan: plan, destinations: destinations)
+    }
+
+    private func chooseRestoreDestinations(
+        for plan: ClipboardHistoryLegacyFileRestorePlan
+    ) -> [ClipboardHistoryLegacyFileDestination]? {
+        if plan.ownedMembers.count == 1,
+            let member = plan.ownedMembers.first
+        {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = member.suggestedName
+            panel.title = L(.clipboardRestoreFile)
+            guard panel.runModal() == .OK, let url = panel.url else {
+                return nil
+            }
+            return [
+                ClipboardHistoryLegacyFileDestination(
+                    memberID: member.id,
+                    url: url
+                )
+            ]
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = L(.clipboardRestoreFiles)
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let directory = panel.url else {
+            return nil
+        }
+        var usedNames = Set<String>()
+        return plan.ownedMembers.map { member in
+            let name = uniqueRestoreName(
+                member.suggestedName,
+                usedNames: &usedNames
+            )
+            return ClipboardHistoryLegacyFileDestination(
+                memberID: member.id,
+                url: directory.appendingPathComponent(name)
+            )
+        }
+    }
+
+    private func uniqueRestoreName(
+        _ suggestedName: String,
+        usedNames: inout Set<String>
+    ) -> String {
+        let safeName = URL(fileURLWithPath: suggestedName)
+            .lastPathComponent
+        let initial = safeName.isEmpty ? "Restored File" : safeName
+        guard !usedNames.contains(initial) else {
+            let url = URL(fileURLWithPath: initial)
+            let stem = url.deletingPathExtension().lastPathComponent
+            let ext = url.pathExtension
+            var suffix = 2
+            while true {
+                let candidate = ext.isEmpty
+                    ? "\(stem) \(suffix)"
+                    : "\(stem) \(suffix).\(ext)"
+                if usedNames.insert(candidate).inserted {
+                    return candidate
+                }
+                suffix += 1
+            }
+        }
+        usedNames.insert(initial)
+        return initial
+    }
+
+    private func performRestore(
+        plan: ClipboardHistoryLegacyFileRestorePlan,
+        destinations: [ClipboardHistoryLegacyFileDestination]
+    ) async {
+        let existing = destinations.filter {
+            FileManager.default.fileExists(atPath: $0.url.path)
+        }
+        var effectiveDestinations = destinations
+        if !existing.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = L(.clipboardRestoreCollisionTitle)
+            alert.informativeText = L(.clipboardRestoreCollisionMessage)
+            alert.alertStyle = .warning
+            alert.addButton(
+                withTitle: L(.clipboardRestoreReuseIdentical)
+            )
+            alert.addButton(
+                withTitle: L(.clipboardRestoreChooseAnother)
+            )
+            alert.addButton(withTitle: L(.settingsPanelCancel))
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                let existingURLs = Set(existing.map(\.url))
+                effectiveDestinations = destinations.map { destination in
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: destination.memberID,
+                        url: destination.url,
+                        collisionPolicy:
+                            existingURLs.contains(destination.url)
+                            ? .reuseIfIdentical
+                            : .failIfExists
+                    )
+                }
+            case .alertSecondButtonReturn:
+                guard let replacement =
+                    chooseRestoreDestinations(for: plan)
+                else {
+                    return
+                }
+                await performRestore(
+                    plan: plan,
+                    destinations: replacement
+                )
+                return
+            default:
+                return
+            }
+        }
+
+        let request = ClipboardHistoryLegacyFileRestoreRequest(
+            entryID: plan.entryID,
+            destinations: effectiveDestinations
+        )
+        if await state.presentation.restoreLegacyOwnedFiles(request) {
+            await state.presentation.reload()
+        } else {
+            ClipboardHistoryActionFailurePresenter.present(
+                state.presentation.actionFailure
+            )
+        }
     }
 
     /// A plugin-contributed action from a card's context menu, routed back
@@ -728,6 +891,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private func ignoreSource(_ entry: ClipboardHistoryEntry) {
         guard let bundleID = entry.source.bundleIdentifier else { return }
         ClipboardPreferences.addExcludedBundleID(bundleID)
+        Task {
+            await clipboardHistoryLifecycle?
+                .refreshMonitoringConfiguration()
+        }
         let name = entry.source.displayName ?? bundleID
         ToastPresenter.shared.show(.success(L(.clipboardToastSourceIgnored, name)))
     }

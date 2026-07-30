@@ -1,6 +1,7 @@
 import PluginInterface
 import PluginSupport
 import AppKit
+import ClipboardHistory
 import Foundation
 import ImageCodec
 
@@ -20,6 +21,7 @@ final class CaptureCoordinator {
     static let shared = CaptureCoordinator()
 
     private let settings: CaptureSettings
+    private var clipboardHistoryModule: ClipboardHistoryModule?
     private let selectionOverlay = SelectionOverlayWindow()
     private var lastRegionRequest: CaptureRequest?
     private var inFlight = false
@@ -28,6 +30,16 @@ final class CaptureCoordinator {
 
     init(settings: CaptureSettings = .shared) {
         self.settings = settings
+    }
+
+    func configure(
+        clipboardHistoryModule: ClipboardHistoryModule
+    ) {
+        precondition(
+            self.clipboardHistoryModule == nil,
+            "CaptureCoordinator may only be configured once"
+        )
+        self.clipboardHistoryModule = clipboardHistoryModule
     }
 
     /// Entry point used by every provider. Guards against re-entrancy.
@@ -338,7 +350,25 @@ final class CaptureCoordinator {
             // Shared box so the delete action can remove the exact history entry
             // once the async record completes (both hops run on the main actor).
             let recordedID = HistoryIDBox()
-            Task { recordedID.value = await ClipboardHistoryStore.shared.recordScreenshot(pngData: png) }
+            if let module = self.clipboardHistoryModule {
+                Task {
+                    recordedID.value = try? await module.capture(
+                        ClipboardHistoryCaptureRequest(
+                            source: .anyDoor,
+                            content: .bitmap(
+                                png,
+                                provenance: .anyDoorScreenshot
+                            )
+                        )
+                    ).entryID
+                    if recordedID.value != nil {
+                        NotificationCenter.default.post(
+                            name: .clipboardHistoryV2DidMutate,
+                            object: nil
+                        )
+                    }
+                }
+            }
 
             let actions = CaptureOverlayActions(
                 copy: { [weak self] in self?.copyToPasteboard(image) },
@@ -354,8 +384,19 @@ final class CaptureCoordinator {
                 recapture: { [weak self] in self?.recapture() },
                 delete: {
                     savedURL.map { try? FileManager.default.removeItem(at: $0) }
-                    if let id = recordedID.value {
-                        Task { await ClipboardHistoryStore.shared.deleteScreenshot(id: id) }
+                    if let id = recordedID.value,
+                        let module = self.clipboardHistoryModule
+                    {
+                        Task {
+                            if (try? await module.apply(.delete(id)))
+                                != nil
+                            {
+                                NotificationCenter.default.post(
+                                    name: .clipboardHistoryV2DidMutate,
+                                    object: nil
+                                )
+                            }
+                        }
                     }
                     ToastPresenter.shared.show(.success(L(.captureToastDeleted)))
                 }
@@ -455,7 +496,20 @@ final class CaptureCoordinator {
                         return
                     }
                     ClipboardSelfWrites.write(string: text)
-                    Task { await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text) }
+                    if let module = self.clipboardHistoryModule {
+                        Task {
+                            _ = try? await module.capture(
+                                ClipboardHistoryCaptureRequest(
+                                    source: .anyDoor,
+                                    content: .ocr(text)
+                                )
+                            )
+                            NotificationCenter.default.post(
+                                name: .clipboardHistoryV2DidMutate,
+                                object: nil
+                            )
+                        }
+                    }
                     ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
                 }
             } catch {
@@ -494,7 +548,7 @@ final class CaptureCoordinator {
 /// task and the overlay's delete action. Main-actor confined, so the two hops
 /// never race.
 @MainActor private final class HistoryIDBox {
-    var value: UUID?
+    var value: ClipboardHistoryEntryID?
 }
 
 /// PNG encoding for an NSImage via its CGImage.

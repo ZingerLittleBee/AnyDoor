@@ -1,3 +1,4 @@
+import ClipboardHistory
 import Foundation
 import PluginInterface
 
@@ -14,6 +15,8 @@ import PluginInterface
 @MainActor
 enum BuiltinProviderRegistry {
     static func makeAll(
+        clipboardHistoryModule: ClipboardHistoryModule,
+        clipboardHistoryLifecycle: ClipboardHistoryLifecycle? = nil,
         onKeepAwakeChange: @escaping @MainActor @Sendable (KeepAwakeState) -> Void
     ) -> [any BuiltinProvider] {
         [
@@ -43,10 +46,12 @@ enum BuiltinProviderRegistry {
             RestartMenuBarProvider(),
             FlushDNSProvider(),
             KeyboardLockProvider(),
-            OCRProvider(),
-            QRCodeProvider(),
-            PickColorProvider(),
-            ClipboardMonitoringProvider(),
+            OCRProvider(module: clipboardHistoryModule),
+            QRCodeProvider(module: clipboardHistoryModule),
+            PickColorProvider(module: clipboardHistoryModule),
+            ClipboardMonitoringProvider(
+                lifecycle: clipboardHistoryLifecycle
+            ),
             WindowLayoutProvider(item: .windowLeftHalf, action: .leftHalf),
             WindowLayoutProvider(item: .windowRightHalf, action: .rightHalf),
             WindowLayoutProvider(item: .windowMaximize, action: .maximize),
