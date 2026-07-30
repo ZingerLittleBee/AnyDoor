@@ -11,10 +11,11 @@ struct ClipboardHistoryActionFailureNotice: Equatable {
 
     init(_ failure: ClipboardHistoryActionFailure) {
         switch failure {
-        case .fileReferencesUnavailable(let count):
+        case .fileReferencesUnavailable(_, let count):
             titleKey = .clipboardToastFileMissing
             details = [.unavailable(count: count)]
         case .fileCollectionRequiresRestore(
+            _,
             let ownedCount,
             let unavailableCount
         ):

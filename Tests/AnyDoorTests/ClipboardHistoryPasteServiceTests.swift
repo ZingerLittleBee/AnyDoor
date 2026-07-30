@@ -84,7 +84,7 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
                     count: 3
                 )
             ),
-            .fileReferencesUnavailable(count: 3)
+            .fileReferencesUnavailable(entryID: id, count: 3)
         )
         XCTAssertEqual(
             ClipboardHistoryActionFailure(
@@ -95,6 +95,7 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
                 )
             ),
             .fileCollectionRequiresRestore(
+                entryID: id,
                 ownedCount: 2,
                 unavailableCount: 4
             )
@@ -102,8 +103,10 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
     }
 
     func testActionFailureNoticePresentsOwnedAndUnavailableCountsSeparately() {
+        let id = ClipboardHistoryEntryID(UUID())
         let notice = ClipboardHistoryActionFailureNotice(
             .fileCollectionRequiresRestore(
+                entryID: id,
                 ownedCount: 2,
                 unavailableCount: 4
             )

@@ -33,6 +33,14 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         @Sendable (
             String
         ) async throws -> ClipboardHistoryTagDefinitionUpdate
+    let legacyFileRestorePlan:
+        @Sendable (
+            ClipboardHistoryEntryID
+        ) async throws -> ClipboardHistoryLegacyFileRestorePlan
+    let restoreLegacyOwnedFiles:
+        @Sendable (
+            ClipboardHistoryLegacyFileRestoreRequest
+        ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome
 
     init(module: ClipboardHistoryModule) {
         status = { await module.status() }
@@ -49,16 +57,37 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             try await module.tagDefinitions()
         }
         createTagDefinition = { name, entryID in
-            try await module.createTagDefinition(
+            let assignment = try await module.createTagDefinition(
                 named: name,
                 assigningTo: entryID
             )
+            try await ClipboardHistoryPortableSettings.persist(
+                module.tagDefinitions()
+            )
+            return assignment
         }
         renameTagDefinition = { id, name in
-            try await module.renameTagDefinition(id: id, to: name)
+            let definition = try await module.renameTagDefinition(
+                id: id,
+                to: name
+            )
+            try await ClipboardHistoryPortableSettings.persist(
+                module.tagDefinitions()
+            )
+            return definition
         }
         deleteTagDefinition = { id in
-            try await module.deleteTagDefinition(id: id)
+            let update = try await module.deleteTagDefinition(id: id)
+            try await ClipboardHistoryPortableSettings.persist(
+                module.tagDefinitions()
+            )
+            return update
+        }
+        legacyFileRestorePlan = { entryID in
+            try await module.legacyFileRestorePlan(for: entryID)
+        }
+        restoreLegacyOwnedFiles = { request in
+            try await module.restoreLegacyOwnedFiles(request)
         }
     }
 
@@ -99,6 +128,18 @@ struct ClipboardHistoryPresentationOperations: Sendable {
                 String
             ) async throws -> ClipboardHistoryTagDefinitionUpdate = { _ in
                 throw ClipboardHistoryModuleError.operationUnavailable
+            },
+        legacyFileRestorePlan:
+            @escaping @Sendable (
+                ClipboardHistoryEntryID
+            ) async throws -> ClipboardHistoryLegacyFileRestorePlan = { _ in
+                throw ClipboardHistoryModuleError.operationUnavailable
+            },
+        restoreLegacyOwnedFiles:
+            @escaping @Sendable (
+                ClipboardHistoryLegacyFileRestoreRequest
+            ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome = { _ in
+                throw ClipboardHistoryModuleError.operationUnavailable
             }
     ) {
         self.status = status
@@ -109,6 +150,8 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.createTagDefinition = createTagDefinition
         self.renameTagDefinition = renameTagDefinition
         self.deleteTagDefinition = deleteTagDefinition
+        self.legacyFileRestorePlan = legacyFileRestorePlan
+        self.restoreLegacyOwnedFiles = restoreLegacyOwnedFiles
     }
 }
 
@@ -135,8 +178,12 @@ enum ClipboardHistoryActionFailure: Equatable {
     case storageFailure
     case payloadAuthenticationFailed
     case payloadUnavailable
-    case fileReferencesUnavailable(count: Int)
+    case fileReferencesUnavailable(
+        entryID: ClipboardHistoryEntryID,
+        count: Int
+    )
     case fileCollectionRequiresRestore(
+        entryID: ClipboardHistoryEntryID,
         ownedCount: Int,
         unavailableCount: Int
     )
@@ -164,14 +211,18 @@ enum ClipboardHistoryActionFailure: Equatable {
             self = .payloadAuthenticationFailed
         case .payloadUnavailable:
             self = .payloadUnavailable
-        case .fileReferencesUnavailable(_, let count):
-            self = .fileReferencesUnavailable(count: count)
+        case .fileReferencesUnavailable(let entryID, let count):
+            self = .fileReferencesUnavailable(
+                entryID: entryID,
+                count: count
+            )
         case .fileCollectionRequiresRestore(
-            _,
+            let entryID,
             let ownedCount,
             let unavailableCount
         ):
             self = .fileCollectionRequiresRestore(
+                entryID: entryID,
                 ownedCount: ownedCount,
                 unavailableCount: unavailableCount
             )
@@ -269,6 +320,34 @@ final class ClipboardHistoryPresentationModel {
         actionFailure = nil
     }
 
+    func legacyFileRestorePlan(
+        for entryID: ClipboardHistoryEntryID
+    ) async -> ClipboardHistoryLegacyFileRestorePlan? {
+        actionFailure = nil
+        do {
+            return try await operations.legacyFileRestorePlan(entryID)
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return nil
+        }
+    }
+
+    func restoreLegacyOwnedFiles(
+        _ request: ClipboardHistoryLegacyFileRestoreRequest
+    ) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.restoreLegacyOwnedFiles(request)
+            materializationCache = materializationCache.filter {
+                $0.key.entryID != request.entryID
+            }
+            return true
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
+    }
+
     func createTagDefinition(
         named name: String,
         assigningTo entryID: ClipboardHistoryEntryID
@@ -281,6 +360,7 @@ final class ClipboardHistoryPresentationModel {
             )
             upsertTagDefinition(assignment.definition)
             replaceEntry(assignment.entry)
+            notifyMutation()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -299,6 +379,7 @@ final class ClipboardHistoryPresentationModel {
                 name
             )
             upsertTagDefinition(definition)
+            notifyMutation()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -323,6 +404,7 @@ final class ClipboardHistoryPresentationModel {
                     source: entry.source
                 )
             }
+            notifyMutation()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -420,7 +502,8 @@ final class ClipboardHistoryPresentationModel {
                 }
                 mergeSources(from: [entry])
                 invalidateMaterializations(for: entry.id)
-            case .deleted, .notFound:
+                notifyMutation()
+            case .deleted:
                 let entryID = mutation.entryID
                 let deletedIndex = entries.firstIndex { $0.id == entryID }
                 entries.removeAll { $0.id == entryID }
@@ -438,6 +521,9 @@ final class ClipboardHistoryPresentationModel {
                 if entries.isEmpty {
                     contentState = .empty
                 }
+                notifyMutation()
+            case .notFound:
+                break
             }
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -633,6 +719,13 @@ final class ClipboardHistoryPresentationModel {
         }
         entries[index] = entry
         invalidateMaterializations(for: entry.id)
+    }
+
+    private func notifyMutation() {
+        NotificationCenter.default.post(
+            name: .clipboardHistoryV2DidMutate,
+            object: nil
+        )
     }
 
     private func mergeSources(from entries: [ClipboardHistoryEntry]) {
