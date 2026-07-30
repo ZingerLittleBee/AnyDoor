@@ -62,6 +62,41 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         )
     }
 
+    func testCleanupFailureRetainsLegacySourceUntilRetrySucceeds()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe(cleanupFailuresRemaining: 1)
+        let defaults = makeDefaults()
+        var finishCount = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            migrationRequest: Self.emptyMigrationRequest,
+            finishMigration: {
+                finishCount += 1
+            }
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+        XCTAssertEqual(finishCount, 0)
+        let failedEvents = await probe.recordedEvents()
+        XCTAssertFalse(failedEvents.contains(.monitoring(.start)))
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertEqual(finishCount, 1)
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(
+            events.filter { $0 == .cleanup }.count,
+            2
+        )
+    }
+
     func testStoreUnavailableRetryReopensBeforeMigrationAndMonitoring()
         async throws
     {
@@ -253,6 +288,7 @@ private actor ClipboardLifecycleProbe {
     private var availability: ClipboardHistoryStatus.Availability
     private var reason: ClipboardHistoryStatus.AvailabilityReason?
     private var migrationFailuresRemaining: Int
+    private var cleanupFailuresRemaining: Int
     private let becomesReadyOnRetry: Bool
     private var shouldSuspendNextMigration = false
     private var migrationContinuation: CheckedContinuation<Void, Never>?
@@ -261,11 +297,13 @@ private actor ClipboardLifecycleProbe {
         availability: ClipboardHistoryStatus.Availability = .ready,
         reason: ClipboardHistoryStatus.AvailabilityReason? = nil,
         migrationFailuresRemaining: Int = 0,
+        cleanupFailuresRemaining: Int = 0,
         becomesReadyOnRetry: Bool = false
     ) {
         self.availability = availability
         self.reason = reason
         self.migrationFailuresRemaining = migrationFailuresRemaining
+        self.cleanupFailuresRemaining = cleanupFailuresRemaining
         self.becomesReadyOnRetry = becomesReadyOnRetry
     }
 
@@ -281,7 +319,7 @@ private actor ClipboardLifecycleProbe {
                 try await self.migrate(request)
             },
             cleanupLegacyPayloads: { _ in
-                await self.cleanupLegacyPayloads()
+                try await self.cleanupLegacyPayloads()
             },
             retryStore: {
                 await self.retryStore()
@@ -375,10 +413,14 @@ private actor ClipboardLifecycleProbe {
         }
     }
 
-    private func cleanupLegacyPayloads()
+    private func cleanupLegacyPayloads() throws
         -> ClipboardHistoryLegacyCleanupReport
     {
         events.append(.cleanup)
+        if cleanupFailuresRemaining > 0 {
+            cleanupFailuresRemaining -= 1
+            throw ClipboardHistoryModuleError.legacyCleanupFailed
+        }
         return ClipboardHistoryLegacyCleanupReport(
             removedPayloadCount: 0,
             alreadyMissingPayloadCount: 0,

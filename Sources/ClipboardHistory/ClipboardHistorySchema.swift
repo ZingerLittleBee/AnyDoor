@@ -94,6 +94,29 @@ extension ClipboardHistoryModule {
                     .defaults(to: false)
             }
         }
+        migrator.registerMigration("v9_retention_delete_index") { database in
+            try database.execute(
+                sql: """
+                    CREATE INDEX clipboard_duplicate_candidates_entry
+                    ON clipboard_duplicate_candidates(entry_id)
+                    """
+            )
+        }
+        migrator.registerMigration("v10_recency_paging_index") { database in
+            try database.execute(
+                sql: "DROP INDEX clipboard_entries_recency"
+            )
+            try database.execute(
+                sql: """
+                    CREATE INDEX clipboard_entries_recency
+                    ON clipboard_entries(
+                        last_captured_at DESC,
+                        recency_order DESC,
+                        id DESC
+                    )
+                    """
+            )
+        }
         return migrator
     }
 
