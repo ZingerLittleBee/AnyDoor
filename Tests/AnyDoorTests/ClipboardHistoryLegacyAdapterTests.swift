@@ -52,14 +52,22 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             try container.mainContext.save()
         }
 
+        let legacyPayloadDirectory = root.appendingPathComponent(
+            "ClipboardHistory",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: legacyPayloadDirectory,
+            withIntermediateDirectories: true
+        )
+        let legacyPayload = legacyPayloadDirectory
+            .appendingPathComponent("owned-copy")
+        try Data("legacy payload".utf8).write(to: legacyPayload)
         let source = try ClipboardHistoryLegacySource(
             applicationSupportDirectory: root,
             productionStoreURL: storeURL,
             legacySchema: legacySchema,
-            payloadDirectory: root.appendingPathComponent(
-                "ClipboardHistory",
-                isDirectory: true
-            )
+            payloadDirectory: legacyPayloadDirectory
         )
 
         let productionContainer = try ModelContainer(
@@ -78,6 +86,16 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         XCTAssertEqual(
             request.transfer.entries.map(\.text),
             ["unique readable copy"]
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: legacyPayload.path)
+        )
+        XCTAssertEqual(
+            try Data(
+                contentsOf: request.payloadDirectory
+                    .appendingPathComponent("owned-copy")
+            ),
+            Data("legacy payload".utf8)
         )
 
         let snapshotDirectory =

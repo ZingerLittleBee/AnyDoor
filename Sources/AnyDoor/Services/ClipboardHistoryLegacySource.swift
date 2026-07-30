@@ -16,6 +16,7 @@ final class ClipboardHistoryLegacySource {
     private static let snapshotDirectoryName =
         "ClipboardHistoryLegacyMigration"
     private static let snapshotStoreName = "AnyDoorLegacy.store"
+    private static let snapshotPayloadDirectoryName = "Payloads"
 
     private let payloadDirectory: URL
     private let snapshotDirectory: URL
@@ -25,14 +26,17 @@ final class ClipboardHistoryLegacySource {
         applicationSupportDirectory: URL,
         productionStoreURL: URL,
         legacySchema: Schema,
-        payloadDirectory: URL
+        payloadDirectory legacyPayloadDirectory: URL
     ) throws {
-        self.payloadDirectory = payloadDirectory
         snapshotDirectory = applicationSupportDirectory
             .appendingPathComponent(
                 Self.snapshotDirectoryName,
                 isDirectory: true
             )
+        payloadDirectory = snapshotDirectory.appendingPathComponent(
+            Self.snapshotPayloadDirectoryName,
+            isDirectory: true
+        )
         try Self.prepareSnapshotIfNeeded(
             sourceStoreURL: productionStoreURL,
             snapshotDirectory: snapshotDirectory
@@ -40,12 +44,72 @@ final class ClipboardHistoryLegacySource {
         let snapshotStoreURL = snapshotDirectory
             .appendingPathComponent(Self.snapshotStoreName)
         if FileManager.default.fileExists(atPath: snapshotStoreURL.path) {
+            try Self.moveLegacyPayloadsIntoSnapshot(
+                from: legacyPayloadDirectory,
+                to: payloadDirectory
+            )
             container = try ModelContainer(
                 for: legacySchema,
                 configurations: ModelConfiguration(url: snapshotStoreURL)
             )
         } else {
             container = nil
+        }
+    }
+
+    private static func moveLegacyPayloadsIntoSnapshot(
+        from sourceDirectory: URL,
+        to snapshotPayloadDirectory: URL
+    ) throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(
+            at: snapshotPayloadDirectory,
+            withIntermediateDirectories: true
+        )
+        guard fileManager.fileExists(atPath: sourceDirectory.path) else {
+            return
+        }
+        let children = try fileManager.contentsOfDirectory(
+            at: sourceDirectory,
+            includingPropertiesForKeys: [
+                .isDirectoryKey,
+                .isRegularFileKey,
+                .isSymbolicLinkKey,
+            ]
+        )
+        let hasV2Store = children.contains {
+            $0.lastPathComponent == "history.sqlite"
+        }
+        let v2Names: Set<String> = [
+            "history.sqlite",
+            "history.sqlite-wal",
+            "history.sqlite-shm",
+            "payloads",
+            "staging",
+        ]
+        for child in children {
+            if hasV2Store, v2Names.contains(child.lastPathComponent) {
+                continue
+            }
+            let values = try child.resourceValues(
+                forKeys: [
+                    .isDirectoryKey,
+                    .isRegularFileKey,
+                    .isSymbolicLinkKey,
+                ]
+            )
+            guard values.isRegularFile == true,
+                values.isDirectory != true,
+                values.isSymbolicLink != true
+            else {
+                throw ClipboardHistoryLegacySourceError.incompleteSnapshot
+            }
+            let destination = snapshotPayloadDirectory
+                .appendingPathComponent(child.lastPathComponent)
+            guard !fileManager.fileExists(atPath: destination.path) else {
+                throw ClipboardHistoryLegacySourceError.incompleteSnapshot
+            }
+            try fileManager.moveItem(at: child, to: destination)
         }
     }
 

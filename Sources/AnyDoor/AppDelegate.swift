@@ -12,7 +12,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
-    let clipboardHistoryModule = ClipboardHistoryModule()
+    let clipboardHistoryModule: ClipboardHistoryModule
     private let clipboardHistoryLegacySource:
         ClipboardHistoryLegacySource
     @MainActor lazy var clipboardHistoryLifecycle =
@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     payloadDirectory:
                         ClipboardHistoryModule.defaultStoreRoot
                 )
+            clipboardHistoryModule = ClipboardHistoryModule()
             // Core-owned model types plus every plugin's (ADR-0005: plugin
             // schema is registered unconditionally, so user data survives
             // Uninstall and a later Install restores it).
