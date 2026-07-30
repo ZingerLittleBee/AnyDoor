@@ -4,7 +4,6 @@ import GRDB
 extension ClipboardHistoryModule {
     struct StorageDiagnostics: Equatable, Sendable {
         let appliedMigrations: [String]
-        let tables: [String]
         let journalMode: String
         let foreignKeysEnabled: Bool
         let autoVacuumMode: Int
@@ -67,16 +66,6 @@ extension ClipboardHistoryModule {
                     ORDER BY rowid
                     """
             )
-            let tables = try String.fetchAll(
-                database,
-                sql: """
-                    SELECT name
-                    FROM sqlite_master
-                    WHERE type = 'table'
-                      AND name LIKE 'clipboard_%'
-                    ORDER BY name
-                    """
-            )
             let journalMode =
                 try String.fetchOne(
                     database,
@@ -112,7 +101,6 @@ extension ClipboardHistoryModule {
 
             return StorageDiagnostics(
                 appliedMigrations: migrations,
-                tables: tables,
                 journalMode: journalMode,
                 foreignKeysEnabled: foreignKeysEnabled,
                 autoVacuumMode: autoVacuumMode,

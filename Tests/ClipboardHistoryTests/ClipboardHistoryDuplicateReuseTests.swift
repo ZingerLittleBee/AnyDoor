@@ -268,11 +268,16 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
         let firstTime = Date(timeIntervalSince1970: 10_000)
         let secondTime = Date(timeIntervalSince1970: 20_000)
         let editTime = Date(timeIntervalSince1970: 5_000)
-        let retryTime = Date(timeIntervalSince1970: 15_000)
         let clock = TestCaptureClock(firstTime)
-        let module = makeDuplicateReuseModule(in: fixture, clock: clock)
+        let recognizer = DuplicateReuseVisionRecognizer()
+        let module = makeDuplicateReuseModule(
+            in: fixture,
+            clock: clock,
+            visionRecognizer: recognizer
+        )
         let bitmap = try makeEquivalentBitmapEncodings().png
 
+        try await module.setAutomaticImageTextIndexingEnabled(true)
         let first = try await module.capture(
             bitmapRequest(
                 bitmap,
@@ -280,29 +285,36 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
                 sourceName: "First"
             )
         )
+        await module.awaitDerivedJobsForTesting()
+        let exhaustedJobs =
+            try await module.derivedIndexingDiagnostics(for: first.entryID)
+        XCTAssertEqual(
+            exhaustedJobs.jobs,
+            [
+                ClipboardHistoryDerivedJobDiagnostics(
+                    kind: .ocr,
+                    state: .failed,
+                    attemptCount: 3,
+                    eligibleGeneration: 1
+                ),
+                ClipboardHistoryDerivedJobDiagnostics(
+                    kind: .qr,
+                    state: .failed,
+                    attemptCount: 3,
+                    eligibleGeneration: 1
+                ),
+            ]
+        )
+        let exhaustedOCRCalls = await recognizer.callCount(for: .ocr)
+        let exhaustedQRCalls = await recognizer.callCount(for: .qr)
+        XCTAssertEqual(exhaustedOCRCalls, 3)
+        XCTAssertEqual(exhaustedQRCalls, 3)
         try await module.prepareDuplicateReuseMetadataForTesting(
             entryID: first.entryID,
             isFavorite: true,
             tags: ["important", "project"],
-            editedAt: editTime,
-            jobs: [
-                .init(
-                    kind: "ocr",
-                    state: "failed",
-                    attemptCount: 3,
-                    eligibleGeneration: 7,
-                    nextAttemptAt: retryTime
-                ),
-                .init(
-                    kind: "qr",
-                    state: "succeeded",
-                    attemptCount: 1,
-                    eligibleGeneration: 9,
-                    nextAttemptAt: nil
-                ),
-            ]
+            editedAt: editTime
         )
-        await module.setAutomaticImageTextIndexingForTesting(true)
         let beforeValue = try await module.duplicateReuseDiagnosticsForTesting(
             first.entryID
         )
@@ -316,6 +328,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
                 sourceName: "Second"
             )
         )
+        await module.awaitDerivedJobsForTesting()
 
         XCTAssertEqual(second.entryID, first.entryID)
         let afterValue = try await module.duplicateReuseDiagnosticsForTesting(
@@ -332,25 +345,37 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
         XCTAssertEqual(after.tags, ["important", "project"])
         XCTAssertEqual(after.editedAt, editTime)
         XCTAssertEqual(after.payloadIDs, before.payloadIDs)
+        let refreshedJobs =
+            try await module.derivedIndexingDiagnostics(for: first.entryID)
         XCTAssertEqual(
-            after.jobs,
+            refreshedJobs.jobs,
             [
-                .init(
-                    kind: "ocr",
-                    state: "pending",
-                    attemptCount: 0,
-                    eligibleGeneration: 8,
-                    nextAttemptAt: nil
+                ClipboardHistoryDerivedJobDiagnostics(
+                    kind: .ocr,
+                    state: .succeeded,
+                    attemptCount: 1,
+                    eligibleGeneration: 2
                 ),
-                .init(
-                    kind: "qr",
-                    state: "pending",
-                    attemptCount: 0,
-                    eligibleGeneration: 10,
-                    nextAttemptAt: nil
+                ClipboardHistoryDerivedJobDiagnostics(
+                    kind: .qr,
+                    state: .succeeded,
+                    attemptCount: 1,
+                    eligibleGeneration: 2
                 ),
             ]
         )
+        let refreshedOCRCalls = await recognizer.callCount(for: .ocr)
+        let refreshedQRCalls = await recognizer.callCount(for: .qr)
+        XCTAssertEqual(refreshedOCRCalls, 4)
+        XCTAssertEqual(refreshedQRCalls, 4)
+        let ocrPage = try await module.page(
+            ClipboardHistoryQuery(text: "refreshed OCR")
+        )
+        XCTAssertEqual(ocrPage.entries.map(\.id), [first.entryID])
+        let qrPage = try await module.page(
+            ClipboardHistoryQuery(facet: .qrCode)
+        )
+        XCTAssertEqual(qrPage.entries.map(\.id), [first.entryID])
         XCTAssertEqual(try fixture.payloadFiles().count, 2)
     }
 
@@ -531,14 +556,6 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
 
 extension ClipboardHistoryModule {
     struct DuplicateReuseDiagnostics: Equatable {
-        struct DerivedJob: Equatable {
-            let kind: String
-            let state: String
-            let attemptCount: Int
-            let eligibleGeneration: Int
-            let nextAttemptAt: Date?
-        }
-
         let capturedAt: Date
         let lastCapturedAt: Date
         let sourceBundleID: String?
@@ -549,15 +566,13 @@ extension ClipboardHistoryModule {
         let retentionStartedAt: Date
         let isProtected: Bool
         let payloadIDs: Set<String>
-        let jobs: [DerivedJob]
     }
 
     func prepareDuplicateReuseMetadataForTesting(
         entryID: ClipboardHistoryEntryID,
         isFavorite: Bool,
         tags: Set<String>,
-        editedAt: Date?,
-        jobs: [DuplicateReuseDiagnostics.DerivedJob] = []
+        editedAt: Date?
     ) throws {
         let database = try requiredDatabase()
         let storedID = entryID.value.uuidString.lowercased()
@@ -595,30 +610,6 @@ extension ClipboardHistoryModule {
                     """,
                 arguments: [isFavorite || !tags.isEmpty, storedID]
             )
-            for job in jobs {
-                try database.execute(
-                    sql: """
-                        INSERT INTO clipboard_derived_jobs(
-                            entry_id, kind, state, attempt_count,
-                            eligible_generation, next_attempt_at
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                        ON CONFLICT(entry_id, kind) DO UPDATE SET
-                            state = excluded.state,
-                            attempt_count = excluded.attempt_count,
-                            eligible_generation =
-                                excluded.eligible_generation,
-                            next_attempt_at = excluded.next_attempt_at
-                        """,
-                    arguments: [
-                        storedID,
-                        job.kind,
-                        job.state,
-                        job.attemptCount,
-                        job.eligibleGeneration,
-                        job.nextAttemptAt?.timeIntervalSince1970,
-                    ]
-                )
-            }
         }
     }
 
@@ -635,10 +626,6 @@ extension ClipboardHistoryModule {
                 arguments: [entryID.value.uuidString.lowercased()]
             )
         }
-    }
-
-    func setAutomaticImageTextIndexingForTesting(_ enabled: Bool) {
-        automaticImageTextIndexingEnabled = enabled
     }
 
     func duplicateReuseDiagnosticsForTesting(
@@ -681,27 +668,6 @@ extension ClipboardHistoryModule {
                     arguments: [storedID, storedID]
                 )
             )
-            let jobs = try Row.fetchAll(
-                database,
-                sql: """
-                    SELECT kind, state, attempt_count, eligible_generation,
-                           next_attempt_at
-                    FROM clipboard_derived_jobs
-                    WHERE entry_id = ?
-                    ORDER BY kind
-                    """,
-                arguments: [storedID]
-            ).map { job in
-                DuplicateReuseDiagnostics.DerivedJob(
-                    kind: job["kind"],
-                    state: job["state"],
-                    attemptCount: job["attempt_count"],
-                    eligibleGeneration: job["eligible_generation"],
-                    nextAttemptAt: (job["next_attempt_at"] as Double?).map {
-                        Date(timeIntervalSince1970: $0)
-                    }
-                )
-            }
             return DuplicateReuseDiagnostics(
                 capturedAt: Date(
                     timeIntervalSince1970: row["captured_at"]
@@ -730,8 +696,7 @@ extension ClipboardHistoryModule {
                     timeIntervalSince1970: row["retention_started_at"]
                 ),
                 isProtected: row["is_protected"],
-                payloadIDs: payloadIDs,
-                jobs: jobs
+                payloadIDs: payloadIDs
             )
         }
     }
@@ -779,6 +744,37 @@ private final class TestCaptureClock: @unchecked Sendable {
     }
 }
 
+private actor DuplicateReuseVisionRecognizer:
+    ClipboardHistoryVisionRecognizing
+{
+    private var callCounts: [ClipboardHistoryDerivedJobKind: Int] = [:]
+
+    func recognize(
+        _ kind: ClipboardHistoryDerivedJobKind,
+        in bitmaps: [Data]
+    ) async throws -> [String] {
+        XCTAssertFalse(bitmaps.isEmpty)
+        callCounts[kind, default: 0] += 1
+        guard callCounts[kind, default: 0] > 3 else {
+            throw DuplicateReuseVisionError.recognitionFailed
+        }
+        switch kind {
+        case .ocr:
+            return ["refreshed OCR value"]
+        case .qr:
+            return ["anydoor://refreshed-qr"]
+        }
+    }
+
+    func callCount(for kind: ClipboardHistoryDerivedJobKind) -> Int {
+        callCounts[kind, default: 0]
+    }
+}
+
+private enum DuplicateReuseVisionError: Error {
+    case recognitionFailed
+}
+
 private final class DuplicateReuseFileFixture {
     let url: URL
 
@@ -806,12 +802,15 @@ private final class DuplicateReuseFileFixture {
 extension ClipboardHistoryDuplicateReuseTests {
     fileprivate func makeDuplicateReuseModule(
         in fixture: DuplicateReuseTemporaryStore,
-        clock: TestCaptureClock = TestCaptureClock(Date())
+        clock: TestCaptureClock = TestCaptureClock(Date()),
+        visionRecognizer: any ClipboardHistoryVisionRecognizing =
+            ClipboardHistoryVisionRecognizer()
     ) -> ClipboardHistoryModule {
         ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: DuplicateReuseMasterKeyStore(),
-            now: { clock.now }
+            now: { clock.now },
+            visionRecognizer: visionRecognizer
         )
     }
 

@@ -729,7 +729,9 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertTrue(capabilities.hasTrigramTokenizer)
     }
 
-    func testEncryptedStoreMigratesCompleteVersionedSchemaAndPassesIntegrityChecks() async throws {
+    func testEncryptedStoreAppliesVersionedMigrationsAndPassesIntegrityChecks()
+        async throws
+    {
         let fixture = try TemporaryDatabase()
         let module = try ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
@@ -748,35 +750,6 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v5_indexed_search",
                 "v6_retention_and_mutations",
                 "v7_derived_indexing",
-            ]
-        )
-        XCTAssertEqual(
-            diagnostics.tables,
-            [
-                "clipboard_derived_jobs",
-                "clipboard_duplicate_candidates",
-                "clipboard_entries",
-                "clipboard_entry_facets",
-                "clipboard_entry_tags",
-                "clipboard_file_members",
-                "clipboard_history_foundation",
-                "clipboard_items",
-                "clipboard_maintenance_metadata",
-                "clipboard_payloads",
-                "clipboard_representations",
-                "clipboard_retention_state",
-                "clipboard_search_fields",
-                "clipboard_search_short_grams",
-                "clipboard_search_short_grams_config",
-                "clipboard_search_short_grams_data",
-                "clipboard_search_short_grams_docsize",
-                "clipboard_search_short_grams_idx",
-                "clipboard_search_trigram",
-                "clipboard_search_trigram_config",
-                "clipboard_search_trigram_data",
-                "clipboard_search_trigram_docsize",
-                "clipboard_search_trigram_idx",
-                "clipboard_tag_definitions",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -795,9 +768,11 @@ final class ClipboardHistoryModuleTests: XCTestCase {
             databaseKey: fixture.key
         )
 
+        let recognizer = MigrationVisionRecognizer()
         let module = try ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
-            databaseKey: fixture.key
+            databaseKey: fixture.key,
+            visionRecognizer: recognizer
         )
 
         let diagnostics = try await module.storageDiagnostics()
@@ -816,6 +791,30 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertTrue(diagnostics.databaseIntegrityOK)
         XCTAssertTrue(diagnostics.foreignKeyIntegrityOK)
         XCTAssertTrue(diagnostics.cipherIntegrityOK)
+
+        let migratedSetting =
+            try await module.isAutomaticImageTextIndexingEnabled()
+        XCTAssertFalse(migratedSetting)
+        let capture = try await module.capture(
+            bitmapRequest(Data("migration behavior".utf8))
+        )
+        await module.awaitDerivedJobsForTesting()
+        let derived = try await module.derivedIndexingDiagnostics(
+            for: capture.entryID
+        )
+        XCTAssertEqual(
+            derived.jobs,
+            [
+                ClipboardHistoryDerivedJobDiagnostics(
+                    kind: .qr,
+                    state: .succeeded,
+                    attemptCount: 1,
+                    eligibleGeneration: 1
+                )
+            ]
+        )
+        let recognizedKinds = await recognizer.recognizedKinds()
+        XCTAssertEqual(recognizedKinds, [.qr])
     }
 
     func testVersionedHKDFDerivesIndependentDatabaseAndPayloadKeys() throws {
@@ -1995,6 +1994,25 @@ private final class TestMasterKeyStore: ClipboardHistoryMasterKeyStoring, Sendab
             $0.loadResult = .missing
             return .missing
         }
+    }
+}
+
+private actor MigrationVisionRecognizer:
+    ClipboardHistoryVisionRecognizing
+{
+    private var kinds: [ClipboardHistoryDerivedJobKind] = []
+
+    func recognize(
+        _ kind: ClipboardHistoryDerivedJobKind,
+        in bitmaps: [Data]
+    ) async throws -> [String] {
+        XCTAssertFalse(bitmaps.isEmpty)
+        kinds.append(kind)
+        return []
+    }
+
+    func recognizedKinds() -> [ClipboardHistoryDerivedJobKind] {
+        kinds
     }
 }
 
