@@ -99,6 +99,18 @@ public struct ClipboardHistoryPage: Equatable, Sendable {
 public enum ClipboardHistoryPageState: Equatable, Sendable {
     case ready
     case indexing
+    case failed(ClipboardHistorySearchIndexFailure)
+}
+
+public enum ClipboardHistorySearchIndexStatus: Equatable, Sendable {
+    case ready
+    case indexing
+    case failed(ClipboardHistorySearchIndexFailure)
+}
+
+public enum ClipboardHistorySearchIndexFailure: Equatable, Sendable {
+    case rebuildFailed
+    case stateUnavailable
 }
 
 public enum ClipboardHistoryMonitoringCommand: Sendable {
@@ -297,15 +309,18 @@ public struct ClipboardHistoryStatus: Equatable, Sendable {
     public let availability: Availability
     public let reason: AvailabilityReason?
     public let isMonitoring: Bool
+    public let searchIndex: ClipboardHistorySearchIndexStatus?
 
     public init(
         availability: Availability,
         reason: AvailabilityReason? = nil,
-        isMonitoring: Bool
+        isMonitoring: Bool,
+        searchIndex: ClipboardHistorySearchIndexStatus? = nil
     ) {
         self.availability = availability
         self.reason = reason
         self.isMonitoring = isMonitoring
+        self.searchIndex = searchIndex
     }
 
     public enum Availability: Equatable, Sendable {

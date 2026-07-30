@@ -3,6 +3,16 @@ import GRDB
 
 extension ClipboardHistoryModule {
     static let searchIndexVersion = 1
+    private static let searchIndexReadyState = "ready"
+    private static let searchIndexIndexingState = "indexing"
+    private static let searchIndexFailedState = "failed"
+    private static let searchIndexRebuildFailedReason = "rebuildFailed"
+
+    enum SearchIndexRebuildOutcome: Sendable {
+        case ready
+        case failed
+        case failureStateUnavailable
+    }
 
     static func validateSearchRuntimeCapabilities(
         of database: DatabasePool
@@ -114,7 +124,7 @@ extension ClipboardHistoryModule {
         try setSearchMetadata(
             version: searchIndexVersion,
             generation: 1,
-            state: "ready",
+            state: searchIndexReadyState,
             in: database
         )
     }
@@ -126,7 +136,13 @@ extension ClipboardHistoryModule {
                 in: database
             )
             let state = try maintenanceText("searchIndexState", in: database)
-            guard version == searchIndexVersion, state == "ready" else {
+            if state == searchIndexFailedState {
+                return false
+            }
+            guard
+                version == searchIndexVersion,
+                state == searchIndexReadyState
+            else {
                 return true
             }
             return !(try searchIndexesPassIntegrityCheck(in: database))
@@ -134,36 +150,70 @@ extension ClipboardHistoryModule {
         guard needsRebuild else { return }
 
         try database.write { database in
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_maintenance_metadata(key, text_value)
-                    VALUES ('searchIndexState', 'indexing')
-                    ON CONFLICT(key) DO UPDATE SET
-                        integer_value = NULL,
-                        real_value = NULL,
-                        text_value = excluded.text_value,
-                        data_value = NULL
-                    """
+            try setSearchIndexState(
+                searchIndexIndexingState,
+                failureReason: nil,
+                in: database
             )
         }
     }
 
     static func makeSearchIndexRebuildTask(
-        for database: DatabasePool?
-    ) -> Task<Void, Never>? {
-        guard let database,
-            (try? database.read({
-                try searchIndexState(in: $0)
-            })) == "indexing"
-        else {
+        for database: DatabasePool?,
+        faultInjector: ClipboardHistoryFaultInjector
+    ) -> Task<SearchIndexRebuildOutcome, Never>? {
+        guard let database else {
             return nil
         }
+        let shouldRebuild: Bool
+        do {
+            shouldRebuild = try database.read {
+                try searchIndexState(in: $0) == searchIndexIndexingState
+            }
+        } catch {
+            return Task.detached(priority: .utility) {
+                do {
+                    try persistSearchIndexRebuildFailure(in: database)
+                    return .failed
+                } catch {
+                    return .failureStateUnavailable
+                }
+            }
+        }
+        guard shouldRebuild else { return nil }
+        return startSearchIndexRebuildTask(
+            in: database,
+            faultInjector: faultInjector
+        )
+    }
+
+    private static func startSearchIndexRebuildTask(
+        in database: DatabasePool,
+        faultInjector: ClipboardHistoryFaultInjector
+    ) -> Task<SearchIndexRebuildOutcome, Never> {
         return Task.detached(priority: .utility) {
-            try? rebuildSearchIndexes(in: database)
+            do {
+                try rebuildSearchIndexes(
+                    in: database,
+                    faultInjector: faultInjector
+                )
+                return .ready
+            } catch {
+                do {
+                    try persistSearchIndexRebuildFailure(in: database)
+                    return .failed
+                } catch {
+                    return .failureStateUnavailable
+                }
+            }
         }
     }
 
-    static func rebuildSearchIndexes(in database: DatabasePool) throws {
+    static func rebuildSearchIndexes(
+        in database: DatabasePool,
+        faultInjector: ClipboardHistoryFaultInjector =
+            ClipboardHistoryFaultInjector()
+    ) throws {
         try database.write { database in
             try database.execute(
                 sql: "DROP TABLE IF EXISTS clipboard_search_trigram"
@@ -192,10 +242,40 @@ extension ClipboardHistoryModule {
                     "searchIndexGeneration",
                     in: database
                 ) ?? 0) + 1
+            try faultInjector.check(.searchRebuildBeforePublish)
             try setSearchMetadata(
                 version: searchIndexVersion,
                 generation: generation,
-                state: "ready",
+                state: searchIndexReadyState,
+                in: database
+            )
+        }
+    }
+
+    static func retrySearchIndexes(
+        in database: DatabasePool,
+        faultInjector: ClipboardHistoryFaultInjector
+    ) throws -> Task<SearchIndexRebuildOutcome, Never> {
+        try database.write { database in
+            try setSearchIndexState(
+                searchIndexIndexingState,
+                failureReason: nil,
+                in: database
+            )
+        }
+        return startSearchIndexRebuildTask(
+            in: database,
+            faultInjector: faultInjector
+        )
+    }
+
+    private static func persistSearchIndexRebuildFailure(
+        in database: DatabasePool
+    ) throws {
+        try database.write { database in
+            try setSearchIndexState(
+                searchIndexFailedState,
+                failureReason: searchIndexRebuildFailedReason,
                 in: database
             )
         }
@@ -486,7 +566,30 @@ extension ClipboardHistoryModule {
     }
 
     static func searchIndexState(in database: Database) throws -> String {
-        try maintenanceText("searchIndexState", in: database) ?? "indexing"
+        try maintenanceText("searchIndexState", in: database)
+            ?? searchIndexIndexingState
+    }
+
+    static func searchIndexStatus(
+        in database: Database
+    ) throws -> ClipboardHistorySearchIndexStatus {
+        switch try searchIndexState(in: database) {
+        case searchIndexReadyState:
+            return .ready
+        case searchIndexIndexingState:
+            return .indexing
+        case searchIndexFailedState:
+            let reason = try maintenanceText(
+                "searchIndexFailure",
+                in: database
+            )
+            guard reason == searchIndexRebuildFailedReason else {
+                return .failed(.stateUnavailable)
+            }
+            return .failed(.rebuildFailed)
+        default:
+            return .failed(.stateUnavailable)
+        }
     }
 
     static func normalizeSearchText(_ value: String) -> String {
@@ -575,6 +678,14 @@ extension ClipboardHistoryModule {
                 arguments: [key, value]
             )
         }
+        try setSearchIndexState(state, failureReason: nil, in: database)
+    }
+
+    private static func setSearchIndexState(
+        _ state: String,
+        failureReason: String?,
+        in database: Database
+    ) throws {
         try database.execute(
             sql: """
                 INSERT INTO clipboard_maintenance_metadata(key, text_value)
@@ -587,6 +698,29 @@ extension ClipboardHistoryModule {
                 """,
             arguments: [state]
         )
+        if let failureReason {
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_maintenance_metadata(
+                        key,
+                        text_value
+                    ) VALUES ('searchIndexFailure', ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                        integer_value = NULL,
+                        real_value = NULL,
+                        text_value = excluded.text_value,
+                        data_value = NULL
+                    """,
+                arguments: [failureReason]
+            )
+        } else {
+            try database.execute(
+                sql: """
+                    DELETE FROM clipboard_maintenance_metadata
+                    WHERE key = 'searchIndexFailure'
+                    """
+            )
+        }
     }
 
     private static func maintenanceInteger(

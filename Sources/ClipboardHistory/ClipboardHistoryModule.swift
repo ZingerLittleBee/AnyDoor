@@ -26,7 +26,8 @@ public actor ClipboardHistoryModule {
     let fingerprintDigest: @Sendable (Data) -> Data
     let duplicateReuseEnabled: Bool
     var automaticImageTextIndexingEnabled = false
-    var searchIndexRebuildTask: Task<Void, Never>?
+    var searchIndexRebuildTask: Task<SearchIndexRebuildOutcome, Never>?
+    var isClosingStore = false
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
@@ -49,7 +50,8 @@ public actor ClipboardHistoryModule {
         duplicateReuseEnabled = true
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
-            for: resolution.database
+            for: resolution.database,
+            faultInjector: faultInjector
         )
         derivedKeys = resolution.keys
         availability = resolution.availability
@@ -80,7 +82,8 @@ public actor ClipboardHistoryModule {
             databaseKey: databaseKey
         )
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
-            for: database
+            for: database,
+            faultInjector: faultInjector
         )
         let payloadKey =
             ClipboardHistoryKeyDerivation
@@ -122,7 +125,8 @@ public actor ClipboardHistoryModule {
         self.duplicateReuseEnabled = duplicateReuseEnabled
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
-            for: resolution.database
+            for: resolution.database,
+            faultInjector: faultInjector
         )
         derivedKeys = resolution.keys
         availability = resolution.availability
@@ -178,7 +182,7 @@ public actor ClipboardHistoryModule {
 
     public func retry() async {
         guard let keyStore else { return }
-        await searchIndexRebuildTask?.value
+        _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
         if let database {
             try? database.close()
@@ -186,7 +190,8 @@ public actor ClipboardHistoryModule {
         let resolution = Self.resolveStore(at: storeRoot, keyStore: keyStore)
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
-            for: resolution.database
+            for: resolution.database,
+            faultInjector: faultInjector
         )
         derivedKeys = resolution.keys
         availability = resolution.availability
@@ -204,8 +209,44 @@ public actor ClipboardHistoryModule {
         ClipboardHistoryStatus(
             availability: availability,
             reason: availabilityReason,
-            isMonitoring: monitoringEnabled
+            isMonitoring: monitoringEnabled,
+            searchIndex: currentSearchIndexStatus()
         )
+    }
+
+    public func retrySearchIndex() throws
+        -> ClipboardHistorySearchIndexStatus
+    {
+        guard !isClosingStore else {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
+        let database = try requiredDatabase()
+        let status = try database.read {
+            try Self.searchIndexStatus(in: $0)
+        }
+        guard case .failed = status else {
+            return status
+        }
+        searchIndexRebuildTask = try Self.retrySearchIndexes(
+            in: database,
+            faultInjector: faultInjector
+        )
+        return .indexing
+    }
+
+    private func currentSearchIndexStatus()
+        -> ClipboardHistorySearchIndexStatus?
+    {
+        guard availability == .ready, let database else {
+            return nil
+        }
+        do {
+            return try database.read {
+                try Self.searchIndexStatus(in: $0)
+            }
+        } catch {
+            return .failed(.stateUnavailable)
+        }
     }
 
     public func monitorMetrics() -> ClipboardHistoryMonitorMetrics {
@@ -278,14 +319,27 @@ extension ClipboardHistoryModule {
     }
 
     func closeStoreForTesting() async throws {
-        await searchIndexRebuildTask?.value
+        guard !isClosingStore else {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
+        isClosingStore = true
+        let rebuildTask = searchIndexRebuildTask
+        if let rebuildTask {
+            _ = await rebuildTask.value
+        }
         searchIndexRebuildTask = nil
-        try database?.close()
-        database = nil
+        do {
+            try database?.close()
+            database = nil
+            isClosingStore = false
+        } catch {
+            isClosingStore = false
+            throw error
+        }
     }
 
     func awaitSearchIndexRebuildForTesting() async {
-        await searchIndexRebuildTask?.value
+        _ = await searchIndexRebuildTask?.value
     }
 
     static func createFoundationStoreForTesting(

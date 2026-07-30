@@ -36,11 +36,20 @@ extension ClipboardHistoryModule {
                     in: database
                 )
             }
-            guard try Self.searchIndexState(in: database) == "ready" else {
+            switch try Self.searchIndexStatus(in: database) {
+            case .ready:
+                break
+            case .indexing:
                 return ClipboardHistoryPage(
                     entries: [],
                     nextCursor: nil,
                     state: .indexing
+                )
+            case .failed(let reason):
+                return ClipboardHistoryPage(
+                    entries: [],
+                    nextCursor: nil,
+                    state: .failed(reason)
                 )
             }
             return try Self.searchPage(

@@ -429,7 +429,7 @@ extension ClipboardHistoryModule {
         monitoringRequested = false
         monitoringEnabled = false
         await captureMonitor?.setEnabled(false)
-        await searchIndexRebuildTask?.value
+        _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
         try database?.close()
         database = nil
@@ -452,7 +452,8 @@ extension ClipboardHistoryModule {
         let resolution = Self.resolveStore(at: storeRoot, keyStore: keyStore)
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
-            for: resolution.database
+            for: resolution.database,
+            faultInjector: faultInjector
         )
         derivedKeys = resolution.keys
         availability = resolution.availability

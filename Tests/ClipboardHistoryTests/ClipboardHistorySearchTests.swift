@@ -670,6 +670,159 @@ final class ClipboardHistorySearchTests: XCTestCase {
         try await Self.assertSearchIntegrity(reopened)
     }
 
+    func testRebuildFailurePersistsAndExplicitRetryPublishesReadyState()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let entry = try await Self.capture(
+            "retry authoritative value",
+            in: original
+        )
+        let database = try await original.requiredDatabase()
+        let originalGeneration = try await database.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        try await database.write { database in
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_maintenance_metadata
+                    SET integer_value = 0
+                    WHERE key = 'searchIndexVersion'
+                    """
+            )
+        }
+        try await original.closeStoreForTesting()
+
+        let failing = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key,
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.searchRebuildBeforePublish]
+            )
+        )
+        await failing.awaitSearchIndexRebuildForTesting()
+
+        let failedSearch = try await failing.page(
+            ClipboardHistoryQuery(text: "authoritative")
+        )
+        XCTAssertEqual(
+            failedSearch.state,
+            .failed(.rebuildFailed)
+        )
+        XCTAssertEqual(failedSearch.entries, [])
+        let browsing = try await failing.page(ClipboardHistoryQuery())
+        XCTAssertEqual(browsing.entries.map(\.id), [entry])
+        let failedStatus = await failing.status()
+        XCTAssertEqual(
+            failedStatus.searchIndex,
+            .failed(.rebuildFailed)
+        )
+        let failedDatabase = try await failing.requiredDatabase()
+        let failedGeneration = try await failedDatabase.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        XCTAssertEqual(failedGeneration, originalGeneration)
+        try await failing.closeStoreForTesting()
+
+        let reopened = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let persistedFailure = try await reopened.page(
+            ClipboardHistoryQuery(text: "authoritative")
+        )
+        XCTAssertEqual(
+            persistedFailure.state,
+            .failed(.rebuildFailed)
+        )
+        let reopenedFailedStatus = await reopened.status()
+        XCTAssertEqual(
+            reopenedFailedStatus.searchIndex,
+            .failed(.rebuildFailed)
+        )
+
+        let retryState = try await reopened.retrySearchIndex()
+        XCTAssertEqual(retryState, .indexing)
+        await reopened.awaitSearchIndexRebuildForTesting()
+
+        let rebuilt = try await reopened.page(
+            ClipboardHistoryQuery(text: "authoritative")
+        )
+        XCTAssertEqual(rebuilt.state, .ready)
+        XCTAssertEqual(rebuilt.entries.map(\.id), [entry])
+        let readyStatus = await reopened.status()
+        XCTAssertEqual(readyStatus.searchIndex, .ready)
+        let reopenedDatabase = try await reopened.requiredDatabase()
+        let rebuiltGeneration = try await reopenedDatabase.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        XCTAssertGreaterThan(rebuiltGeneration, originalGeneration)
+    }
+
+    func testClosingDuringExplicitRetryWaitsForOneCompletePublication()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let entry = try await Self.capture("close retry value", in: original)
+        let database = try await original.requiredDatabase()
+        let originalGeneration = try await database.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        try await database.write { database in
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_maintenance_metadata
+                    SET integer_value = 0
+                    WHERE key = 'searchIndexVersion'
+                    """
+            )
+        }
+        try await original.closeStoreForTesting()
+
+        let failing = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key,
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.searchRebuildBeforePublish]
+            )
+        )
+        await failing.awaitSearchIndexRebuildForTesting()
+        try await failing.closeStoreForTesting()
+
+        let retrying = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let retryState = try await retrying.retrySearchIndex()
+        XCTAssertEqual(retryState, .indexing)
+        try await retrying.closeStoreForTesting()
+
+        let reopened = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        await reopened.awaitSearchIndexRebuildForTesting()
+        let page = try await reopened.page(
+            ClipboardHistoryQuery(text: "close retry")
+        )
+        XCTAssertEqual(page.state, .ready)
+        XCTAssertEqual(page.entries.map(\.id), [entry])
+        let reopenedDatabase = try await reopened.requiredDatabase()
+        let generation = try await reopenedDatabase.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        XCTAssertGreaterThan(generation, originalGeneration)
+        try await Self.assertSearchIntegrity(reopened)
+    }
+
     func testMissingFTS5OrTrigramIsAnInvalidRuntime() throws {
         XCTAssertThrowsError(
             try ClipboardHistoryModule.requireSearchRuntimeCapabilities(
