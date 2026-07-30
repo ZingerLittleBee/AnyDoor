@@ -50,6 +50,40 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 "Unexpected results for \(query)"
             )
         }
+
+        for (expected, queries) in [
+            (
+                "Cafe\u{301} Society",
+                ["café society", "cafe", "fé soci"]
+            ),
+            (
+                "Ｆｕｌｌ－Ｗｉｄｔｈ",
+                ["full-width", "full", "ll-wid"]
+            ),
+            (
+                "Launch 🚀 now",
+                ["launch 🚀 now", "launch 🚀", "🚀 no"]
+            ),
+            (
+                "literal [brackets] + punctuation",
+                [
+                    "literal [brackets] + punctuation",
+                    "literal [brackets]",
+                    "[brackets] +",
+                ]
+            ),
+        ] {
+            for query in queries {
+                let page = try await module.page(
+                    ClipboardHistoryQuery(text: query)
+                )
+                XCTAssertEqual(
+                    page.entries.map(\.previewText),
+                    [expected],
+                    "Unexpected match class for \(query)"
+                )
+            }
+        }
     }
 
     func testOneAndTwoCodePointTermsReturnIndexedMatches() async throws {
@@ -103,6 +137,19 @@ final class ClipboardHistorySearchTests: XCTestCase {
         )
 
         XCTAssertEqual(page.entries.map(\.id), [captured.entryID])
+        for query in [
+            "alpha visible",
+            "alpha vis",
+            "pha visi",
+            "beta item",
+            "beta it",
+            "eta ite",
+        ] {
+            let classPage = try await module.page(
+                ClipboardHistoryQuery(text: query)
+            )
+            XCTAssertEqual(classPage.entries.map(\.id), [captured.entryID])
+        }
     }
 
     @MainActor
@@ -420,6 +467,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
         )
+        await module.awaitSearchIndexRebuildForTesting()
         let database = try await module.requiredDatabase()
         try await database.write { database in
             for index in 0..<205 {
