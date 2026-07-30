@@ -887,7 +887,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     }
 
     /// "Ignore Source App" from a card's context menu: future captures from
-    /// that app are skipped by ClipboardWatcher. Existing history stays intact.
+    /// that app are skipped by the v2 monitor. Existing history stays intact.
     private func ignoreSource(_ entry: ClipboardHistoryEntry) {
         guard let bundleID = entry.source.bundleIdentifier else { return }
         ClipboardPreferences.addExcludedBundleID(bundleID)

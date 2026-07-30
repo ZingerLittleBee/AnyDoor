@@ -13,15 +13,16 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule = ClipboardHistoryModule()
+    private let clipboardHistoryLegacySource:
+        ClipboardHistoryLegacySource
     @MainActor lazy var clipboardHistoryLifecycle =
         ClipboardHistoryLifecycle(
             module: clipboardHistoryModule,
             migrationRequest: { [unowned self] in
-                try ClipboardHistoryLegacyAdapter.makeMigrationRequest(
-                    modelContext: modelContainer.mainContext,
-                    payloadDirectory:
-                        ClipboardHistoryStore.defaultHistoryDirectory()
-                )
+                try clipboardHistoryLegacySource.makeMigrationRequest()
+            },
+            finishMigration: { [unowned self] in
+                try clipboardHistoryLegacySource.finishMigration()
             }
         )
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
@@ -56,12 +57,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
             let config = ModelConfiguration(url: storeURL)
+            let legacySchema = Schema(
+                [
+                    KeyBinding.self, BuiltinPreference.self,
+                    ClipboardHistoryItem.self, TranslationRecord.self,
+                    Quicklink.self,
+                ]
+                + NativePluginCatalog.modelSchemaTypes
+            )
+            clipboardHistoryLegacySource =
+                try ClipboardHistoryLegacySource(
+                    applicationSupportDirectory: storeDir,
+                    productionStoreURL: storeURL,
+                    legacySchema: legacySchema,
+                    payloadDirectory:
+                        ClipboardHistoryModule.defaultStoreRoot
+                )
             // Core-owned model types plus every plugin's (ADR-0005: plugin
             // schema is registered unconditionally, so user data survives
             // Uninstall and a later Install restores it).
             let schema = Schema(
                 [
-                    KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
+                    KeyBinding.self, BuiltinPreference.self,
                     TranslationRecord.self, Quicklink.self,
                 ]
                 + NativePluginCatalog.modelSchemaTypes
@@ -223,7 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Run synchronously on the main thread via MainThreadIsolation rather
             // than MainActor.assumeIsolated, whose swift_task_isCurrentExecutor
             // check can fault on the main thread after a ScreenCaptureKit capture
-            // (see ClipboardWatcher / MainThreadIsolation).
+            // (see the clipboard monitor / MainThreadIsolation).
             MainThreadIsolation.run { menuBar?.syncFromPreferences() }
         }
         bootstrapUpdater()

@@ -7,6 +7,94 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
+    func testCutoverSnapshotPreservesLegacyRowsWhileProductionSchemaDropsModel()
+        throws
+    {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-LegacyCutover-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: root)
+        }
+        let storeURL = root.appendingPathComponent("AnyDoor.store")
+        let legacySchema = Schema([
+            KeyBinding.self,
+            ClipboardHistoryItem.self,
+        ])
+        do {
+            let container = try ModelContainer(
+                for: legacySchema,
+                configurations: ModelConfiguration(url: storeURL)
+            )
+            container.mainContext.insert(
+                KeyBinding(
+                    keyCode: 122,
+                    modifierFlags: 0,
+                    appBundleID: "com.apple.finder",
+                    appName: "Finder",
+                    appPath:
+                        "/System/Library/CoreServices/Finder.app"
+                )
+            )
+            container.mainContext.insert(
+                ClipboardHistoryItem(
+                    kind: .text,
+                    text: "unique readable copy",
+                    previewTitle: "unique readable copy"
+                )
+            )
+            try container.mainContext.save()
+        }
+
+        let source = try ClipboardHistoryLegacySource(
+            applicationSupportDirectory: root,
+            productionStoreURL: storeURL,
+            legacySchema: legacySchema,
+            payloadDirectory: root.appendingPathComponent(
+                "ClipboardHistory",
+                isDirectory: true
+            )
+        )
+
+        let productionContainer = try ModelContainer(
+            for: Schema([KeyBinding.self]),
+            configurations: ModelConfiguration(url: storeURL)
+        )
+        XCTAssertEqual(
+            try productionContainer.mainContext.fetch(
+                FetchDescriptor<KeyBinding>()
+            ).map(\.appBundleID),
+            ["com.apple.finder"]
+        )
+        let request = try source.makeMigrationRequest(
+            defaults: makeDefaults()
+        )
+        XCTAssertEqual(
+            request.transfer.entries.map(\.text),
+            ["unique readable copy"]
+        )
+
+        let snapshotDirectory =
+            ClipboardHistoryLegacySource.snapshotDirectory(in: root)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: snapshotDirectory.path
+            )
+        )
+        try source.finishMigration()
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: snapshotDirectory.path
+            )
+        )
+    }
+
     func testAdapterReadsVersionedTransferWithoutMutatingLegacyState()
         throws
     {
@@ -89,7 +177,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
                 data: try JSONEncoder().encode(tags),
                 encoding: .utf8
             ),
-            forKey: ClipboardTagStore.defaultsKey
+            forKey: ClipboardHistoryPortableKeys.customTags
         )
         defaults.set(
             String(
@@ -160,5 +248,14 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             try Data(contentsOf: legacyPayload),
             Data("legacy bytes".utf8)
         )
+    }
+
+    private func makeDefaults() throws -> UserDefaults {
+        let suiteName = "ClipboardHistoryLegacySourceTests-\(UUID())"
+        let defaults = try XCTUnwrap(
+            UserDefaults(suiteName: suiteName)
+        )
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
     }
 }

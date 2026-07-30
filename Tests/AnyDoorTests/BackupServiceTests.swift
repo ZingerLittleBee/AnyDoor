@@ -8,7 +8,6 @@ final class BackupServiceTests: XCTestCase {
         let schema = Schema([
             KeyBinding.self,
             BuiltinPreference.self,
-            ClipboardHistoryItem.self,
             Quicklink.self,
         ])
         let config = ModelConfiguration(isStoredInMemoryOnly: true, allowsSave: true)
@@ -79,20 +78,10 @@ final class BackupServiceTests: XCTestCase {
         throws
     {
         let context = try makeContext()
-        context.insert(
-            ClipboardHistoryItem(
-                kind: .text,
-                text: "device-only-secret",
-                previewTitle: "device-only-secret",
-                isFavorite: true,
-                tagIDs: ["work"]
-            )
-        )
-        try context.save()
         let defaults = makeDefaults()
         defaults.set(
             "[{\"id\":\"work\",\"name\":\"Work\"}]",
-            forKey: ClipboardTagStore.defaultsKey
+            forKey: ClipboardHistoryPortableKeys.customTags
         )
         defaults.set(
             "[\"all\",\"tag:work\"]",
@@ -117,6 +106,10 @@ final class BackupServiceTests: XCTestCase {
             "device-only-migration-state",
             forKey: "clipboard.migrationState"
         )
+        defaults.set(
+            "device-only-secret",
+            forKey: "clipboard.historyPayload"
+        )
 
         let snapshot = try BackupService(
             context: context,
@@ -125,7 +118,7 @@ final class BackupServiceTests: XCTestCase {
         ).exportSnapshot()
 
         XCTAssertNotNil(
-            snapshot.settings[ClipboardTagStore.defaultsKey]
+            snapshot.settings[ClipboardHistoryPortableKeys.customTags]
         )
         XCTAssertNotNil(
             snapshot.settings[ClipboardCategoryOrder.defaultsKey]

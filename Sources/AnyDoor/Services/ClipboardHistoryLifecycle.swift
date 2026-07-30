@@ -23,6 +23,9 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
         @Sendable (
             ClipboardHistoryLegacyMigrationRequest
         ) async throws -> ClipboardHistoryLegacyMigrationOutcome
+    let cleanupLegacyPayloads:
+        @Sendable (URL) async throws
+            -> ClipboardHistoryLegacyCleanupReport
     let retryStore: @Sendable () async -> Void
     let resetStore: @Sendable () async throws -> Void
 
@@ -38,6 +41,9 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
         }
         migrate = { request in
             try await module.migrateLegacy(request)
+        }
+        cleanupLegacyPayloads = { payloadDirectory in
+            try await module.cleanupLegacyPayloads(in: payloadDirectory)
         }
         retryStore = {
             await module.retry()
@@ -58,12 +64,16 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
             @escaping @Sendable (
                 ClipboardHistoryLegacyMigrationRequest
             ) async throws -> ClipboardHistoryLegacyMigrationOutcome,
+        cleanupLegacyPayloads:
+            @escaping @Sendable (URL) async throws
+                -> ClipboardHistoryLegacyCleanupReport,
         retryStore: @escaping @Sendable () async -> Void,
         resetStore: @escaping @Sendable () async throws -> Void
     ) {
         self.status = status
         self.setMonitoring = setMonitoring
         self.migrate = migrate
+        self.cleanupLegacyPayloads = cleanupLegacyPayloads
         self.retryStore = retryStore
         self.resetStore = resetStore
     }
@@ -76,6 +86,7 @@ final class ClipboardHistoryLifecycle {
     private let defaults: UserDefaults
     private let migrationRequest:
         @MainActor () throws -> ClipboardHistoryLegacyMigrationRequest
+    private let finishMigration: @MainActor () throws -> Void
 
     @ObservationIgnored private var operationTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
@@ -89,11 +100,13 @@ final class ClipboardHistoryLifecycle {
         defaults: UserDefaults = .standard,
         migrationRequest:
             @escaping @MainActor () throws
-                -> ClipboardHistoryLegacyMigrationRequest
+                -> ClipboardHistoryLegacyMigrationRequest,
+        finishMigration: @escaping @MainActor () throws -> Void = {}
     ) {
         operations = ClipboardHistoryLifecycleOperations(module: module)
         self.defaults = defaults
         self.migrationRequest = migrationRequest
+        self.finishMigration = finishMigration
     }
 
     init(
@@ -101,11 +114,13 @@ final class ClipboardHistoryLifecycle {
         defaults: UserDefaults,
         migrationRequest:
             @escaping @MainActor () throws
-                -> ClipboardHistoryLegacyMigrationRequest
+                -> ClipboardHistoryLegacyMigrationRequest,
+        finishMigration: @escaping @MainActor () throws -> Void = {}
     ) {
         self.operations = operations
         self.defaults = defaults
         self.migrationRequest = migrationRequest
+        self.finishMigration = finishMigration
     }
 
     func start() {
@@ -271,6 +286,16 @@ final class ClipboardHistoryLifecycle {
             case .published(let report), .alreadyPublished(let report):
                 migrationReport = report
             }
+            let cleanupReport = try await operations.cleanupLegacyPayloads(
+                request.payloadDirectory
+            )
+            guard cleanupReport.canDeleteLegacyRows else {
+                throw ClipboardHistoryModuleError.legacyCleanupFailed
+            }
+            guard !Task.isCancelled, generation == requestGeneration else {
+                return
+            }
+            try finishMigration()
             _ = await operations.setMonitoring(
                 .migrationCompleted,
                 configuration

@@ -27,6 +27,7 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
                 .status,
                 .monitoring(.migrationStarted),
                 .migration,
+                .cleanup,
                 .monitoring(.migrationCompleted),
                 .monitoring(.start),
             ]
@@ -93,6 +94,7 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
                 .status,
                 .monitoring(.migrationStarted),
                 .migration,
+                .cleanup,
                 .monitoring(.migrationCompleted),
                 .monitoring(.start),
             ]
@@ -200,12 +202,13 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         XCTAssertEqual(entryCounts, [0])
         let events = await probe.recordedEvents()
         XCTAssertEqual(
-            events.suffix(6),
+            events.suffix(7),
             [
                 .reset,
                 .status,
                 .monitoring(.migrationStarted),
                 .migration,
+                .cleanup,
                 .monitoring(.migrationCompleted),
                 .monitoring(.start),
             ]
@@ -238,6 +241,7 @@ private enum ClipboardLifecycleEvent: Equatable, Sendable {
     case status
     case retryStore
     case migration
+    case cleanup
     case monitoring(ClipboardHistoryMonitoringCommand)
     case reset
 }
@@ -275,6 +279,9 @@ private actor ClipboardLifecycleProbe {
             },
             migrate: { request in
                 try await self.migrate(request)
+            },
+            cleanupLegacyPayloads: { _ in
+                await self.cleanupLegacyPayloads()
             },
             retryStore: {
                 await self.retryStore()
@@ -366,6 +373,18 @@ private actor ClipboardLifecycleProbe {
             availability = .ready
             reason = nil
         }
+    }
+
+    private func cleanupLegacyPayloads()
+        -> ClipboardHistoryLegacyCleanupReport
+    {
+        events.append(.cleanup)
+        return ClipboardHistoryLegacyCleanupReport(
+            removedPayloadCount: 0,
+            alreadyMissingPayloadCount: 0,
+            pendingPayloadCount: 0,
+            canDeleteLegacyRows: true
+        )
     }
 
     private func resetStore() async throws {

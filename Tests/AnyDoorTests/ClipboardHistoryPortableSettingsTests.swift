@@ -27,7 +27,7 @@ final class ClipboardHistoryPortableSettingsTests: XCTestCase {
 
         let json = try XCTUnwrap(
             fixture.defaults.string(
-                forKey: ClipboardTagStore.defaultsKey
+                forKey: ClipboardHistoryPortableKeys.customTags
             )
         )
         XCTAssertTrue(json.contains(assignment.definition.id))
@@ -58,7 +58,7 @@ final class ClipboardHistoryPortableSettingsTests: XCTestCase {
         let data = try JSONEncoder().encode(imported)
         fixture.defaults.set(
             String(decoding: data, as: UTF8.self),
-            forKey: ClipboardTagStore.defaultsKey
+            forKey: ClipboardHistoryPortableKeys.customTags
         )
 
         try await ClipboardHistoryPortableSettings.reconcile(

@@ -1526,7 +1526,9 @@ private final class TemporaryStore {
 
     init() throws {
         url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AnyDoor-ClipboardHistoryStoreTests-\(UUID().uuidString)")
+            .appendingPathComponent(
+                "AnyDoor-ClipboardHistoryModuleTests-\(UUID().uuidString)"
+            )
     }
 
     deinit {

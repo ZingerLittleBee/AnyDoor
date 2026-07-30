@@ -107,7 +107,10 @@ enum ClipboardHistoryLegacyAdapter {
     private static func legacyTags(
         from defaults: UserDefaults
     ) throws -> [ClipboardHistoryLegacyTag] {
-        guard let json = defaults.string(forKey: ClipboardTagStore.defaultsKey)
+        guard
+            let json = defaults.string(
+                forKey: ClipboardHistoryPortableKeys.customTags
+            )
         else {
             return []
         }

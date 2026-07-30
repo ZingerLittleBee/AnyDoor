@@ -8,7 +8,6 @@ final class BuiltinPreferenceSeederTranslateTests: XCTestCase {
         let schema = Schema([
             KeyBinding.self,
             BuiltinPreference.self,
-            ClipboardHistoryItem.self,
         ])
         let config = ModelConfiguration(isStoredInMemoryOnly: true, allowsSave: true)
         let container = try ModelContainer(for: schema, configurations: [config])

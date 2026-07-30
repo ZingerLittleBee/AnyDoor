@@ -1,6 +1,15 @@
 import ClipboardHistory
 import Foundation
 
+struct ClipboardTag: Codable, Equatable, Identifiable {
+    let id: String
+    var name: String
+}
+
+enum ClipboardHistoryPortableKeys {
+    static let customTags = "clipboard.customTags"
+}
+
 @MainActor
 enum ClipboardHistoryPortableSettings {
     static func persist(
@@ -14,7 +23,7 @@ enum ClipboardHistoryPortableSettings {
         guard let json = String(data: data, encoding: .utf8) else {
             throw ClipboardHistoryModuleError.storageFailure
         }
-        defaults.set(json, forKey: ClipboardTagStore.defaultsKey)
+        defaults.set(json, forKey: ClipboardHistoryPortableKeys.customTags)
         NotificationCenter.default.post(
             name: .portableConfigDidChange,
             object: nil
@@ -34,7 +43,7 @@ enum ClipboardHistoryPortableSettings {
     ) throws -> [ClipboardHistoryTagDefinition] {
         guard
             let json = defaults.string(
-                forKey: ClipboardTagStore.defaultsKey
+                forKey: ClipboardHistoryPortableKeys.customTags
             )
         else {
             return []

@@ -1,35 +1,36 @@
 import AppKit
-import ClipboardHistory
 import Foundation
-import SwiftData
 import XCTest
 import ScriptPluginRuntime
 @testable import AnyDoor
+@testable import ClipboardHistory
 
 /// The pasteboard capability must route through the host's real self-write
 /// funnel, so a plugin's copy never lands in clipboard history (user story 13).
 /// This test wires the runtime's `writePasteboard` to the production
-/// module-facing self-write funnel and drives the real watcher.
+/// module-facing self-write funnel and drives the real v2 monitor.
 @MainActor
 final class ScriptPluginPasteboardTests: XCTestCase {
-    private func makeStore() throws -> ClipboardHistoryStore {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: ClipboardHistoryItem.self, configurations: config)
-        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
-        store.bootstrap(modelContainer: container)
-        return store
-    }
-
     func testPluginCopySuppressesClipboardHistory() async throws {
-        let store = try makeStore()
-        let pasteboard = NSPasteboard(name: NSPasteboard.Name("AnyDoorScript-\(UUID().uuidString)"))
-        let funnel = ClipboardHistoryPasteboardSelfWriteFunnel()
-        let watcher = ClipboardWatcher(
-            store: store,
-            pasteboard: pasteboard,
-            selfWrites: funnel,
-            sourceProvider: { nil }
+        let storeRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-ScriptClipboard-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: storeRoot) }
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: storeRoot
+                .appendingPathComponent("history.sqlite"),
+            databaseKey: Data(repeating: 0x5A, count: 32)
         )
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("AnyDoorScript-\(UUID().uuidString)"))
+        let funnel = module.pasteboardSelfWrites
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
 
         let spy = ScriptCapabilitySpy()
         // Route the pasteboard capability at the real self-write funnel.
@@ -57,8 +58,8 @@ final class ScriptPluginPasteboardTests: XCTestCase {
         XCTAssertEqual(spy.pasteboardWrites, ["plugin-clip"])
 
         // ...but the funnel suppressed it from clipboard history.
-        await watcher.poll()
-        await store.reload(kind: .text)
-        XCTAssertTrue(store.items(for: .text).isEmpty)
+        await monitor.observeForTesting()
+        let page = try await module.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
     }
 }
