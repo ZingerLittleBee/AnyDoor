@@ -5,7 +5,14 @@ import SwiftData
 
 enum ClipboardHistoryLegacySourceError: Error {
     case incompleteSnapshot
+    case cutoverAlreadyCompleted
     case cutoverMarkerPersistenceFailed(Int32)
+}
+
+enum ClipboardHistoryLegacyCleanupState: Equatable {
+    case incomplete
+    case snapshotDeletionPending
+    case completed
 }
 
 /// A crash-resilient, read-only snapshot of the pre-v2 SwiftData store.
@@ -30,23 +37,42 @@ final class ClipboardHistoryLegacySource {
     ///
     /// A completed marker is authoritative because `finishMigration()` makes
     /// it durable only after publication and cleanup have succeeded. A
-    /// leftover snapshot is best-effort cleanup at that point, never a reason
-    /// to reopen the removed schema.
+    /// leftover snapshot is retried as a visible filesystem operation, never
+    /// a reason to reopen the removed schema.
     static func openIfNeeded(
         applicationSupportDirectory: URL,
         productionStoreURL: URL,
         legacySchema: Schema,
         payloadDirectory: URL
     ) throws -> ClipboardHistoryLegacySource? {
-        let markerURL = cutoverMarkerURL(
-            in: applicationSupportDirectory
-        )
-        guard !FileManager.default.fileExists(atPath: markerURL.path)
-        else {
-            try? FileManager.default.removeItem(
-                at: snapshotDirectory(in: applicationSupportDirectory)
+        switch cleanupState(in: applicationSupportDirectory) {
+        case .completed:
+            return nil
+        case .snapshotDeletionPending:
+            try retrySnapshotDeletion(
+                in: applicationSupportDirectory
             )
             return nil
+        case .incomplete:
+            return try openForMigration(
+                applicationSupportDirectory: applicationSupportDirectory,
+                productionStoreURL: productionStoreURL,
+                legacySchema: legacySchema,
+                payloadDirectory: payloadDirectory
+            )
+        }
+    }
+
+    static func openForMigration(
+        applicationSupportDirectory: URL,
+        productionStoreURL: URL,
+        legacySchema: Schema,
+        payloadDirectory: URL
+    ) throws -> ClipboardHistoryLegacySource {
+        guard cleanupState(in: applicationSupportDirectory) == .incomplete
+        else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverAlreadyCompleted
         }
         return try ClipboardHistoryLegacySource(
             applicationSupportDirectory: applicationSupportDirectory,
@@ -171,19 +197,9 @@ final class ClipboardHistoryLegacySource {
 
     @MainActor
     func finishMigration() throws {
-        // Persist completion before deleting the snapshot. If marker
-        // persistence fails, every readable legacy row remains available for
-        // the next launch. If snapshot deletion fails after the marker, the
-        // next launch retries only that deletion without opening its schema.
-        try Self.persistCutoverMarker(
+        try Self.finishMigration(
             in: snapshotDirectory.deletingLastPathComponent()
         )
-        guard FileManager.default.fileExists(
-            atPath: snapshotDirectory.path
-        ) else {
-            return
-        }
-        try FileManager.default.removeItem(at: snapshotDirectory)
     }
 
     static func snapshotDirectory(
@@ -193,6 +209,72 @@ final class ClipboardHistoryLegacySource {
             snapshotDirectoryName,
             isDirectory: true
         )
+    }
+
+    static func snapshotPayloadDirectory(
+        in applicationSupportDirectory: URL
+    ) -> URL {
+        snapshotDirectory(in: applicationSupportDirectory)
+            .appendingPathComponent(
+                snapshotPayloadDirectoryName,
+                isDirectory: true
+            )
+    }
+
+    static func prepareSnapshotIfNeeded(
+        applicationSupportDirectory: URL,
+        productionStoreURL: URL
+    ) throws {
+        guard cleanupState(in: applicationSupportDirectory) == .incomplete
+        else {
+            return
+        }
+        try prepareSnapshotIfNeeded(
+            sourceStoreURL: productionStoreURL,
+            snapshotDirectory: snapshotDirectory(
+                in: applicationSupportDirectory
+            )
+        )
+    }
+
+    static func cleanupState(
+        in applicationSupportDirectory: URL
+    ) -> ClipboardHistoryLegacyCleanupState {
+        let fileManager = FileManager.default
+        let markerExists = fileManager.fileExists(
+            atPath: cutoverMarkerURL(
+                in: applicationSupportDirectory
+            ).path
+        )
+        guard markerExists else {
+            return .incomplete
+        }
+        return fileManager.fileExists(
+            atPath: snapshotDirectory(
+                in: applicationSupportDirectory
+            ).path
+        )
+            ? .snapshotDeletionPending
+            : .completed
+    }
+
+    static func finishMigration(
+        in applicationSupportDirectory: URL
+    ) throws {
+        try persistCutoverMarker(in: applicationSupportDirectory)
+        try retrySnapshotDeletion(in: applicationSupportDirectory)
+    }
+
+    static func retrySnapshotDeletion(
+        in applicationSupportDirectory: URL
+    ) throws {
+        let directory = snapshotDirectory(
+            in: applicationSupportDirectory
+        )
+        guard FileManager.default.fileExists(atPath: directory.path) else {
+            return
+        }
+        try FileManager.default.removeItem(at: directory)
     }
 
     private static func prepareSnapshotIfNeeded(

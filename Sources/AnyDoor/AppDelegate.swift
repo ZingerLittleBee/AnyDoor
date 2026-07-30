@@ -14,28 +14,59 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule: ClipboardHistoryModule
-    private let clipboardHistoryLegacySource:
-        ClipboardHistoryLegacySource?
     @MainActor lazy var clipboardHistoryLifecycle = {
-        let migrationRequest:
-            (@MainActor () throws
-                -> ClipboardHistoryLegacyMigrationRequest)?
-        let finishMigration: @MainActor () throws -> Void
-        if let clipboardHistoryLegacySource {
-            migrationRequest = {
-                try clipboardHistoryLegacySource.makeMigrationRequest()
-            }
-            finishMigration = {
-                try clipboardHistoryLegacySource.finishMigration()
-            }
-        } else {
-            migrationRequest = nil
-            finishMigration = {}
-        }
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+        let storeDirectory = appSupport.appendingPathComponent(
+            "dev.bybee.AnyDoor",
+            isDirectory: true
+        )
+        let storeURL = storeDirectory.appendingPathComponent(
+            "AnyDoor.store"
+        )
+        let legacySchema = Schema(
+            [
+                KeyBinding.self, BuiltinPreference.self,
+                ClipboardHistoryItem.self, TranslationRecord.self,
+                Quicklink.self,
+            ]
+                + NativePluginCatalog.modelSchemaTypes
+        )
         return ClipboardHistoryLifecycle(
             module: clipboardHistoryModule,
-            migrationRequest: migrationRequest,
-            finishMigration: finishMigration
+            legacyCleanupState: {
+                ClipboardHistoryLegacySource.cleanupState(
+                    in: storeDirectory
+                )
+            },
+            legacyPayloadDirectory: {
+                ClipboardHistoryLegacySource.snapshotPayloadDirectory(
+                    in: storeDirectory
+                )
+            },
+            migrationRequest: {
+                let source =
+                    try ClipboardHistoryLegacySource.openForMigration(
+                        applicationSupportDirectory: storeDirectory,
+                        productionStoreURL: storeURL,
+                        legacySchema: legacySchema,
+                        payloadDirectory:
+                            ClipboardHistoryModule.defaultStoreRoot
+                    )
+                return try source.makeMigrationRequest()
+            },
+            finishMigration: {
+                try ClipboardHistoryLegacySource.finishMigration(
+                    in: storeDirectory
+                )
+            },
+            retrySnapshotDeletion: {
+                try ClipboardHistoryLegacySource.retrySnapshotDeletion(
+                    in: storeDirectory
+                )
+            }
         )
     }()
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
@@ -70,23 +101,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
             try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
-            let config = ModelConfiguration(url: storeURL)
-            let legacySchema = Schema(
-                [
-                    KeyBinding.self, BuiltinPreference.self,
-                    ClipboardHistoryItem.self, TranslationRecord.self,
-                    Quicklink.self,
-                ]
-                + NativePluginCatalog.modelSchemaTypes
+            // Preserve the removed SwiftData entity as raw files before the
+            // reduced production schema opens. Recovery still opens this
+            // snapshot only when the encrypted store says unpublished.
+            try ClipboardHistoryLegacySource.prepareSnapshotIfNeeded(
+                applicationSupportDirectory: storeDir,
+                productionStoreURL: storeURL
             )
-            clipboardHistoryLegacySource =
-                try ClipboardHistoryLegacySource.openIfNeeded(
-                    applicationSupportDirectory: storeDir,
-                    productionStoreURL: storeURL,
-                    legacySchema: legacySchema,
-                    payloadDirectory:
-                        ClipboardHistoryModule.defaultStoreRoot
-                )
+            let config = ModelConfiguration(url: storeURL)
             clipboardHistoryModule = ClipboardHistoryModule()
             // Core-owned model types plus every plugin's (ADR-0005: plugin
             // schema is registered unconditionally, so user data survives

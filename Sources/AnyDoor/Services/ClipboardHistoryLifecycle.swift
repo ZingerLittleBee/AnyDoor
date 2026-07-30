@@ -19,6 +19,9 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
             ClipboardHistoryMonitoringCommand,
             ClipboardHistoryMonitoringConfiguration
         ) async -> ClipboardHistoryStatus
+    let legacyMigrationPublicationState:
+        @Sendable () async throws
+            -> ClipboardHistoryLegacyMigrationPublicationState
     let migrate:
         @Sendable (
             ClipboardHistoryLegacyMigrationRequest
@@ -38,6 +41,9 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
                 command,
                 configuration: configuration
             )
+        }
+        legacyMigrationPublicationState = {
+            try await module.legacyMigrationPublicationState()
         }
         migrate = { request in
             try await module.migrateLegacy(request)
@@ -60,6 +66,9 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
                 ClipboardHistoryMonitoringCommand,
                 ClipboardHistoryMonitoringConfiguration
             ) async -> ClipboardHistoryStatus,
+        legacyMigrationPublicationState:
+            @escaping @Sendable () async throws
+                -> ClipboardHistoryLegacyMigrationPublicationState,
         migrate:
             @escaping @Sendable (
                 ClipboardHistoryLegacyMigrationRequest
@@ -72,6 +81,8 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
     ) {
         self.status = status
         self.setMonitoring = setMonitoring
+        self.legacyMigrationPublicationState =
+            legacyMigrationPublicationState
         self.migrate = migrate
         self.cleanupLegacyPayloads = cleanupLegacyPayloads
         self.retryStore = retryStore
@@ -86,7 +97,11 @@ final class ClipboardHistoryLifecycle {
     private let defaults: UserDefaults
     private let migrationRequest:
         (@MainActor () throws -> ClipboardHistoryLegacyMigrationRequest)?
+    private let legacyCleanupState:
+        @MainActor () throws -> ClipboardHistoryLegacyCleanupState
+    private let legacyPayloadDirectory: (@MainActor () -> URL)?
     private let finishMigration: @MainActor () throws -> Void
+    private let retrySnapshotDeletion: @MainActor () throws -> Void
 
     @ObservationIgnored private var operationTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
@@ -98,29 +113,51 @@ final class ClipboardHistoryLifecycle {
     init(
         module: ClipboardHistoryModule,
         defaults: UserDefaults = .standard,
+        legacyCleanupState:
+            (@MainActor () throws
+                -> ClipboardHistoryLegacyCleanupState)? = nil,
+        legacyPayloadDirectory: (@MainActor () -> URL)? = nil,
         migrationRequest:
             (@MainActor () throws
                 -> ClipboardHistoryLegacyMigrationRequest)?,
-        finishMigration: @escaping @MainActor () throws -> Void = {}
+        finishMigration: @escaping @MainActor () throws -> Void = {},
+        retrySnapshotDeletion:
+            @escaping @MainActor () throws -> Void = {}
     ) {
         operations = ClipboardHistoryLifecycleOperations(module: module)
         self.defaults = defaults
         self.migrationRequest = migrationRequest
+        self.legacyCleanupState =
+            legacyCleanupState
+            ?? { migrationRequest == nil ? .completed : .incomplete }
+        self.legacyPayloadDirectory = legacyPayloadDirectory
         self.finishMigration = finishMigration
+        self.retrySnapshotDeletion = retrySnapshotDeletion
     }
 
     init(
         operations: ClipboardHistoryLifecycleOperations,
         defaults: UserDefaults,
+        legacyCleanupState:
+            (@MainActor () throws
+                -> ClipboardHistoryLegacyCleanupState)? = nil,
+        legacyPayloadDirectory: (@MainActor () -> URL)? = nil,
         migrationRequest:
             (@MainActor () throws
                 -> ClipboardHistoryLegacyMigrationRequest)?,
-        finishMigration: @escaping @MainActor () throws -> Void = {}
+        finishMigration: @escaping @MainActor () throws -> Void = {},
+        retrySnapshotDeletion:
+            @escaping @MainActor () throws -> Void = {}
     ) {
         self.operations = operations
         self.defaults = defaults
         self.migrationRequest = migrationRequest
+        self.legacyCleanupState =
+            legacyCleanupState
+            ?? { migrationRequest == nil ? .completed : .incomplete }
+        self.legacyPayloadDirectory = legacyPayloadDirectory
         self.finishMigration = finishMigration
+        self.retrySnapshotDeletion = retrySnapshotDeletion
     }
 
     func start() {
@@ -253,7 +290,14 @@ final class ClipboardHistoryLifecycle {
         let configuration = ClipboardPreferences.monitoringConfiguration(
             from: defaults
         )
-        guard let migrationRequest else {
+        let cleanupState: ClipboardHistoryLegacyCleanupState
+        do {
+            cleanupState = try legacyCleanupState()
+        } catch {
+            state = .migrationFailed
+            return
+        }
+        guard cleanupState != .completed else {
             state = .ready
             if ClipboardPreferences.monitoringEnabled(from: defaults) {
                 _ = await operations.setMonitoring(.start, configuration)
@@ -269,40 +313,70 @@ final class ClipboardHistoryLifecycle {
         }
         state = .migrating
         do {
-            let migrationSource = try migrationRequest()
-            let request: ClipboardHistoryLegacyMigrationRequest
-            if resetStoreFirst {
-                request = ClipboardHistoryLegacyMigrationRequest(
-                    transfer: ClipboardHistoryLegacyTransfer(
-                        entries: [],
-                        tags: [],
-                        categoryOrder: [],
-                        retentionPeriod: .default
-                    ),
-                    payloadDirectory:
-                        migrationSource.payloadDirectory
-                )
+            if cleanupState == .snapshotDeletionPending {
+                try retrySnapshotDeletion()
             } else {
-                request = migrationSource
+                let publicationState =
+                    try await operations
+                    .legacyMigrationPublicationState()
+                let payloadDirectory: URL
+                switch publicationState {
+                case .published(let report):
+                    migrationReport = report
+                    guard let legacyPayloadDirectory else {
+                        throw ClipboardHistoryModuleError
+                            .legacyCleanupFailed
+                    }
+                    payloadDirectory = legacyPayloadDirectory()
+                case .notPublished:
+                    guard let migrationRequest else {
+                        throw ClipboardHistoryModuleError
+                            .legacyMigrationFailed
+                    }
+                    let migrationSource = try migrationRequest()
+                    let request: ClipboardHistoryLegacyMigrationRequest
+                    if resetStoreFirst {
+                        request = ClipboardHistoryLegacyMigrationRequest(
+                            transfer: ClipboardHistoryLegacyTransfer(
+                                entries: [],
+                                tags: [],
+                                categoryOrder: [],
+                                retentionPeriod: .default
+                            ),
+                            payloadDirectory:
+                                migrationSource.payloadDirectory
+                        )
+                    } else {
+                        request = migrationSource
+                    }
+                    let outcome = try await operations.migrate(request)
+                    guard !Task.isCancelled,
+                        generation == requestGeneration
+                    else {
+                        return
+                    }
+                    switch outcome {
+                    case .published(let report),
+                        .alreadyPublished(let report):
+                        migrationReport = report
+                    }
+                    payloadDirectory = request.payloadDirectory
+                }
+                let cleanupReport =
+                    try await operations.cleanupLegacyPayloads(
+                        payloadDirectory
+                    )
+                guard cleanupReport.canDeleteLegacyRows else {
+                    throw ClipboardHistoryModuleError
+                        .legacyCleanupFailed
+                }
+                guard !Task.isCancelled,
+                    generation == requestGeneration
+                else {
+                    return
+                }
+                try finishMigration()
             }
-            let outcome = try await operations.migrate(request)
-            guard !Task.isCancelled, generation == requestGeneration else {
-                return
-            }
-            switch outcome {
-            case .published(let report), .alreadyPublished(let report):
-                migrationReport = report
-            }
-            let cleanupReport = try await operations.cleanupLegacyPayloads(
-                request.payloadDirectory
-            )
-            guard cleanupReport.canDeleteLegacyRows else {
-                throw ClipboardHistoryModuleError.legacyCleanupFailed
-            }
-            guard !Task.isCancelled, generation == requestGeneration else {
-                return
-            }
-            try finishMigration()
             _ = await operations.setMonitoring(
                 .migrationCompleted,
                 configuration

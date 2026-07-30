@@ -1365,6 +1365,15 @@ extension ClipboardHistoryModule {
         }
     }
 
+    public func legacyMigrationPublicationState() throws
+        -> ClipboardHistoryLegacyMigrationPublicationState
+    {
+        if let report = try currentLegacyMigrationReport() {
+            return .published(report)
+        }
+        return .notPublished
+    }
+
     func currentLegacyMigrationReport() throws
         -> ClipboardHistoryLegacyMigrationReport?
     {

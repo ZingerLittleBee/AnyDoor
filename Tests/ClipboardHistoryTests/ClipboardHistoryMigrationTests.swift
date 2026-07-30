@@ -5,6 +5,34 @@ import XCTest
 @testable import ClipboardHistory
 
 final class ClipboardHistoryMigrationTests: XCTestCase {
+    func testPublishedMigrationStateSurvivesModuleReopen() async throws {
+        let fixture = try LegacyMigrationFixture()
+        let module = fixture.makeModule()
+        let expectedReport = ClipboardHistoryLegacyMigrationReport(
+            retainedEntryCount: 0,
+            omittedExpiredEntryCount: 0,
+            ownedPayloadCount: 0,
+            redundantLegacyPayloadCount: 0
+        )
+
+        let initialState =
+            try await module.legacyMigrationPublicationState()
+        XCTAssertEqual(initialState, .notPublished)
+        let outcome = try await module.migrateLegacy(
+            fixture.request(
+                entries: [],
+                retentionPeriod: .unlimited
+            )
+        )
+        XCTAssertEqual(outcome, .published(expectedReport))
+        try await module.closeStoreForTesting()
+
+        let reopened = fixture.makeModule()
+        let reopenedState =
+            try await reopened.legacyMigrationPublicationState()
+        XCTAssertEqual(reopenedState, .published(expectedReport))
+    }
+
     func testMigrationPreservesLegacyRowsAndMapsKindsWithoutDerivedBackfill()
         async throws
     {

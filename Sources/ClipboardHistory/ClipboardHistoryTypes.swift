@@ -681,6 +681,14 @@ public enum ClipboardHistoryLegacyMigrationOutcome:
     case alreadyPublished(ClipboardHistoryLegacyMigrationReport)
 }
 
+public enum ClipboardHistoryLegacyMigrationPublicationState:
+    Equatable,
+    Sendable
+{
+    case notPublished
+    case published(ClipboardHistoryLegacyMigrationReport)
+}
+
 public struct ClipboardHistoryLegacyFileMemberID:
     Hashable,
     Sendable

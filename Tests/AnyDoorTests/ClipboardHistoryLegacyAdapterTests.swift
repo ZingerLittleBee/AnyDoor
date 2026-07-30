@@ -7,6 +7,63 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
+    func testSnapshotRecursiveDeletionFailureRemainsVisibleAndRetryable()
+        throws
+    {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-LegacyDeleteFailure-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        let snapshot = ClipboardHistoryLegacySource.snapshotDirectory(
+            in: root
+        )
+        let nested = snapshot.appendingPathComponent(
+            "nested",
+            isDirectory: true
+        )
+        let protectedFile = nested.appendingPathComponent("payload")
+        try FileManager.default.createDirectory(
+            at: nested,
+            withIntermediateDirectories: true
+        )
+        try Data("protected".utf8).write(to: protectedFile)
+        try FileManager.default.setAttributes(
+            [.immutable: true],
+            ofItemAtPath: protectedFile.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.immutable: false],
+                ofItemAtPath: protectedFile.path
+            )
+            try? FileManager.default.removeItem(at: root)
+        }
+
+        XCTAssertThrowsError(
+            try ClipboardHistoryLegacySource.finishMigration(in: root)
+        )
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: root),
+            .snapshotDeletionPending
+        )
+        XCTAssertThrowsError(
+            try ClipboardHistoryLegacySource.retrySnapshotDeletion(
+                in: root
+            )
+        )
+
+        try FileManager.default.setAttributes(
+            [.immutable: false],
+            ofItemAtPath: protectedFile.path
+        )
+        try ClipboardHistoryLegacySource.retrySnapshotDeletion(in: root)
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: root),
+            .completed
+        )
+    }
+
     func testCutoverMarkerPersistenceFailureRetainsReadableSnapshot()
         throws
     {
@@ -92,7 +149,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         )
     }
 
-    func testPublishedMigrationWithoutCleanupRecoversFromExistingSnapshot()
+    func testPublishedMigrationRecoveryNeverReopensLegacySchema()
         async throws
     {
         let root = FileManager.default.temporaryDirectory
@@ -167,55 +224,115 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             "ClipboardHistory",
             isDirectory: true
         )
-        let firstLaunch = try XCTUnwrap(
-            ClipboardHistoryLegacySource.openIfNeeded(
-                applicationSupportDirectory: root,
-                productionStoreURL: storeURL,
-                legacySchema: legacySchema,
-                payloadDirectory: payloadDirectory
+        let request: ClipboardHistoryLegacyMigrationRequest = try {
+            let firstLaunch = try ClipboardHistoryLegacySource
+                .openForMigration(
+                    applicationSupportDirectory: root,
+                    productionStoreURL: storeURL,
+                    legacySchema: legacySchema,
+                    payloadDirectory: payloadDirectory
+                )
+            return try firstLaunch.makeMigrationRequest(
+                defaults: makeDefaults()
+            )
+        }()
+        let databaseURL = root
+            .appendingPathComponent("v2", isDirectory: true)
+            .appendingPathComponent("history.sqlite")
+        let databaseKey = Data(repeating: 17, count: 32)
+        let publishingModule = try ClipboardHistoryModule(
+            testingDatabaseURL: databaseURL,
+            databaseKey: databaseKey,
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.legacyMigrationAfterPublication]
             )
         )
-        let request = try firstLaunch.makeMigrationRequest(
-            defaults: makeDefaults()
-        )
+        do {
+            _ = try await publishingModule.migrateLegacy(request)
+            XCTFail("Expected the post-publication crash boundary")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyMigrationFailed
+            )
+        }
+        try await publishingModule.closeStoreForTesting()
         let module = try ClipboardHistoryModule(
-            testingDatabaseURL: root
-                .appendingPathComponent("v2", isDirectory: true)
-                .appendingPathComponent("history.sqlite"),
-            databaseKey: Data(repeating: 17, count: 32)
+            testingDatabaseURL: databaseURL,
+            databaseKey: databaseKey
         )
-        _ = try await module.migrateLegacy(request)
 
         let productionContainer = try ModelContainer(
             for: Schema(productionTypes),
             configurations: ModelConfiguration(url: storeURL)
         )
-        let recoveredLaunch = try XCTUnwrap(
-            ClipboardHistoryLegacySource.openIfNeeded(
-                applicationSupportDirectory: root,
-                productionStoreURL: storeURL,
-                legacySchema: legacySchema,
-                payloadDirectory: payloadDirectory
-            )
+        let snapshotStoreURL =
+            ClipboardHistoryLegacySource.snapshotDirectory(in: root)
+            .appendingPathComponent("AnyDoorLegacy.store")
+        try Data("not a SwiftData store".utf8).write(
+            to: snapshotStoreURL,
+            options: .atomic
         )
-        let recoveredRequest = try recoveredLaunch.makeMigrationRequest(
-            defaults: makeDefaults()
+        let defaults = try makeDefaults()
+        var migrationRequestCount = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            module: module,
+            defaults: defaults,
+            legacyCleanupState: {
+                ClipboardHistoryLegacySource.cleanupState(in: root)
+            },
+            legacyPayloadDirectory: {
+                ClipboardHistoryLegacySource.snapshotPayloadDirectory(
+                    in: root
+                )
+            },
+            migrationRequest: {
+                migrationRequestCount += 1
+                let source =
+                    try ClipboardHistoryLegacySource.openForMigration(
+                        applicationSupportDirectory: root,
+                        productionStoreURL: storeURL,
+                        legacySchema: legacySchema,
+                        payloadDirectory: payloadDirectory
+                    )
+                return try source.makeMigrationRequest(
+                    defaults: defaults
+                )
+            },
+            finishMigration: {
+                try ClipboardHistoryLegacySource.finishMigration(in: root)
+            },
+            retrySnapshotDeletion: {
+                try ClipboardHistoryLegacySource.retrySnapshotDeletion(
+                    in: root
+                )
+            }
         )
 
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertEqual(migrationRequestCount, 0)
+        let recoveredPage = try await module.page(
+            ClipboardHistoryQuery()
+        )
         XCTAssertEqual(
-            recoveredRequest.transfer.entries.map(\.text),
+            recoveredPage.entries.map(\.previewText),
             ["survives publication crash"]
         )
-        guard case .alreadyPublished =
-            try await module.migrateLegacy(recoveredRequest)
-        else {
-            return XCTFail("Published migration must be reused")
-        }
-        let cleanup = try await module.cleanupLegacyPayloads(
-            in: recoveredRequest.payloadDirectory
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: root),
+            .completed
         )
-        XCTAssertTrue(cleanup.canDeleteLegacyRows)
-        try recoveredLaunch.finishMigration()
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath:
+                    ClipboardHistoryLegacySource.snapshotDirectory(
+                        in: root
+                    ).path
+            )
+        )
         XCTAssertEqual(
             try productionContainer.mainContext.fetch(
                 FetchDescriptor<KeyBinding>()
@@ -418,18 +535,20 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         let legacyPayload = legacyPayloadDirectory
             .appendingPathComponent("owned-copy")
         try Data("legacy payload".utf8).write(to: legacyPayload)
-        let source = try XCTUnwrap(
-            ClipboardHistoryLegacySource.openIfNeeded(
-                applicationSupportDirectory: root,
-                productionStoreURL: storeURL,
-                legacySchema: legacySchema,
-                payloadDirectory: legacyPayloadDirectory
-            )
+        try ClipboardHistoryLegacySource.prepareSnapshotIfNeeded(
+            applicationSupportDirectory: root,
+            productionStoreURL: storeURL
         )
 
         let productionContainer = try ModelContainer(
             for: Schema([KeyBinding.self]),
             configurations: ModelConfiguration(url: storeURL)
+        )
+        let source = try ClipboardHistoryLegacySource.openForMigration(
+            applicationSupportDirectory: root,
+            productionStoreURL: storeURL,
+            legacySchema: legacySchema,
+            payloadDirectory: legacyPayloadDirectory
         )
         XCTAssertEqual(
             try productionContainer.mainContext.fetch(

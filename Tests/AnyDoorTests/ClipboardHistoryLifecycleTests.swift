@@ -6,6 +6,152 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryLifecycleTests: XCTestCase {
+    func testPublishedRecoveryCleansSnapshotWithoutReadingLegacySource()
+        async throws
+    {
+        let report = ClipboardHistoryLegacyMigrationReport(
+            retainedEntryCount: 1,
+            omittedExpiredEntryCount: 0,
+            ownedPayloadCount: 0,
+            redundantLegacyPayloadCount: 0
+        )
+        let probe = ClipboardLifecycleProbe(
+            publicationState: .published(report)
+        )
+        let defaults = makeDefaults()
+        var migrationRequestCount = 0
+        var finishCount = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            legacyCleanupState: { .incomplete },
+            legacyPayloadDirectory: {
+                FileManager.default.temporaryDirectory
+            },
+            migrationRequest: {
+                migrationRequestCount += 1
+                throw ClipboardHistoryModuleError.legacyMigrationFailed
+            },
+            finishMigration: {
+                finishCount += 1
+            }
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertEqual(lifecycle.migrationReport, report)
+        XCTAssertEqual(migrationRequestCount, 0)
+        XCTAssertEqual(finishCount, 1)
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(
+            events,
+            [
+                .status,
+                .monitoring(.migrationStarted),
+                .publicationState,
+                .cleanup,
+                .monitoring(.migrationCompleted),
+                .monitoring(.start),
+            ]
+        )
+    }
+
+    func testPendingSnapshotDeletionRetriesWithoutPublicationOrLegacyRead()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe()
+        let defaults = makeDefaults()
+        var cleanupState =
+            ClipboardHistoryLegacyCleanupState.snapshotDeletionPending
+        var deletionAttempts = 0
+        var migrationRequestCount = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            legacyCleanupState: { cleanupState },
+            migrationRequest: {
+                migrationRequestCount += 1
+                return try Self.emptyMigrationRequest()
+            },
+            retrySnapshotDeletion: {
+                deletionAttempts += 1
+                if deletionAttempts == 1 {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                cleanupState = .completed
+            }
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertEqual(deletionAttempts, 2)
+        XCTAssertEqual(migrationRequestCount, 0)
+        let events = await probe.recordedEvents()
+        XCTAssertFalse(events.contains(.publicationState))
+        XCTAssertFalse(events.contains(.migration))
+        XCTAssertFalse(events.contains(.cleanup))
+    }
+
+    func testStorePermissionRecoveryResumesPublishedCleanupOnly()
+        async throws
+    {
+        let report = ClipboardHistoryLegacyMigrationReport(
+            retainedEntryCount: 2,
+            omittedExpiredEntryCount: 0,
+            ownedPayloadCount: 0,
+            redundantLegacyPayloadCount: 0
+        )
+        let probe = ClipboardLifecycleProbe(
+            availability: .unavailable,
+            reason: .missingKey,
+            becomesReadyOnRetry: true,
+            publicationState: .published(report)
+        )
+        let defaults = makeDefaults()
+        var migrationRequestCount = 0
+        var finishCount = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            legacyCleanupState: { .incomplete },
+            legacyPayloadDirectory: {
+                FileManager.default.temporaryDirectory
+            },
+            migrationRequest: {
+                migrationRequestCount += 1
+                throw ClipboardHistoryModuleError.legacyMigrationFailed
+            },
+            finishMigration: {
+                finishCount += 1
+            }
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .storeUnavailable(.missingKey))
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertEqual(migrationRequestCount, 0)
+        XCTAssertEqual(finishCount, 1)
+        let events = await probe.recordedEvents()
+        XCTAssertFalse(events.contains(.migration))
+        XCTAssertEqual(
+            events.filter { $0 == .cleanup }.count,
+            1
+        )
+    }
+
     func testCompletedCutoverLaunchSkipsLegacyRequestAndMigration()
         async throws
     {
@@ -87,6 +233,7 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
             [
                 .status,
                 .monitoring(.migrationStarted),
+                .publicationState,
                 .migration,
                 .cleanup,
                 .monitoring(.migrationCompleted),
@@ -189,6 +336,7 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
                 .retryStore,
                 .status,
                 .monitoring(.migrationStarted),
+                .publicationState,
                 .migration,
                 .cleanup,
                 .monitoring(.migrationCompleted),
@@ -298,11 +446,12 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         XCTAssertEqual(entryCounts, [0])
         let events = await probe.recordedEvents()
         XCTAssertEqual(
-            events.suffix(7),
+            events.suffix(8),
             [
                 .reset,
                 .status,
                 .monitoring(.migrationStarted),
+                .publicationState,
                 .migration,
                 .cleanup,
                 .monitoring(.migrationCompleted),
@@ -336,6 +485,7 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
 private enum ClipboardLifecycleEvent: Equatable, Sendable {
     case status
     case retryStore
+    case publicationState
     case migration
     case cleanup
     case monitoring(ClipboardHistoryMonitoringCommand)
@@ -351,6 +501,8 @@ private actor ClipboardLifecycleProbe {
     private var migrationFailuresRemaining: Int
     private var cleanupFailuresRemaining: Int
     private let becomesReadyOnRetry: Bool
+    private let publicationState:
+        ClipboardHistoryLegacyMigrationPublicationState
     private var shouldSuspendNextMigration = false
     private var migrationContinuation: CheckedContinuation<Void, Never>?
 
@@ -359,13 +511,16 @@ private actor ClipboardLifecycleProbe {
         reason: ClipboardHistoryStatus.AvailabilityReason? = nil,
         migrationFailuresRemaining: Int = 0,
         cleanupFailuresRemaining: Int = 0,
-        becomesReadyOnRetry: Bool = false
+        becomesReadyOnRetry: Bool = false,
+        publicationState:
+            ClipboardHistoryLegacyMigrationPublicationState = .notPublished
     ) {
         self.availability = availability
         self.reason = reason
         self.migrationFailuresRemaining = migrationFailuresRemaining
         self.cleanupFailuresRemaining = cleanupFailuresRemaining
         self.becomesReadyOnRetry = becomesReadyOnRetry
+        self.publicationState = publicationState
     }
 
     nonisolated var operations: ClipboardHistoryLifecycleOperations {
@@ -375,6 +530,9 @@ private actor ClipboardLifecycleProbe {
             },
             setMonitoring: { command, _ in
                 await self.recordMonitoring(command)
+            },
+            legacyMigrationPublicationState: {
+                try await self.recordPublicationState()
             },
             migrate: { request in
                 try await self.migrate(request)
@@ -436,6 +594,13 @@ private actor ClipboardLifecycleProbe {
             reason: reason,
             isMonitoring: command == .start
         )
+    }
+
+    private func recordPublicationState() throws
+        -> ClipboardHistoryLegacyMigrationPublicationState
+    {
+        events.append(.publicationState)
+        return publicationState
     }
 
     private func migrate(
