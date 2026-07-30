@@ -209,7 +209,7 @@ final class ClipboardWallStateTests: XCTestCase {
             state.queryTextDidChange()
         }
         await clock.advance(by: .milliseconds(149))
-        var recorded = await recorder.count
+        let recorded = await recorder.count
         XCTAssertEqual(recorded, 0)
 
         await clock.advance(by: .milliseconds(1))
