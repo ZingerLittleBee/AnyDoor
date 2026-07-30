@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import GRDB
 
@@ -417,17 +418,28 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
+        let previousSchedule = try database.read {
+            try Self.maintenanceScheduleSnapshot(in: $0)
+        }
         try database.writeWithoutTransaction { database in
             try database.execute(sql: "PRAGMA incremental_vacuum")
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_maintenance_metadata(key, real_value)
-                    VALUES ('lastMaintenanceAt', ?)
-                    ON CONFLICT(key) DO UPDATE SET real_value = excluded.real_value
-                    """,
-                arguments: [now().timeIntervalSince1970]
-            )
             try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+        try database.write { database in
+            try Self.recordMaintenanceSuccess(in: database, at: now())
+        }
+        do {
+            try database.writeWithoutTransaction { database in
+                try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+            }
+        } catch {
+            try? database.write { database in
+                try Self.restoreMaintenanceSchedule(
+                    previousSchedule,
+                    in: database
+                )
+            }
+            throw error
         }
         return ClipboardHistoryMaintenanceReport(
             reclaimedPayloadCount: reclaimed,
@@ -436,10 +448,21 @@ extension ClipboardHistoryModule {
     }
 
     public func storageUsage() throws -> UInt64 {
-        guard FileManager.default.fileExists(atPath: storeRoot.path) else {
-            return 0
+        let descriptor = Darwin.open(
+            storeRoot.path,
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
+        )
+        guard descriptor >= 0 else {
+            if errno == ENOENT {
+                return 0
+            }
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
         }
-        return try allocatedSize(of: storeRoot)
+        defer { Darwin.close(descriptor) }
+        return try allocatedSize(
+            ofDirectoryDescriptor: descriptor,
+            representedBy: storeRoot
+        )
     }
 
     func awaitPendingReclamation() async
@@ -461,6 +484,7 @@ extension ClipboardHistoryModule {
         monitoringRequested = false
         monitoringEnabled = false
         await captureMonitor?.setEnabled(false)
+        await stopMaintenanceTask()
         _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
         try database?.close()
@@ -481,7 +505,11 @@ extension ClipboardHistoryModule {
             availabilityReason = .keychainFailure
             throw ClipboardHistoryModuleError.resetFailed
         }
-        let resolution = Self.resolveStore(at: storeRoot, keyStore: keyStore)
+        let resolution = Self.resolveStore(
+            at: storeRoot,
+            keyStore: keyStore,
+            maintenanceDate: now()
+        )
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
@@ -493,6 +521,7 @@ extension ClipboardHistoryModule {
         guard availability == .ready else {
             throw ClipboardHistoryModuleError.resetFailed
         }
+        startMaintenanceTaskIfNeeded()
     }
 }
 
@@ -611,33 +640,137 @@ extension ClipboardHistoryModule {
         return ClipboardHistoryEntryID(value)
     }
 
-    fileprivate func allocatedSize(of directory: URL) throws -> UInt64 {
-        let keys: Set<URLResourceKey> = [
-            .fileAllocatedSizeKey,
-            .totalFileAllocatedSizeKey,
-            .isDirectoryKey,
-            .isRegularFileKey,
-            .isSymbolicLinkKey,
-        ]
+    fileprivate func allocatedSize(
+        ofDirectoryDescriptor directoryDescriptor: Int32,
+        representedBy directory: URL
+    ) throws -> UInt64 {
+        let streamDescriptor = Darwin.dup(directoryDescriptor)
+        guard streamDescriptor >= 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        guard let stream = Darwin.fdopendir(streamDescriptor) else {
+            let failure = errno
+            Darwin.close(streamDescriptor)
+            throw ClipboardHistoryStorageError.fileOperationFailed(failure)
+        }
+        defer { Darwin.closedir(stream) }
+
         var total: UInt64 = 0
-        for child in try FileManager.default.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: Array(keys),
-            options: []
-        ) {
-            let values = try child.resourceValues(forKeys: keys)
-            if values.isSymbolicLink == true {
+        while true {
+            errno = 0
+            guard let entry = Darwin.readdir(stream) else {
+                if errno != 0 {
+                    throw ClipboardHistoryStorageError.fileOperationFailed(
+                        errno
+                    )
+                }
+                break
+            }
+            let name = withUnsafePointer(to: &entry.pointee.d_name) {
+                pointer in
+                pointer.withMemoryRebound(
+                    to: CChar.self,
+                    capacity: Int(entry.pointee.d_namlen) + 1
+                ) {
+                    String(cString: $0)
+                }
+            }
+            guard name != ".", name != ".." else { continue }
+
+            var observed = stat()
+            guard name.withCString({
+                Darwin.fstatat(
+                    directoryDescriptor,
+                    $0,
+                    &observed,
+                    AT_SYMLINK_NOFOLLOW
+                )
+            }) == 0 else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+            }
+            let observedKind = observed.st_mode & mode_t(S_IFMT)
+            if observedKind == mode_t(S_IFLNK) {
                 continue
             }
-            if values.isDirectory == true {
-                total += try allocatedSize(of: child)
-            } else if values.isRegularFile == true {
-                let size = values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0
-                total += UInt64(max(size, 0))
+            guard observedKind == mode_t(S_IFDIR)
+                    || observedKind == mode_t(S_IFREG)
+            else {
+                continue
+            }
+
+            let child = directory.appendingPathComponent(name)
+            try storageTraversalHook?(child)
+            let flags =
+                O_RDONLY | O_CLOEXEC | O_NOFOLLOW
+                | (observedKind == mode_t(S_IFDIR) ? O_DIRECTORY : 0)
+            let childDescriptor = name.withCString {
+                Darwin.openat(directoryDescriptor, $0, flags)
+            }
+            guard childDescriptor >= 0 else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+            }
+            try withClipboardHistoryFileDescriptor(childDescriptor) {
+                openedDescriptor in
+                var opened = stat()
+                guard Darwin.fstat(openedDescriptor, &opened) == 0 else {
+                    throw ClipboardHistoryStorageError.fileOperationFailed(
+                        errno
+                    )
+                }
+                guard Self.sameFileIdentity(observed, opened) else {
+                    throw ClipboardHistoryStorageError.fileOperationFailed(
+                        ESTALE
+                    )
+                }
+
+                if observedKind == mode_t(S_IFDIR) {
+                    let childSize = try allocatedSize(
+                        ofDirectoryDescriptor: openedDescriptor,
+                        representedBy: child
+                    )
+                    let (sum, overflow) =
+                        total.addingReportingOverflow(childSize)
+                    guard !overflow else {
+                        throw ClipboardHistoryStorageError.fileOperationFailed(
+                            EOVERFLOW
+                        )
+                    }
+                    total = sum
+                } else {
+                    let blocks = max(opened.st_blocks, 0)
+                    let (bytes, multiplicationOverflow) =
+                        UInt64(blocks).multipliedReportingOverflow(by: 512)
+                    let (sum, additionOverflow) =
+                        total.addingReportingOverflow(bytes)
+                    guard !multiplicationOverflow, !additionOverflow else {
+                        throw ClipboardHistoryStorageError.fileOperationFailed(
+                            EOVERFLOW
+                        )
+                    }
+                    total = sum
+                }
             }
         }
         return total
     }
+
+    private static func sameFileIdentity(
+        _ observed: stat,
+        _ opened: stat
+    ) -> Bool {
+        observed.st_dev == opened.st_dev
+            && observed.st_ino == opened.st_ino
+            && (observed.st_mode & mode_t(S_IFMT))
+                == (opened.st_mode & mode_t(S_IFMT))
+    }
+}
+
+private func withClipboardHistoryFileDescriptor<Result>(
+    _ descriptor: Int32,
+    _ body: (Int32) throws -> Result
+) rethrows -> Result {
+    defer { Darwin.close(descriptor) }
+    return try body(descriptor)
 }
 
 private struct EntryDeletionResult: Sendable {

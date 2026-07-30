@@ -449,6 +449,145 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
         XCTAssertEqual(try fixture.payloadFiles(), [])
     }
 
+    func testAutomaticMaintenanceUsesPersistedDailyDeadlineAcrossReopen()
+        async throws
+    {
+        let start = Date(timeIntervalSince1970: 9_000_000)
+        let clock = RetentionTestClock(start)
+        let fixture = try RetentionTemporaryStore()
+        let firstScheduler = MaintenanceTestScheduler(now: start)
+        let first = fixture.makeModule(
+            clock: clock,
+            maintenanceScheduler: firstScheduler
+        )
+
+        await waitForMaintenanceScheduler(firstScheduler, sleepCount: 1)
+        let firstDeadlines = await firstScheduler.recordedDeadlines
+        let firstDeadline = try XCTUnwrap(firstDeadlines.first)
+        XCTAssertEqual(
+            firstDeadline.timeIntervalSince1970,
+            start.addingTimeInterval(86_400).timeIntervalSince1970,
+            accuracy: 0.001
+        )
+        let orphan = fixture.url
+            .appendingPathComponent("payloads")
+            .appendingPathComponent("reopen-overdue.payload")
+        try Data(repeating: 0xC3, count: 4_096).write(to: orphan)
+        try FileManager.default.setAttributes(
+            [.modificationDate: start],
+            ofItemAtPath: orphan.path
+        )
+        try await first.closeStoreForTesting()
+
+        clock.now = start.addingTimeInterval(30 * 3_600)
+        let secondScheduler = MaintenanceTestScheduler(now: clock.now)
+        let second = fixture.makeModule(
+            clock: clock,
+            maintenanceScheduler: secondScheduler
+        )
+        await waitForMaintenanceScheduler(secondScheduler, sleepCount: 1)
+        let reopenedDeadlines = await secondScheduler.recordedDeadlines
+        let reopenedDeadline = try XCTUnwrap(reopenedDeadlines.first)
+        XCTAssertEqual(reopenedDeadline, firstDeadline)
+        await waitUntil {
+            !FileManager.default.fileExists(atPath: orphan.path)
+        }
+        await waitForMaintenanceScheduler(secondScheduler, sleepCount: 2)
+        let nextDeadlines = await secondScheduler.recordedDeadlines
+        let nextDeadline = try XCTUnwrap(nextDeadlines.last)
+        XCTAssertEqual(
+            nextDeadline.timeIntervalSince(clock.now),
+            86_400,
+            accuracy: 0.001
+        )
+        try await second.closeStoreForTesting()
+    }
+
+    func testAutomaticMaintenanceRetriesFailureAndPersistsNextSuccessDeadline()
+        async throws
+    {
+        let start = Date(timeIntervalSince1970: 10_000_000)
+        let clock = RetentionTestClock(start)
+        let fixture = try RetentionTemporaryStore()
+        let fault = OneShotMaintenanceFault()
+        let scheduler = MaintenanceTestScheduler(now: start)
+        let module = fixture.makeModule(
+            clock: clock,
+            maintenanceScheduler: scheduler,
+            faultInjector: ClipboardHistoryFaultInjector {
+                fault.shouldFail($0)
+            }
+        )
+        let orphan = fixture.url
+            .appendingPathComponent("payloads")
+            .appendingPathComponent("automatic-retry.payload")
+        try Data(repeating: 0xD4, count: 4_096).write(to: orphan)
+        try FileManager.default.setAttributes(
+            [.modificationDate: start],
+            ofItemAtPath: orphan.path
+        )
+
+        await waitForMaintenanceScheduler(scheduler, sleepCount: 1)
+        let deadline = start.addingTimeInterval(86_400)
+        clock.now = deadline
+        await scheduler.advance(to: deadline)
+        await waitForMaintenanceScheduler(scheduler, sleepCount: 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: orphan.path))
+        let retryDeadlines = await scheduler.recordedDeadlines
+        let retryDeadline = try XCTUnwrap(retryDeadlines.last)
+        XCTAssertEqual(
+            retryDeadline.timeIntervalSince(deadline),
+            5 * 60,
+            accuracy: 0.001
+        )
+
+        clock.now = retryDeadline
+        await scheduler.advance(to: retryDeadline)
+        await waitUntil { !FileManager.default.fileExists(atPath: orphan.path) }
+        await waitForMaintenanceScheduler(scheduler, sleepCount: 3)
+        let successDeadlines = await scheduler.recordedDeadlines
+        let nextDeadline = try XCTUnwrap(successDeadlines.last)
+        XCTAssertEqual(
+            nextDeadline.timeIntervalSince(retryDeadline),
+            86_400,
+            accuracy: 0.001
+        )
+        try await module.closeStoreForTesting()
+    }
+
+    func testCloseAndRetryKeepExactlyOneMaintenanceTask()
+        async throws
+    {
+        let start = Date(timeIntervalSince1970: 11_000_000)
+        let clock = RetentionTestClock(start)
+        let fixture = try RetentionTemporaryStore()
+        let scheduler = MaintenanceTestScheduler(now: start)
+        let module = fixture.makeModule(
+            clock: clock,
+            maintenanceScheduler: scheduler
+        )
+        await waitForMaintenanceScheduler(scheduler, sleepCount: 1)
+        let initialWaiterCount = await scheduler.activeWaiterCount
+        XCTAssertEqual(initialWaiterCount, 1)
+
+        try await module.closeStoreForTesting()
+        await waitUntil { await scheduler.activeWaiterCount == 0 }
+        let firstCancellationCount = await scheduler.cancellationCount
+        XCTAssertEqual(firstCancellationCount, 1)
+
+        await module.retry()
+        await waitForMaintenanceScheduler(scheduler, sleepCount: 2)
+        let firstRetryWaiterCount = await scheduler.activeWaiterCount
+        XCTAssertEqual(firstRetryWaiterCount, 1)
+        await module.retry()
+        await waitForMaintenanceScheduler(scheduler, sleepCount: 3)
+        let secondRetryWaiterCount = await scheduler.activeWaiterCount
+        let secondCancellationCount = await scheduler.cancellationCount
+        XCTAssertEqual(secondRetryWaiterCount, 1)
+        XCTAssertEqual(secondCancellationCount, 2)
+        try await module.closeStoreForTesting()
+    }
+
     func testStorageUsageIncludesEveryOwnedArtifactAndDoesNotFollowSymlinks()
         async throws
     {
@@ -481,6 +620,52 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
         )
         let afterSymlink = try await module.storageUsage()
         XCTAssertEqual(afterSymlink, reported)
+    }
+
+    func testStorageUsageFailsSafelyWhenDirectoryBecomesExternalSymlink()
+        async throws
+    {
+        let fixture = try RetentionTemporaryStore()
+        let owned = fixture.url.appendingPathComponent("owned-nested")
+        try FileManager.default.createDirectory(
+            at: owned,
+            withIntermediateDirectories: true
+        )
+        try Data(repeating: 0xE5, count: 4_096).write(
+            to: owned.appendingPathComponent("owned.payload")
+        )
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-StorageBoundary-\(UUID().uuidString)"
+            )
+        let parked = fixture.url.appendingPathComponent("owned-parked")
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createDirectory(
+            at: outside,
+            withIntermediateDirectories: true
+        )
+        let outsideFile = outside.appendingPathComponent("outside.payload")
+        try Data(repeating: 0xF6, count: 1_048_576).write(to: outsideFile)
+        let swap = StorageTraversalSwap(
+            target: owned,
+            parked: parked,
+            outside: outside
+        )
+        let module = fixture.makeModule(storageTraversalHook: { url in
+            try swap.performIfNeeded(at: url)
+        })
+
+        do {
+            _ = try await module.storageUsage()
+            XCTFail("Expected safe traversal failure")
+        } catch {
+            XCTAssertNotNil(error as? ClipboardHistoryStorageError)
+        }
+        XCTAssertTrue(swap.didSwap)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: outsideFile.path),
+            "Traversal must never consume or mutate the external target"
+        )
     }
 
     func testLogicalDeletionFaultsRollbackSearchRowsEntriesAndPayloadReferences()
@@ -674,13 +859,21 @@ private final class RetentionTemporaryStore {
 
     func makeModule(
         clock: RetentionTestClock = RetentionTestClock(Date()),
-        faults: Set<ClipboardHistoryFaultPoint> = []
+        faults: Set<ClipboardHistoryFaultPoint> = [],
+        maintenanceScheduler:
+            (any ClipboardHistoryMaintenanceScheduling)? = nil,
+        faultInjector: ClipboardHistoryFaultInjector? = nil,
+        storageTraversalHook:
+            (@Sendable (URL) throws -> Void)? = nil
     ) -> ClipboardHistoryModule {
         ClipboardHistoryModule(
             testingStoreRoot: url,
             keyStore: keyStore,
-            faultInjector: ClipboardHistoryFaultInjector(points: faults),
-            now: { clock.now }
+            faultInjector: faultInjector
+                ?? ClipboardHistoryFaultInjector(points: faults),
+            now: { clock.now },
+            maintenanceScheduler: maintenanceScheduler,
+            storageTraversalHook: storageTraversalHook
         )
     }
 
@@ -716,11 +909,146 @@ private final class RetentionMasterKeyStore:
 }
 
 private final class RetentionTestClock: @unchecked Sendable {
-    var now: Date
+    private let lock = NSLock()
+    private var value: Date
+
+    var now: Date {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+        set {
+            lock.lock()
+            value = newValue
+            lock.unlock()
+        }
+    }
 
     init(_ now: Date) {
+        value = now
+    }
+}
+
+private actor MaintenanceTestScheduler:
+    ClipboardHistoryMaintenanceScheduling
+{
+    private struct Waiter {
+        let deadline: Date
+        let continuation: CheckedContinuation<Void, Error>
+    }
+
+    private var now: Date
+    private var waiters: [UUID: Waiter] = [:]
+    private(set) var recordedDeadlines: [Date] = []
+    private(set) var cancellationCount = 0
+
+    init(now: Date) {
         self.now = now
     }
+
+    var activeWaiterCount: Int {
+        waiters.count
+    }
+
+    func sleep(until deadline: Date) async throws {
+        try Task.checkCancellation()
+        recordedDeadlines.append(deadline)
+        guard deadline > now else { return }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiters[id] = Waiter(
+                    deadline: deadline,
+                    continuation: continuation
+                )
+            }
+        } onCancel: {
+            Task { await self.cancel(id) }
+        }
+    }
+
+    func advance(to date: Date) {
+        now = date
+        let ready = waiters.filter { $0.value.deadline <= date }
+        for (id, waiter) in ready {
+            waiters.removeValue(forKey: id)
+            waiter.continuation.resume()
+        }
+    }
+
+    private func cancel(_ id: UUID) {
+        guard let waiter = waiters.removeValue(forKey: id) else { return }
+        cancellationCount += 1
+        waiter.continuation.resume(throwing: CancellationError())
+    }
+}
+
+private final class OneShotMaintenanceFault: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remainingFailures = 1
+
+    func shouldFail(_ point: ClipboardHistoryFaultPoint) -> Bool {
+        guard point == .orphanReconciliation else { return false }
+        lock.lock()
+        defer { lock.unlock() }
+        guard remainingFailures > 0 else { return false }
+        remainingFailures -= 1
+        return true
+    }
+}
+
+private final class StorageTraversalSwap: @unchecked Sendable {
+    let target: URL
+    let parked: URL
+    let outside: URL
+    private let lock = NSLock()
+    private var swapped = false
+
+    var didSwap: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return swapped
+    }
+
+    init(target: URL, parked: URL, outside: URL) {
+        self.target = target
+        self.parked = parked
+        self.outside = outside
+    }
+
+    func performIfNeeded(at url: URL) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !swapped, url.path == target.path else { return }
+        try FileManager.default.moveItem(at: target, to: parked)
+        try FileManager.default.createSymbolicLink(
+            at: target,
+            withDestinationURL: outside
+        )
+        swapped = true
+    }
+}
+
+private func waitForMaintenanceScheduler(
+    _ scheduler: MaintenanceTestScheduler,
+    sleepCount: Int
+) async {
+    await waitUntil {
+        await scheduler.recordedDeadlines.count >= sleepCount
+    }
+}
+
+private func waitUntil(
+    _ condition: @escaping @Sendable () async -> Bool
+) async {
+    for _ in 0..<100_000 {
+        if await condition() {
+            return
+        }
+        await Task.yield()
+    }
+    XCTFail("Timed out waiting for asynchronous test condition")
 }
 
 private struct TextEditDiagnostics {

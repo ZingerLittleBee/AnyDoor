@@ -44,14 +44,20 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
 }
 
 struct ClipboardHistoryFaultInjector: Sendable {
-    let points: Set<ClipboardHistoryFaultPoint>
+    private let shouldFail: @Sendable (ClipboardHistoryFaultPoint) -> Bool
 
     init(points: Set<ClipboardHistoryFaultPoint> = []) {
-        self.points = points
+        shouldFail = { points.contains($0) }
+    }
+
+    init(
+        shouldFail: @escaping @Sendable (ClipboardHistoryFaultPoint) -> Bool
+    ) {
+        self.shouldFail = shouldFail
     }
 
     func check(_ point: ClipboardHistoryFaultPoint) throws {
-        if points.contains(point) {
+        if shouldFail(point) {
             throw ClipboardHistoryStorageError.injected(point)
         }
     }

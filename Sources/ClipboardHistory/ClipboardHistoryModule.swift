@@ -23,10 +23,16 @@ public actor ClipboardHistoryModule {
     let faultInjector: ClipboardHistoryFaultInjector
     let payloadReclaimer = ClipboardHistoryPayloadReclaimer()
     let now: @Sendable () -> Date
+    let maintenanceScheduler:
+        (any ClipboardHistoryMaintenanceScheduling)?
+    let storageTraversalHook: (@Sendable (URL) throws -> Void)?
     let fingerprintDigest: @Sendable (Data) -> Data
     let duplicateReuseEnabled: Bool
     var automaticImageTextIndexingEnabled = false
     var searchIndexRebuildTask: Task<SearchIndexRebuildOutcome, Never>?
+    var maintenanceTask: Task<Void, Never>?
+    nonisolated let maintenanceBootstrap =
+        ClipboardHistoryMaintenanceBootstrap()
     var isClosingStore = false
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
@@ -41,11 +47,17 @@ public actor ClipboardHistoryModule {
         )
         let root = Self.defaultStoreRoot
         let keyStore = ClipboardHistoryKeychainStore()
-        let resolution = Self.resolveStore(at: root, keyStore: keyStore)
+        let resolution = Self.resolveStore(
+            at: root,
+            keyStore: keyStore,
+            maintenanceDate: Date()
+        )
         storeRoot = root
         self.keyStore = keyStore
         faultInjector = ClipboardHistoryFaultInjector()
         now = Date.init
+        maintenanceScheduler = SystemClipboardHistoryMaintenanceScheduler()
+        storageTraversalHook = nil
         fingerprintDigest = CanonicalIdentity.sha256
         duplicateReuseEnabled = true
         database = resolution.database
@@ -56,6 +68,11 @@ public actor ClipboardHistoryModule {
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
+        maintenanceBootstrap.install(
+            Task { [weak self] in
+                await self?.startMaintenanceTaskIfNeeded()
+            }
+        )
     }
 
     init(
@@ -74,6 +91,8 @@ public actor ClipboardHistoryModule {
         keyStore = nil
         self.faultInjector = faultInjector
         now = Date.init
+        maintenanceScheduler = nil
+        storageTraversalHook = nil
         fingerprintDigest = CanonicalIdentity.sha256
         duplicateReuseEnabled = true
         try Self.prepareStoreDirectories(at: storeRoot)
@@ -103,6 +122,10 @@ public actor ClipboardHistoryModule {
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector(),
         now: @escaping @Sendable () -> Date = Date.init,
+        maintenanceScheduler:
+            (any ClipboardHistoryMaintenanceScheduling)? = nil,
+        storageTraversalHook:
+            (@Sendable (URL) throws -> Void)? = nil,
         fingerprintDigest: @escaping @Sendable (Data) -> Data =
             CanonicalIdentity.sha256,
         duplicateReuseEnabled: Bool = true
@@ -115,12 +138,15 @@ public actor ClipboardHistoryModule {
         )
         let resolution = Self.resolveStore(
             at: testingStoreRoot,
-            keyStore: keyStore
+            keyStore: keyStore,
+            maintenanceDate: now()
         )
         storeRoot = testingStoreRoot
         self.keyStore = keyStore
         self.faultInjector = faultInjector
         self.now = now
+        self.maintenanceScheduler = maintenanceScheduler
+        self.storageTraversalHook = storageTraversalHook
         self.fingerprintDigest = fingerprintDigest
         self.duplicateReuseEnabled = duplicateReuseEnabled
         database = resolution.database
@@ -131,6 +157,11 @@ public actor ClipboardHistoryModule {
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
+        maintenanceBootstrap.install(
+            Task { [weak self] in
+                await self?.startMaintenanceTaskIfNeeded()
+            }
+        )
     }
 
     public func setMonitoring(
@@ -182,12 +213,17 @@ public actor ClipboardHistoryModule {
 
     public func retry() async {
         guard let keyStore else { return }
+        await stopMaintenanceTask()
         _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
         if let database {
             try? database.close()
         }
-        let resolution = Self.resolveStore(at: storeRoot, keyStore: keyStore)
+        let resolution = Self.resolveStore(
+            at: storeRoot,
+            keyStore: keyStore,
+            maintenanceDate: now()
+        )
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
@@ -203,6 +239,7 @@ public actor ClipboardHistoryModule {
             monitoringEnabled = true
             await captureMonitor?.setEnabled(true)
         }
+        startMaintenanceTaskIfNeeded()
     }
 
     public func status() -> ClipboardHistoryStatus {
@@ -323,6 +360,7 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         isClosingStore = true
+        await stopMaintenanceTask()
         let rebuildTask = searchIndexRebuildTask
         if let rebuildTask {
             _ = await rebuildTask.value
@@ -406,7 +444,8 @@ extension ClipboardHistoryModule {
 
     static func resolveStore(
         at root: URL,
-        keyStore: any ClipboardHistoryMasterKeyStoring
+        keyStore: any ClipboardHistoryMasterKeyStoring,
+        maintenanceDate: Date
     ) -> StoreResolution {
         let databaseURL = databaseURL(in: root)
         let databaseExists = FileManager.default.fileExists(
@@ -454,6 +493,12 @@ extension ClipboardHistoryModule {
                 at: databaseURL,
                 databaseKey: keys.databaseKey
             )
+            try database.write { database in
+                _ = try ensureMaintenanceDeadline(
+                    in: database,
+                    at: maintenanceDate
+                )
+            }
             return StoreResolution(
                 database: database,
                 keys: keys,
