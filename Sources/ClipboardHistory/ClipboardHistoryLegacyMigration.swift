@@ -1348,6 +1348,16 @@ extension ClipboardHistoryModule {
                         throw ClipboardHistoryModuleError
                             .legacyMigrationFailed
                     }
+                    try database.execute(
+                        sql: """
+                            UPDATE clipboard_legacy_cleanup
+                            SET proof_kind = 'publishedEncrypted'
+                            WHERE relative_path = ?
+                            """,
+                        arguments: [
+                            row["legacy_relative_path"] as String
+                        ]
+                    )
                 default:
                     throw ClipboardHistoryModuleError.legacyMigrationFailed
                 }

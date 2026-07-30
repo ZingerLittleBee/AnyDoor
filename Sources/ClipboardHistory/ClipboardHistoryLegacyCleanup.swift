@@ -117,6 +117,8 @@ extension ClipboardHistoryModule {
             else {
                 throw ClipboardHistoryModuleError.legacyCleanupFailed
             }
+        case .publishedEncrypted:
+            break
         case .encryptedPayload:
             guard let relativePath = proof.payloadRelativePath,
                 let kindValue = proof.payloadKind,
@@ -159,6 +161,7 @@ private struct PendingLegacyCleanup: Sendable {
     enum Kind: Sendable {
         case equalCurrent
         case encryptedPayload
+        case publishedEncrypted
     }
 
     let relativePath: String
@@ -176,6 +179,8 @@ private struct PendingLegacyCleanup: Sendable {
             kind = .equalCurrent
         case "encryptedPayload":
             kind = .encryptedPayload
+        case "publishedEncrypted":
+            kind = .publishedEncrypted
         default:
             throw ClipboardHistoryModuleError.legacyCleanupFailed
         }

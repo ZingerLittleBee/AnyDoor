@@ -1013,6 +1013,55 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             )
         )
     }
+
+    func testPublishedCleanupProofSurvivesNewHistoryDeletion()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let payloadName = "owned-copy"
+        try fixture.writeLegacyPayload(
+            named: payloadName,
+            data: Data("captured bytes".utf8)
+        )
+        let entryID = UUID()
+        let module = fixture.makeModule()
+        _ = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: entryID,
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: payloadName,
+                                originalURL: fixture.root
+                                    .appendingPathComponent("missing.txt")
+                            )
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+        let deletion = try await module.apply(
+            .delete(ClipboardHistoryEntryID(entryID))
+        )
+        XCTAssertEqual(deletion, .deleted)
+
+        let report = try await module.cleanupLegacyPayloads(
+            in: fixture.legacyPayloadRoot
+        )
+
+        XCTAssertEqual(report.removedPayloadCount, 1)
+        XCTAssertEqual(report.pendingPayloadCount, 0)
+        XCTAssertTrue(report.canDeleteLegacyRows)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: fixture.legacyPayloadURL(payloadName).path
+            )
+        )
+    }
 }
 
 private final class LegacyMigrationFixture {
