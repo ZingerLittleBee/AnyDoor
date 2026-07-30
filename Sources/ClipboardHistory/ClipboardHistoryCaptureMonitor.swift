@@ -183,6 +183,9 @@ final class ClipboardHistoryCaptureMonitor {
     }
 
     private func timerFired() async {
+        // Doubles as the tap watchdog: re-arming is a no-op while the tap is
+        // installed, and recovers it when Accessibility is granted after launch.
+        eventHintSource?.ensureInstalled()
         os_signpost(
             .event,
             log: clipboardMonitorSignpostLog,
@@ -413,16 +416,37 @@ final class ClipboardHistoryCaptureMonitor {
 @MainActor
 private final class ClipboardHistoryCopyEventHintSource {
     private nonisolated let scheduleHint: @Sendable () -> Void
-    private var eventTap: CFMachPort?
+    /// Read by the tap callback, which runs on the run loop that installed it
+    /// (the main thread) but is not statically main-actor isolated — the same
+    /// arrangement HotkeyService uses for its own tap storage.
+    private nonisolated(unsafe) var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    /// Whether the hint source is supposed to be observing. Kept separate from
+    /// `eventTap` so a create that failed for lack of Accessibility can be
+    /// retried later without a stop/start cycle.
+    private var isRunning = false
 
     init(scheduleHint: @escaping @Sendable () -> Void) {
         self.scheduleHint = scheduleHint
     }
 
     func start() {
-        guard eventTap == nil else { return }
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        isRunning = true
+        ensureInstalled()
+    }
+
+    /// Idempotent re-arm, driven off the monitor's existing timer. It covers
+    /// the two ways the tap goes away without anyone calling `stop()`:
+    /// `tapCreate` returning nil because Accessibility was not granted yet at
+    /// first launch, and a tap the system tore down entirely. Without it the
+    /// source attribution silently degrades to timer-only polling for the rest
+    /// of the session even after the user grants permission.
+    func ensureInstalled() {
+        guard isRunning, eventTap == nil else { return }
+        let mask =
+            CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.tapDisabledByTimeout.rawValue)
+            | CGEventMask(1 << CGEventType.tapDisabledByUserInput.rawValue)
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -441,6 +465,31 @@ private final class ClipboardHistoryCopyEventHintSource {
     }
 
     func stop() {
+        isRunning = false
+        Self.teardown(eventTap: eventTap, runLoopSource: runLoopSource)
+        eventTap = nil
+        runLoopSource = nil
+    }
+
+    /// The system disables a tap that overran its callback budget or was
+    /// interrupted by user input. Re-enable it inline from the callback, the
+    /// same defence HotkeyService applies to its own tap.
+    nonisolated func reenableAfterSystemDisable() {
+        guard let eventTap else { return }
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+    }
+
+    /// The run loop retains the source, so an installed tap outlives this
+    /// object and would call back through a freed `Unmanaged` pointer. Tear it
+    /// down here instead of relying on a matching `stop()`.
+    isolated deinit {
+        Self.teardown(eventTap: eventTap, runLoopSource: runLoopSource)
+    }
+
+    private nonisolated static func teardown(
+        eventTap: CFMachPort?,
+        runLoopSource: CFRunLoopSource?
+    ) {
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
         }
@@ -451,8 +500,6 @@ private final class ClipboardHistoryCopyEventHintSource {
                 .commonModes
             )
         }
-        eventTap = nil
-        runLoopSource = nil
     }
 
     nonisolated func receive(_ event: CGEvent) {
@@ -480,13 +527,20 @@ private func clipboardHistoryCopyEventCallback(
     event: CGEvent,
     userInfo: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
-    guard type == .keyDown, let userInfo else {
+    guard let userInfo else {
         return Unmanaged.passUnretained(event)
     }
     let source = Unmanaged<ClipboardHistoryCopyEventHintSource>
         .fromOpaque(userInfo)
         .takeUnretainedValue()
-    source.receive(event)
+    switch type {
+    case .keyDown:
+        source.receive(event)
+    case .tapDisabledByTimeout, .tapDisabledByUserInput:
+        source.reenableAfterSystemDisable()
+    default:
+        break
+    }
     return Unmanaged.passUnretained(event)
 }
 
