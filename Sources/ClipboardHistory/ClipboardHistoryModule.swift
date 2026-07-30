@@ -28,6 +28,8 @@ public actor ClipboardHistoryModule {
     let storageTraversalHook: (@Sendable (URL) throws -> Void)?
     let fingerprintDigest: @Sendable (Data) -> Data
     let duplicateReuseEnabled: Bool
+    var legacyDigestReadCount = 0
+    var legacyMaximumDigestReadSize = 0
     let visionRecognizer: any ClipboardHistoryVisionRecognizing
     var automaticImageTextIndexingEnabled = false
     var derivedJobSchedulerTask: Task<Void, Never>?

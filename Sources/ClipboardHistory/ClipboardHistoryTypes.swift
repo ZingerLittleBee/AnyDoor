@@ -447,6 +447,11 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case payloadAuthenticationFailed(ClipboardHistoryEntryID)
     case payloadUnavailable(ClipboardHistoryEntryID)
     case fileReferencesUnavailable(ClipboardHistoryEntryID, count: Int)
+    case fileCollectionRequiresRestore(
+        ClipboardHistoryEntryID,
+        ownedCount: Int,
+        unavailableCount: Int
+    )
     case resetFailed
     case invalidTagIDs(Set<String>)
     case invalidTextEdit

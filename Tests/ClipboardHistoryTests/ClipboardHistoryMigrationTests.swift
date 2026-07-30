@@ -305,6 +305,193 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(page.entries.map(\.id.value), ids)
     }
+
+    func testFileMigrationClassifiesEveryMemberAndBlocksPartialPaste()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let originals = fixture.root.appendingPathComponent("Originals")
+        try FileManager.default.createDirectory(
+            at: originals,
+            withIntermediateDirectories: true
+        )
+        let equal = originals.appendingPathComponent("equal.txt")
+        let changed = originals.appendingPathComponent("changed.txt")
+        let missingOriginal = originals.appendingPathComponent("missing.txt")
+        let missingCopy = originals.appendingPathComponent("copy-missing.txt")
+        let doubleMissing = originals.appendingPathComponent("double.txt")
+        try Data(repeating: 0x31, count: 200_000).write(to: equal)
+        try Data("current changed".utf8).write(to: changed)
+        try Data("current without captured bytes".utf8).write(
+            to: missingCopy
+        )
+        try fixture.writeLegacyPayload(
+            named: "equal-copy",
+            data: Data(repeating: 0x31, count: 200_000)
+        )
+        try fixture.writeLegacyPayload(
+            named: "changed-copy",
+            data: Data("captured original".utf8)
+        )
+        try fixture.writeLegacyPayload(
+            named: "missing-original-copy",
+            data: Data("only retained copy".utf8)
+        )
+        let entryID = UUID()
+        let module = fixture.makeModule()
+
+        let outcome = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: entryID,
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: "equal-copy",
+                                originalURL: equal
+                            ),
+                            legacyFile(
+                                storedName: "changed-copy",
+                                originalURL: changed
+                            ),
+                            legacyFile(
+                                storedName: "missing-original-copy",
+                                originalURL: missingOriginal
+                            ),
+                            legacyFile(
+                                storedName: "named-copy-is-missing",
+                                originalURL: missingCopy
+                            ),
+                            legacyFile(
+                                storedName: nil,
+                                originalURL: doubleMissing
+                            ),
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+
+        XCTAssertEqual(
+            outcome,
+            .published(
+                ClipboardHistoryLegacyMigrationReport(
+                    retainedEntryCount: 1,
+                    omittedExpiredEntryCount: 0,
+                    ownedPayloadCount: 2,
+                    redundantLegacyPayloadCount: 1
+                )
+            )
+        )
+        let diagnostics = try await module.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        XCTAssertEqual(
+            diagnostics.members.map(\.state),
+            [
+                .ordinary,
+                .legacyOwned,
+                .legacyOwned,
+                .legacyUnverified,
+                .unavailable,
+            ]
+        )
+        XCTAssertEqual(
+            diagnostics.members.map(\.capturedPath),
+            [equal, changed, missingOriginal, missingCopy, doubleMissing]
+                .map(\.path)
+        )
+        XCTAssertEqual(
+            diagnostics.maximumDigestReadSize,
+            64 * 1_024
+        )
+        XCTAssertGreaterThan(diagnostics.digestReadCount, 2)
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries[0].facets, [.file])
+        for query in [
+            "equal.txt",
+            "changed.txt",
+            "missing.txt",
+            doubleMissing.path,
+        ] {
+            let matches = try await module.page(
+                ClipboardHistoryQuery(text: query)
+            )
+            XCTAssertEqual(
+                matches.entries.map(\.id.value),
+                [entryID]
+            )
+        }
+        do {
+            _ = try await module.materialize(
+                ClipboardHistoryMaterializationRequest(
+                    entryID: ClipboardHistoryEntryID(entryID),
+                    purpose: .normalPaste
+                )
+            )
+            XCTFail("Expected mixed file collection paste to be blocked")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .fileCollectionRequiresRestore(
+                    ClipboardHistoryEntryID(entryID),
+                    ownedCount: 2,
+                    unavailableCount: 1
+                )
+            )
+        }
+    }
+
+    func testLegacyUnverifiedBookmarkStartsIdentityAtMigration()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let original = fixture.root.appendingPathComponent("unverified.txt")
+        try Data("current bytes".utf8).write(to: original)
+        let entryID = UUID()
+        let module = fixture.makeModule()
+        _ = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: entryID,
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: "missing-copy",
+                                originalURL: original
+                            )
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: ClipboardHistoryEntryID(entryID),
+                purpose: .normalPaste
+            )
+        )
+        guard
+            case .file(let reference) =
+                materialized.items.first?.representations.first
+        else {
+            return XCTFail("Expected a materialized file reference")
+        }
+        XCTAssertEqual(reference.capturedPath, original.path)
+        XCTAssertEqual(reference.displayName, original.lastPathComponent)
+        XCTAssertEqual(
+            reference.currentURL.resolvingSymlinksInPath(),
+            original.resolvingSymlinksInPath()
+        )
+    }
 }
 
 private final class LegacyMigrationFixture {
@@ -413,5 +600,16 @@ private func legacyEntry(
         isFavorite: isFavorite,
         tagIDs: tagIDs,
         files: files
+    )
+}
+
+private func legacyFile(
+    storedName: String?,
+    originalURL: URL
+) -> ClipboardHistoryLegacyFileMember {
+    ClipboardHistoryLegacyFileMember(
+        storedName: storedName,
+        originalName: originalURL.lastPathComponent,
+        originalPath: originalURL.path
     )
 }

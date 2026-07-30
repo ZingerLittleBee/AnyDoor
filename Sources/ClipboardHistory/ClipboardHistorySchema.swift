@@ -84,7 +84,7 @@ extension ClipboardHistoryModule {
                 table.column("payload_id", .text)
                     .references(
                         "clipboard_payloads",
-                        onDelete: .cascade
+                        onDelete: .setNull
                     )
                 table.column("current_path", .text)
                 table.column("plaintext_byte_count", .integer).notNull()

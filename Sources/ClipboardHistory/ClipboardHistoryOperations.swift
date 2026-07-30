@@ -206,7 +206,8 @@ extension ClipboardHistoryModule {
                 database,
                 sql: """
                     SELECT item_index, captured_path, display_name,
-                           bookmark_data, identity_data
+                           bookmark_data, identity_data,
+                           reference_provenance
                     FROM clipboard_file_members
                     WHERE entry_id = ?
                     ORDER BY item_index, member_index
@@ -215,6 +216,19 @@ extension ClipboardHistoryModule {
             )
         }
         guard !rows.isEmpty else { return [:] }
+        let ownedCount = rows.count {
+            ($0["reference_provenance"] as String) == "legacyOwned"
+        }
+        let legacyUnavailableCount = rows.count {
+            ($0["reference_provenance"] as String) == "unavailable"
+        }
+        guard ownedCount == 0, legacyUnavailableCount == 0 else {
+            throw ClipboardHistoryModuleError.fileCollectionRequiresRestore(
+                entryID,
+                ownedCount: ownedCount,
+                unavailableCount: legacyUnavailableCount
+            )
+        }
 
         struct ResolvedFile {
             let itemIndex: Int
