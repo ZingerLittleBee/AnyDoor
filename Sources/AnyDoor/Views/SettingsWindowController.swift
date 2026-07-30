@@ -38,6 +38,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private var keyMonitor: Any?
+    /// The hosted SwiftUI hierarchy outlives individual presentations. This
+    /// explicitly marks each `show()` so an already-selected pane can refresh
+    /// its visible, derived state without rebuilding the window or navigation.
+    private let presentation = SettingsPresentation()
 
     private init() {
         // Fixed-size utility window: the mask carries no .miniaturizable /
@@ -81,6 +85,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func show() {
         guard let window else { return }
         window.title = L(.panelFooterSettings)
+        presentation.recordShow()
         mountContentIfNeeded()
         restorePosition()
         installKeyMonitor()
@@ -115,7 +120,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             rootView: SettingsRoot(
                 container: container,
                 clipboardHistoryModule: module,
-                clipboardHistoryLifecycle: lifecycle
+                clipboardHistoryLifecycle: lifecycle,
+                presentation: presentation
             )
         )
         // Let SwiftUI install the (item-less) NavigationSplitView toolbar —
@@ -200,15 +206,33 @@ private struct SettingsRoot: View {
     let container: ModelContainer
     let clipboardHistoryModule: ClipboardHistoryModule
     let clipboardHistoryLifecycle: ClipboardHistoryLifecycle
+    let presentation: SettingsPresentation
 
     var body: some View {
         let localization = LocalizationManager.shared
         SettingsView(
             clipboardHistoryModule: clipboardHistoryModule,
-            clipboardHistoryLifecycle: clipboardHistoryLifecycle
+            clipboardHistoryLifecycle: clipboardHistoryLifecycle,
+            presentation: presentation
         )
             .modelContainer(container)
             .environment(localization)
             .environment(\.locale, localization.effectiveLocale)
+    }
+}
+
+/// Presentation-bound, observable state for the reusable Settings host.
+///
+/// `NSWindow.close()` leaves this controller and its `NSHostingView` alive, so
+/// SwiftUI's initial appearance hooks are not a reliable representation of a
+/// subsequent Settings presentation. The controller owns this value and passes
+/// it through the Settings hierarchy instead of broadcasting a global event.
+@MainActor
+@Observable
+final class SettingsPresentation {
+    private(set) var showGeneration: UInt64 = 0
+
+    func recordShow() {
+        showGeneration &+= 1
     }
 }

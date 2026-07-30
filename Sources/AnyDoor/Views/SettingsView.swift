@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsView: View {
     let clipboardHistoryModule: ClipboardHistoryModule
     let clipboardHistoryLifecycle: ClipboardHistoryLifecycle
+    let presentation: SettingsPresentation
     @State private var opener = SettingsOpener.shared
     @State private var selectedTab: SettingsTab = .panel
 
@@ -81,7 +82,8 @@ struct SettingsView: View {
             groupedFormPane {
                 ClipboardSettingsView(
                     module: clipboardHistoryModule,
-                    lifecycle: clipboardHistoryLifecycle
+                    lifecycle: clipboardHistoryLifecycle,
+                    presentation: presentation
                 )
             }
         case .capture: groupedFormPane { CaptureSettingsView() }

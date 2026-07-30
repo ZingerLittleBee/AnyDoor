@@ -85,6 +85,59 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
         XCTAssertGreaterThan(fixture.model.storageBytes, 0)
     }
 
+    func testFirstShowAndClipboardSelectedReopenRefreshFreshUsage()
+        async throws
+    {
+        let fixture = try SettingsFixture()
+        let presentation = SettingsPresentation()
+
+        presentation.recordShow()
+        await fixture.model.refreshForSettingsAppearance(
+            presentation.showGeneration
+        )
+        let firstUsage = fixture.model.storageBytes
+
+        let entry = try await fixture.module.capture(
+            request(String(repeating: "fresh usage ", count: 20_000))
+        )
+        let expectedUsage = try await fixture.module.storageUsage()
+
+        presentation.recordShow()
+        await fixture.model.refreshForSettingsAppearance(
+            presentation.showGeneration
+        )
+
+        XCTAssertEqual(fixture.model.storageBytes, expectedUsage)
+        XCTAssertGreaterThan(fixture.model.storageBytes, firstUsage)
+        let page = try await fixture.module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id), [entry.entryID])
+    }
+
+    func testSettingsPresentationGenerationsAreMonotonicAcrossRapidShows() {
+        let presentation = SettingsPresentation()
+
+        presentation.recordShow()
+        presentation.recordShow()
+        presentation.recordShow()
+
+        XCTAssertEqual(presentation.showGeneration, 3)
+    }
+
+    func testHiddenClipboardPaneDoesNotRefreshOrMutateForSettingsShows()
+        async throws
+    {
+        let fixture = try SettingsFixture()
+        let presentation = SettingsPresentation()
+        let entry = try await fixture.module.capture(request("preserve me"))
+
+        presentation.recordShow()
+        presentation.recordShow()
+
+        XCTAssertEqual(fixture.model.storageBytes, 0)
+        let page = try await fixture.module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id), [entry.entryID])
+    }
+
     private func request(
         _ text: String
     ) -> ClipboardHistoryCaptureRequest {

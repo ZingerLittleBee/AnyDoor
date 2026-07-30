@@ -5,13 +5,16 @@ import SwiftUI
 @MainActor
 struct ClipboardSettingsView: View {
     @State private var model: ClipboardHistorySettingsModel
+    let presentation: SettingsPresentation
     @State private var installedApps: [InstalledApp] = []
     @State private var showsResetConfirmation = false
 
     init(
         module: ClipboardHistoryModule,
-        lifecycle: ClipboardHistoryLifecycle
+        lifecycle: ClipboardHistoryLifecycle,
+        presentation: SettingsPresentation
     ) {
+        self.presentation = presentation
         _model = State(
             initialValue: ClipboardHistorySettingsModel(
                 module: module,
@@ -151,8 +154,12 @@ struct ClipboardSettingsView: View {
         }
         .formStyle(.grouped)
         .overlayScrollers()
+        .task(id: presentation.showGeneration) {
+            await model.refreshForSettingsAppearance(
+                presentation.showGeneration
+            )
+        }
         .task {
-            await model.refresh()
             installedApps = await Task.detached {
                 InstalledAppsScanner.scan()
             }.value

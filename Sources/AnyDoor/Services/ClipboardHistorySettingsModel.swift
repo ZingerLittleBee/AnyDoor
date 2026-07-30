@@ -26,6 +26,8 @@ final class ClipboardHistorySettingsModel {
     private let module: ClipboardHistoryModule
     let lifecycle: ClipboardHistoryLifecycle
     private let defaults: UserDefaults
+    @ObservationIgnored private var latestSettingsAppearanceGeneration:
+        UInt64 = 0
 
     private(set) var retention: ClipboardHistoryRetentionPeriod = .default
     private(set) var automaticImageTextIndexingEnabled = false
@@ -61,16 +63,63 @@ final class ClipboardHistorySettingsModel {
     }
 
     func refresh() async {
+        await refresh(expectedSettingsAppearanceGeneration: nil)
+    }
+
+    /// Refreshes the settings-derived state for one visible Settings
+    /// presentation. A reused Settings host can request a newer generation
+    /// while a previous read is suspended; only the newest result may update
+    /// this UI model.
+    func refreshForSettingsAppearance(_ generation: UInt64) async {
+        guard generation > latestSettingsAppearanceGeneration else { return }
+        latestSettingsAppearanceGeneration = generation
+        await refresh(expectedSettingsAppearanceGeneration: generation)
+    }
+
+    private func refresh(
+        expectedSettingsAppearanceGeneration: UInt64?
+    ) async {
         do {
-            retention = try await module.retentionStatus().period
-            automaticImageTextIndexingEnabled =
+            guard shouldApplyRefresh(
+                expectedSettingsAppearanceGeneration
+            ) else { return }
+            let retention = try await module.retentionStatus().period
+            guard shouldApplyRefresh(
+                expectedSettingsAppearanceGeneration
+            ) else { return }
+            let automaticImageTextIndexingEnabled =
                 try await module.isAutomaticImageTextIndexingEnabled()
-            storageBytes = try await module.storageUsage()
+            guard shouldApplyRefresh(
+                expectedSettingsAppearanceGeneration
+            ) else { return }
+            let storageBytes = try await module.storageUsage()
+            guard shouldApplyRefresh(
+                expectedSettingsAppearanceGeneration
+            ) else { return }
+            self.retention = retention
+            self.automaticImageTextIndexingEnabled =
+                automaticImageTextIndexingEnabled
+            self.storageBytes = storageBytes
             operationFailed = false
         } catch {
+            guard shouldApplyRefresh(
+                expectedSettingsAppearanceGeneration
+            ) else { return }
             operationFailed = true
         }
+        guard shouldApplyRefresh(expectedSettingsAppearanceGeneration)
+        else { return }
         reloadLocalPreferences()
+    }
+
+    private func shouldApplyRefresh(
+        _ expectedSettingsAppearanceGeneration: UInt64?
+    ) -> Bool {
+        !Task.isCancelled && (
+            expectedSettingsAppearanceGeneration == nil
+                || expectedSettingsAppearanceGeneration
+                    == latestSettingsAppearanceGeneration
+        )
     }
 
     func setMonitoringEnabled(_ enabled: Bool) async {
