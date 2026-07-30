@@ -2,26 +2,32 @@
 
 The automated suite covers the store, the search index, migration boundaries,
 and crash safety. It cannot cover what this feature is actually judged on:
-whether copying feels instant, whether the wall opens without a hitch, and
-whether a year of history still types smoothly. This plan covers that.
+whether copying feels instant, whether the wall opens without a hitch, whether
+a year of history still types smoothly, and whether the app costs anything
+while sitting idle in the menu bar. This plan covers that.
 
-Scope: everything behind `docs/prds/2026-07-29-clipboard-history-v2.md`.
+Scope: the contract in `docs/prds/2026-07-29-clipboard-history-v2.md`
+(ADR-0011 through ADR-0025). Cases are traced to that contract; a case that
+contradicts it is a bug in this plan, not licence to change behaviour.
 
 ## How to read this
 
 Each case has **Steps**, **Pass**, and where it matters a **Budget** — a number
-that decides pass or fail. Budgets are not aspirations; a case that exceeds one
-is a defect, not a note.
+that decides pass or fail. Budgets are not aspirations; exceeding one is a
+defect, not a note.
 
-Priority markers:
+- **P0** — must pass before merge. Failure loses or exposes user data.
+- **P1** — must pass before release. Failure is a bad experience.
+- **P2** — record the result, decide separately.
 
-- **P0** — must pass before merge. A failure here loses or exposes user data.
-- **P1** — must pass before release. A failure here is a bad experience.
-- **P2** — worth knowing. Record the result, decide separately.
+Negative cases are marked **(must not)**. They matter more than the positive
+ones: this feature's contract is mostly about what it refuses to do.
+
+---
 
 ## 0. Preparation
 
-### 0.1 Builds
+### 0.1 Builds and hardware
 
 Test the **installed** app, not `swift run`. They are separate process
 identities with separate Accessibility grants, and only the installed one has
@@ -31,65 +37,67 @@ the production Bundle ID that the Keychain item and the URL scheme key off.
 make install          # /Applications/AnyDoor.app, Bundle ID dev.bybee.AnyDoor
 ```
 
-Grant Accessibility to that binary specifically. Re-granting after a reinstall
-is expected.
+Coverage matrix — the PRD requires the feature to stay interactive on the
+**minimum supported hardware**, and CI only type-checks the x86_64 branch:
+
+| Machine | Priority | Why |
+| --- | --- | --- |
+| Apple Silicon, current | P0 | Primary |
+| Intel Mac on macOS 14 | P1 | Oldest supported; SQLCipher and FTS5 perf differ. Every budget in section 8 must be re-measured here, not assumed. |
+| Universal build from `scripts/release.sh` | P1 | The shipped artifact, not the debug one |
 
 ### 0.2 Store locations
 
 ```
-~/Library/Application Support/dev.bybee.AnyDoor/AnyDoor.store        # SwiftData (no clipboard rows in v2)
-~/Library/Application Support/dev.bybee.AnyDoor/ClipboardHistory/    # v2 store root
-  history.sqlite, -wal, -shm                                          # SQLCipher
-  payloads/                                                           # AES-GCM files
-  staging/
-~/Library/Application Support/dev.bybee.AnyDoor/ClipboardHistoryLegacyMigration/   # only mid-migration
-~/Library/Application Support/dev.bybee.AnyDoor/ClipboardHistoryLegacyCutover-v1.complete
+~/Library/Application Support/dev.bybee.AnyDoor/
+  AnyDoor.store                            # SwiftData — must contain no clipboard rows in v2
+  ClipboardHistory/
+    history.sqlite, -wal, -shm             # SQLCipher
+    payloads/                              # AES-GCM envelopes
+    staging/
+  ClipboardHistoryLegacyMigration/         # exists only mid-migration
+  ClipboardHistoryLegacyCutover-v1.complete
 ```
 
-Keychain: one device-only generic-password item. Never synced, never in a
-backup.
+Keychain: one device-only generic-password item, never synced, never backed up.
 
 ### 0.3 Building a large history
 
-Perf cases need real volume. Do **not** hand-copy 10000 times. Two options:
-
-**A. Drive real captures** (exercises the whole capture pipeline):
+**A. Drive real captures** (exercises the whole pipeline):
 
 ```bash
-# 2000 mixed text entries, roughly one per 120ms.
 for i in $(seq 1 2000); do
   printf 'fixture %d %s\n' "$i" "$(head -c 200 /dev/urandom | base64)" | pbcopy
   sleep 0.12
 done
 ```
 
-Vary it: include CJK, emoji, URLs, long code blocks, and periodic images
+Vary it: CJK, emoji, URLs, long code blocks, periodic images
 (`screencapture -c`).
 
-**B. Disposable-home fixture** (fast, for migration cases):
+**B. Disposable-home legacy fixture** (for migration cases, does not touch
+your real history):
 
 ```bash
 CLIPBOARD_HISTORY_GUI_FIXTURE=1 CFFIXED_USER_HOME=/tmp/anydoor-fixture \
   swift test --filter ClipboardHistoryGUIFixtureTests/testCreateDisposableLegacyMigrationFixture
 ```
 
-This writes a **legacy** store under a throwaway home. Use it to build
-pre-v2 states without touching your real history.
-
 ### 0.4 Measuring
 
-- **Latency you can feel** — screen-record at 60fps and count frames. One
-  frame is 16.7ms; this is more honest than a stopwatch for anything under
-  half a second.
-- **Frame drops while scrolling** — Instruments → Animation Hitches, or
-  Core Animation FPS. "Looks smooth" is not a result.
-- **Memory** — Activity Monitor's *Memory* column tracks `phys_footprint`,
-  which is what the OS kills on. Record idle, peak-while-scrolling, and
-  settled-after.
-- **Disk** — `du -sh` the store root before and after; compare against
-  Settings → Clipboard's reported usage. They must agree.
-- **Is it AnyDoor stalling or the target app?** — sample the process:
-  `sample AnyDoor 3 -file /tmp/sample.txt` while reproducing.
+- **Perceived latency** — screen-record at 60fps and count frames. One frame
+  is 16.7ms; more honest than a stopwatch below half a second.
+- **Frame drops** — Instruments → Animation Hitches. "Looks smooth" is not a
+  result.
+- **Memory** — Activity Monitor's *Memory* column is `phys_footprint`, what
+  the OS kills on. Record idle, peak, and settled-after.
+- **Idle cost** — Activity Monitor → Energy, plus
+  `powermetrics --samplers tasks -n 1 | grep -i anydoor` for wakeups/sec.
+  Section 8.11 depends on this.
+- **Who is stalling** — `sample AnyDoor 3 -file /tmp/sample.txt` while
+  reproducing tells you whether it is AnyDoor or the target app.
+- **Disk** — `du -sh` the store root; compare against Settings → Clipboard's
+  reported usage. They must agree.
 
 ### 0.5 Before each destructive case
 
@@ -97,348 +105,686 @@ pre-v2 states without touching your real history.
 cp -R ~/Library/Application\ Support/dev.bybee.AnyDoor /tmp/anydoor-backup-$(date +%s)
 ```
 
-Several cases below deliberately corrupt or delete the store.
-
 ---
 
 ## 1. Migration from pre-v2 — P0
 
-This path runs exactly once per user and has never been exercised on a real
-install. It is the highest-risk area in the branch.
+Runs exactly once per user and has never been exercised on a real install.
+Highest-risk area in the branch.
 
-| # | Case | Steps | Pass |
-| --- | --- | --- | --- |
-| 1.1 | Fresh install | Remove the whole `dev.bybee.AnyDoor` directory. Launch. | Empty history, no error, no migration UI. Cutover marker present. |
-| 1.2 | Small legacy store | Restore a pre-v2 store with ~50 entries. Launch. | Every entry present, same order, same favorites and tags. |
-| 1.3 | Large legacy store | Pre-v2 store with 5000+ entries including images. Launch. | See Budget below. All entries migrate. |
-| 1.4 | Legacy images and files | Pre-v2 store with owned image payloads and file entries. | Images render. File entries resolve or show a missing-file state, never a crash. |
-| 1.5 | Legacy tags and favorites | Tag several legacy entries, favorite others. Launch. | Tags and favorites preserved; tag definitions intact; category order preserved. |
-| 1.6 | Legacy retention setting | Set a non-default retention pre-v2. Launch. | The same preset is selected after migration. |
-| 1.7 | **Kill mid-migration** | Launch with a large legacy store, force-quit during migration. Relaunch. | History intact. Migration retries and completes. No duplicates. |
-| 1.8 | Kill after publish, before cleanup | Same, timed just after entries appear. Relaunch. | No re-migration, no duplicates, snapshot directory removed. |
-| 1.9 | Second launch | Launch again after a successful migration. | No migration runs. Legacy snapshot directory absent. Marker present. |
-| 1.10 | Plaintext cleanup | After 1.3 completes, inspect the old payload directory. | No plaintext payloads remain. `grep -r` a known copied secret across the store root returns nothing. |
-| 1.11 | Corrupt legacy row | Hand-edit a legacy row to an unknown `ZKIND`. Launch. | That row is skipped; every other row migrates. Nothing fails wholesale. |
-
-**Budget (1.3)** — first launch with 5000 entries / ~1GB of payloads:
-
-- Migration completes within **60s**.
-- Peak `phys_footprint` stays under **1.5x** the legacy store's own size.
-- The menu bar item stays responsive throughout; the app never shows a
-  beachball.
-- Settings → Clipboard shows a migrating state rather than an empty history.
-
-> The automated peak measurement was 113MB for 800 x 128KB rows. If a real
-> store blows past the ratio above, capture a memory graph before filing.
-
----
-
-## 2. Capture correctness — P0
+### 1.1 Basic paths
 
 | # | Case | Pass |
 | --- | --- | --- |
-| 2.1 | ⌘C in a native app (TextEdit, Notes) | Captured within budget, correct source app. |
+| 1.1.1 | Fresh install (no `dev.bybee.AnyDoor` directory) | Empty history, no error, no migration UI. Cutover marker written. |
+| 1.1.2 | ~50 legacy entries | All present, same order, same favorites and tags. |
+| 1.1.3 | 5000+ legacy entries incl. images | See budget in 8.12. All migrate. |
+| 1.1.4 | Legacy tags, favorites, category order | All preserved; tag definitions intact. |
+| 1.1.5 | Legacy retention preset | Same preset selected after migration. |
+| 1.1.6 | Second launch | No migration runs; snapshot directory absent; marker present. |
+| 1.1.7 | Unknown legacy `ZKIND` | That row skipped; every other row migrates. **(must not)** fail wholesale. |
+
+### 1.2 Legacy kind mapping (ADR-0020)
+
+| # | Legacy kind | Pass |
+| --- | --- | --- |
+| 1.2.1 | Text | Text entry, searchable. |
+| 1.2.2 | Color | Color facet, normalized value searchable. |
+| 1.2.3 | QR | Decoded value retained and searchable. |
+| 1.2.4 | **Standalone OCR** | Becomes **Text**, not an image-derived entry — its image relation cannot be reconstructed. |
+| 1.2.5 | Image | Encrypted payload, Image facet. |
+| 1.2.6 | Screenshot | Screenshot facet retained. |
+| 1.2.7 | File | See 1.3. |
+| 1.2.8 | **No OCR/QR backfill** | **(must not)** run recognition over migrated images, even with Image Text Indexing on. |
+| 1.2.9 | Existing duplicates | **(must not)** be merged. Two identical legacy rows stay two entries. |
+
+### 1.3 Legacy file members — the subtle part
+
+The contract decides per member whether the legacy copy can be retired.
+
+| # | Setup | Pass |
+| --- | --- | --- |
+| 1.3.1 | Legacy copy + current file at the same path with **identical** content | Size check and streamed SHA-256 agree → becomes an ordinary reference; the encrypted copy is retired. |
+| 1.3.2 | Legacy copy + current file at the same path with **changed** content | Copy is preserved as a Legacy Owned File. **(must not)** silently adopt the different file. |
+| 1.3.3 | Legacy copy, path now missing | Copy preserved as Legacy Owned File. |
+| 1.3.4 | Legacy copy, path replaced by a different file | Copy preserved. |
+| 1.3.5 | Legacy copy unreadable | Copy preserved (unverifiable ⇒ keep). |
+| 1.3.6 | Path-only member, path resolves | Bookmark created with legacy-unverified provenance. |
+| 1.3.7 | Path-only member, path does not resolve | Searchable unavailable reference, **no** bookmark. |
+| 1.3.8 | **(must not) auto-bind** | For 1.3.7, later create a file at that exact path. The entry **(must not)** bind to it. |
+| 1.3.9 | Mixed collection | One entry mixing ordinary, legacy-unverified, unavailable, and owned members renders and lists all members in order. |
+| 1.3.10 | No discard confirmation | Migration keeps unresolvable records without prompting. |
+
+### 1.4 Restore File… / Restore Files…
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 1.4.1 | Single owned member | Restore writes to a user-chosen destination; the member converts to an ordinary reference in one transaction. |
+| 1.4.2 | Multiple owned members | All destinations chosen, all bookmarks created, then **one** transaction converts all. |
+| 1.4.3 | **Partial failure** | Make one destination unwritable. No encrypted payload is retired; history state stays retryable; already-written output files may remain. Retrying succeeds. |
+| 1.4.4 | Restore does not rewrite identity | Capture-time paths and the duplicate fingerprint are unchanged after restore. |
+
+### 1.5 Crash boundaries
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 1.5.1 | Force-quit **during** migration | Relaunch: history intact, migration retries and completes, no duplicates. |
+| 1.5.2 | Force-quit **after publish, before cleanup** | Relaunch: no re-migration, no duplicates, snapshot removed. |
+| 1.5.3 | Pre-publication failure | Legacy data left fully intact. |
+| 1.5.4 | Plaintext cleanup | After success, no plaintext payloads remain; `grep -r` a canary across the store root returns nothing. |
+
+---
+
+## 2. Capture: observation and scheduling — P0
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 2.1 | ⌘C in native (TextEdit, Notes) | Captured; correct source app. |
 | 2.2 | ⌘C in Electron (VS Code, Slack) | Same. |
 | 2.3 | ⌘C in Terminal / iTerm | Same. |
-| 2.4 | ⌘C in a browser (Safari, Chrome) | Same, with rich text preserved. |
+| 2.4 | ⌘C in a browser | Same. |
 | 2.5 | ⌘X | Captured. |
-| 2.6 | Menu Edit → Copy, no keystroke | Captured via the polling fallback. |
+| 2.6 | Menu Edit → Copy (no keystroke) | Captured via the fallback tick. |
 | 2.7 | Right-click → Copy | Captured. |
 | 2.8 | Programmatic `pbcopy` | Captured. |
-| 2.9 | Copy an image (Preview, browser, `screencapture -c`) | Thumbnail renders; Image facet; Screenshot facet only for AnyDoor's own capture. |
-| 2.10 | Copy one file in Finder | File facet, correct name, opens/reveals. |
-| 2.11 | Copy multiple files | All members preserved, not collapsed to one. |
-| 2.12 | Copy multiple pasteboard items at once | Multi-item entry preserved in full. |
-| 2.13 | Copy rich text (Pages, Word, browser) | Rich representation retained; pasting into a rich target keeps formatting. |
-| 2.14 | Copy a color from the system picker | Color facet, normalized hex searchable. |
-| 2.15 | **Universal Clipboard** from iPhone | Captured, labeled without guessing the device. Turning on "Ignore Universal Clipboard" stops future ones only. |
-| 2.16 | **Rapid successive copies** | Copy three different values within 300ms. All three land. This is the case the old 500ms poll missed. |
-| 2.17 | **AnyDoor's own writes** | Paste from history, copy a translation, copy a screenshot, use a Script Plugin's `copy`. None of these create a new history entry. |
-| 2.18 | Excluded app | Copy in Apple Passwords and in Keychain Access. Nothing captured, on a fresh install by default. |
-| 2.19 | Exclusion marker | Copy from an app that sets `org.nspasteboard.ConcealedType`. Discarded before payload bytes are read. |
-| 2.20 | Duplicate copy | Copy the same value twice. One entry, moved to top, not duplicated. Retention window resets. |
-| 2.21 | Monitoring off | Turn off Monitoring, copy several values, turn it on. Nothing from the off period appears — no backfill. |
-| 2.22 | Screen locked | Lock the screen, copy from another session path, unlock. Nothing captured while locked. |
-| 2.23 | Sleep / wake | Sleep the Mac, wake, copy. Capture resumes without a relaunch. |
+| 2.9 | Accessibility-driven copy | Captured. |
+| 2.10 | **Rapid successive copies** | Three different values within 300ms — all three land. This is what the old plain poll missed. |
+| 2.11 | **Generation change during read** | Copy a large value and immediately overwrite it mid-read. The pipeline retries rather than persisting a torn snapshot. |
+| 2.12 | **Source precedence** | Copy, then immediately switch apps. Attribution is the app that owned the copy, not the newly focused one. |
+| 2.13 | Baseline on enable | Turn Monitoring off, copy several values, turn it on. **(must not)** import anything from the off period. |
+| 2.14 | Baseline on launch | Copy while AnyDoor is quit, then launch. **(must not)** import the pre-launch value. |
+| 2.15 | Baseline after unlock | Lock screen, copy elsewhere, unlock. **(must not)** import from the locked period. |
+| 2.16 | Baseline after migration | Migration completion establishes a new baseline, not a backfill. |
+| 2.17 | Sleep / wake | Capture resumes after wake without relaunch. |
+| 2.18 | **Self-writes** | Paste from history, copy a translation result, copy from translation history, screenshot auto-copy, Script Plugin `copy`, Port Manager copy, palette copy. **(must not)** create a history entry for any of them. |
+| 2.19 | **Selected-text read** | Trigger translation of selected text (which synthesizes ⌘C internally). **(must not)** create a history entry, and the user's real clipboard is restored. |
+| 2.20 | Excluded app | Apple Passwords and Keychain Access on a fresh install — nothing captured. |
+| 2.21 | Exclusion migration | An existing install picks up the new defaults once. Remove one, relaunch — **(must not)** resurrect it. |
+| 2.22 | **Exclusion markers** | Each of `org.nspasteboard.ConcealedType`, `TransientType`, `AutoGeneratedType`, `com.agilebits.onepassword`, `net.antelle.keeweb`, `de.petermaurer.TransientPasteboardType`, `com.typeit4me.clipping`, `Pasteboard generator type` — discarded before payload bytes are read, and **(must not)** be overridable by settings. Real-world check: copy a password from 1Password. |
+| 2.23 | Copy-only setting | With Copy-only on, ⌘X **(must not)** be captured while ⌘C is. |
+| 2.24 | Universal Clipboard | Copy on iPhone. Captured, labeled without guessing device or app. |
+| 2.25 | Ignore Universal Clipboard | Turning it on stops **future** ones only; existing entries stay. |
 
-**Budget (2.1–2.8)** — copy to visible in the wall:
-
-- With ⌘C/⌘X assistance: **under 250ms**.
-- Via the polling fallback (menu copy, programmatic): **under 800ms**.
+**Budget** — copy to visible in the wall: ⌘C/⌘X assisted **< 250ms**;
+fallback path (menu copy, programmatic) **< 800ms**.
 
 ---
 
-## 3. Search and filtering — P1
+## 3. Capture: supported content and limits — P0
 
 | # | Case | Pass |
 | --- | --- | --- |
-| 3.1 | Empty query | Strictly newest first. |
-| 3.2 | Case insensitivity | `SWIFT` finds `swift`. |
-| 3.3 | Diacritics | `cafe` finds `Café`; `café` finds `Cafe` + combining accent. |
-| 3.4 | Full width | `full-width` finds `Ｆｕｌｌ－Ｗｉｄｔｈ`. |
-| 3.5 | **1-character CJK** | `甲` finds every entry containing it. Complete, not partial. |
-| 3.6 | **2-character CJK** | `乙丙` likewise. |
-| 3.7 | 3+ character CJK | `剪贴板` likewise. |
-| 3.8 | Emoji | `🚀` finds it. |
-| 3.9 | Multi-word AND | `swift actor` returns only entries containing both. |
-| 3.10 | Word order | `actor swift` returns the same set. |
-| 3.11 | **Ranking** | An entry whose whole field equals the query ranks above a prefix match, which ranks above a mid-string match. |
-| 3.12 | Field priority | Copied text outranks OCR text, which outranks file paths. |
-| 3.13 | Search OCR text | With Image Text Indexing on, copy a screenshot of text, wait, search a word only present in the image. Found. |
-| 3.14 | Search QR values | Copy an image of a QR code. Its decoded value is searchable. |
-| 3.15 | Search file names and paths | Both capture-time and current path match. |
-| 3.16 | **FTS syntax is literal** | Search `AND`, `OR`, `NOT`, `NEAR`, `"`, `*`, `(`, `^`. Each is treated as text; none errors, none behaves as an operator. |
-| 3.17 | No results | Clean empty state, not a spinner. |
-| 3.18 | Pagination | Scroll a result set past 100. More loads, no duplicates, no gaps, no jump. |
-| 3.19 | Query change mid-scroll | Type while more is loading. Results restart cleanly, no mixed generations. |
-| 3.20 | Combined filters | Query + facet + source + tag + favorites-only, all at once. AND semantics. |
-| 3.21 | Search during index rebuild | Delete the FTS tables to force a rebuild, launch. Browsing works; search shows an indexing state rather than partial results. |
-| 3.22 | Clearing the query | Returns to newest-first immediately, no perceptible delay. |
+| 3.1 | Exact plain text | Stored verbatim. |
+| 3.2 | RTF / RTFD / HTML | All supplied rich representations stored; pasting into a rich target preserves formatting. |
+| 3.3 | URL + exact text | Both stored. |
+| 3.4 | Standard color | Stored plus its normalized form. |
+| 3.5 | Still bitmap | One orientation-applied lossless PNG. An EXIF-rotated JPEG pastes upright. |
+| 3.6 | Concrete `file://` URLs | Stored as references (see section 5). |
+| 3.7 | **Application-private data** | **(must not)** be stored. |
+| 3.8 | **Unknown binary format** | **(must not)** be stored. |
+| 3.9 | **PDF-only clipboard data** | **(must not)** be stored. Copy a page in Preview — verify the behaviour is a clean skip, not a broken entry. |
+| 3.10 | **File promises** | **(must not)** be materialized or stored. Drag-copy from an app that promises files. |
+| 3.11 | Private type alongside supported data | The private type is ignored; the item is still stored. |
+| 3.12 | **Unsupported-only item in a multi-item state** | The **complete** state is skipped. **(must not)** silently store a shortened version. |
+| 3.13 | Zero-length string | Absent from history. |
+| 3.14 | Whitespace-only | **Present**, preserved exactly (spaces, tabs, CRLF vs LF). |
+| 3.15 | Multi-item order | Copy several items at once; item boundaries and order survive a normal paste. |
+| 3.16 | Normal paste fidelity | Every stored representation and item is restored in order. |
+| 3.17 | Plain-text paste availability | Offered only when **every** item has exact text. For a mixed text+image entry it is unavailable rather than silently dropping the image. |
+
+### 3.18 Hard limits (P0 — exact thresholds)
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 3.18.1 | Just under 128 MiB (`134_217_728` bytes) of canonical plaintext | Accepted. |
+| 3.18.2 | Just over 128 MiB | **Complete entry rejected**, one non-modal notice. Existing history and the live pasteboard survive. |
+| 3.18.3 | Just under 64,000,000 decoded pixels | Accepted. The cap is decimal, not `64 × 1024²`: 8000×8000 is exactly at it, so test 7900×8000 (accept) and 8100×8000 (reject). |
+| 3.18.4 | Just over 64,000,000 pixels | Rejected the same way. |
+| 3.18.5 | Aggregate across a multi-item entry | The limits are aggregate, not per item. A state of many items summing past a limit is rejected whole. |
+| 3.18.6 | Repeated rejections | Notices are rate-limited to one, not a stream. |
 
 ---
 
-## 4. Performance, latency, and stutter — P1
+## 4. Content classification (facets) — P1
 
-This is the section that decides whether the rewrite was worth it. Run each
-case at **three volumes**: 1000, 10000, and 50000 entries. Record the number
-at each; a budget that holds at 1000 and breaks at 10000 is a failure.
+Facets are overlapping, not an enum. These inference rules are exactly the
+kind that drift; test the negatives.
 
-### 4.1 Search typing latency — the headline case
+### 4.1 Link
 
-**Steps.** Open the wall. Type `swift` one character at a time at a normal
-pace (~100ms between keys). Then hold backspace to clear.
+| Input | Result |
+| --- | --- |
+| `https://example.com/a` | Link |
+| `http://example.com` | Link |
+| `example.com` (bare host) | Link |
+| `localhost:3000` | Link |
+| `192.168.1.1` | Link |
+| `2001:db8::1` (IPv6 host) | Link |
+| `raycast://extensions/x` (valid deep link) | Link |
+| `tel:+15551234` (**scheme without `://`**) | **no Link** |
+| `/Users/me/file.txt` (leading slash) | **no Link** |
+| `file:///Users/me/x` | **File** facet, **no Link** |
+| `example..com` / `.example.com` / `example.com.` | **no Link** (malformed labels) |
+| `https://{{host}}/x` (template) | **no Link** |
+| `https://a.com /b` (internal whitespace) | **no Link** |
+| `javascript:alert(1)` | **no Link** |
+| `data:text/html,<b>x` | **no Link** |
+| `vbscript:msgbox` | **no Link** |
+| `see https://example.com here` (embedded) | **no Link** — stays searchable Text |
 
-**Pass.** No visible stutter in the text field. Characters appear as typed —
-the field must never lag behind the keyboard.
+### 4.2 Email
 
-**Budget.**
+| Input | Facets |
+| --- | --- |
+| `me@example.com` | Text + Email |
+| `mailto:me@example.com` | Text + Email + Link |
+| `Me <me@example.com>` (display name) | Text only |
+| `a@x.com, b@y.com` (list) | Text only |
 
-| Volume | Results settle after typing stops |
+### 4.3 Color
+
+| Input | Color? |
+| --- | --- |
+| Explicit pasteboard color (system picker) | yes |
+| `#F00`, `#F00A` (3- and 4-digit) | yes |
+| `#FF0000`, `#FF0000AA` (6- and 8-digit) | yes |
+| `rgb(255, 0, 0)` and `rgb(255 0 0 / 0.5)` (both syntaxes) | yes |
+| `hsl(0, 100%, 50%)` and `hsl(0deg 100% 50% / 50%)` | yes |
+| AnyDoor SwiftUI form | yes |
+| `#FF000` (5 digits) / `#FF00000` (7 digits) | **no** |
+| `FF0000` (bare hex, no `#`) | **no** |
+| `red` (name) | **no** |
+| `var(--brand)` | **no** |
+| `linear-gradient(...)` | **no** |
+| `color(display-p3 1 0 0)` (extended function) | **no** |
+| `rgb(255, 0, 0) ` with trailing text or newline | **no** (anchored match) |
+
+### 4.4 Image and Screenshot
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 4.4.1 | Any bitmap | Image facet. |
+| 4.4.2 | AnyDoor's own capture | Image **+** Screenshot. |
+| 4.4.3 | **(must not)** heuristics | Copy an external image named `Screenshot 2026-07-30 at 10.00.00.png`, with screen-sized dimensions, from an app called "Screenshot". It gets Image only — **never** Screenshot. |
+
+### 4.5 Derived values do not recurse
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 4.5.1 | Image whose OCR text contains a URL | The entry **(must not)** gain Link. |
+| 4.5.2 | QR encoding an email address | The entry **(must not)** gain Email. |
+| 4.5.3 | QR encoding a hex color | The entry **(must not)** gain Color. |
+
+### 4.6 Filter behaviour
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 4.6.1 | Facet filter is single-select with All, fixed order | Confirmed. |
+| 4.6.2 | Source, tag, favorites-only are separate AND constraints | Combining them narrows, never widens. |
+
+---
+
+## 5. File references — P1
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 5.1 | Copy one file in Finder | Reference stored with encrypted path, name, order, bookmark. |
+| 5.2 | Copy multiple files | All members, order preserved. |
+| 5.3 | **No content copy** | `du -sh` the store root before/after copying a 5GB file. Growth is negligible — **(must not)** copy bytes. |
+| 5.4 | **Rename** the file | Entry still resolves and pastes (bookmark follows the rename). |
+| 5.5 | **Move** the file on the same volume | Still resolves. |
+| 5.6 | **(must not) rebind** | Delete the referenced file, then create a *different* file at the old path. The entry **(must not)** resolve to the new file. |
+| 5.7 | Unavailable member — searchable | The entry still appears in search by name and path. |
+| 5.8 | Unavailable member — blocks paste | Normal paste of the complete entry is blocked and the **missing count** is reported. |
+| 5.9 | Mixed entry with one missing member | Same: blocked with a count, not a partial paste. |
+| 5.10 | External volume | Copy from a USB/network volume, eject it. Entry stays searchable; **(must not)** mount the volume to resolve. |
+| 5.11 | Directory reference | Behaves as a reference; contents never copied. |
+| 5.12 | Referenced image file | Gains Image via declared type metadata, but **(must not)** be opened for OCR or QR. |
+| 5.13 | Unicode / very long filenames | Stored and displayed correctly. |
+
+---
+
+## 6. Derived text: OCR and QR — P1
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 6.1 | Indexing **off** (default) | Copy an image of text. Its text is **not** searchable. |
+| 6.2 | Turn indexing **on**, then copy | Text becomes searchable once the job finishes. |
+| 6.3 | **No backfill** | Enabling **(must not)** index images captured before it was enabled. |
+| 6.4 | Disable with jobs pending | Already-pending jobs finish; their text is retained. New captures are not eligible. |
+| 6.5 | Disable retains indexed text | Previously indexed text stays searchable. |
+| 6.6 | QR is always on | Copy an image containing a QR code with indexing off — its value is still indexed. |
+| 6.7 | QR has no setting | Confirm no toggle exists for it. |
+| 6.8 | **No sibling entry** | Neither OCR nor QR creates a second history record, and normal image paste is unchanged. |
+| 6.9 | Both attach to one entry | An image with text *and* a QR code — both attach to the same entry. |
+| 6.10 | Retry budget | An image that fails recognition retries up to three attempts total, then fails silently (no error UI). |
+| 6.11 | Empty result does not retry | An image with no text yields no repeated attempts. |
+| 6.12 | Duplicate recapture grants a fresh budget | Re-copy an image whose jobs were exhausted; recognition is attempted again. |
+| 6.13 | Persists across relaunch | Copy several images, quit before jobs finish, relaunch. Jobs resume. |
+| 6.14 | **(must not)** touch file references | See 5.12. |
+
+---
+
+## 7. Search and pagination — P1
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 7.1 | Empty query | Strictly newest first. |
+| 7.2 | Case | `SWIFT` finds `swift`. |
+| 7.3 | Diacritics | `cafe` ⇄ `Café` ⇄ `Cafe` + combining accent. |
+| 7.4 | Full width | `full-width` finds `Ｆｕｌｌ－Ｗｉｄｔｈ`. |
+| 7.5 | **1-character CJK** | `甲` returns complete results, not partial. |
+| 7.6 | **2-character CJK** | `乙丙` likewise. |
+| 7.7 | 3+ character CJK | `剪贴板` likewise. |
+| 7.8 | Emoji | `🚀` found. |
+| 7.9 | RTL text | Arabic/Hebrew content is searchable and renders correctly. |
+| 7.10 | Multi-word AND | `swift actor` returns only entries with both. |
+| 7.11 | Word order irrelevant | `actor swift` returns the same set. |
+| 7.12 | **Ranking** | Exact whole-field > prefix > mid-string substring. |
+| 7.13 | **Field priority** | Copied text > OCR text > file paths, for equal match class. |
+| 7.14 | Multi-item fields | A term in the second item of a multi-item entry matches the entry. |
+| 7.15 | Searches OCR, QR, filenames, both paths, normalized colors | Each independently verified. |
+| 7.16 | **FTS syntax is literal** | `AND`, `OR`, `NOT`, `NEAR`, `"`, `*`, `(`, `^`, `-` are all treated as text. None errors; none acts as an operator. |
+| 7.17 | Filters are not searchable text | Searching an app name **(must not)** match by source; source is a filter. |
+| 7.18 | No results | Clean empty state. |
+| 7.19 | Pagination | Scroll past 100. No duplicates, no gaps, no scroll jump. |
+| 7.20 | **Cursor invalidation** | Load page 2, then change the query. Pagination restarts; **(must not)** mix generations. |
+| 7.21 | **Index-generation change mid-paging** | Load page 2, delete an entry (mutating the index), then load more. Restarts cleanly rather than mixing. |
+| 7.22 | Stale token rejected | Reuse an old cursor after a filter change — rejected, not honoured. |
+| 7.23 | Search during rebuild | Force a rebuild (delete the FTS tables, relaunch). Browsing works; search shows an **indexing** state, **(must not)** show incomplete results. |
+| 7.24 | Rebuild failure | Make the rebuild fail. Search reports failure rather than falling back to a linear scan. |
+| 7.25 | Combined filters | Query + facet + source + tag + favorites, all at once. |
+| 7.26 | Clearing the query | Returns to newest-first with no perceptible delay. |
+
+---
+
+## 8. Performance, latency, and stutter — P1
+
+The section that decides whether the rewrite was worth it. Run every case at
+**three volumes — 1000, 10000, 50000 entries** — and record each. A budget
+that holds at 1000 and breaks at 10000 is a failure. Re-measure on the Intel
+machine from 0.1.
+
+### 8.1 Search typing latency — headline case
+
+**Steps.** Type `swift` one character at a time at ~100ms intervals. Then hold
+backspace to clear.
+
+**Pass.** The text field never lags behind the keyboard.
+
+**Budget** — results settle after typing stops:
+
+| Volume | Budget |
 | --- | --- |
 | 1000 | < 150ms |
 | 10000 | < 300ms |
 | 50000 | < 600ms |
 
-> Typing coalesces into one search after 150ms of settling, so a burst should
-> produce exactly one query. Measured cost of a broad single-term query at
-> 8000 entries is ~67ms. If the field itself lags, the debounce is not
-> working and the module actor is being hit per keystroke.
+### 8.2 The four query shapes the contract names
 
-**Also check.** Type a single very common character (`e`, or `的`). This is
-the worst case: it matches nearly everything. It must still settle within
-budget, not just narrow queries.
+Measure first-page latency **and** peak memory for each, at each volume:
 
-### 4.2 Copy while searching — actor contention
+| Shape | Example | Note |
+| --- | --- | --- |
+| Empty | `` | Pure browse path, should be near-constant |
+| One character | `e`, `的` | Worst case — matches nearly everything |
+| Two characters | `sw`, `乙丙` | Uses the short-gram index, not trigram |
+| Long substring | a 40-character phrase | Trigram phrase, few matches |
 
-**Steps.** Start typing a broad query. While results are loading, copy
-something in another app.
+**Pass.** All four stay within the 8.1 budget. Memory does not spike with match
+count — a one-character query at 50000 entries **(must not)** balloon the
+footprint.
 
-**Pass.** The copy is captured. Capture is not dropped or delayed beyond the
-normal budget in section 2.
+### 8.3 Copy while searching — actor contention
 
-**Why.** Search and capture share the module actor. A long search blocking
-capture is the specific regression this rewrite was meant to prevent.
+**Steps.** Start a broad query; while results load, copy in another app.
 
-### 4.3 Wall open latency
+**Pass.** The copy is captured within the section 2 budget. Search and capture
+share the module actor; a long search blocking capture is the specific
+regression this rewrite exists to prevent.
+
+### 8.4 Wall open latency
 
 | Case | Budget |
 | --- | --- |
-| First open after launch (cold) | < 400ms to first painted row |
-| Subsequent opens (warm) | < 150ms |
-| Open at 50000 entries | Same as above — page size is fixed at 100, so volume must not matter |
+| Cold (first open after launch) | < 400ms to first painted row |
+| Warm | < 150ms |
+| At 50000 entries | Same — page size is fixed at 100, so volume must not matter |
+| Global hotkey → visible | < 400ms end to end |
 
-**Pass.** The window appears already populated. A visible empty frame followed
-by rows popping in is a failure.
+**Pass.** The window appears already populated. An empty frame followed by rows
+popping in is a failure.
 
-### 4.4 Scrolling
+### 8.5 Paste latency
 
-**Steps.** Scroll the wall from top to bottom continuously through several
-pages, including a stretch of image entries.
+**Steps.** Open the wall, select an entry, press Return. Measure to content
+landing in the target app.
 
-**Pass.** No dropped frames. Thumbnails may load progressively but must not
-cause the scroll itself to hitch.
+| Entry type | Budget |
+| --- | --- |
+| Plain text | < 200ms |
+| Rich text / multi-representation | < 300ms |
+| Large image (30MB) | < 800ms, no beachball |
+| File reference | < 200ms |
+
+**Pass.** Focus returns to the target app correctly; the paste lands in the
+right place.
+
+### 8.6 Live updates while the wall is open
+
+**Steps.** Open the wall. Copy several values in another app while it stays
+open. Then repeat while scrolled halfway down, and again with an active search
+query.
+
+**Pass.** New entries appear without the list jumping, without losing the
+user's scroll position, and without stealing selection. With a query active,
+a new non-matching entry **(must not)** appear.
+
+**Budget.** No visible hitch when an entry is inserted. Copying an image while
+the wall is open **(must not)** stall the list while its thumbnail is produced.
+
+### 8.7 Scrolling
+
+**Steps.** Scroll top to bottom through several pages including a run of image
+entries.
 
 **Budget.** Zero hitches over 5s of continuous scrolling in Instruments →
-Animation Hitches. Image thumbnails appear within 200ms of a row becoming
-visible.
+Animation Hitches. Thumbnails appear within 200ms of a row becoming visible.
 
-**Why it can fail.** Every thumbnail is individually AES-GCM encrypted on
-disk; decryption on the main thread during scroll would be visible.
+**Why it can fail.** Every thumbnail is individually AES-GCM encrypted;
+decrypting on the main thread during scroll is visible.
 
-### 4.5 Large payloads
+### 8.8 Large payloads and fingerprinting
 
 | Case | Pass |
 | --- | --- |
-| Copy a 50MB image | Captured. UI stays responsive during encryption. |
-| Copy a 500MB image | Either captured without freezing, or rejected with a clear error. Never a beachball. |
-| Copy a 5GB file (reference) | Instant — file references must not copy bytes. |
+| Copy a 50MB image | Captured; UI responsive during encryption **and** duplicate fingerprinting. |
+| Copy a 60-megapixel image (just under the cap) | Captured within 2s; no beachball. |
+| Copy a 100MB text blob | Captured or cleanly rejected per 3.18. |
 | Copy 500 files at once | Handled or cleanly rejected; no freeze. |
 
 **Budget.** The menu bar item responds to a click within 200ms at all times,
-including mid-capture.
+including mid-capture. Fingerprinting a large image **(must not)** block the
+main thread.
 
-### 4.6 Sustained copy load
+### 8.9 Consecutive-copy loss rate
 
-**Steps.**
+The PRD requires this benchmarked separately for event-assisted bursts, because
+it is the whole justification for the ⌘C/⌘X hint path.
+
+**Steps.** Copy N distinct values as fast as a human realistically can (≈150ms
+apart), by hand in a real app — not via `pbcopy`, which bypasses the key hint.
+Do 50 copies. Then repeat via menu Edit → Copy (fallback path only).
+
+**Pass.** Count the entries that landed.
+
+| Path | Budget |
+| --- | --- |
+| Event-assisted (⌘C) | Zero loss at 150ms spacing |
+| Fallback (menu copy) | Loss only where two copies fall inside one 500ms idle tick |
+
+`monitorMetrics().overwrittenGenerationCount` is the exact loss counter; see
+the probe note in 8.11. Compare against a `main` build to prove the hint path
+is an improvement rather than a wash.
+
+### 8.10 Sustained copy load
 
 ```bash
 for i in $(seq 1 500); do printf 'load %d\n' "$i" | pbcopy; sleep 0.05; done
 ```
 
-**Pass.** Every value captured. The wall stays usable throughout — open it
-mid-run and scroll. CPU returns to idle within 5s of the loop ending.
+**Pass.** Every value captured. The wall stays usable during the run. CPU
+returns to idle within 5s of the loop ending.
 
-**Budget.** AnyDoor's CPU stays under 30% of one core during the run.
-Sustained 100% is a failure.
+**Budget.** AnyDoor stays under 30% of one core during the run.
 
-### 4.7 OCR and QR indexing under load
+### 8.11 Idle cost — explicit contract gate
 
-**Steps.** With Image Text Indexing on, copy ten screenshots in quick
-succession, then immediately open the wall and search.
+The PRD requires the idle fallback to produce **no more than two timer fires
+per second** and permits **no material regression** in wakeups, CPU, or Energy
+Impact versus the old plain 500ms poll.
 
-**Pass.** The UI never blocks on recognition. Search works while jobs are
-pending. OCR text becomes searchable as each job finishes.
+**Steps.** Leave the Mac idle with AnyDoor running and no copying for **10
+minutes**. Record:
 
-**Budget.** No UI stall over 100ms attributable to a Vision job. Verify with
-`sample AnyDoor` during the run if anything feels off.
+```bash
+sudo powermetrics --samplers tasks -n 1 | grep -i anydoor   # wakeups/sec, CPU ms/s
+```
 
-### 4.8 Retention cleanup
+Also record Activity Monitor → Energy → *Energy Impact* and *Avg Energy
+Impact*. Run the identical trial against a `main` build; the comparison is the
+gate, absolute numbers alone are not.
 
-**Steps.** With 50000 entries, shorten retention from Unlimited to 7 days.
+**Budget.**
 
-**Pass.** The affected count appears within 2s. After confirming, the wall
-reflects the deletion promptly and stays responsive during reclamation.
+| Metric | Budget |
+| --- | --- |
+| Idle timer fires | ≤ 2/sec (the scheduler's idle interval is 500ms) |
+| Idle CPU | < 0.5% average over 10 minutes |
+| Wakeups | No material increase versus `main` measured the same way |
+| Energy Impact | Same |
 
-**Budget.** Count computation < 2s. UI responsive throughout deletion.
-Physical reclamation may lag (the contract allows 24h) but must not block.
+**Exact counts.** `ClipboardHistoryModule.monitorMetrics()` returns
+`idleTimerFireCount`, `boostedTimerFireCount`, `observedChangeCount`,
+`capturedChangeCount`, and `overwrittenGenerationCount` — precisely what this
+gate needs. It has **no shipped surface**: nothing in the app or its logs reads
+it. Reaching it requires a temporary env-gated probe (the pattern already used
+for capture verification). Treat the absence of a surface as a finding, not a
+test-plan problem: this gate must be re-verifiable on a release build.
 
-### 4.9 Memory
+**Boost windows.** After a ⌘C hint the scheduler polls at 50ms for 500ms; after
+an observed change, at 100ms for 500ms. Confirm both windows actually expire:
+copy once, then idle for 5s and check that fires return to the idle rate rather
+than staying boosted.
+
+**Also.** Repeat with the display asleep and after a lid close/open. The timer
+must **stop** while monitoring is off, during sleep, and while the screen is
+locked — verify it stops rather than merely discarding results.
+
+**Why this matters.** This is a menu-bar app that runs all day on battery. A
+regression here is invisible in every other case in this plan.
+
+### 8.12 Migration cost
+
+**Budget** — 5000 entries / ~1GB of payloads:
+
+- Completes within **60s**.
+- Peak `phys_footprint` under **1.5×** the legacy store's own size. (The
+  automated measurement was 113MB for 800 × 128KB rows.)
+- The menu bar item stays responsive; no beachball.
+- Settings → Clipboard shows a migrating state, not an empty history.
+- Opening the wall mid-migration shows a sensible state rather than hanging.
+
+### 8.13 Search index rebuild
+
+**Steps.** Delete the FTS tables at 50000 entries and relaunch.
+
+**Budget.** Browsing is available immediately. Rebuild completes within **120s**
+and does not block the UI. CPU stays under one core.
+
+### 8.14 Retention cleanup with secure delete
+
+**Steps.** At 50000 entries, shorten retention from Unlimited to 7 days.
+
+**Budget.** Affected count computed within **2s**. UI stays responsive during
+deletion. Note that both FTS tables run FTS5 `secure-delete=1` on top of
+`PRAGMA secure_delete=ON`, so this is deliberately the most expensive delete
+path — measure it rather than assuming.
+
+### 8.15 Memory
 
 | Checkpoint | Budget |
 | --- | --- |
 | Idle, wall closed, 10000 entries | < 150MB |
 | Wall open, scrolled through 500 image rows | < 400MB peak |
-| Settled 30s after closing the wall | Returns near idle — a monotonic climb across open/close cycles is a leak |
+| Settled 30s after closing | Near idle |
 
-Repeat the open/scroll/close cycle ten times and confirm the settled figure
-does not drift upward.
+Repeat open/scroll/close **ten times**; the settled figure **(must not)** drift
+upward.
 
-### 4.10 Disk growth
+### 8.16 Disk growth
 
-**Steps.** Record `du -sh` of the store root. Run a heavy session (200 mixed
-copies including images). Record again.
+**Pass.** Growth is proportional to what was stored. Settings → Clipboard's
+reported usage matches `du -sh` within a few percent, and **includes**
+encrypted orphans. WAL does not grow without bound across a long session —
+check it after 8.10.
 
-**Pass.** Growth is proportional to what was actually stored. Settings →
-Clipboard's reported usage matches `du` within a few percent. WAL does not
-grow without bound across a long session.
+### 8.17 Launch impact
 
-### 4.11 Launch impact
-
-**Steps.** With 50000 entries, quit and relaunch. Time from launch to the
-menu bar item being clickable.
-
-**Pass.** No regression versus a small history.
-
-**Budget.** < 1.5s. Note that the store opens synchronously during
-`AppDelegate.init`; an integrity check over a large trigram index is the
-thing to watch here.
+**Budget.** At 50000 entries, launch to a clickable menu bar item in **< 1.5s**.
+The store opens synchronously in `AppDelegate.init`; an integrity check over a
+large trigram index is the thing to watch.
 
 ---
 
-## 5. Retention, protection, deletion — P1
+## 9. Retention, protection, deletion — P1
 
 | # | Case | Pass |
 | --- | --- | --- |
-| 5.1 | Each preset | 1 day, 7 days, 30 days, 3 months, 6 months, 1 year, Unlimited all selectable and enforced. |
-| 5.2 | Shorten with affected entries | Exact count shown, confirmation required, period and deletion commit together. |
-| 5.3 | Shorten with zero affected | Applies immediately, no prompt. |
-| 5.4 | Count changes during the prompt | Prompt refreshes rather than committing a stale count. |
-| 5.5 | Favorite protection | A favorited entry older than the period survives indefinitely. |
-| 5.6 | Tag protection | Same for a tagged entry. |
-| 5.7 | Losing last protection | Unfavorite an old protected entry. It gets a fresh window, not immediate deletion. |
-| 5.8 | Deleting a tag definition | Membership removed from entries; entries that lose their last protection get a fresh window. |
-| 5.9 | Expired entries | Gone from the wall, from search, from counts, and from duplicate reuse — all at once. |
-| 5.10 | Clear History, default scope | Confirms first. Protected entries survive. Tag definitions, settings, and the live pasteboard survive. |
-| 5.11 | Clear History, including protected | The checkbox updates the count and removes everything. |
-| 5.12 | Usage is not capture | Preview, copy, and paste an old entry. It does not move to the top and its retention does not extend. |
-| 5.13 | Storage reclaimed | After a large deletion, physical usage drops within 24h without a longer period resurrecting anything. |
+| 9.1 | Every preset | 1d, 7d, 30d, 3mo, 6mo, 1y, Unlimited all selectable and enforced. |
+| 9.2 | **(must not)** hidden limits | At 50000 entries with Unlimited, nothing is evicted by count, disk, or LRU. |
+| 9.3 | Shorten with affected entries | Exact count shown; confirmation required; period and deletion commit atomically. |
+| 9.4 | Shorten with zero affected | Applies immediately, no prompt. |
+| 9.5 | Count changes during the prompt | Prompt refreshes rather than committing a stale count. |
+| 9.6 | Favorite protection | An old favorited entry survives indefinitely. |
+| 9.7 | Tag protection | Same for a tagged entry. |
+| 9.8 | Losing last protection | Unfavorite an old protected entry → fresh retention window, **(must not)** vanish immediately. |
+| 9.9 | Deleting a tag definition | Membership removed; entries losing last protection get a fresh window. |
+| 9.10 | Importing away a tag | Same via a config import. |
+| 9.11 | Retention start on capture | New capture and real duplicate recapture both set it. |
+| 9.12 | Retention start on edit | Editing text resets it **without** changing recency. |
+| 9.13 | Expired entries | Gone from wall, search, counts, and duplicate reuse simultaneously. |
+| 9.14 | **(must not)** resurrect | After expiry, set a longer period. The entries stay gone. |
+| 9.15 | Physical reclamation | Encrypted storage reclaimed within 24h. |
+| 9.16 | Clear History, default scope | Confirms; protected entries survive; tag definitions, settings, and the live pasteboard survive. |
+| 9.17 | Clear History, including protected | Checkbox updates the count and removes everything. |
+| 9.18 | **Usage is not capture** | Preview, copy, and paste an old entry. It **(must not)** move to the top, change source attribution, or extend retention. |
 
 ---
 
-## 6. Encryption and privacy — P0
+## 10. Encryption and privacy — P0
 
 | # | Case | Steps | Pass |
 | --- | --- | --- | --- |
-| 6.1 | **No plaintext at rest** | Copy a unique string like `CANARY-8f3a2b`. Then `grep -r 'CANARY-8f3a2b' ~/Library/Application\ Support/dev.bybee.AnyDoor/` | No match anywhere, including WAL. |
-| 6.2 | Payload files encrypted | Copy an image. `xxd` the newest file under `payloads/`. | Starts with the `ADCHPAYL` envelope magic, not PNG/JPEG magic. |
-| 6.3 | No plaintext in temp | Repeat 6.1 against `/tmp`, `$TMPDIR`, and `~/Library/Caches`. | No match. |
-| 6.4 | Nothing in logs | `log show --last 10m --predicate 'subsystem == "dev.bybee.AnyDoor"'` after copying the canary. | Clipboard content, paths, and search terms never appear. |
-| 6.5 | Keychain locked | Lock the login keychain, copy something, unlock. | Capture pauses, then resumes from a new baseline. Nothing from the locked period is imported. |
-| 6.6 | **Key missing** | Delete the Keychain item. Launch. | Store Unavailable with retry and an explicitly confirmed reset. The database is **not** replaced or wiped silently. |
-| 6.7 | Reset action | Use the confirmed Reset Clipboard History. | History cleared, a new key created, the app works. |
-| 6.8 | Backup excludes history | Settings → Sync, export a backup. Inspect it. | No clipboard entries, no keys, no exclusion-list secrets. |
-| 6.9 | Sync excludes history | With sync configured, confirm the sync file. | Same. Clipboard history is device-local. |
-| 6.10 | Cross-identity | Run `swift run AnyDoor` after using the installed app. | Documented behavior in `clipboard-history-keychain-integration.md` holds; no silent data loss. |
+| 10.1 | **No plaintext at rest** | Copy `CANARY-8f3a2b`, then `grep -r` the whole store root including `-wal`. | No match. |
+| 10.2 | Payload envelope | `xxd` the newest file under `payloads/`. | Starts with `ADCHPAYL`, not PNG/JPEG magic. |
+| 10.3 | No plaintext in temp | Repeat 10.1 against `/tmp`, `$TMPDIR`, `~/Library/Caches`. | No match. |
+| 10.4 | Nothing in logs | `log show --last 10m --predicate 'subsystem == "dev.bybee.AnyDoor"'`. | Content, paths, search terms, recognized values never appear. |
+| 10.5 | Search terms not cached | Search the canary, quit, grep the store root and caches. | No match. |
+| 10.6 | Keychain locked | Lock the login keychain, copy, unlock. | Capture pauses; resumes from a new baseline. |
+| 10.7 | **Key missing** | Delete the Keychain item. Launch. | Store Unavailable with retry and a confirmed reset. **(must not)** silently replace or wipe the database. |
+| 10.8 | Wrong key | Restore a store from a machine with a different key. | Clean authentication failure, no reset. |
+| 10.9 | Reset action | Use the confirmed Reset. | History cleared, new key, app works. |
+| 10.10 | Backup excludes history | Export a backup from Settings → Sync; inspect it. | No entries, no keys, no exclusion-list contents. |
+| 10.11 | Sync excludes history | Inspect the sync state file. | Same. |
+| 10.12 | Keychain item not synced | Verify the item is device-only in Keychain Access. | Not in iCloud Keychain. |
+| 10.13 | Cross-identity | Follow `docs/testing/clipboard-history-keychain-integration.md`. | Documented behaviour holds; no silent loss. |
 
 ---
 
-## 7. UI and interaction — P1
+## 11. UI and interaction — P1
 
 | # | Case | Pass |
 | --- | --- | --- |
-| 7.1 | Wall keyboard navigation | Arrows, Home/End, Return to paste, Esc to dismiss. |
-| 7.2 | Facet filter | Each of Text, Link, Email, Color, Image, Screenshot, File, QR Code filters correctly and is single-select with All. |
-| 7.3 | Source filter | ⌘K opens the source menu; counts match; a removed source clears the filter. |
-| 7.4 | Tags | Create, rename, delete, assign, unassign. Category order persists across relaunch. |
-| 7.5 | Favorites | Toggle from the wall and from the popover. |
-| 7.6 | Text editing | Edit a single-item text entry. Id, source, capture time, favorite, and tags survive; recency does not move; search reflects the new text. |
-| 7.7 | Zero-length edit | Rejected. Whitespace-only accepted. |
-| 7.8 | Quick Look | Opens for image and file entries; closes cleanly. |
-| 7.9 | Paste into various targets | Plain text, rich text, image, and file targets all receive the right representation. |
-| 7.10 | Plugin context actions | Convert Image appears only while the Image Conversion plugin is installed and acts on the right entry. |
-| 7.11 | Menu-bar popover | The compact history popover lists, filters, and pastes correctly. |
-| 7.12 | Localization | Switch between 简体中文 and English. Every new string is translated; no raw keys. |
-| 7.13 | Empty states | Fresh install, no search results, and filtered-to-empty each show a distinct sensible state. |
-| 7.14 | Error surface | Trigger an operation failure (see 8.2). One rate-limited error, not a stream of alerts. |
+| 11.1 | Wall keyboard nav | Arrows, Home/End, Return to paste, Esc to dismiss. |
+| 11.2 | Facet filter | All eight facets plus All; single-select; fixed order. |
+| 11.3 | Source filter | ⌘K opens the menu; counts match; a removed source clears the filter. |
+| 11.4 | Tags | Create, rename, delete, assign, unassign; order persists across relaunch. |
+| 11.5 | Category reordering | Reorder categories; persists. |
+| 11.6 | Favorites | Toggle from wall and popover. |
+| 11.7 | Text editing — availability | Offered **only** for a one-item exact-text entry. Not offered for image, file, or multi-item entries. |
+| 11.8 | Text editing — identity | Id, source, capture time, favorite, tags survive; recency does not move. |
+| 11.9 | Text editing — provenance drop | Editing drops stale rich/URL/color/QR provenance; the entry becomes plain text. |
+| 11.10 | Zero-length edit rejected; whitespace-only accepted | Confirmed. |
+| 11.11 | Edit updates search transactionally | New text searchable, old text no longer matches. |
+| 11.12 | **(must not)** auto-merge | Edit an entry to equal another entry's content. They stay separate. |
+| 11.13 | Quick Look | Opens for image and file entries; closes cleanly. |
+| 11.14 | Paste targets | Plain text, rich text, image, and file targets each receive the right representation. |
+| 11.15 | Plugin context actions | Convert Image appears only while the Image Conversion plugin is installed, and acts on the right entry. |
+| 11.16 | Menu-bar popover | Lists, filters, and pastes correctly. |
+| 11.17 | Localization | 简体中文 and English; no raw keys; new strings translated. |
+| 11.18 | Empty states | Fresh install / no results / filtered-to-empty are each distinct and sensible. |
+| 11.19 | Error surface | One rate-limited error, not a stream of alerts. |
+| 11.20 | Reduce Motion | With Reduce Motion on, the wall still opens and scrolls correctly. |
 
 ---
 
-## 8. Failure and recovery — P0
+## 12. Failure and recovery — P0
 
-| # | Case | Steps | Pass |
-| --- | --- | --- | --- |
-| 8.1 | Corrupt database | Overwrite bytes in `history.sqlite`. Launch. | Store Unavailable with retry and confirmed reset. No silent recreation. |
-| 8.2 | Disk full | Fill the volume (or use a small disk image), then copy. | The new entry is rejected. Existing history and the live pasteboard survive. One rate-limited error. |
-| 8.3 | Corrupt single payload | Overwrite one file in `payloads/`. | Only that entry's payload action is disabled. Everything else works. |
-| 8.4 | Kill mid-capture | Force-quit while copying a large image. Relaunch. | No committed reference to an unfinished file. At worst an encrypted orphan, counted in storage usage. |
-| 8.5 | Read-only store directory | `chmod 500` the store root. Launch. | Clear failure, no crash, no data loss on restore. |
-| 8.6 | Missing payload file | Delete a payload file referenced by an entry. | That entry degrades gracefully; the list still renders. |
-| 8.7 | Clock moved backward | Set the system clock back a day, copy, restore. | No entries vanish; retention does not misfire. |
+| # | Case | Pass |
+| --- | --- | --- |
+| 12.1 | Corrupt database | Store Unavailable with retry and confirmed reset. **(must not)** silently recreate. |
+| 12.2 | Disk full during capture | New entry rejected; existing history and the live pasteboard survive; one rate-limited error. |
+| 12.3 | Corrupt single payload | Only that entry's payload action is disabled; everything else works. |
+| 12.4 | Kill mid-capture | **(must not)** leave a committed reference to an unfinished file. At worst an encrypted orphan, counted in storage usage. |
+| 12.5 | Orphan reconciliation | After 12.4, orphans are reclaimed and the reported usage drops. |
+| 12.6 | Read-only store directory | Clear failure, no crash, no data loss when permissions are restored. |
+| 12.7 | Missing payload file | That entry degrades gracefully; the list still renders. |
+| 12.8 | Kill during retention deletion | Relaunch is consistent; no half-deleted entries. |
+| 12.9 | Kill during index rebuild | Rebuild resumes; browsing available. |
+| 12.10 | Clock moved backward a day | No entries vanish; retention does not misfire. |
+| 12.11 | Clock moved forward a year | Expiry behaves per the configured period, not catastrophically mid-session. |
 
 ---
 
-## 9. Adjacent-feature regression sweep — P1
+## 13. Environment matrix — P1
 
-The branch touched 164 files. Confirm it did not break its neighbours.
+| # | Case | Pass |
+| --- | --- | --- |
+| 13.1 | Two displays | The wall opens on the active display, fully on-screen. Note: the status item can sit on a left-hand display at negative x. |
+| 13.2 | Mixed scale factors | Retina + non-Retina; thumbnails are crisp on both, no layout break. |
+| 13.3 | Display disconnected while the wall is open | The wall moves or closes; **(must not)** be stranded off-screen. |
+| 13.4 | **Concurrent identities** | Run `swift run AnyDoor` while the installed app is running. Neither corrupts the store; SQLite locking behaves. Document what actually happens. |
+| 13.5 | Sparkle update relaunch | Update while running; the store reopens cleanly after relaunch. |
+| 13.6 | Login auto-launch | **(must not)** show any window on login. |
+| 13.7 | Locale change | Switch system language and region; search normalization is unchanged (it is pinned to `en_US_POSIX`). |
+| 13.8 | Time zone change | Timestamps and retention stay coherent. |
+| 13.9 | Low disk (under 1GB free) | Capture degrades gracefully per 12.2. |
+| 13.10 | FileVault on | No behavioural difference. |
 
-- [ ] Global hotkeys still fire; the event tap survives a search burst
+---
+
+## 14. Release acceptance gates — P1
+
+Not runtime tests, but contract items that block acceptance.
+
+- [ ] Universal build (`--arch arm64 --arch x86_64`) succeeds and the app runs
+      on both architectures — this is the only place the x86_64 branches are
+      exercised at runtime.
+- [ ] **Release binary size impact measured and reported** versus the previous
+      release (SQLCipher is a new dependency).
+- [ ] `sqlcipher/GRDB.swift` and `sqlcipher/SQLCipher.swift` licenses present
+      in `THIRD-PARTY-LICENSES.md`.
+- [ ] SwiftPM pins match ADR-0013.
+- [ ] `CHANGELOG.md` entry under `## [Unreleased]` matches shipped behaviour.
+- [ ] No first-party build warnings (`swift build --build-tests` from clean).
+
+---
+
+## 15. Adjacent-feature regression sweep — P1
+
+The branch touched 164 files.
+
+- [ ] Global hotkeys fire; the event tap survives a search burst and a large capture
 - [ ] Hyper Key unaffected
-- [ ] Command Palette opens, searches, and drills in
-- [ ] Screenshot capture and annotation; auto-copy still lands in history once
+- [ ] Command Palette opens, searches, drills in
+- [ ] Screenshot capture, annotation, scrolling capture; auto-copy lands in history exactly once
 - [ ] Screen recording
-- [ ] Translation, including copy-from-result (must not create a history entry)
-- [ ] Hosts plugin install/uninstall
-- [ ] Image Conversion plugin, including its clipboard context action
+- [ ] Translation, including copy-from-result and selected-text reading (see 2.19)
+- [ ] Hosts plugin install/uninstall, including the privileged helper
+- [ ] Image Conversion plugin and its clipboard context action
 - [ ] Script Plugins, including a plugin's `copy` capability
 - [ ] Config sync export/import round trip
-- [ ] Settings window: every tab opens, no focus loss on switch
+- [ ] Settings: every tab opens; no focus loss on switch
 - [ ] Scheduled Shutdown
 - [ ] Sparkle update check
+- [ ] Keyboard lock
 
 ---
 
 ## Reporting
 
-For any failure record: case number, volume (entry count), the measured value
-against its budget, whether it reproduces, and a `sample AnyDoor` trace for
-anything that stalls. A perf failure without a number is not actionable.
+For any failure record: case number, entry volume, machine and architecture,
+the measured value against its budget, whether it reproduces, and a
+`sample AnyDoor` trace for anything that stalls. A performance failure without
+a number is not actionable.
