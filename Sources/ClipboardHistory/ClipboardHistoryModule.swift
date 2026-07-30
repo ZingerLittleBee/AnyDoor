@@ -639,13 +639,23 @@ extension ClipboardHistoryModule {
                     try database.execute(sql: "VACUUM")
                 }
             }
+            let requiresMigration = try database.read { database in
+                try !migrator.hasCompletedMigrations(database)
+            }
             if let migrationTarget {
                 try migrator.migrate(database, upTo: migrationTarget)
             } else {
                 try migrator.migrate(database)
                 try prepareSearchIndexState(in: database)
             }
-            try validateIntegrity(of: database)
+            // Re-validate only when this open actually wrote schema. An
+            // already-current store was validated above, and integrity_check
+            // reads every page of the (trigram-index-heavy) database — running
+            // it twice is the dominant cost of opening a large history, and
+            // this runs synchronously during AppDelegate.init.
+            if requiresMigration {
+                try validateIntegrity(of: database)
+            }
             return database
         } catch let error as StoreOpenError {
             throw error
