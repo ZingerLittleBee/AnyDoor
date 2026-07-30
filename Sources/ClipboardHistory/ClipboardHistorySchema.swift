@@ -40,6 +40,9 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v5_indexed_search") { database in
             try createSearchIndexSchema(in: database)
         }
+        migrator.registerMigration("v6_retention_and_mutations") { database in
+            try createRetentionMutationSchema(in: database)
+        }
         return migrator
     }
 
@@ -109,6 +112,43 @@ extension ClipboardHistoryModule {
                 cipherIntegrityOK: cipherFailures.isEmpty || cipherFailures == ["ok"]
             )
         }
+    }
+
+    private static func createRetentionMutationSchema(
+        in database: Database
+    ) throws {
+        try database.create(table: "clipboard_tag_definitions") { table in
+            table.primaryKey("id", .text)
+        }
+        try database.execute(
+            sql: """
+                CREATE INDEX clipboard_retention_expiry
+                ON clipboard_retention_state(
+                    is_protected,
+                    retention_started_at,
+                    entry_id
+                )
+                """
+        )
+        for (key, textValue) in [
+            ("retentionPeriod", ClipboardHistoryRetentionPeriod.default.rawValue)
+        ] {
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_maintenance_metadata(key, text_value)
+                    VALUES (?, ?)
+                    ON CONFLICT(key) DO NOTHING
+                    """,
+                arguments: [key, textValue]
+            )
+        }
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_maintenance_metadata(key, integer_value)
+                VALUES ('historyRevision', 0)
+                ON CONFLICT(key) DO NOTHING
+                """
+        )
     }
 }
 

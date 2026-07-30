@@ -746,6 +746,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v3_file_reference_identity",
                 "v4_capture_source_provenance",
                 "v5_indexed_search",
+                "v6_retention_and_mutations",
             ]
         )
         XCTAssertEqual(
@@ -774,6 +775,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "clipboard_search_trigram_data",
                 "clipboard_search_trigram_docsize",
                 "clipboard_search_trigram_idx",
+                "clipboard_tag_definitions",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -806,6 +808,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v3_file_reference_identity",
                 "v4_capture_source_provenance",
                 "v5_indexed_search",
+                "v6_retention_and_mutations",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

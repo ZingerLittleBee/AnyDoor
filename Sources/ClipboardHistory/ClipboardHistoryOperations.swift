@@ -22,8 +22,20 @@ extension ClipboardHistoryModule {
         switch mutation {
         case .delete(let entryID):
             return try await delete(entryID, from: database)
-        case .setFavorite, .setTags, .editText:
-            throw ClipboardHistoryModuleError.operationUnavailable
+        case .setFavorite(let entryID, let isFavorite):
+            return try setFavorite(
+                isFavorite,
+                for: entryID,
+                in: database
+            )
+        case .setTags(let entryID, let tagIDs):
+            return try setTags(tagIDs, for: entryID, in: database)
+        case .editText(let entryID, let text):
+            return try await editText(
+                text,
+                for: entryID,
+                in: database
+            )
         }
     }
 
@@ -32,6 +44,11 @@ extension ClipboardHistoryModule {
     ) throws -> ClipboardHistoryMaterialization {
         let database = try requiredDatabase()
         let id = request.entryID.value.uuidString.lowercased()
+        guard try database.read({
+            try isLiveEntry(id, at: now(), in: $0)
+        }) else {
+            throw ClipboardHistoryModuleError.entryNotFound
+        }
         if request.purpose == .preview,
             let row = try database.read({ database in
                 try Row.fetchOne(
@@ -329,7 +346,16 @@ extension ClipboardHistoryModule {
         orphanGracePeriod: TimeInterval = 3_600
     ) throws -> ClipboardHistoryMaintenanceReport {
         let database = try requiredDatabase()
+        let maintenanceDate = now()
         let referencedPaths = try database.write { database in
+            let expiredIDs = try expiredEntryIDs(
+                at: maintenanceDate,
+                in: database
+            )
+            _ = try logicallyDelete(
+                entryIDs: expiredIDs,
+                in: database
+            )
             let paths = Set(
                 try String.fetchAll(
                     database,
@@ -378,9 +404,15 @@ extension ClipboardHistoryModule {
         }
         let reclaimed: Int
         do {
+            let boundedGracePeriod = min(
+                max(orphanGracePeriod, 0),
+                24 * 60 * 60
+            )
             reclaimed = try requiredPayloadStore().reconcile(
                 referencedPaths: referencedPaths,
-                olderThan: now().addingTimeInterval(-orphanGracePeriod)
+                olderThan: maintenanceDate.addingTimeInterval(
+                    -boundedGracePeriod
+                )
             )
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
@@ -504,64 +536,33 @@ extension ClipboardHistoryModule {
         from database: DatabasePool
     ) async throws -> ClipboardHistoryMutationOutcome {
         let storedID = entryID.value.uuidString.lowercased()
-        let payloads: [(id: String, path: String)] = try await database.read {
-            database in
-            try Row.fetchAll(
-                database,
-                sql: """
-                    SELECT DISTINCT payload.id, payload.relative_path
-                    FROM clipboard_payloads AS payload
-                    WHERE payload.id IN (
-                        SELECT payload_id
-                        FROM clipboard_representations
-                        WHERE entry_id = ? AND payload_id IS NOT NULL
-                        UNION
-                        SELECT thumbnail_payload_id
-                        FROM clipboard_entries
-                        WHERE id = ? AND thumbnail_payload_id IS NOT NULL
-                        UNION
-                        SELECT payload_id
-                        FROM clipboard_file_members
-                        WHERE entry_id = ? AND payload_id IS NOT NULL
+        let date = now()
+        let result: EntryDeletionResult
+        do {
+            result = try await database.write { database in
+                guard try isLiveEntry(storedID, at: date, in: database) else {
+                    return EntryDeletionResult(
+                        didDelete: false,
+                        payloadPaths: []
                     )
-                    """,
-                arguments: [storedID, storedID, storedID]
-            ).map { ($0["id"], $0["relative_path"]) }
-        }
-        let deleted = try await database.write { database in
-            guard try Int.fetchOne(
-                database,
-                sql: "SELECT 1 FROM clipboard_entries WHERE id = ?",
-                arguments: [storedID]
-            ) == 1 else {
-                return false
-            }
-            try Self.deleteSearchFields(
-                forEntryID: storedID,
-                from: database,
-                faultInjector: faultInjector
-            )
-            try database.execute(
-                sql: "DELETE FROM clipboard_entries WHERE id = ?",
-                arguments: [storedID]
-            )
-            for payload in payloads {
-                try database.execute(
-                    sql: "DELETE FROM clipboard_payloads WHERE id = ?",
-                    arguments: [payload.id]
+                }
+                let paths = try logicallyDelete(
+                    entryIDs: [storedID],
+                    in: database
+                )
+                try faultInjector.check(.databaseTransaction)
+                return EntryDeletionResult(
+                    didDelete: true,
+                    payloadPaths: paths
                 )
             }
-            try Self.bumpSearchIndexGeneration(in: database)
-            return true
+        } catch let error as ClipboardHistoryModuleError {
+            throw error
+        } catch {
+            throw ClipboardHistoryModuleError.storageFailure
         }
-        guard deleted else { return .notFound }
-
-        if let payloadStore = try? requiredPayloadStore() {
-            await payloadReclaimer.enqueue(
-                paths: payloads.map(\.path),
-                in: payloadStore
-            )
-        }
+        guard result.didDelete else { return .notFound }
+        await enqueueReclamation(for: result.payloadPaths)
         return .deleted
     }
 
@@ -637,6 +638,11 @@ extension ClipboardHistoryModule {
         }
         return total
     }
+}
+
+private struct EntryDeletionResult: Sendable {
+    let didDelete: Bool
+    let payloadPaths: [String]
 }
 
 extension ClipboardHistoryPayloadKind {

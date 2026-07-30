@@ -14,7 +14,27 @@ extension ClipboardHistoryModule {
         payloadStore: ClipboardHistoryPayloadStore
     ) throws -> ClipboardHistoryEntryID? {
         let candidates = try database.read { database in
-            try Row.fetchAll(
+            let expiryCutoff = try Self.expiryCutoff(
+                at: capturedAt,
+                in: database
+            )
+            var arguments: StatementArguments = [
+                identity.fingerprint,
+                identity.canonicalByteCount,
+            ]
+            let liveCondition: String
+            if let expiryCutoff {
+                liveCondition = """
+                    AND (
+                        retention.is_protected = 1
+                        OR retention.retention_started_at > ?
+                    )
+                    """
+                arguments += [expiryCutoff]
+            } else {
+                liveCondition = ""
+            }
+            return try Row.fetchAll(
                 database,
                 sql: """
                     SELECT candidate.entry_id
@@ -25,12 +45,10 @@ extension ClipboardHistoryModule {
                       ON retention.entry_id = entry.id
                     WHERE candidate.fingerprint = ?
                       AND candidate.canonical_byte_count = ?
+                      \(liveCondition)
                     ORDER BY entry.last_captured_at DESC, entry.id DESC
                     """,
-                arguments: [
-                    identity.fingerprint,
-                    identity.canonicalByteCount,
-                ]
+                arguments: arguments
             ).compactMap { row -> String? in row["entry_id"] }
         }
 
@@ -137,6 +155,7 @@ extension ClipboardHistoryModule {
                         )
                     }
                     try Self.bumpSearchIndexGeneration(in: database)
+                    try Self.bumpHistoryRevision(in: database)
                     try faultInjector.check(.databaseTransaction)
                 }
             } catch {

@@ -693,6 +693,7 @@ extension ClipboardHistoryModule {
                     ]
                 )
                 try Self.bumpSearchIndexGeneration(in: database)
+                try Self.bumpHistoryRevision(in: database)
                 try faultInjector.check(.databaseTransaction)
             }
         } catch {
@@ -962,7 +963,7 @@ extension ClipboardHistoryModule {
         return facets
     }
 
-    fileprivate static func inferredFacets(
+    static func inferredFacets(
         forExactText exactText: String
     ) -> Set<ClipboardHistoryFacet> {
         let value = exactText.trimmingCharacters(in: .whitespacesAndNewlines)

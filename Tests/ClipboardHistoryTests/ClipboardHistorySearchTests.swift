@@ -257,6 +257,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 content: .text("https://needle.example/other")
             )
         )
+        await module.awaitSearchIndexRebuildForTesting()
         let allEntries = try await module.page(ClipboardHistoryQuery()).entries
         let captured = try XCTUnwrap(
             allEntries.first { $0.id == wanted.entryID }
@@ -498,6 +499,17 @@ final class ClipboardHistorySearchTests: XCTestCase {
                     rankingGroup: 0,
                     entryID: id,
                     into: database
+                )
+                try database.execute(
+                    sql: """
+                        INSERT INTO clipboard_retention_state(
+                            entry_id, retention_started_at, is_protected
+                        ) VALUES (?, ?, 0)
+                        """,
+                    arguments: [
+                        id,
+                        Date().timeIntervalSince1970,
+                    ]
                 )
             }
             try ClipboardHistoryModule.bumpSearchIndexGeneration(in: database)
@@ -979,6 +991,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 databaseKey: fixture.key,
                 faultInjector: ClipboardHistoryFaultInjector(points: [point])
             )
+            await deleting.awaitSearchIndexRebuildForTesting()
             do {
                 _ = try await deleting.apply(.delete(entry))
                 XCTFail("Expected delete fault at \(point)")
@@ -1005,12 +1018,14 @@ final class ClipboardHistorySearchTests: XCTestCase {
         _ value: String,
         in module: ClipboardHistoryModule
     ) async throws -> ClipboardHistoryEntryID {
-        try await module.capture(
+        let entryID = try await module.capture(
             ClipboardHistoryCaptureRequest(
                 source: .unknown,
                 content: .text(value)
             )
         ).entryID
+        await module.awaitSearchIndexRebuildForTesting()
+        return entryID
     }
 
     @MainActor

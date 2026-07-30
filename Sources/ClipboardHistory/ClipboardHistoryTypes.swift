@@ -14,6 +14,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
     public let previewText: String?
     public let facets: Set<ClipboardHistoryFacet>
     public let isFavorite: Bool
+    public let tagIDs: Set<String>
     public let source: ClipboardHistoryCaptureSource
 
     public init(
@@ -22,6 +23,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         previewText: String?,
         facets: Set<ClipboardHistoryFacet>,
         isFavorite: Bool,
+        tagIDs: Set<String> = [],
         source: ClipboardHistoryCaptureSource
     ) {
         self.id = id
@@ -29,6 +31,7 @@ public struct ClipboardHistoryEntry: Equatable, Sendable {
         self.previewText = previewText
         self.facets = facets
         self.isFavorite = isFavorite
+        self.tagIDs = tagIDs
         self.source = source
     }
 }
@@ -247,6 +250,99 @@ public enum ClipboardHistoryMutationOutcome: Equatable, Sendable {
     case notFound
 }
 
+public enum ClipboardHistoryRetentionPeriod:
+    String,
+    CaseIterable,
+    Codable,
+    Sendable
+{
+    case oneDay
+    case sevenDays
+    case thirtyDays
+    case ninetyDays
+    case oneHundredEightyDays
+    case threeHundredSixtyFiveDays
+    case unlimited
+
+    public static let `default`: Self = .thirtyDays
+
+    var duration: TimeInterval? {
+        switch self {
+        case .oneDay:
+            86_400
+        case .sevenDays:
+            7 * 86_400
+        case .thirtyDays:
+            30 * 86_400
+        case .ninetyDays:
+            90 * 86_400
+        case .oneHundredEightyDays:
+            180 * 86_400
+        case .threeHundredSixtyFiveDays:
+            365 * 86_400
+        case .unlimited:
+            nil
+        }
+    }
+}
+
+public struct ClipboardHistoryRetentionStatus: Equatable, Sendable {
+    public let period: ClipboardHistoryRetentionPeriod
+
+    public init(period: ClipboardHistoryRetentionPeriod) {
+        self.period = period
+    }
+}
+
+public struct ClipboardHistoryTagDefinitionUpdate: Equatable, Sendable {
+    public let removedMembershipCount: Int
+    public let unprotectedEntryCount: Int
+
+    public init(
+        removedMembershipCount: Int,
+        unprotectedEntryCount: Int
+    ) {
+        self.removedMembershipCount = removedMembershipCount
+        self.unprotectedEntryCount = unprotectedEntryCount
+    }
+}
+
+public enum ClipboardHistoryClearScope: String, Codable, Sendable {
+    case unprotectedOnly
+    case includingProtected
+}
+
+public struct ClipboardHistoryConfirmationToken: Equatable, Sendable {
+    let data: Data
+
+    init(data: Data) {
+        self.data = data
+    }
+}
+
+public struct ClipboardHistoryDestructivePreview: Equatable, Sendable {
+    public let affectedCount: Int
+    public let token: ClipboardHistoryConfirmationToken
+
+    public init(
+        affectedCount: Int,
+        token: ClipboardHistoryConfirmationToken
+    ) {
+        self.affectedCount = affectedCount
+        self.token = token
+    }
+}
+
+public enum ClipboardHistoryRetentionChangePreparation: Equatable, Sendable {
+    case applied(ClipboardHistoryRetentionPeriod)
+    case confirmationRequired(ClipboardHistoryDestructivePreview)
+}
+
+public enum ClipboardHistoryDestructiveApplyOutcome: Equatable, Sendable {
+    case applied(deletedCount: Int)
+    case stale(ClipboardHistoryDestructivePreview)
+}
+
 public struct ClipboardHistoryMaterializationRequest: Equatable, Sendable {
     public let entryID: ClipboardHistoryEntryID
     public let purpose: ClipboardHistoryMaterializationPurpose
@@ -351,6 +447,9 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case payloadUnavailable(ClipboardHistoryEntryID)
     case fileReferencesUnavailable(ClipboardHistoryEntryID, count: Int)
     case resetFailed
+    case invalidTagIDs(Set<String>)
+    case invalidTextEdit
+    case invalidConfirmation
 }
 
 public enum ClipboardHistoryResetConfirmation: Sendable {

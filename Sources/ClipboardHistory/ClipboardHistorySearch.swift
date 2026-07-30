@@ -3,6 +3,72 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
+    func indexedCount(_ query: ClipboardHistoryQuery) throws -> Int {
+        let database = try requiredDatabase()
+        let normalizedQuery = Self.normalizedQuery(query.text)
+        return try database.read { database in
+            let expiryCutoff = try Self.expiryCutoff(
+                at: now(),
+                in: database
+            )
+            if normalizedQuery.isEmpty {
+                var conditions: [String] = []
+                var arguments: StatementArguments = []
+                Self.appendTypedFilters(
+                    query,
+                    entryAlias: "entry",
+                    to: &conditions,
+                    arguments: &arguments,
+                    expiryCutoff: expiryCutoff
+                )
+                let predicate = conditions.isEmpty
+                    ? ""
+                    : "WHERE \(conditions.joined(separator: " AND "))"
+                return try Int.fetchOne(
+                    database,
+                    sql: """
+                        SELECT COUNT(*)
+                        FROM clipboard_entries AS entry
+                        \(predicate)
+                        """,
+                    arguments: arguments
+                ) ?? 0
+            }
+            guard try Self.searchIndexStatus(in: database) == .ready else {
+                throw ClipboardHistoryModuleError.operationUnavailable
+            }
+            let terms = normalizedQuery.split(separator: " ").map(String.init)
+            var matchingIDs: Set<String>?
+            for term in terms {
+                let termIDs = Set(
+                    try Self.candidateFields(
+                        matching: term,
+                        in: database
+                    ).compactMap { row -> String? in
+                        let value: String = row["normalized_value"]
+                        guard value.range(of: term) != nil else {
+                            return nil
+                        }
+                        return row["entry_id"]
+                    }
+                )
+                matchingIDs = matchingIDs.map {
+                    $0.intersection(termIDs)
+                } ?? termIDs
+                if matchingIDs?.isEmpty == true {
+                    return 0
+                }
+            }
+            guard let matchingIDs, !matchingIDs.isEmpty else { return 0 }
+            return try Self.filteredEntryRows(
+                ids: Array(matchingIDs),
+                query: query,
+                expiryCutoff: expiryCutoff,
+                in: database
+            ).count
+        }
+    }
+
     func indexedPage(
         _ query: ClipboardHistoryQuery,
         after cursor: ClipboardHistoryCursor?
@@ -10,6 +76,10 @@ extension ClipboardHistoryModule {
         let database = try requiredDatabase()
         let normalizedQuery = Self.normalizedQuery(query.text)
         return try database.read { database in
+            let expiryCutoff = try Self.expiryCutoff(
+                at: now(),
+                in: database
+            )
             let generation = try Self.searchIndexGeneration(in: database)
             let binding = try SearchCursorBinding(
                 normalizedQuery: normalizedQuery,
@@ -33,6 +103,7 @@ extension ClipboardHistoryModule {
                     query,
                     binding: binding,
                     cursor: validCursor,
+                    expiryCutoff: expiryCutoff,
                     in: database
                 )
             }
@@ -57,6 +128,7 @@ extension ClipboardHistoryModule {
                 normalizedQuery: normalizedQuery,
                 binding: binding,
                 cursor: validCursor,
+                expiryCutoff: expiryCutoff,
                 in: database
             )
         }
@@ -66,6 +138,7 @@ extension ClipboardHistoryModule {
         _ query: ClipboardHistoryQuery,
         binding: SearchCursorBinding,
         cursor: SearchCursorPayload?,
+        expiryCutoff: Double?,
         in database: Database
     ) throws -> ClipboardHistoryPage {
         var conditions: [String] = []
@@ -74,7 +147,8 @@ extension ClipboardHistoryModule {
             query,
             entryAlias: "entry",
             to: &conditions,
-            arguments: &arguments
+            arguments: &arguments,
+            expiryCutoff: expiryCutoff
         )
         if let cursor {
             conditions.append(
@@ -137,6 +211,7 @@ extension ClipboardHistoryModule {
         normalizedQuery: String,
         binding: SearchCursorBinding,
         cursor: SearchCursorPayload?,
+        expiryCutoff: Double?,
         in database: Database
     ) throws -> ClipboardHistoryPage {
         let terms = normalizedQuery.split(separator: " ").map(String.init)
@@ -145,6 +220,7 @@ extension ClipboardHistoryModule {
                 query,
                 binding: binding,
                 cursor: cursor,
+                expiryCutoff: expiryCutoff,
                 in: database
             )
         }
@@ -182,6 +258,7 @@ extension ClipboardHistoryModule {
         let metadata = try filteredEntryRows(
             ids: Array(matchesByEntry.keys),
             query: query,
+            expiryCutoff: expiryCutoff,
             in: database
         )
         var ranked: [RankedSearchEntry] = []
@@ -309,6 +386,7 @@ extension ClipboardHistoryModule {
     private static func filteredEntryRows(
         ids: [String],
         query: ClipboardHistoryQuery,
+        expiryCutoff: Double?,
         in database: Database
     ) throws -> [Row] {
         var result: [Row] = []
@@ -324,7 +402,8 @@ extension ClipboardHistoryModule {
                 query,
                 entryAlias: "entry",
                 to: &conditions,
-                arguments: &arguments
+                arguments: &arguments,
+                expiryCutoff: expiryCutoff
             )
             result += try Row.fetchAll(
                 database,
@@ -347,8 +426,25 @@ extension ClipboardHistoryModule {
         _ query: ClipboardHistoryQuery,
         entryAlias: String,
         to conditions: inout [String],
-        arguments: inout StatementArguments
+        arguments: inout StatementArguments,
+        expiryCutoff: Double?
     ) {
+        if let expiryCutoff {
+            conditions.append(
+                """
+                EXISTS (
+                    SELECT 1
+                    FROM clipboard_retention_state AS retention
+                    WHERE retention.entry_id = \(entryAlias).id
+                      AND (
+                          retention.is_protected = 1
+                          OR retention.retention_started_at > ?
+                      )
+                )
+                """
+            )
+            arguments += [expiryCutoff]
+        }
         if query.favoritesOnly {
             conditions.append("\(entryAlias).is_favorite = 1")
         }
@@ -392,7 +488,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private static func entry(
+    static func entry(
         from row: Row,
         in database: Database
     ) throws -> ClipboardHistoryEntry {
@@ -409,12 +505,25 @@ extension ClipboardHistoryModule {
                 """,
             arguments: [storedID]
         )
+        let tagIDs = try String.fetchAll(
+            database,
+            sql: """
+                SELECT assignment.tag_id
+                FROM clipboard_entry_tags AS assignment
+                JOIN clipboard_tag_definitions AS definition
+                  ON definition.id = assignment.tag_id
+                WHERE assignment.entry_id = ?
+                ORDER BY assignment.tag_id
+                """,
+            arguments: [storedID]
+        )
         return ClipboardHistoryEntry(
             id: ClipboardHistoryEntryID(value),
             capturedAt: Date(timeIntervalSince1970: row["captured_at"]),
             previewText: row["preview_text"],
             facets: Set(facets.compactMap(ClipboardHistoryFacet.init)),
             isFavorite: row["is_favorite"],
+            tagIDs: Set(tagIDs),
             source: ClipboardHistoryCaptureSource(
                 bundleIdentifier: row["source_bundle_id"],
                 displayName: row["source_display_name"],
