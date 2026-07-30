@@ -666,6 +666,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
             .appendingPathComponent("manual.payload")
         try Data(repeating: 0xA7, count: 32_768).write(to: staging)
         try Data(repeating: 0xB8, count: 65_536).write(to: orphan)
+        await module.awaitDerivedJobsForTesting()
 
         let expected = try allocatedRegularFileBytes(in: fixture.url)
         let reported = try await module.storageUsage()

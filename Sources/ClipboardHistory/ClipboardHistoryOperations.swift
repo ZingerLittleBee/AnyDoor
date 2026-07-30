@@ -348,7 +348,7 @@ extension ClipboardHistoryModule {
     ) throws -> ClipboardHistoryMaintenanceReport {
         let database = try requiredDatabase()
         let maintenanceDate = now()
-        let referencedPaths = try database.write { database in
+        let maintenanceState = try database.write { database in
             let expiredIDs = try expiredEntryIDs(
                 at: maintenanceDate,
                 in: database
@@ -401,8 +401,10 @@ extension ClipboardHistoryModule {
                     )
                     """
             )
-            return paths
+            return (paths, Set(expiredIDs))
         }
+        cancelDerivedJobs(for: maintenanceState.1)
+        let referencedPaths = maintenanceState.0
         let reclaimed: Int
         do {
             let boundedGracePeriod = min(
@@ -470,6 +472,7 @@ extension ClipboardHistoryModule {
         monitoringEnabled = false
         await captureMonitor?.setEnabled(false)
         await stopMaintenanceTask()
+        await stopDerivedJobScheduler()
         _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
         try database?.close()
@@ -503,10 +506,13 @@ extension ClipboardHistoryModule {
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
+        automaticImageTextIndexingEnabled = Self
+            .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         guard availability == .ready else {
             throw ClipboardHistoryModuleError.resetFailed
         }
         startMaintenanceTaskIfNeeded()
+        startDerivedJobSchedulerIfNeeded()
     }
 }
 
@@ -576,6 +582,7 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.storageFailure
         }
         guard result.didDelete else { return .notFound }
+        cancelDerivedJobs(for: [storedID])
         await enqueueReclamation(for: result.payloadPaths)
         return .deleted
     }

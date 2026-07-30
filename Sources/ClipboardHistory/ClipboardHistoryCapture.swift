@@ -418,6 +418,7 @@ extension ClipboardHistoryModule {
                 payloadStore: payloadStore
             )
         {
+            startDerivedJobSchedulerIfNeeded()
             return ClipboardHistoryCaptureOutcome(entryID: reusedEntryID)
         }
         var publishedBitmaps: [
@@ -692,6 +693,20 @@ extension ClipboardHistoryModule {
                         capturedAt.timeIntervalSince1970,
                     ]
                 )
+                if !publishedBitmaps.isEmpty {
+                    try insertDerivedJob(
+                        kind: .qr,
+                        entryID: storedID,
+                        into: database
+                    )
+                    if automaticImageTextIndexingEnabled {
+                        try insertDerivedJob(
+                            kind: .ocr,
+                            entryID: storedID,
+                            into: database
+                        )
+                    }
+                }
                 try Self.bumpSearchIndexGeneration(in: database)
                 try Self.bumpHistoryRevision(in: database)
                 try faultInjector.check(.databaseTransaction)
@@ -699,7 +714,24 @@ extension ClipboardHistoryModule {
         } catch {
             throw mapStorageError(error, entryID: entryID)
         }
+        startDerivedJobSchedulerIfNeeded()
         return ClipboardHistoryCaptureOutcome(entryID: entryID)
+    }
+
+    private func insertDerivedJob(
+        kind: ClipboardHistoryDerivedJobKind,
+        entryID: String,
+        into database: Database
+    ) throws {
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_derived_jobs(
+                    entry_id, kind, state, attempt_count,
+                    eligible_generation, next_attempt_at
+                ) VALUES (?, ?, 'pending', 0, 1, NULL)
+                """,
+            arguments: [entryID, kind.rawValue]
+        )
     }
 
     fileprivate struct RepresentationPosition: Hashable {

@@ -28,7 +28,13 @@ public actor ClipboardHistoryModule {
     let storageTraversalHook: (@Sendable (URL) throws -> Void)?
     let fingerprintDigest: @Sendable (Data) -> Data
     let duplicateReuseEnabled: Bool
+    let visionRecognizer: any ClipboardHistoryVisionRecognizing
     var automaticImageTextIndexingEnabled = false
+    var derivedJobSchedulerTask: Task<Void, Never>?
+    var derivedJobSchedulerToken: UUID?
+    var activeDerivedJob: ClipboardHistoryDerivedJobKey?
+    nonisolated let derivedJobBootstrap =
+        ClipboardHistoryDerivedJobBootstrap()
     var searchIndexRebuildTask: Task<SearchIndexRebuildOutcome, Never>?
     var maintenanceTask: Task<Void, Never>?
     nonisolated let maintenanceBootstrap =
@@ -60,6 +66,7 @@ public actor ClipboardHistoryModule {
         storageTraversalHook = nil
         fingerprintDigest = CanonicalIdentity.sha256
         duplicateReuseEnabled = true
+        visionRecognizer = ClipboardHistoryVisionRecognizer()
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
@@ -68,9 +75,16 @@ public actor ClipboardHistoryModule {
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
+        automaticImageTextIndexingEnabled = Self
+            .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         maintenanceBootstrap.install(
             Task { [weak self] in
                 await self?.startMaintenanceTaskIfNeeded()
+            }
+        )
+        derivedJobBootstrap.install(
+            Task { [weak self] in
+                await self?.startDerivedJobSchedulerIfNeeded()
             }
         )
     }
@@ -79,7 +93,9 @@ public actor ClipboardHistoryModule {
         testingDatabaseURL: URL,
         databaseKey: Data,
         faultInjector: ClipboardHistoryFaultInjector =
-            ClipboardHistoryFaultInjector()
+            ClipboardHistoryFaultInjector(),
+        visionRecognizer: any ClipboardHistoryVisionRecognizing =
+            ClipboardHistoryVisionRecognizer()
     ) throws {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -95,6 +111,7 @@ public actor ClipboardHistoryModule {
         storageTraversalHook = nil
         fingerprintDigest = CanonicalIdentity.sha256
         duplicateReuseEnabled = true
+        self.visionRecognizer = visionRecognizer
         try Self.prepareStoreDirectories(at: storeRoot)
         database = try Self.openDatabase(
             at: testingDatabaseURL,
@@ -114,6 +131,13 @@ public actor ClipboardHistoryModule {
         )
         availability = .ready
         availabilityReason = nil
+        automaticImageTextIndexingEnabled = Self
+            .storedAutomaticImageTextIndexingSetting(in: database)
+        derivedJobBootstrap.install(
+            Task { [weak self] in
+                await self?.startDerivedJobSchedulerIfNeeded()
+            }
+        )
     }
 
     init(
@@ -128,7 +152,9 @@ public actor ClipboardHistoryModule {
             (@Sendable (URL) throws -> Void)? = nil,
         fingerprintDigest: @escaping @Sendable (Data) -> Data =
             CanonicalIdentity.sha256,
-        duplicateReuseEnabled: Bool = true
+        duplicateReuseEnabled: Bool = true,
+        visionRecognizer: any ClipboardHistoryVisionRecognizing =
+            ClipboardHistoryVisionRecognizer()
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -149,6 +175,7 @@ public actor ClipboardHistoryModule {
         self.storageTraversalHook = storageTraversalHook
         self.fingerprintDigest = fingerprintDigest
         self.duplicateReuseEnabled = duplicateReuseEnabled
+        self.visionRecognizer = visionRecognizer
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
@@ -157,9 +184,16 @@ public actor ClipboardHistoryModule {
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
+        automaticImageTextIndexingEnabled = Self
+            .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         maintenanceBootstrap.install(
             Task { [weak self] in
                 await self?.startMaintenanceTaskIfNeeded()
+            }
+        )
+        derivedJobBootstrap.install(
+            Task { [weak self] in
+                await self?.startDerivedJobSchedulerIfNeeded()
             }
         )
     }
@@ -214,6 +248,7 @@ public actor ClipboardHistoryModule {
     public func retry() async {
         guard let keyStore else { return }
         await stopMaintenanceTask()
+        await stopDerivedJobScheduler()
         _ = await searchIndexRebuildTask?.value
         searchIndexRebuildTask = nil
         if let database {
@@ -232,6 +267,8 @@ public actor ClipboardHistoryModule {
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
+        automaticImageTextIndexingEnabled = Self
+            .storedAutomaticImageTextIndexingSetting(in: resolution.database)
         if availability != .ready {
             monitoringEnabled = false
             await captureMonitor?.setEnabled(false)
@@ -240,6 +277,7 @@ public actor ClipboardHistoryModule {
             await captureMonitor?.setEnabled(true)
         }
         startMaintenanceTaskIfNeeded()
+        startDerivedJobSchedulerIfNeeded()
     }
 
     public func status() -> ClipboardHistoryStatus {
@@ -361,6 +399,7 @@ extension ClipboardHistoryModule {
         }
         isClosingStore = true
         await stopMaintenanceTask()
+        await stopDerivedJobScheduler()
         let rebuildTask = searchIndexRebuildTask
         if let rebuildTask {
             _ = await rebuildTask.value

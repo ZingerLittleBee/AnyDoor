@@ -176,7 +176,8 @@ extension ClipboardHistoryModule {
                 guard current != period else {
                     return RetentionPreparationResult(
                         preparation: .applied(period),
-                        payloadPaths: []
+                        payloadPaths: [],
+                        deletedEntryIDs: []
                     )
                 }
                 let affectedIDs = try retentionReductionEntryIDs(
@@ -193,7 +194,8 @@ extension ClipboardHistoryModule {
                     )
                     return RetentionPreparationResult(
                         preparation: .confirmationRequired(preview),
-                        payloadPaths: []
+                        payloadPaths: [],
+                        deletedEntryIDs: []
                     )
                 }
 
@@ -207,7 +209,8 @@ extension ClipboardHistoryModule {
                 try Self.bumpSearchIndexGeneration(in: database)
                 return RetentionPreparationResult(
                     preparation: .applied(period),
-                    payloadPaths: payloadPaths
+                    payloadPaths: payloadPaths,
+                    deletedEntryIDs: Set(expiredIDs)
                 )
             }
         } catch let error as ClipboardHistoryModuleError {
@@ -215,6 +218,7 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
+        cancelDerivedJobs(for: preparation.deletedEntryIDs)
         await enqueueReclamation(for: preparation.payloadPaths)
         return preparation.preparation
     }
@@ -284,7 +288,8 @@ extension ClipboardHistoryModule {
                                 in: database
                             )
                         ),
-                        payloadPaths: []
+                        payloadPaths: [],
+                        deletedEntryIDs: []
                     )
                 }
 
@@ -303,7 +308,8 @@ extension ClipboardHistoryModule {
                 try faultInjector.check(.databaseTransaction)
                 return ConfirmationApplyResult(
                     outcome: .applied(deletedCount: currentIDs.count),
-                    payloadPaths: payloadPaths
+                    payloadPaths: payloadPaths,
+                    deletedEntryIDs: allDeletedIDs
                 )
             }
         } catch let error as ClipboardHistoryModuleError {
@@ -311,6 +317,7 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
+        cancelDerivedJobs(for: result.deletedEntryIDs)
         await enqueueReclamation(for: result.payloadPaths)
         return result.outcome
     }
@@ -672,6 +679,7 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
+        cancelDerivedJobs(for: [storedID])
         await enqueueReclamation(for: result.payloadPaths)
         return result.outcome
     }
@@ -1088,11 +1096,13 @@ extension ClipboardHistoryModule {
 private struct RetentionPreparationResult {
     let preparation: ClipboardHistoryRetentionChangePreparation
     let payloadPaths: [String]
+    let deletedEntryIDs: Set<String>
 }
 
 private struct ConfirmationApplyResult {
     let outcome: ClipboardHistoryDestructiveApplyOutcome
     let payloadPaths: [String]
+    let deletedEntryIDs: Set<String>
 }
 
 private struct TextEditResult {

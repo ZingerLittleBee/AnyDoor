@@ -747,6 +747,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v4_capture_source_provenance",
                 "v5_indexed_search",
                 "v6_retention_and_mutations",
+                "v7_derived_indexing",
             ]
         )
         XCTAssertEqual(
@@ -809,6 +810,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v4_capture_source_provenance",
                 "v5_indexed_search",
                 "v6_retention_and_mutations",
+                "v7_derived_indexing",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

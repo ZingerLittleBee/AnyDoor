@@ -43,6 +43,16 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v6_retention_and_mutations") { database in
             try createRetentionMutationSchema(in: database)
         }
+        migrator.registerMigration("v7_derived_indexing") { database in
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_maintenance_metadata(
+                        key, integer_value
+                    ) VALUES ('automaticImageTextIndexingEnabled', 0)
+                    ON CONFLICT(key) DO NOTHING
+                    """
+            )
+        }
         return migrator
     }
 

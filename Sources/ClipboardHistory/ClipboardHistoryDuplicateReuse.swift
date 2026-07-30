@@ -95,13 +95,26 @@ extension ClipboardHistoryModule {
                             storedID,
                         ]
                     )
-                    try database.execute(
-                        sql: """
-                            DELETE FROM clipboard_entry_facets
-                            WHERE entry_id = ?
-                            """,
-                        arguments: [storedID]
-                    )
+                    if containsBitmap {
+                        try database.execute(
+                            sql: """
+                                DELETE FROM clipboard_entry_facets
+                                WHERE entry_id = ? AND facet != ?
+                                """,
+                            arguments: [
+                                storedID,
+                                ClipboardHistoryFacet.qrCode.rawValue,
+                            ]
+                        )
+                    } else {
+                        try database.execute(
+                            sql: """
+                                DELETE FROM clipboard_entry_facets
+                                WHERE entry_id = ?
+                                """,
+                            arguments: [storedID]
+                        )
+                    }
                     for facet in facets {
                         try database.execute(
                             sql: """
@@ -112,29 +125,16 @@ extension ClipboardHistoryModule {
                         )
                     }
                     if containsBitmap {
-                        try database.execute(
-                            sql: """
-                                UPDATE clipboard_derived_jobs
-                                SET state = 'pending', attempt_count = 0,
-                                    eligible_generation =
-                                        eligible_generation + 1,
-                                    next_attempt_at = NULL
-                                WHERE entry_id = ?
-                                  AND kind = 'qr'
-                                """,
-                            arguments: [storedID]
+                        try refreshDerivedJob(
+                            .qr,
+                            entryID: storedID,
+                            in: database
                         )
                         if refreshOCRBudget {
-                            try database.execute(
-                                sql: """
-                                    UPDATE clipboard_derived_jobs
-                                    SET state = 'pending', attempt_count = 0,
-                                        eligible_generation =
-                                            eligible_generation + 1,
-                                        next_attempt_at = NULL
-                                    WHERE entry_id = ? AND kind = 'ocr'
-                                    """,
-                                arguments: [storedID]
+                            try refreshDerivedJob(
+                                .ocr,
+                                entryID: storedID,
+                                in: database
                             )
                         }
                     }
@@ -167,6 +167,28 @@ extension ClipboardHistoryModule {
             return ClipboardHistoryEntryID(value)
         }
         return nil
+    }
+
+    private func refreshDerivedJob(
+        _ kind: ClipboardHistoryDerivedJobKind,
+        entryID: String,
+        in database: Database
+    ) throws {
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_derived_jobs(
+                    entry_id, kind, state, attempt_count,
+                    eligible_generation, next_attempt_at
+                ) VALUES (?, ?, 'pending', 0, 1, NULL)
+                ON CONFLICT(entry_id, kind) DO UPDATE SET
+                    state = 'pending',
+                    attempt_count = 0,
+                    eligible_generation =
+                        clipboard_derived_jobs.eligible_generation + 1,
+                    next_attempt_at = NULL
+                """,
+            arguments: [entryID, kind.rawValue]
+        )
     }
 
     private func canonicalIdentity(

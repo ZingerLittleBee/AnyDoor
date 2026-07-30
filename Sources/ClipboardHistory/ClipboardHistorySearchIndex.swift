@@ -475,6 +475,41 @@ extension ClipboardHistoryModule {
         }
     }
 
+    static func deleteSearchFields(
+        forEntryID entryID: String,
+        kind: String,
+        from database: Database,
+        faultInjector: ClipboardHistoryFaultInjector =
+            ClipboardHistoryFaultInjector()
+    ) throws {
+        let fields = try Row.fetchAll(
+            database,
+            sql: """
+                SELECT id, normalized_value
+                FROM clipboard_search_fields
+                WHERE entry_id = ? AND field_kind = ?
+                ORDER BY id
+                """,
+            arguments: [entryID, kind]
+        )
+        for field in fields {
+            let fieldID: Int64 = field["id"]
+            let normalizedValue: String = field["normalized_value"]
+            try deleteSearchIndexEntries(
+                fieldID: fieldID,
+                normalizedValue: normalizedValue,
+                from: database,
+                faultInjector: faultInjector,
+                afterTrigram: .searchDeleteAfterTrigram,
+                afterShortGrams: .searchDeleteAfterShortGrams
+            )
+            try database.execute(
+                sql: "DELETE FROM clipboard_search_fields WHERE id = ?",
+                arguments: [fieldID]
+            )
+        }
+    }
+
     static func insertSearchIndexEntries(
         fieldID: Int64,
         normalizedValue: String,

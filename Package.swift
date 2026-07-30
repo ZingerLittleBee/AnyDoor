@@ -202,6 +202,7 @@ let package = Package(
                 .product(name: "GRDB", package: "GRDB.swift"),
                 "ClipboardHistory",
             ],
+            resources: [.process("Fixtures")],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

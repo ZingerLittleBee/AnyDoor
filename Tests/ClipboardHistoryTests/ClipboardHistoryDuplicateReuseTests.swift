@@ -602,6 +602,12 @@ extension ClipboardHistoryModule {
                             entry_id, kind, state, attempt_count,
                             eligible_generation, next_attempt_at
                         ) VALUES (?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(entry_id, kind) DO UPDATE SET
+                            state = excluded.state,
+                            attempt_count = excluded.attempt_count,
+                            eligible_generation =
+                                excluded.eligible_generation,
+                            next_attempt_at = excluded.next_attempt_at
                         """,
                     arguments: [
                         storedID,
