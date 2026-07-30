@@ -29,24 +29,30 @@ enum ClipboardHistoryPasteService {
                         throw ClipboardHistoryPasteServiceError
                             .invalidTypeIdentifier
                     }
-                    pasteboardItem.setString(
+                    guard pasteboardItem.setString(
                         value,
                         forType: NSPasteboard.PasteboardType(typeIdentifier)
-                    )
+                    ) else {
+                        throw ClipboardHistoryPasteServiceError.writeFailed
+                    }
                 case .data(let typeIdentifier, let data):
                     guard !typeIdentifier.isEmpty else {
                         throw ClipboardHistoryPasteServiceError
                             .invalidTypeIdentifier
                     }
-                    pasteboardItem.setData(
+                    guard pasteboardItem.setData(
                         data,
                         forType: NSPasteboard.PasteboardType(typeIdentifier)
-                    )
+                    ) else {
+                        throw ClipboardHistoryPasteServiceError.writeFailed
+                    }
                 case .file(let file):
-                    pasteboardItem.setString(
+                    guard pasteboardItem.setString(
                         file.currentURL.absoluteString,
                         forType: .fileURL
-                    )
+                    ) else {
+                        throw ClipboardHistoryPasteServiceError.writeFailed
+                    }
                 }
             }
             return pasteboardItem

@@ -1,26 +1,23 @@
 import AppKit
+import ClipboardHistory
 import SwiftUI
 
-/// Single row inside `ClipboardHistoryPopoverView`'s list.
-///
-/// Visual states: hover-selected highlight, kind-specific leading icon
-/// (color swatch / screenshot thumbnail / OCR / QR), title + subtitle, and a
-/// trailing relative timestamp. Pure presentation — hover and tap handlers
-/// live in the parent view.
 struct ClipboardHistoryRow: View {
-    let item: ClipboardHistoryItem
+    let entry: ClipboardHistoryEntry
     let isSelected: Bool
-    let store: ClipboardHistoryStore
+    let presentation: ClipboardHistoryPresentationModel
+
+    @State private var preview: ClipboardHistoryMaterialization?
 
     var body: some View {
         HStack(spacing: 10) {
             leading
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayTitle)
+                Text(entry.presentationTitle)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                if let subtitle = subtitleText {
-                    Text(subtitle)
+                if let subtitleText {
+                    Text(subtitleText)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -33,38 +30,37 @@ struct ClipboardHistoryRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .contentShape(Rectangle())
-        .background(rowBackground, in: .rect(cornerRadius: 6))
-    }
-
-    /// Screenshots persist an empty `previewTitle` because the human-readable
-    /// label is purely decorative and must follow the current UI language.
-    /// Other kinds carry user data (OCR text, color hex) and pass through.
-    private var displayTitle: String {
-        _ = LocalizationManager.shared.preference
-        if item.previewTitle.isEmpty, let kind = item.historyKind {
-            return L(kind.titleKey)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.18) : .clear,
+            in: .rect(cornerRadius: 6)
+        )
+        .task(id: entry.id) {
+            preview = await presentation.materialization(
+                for: entry.id,
+                purpose: .preview,
+                recordsFailure: false
+            )
         }
-        return item.previewTitle
-    }
-
-    private var rowBackground: Color {
-        isSelected ? Color.accentColor.opacity(0.18) : .clear
     }
 
     @ViewBuilder
     private var leading: some View {
-        switch item.historyKind {
+        switch entry.presentationFacet {
         case .color:
             RoundedRectangle(cornerRadius: 4)
-                .fill(Self.swatchColor(forHex: item.colorHex) ?? Color.gray)
+                .fill(swatchColor)
                 .frame(width: 18, height: 18)
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                        .stroke(
+                            Color(nsColor: .separatorColor),
+                            lineWidth: 0.5
+                        )
                 )
-        case .screenshot:
-            if let url = store.screenshotURL(for: item),
-               let image = NSImage(contentsOf: url) {
+        case .screenshot, .image:
+            if let data = preview?.firstBitmapData,
+                let image = NSImage(data: data)
+            {
                 Image(nsImage: image)
                     .resizable()
                     .interpolation(.medium)
@@ -76,63 +72,58 @@ struct ClipboardHistoryRow: View {
                     .frame(width: 24, height: 18)
                     .foregroundStyle(.secondary)
             }
-        case .qrcode:
+        case .qrCode:
             Image(systemName: "qrcode")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
-        case .ocr, .text, .image, .file, .none:
-            // The per-kind hover row intentionally renders only the four legacy
-            // kinds (ocr/color/qrcode/screenshot). text/image/file are surfaced
-            // exclusively in the clipboard wall, so they fall back to the OCR
-            // glyph here by design.
+        case .file:
+            Image(systemName: "doc")
+                .frame(width: 18, height: 18)
+                .foregroundStyle(.secondary)
+        case .text, .link, .email:
             Image(systemName: "text.viewfinder")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
         }
     }
 
-    /// Text rows persist `text` in SwiftData but the subtitle ("N characters" /
-    /// "N lines") must reflect the current UI language. Computing it from
-    /// `item.text` here ignores any stale `previewSubtitle` frozen at insert
-    /// time and re-resolves through `L(...)` on every render.
     private var subtitleText: String? {
-        _ = LocalizationManager.shared.preference
-        if let text = item.text {
-            let lineCount = text.split(whereSeparator: \.isNewline).count
-            return lineCount > 1
-                ? L(.clipboardTextLines, lineCount)
-                : L(.clipboardTextChars, text.count)
+        guard let text = entry.previewText else { return nil }
+        let lineCount = text.split(whereSeparator: \.isNewline).count
+        return lineCount > 1
+            ? L(.clipboardTextLines, lineCount)
+            : L(.clipboardTextChars, text.count)
+    }
+
+    private var swatchColor: Color {
+        if let color = preview?.normalizedColor {
+            return Color(nsColor: color)
         }
-        return item.previewSubtitle
+        return Color(hex: entry.previewText) ?? .gray
     }
 
     private var relativeTimestamp: String {
-        Self.formatter(for: LocalizationManager.shared.effectiveLocale)
-            .localizedString(for: item.createdAt, relativeTo: Date())
+        Self.formatter(
+            for: LocalizationManager.shared.effectiveLocale
+        ).localizedString(for: entry.capturedAt, relativeTo: Date())
     }
 
-    /// Per-locale `RelativeDateTimeFormatter` cache. ICU locale loading is
-    /// non-trivial, so re-allocating per row per render measurably slowed
-    /// scrolling on populated history lists.
-    @MainActor
-    private static var formatterCache: [String: RelativeDateTimeFormatter] = [:]
+    private static var formatterCache:
+        [String: RelativeDateTimeFormatter] = [:]
 
-    @MainActor
-    private static func formatter(for locale: Locale) -> RelativeDateTimeFormatter {
+    private static func formatter(
+        for locale: Locale
+    ) -> RelativeDateTimeFormatter {
         if let cached = formatterCache[locale.identifier] {
             return cached
         }
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        f.locale = locale
-        formatterCache[locale.identifier] = f
-        return f
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        formatter.locale = locale
+        formatterCache[locale.identifier] = formatter
+        return formatter
     }
 
-    /// Parse `"#RRGGBB"` (or `"RRGGBB"`) into a SwiftUI `Color`. Returns nil on
-    /// malformed input so callers can fall back to a neutral swatch. Shared
-    /// with `ClipboardHistoryPopoverView`'s preview overlay. Delegates to the
-    /// single `Color(hex:)` parser in `Color+Hex.swift`.
     static func swatchColor(forHex hex: String?) -> Color? {
         Color(hex: hex)
     }

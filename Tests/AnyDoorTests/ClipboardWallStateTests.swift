@@ -1,28 +1,64 @@
 import XCTest
+import ClipboardHistory
 @testable import AnyDoor
 
 @MainActor
 final class ClipboardWallStateTests: XCTestCase {
-    private func items(_ titles: [String]) -> [ClipboardHistoryItem] {
+    private func entries(_ titles: [String]) -> [ClipboardHistoryEntry] {
         titles.enumerated().map { idx, t in
-            ClipboardHistoryItem(kind: .text, text: t, previewTitle: t,
-                                 createdAt: Date(timeIntervalSinceReferenceDate: Double(idx)))
+            ClipboardHistoryEntry(
+                id: ClipboardHistoryEntryID(UUID()),
+                capturedAt: Date(
+                    timeIntervalSinceReferenceDate: Double(idx)
+                ),
+                previewText: t,
+                facets: [.text],
+                isFavorite: false,
+                source: .unknown
+            )
         }
     }
 
-    func testSelectionClampsAndMoves() {
-        let state = ClipboardWallState()
-        state.setItems(items(["a", "b", "c"]))
+    private func makeState(
+        entries: [ClipboardHistoryEntry] = []
+    ) async -> ClipboardWallState {
+        let page = ClipboardHistoryPage(
+            entries: entries,
+            nextCursor: nil
+        )
+        let presentation = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: {
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: true,
+                        searchIndex: .ready
+                    )
+                },
+                page: { _, _ in page },
+                apply: { _ in .notFound },
+                materialize: { _ in
+                    ClipboardHistoryMaterialization(items: [])
+                },
+                tagDefinitions: { [] }
+            )
+        )
+        await presentation.load()
+        return ClipboardWallState(presentation: presentation)
+    }
+
+    func testSelectionClampsAndMoves() async {
+        let state = await makeState(entries: entries(["a", "b", "c"]))
         XCTAssertEqual(state.selectedIndex, 0)
         state.moveRight(); state.moveRight(); state.moveRight()   // clamps at last
         XCTAssertEqual(state.selectedIndex, 2)
         state.moveLeft()
         XCTAssertEqual(state.selectedIndex, 1)
-        XCTAssertEqual(state.selectedItem?.previewTitle, "b")
+        XCTAssertEqual(state.selectedItem?.previewText, "b")
     }
 
-    func testCategoryAndSearchAreHeld() {
-        let state = ClipboardWallState()
+    func testCategoryAndSearchAreHeld() async {
+        let state = await makeState()
         state.category = .kind(.image)
         state.query = "foo"
         state.sourceFilterBundleID = "com.apple.Safari"
@@ -31,8 +67,8 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.sourceFilterBundleID, "com.apple.Safari")
     }
 
-    func testCategoryCyclingWrapsBothWays() {
-        let state = ClipboardWallState()
+    func testCategoryCyclingWrapsBothWays() async {
+        let state = await makeState()
         XCTAssertEqual(state.category, .all)
         state.selectNextCategory()
         XCTAssertEqual(state.category, .favorites)
@@ -45,8 +81,8 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.category, .all)
     }
 
-    func testCyclingIncludesCustomTags() {
-        let state = ClipboardWallState()
+    func testCyclingIncludesCustomTags() async {
+        let state = await makeState()
         let tags = [ClipboardTag(id: "t1", name: "工作")]
         state.setCategories(ClipboardWallState.order(tags: tags))
         state.selectNextCategory()   // .all → .favorites
@@ -54,16 +90,16 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.category, .tag("t1"))
     }
 
-    func testSetCategoriesFallsBackToAllWhenActiveTagRemoved() {
-        let state = ClipboardWallState()
+    func testSetCategoriesFallsBackToAllWhenActiveTagRemoved() async {
+        let state = await makeState()
         state.setCategories(ClipboardWallState.order(tags: [ClipboardTag(id: "t1", name: "工作")]))
         state.category = .tag("t1")
         state.setCategories(ClipboardWallState.order(tags: []))
         XCTAssertEqual(state.category, .all)
     }
 
-    func testSetCategoriesKeepsActiveTagWhenStillPresent() {
-        let state = ClipboardWallState()
+    func testSetCategoriesKeepsActiveTagWhenStillPresent() async {
+        let state = await makeState()
         let tags = [ClipboardTag(id: "t1", name: "工作")]
         state.setCategories(ClipboardWallState.order(tags: tags))
         state.category = .tag("t1")
@@ -84,17 +120,66 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(ClipboardWallCategory.kind(.text).kindFilter, .text)
     }
 
-    func testEmptyItemsHasNilSelection() {
-        let state = ClipboardWallState()
-        state.setItems([])
+    func testEmptyItemsHasNilSelection() async {
+        let state = await makeState()
         XCTAssertNil(state.selectedItem)
         XCTAssertEqual(state.selectedIndex, 0)
     }
 
-    func testClearingSourceFilterRestoresAllSources() {
-        let state = ClipboardWallState()
+    func testClearingSourceFilterRestoresAllSources() async {
+        let state = await makeState()
         state.sourceFilterBundleID = "com.apple.Safari"
         state.clearSourceFilter()
         XCTAssertNil(state.sourceFilterBundleID)
+    }
+
+    func testRefreshQuerySendsEveryFilterToModule() async {
+        let recorder = ClipboardWallQueryRecorder()
+        let presentation = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: {
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: true,
+                        searchIndex: .ready
+                    )
+                },
+                page: { query, _ in
+                    await recorder.record(query)
+                    return ClipboardHistoryPage(
+                        entries: [],
+                        nextCursor: nil
+                    )
+                },
+                apply: { _ in .notFound },
+                materialize: { _ in
+                    ClipboardHistoryMaterialization(items: [])
+                },
+                tagDefinitions: { [] }
+            )
+        )
+        let state = ClipboardWallState(presentation: presentation)
+        state.query = "needle"
+        state.category = .kind(.image)
+        state.sourceFilterBundleID = "com.example.Source"
+
+        await state.refreshQuery()
+
+        let query = await recorder.lastQuery
+        XCTAssertEqual(query?.text, "needle")
+        XCTAssertEqual(query?.facet, .image)
+        XCTAssertEqual(query?.sourceID, "com.example.Source")
+    }
+}
+
+private actor ClipboardWallQueryRecorder {
+    private var queries: [ClipboardHistoryQuery] = []
+
+    func record(_ query: ClipboardHistoryQuery) {
+        queries.append(query)
+    }
+
+    var lastQuery: ClipboardHistoryQuery? {
+        queries.last
     }
 }

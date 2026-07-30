@@ -165,6 +165,106 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertEqual(emptyModel.actionFailure, .storageFailure)
     }
 
+    func testPlainTextOfferRequiresExactTextOnEveryItem() async {
+        let id = entry(20).id
+        let exact = ClipboardHistoryMaterialization(
+            items: [
+                ClipboardHistoryMaterializedItem(
+                    representations: [
+                        .text(
+                            typeIdentifier: "public.utf8-plain-text",
+                            value: "first"
+                        ),
+                        .data(
+                            typeIdentifier: "public.rtf",
+                            Data([0x01])
+                        ),
+                    ]
+                ),
+                ClipboardHistoryMaterializedItem(
+                    representations: [
+                        .text(
+                            typeIdentifier: "public.utf8-plain-text",
+                            value: "second"
+                        )
+                    ]
+                ),
+            ]
+        )
+        let exactModel = materializationModel(returning: exact)
+
+        _ = await exactModel.materialization(
+            for: id,
+            purpose: .hostAction
+        )
+
+        XCTAssertTrue(exactModel.supportsPlainTextPaste(for: id))
+
+        let mixed = ClipboardHistoryMaterialization(
+            items: exact.items + [
+                ClipboardHistoryMaterializedItem(
+                    representations: [
+                        .data(
+                            typeIdentifier: "public.png",
+                            Data([0x89, 0x50])
+                        )
+                    ]
+                )
+            ]
+        )
+        let mixedModel = materializationModel(returning: mixed)
+
+        _ = await mixedModel.materialization(
+            for: id,
+            purpose: .hostAction
+        )
+
+        XCTAssertFalse(mixedModel.supportsPlainTextPaste(for: id))
+    }
+
+    func testSourceCatalogDoesNotCollapseWhileSourceFilterIsActive() async {
+        let sourcedEntry = ClipboardHistoryEntry(
+            id: ClipboardHistoryEntryID(UUID()),
+            capturedAt: Date(),
+            previewText: "Safari",
+            facets: [.text],
+            isFavorite: false,
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: "com.apple.Safari",
+                displayName: "Safari"
+            )
+        )
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: [sourcedEntry],
+                    nextCursor: nil
+                ),
+                ClipboardHistoryPage(entries: [], nextCursor: nil),
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+
+        await model.setQuery(
+            ClipboardHistoryQuery(sourceID: "com.example.Empty")
+        )
+
+        XCTAssertEqual(
+            model.sources,
+            [
+                ClipboardHistoryPresentationSource(
+                    bundleID: "com.apple.Safari",
+                    name: "Safari",
+                    count: 1
+                )
+            ]
+        )
+        XCTAssertEqual(model.contentState, .empty)
+    }
+
     private func entry(_ index: Int) -> ClipboardHistoryEntry {
         ClipboardHistoryEntry(
             id: ClipboardHistoryEntryID(
@@ -175,6 +275,28 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             facets: [.text],
             isFavorite: false,
             source: .unknown
+        )
+    }
+
+    private func materializationModel(
+        returning materialization: ClipboardHistoryMaterialization
+    ) -> ClipboardHistoryPresentationModel {
+        ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: {
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: true,
+                        searchIndex: .ready
+                    )
+                },
+                page: { _, _ in
+                    ClipboardHistoryPage(entries: [], nextCursor: nil)
+                },
+                apply: { _ in .notFound },
+                materialize: { _ in materialization },
+                tagDefinitions: { [] }
+            )
         )
     }
 }

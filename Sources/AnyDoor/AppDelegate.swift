@@ -102,8 +102,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         watcher.start()
         clipboardWatcher = watcher
-        ClipboardWallWindowController.shared.modelContainer = modelContainer
-
         // Native Plugins: the registry loads the installed set, activates the
         // installed plugins, and owns surface composition for launch and
         // later lifecycle changes. Core control flow names no plugin beyond

@@ -19,6 +19,10 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         ) async throws -> ClipboardHistoryMaterialization
     let tagDefinitions:
         @Sendable () async throws -> [ClipboardHistoryTagDefinition]
+    let replaceTagDefinitions:
+        @Sendable (
+            Set<String>
+        ) async throws -> ClipboardHistoryTagDefinitionUpdate
 
     init(module: ClipboardHistoryModule) {
         status = { await module.status() }
@@ -33,6 +37,9 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         }
         tagDefinitions = {
             try await module.tagDefinitions()
+        }
+        replaceTagDefinitions = { tagIDs in
+            try await module.replaceTagDefinitions(with: tagIDs)
         }
     }
 
@@ -53,13 +60,23 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             ) async throws -> ClipboardHistoryMaterialization,
         tagDefinitions:
             @escaping @Sendable () async throws
-                -> [ClipboardHistoryTagDefinition]
+                -> [ClipboardHistoryTagDefinition],
+        replaceTagDefinitions:
+            @escaping @Sendable (
+                Set<String>
+            ) async throws -> ClipboardHistoryTagDefinitionUpdate = { _ in
+                ClipboardHistoryTagDefinitionUpdate(
+                    removedMembershipCount: 0,
+                    unprotectedEntryCount: 0
+                )
+            }
     ) {
         self.status = status
         self.page = page
         self.apply = apply
         self.materialize = materialize
         self.tagDefinitions = tagDefinitions
+        self.replaceTagDefinitions = replaceTagDefinitions
     }
 }
 
@@ -69,6 +86,14 @@ enum ClipboardHistoryContentState: Equatable {
     case empty
     case indexing
     case unavailable(ClipboardHistoryStatus.AvailabilityReason?)
+}
+
+struct ClipboardHistoryPresentationSource: Equatable, Identifiable {
+    let bundleID: String
+    let name: String
+    let count: Int
+
+    var id: String { bundleID }
 }
 
 enum ClipboardHistoryActionFailure: Equatable {
@@ -145,6 +170,9 @@ final class ClipboardHistoryPresentationModel {
     private var isLoadingMore = false
     private var materializationCache:
         [MaterializationKey: ClipboardHistoryMaterialization] = [:]
+    private var sourceNames: [String: String] = [:]
+    private var sourceEntryIDs:
+        [String: Set<ClipboardHistoryEntryID>] = [:]
 
     private(set) var entries: [ClipboardHistoryEntry] = []
     private(set) var query = ClipboardHistoryQuery()
@@ -152,6 +180,7 @@ final class ClipboardHistoryPresentationModel {
     private(set) var contentState: ClipboardHistoryContentState = .loading
     private(set) var actionFailure: ClipboardHistoryActionFailure?
     private(set) var tags: [ClipboardHistoryTagDefinition] = []
+    private(set) var sources: [ClipboardHistoryPresentationSource] = []
 
     var canLoadMore: Bool {
         nextCursor != nil
@@ -191,6 +220,18 @@ final class ClipboardHistoryPresentationModel {
 
     func clearActionFailure() {
         actionFailure = nil
+    }
+
+    func replaceTagDefinitions(with tagIDs: Set<String>) async -> Bool {
+        actionFailure = nil
+        do {
+            _ = try await operations.replaceTagDefinitions(tagIDs)
+            tags = try await operations.tagDefinitions()
+            return true
+        } catch {
+            actionFailure = ClipboardHistoryActionFailure(error)
+            return false
+        }
     }
 
     func select(_ id: ClipboardHistoryEntryID) {
@@ -243,11 +284,11 @@ final class ClipboardHistoryPresentationModel {
             switch page.state {
             case .ready:
                 let existingIDs = Set(entries.map(\.id))
-                entries.append(
-                    contentsOf: page.entries.filter {
-                        !existingIDs.contains($0.id)
-                    }
-                )
+                let newEntries = page.entries.filter {
+                    !existingIDs.contains($0.id)
+                }
+                entries.append(contentsOf: newEntries)
+                mergeSources(from: newEntries)
                 nextCursor = page.nextCursor
                 reconcileSelection(preferredID: selectedID)
             case .indexing:
@@ -272,11 +313,13 @@ final class ClipboardHistoryPresentationModel {
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                     entries[index] = entry
                 }
+                mergeSources(from: [entry])
                 invalidateMaterializations(for: entry.id)
             case .deleted, .notFound:
                 let entryID = mutation.entryID
                 let deletedIndex = entries.firstIndex { $0.id == entryID }
                 entries.removeAll { $0.id == entryID }
+                removeSourceEntry(entryID)
                 invalidateMaterializations(for: entryID)
                 if selectedID == entryID {
                     let replacementIndex = min(
@@ -299,13 +342,17 @@ final class ClipboardHistoryPresentationModel {
     func materialization(
         for entryID: ClipboardHistoryEntryID,
         purpose: ClipboardHistoryMaterializationPurpose,
-        usesCache: Bool = true
+        usesCache: Bool = true,
+        recordsFailure: Bool = true
     ) async -> ClipboardHistoryMaterialization? {
         let key = MaterializationKey(entryID: entryID, purpose: purpose)
         if usesCache, let cached = materializationCache[key] {
             return cached
         }
-        actionFailure = nil
+        let requestRevision = revision
+        if recordsFailure {
+            actionFailure = nil
+        }
         do {
             let value = try await operations.materialize(
                 ClipboardHistoryMaterializationRequest(
@@ -313,12 +360,14 @@ final class ClipboardHistoryPresentationModel {
                     purpose: purpose
                 )
             )
-            if usesCache {
+            if usesCache, requestRevision == revision {
                 materializationCache[key] = value
             }
             return value
         } catch {
-            actionFailure = ClipboardHistoryActionFailure(error)
+            if recordsFailure {
+                actionFailure = ClipboardHistoryActionFailure(error)
+            }
             return nil
         }
     }
@@ -330,6 +379,19 @@ final class ClipboardHistoryPresentationModel {
         materializationCache[
             MaterializationKey(entryID: entryID, purpose: purpose)
         ]
+    }
+
+    func supportsPlainTextPaste(
+        for entryID: ClipboardHistoryEntryID
+    ) -> Bool {
+        guard let materialization = cachedMaterialization(
+            for: entryID,
+            purpose: .hostAction
+        ), let texts = materialization.exactTexts else {
+            return false
+        }
+        return !materialization.items.isEmpty
+            && texts.count == materialization.items.count
     }
 
     private func loadFirstPage(preservingSelection: Bool) async {
@@ -364,9 +426,18 @@ final class ClipboardHistoryPresentationModel {
             switch loadedPage.state {
             case .ready:
                 entries = loadedPage.entries
+                if requestQuery == ClipboardHistoryQuery() {
+                    sourceNames = [:]
+                    sourceEntryIDs = [:]
+                }
+                mergeSources(from: loadedPage.entries)
                 nextCursor = loadedPage.nextCursor
                 contentState = entries.isEmpty ? .empty : .content
                 reconcileSelection(preferredID: preferredSelection)
+                let currentIDs = Set(entries.map(\.id))
+                materializationCache = materializationCache.filter {
+                    currentIDs.contains($0.key.entryID)
+                }
             case .indexing:
                 entries = []
                 selectedID = nil
@@ -406,6 +477,44 @@ final class ClipboardHistoryPresentationModel {
     ) {
         materializationCache = materializationCache.filter {
             $0.key.entryID != entryID
+        }
+    }
+
+    private func mergeSources(from entries: [ClipboardHistoryEntry]) {
+        for entry in entries {
+            guard let bundleID = entry.source.bundleIdentifier else {
+                continue
+            }
+            sourceNames[bundleID] =
+                entry.source.displayName ?? bundleID
+            sourceEntryIDs[bundleID, default: []].insert(entry.id)
+        }
+        rebuildSources()
+    }
+
+    private func removeSourceEntry(_ entryID: ClipboardHistoryEntryID) {
+        for bundleID in Array(sourceEntryIDs.keys) {
+            sourceEntryIDs[bundleID]?.remove(entryID)
+            if sourceEntryIDs[bundleID]?.isEmpty == true {
+                sourceEntryIDs.removeValue(forKey: bundleID)
+                sourceNames.removeValue(forKey: bundleID)
+            }
+        }
+        rebuildSources()
+    }
+
+    private func rebuildSources() {
+        sources = sourceEntryIDs.compactMap { bundleID, entryIDs in
+            guard !entryIDs.isEmpty else { return nil }
+            return ClipboardHistoryPresentationSource(
+                bundleID: bundleID,
+                name: sourceNames[bundleID] ?? bundleID,
+                count: entryIDs.count
+            )
+        }
+        .sorted { lhs, rhs in
+            lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                == .orderedAscending
         }
     }
 }
