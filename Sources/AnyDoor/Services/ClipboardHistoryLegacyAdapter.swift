@@ -19,6 +19,19 @@ enum ClipboardHistoryLegacyAdapter {
         defaults: UserDefaults = .standard,
         payloadDirectory: URL
     ) throws -> ClipboardHistoryLegacyMigrationRequest {
+        // Newest first: `recency_order` is assigned downstream straight from
+        // this sequence.
+        //
+        // NOTE: this reads the whole legacy store at once, and the peak scales
+        // with the user's history (v1 capped neither payload size nor row
+        // count, and `richData` is an inline blob). Batching through
+        // `ModelContext.enumerate` was measured and does *not* help: traversing
+        // 800 rows x 128KB peaks at the same ~215MB even when the block keeps
+        // nothing, because SwiftData's row cache retains the blobs regardless
+        // of batch size. Lowering this peak means either reading the snapshot
+        // as plain SQLite instead of through SwiftData, or splitting the
+        // publish itself — the latter would change the atomic-publish
+        // guarantee the crash-safe cutover rests on.
         let rows = try modelContext.fetch(
             FetchDescriptor<ClipboardHistoryItem>(
                 sortBy: [

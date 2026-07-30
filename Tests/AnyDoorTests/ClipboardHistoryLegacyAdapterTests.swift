@@ -744,6 +744,47 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         )
     }
 
+    /// `recency_order` is assigned downstream straight from the transfer's
+    /// sequence, so newest-first has to hold at a realistic row count, not
+    /// just for the two-row fixtures above. This pins the contract against any
+    /// future change to how the snapshot is read.
+    func testTransferPreservesNewestFirstOrderAtScale() throws {
+        let container = try ModelContainer(
+            for: ClipboardHistoryItem.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let rowCount = 500
+        var expected: [UUID] = []
+        for index in 0..<rowCount {
+            let id = UUID()
+            expected.append(id)
+            context.insert(
+                ClipboardHistoryItem(
+                    id: id,
+                    kind: .text,
+                    text: "row \(index)",
+                    previewTitle: "Row \(index)",
+                    // Strictly decreasing, so newest-first is unambiguous.
+                    createdAt: Date(
+                        timeIntervalSince1970: TimeInterval(rowCount - index)
+                    )
+                )
+            )
+        }
+        try context.save()
+
+        let request = try ClipboardHistoryLegacyAdapter.makeMigrationRequest(
+            modelContext: context,
+            defaults: try makeDefaults(),
+            payloadDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        )
+
+        XCTAssertEqual(request.transfer.entries.count, rowCount)
+        XCTAssertEqual(request.transfer.entries.map(\.id), expected)
+    }
+
     /// A single row the current schema cannot describe must not cost the user
     /// their whole history: a thrown transfer would fail migration on every
     /// retry, since each retry re-reads the same snapshot row.
