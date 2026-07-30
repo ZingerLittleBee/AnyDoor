@@ -18,12 +18,18 @@ final class ClipboardHistoryCaptureMonitor {
         case migrationCompleted
     }
 
+    private struct PendingCopyEventSource {
+        let source: ClipboardHistoryApplicationSource
+        let deadline: Duration
+    }
+
     private let module: ClipboardHistoryModule
     private let pasteboard: NSPasteboard
     private let suppression: ClipboardHistorySelfWriteSuppression
     private let instrumentation: ClipboardHistoryMonitorInstrumentation
     private let sourceProvider:
         @MainActor () -> ClipboardHistoryApplicationSource?
+    private let nowProvider: @MainActor () -> Duration
     private let snapshotRequest:
         @MainActor (NSPasteboard, Int) ->
             ClipboardHistoryPasteboardCaptureRequest
@@ -32,7 +38,7 @@ final class ClipboardHistoryCaptureMonitor {
     private var configuration: ClipboardHistoryMonitoringConfiguration
     private var scheduler = ClipboardHistoryMonitorScheduler()
     private var lastGeneration: Int?
-    private var pendingCopyEventSource: ClipboardHistoryApplicationSource?
+    private var pendingCopyEventSource: PendingCopyEventSource?
     private var observationInFlight = false
     private var observationRequested = false
     private var isEnabled = false
@@ -51,6 +57,8 @@ final class ClipboardHistoryCaptureMonitor {
         sourceProvider: @escaping @MainActor
             () -> ClipboardHistoryApplicationSource? =
             ClipboardHistoryCaptureMonitor.frontmostApplicationSource,
+        now: @escaping @MainActor () -> Duration =
+            ClipboardHistoryCaptureMonitor.uptime,
         snapshotRequest: @escaping @MainActor (NSPasteboard, Int) ->
             ClipboardHistoryPasteboardCaptureRequest = {
                 pasteboard,
@@ -69,6 +77,7 @@ final class ClipboardHistoryCaptureMonitor {
             instrumentation ?? module.monitorInstrumentation
         self.configuration = configuration
         self.sourceProvider = sourceProvider
+        nowProvider = now
         self.snapshotRequest = snapshotRequest
         if installsSystemObservers {
             installSystemObservers()
@@ -149,8 +158,16 @@ final class ClipboardHistoryCaptureMonitor {
             name: "CopyKeyHint"
         )
         instrumentation.recordKeyHint()
-        pendingCopyEventSource = sourceProvider()
+        let source = sourceProvider()
         let plan = scheduler.handle(.keyHint, at: now())
+        if let source, let deadline = plan.copyEventWindowDeadline {
+            pendingCopyEventSource = PendingCopyEventSource(
+                source: source,
+                deadline: deadline
+            )
+        } else {
+            pendingCopyEventSource = nil
+        }
         apply(plan)
         if plan.observeNow {
             await observe()
@@ -219,7 +236,7 @@ final class ClipboardHistoryCaptureMonitor {
             let metadata = readMetadata(generation: generation)
             let decision = policy.evaluate(
                 metadata,
-                copyEventSource: pendingCopyEventSource,
+                copyEventSource: activeCopyEventSource(at: now()),
                 observationSource: sourceProvider(),
                 configuration: configuration
             )
@@ -282,6 +299,9 @@ final class ClipboardHistoryCaptureMonitor {
 
     private func apply(_ plan: ClipboardHistoryMonitorScheduler.Plan) {
         isActive = plan.nextFire != nil
+        if plan.copyEventWindowDeadline == nil {
+            pendingCopyEventSource = nil
+        }
         if plan.establishBaseline {
             lastGeneration = pasteboard.changeCount
             pendingCopyEventSource = nil
@@ -332,6 +352,22 @@ final class ClipboardHistoryCaptureMonitor {
     }
 
     private func now() -> Duration {
+        nowProvider()
+    }
+
+    private func activeCopyEventSource(
+        at now: Duration
+    ) -> ClipboardHistoryApplicationSource? {
+        guard let pendingCopyEventSource,
+            now < pendingCopyEventSource.deadline
+        else {
+            pendingCopyEventSource = nil
+            return nil
+        }
+        return pendingCopyEventSource.source
+    }
+
+    private static func uptime() -> Duration {
         .nanoseconds(Int64(clamping: DispatchTime.now().uptimeNanoseconds))
     }
 

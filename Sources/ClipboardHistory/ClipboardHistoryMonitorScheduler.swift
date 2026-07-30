@@ -23,6 +23,7 @@ struct ClipboardHistoryMonitorScheduler {
         let establishBaseline: Bool
         let observeNow: Bool
         let nextFire: ScheduledFire?
+        let copyEventWindowDeadline: Duration?
     }
 
     private static let idleInterval = Duration.milliseconds(500)
@@ -85,7 +86,8 @@ struct ClipboardHistoryMonitorScheduler {
             return Plan(
                 establishBaseline: false,
                 observeNow: false,
-                nextFire: nil
+                nextFire: nil,
+                copyEventWindowDeadline: nil
             )
         }
 
@@ -112,7 +114,8 @@ struct ClipboardHistoryMonitorScheduler {
         return Plan(
             establishBaseline: establishBaseline,
             observeNow: observeNow,
-            nextFire: nextFire
+            nextFire: nextFire,
+            copyEventWindowDeadline: keyWindowEndsAt
         )
     }
 

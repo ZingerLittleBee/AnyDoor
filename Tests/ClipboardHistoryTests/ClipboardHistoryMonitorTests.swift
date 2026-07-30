@@ -20,12 +20,20 @@ final class ClipboardHistoryMonitorSchedulerTests: XCTestCase {
         XCTAssertFalse(firstHint.establishBaseline)
         XCTAssertTrue(firstHint.observeNow)
         XCTAssertEqual(
+            firstHint.copyEventWindowDeadline,
+            .milliseconds(600)
+        )
+        XCTAssertEqual(
             firstHint.nextFire,
             .init(deadline: .milliseconds(150), tolerance: .milliseconds(5))
         )
 
         let overlappingHint = scheduler.handle(.keyHint, at: .milliseconds(125))
         XCTAssertTrue(overlappingHint.observeNow)
+        XCTAssertEqual(
+            overlappingHint.copyEventWindowDeadline,
+            .milliseconds(625)
+        )
         XCTAssertEqual(
             overlappingHint.nextFire,
             .init(deadline: .milliseconds(175), tolerance: .milliseconds(5))
@@ -40,6 +48,7 @@ final class ClipboardHistoryMonitorSchedulerTests: XCTestCase {
 
         let idleTick = scheduler.handle(.timerFired, at: .milliseconds(675))
         XCTAssertTrue(idleTick.observeNow)
+        XCTAssertNil(idleTick.copyEventWindowDeadline)
         XCTAssertEqual(
             idleTick.nextFire,
             .init(deadline: .milliseconds(1_175), tolerance: .milliseconds(50))
@@ -467,6 +476,94 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testExpiredKeyHintUsesObservationSourceForNextChange() async throws {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let clock = MonitorTestClock()
+        var sourceSamples: [ClipboardHistoryApplicationSource?] = [
+            ClipboardHistoryApplicationSource(
+                bundleIdentifier: "dev.bybee.copy",
+                displayName: "Copy App"
+            ),
+            ClipboardHistoryApplicationSource(
+                bundleIdentifier: "dev.bybee.observed",
+                displayName: "Observed App"
+            ),
+        ]
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            sourceProvider: { sourceSamples.removeFirst() },
+            now: { clock.now },
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        await monitor.keyHintForTesting()
+        clock.now = .milliseconds(501)
+        pasteboard.clearContents()
+        pasteboard.setString("menu copy", forType: .string)
+        await monitor.observeForTesting()
+
+        let page = try await module.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(
+            entry.source,
+            ClipboardHistoryCaptureSource(
+                bundleIdentifier: "dev.bybee.observed",
+                displayName: "Observed App",
+                provenance: .observation
+            )
+        )
+    }
+
+    @MainActor
+    func testExpiredKeyHintUsesUnknownWithoutObservationSource() async throws {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let clock = MonitorTestClock()
+        var sourceSamples: [ClipboardHistoryApplicationSource?] = [
+            ClipboardHistoryApplicationSource(
+                bundleIdentifier: "dev.bybee.copy",
+                displayName: "Copy App"
+            ),
+            nil,
+        ]
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            sourceProvider: { sourceSamples.removeFirst() },
+            now: { clock.now },
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        await monitor.keyHintForTesting()
+        clock.now = .milliseconds(501)
+        pasteboard.clearContents()
+        pasteboard.setString("programmatic copy", forType: .string)
+        await monitor.observeForTesting()
+
+        let page = try await module.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(entry.source, .unknown)
+    }
+
+    @MainActor
     func testGenerationChangeBeforeSnapshotRetriesWithoutMixingSourceAndContent()
         async throws
     {
@@ -707,6 +804,11 @@ private final class MonitorTemporaryStore {
     deinit {
         try? FileManager.default.removeItem(at: url)
     }
+}
+
+@MainActor
+private final class MonitorTestClock {
+    var now = Duration.zero
 }
 
 private struct MonitorMemoryKeyStore: ClipboardHistoryMasterKeyStoring {
