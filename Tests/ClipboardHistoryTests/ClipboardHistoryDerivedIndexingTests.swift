@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import GRDB
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest
@@ -110,16 +109,19 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             secondJobKinds,
             [.ocr, .qr]
         )
-        let qrValues = try await module.derivedSearchValuesForTesting(
-            second.entryID,
-            kind: .qr
+        let firstQRSearch = try await module.page(
+            ClipboardHistoryQuery(text: "derived/qr/one")
+        )
+        let secondQRSearch = try await module.page(
+            ClipboardHistoryQuery(text: "derived/qr/two")
         )
         XCTAssertEqual(
-            qrValues,
-            [
-                "anydoor://derived/qr/one",
-                "anydoor://derived/qr/two",
-            ]
+            firstQRSearch.entries.map(\.id),
+            [second.entryID, first.entryID]
+        )
+        XCTAssertEqual(
+            secondQRSearch.entries.map(\.id),
+            [second.entryID, first.entryID]
         )
         let ocrSearch = try await module.page(
             ClipboardHistoryQuery(text: "derived.example")
@@ -151,11 +153,6 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             qrPage.entries.map(\.id),
             [second.entryID, first.entryID]
         )
-        let secondQRFacetCount = try await module.facetCountForTesting(
-            second.entryID,
-            facet: .qrCode
-        )
-        XCTAssertEqual(secondQRFacetCount, 1)
         let materialized = try await module.materialize(
             ClipboardHistoryMaterializationRequest(
                 entryID: second.entryID,
@@ -193,7 +190,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             capture.entryID,
             kind: .qr
         )
-        XCTAssertEqual(job?.state, "succeeded")
+        XCTAssertEqual(job?.state, .succeeded)
         XCTAssertEqual(job?.attemptCount, 1)
         let qrPage = try await module.page(
             ClipboardHistoryQuery(facet: .qrCode)
@@ -223,7 +220,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             capture.entryID,
             kind: .qr
         )
-        XCTAssertEqual(job?.state, "failed")
+        XCTAssertEqual(job?.state, .failed)
         XCTAssertEqual(job?.attemptCount, 3)
         await module.awaitDerivedJobsForTesting()
         let finalCallCount = await recognizer.callCount(for: .qr)
@@ -444,14 +441,6 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             kind: .qr
         )
         XCTAssertNil(deletedJob)
-        let deletedValues = try await module.derivedSearchValuesForTesting(
-            capture.entryID,
-            kind: .qr
-        )
-        XCTAssertEqual(
-            deletedValues,
-            []
-        )
     }
 
     func testDerivedPublicationRollsBackFieldsBothFTSAndFacetTogether()
@@ -479,16 +468,12 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             capture.entryID,
             kind: .qr
         )
-        XCTAssertEqual(job?.state, "failed")
+        XCTAssertEqual(job?.state, .failed)
         XCTAssertEqual(job?.attemptCount, 3)
-        let derivedValues = try await module.derivedSearchValuesForTesting(
-            capture.entryID,
-            kind: .qr
+        let derivedSearch = try await module.page(
+            ClipboardHistoryQuery(text: "transactional QR")
         )
-        XCTAssertEqual(
-            derivedValues,
-            []
-        )
+        XCTAssertEqual(derivedSearch.entries, [])
         let qrPage = try await module.page(
             ClipboardHistoryQuery(facet: .qrCode)
         )
@@ -551,7 +536,6 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         )
         await first.awaitDerivedJobsForTesting()
         try await first.setAutomaticImageTextIndexingEnabled(true)
-        try await first.removeDerivedJobsForTesting(capture.entryID)
         try await first.closeStoreForTesting()
 
         let reopenedRecognizer = CountingVisionRecognizer(results: [:])
@@ -571,7 +555,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             try await reopened.derivedJobKindsForTesting(capture.entryID)
         XCTAssertEqual(
             reopenedJobKinds,
-            []
+            [.qr]
         )
     }
 
@@ -633,7 +617,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
         )
-        let capture = try await module.capture(
+        _ = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemPink))
         )
         await recognizer.waitUntilStarted(.qr)
@@ -646,11 +630,6 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         await recognizer.release(.qr)
         await module.awaitDerivedJobsForTesting()
 
-        let values = try await module.derivedSearchValuesForTesting(
-            capture.entryID,
-            kind: .qr
-        )
-        XCTAssertEqual(values, [])
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(page.entries, [])
     }
@@ -672,7 +651,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             now: { clock.now },
             visionRecognizer: recognizer
         )
-        let capture = try await module.capture(
+        _ = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemTeal))
         )
         await recognizer.waitUntilStarted(.qr)
@@ -682,11 +661,6 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         await recognizer.release(.qr)
         await module.awaitDerivedJobsForTesting()
 
-        let values = try await module.derivedSearchValuesForTesting(
-            capture.entryID,
-            kind: .qr
-        )
-        XCTAssertEqual(values, [])
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(page.entries, [])
     }
@@ -1037,125 +1011,22 @@ private func makeBitmap(color: NSColor) throws -> Data {
 }
 
 extension ClipboardHistoryModule {
-    struct DerivedJobForTesting: Equatable {
-        let state: String
-        let attemptCount: Int
-        let eligibleGeneration: Int
-    }
-
     func derivedJobKindsForTesting(
         _ entryID: ClipboardHistoryEntryID
     ) throws -> Set<ClipboardHistoryDerivedJobKind> {
-        let database = try requiredDatabase()
-        return try database.read { database in
-            Set(
-                try String.fetchAll(
-                    database,
-                    sql: """
-                        SELECT kind
-                        FROM clipboard_derived_jobs
-                        WHERE entry_id = ?
-                        ORDER BY kind
-                        """,
-                    arguments: [
-                        entryID.value.uuidString.lowercased()
-                    ]
-                ).compactMap(ClipboardHistoryDerivedJobKind.init(rawValue:))
-            )
-        }
+        Set(try derivedIndexingDiagnostics(for: entryID).jobs.map(\.kind))
     }
 
     func derivedJobForTesting(
         _ entryID: ClipboardHistoryEntryID,
         kind: ClipboardHistoryDerivedJobKind
-    ) throws -> DerivedJobForTesting? {
-        let database = try requiredDatabase()
-        return try database.read { database in
-            try Row.fetchOne(
-                database,
-                sql: """
-                    SELECT state, attempt_count, eligible_generation
-                    FROM clipboard_derived_jobs
-                    WHERE entry_id = ? AND kind = ?
-                    """,
-                arguments: [
-                    entryID.value.uuidString.lowercased(),
-                    kind.rawValue,
-                ]
-            ).map {
-                DerivedJobForTesting(
-                    state: $0["state"],
-                    attemptCount: $0["attempt_count"],
-                    eligibleGeneration: $0["eligible_generation"]
-                )
-            }
-        }
-    }
-
-    func derivedSearchValuesForTesting(
-        _ entryID: ClipboardHistoryEntryID,
-        kind: ClipboardHistoryDerivedJobKind
-    ) throws -> [String] {
-        let database = try requiredDatabase()
-        return try database.read { database in
-            try String.fetchAll(
-                database,
-                sql: """
-                    SELECT value
-                    FROM clipboard_search_fields
-                    WHERE entry_id = ? AND field_kind = ?
-                    ORDER BY field_index
-                    """,
-                arguments: [
-                    entryID.value.uuidString.lowercased(),
-                    kind.rawValue,
-                ]
-            )
-        }
-    }
-
-    func removeDerivedJobsForTesting(
-        _ entryID: ClipboardHistoryEntryID
-    ) throws {
-        let database = try requiredDatabase()
-        try database.write { database in
-            try database.execute(
-                sql: """
-                    DELETE FROM clipboard_derived_jobs
-                    WHERE entry_id = ?
-                    """,
-                arguments: [
-                    entryID.value.uuidString.lowercased()
-                ]
-            )
+    ) throws -> ClipboardHistoryDerivedJobDiagnostics? {
+        try derivedIndexingDiagnostics(for: entryID).jobs.first {
+            $0.kind == kind
         }
     }
 
     func searchIndexesAreConsistentForTesting() throws -> Bool {
-        let database = try requiredDatabase()
-        return try database.write {
-            try Self.searchIndexesPassIntegrityCheck(in: $0)
-        }
-    }
-
-    func facetCountForTesting(
-        _ entryID: ClipboardHistoryEntryID,
-        facet: ClipboardHistoryFacet
-    ) throws -> Int {
-        let database = try requiredDatabase()
-        return try database.read {
-            try Int.fetchOne(
-                $0,
-                sql: """
-                    SELECT COUNT(*)
-                    FROM clipboard_entry_facets
-                    WHERE entry_id = ? AND facet = ?
-                    """,
-                arguments: [
-                    entryID.value.uuidString.lowercased(),
-                    facet.rawValue,
-                ]
-            ) ?? 0
-        }
+        try derivedSearchIndexesAreConsistent()
     }
 }

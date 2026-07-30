@@ -7,6 +7,24 @@ enum ClipboardHistoryDerivedJobKind: String, CaseIterable, Sendable {
     case qr
 }
 
+enum ClipboardHistoryDerivedJobState: String, Sendable {
+    case pending
+    case running
+    case succeeded
+    case failed
+}
+
+struct ClipboardHistoryDerivedJobDiagnostics: Equatable, Sendable {
+    let kind: ClipboardHistoryDerivedJobKind
+    let state: ClipboardHistoryDerivedJobState
+    let attemptCount: Int
+    let eligibleGeneration: Int
+}
+
+struct ClipboardHistoryDerivedIndexingDiagnostics: Equatable, Sendable {
+    let jobs: [ClipboardHistoryDerivedJobDiagnostics]
+}
+
 protocol ClipboardHistoryVisionRecognizing: Sendable {
     func recognize(
         _ kind: ClipboardHistoryDerivedJobKind,
@@ -92,7 +110,7 @@ extension ClipboardHistoryModule {
         let payloadPaths: [String]
     }
 
-    public func setAutomaticImageTextIndexingEnabled(
+    func setAutomaticImageTextIndexingEnabled(
         _ enabled: Bool
     ) throws {
         let database = try requiredDatabase()
@@ -114,7 +132,7 @@ extension ClipboardHistoryModule {
         automaticImageTextIndexingEnabled = enabled
     }
 
-    public func isAutomaticImageTextIndexingEnabled() throws -> Bool {
+    func isAutomaticImageTextIndexingEnabled() throws -> Bool {
         let database = try requiredDatabase()
         return try database.read {
             try Self.automaticImageTextIndexingSetting(in: $0)
@@ -186,6 +204,49 @@ extension ClipboardHistoryModule {
         startDerivedJobSchedulerIfNeeded()
         while let task = derivedJobSchedulerTask {
             await task.value
+        }
+    }
+
+    func derivedIndexingDiagnostics(
+        for entryID: ClipboardHistoryEntryID
+    ) throws -> ClipboardHistoryDerivedIndexingDiagnostics {
+        let database = try requiredDatabase()
+        let storedEntryID = entryID.value.uuidString.lowercased()
+        return try database.read { database in
+            let jobs = try Row.fetchAll(
+                database,
+                sql: """
+                    SELECT kind, state, attempt_count, eligible_generation
+                    FROM clipboard_derived_jobs
+                    WHERE entry_id = ?
+                    ORDER BY kind
+                    """,
+                arguments: [storedEntryID]
+            ).map { row in
+                guard let kind = ClipboardHistoryDerivedJobKind(
+                    rawValue: row["kind"]
+                ), let state = ClipboardHistoryDerivedJobState(
+                    rawValue: row["state"]
+                ) else {
+                    throw ClipboardHistoryModuleError.storageFailure
+                }
+                return ClipboardHistoryDerivedJobDiagnostics(
+                    kind: kind,
+                    state: state,
+                    attemptCount: row["attempt_count"],
+                    eligibleGeneration: row["eligible_generation"]
+                )
+            }
+            return ClipboardHistoryDerivedIndexingDiagnostics(
+                jobs: jobs
+            )
+        }
+    }
+
+    func derivedSearchIndexesAreConsistent() throws -> Bool {
+        let database = try requiredDatabase()
+        return try database.write {
+            try Self.searchIndexesPassIntegrityCheck(in: $0)
         }
     }
 
