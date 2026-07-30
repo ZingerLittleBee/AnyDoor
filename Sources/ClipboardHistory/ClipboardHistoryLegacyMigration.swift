@@ -1,3 +1,4 @@
+import Darwin
 import CryptoKit
 import Foundation
 import GRDB
@@ -78,7 +79,7 @@ extension ClipboardHistoryModule {
                 databaseKey: keys.databaseKey
             )
             stagingDatabase = staged
-            let report = try buildLegacyStagingStore(
+            let stagingResult = try buildLegacyStagingStore(
                 request,
                 database: staged,
                 root: stagingRoot,
@@ -86,7 +87,8 @@ extension ClipboardHistoryModule {
             )
             try verifyLegacyStagingStore(
                 request,
-                expectedReport: report,
+                expectedReport: stagingResult.report,
+                expectedEntryIDs: stagingResult.entryIDs,
                 database: staged,
                 root: stagingRoot,
                 payloadKey: keys.payloadKey
@@ -94,10 +96,7 @@ extension ClipboardHistoryModule {
             try staged.close()
             stagingDatabase = nil
             try faultInjector.check(.legacyMigrationBeforePublication)
-            try FileManager.default.moveItem(
-                at: stagingRoot,
-                to: storeRoot
-            )
+            try publishLegacyStagingStore(from: stagingRoot)
             try faultInjector.check(.legacyMigrationAfterPublication)
 
             let published = try Self.openDatabase(
@@ -116,7 +115,7 @@ extension ClipboardHistoryModule {
                 .storedAutomaticImageTextIndexingSetting(in: published)
             startMaintenanceTaskIfNeeded()
             startDerivedJobSchedulerIfNeeded()
-            return .published(report)
+            return .published(stagingResult.report)
         } catch let error as ClipboardHistoryModuleError {
             try? stagingDatabase?.close()
             if FileManager.default.fileExists(atPath: stagingRoot.path) {
@@ -280,6 +279,21 @@ extension ClipboardHistoryModule {
         try FileManager.default.removeItem(at: storeRoot)
     }
 
+    private func publishLegacyStagingStore(from stagingRoot: URL) throws {
+        try FileManager.default.moveItem(at: stagingRoot, to: storeRoot)
+        let parent = storeRoot.deletingLastPathComponent()
+        let descriptor = Darwin.open(parent.path, O_RDONLY | O_DIRECTORY)
+        guard descriptor >= 0 else {
+            throw ClipboardHistoryModuleError.legacyMigrationFailed
+        }
+        defer { Darwin.close(descriptor) }
+        guard Darwin.fcntl(descriptor, F_FULLFSYNC) == 0
+            || Darwin.fsync(descriptor) == 0
+        else {
+            throw ClipboardHistoryModuleError.legacyMigrationFailed
+        }
+    }
+
     private func reopenPublishedStoreIfPresent(
         keys: ClipboardHistoryDerivedKeys
     ) throws {
@@ -311,7 +325,7 @@ extension ClipboardHistoryModule {
         database: DatabasePool,
         root: URL,
         payloadKey: Data
-    ) throws -> ClipboardHistoryLegacyMigrationReport {
+    ) throws -> LegacyStagingBuildResult {
         let tagOrder = try legacyTagOrder(for: request.transfer)
         let validTagIDs = Set(tagOrder.map(\.id))
         let payloadStore = ClipboardHistoryPayloadStore(
@@ -323,6 +337,7 @@ extension ClipboardHistoryModule {
         var omittedCount = 0
         var ownedPayloadCount = 0
         var redundantPayloadCount = 0
+        var retainedEntryIDs: Set<String> = []
 
         try database.write { database in
             try database.execute(
@@ -382,6 +397,9 @@ extension ClipboardHistoryModule {
                     redundantPayloadCount: &redundantPayloadCount
                 )
                 retainedCount += 1
+                retainedEntryIDs.insert(
+                    entry.id.uuidString.lowercased()
+                )
             }
             try setLegacyMigrationReport(
                 ClipboardHistoryLegacyMigrationReport(
@@ -395,11 +413,14 @@ extension ClipboardHistoryModule {
             try Self.bumpSearchIndexGeneration(in: database)
             try Self.bumpHistoryRevision(in: database)
         }
-        return ClipboardHistoryLegacyMigrationReport(
-            retainedEntryCount: retainedCount,
-            omittedExpiredEntryCount: omittedCount,
-            ownedPayloadCount: ownedPayloadCount,
-            redundantLegacyPayloadCount: redundantPayloadCount
+        return LegacyStagingBuildResult(
+            report: ClipboardHistoryLegacyMigrationReport(
+                retainedEntryCount: retainedCount,
+                omittedExpiredEntryCount: omittedCount,
+                ownedPayloadCount: ownedPayloadCount,
+                redundantLegacyPayloadCount: redundantPayloadCount
+            ),
+            entryIDs: retainedEntryIDs
         )
     }
 
@@ -866,13 +887,16 @@ extension ClipboardHistoryModule {
         } else {
             capturedCopyURL = nil
         }
-        let capturedProof = try capturedCopyURL.map(streamedFileProof)
+        let capturedProof = capturedCopyURL.flatMap {
+            try? streamedFileProof($0)
+        }
         let currentReference = try? legacyFileReference(at: originalURL)
 
         if let capturedCopyURL, let capturedProof {
             if let currentReference,
                 currentReference.isRegularFile,
-                try streamedFileProof(currentReference.url) == capturedProof
+                (try? streamedFileProof(currentReference.url))
+                    == capturedProof
             {
                 return PreparedLegacyFileMember(
                     capturedPath: member.originalPath,
@@ -1207,6 +1231,7 @@ extension ClipboardHistoryModule {
     private func verifyLegacyStagingStore(
         _ request: ClipboardHistoryLegacyMigrationRequest,
         expectedReport: ClipboardHistoryLegacyMigrationReport,
+        expectedEntryIDs: Set<String>,
         database: DatabasePool,
         root: URL,
         payloadKey: Data
@@ -1222,11 +1247,6 @@ extension ClipboardHistoryModule {
             guard storedReport == expectedReport else {
                 throw ClipboardHistoryModuleError.legacyMigrationFailed
             }
-            let expectedIDs = Set(
-                request.transfer.entries.map {
-                    $0.id.uuidString.lowercased()
-                }
-            )
             let storedIDs = Set(
                 try String.fetchAll(
                     database,
@@ -1236,7 +1256,7 @@ extension ClipboardHistoryModule {
             let searchOK = try Self.searchIndexesPassIntegrityCheck(
                 in: database
             )
-            guard storedIDs.isSubset(of: expectedIDs),
+            guard storedIDs == expectedEntryIDs,
                 storedIDs.count == expectedReport.retainedEntryCount,
                 searchOK
             else {
@@ -1463,4 +1483,9 @@ private struct PreparedLegacyEntry {
     let facets: Set<ClipboardHistoryFacet>
     let thumbnail: ClipboardHistoryPublishedPayload?
     let canonicalSnapshot: ClipboardHistoryModule.PasteboardSnapshot
+}
+
+private struct LegacyStagingBuildResult {
+    let report: ClipboardHistoryLegacyMigrationReport
+    let entryIDs: Set<String>
 }

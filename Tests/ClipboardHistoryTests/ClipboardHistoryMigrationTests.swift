@@ -493,6 +493,105 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
         )
     }
 
+    func testUnreadableFileSidesFollowContractAndSingleOwnedRestore()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let readableCurrent = fixture.root.appendingPathComponent(
+            "readable-current.txt"
+        )
+        let unreadableCurrent = fixture.root.appendingPathComponent(
+            "unreadable-current.txt"
+        )
+        try Data("current".utf8).write(to: readableCurrent)
+        try Data("different current".utf8).write(to: unreadableCurrent)
+        try fixture.writeLegacyPayload(
+            named: "unreadable-copy",
+            data: Data("captured".utf8)
+        )
+        try fixture.writeLegacyPayload(
+            named: "readable-copy",
+            data: Data("captured".utf8)
+        )
+        let unreadableCopy = fixture.legacyPayloadURL("unreadable-copy")
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0],
+            ofItemAtPath: unreadableCopy.path
+        )
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0],
+            ofItemAtPath: unreadableCurrent.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: unreadableCopy.path
+            )
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: unreadableCurrent.path
+            )
+        }
+        let entryID = UUID()
+        let module = fixture.makeModule()
+
+        _ = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: entryID,
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: "unreadable-copy",
+                                originalURL: readableCurrent
+                            ),
+                            legacyFile(
+                                storedName: "readable-copy",
+                                originalURL: unreadableCurrent
+                            ),
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+
+        let migrated = try await module.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        XCTAssertEqual(
+            migrated.members.map(\.state),
+            [.legacyUnverified, .legacyOwned]
+        )
+        let restoreRoot = fixture.root.appendingPathComponent("Restored")
+        try FileManager.default.createDirectory(
+            at: restoreRoot,
+            withIntermediateDirectories: true
+        )
+        let destination = restoreRoot.appendingPathComponent("restored.txt")
+        let outcome = try await module.restoreLegacyOwnedFiles(
+            ClipboardHistoryLegacyFileRestoreRequest(
+                entryID: ClipboardHistoryEntryID(entryID),
+                destinations: [
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: ClipboardHistoryLegacyFileMemberID(
+                            itemIndex: 1,
+                            memberIndex: 0
+                        ),
+                        url: destination
+                    )
+                ]
+            )
+        )
+        XCTAssertEqual(outcome, .restored(memberCount: 1))
+        XCTAssertEqual(
+            try Data(contentsOf: destination),
+            Data("captured".utf8)
+        )
+    }
+
     func testOwnedFileRestoreCommitsAllMembersAndPreservesIdentity()
         async throws
     {
