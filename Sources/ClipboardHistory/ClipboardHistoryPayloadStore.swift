@@ -206,19 +206,30 @@ struct ClipboardHistoryPayloadStore: Sendable {
             throw ClipboardHistoryStorageError.unsafePayloadPath
         }
         try faultInjector.check(.payloadDeletion)
-        let result = relativePath.withCString { name in
-            let directoryFD = open(payloadDirectory.path, O_DIRECTORY | O_RDONLY)
-            guard directoryFD >= 0 else { return Int32(-1) }
-            defer { close(directoryFD) }
-            let result = unlinkat(directoryFD, name, 0)
-            if result == 0 {
+        // errno must be read at each failure site: the `close` in the defer can
+        // clobber it before the caller looks, and a failed `open` must not be
+        // mistaken for the benign "already unlinked" case just because opening
+        // the directory happens to report ENOENT too.
+        let outcome: Result<Void, ClipboardHistoryStorageError> =
+            relativePath.withCString { name in
+                let directoryFD = open(
+                    payloadDirectory.path,
+                    O_DIRECTORY | O_RDONLY
+                )
+                guard directoryFD >= 0 else {
+                    return .failure(.fileOperationFailed(errno))
+                }
+                defer { close(directoryFD) }
+                guard unlinkat(directoryFD, name, 0) == 0 else {
+                    let code = errno
+                    return code == ENOENT
+                        ? .success(())
+                        : .failure(.fileOperationFailed(code))
+                }
                 _ = fsync(directoryFD)
+                return .success(())
             }
-            return result
-        }
-        guard result == 0 || errno == ENOENT else {
-            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
-        }
+        try outcome.get()
     }
 
     func reconcile(
