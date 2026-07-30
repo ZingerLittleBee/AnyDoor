@@ -2,23 +2,49 @@ import ClipboardHistory
 import Foundation
 
 enum ClipboardRetention: Int, CaseIterable, Sendable {
+    case oneDay = 1
     case sevenDays = 7
     case thirtyDays = 30
+    case ninetyDays = 90
+    case oneHundredEightyDays = 180
+    case threeHundredSixtyFiveDays = 365
     case unlimited = 0
 
     var maxAge: TimeInterval {
         switch self {
         case .unlimited: return .infinity
+        case .oneDay: return 86_400
         case .sevenDays: return 7 * 86_400
         case .thirtyDays: return 30 * 86_400
+        case .ninetyDays: return 90 * 86_400
+        case .oneHundredEightyDays: return 180 * 86_400
+        case .threeHundredSixtyFiveDays: return 365 * 86_400
         }
     }
 
     var titleKey: L10n.Key {
         switch self {
+        case .oneDay: return .settingsClipboardRetention1
         case .sevenDays:  return .settingsClipboardRetention7
         case .thirtyDays: return .settingsClipboardRetention30
+        case .ninetyDays: return .settingsClipboardRetention90
+        case .oneHundredEightyDays:
+            return .settingsClipboardRetention180
+        case .threeHundredSixtyFiveDays:
+            return .settingsClipboardRetention365
         case .unlimited:  return .settingsClipboardRetentionUnlimited
+        }
+    }
+
+    var modulePeriod: ClipboardHistoryRetentionPeriod {
+        switch self {
+        case .oneDay: .oneDay
+        case .sevenDays: .sevenDays
+        case .thirtyDays: .thirtyDays
+        case .ninetyDays: .ninetyDays
+        case .oneHundredEightyDays: .oneHundredEightyDays
+        case .threeHundredSixtyFiveDays: .threeHundredSixtyFiveDays
+        case .unlimited: .unlimited
         }
     }
 }
