@@ -247,7 +247,22 @@ final class ClipboardHistoryLifecycle {
         }
         state = .migrating
         do {
-            let request = try migrationRequest()
+            let migrationSource = try migrationRequest()
+            let request: ClipboardHistoryLegacyMigrationRequest
+            if resetStoreFirst {
+                request = ClipboardHistoryLegacyMigrationRequest(
+                    transfer: ClipboardHistoryLegacyTransfer(
+                        entries: [],
+                        tags: [],
+                        categoryOrder: [],
+                        retentionPeriod: .default
+                    ),
+                    payloadDirectory:
+                        migrationSource.payloadDirectory
+                )
+            } else {
+                request = migrationSource
+            }
             let outcome = try await operations.migrate(request)
             guard !Task.isCancelled, generation == requestGeneration else {
                 return

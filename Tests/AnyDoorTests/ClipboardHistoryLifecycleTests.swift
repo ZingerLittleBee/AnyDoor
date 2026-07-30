@@ -149,6 +149,69 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         XCTAssertFalse(events.contains(.monitoring(.start)))
     }
 
+    func testConfirmedResetPublishesEmptyMigrationBeforeMonitoring()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe(
+            availability: .unavailable,
+            reason: .databaseCorrupt
+        )
+        let defaults = makeDefaults()
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            migrationRequest: {
+                ClipboardHistoryLegacyMigrationRequest(
+                    transfer: ClipboardHistoryLegacyTransfer(
+                        entries: [
+                            ClipboardHistoryLegacyEntry(
+                                id: UUID(),
+                                kind: .text,
+                                text: "must not return after reset",
+                                fileName: nil,
+                                colorHex: nil,
+                                previewText: nil,
+                                capturedAt: Date(),
+                                richData: nil,
+                                richType: nil,
+                                source: .unknown,
+                                isFavorite: false,
+                                tagIDs: [],
+                                files: []
+                            )
+                        ],
+                        tags: [],
+                        categoryOrder: [],
+                        retentionPeriod: .thirtyDays
+                    ),
+                    payloadDirectory:
+                        FileManager.default.temporaryDirectory
+                )
+            }
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        lifecycle.resetConfirmed()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        let entryCounts = await probe.recordedMigrationEntryCounts()
+        XCTAssertEqual(entryCounts, [0])
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(
+            events.suffix(6),
+            [
+                .reset,
+                .status,
+                .monitoring(.migrationStarted),
+                .migration,
+                .monitoring(.migrationCompleted),
+                .monitoring(.start),
+            ]
+        )
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suite = "ClipboardHistoryLifecycleTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -182,6 +245,7 @@ private enum ClipboardLifecycleEvent: Equatable, Sendable {
 private actor ClipboardLifecycleProbe {
     private(set) var events: [ClipboardLifecycleEvent] = []
     private(set) var migrationCount = 0
+    private(set) var migrationEntryCounts: [Int] = []
     private var availability: ClipboardHistoryStatus.Availability
     private var reason: ClipboardHistoryStatus.AvailabilityReason?
     private var migrationFailuresRemaining: Int
@@ -209,8 +273,8 @@ private actor ClipboardLifecycleProbe {
             setMonitoring: { command, _ in
                 await self.recordMonitoring(command)
             },
-            migrate: { _ in
-                try await self.migrate()
+            migrate: { request in
+                try await self.migrate(request)
             },
             retryStore: {
                 await self.retryStore()
@@ -231,6 +295,10 @@ private actor ClipboardLifecycleProbe {
 
     func recordedMigrationCount() -> Int {
         migrationCount
+    }
+
+    func recordedMigrationEntryCounts() -> [Int] {
+        migrationEntryCounts
     }
 
     func resumeMigration() {
@@ -264,11 +332,14 @@ private actor ClipboardLifecycleProbe {
         )
     }
 
-    private func migrate() async throws
+    private func migrate(
+        _ request: ClipboardHistoryLegacyMigrationRequest
+    ) async throws
         -> ClipboardHistoryLegacyMigrationOutcome
     {
         events.append(.migration)
         migrationCount += 1
+        migrationEntryCounts.append(request.transfer.entries.count)
         if shouldSuspendNextMigration {
             shouldSuspendNextMigration = false
             await withCheckedContinuation { continuation in
