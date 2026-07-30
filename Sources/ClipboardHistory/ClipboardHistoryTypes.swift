@@ -114,6 +114,7 @@ public struct ClipboardHistoryCaptureSource: Equatable, Sendable {
 
 public enum ClipboardHistoryCaptureContent: Equatable, Sendable {
     case text(String)
+    case ocr(String)
     case color(String)
     case bitmap(Data, provenance: ClipboardHistoryBitmapProvenance)
     case qrCode(String)
@@ -130,6 +131,21 @@ public struct ClipboardHistoryCaptureOutcome: Equatable, Sendable {
     public init(entryID: ClipboardHistoryEntryID) {
         self.entryID = entryID
     }
+}
+
+public enum ClipboardHistoryPasteboardCaptureOutcome: Equatable, Sendable {
+    case captured(ClipboardHistoryCaptureOutcome)
+    case skipped(ClipboardHistoryCaptureRejection)
+}
+
+public enum ClipboardHistoryCaptureRejection: Equatable, Sendable {
+    case excluded
+    case empty
+    case unsupportedItem
+    case generationChanged
+    case contentTooLarge
+    case imageTooLarge
+    case invalidFileReference
 }
 
 public enum ClipboardHistoryMutation: Equatable, Sendable {
@@ -182,8 +198,25 @@ public struct ClipboardHistoryMaterializedItem: Equatable, Sendable {
 }
 
 public enum ClipboardHistoryMaterializedRepresentation: Equatable, Sendable {
-    case text(String)
+    case text(typeIdentifier: String, value: String)
     case data(typeIdentifier: String, Data)
+    case file(ClipboardHistoryMaterializedFileReference)
+}
+
+public struct ClipboardHistoryMaterializedFileReference: Equatable, Sendable {
+    public let capturedPath: String
+    public let displayName: String
+    public let currentURL: URL
+
+    public init(
+        capturedPath: String,
+        displayName: String,
+        currentURL: URL
+    ) {
+        self.capturedPath = capturedPath
+        self.displayName = displayName
+        self.currentURL = currentURL
+    }
 }
 
 public struct ClipboardHistoryStatus: Equatable, Sendable {
@@ -226,6 +259,7 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case storageFailure
     case payloadAuthenticationFailed(ClipboardHistoryEntryID)
     case payloadUnavailable(ClipboardHistoryEntryID)
+    case fileReferencesUnavailable(ClipboardHistoryEntryID, count: Int)
     case resetFailed
 }
 

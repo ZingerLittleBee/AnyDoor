@@ -24,6 +24,11 @@ extension ClipboardHistoryModule {
         migrator.registerMigration("v2_encrypted_store") { database in
             try createEncryptedStoreSchema(in: database)
         }
+        migrator.registerMigration("v3_file_reference_identity") { database in
+            try database.alter(table: "clipboard_file_members") { table in
+                table.add(column: "identity_data", .blob)
+            }
+        }
         return migrator
     }
 

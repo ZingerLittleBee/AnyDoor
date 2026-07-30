@@ -1,12 +1,688 @@
+import AppKit
 import Foundation
+import ImageIO
 import LocalAuthentication
 import Security
+import UniformTypeIdentifiers
 import XCTest
 import os
 
 @testable import ClipboardHistory
 
 final class ClipboardHistoryModuleTests: XCTestCase {
+    @MainActor
+    func testWhitespaceOnlyTextIsCapturedWhileZeroLengthTextIsAbsent()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+
+        pasteboard.clearContents()
+        let whitespaceItem = NSPasteboardItem()
+        whitespaceItem.setString(" \t\r\n ", forType: .string)
+        XCTAssertTrue(pasteboard.writeObjects([whitespaceItem]))
+        let whitespaceCapture = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: nil,
+                displayName: nil
+            )
+        )
+        guard case .captured(let captured) = whitespaceCapture else {
+            return XCTFail("Expected whitespace-only text to be captured")
+        }
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: captured.entryID,
+                purpose: .plainTextPaste
+            )
+        )
+        XCTAssertEqual(
+            materialized.items[0].representations,
+            [
+                .text(
+                    typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                    value: " \t\r\n "
+                )
+            ]
+        )
+
+        pasteboard.clearContents()
+        let emptyItem = NSPasteboardItem()
+        emptyItem.setString("", forType: .string)
+        XCTAssertTrue(pasteboard.writeObjects([emptyItem]))
+        let emptyCapture = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: nil,
+                displayName: nil
+            )
+        )
+        XCTAssertEqual(emptyCapture, .skipped(.unsupportedItem))
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.count, 1)
+    }
+
+    @MainActor
+    func testPlainTextMaterializationRejectsMixedEntryWithoutExactTextOnEveryItem()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let textItem = NSPasteboardItem()
+        textItem.setString("first", forType: .string)
+        let imageItem = NSPasteboardItem()
+        imageItem.setData(try makeOrientedWideGamutPNG(), forType: .png)
+        XCTAssertTrue(pasteboard.writeObjects([textItem, imageItem]))
+        let capture = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: nil,
+                displayName: nil
+            )
+        )
+        guard case .captured(let captured) = capture else {
+            return XCTFail("Expected mixed content capture")
+        }
+
+        do {
+            _ = try await module.materialize(
+                ClipboardHistoryMaterializationRequest(
+                    entryID: captured.entryID,
+                    purpose: .plainTextPaste
+                )
+            )
+            XCTFail("Expected incomplete plain-text materialization to fail")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .operationUnavailable
+            )
+        }
+    }
+
+    func testExplicitFirstPartyCapturesKeepProvenanceWithoutRecursiveFacetInference()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let source = ClipboardHistoryCaptureSource(
+            bundleIdentifier: "dev.bybee.AnyDoor",
+            displayName: "AnyDoor"
+        )
+
+        let ocr = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: source,
+                content: .ocr("https://ocr.example")
+            )
+        )
+        let qr = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: source,
+                content: .qrCode("#FF00FF")
+            )
+        )
+        let color = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: source,
+                content: .color("Color(red: 0.1, green: 0.2, blue: 0.3)")
+            )
+        )
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        let byID = Dictionary(uniqueKeysWithValues: page.entries.map {
+            ($0.id, $0.facets)
+        })
+        XCTAssertEqual(byID[ocr.entryID], [.text])
+        XCTAssertEqual(byID[qr.entryID], [.text, .qrCode])
+        XCTAssertEqual(byID[color.entryID], [.text, .color])
+
+        let preview = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: qr.entryID,
+                purpose: .preview
+            )
+        )
+        XCTAssertEqual(
+            preview.items[0].representations,
+            [
+                .text(
+                    typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                    value: "#FF00FF"
+                )
+            ]
+        )
+    }
+
+    @MainActor
+    func testAggregateByteAndPixelSafetyLimitsCommitNoEntryOrPayload()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+
+        do {
+            let pasteboard = NSPasteboard(
+                name: NSPasteboard.Name(
+                    "dev.bybee.AnyDoor.tests.\(UUID().uuidString)"
+                )
+            )
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            item.setData(
+                Data(repeating: 0x41, count: 128 * 1_024 * 1_024 + 1),
+                forType: .html
+            )
+            XCTAssertTrue(pasteboard.writeObjects([item]))
+            let outcome = try await module.capture(
+                ClipboardHistoryPasteboardCaptureRequest(
+                    pasteboard: pasteboard
+                ),
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: nil,
+                    displayName: nil
+                )
+            )
+            XCTAssertEqual(outcome, .skipped(.contentTooLarge))
+        }
+
+        do {
+            let pasteboard = NSPasteboard(
+                name: NSPasteboard.Name(
+                    "dev.bybee.AnyDoor.tests.\(UUID().uuidString)"
+                )
+            )
+            pasteboard.clearContents()
+            let item = NSPasteboardItem()
+            item.setData(
+                try makeOversizedPixelPNG(),
+                forType: .png
+            )
+            XCTAssertTrue(pasteboard.writeObjects([item]))
+            let outcome = try await module.capture(
+                ClipboardHistoryPasteboardCaptureRequest(
+                    pasteboard: pasteboard
+                ),
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: nil,
+                    displayName: nil
+                )
+            )
+            XCTAssertEqual(outcome, .skipped(.imageTooLarge))
+        }
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries, [])
+        XCTAssertEqual(try fixture.payloadFiles(), [])
+        XCTAssertEqual(try fixture.stagingFiles(), [])
+    }
+
+    @MainActor
+    func testStandardColorPreservesRawRepresentationAndOverlapsExactTextFacet()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        let color = NSColor(
+            displayP3Red: 0.25,
+            green: 0.5,
+            blue: 0.75,
+            alpha: 0.5
+        )
+        let colorData = try XCTUnwrap(
+            color.pasteboardPropertyList(forType: .color) as? Data
+        )
+        item.setData(colorData, forType: .color)
+        item.setString("original color label", forType: .string)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+
+        let capture = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: "dev.bybee.colors",
+                displayName: "Colors"
+            )
+        )
+        guard case .captured(let captured) = capture else {
+            return XCTFail("Expected the standard color to be captured")
+        }
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries[0].facets, [.text, .color])
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: captured.entryID,
+                purpose: .normalPaste
+            )
+        )
+        XCTAssertEqual(
+            materialized.items[0].representations,
+            [
+                .text(
+                    typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                    value: "original color label"
+                ),
+                .data(
+                    typeIdentifier: NSPasteboard.PasteboardType.color.rawValue,
+                    colorData
+                ),
+            ]
+        )
+    }
+
+    @MainActor
+    func testSnapshotRejectsMarkersUnsupportedItemsAndGenerationChangesAtomically()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let privateType = NSPasteboard.PasteboardType("dev.bybee.tests.private")
+        let markerType = NSPasteboard.PasteboardType(
+            "org.nspasteboard.ConcealedType"
+        )
+
+        let markerPasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        markerPasteboard.clearContents()
+        let markedItem = NSPasteboardItem()
+        let markerProvider = TestPasteboardDataProvider(
+            action: .provide("must not be read")
+        )
+        markedItem.setDataProvider(markerProvider, forTypes: [.string])
+        markedItem.setData(Data(), forType: markerType)
+        XCTAssertTrue(markerPasteboard.writeObjects([markedItem]))
+        let markerRequest = ClipboardHistoryPasteboardCaptureRequest(
+            pasteboard: markerPasteboard
+        )
+        XCTAssertEqual(markerProvider.callCount, 0)
+        let markerOutcome = try await module.capture(
+            markerRequest,
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: nil,
+                displayName: nil
+            )
+        )
+        XCTAssertEqual(markerOutcome, .skipped(.excluded))
+
+        let unsupportedPasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        unsupportedPasteboard.clearContents()
+        let supported = NSPasteboardItem()
+        supported.setString("supported first item", forType: .string)
+        supported.setData(Data("ignored private".utf8), forType: privateType)
+        let unsupported = NSPasteboardItem()
+        unsupported.setData(Data("private".utf8), forType: privateType)
+        XCTAssertTrue(unsupportedPasteboard.writeObjects([supported, unsupported]))
+        let unsupportedRequest = ClipboardHistoryPasteboardCaptureRequest(
+            pasteboard: unsupportedPasteboard
+        )
+        let unsupportedOutcome = try await module.capture(
+            unsupportedRequest,
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: nil,
+                displayName: nil
+            )
+        )
+        XCTAssertEqual(unsupportedOutcome, .skipped(.unsupportedItem))
+
+        let changingPasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        changingPasteboard.clearContents()
+        let changingItem = NSPasteboardItem()
+        let changingProvider = TestPasteboardDataProvider(
+            action: .replaceGeneration(
+                provided: "old generation",
+                replacement: "new generation"
+            )
+        )
+        changingItem.setDataProvider(changingProvider, forTypes: [.string])
+        XCTAssertTrue(changingPasteboard.writeObjects([changingItem]))
+        let changingRequest = ClipboardHistoryPasteboardCaptureRequest(
+            pasteboard: changingPasteboard
+        )
+        let changingOutcome = try await module.capture(
+            changingRequest,
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: nil,
+                displayName: nil
+            )
+        )
+        XCTAssertEqual(changingOutcome, .skipped(.generationChanged))
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries, [])
+        XCTAssertEqual(try fixture.payloadFiles(), [])
+    }
+
+    @MainActor
+    func testFileCaptureUsesAtomicBookmarksWithoutCopyingOrPathFallback()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let files = try TemporaryFileReferences()
+        let first = try files.create(name: "first.png", contents: "not image data")
+        let second = try files.create(name: "second.txt", contents: "second")
+        let missing = files.url.appendingPathComponent("missing.txt")
+        let module = makeReadyModule(in: fixture)
+
+        let invalidPasteboard = makeFilePasteboard([first, missing])
+        let invalid = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(
+                pasteboard: invalidPasteboard
+            ),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: "com.apple.finder",
+                displayName: "Finder"
+            )
+        )
+        XCTAssertEqual(invalid, .skipped(.invalidFileReference))
+        let pageAfterInvalid = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(pageAfterInvalid.entries, [])
+
+        let pasteboard = makeFilePasteboard([first, second])
+        let capture = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: "com.apple.finder",
+                displayName: "Finder"
+            )
+        )
+        guard case .captured(let captured) = capture else {
+            return XCTFail("Expected concrete file URLs to be captured")
+        }
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries[0].facets, [.file, .image])
+        XCTAssertEqual(try fixture.payloadFiles(), [])
+
+        let movedFirst = files.url.appendingPathComponent("moved.png")
+        try FileManager.default.moveItem(at: first, to: movedFirst)
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: captured.entryID,
+                purpose: .normalPaste
+            )
+        )
+        XCTAssertEqual(
+            materialized.items.compactMap { item -> String? in
+                guard item.representations.count == 1,
+                    case .file(let reference) = item.representations[0]
+                else {
+                    return nil
+                }
+                return reference.currentURL.lastPathComponent
+            },
+            ["moved.png", "second.txt"]
+        )
+
+        try FileManager.default.removeItem(at: second)
+        try Data("replacement".utf8).write(to: second)
+        do {
+            _ = try await module.materialize(
+                ClipboardHistoryMaterializationRequest(
+                    entryID: captured.entryID,
+                    purpose: .normalPaste
+                )
+            )
+            XCTFail("Expected the original bookmark to remain unavailable")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .fileReferencesUnavailable(captured.entryID, count: 1)
+            )
+        }
+    }
+
+    @MainActor
+    func testCanonicalBitmapAppliesOrientationAndPreservesDepthAlphaProfileAndProvenance()
+        async throws
+    {
+        let sourcePNG = try makeOrientedWideGamutPNG()
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setData(sourcePNG, forType: .png)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+
+        let externalCapture = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: "com.apple.screencapture",
+                displayName: "Screenshot"
+            )
+        )
+        guard case .captured(let external) = externalCapture else {
+            return XCTFail("Expected the external bitmap to be captured")
+        }
+        let externalPage = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(externalPage.entries[0].facets, [.image])
+
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: external.entryID,
+                purpose: .normalPaste
+            )
+        )
+        let canonical = try XCTUnwrap(materialized.singleDataRepresentation)
+        let canonicalSource = try XCTUnwrap(
+            CGImageSourceCreateWithData(canonical as CFData, nil)
+        )
+        let canonicalProperties = try XCTUnwrap(
+            CGImageSourceCopyPropertiesAtIndex(canonicalSource, 0, nil)
+                as? [CFString: Any]
+        )
+        let canonicalImage = try XCTUnwrap(
+            CGImageSourceCreateImageAtIndex(canonicalSource, 0, nil)
+        )
+        XCTAssertEqual(canonicalImage.width, 3)
+        XCTAssertEqual(canonicalImage.height, 2)
+        XCTAssertEqual(canonicalImage.bitsPerComponent, 16)
+        XCTAssertNotEqual(canonicalImage.alphaInfo, .none)
+        XCTAssertEqual(canonicalImage.colorSpace?.name, CGColorSpace.displayP3)
+        XCTAssertEqual(
+            canonicalProperties[kCGImagePropertyOrientation] as? Int,
+            nil
+        )
+
+        let firstParty = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: "dev.bybee.AnyDoor",
+                    displayName: "AnyDoor"
+                ),
+                content: .bitmap(
+                    sourcePNG,
+                    provenance: .anyDoorScreenshot
+                )
+            )
+        )
+        let screenshotPage = try await module.page(
+            ClipboardHistoryQuery(facet: .screenshot)
+        )
+        XCTAssertEqual(screenshotPage.entries.map(\.id), [firstParty.entryID])
+    }
+
+    @MainActor
+    func testExactTextDerivesClosedOverlappingFacetsWithoutRewritingPayload()
+        async throws
+    {
+        let cases: [(String, Set<ClipboardHistoryFacet>)] = [
+            (" \thttps://example.com/path?q=1\r\n", [.text, .link]),
+            ("person@example.com", [.text, .email]),
+            ("mailto:person@example.com", [.text, .link, .email]),
+            ("#1a2B3c", [.text, .color]),
+            ("file:///tmp/reference.txt", [.text, .file]),
+            ("See https://example.com in prose", [.text]),
+            ("javascript://example.com", [.text]),
+        ]
+
+        for (text, expectedFacets) in cases {
+            let fixture = try TemporaryStore()
+            let module = makeReadyModule(in: fixture)
+            let pasteboard = NSPasteboard(
+                name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+            )
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+
+            let capture = try await module.capture(
+                ClipboardHistoryPasteboardCaptureRequest(
+                    pasteboard: pasteboard
+                ),
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: nil,
+                    displayName: nil
+                )
+            )
+            guard case .captured(let captured) = capture else {
+                return XCTFail("Expected \(text) to be captured")
+            }
+            let page = try await module.page(ClipboardHistoryQuery())
+            let entry = try XCTUnwrap(page.entries.first)
+            XCTAssertEqual(entry.id, captured.entryID)
+            XCTAssertEqual(entry.facets, expectedFacets, "Unexpected facets for \(text)")
+
+            let materialized = try await module.materialize(
+                ClipboardHistoryMaterializationRequest(
+                    entryID: captured.entryID,
+                    purpose: .normalPaste
+                )
+            )
+            XCTAssertEqual(
+                materialized.items[0].representations[0],
+                .text(
+                    typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                    value: text
+                )
+            )
+        }
+    }
+
+    @MainActor
+    func testNamedPasteboardCapturePreservesItemOrderAndEveryStandardTextRepresentation()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+
+        let exactText = " \tfirst line\r\nsecond line "
+        let rtf = Data(#"{\rtf1\ansi first}"#.utf8)
+        let rtfd = Data("flat rtfd fixture".utf8)
+        let html = Data("<p>first<br>second</p>".utf8)
+        let first = NSPasteboardItem()
+        first.setString(exactText, forType: .string)
+        first.setData(rtf, forType: .rtf)
+        first.setData(
+            rtfd,
+            forType: NSPasteboard.PasteboardType("com.apple.flat-rtfd")
+        )
+        first.setData(html, forType: .html)
+
+        let second = NSPasteboardItem()
+        second.setString("https://example.com/path", forType: .URL)
+        second.setString("Example link", forType: .string)
+        XCTAssertTrue(pasteboard.writeObjects([first, second]))
+
+        let capture = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: "dev.bybee.tests",
+                displayName: "Tests"
+            )
+        )
+        guard case .captured(let captured) = capture else {
+            return XCTFail("Expected a captured pasteboard generation")
+        }
+
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: captured.entryID,
+                purpose: .normalPaste
+            )
+        )
+
+        XCTAssertEqual(
+            materialized,
+            ClipboardHistoryMaterialization(items: [
+                ClipboardHistoryMaterializedItem(representations: [
+                    .text(
+                        typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                        value: exactText
+                    ),
+                    .data(
+                        typeIdentifier: NSPasteboard.PasteboardType.rtf.rawValue,
+                        rtf
+                    ),
+                    .data(
+                        typeIdentifier: "com.apple.flat-rtfd",
+                        rtfd
+                    ),
+                    .data(
+                        typeIdentifier: NSPasteboard.PasteboardType.html.rawValue,
+                        html
+                    ),
+                ]),
+                ClipboardHistoryMaterializedItem(representations: [
+                    .text(
+                        typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                        value: "Example link"
+                    ),
+                    .text(
+                        typeIdentifier: NSPasteboard.PasteboardType.URL.rawValue,
+                        value: "https://example.com/path"
+                    ),
+                ]),
+            ])
+        )
+
+        let plainText = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: captured.entryID,
+                purpose: .plainTextPaste
+            )
+        )
+        XCTAssertEqual(
+            plainText.items,
+            [
+                ClipboardHistoryMaterializedItem(representations: [
+                    .text(
+                        typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                        value: exactText
+                    )
+                ]),
+                ClipboardHistoryMaterializedItem(representations: [
+                    .text(
+                        typeIdentifier: NSPasteboard.PasteboardType.string.rawValue,
+                        value: "Example link"
+                    )
+                ]),
+            ]
+        )
+    }
+
     func testEncryptedStoreReturnsEmptyFirstPage() async throws {
         let fixture = try TemporaryDatabase()
         let module = try ClipboardHistoryModule(
@@ -64,7 +740,11 @@ final class ClipboardHistoryModuleTests: XCTestCase {
 
         XCTAssertEqual(
             diagnostics.appliedMigrations,
-            ["v1_foundation", "v2_encrypted_store"]
+            [
+                "v1_foundation",
+                "v2_encrypted_store",
+                "v3_file_reference_identity",
+            ]
         )
         XCTAssertEqual(
             diagnostics.tables,
@@ -108,7 +788,11 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         let diagnostics = try await module.storageDiagnostics()
         XCTAssertEqual(
             diagnostics.appliedMigrations,
-            ["v1_foundation", "v2_encrypted_store"]
+            [
+                "v1_foundation",
+                "v2_encrypted_store",
+                "v3_file_reference_identity",
+            ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)
         XCTAssertTrue(diagnostics.foreignKeyIntegrityOK)
@@ -496,8 +1180,16 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 purpose: .preview
             )
         )
-        XCTAssertEqual(normal.singleDataRepresentation, plaintext)
-        XCTAssertEqual(preview.singleDataRepresentation, plaintext)
+        XCTAssertNotNil(
+            normal.singleDataRepresentation.flatMap {
+                CGImageSourceCreateWithData($0 as CFData, nil)
+            }
+        )
+        XCTAssertNotNil(
+            preview.singleDataRepresentation.flatMap {
+                CGImageSourceCreateWithData($0 as CFData, nil)
+            }
+        )
     }
 
     func testPayloadAuthenticationFaultDisablesOnlyThatPayloadAction() async throws {
@@ -579,7 +1271,11 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 purpose: .preview
             )
         )
-        XCTAssertEqual(preview.singleDataRepresentation, plaintext)
+        XCTAssertNotNil(
+            preview.singleDataRepresentation.flatMap {
+                CGImageSourceCreateWithData($0 as CFData, nil)
+            }
+        )
         let page = try await module.page(ClipboardHistoryQuery())
         let status = await module.status()
         XCTAssertEqual(page.entries.count, 1)
@@ -837,6 +1533,62 @@ private final class TemporaryStore {
             at: directory,
             includingPropertiesForKeys: nil
         )
+    }
+}
+
+private final class TemporaryFileReferences {
+    let url: URL
+
+    init() throws {
+        url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AnyDoor-FileReferences-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: url,
+            withIntermediateDirectories: true
+        )
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func create(name: String, contents: String) throws -> URL {
+        let file = url.appendingPathComponent(name)
+        try Data(contents.utf8).write(to: file)
+        return file
+    }
+}
+
+private final class TestPasteboardDataProvider: NSObject,
+    NSPasteboardItemDataProvider
+{
+    enum Action {
+        case provide(String)
+        case replaceGeneration(provided: String, replacement: String)
+    }
+
+    nonisolated(unsafe) private(set) var callCount = 0
+    private let action: Action
+
+    init(action: Action) {
+        self.action = action
+    }
+
+    func pasteboard(
+        _ pasteboard: NSPasteboard?,
+        item: NSPasteboardItem,
+        provideDataForType type: NSPasteboard.PasteboardType
+    ) {
+        guard let pasteboard else { return }
+        callCount += 1
+        switch action {
+        case .provide(let value):
+            item.setString(value, forType: type)
+        case .replaceGeneration(let provided, let replacement):
+            pasteboard.clearContents()
+            pasteboard.setString(replacement, forType: .string)
+            item.setString(provided, forType: type)
+        }
     }
 }
 
@@ -1234,6 +1986,90 @@ extension Data {
 }
 
 extension ClipboardHistoryModuleTests {
+    fileprivate func makeOversizedPixelPNG() throws -> Data {
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil,
+                width: 8_001,
+                height: 8_000,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceGray(),
+                bitmapInfo: CGImageAlphaInfo.none.rawValue
+            )
+        )
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(
+            CGImageDestinationCreateWithData(
+                data,
+                UTType.png.identifier as CFString,
+                1,
+                nil
+            )
+        )
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
+    @MainActor
+    fileprivate func makeFilePasteboard(_ urls: [URL]) -> NSPasteboard {
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let items = urls.map { url in
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            return item
+        }
+        XCTAssertTrue(pasteboard.writeObjects(items))
+        return pasteboard
+    }
+
+    fileprivate func makeOrientedWideGamutPNG() throws -> Data {
+        let colorSpace = try XCTUnwrap(
+            CGColorSpace(name: CGColorSpace.displayP3)
+        )
+        let context = try XCTUnwrap(
+            CGContext(
+                data: nil,
+                width: 2,
+                height: 3,
+                bitsPerComponent: 16,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                    | CGBitmapInfo.byteOrder16Little.rawValue
+            )
+        )
+        context.setFillColor(
+            CGColor(
+                colorSpace: colorSpace,
+                components: [1, 0.25, 0.5, 0.5]
+            )!
+        )
+        context.fill(CGRect(x: 0, y: 0, width: 2, height: 3))
+        let image = try XCTUnwrap(context.makeImage())
+        let data = NSMutableData()
+        let destination = try XCTUnwrap(
+            CGImageDestinationCreateWithData(
+                data,
+                UTType.png.identifier as CFString,
+                1,
+                nil
+            )
+        )
+        CGImageDestinationAddImage(
+            destination,
+            image,
+            [kCGImagePropertyOrientation: 6] as CFDictionary
+        )
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+
     fileprivate func makeReadyModule(
         in fixture: TemporaryStore,
         faults: Set<ClipboardHistoryFaultPoint> = []
@@ -1249,12 +2085,23 @@ extension ClipboardHistoryModuleTests {
     }
 
     fileprivate func bitmapRequest(_ data: Data) -> ClipboardHistoryCaptureRequest {
-        ClipboardHistoryCaptureRequest(
+        let bitmapData: Data
+        if let source = CGImageSourceCreateWithData(data as CFData, nil),
+            CGImageSourceGetCount(source) > 0
+        {
+            bitmapData = data
+        } else {
+            bitmapData = Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+            )!
+        }
+        return ClipboardHistoryCaptureRequest(
             source: ClipboardHistoryCaptureSource(
                 bundleIdentifier: "dev.bybee.tests",
                 displayName: "Tests"
             ),
-            content: .bitmap(data, provenance: .image)
+            content: .bitmap(bitmapData, provenance: .image)
         )
     }
 }

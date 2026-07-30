@@ -5,66 +5,7 @@ extension ClipboardHistoryModule {
     public func capture(
         _ request: ClipboardHistoryCaptureRequest
     ) throws -> ClipboardHistoryCaptureOutcome {
-        let database = try requiredDatabase()
-        let entryID = ClipboardHistoryEntryID(UUID())
-        let capturedAt = now()
-
-        switch request.content {
-        case .bitmap(let data, let provenance):
-            let payloadStore = try requiredPayloadStore()
-            do {
-                let bitmap = try payloadStore.publish(data, kind: .bitmap)
-                let thumbnail = try payloadStore.publish(data, kind: .thumbnail)
-                try database.write { database in
-                    try insertPayload(bitmap, into: database, at: capturedAt)
-                    try insertPayload(thumbnail, into: database, at: capturedAt)
-                    try insertEntry(
-                        id: entryID,
-                        source: request.source,
-                        capturedAt: capturedAt,
-                        previewText: nil,
-                        facets: provenance == .anyDoorScreenshot
-                            ? [.image, .screenshot]
-                            : [.image],
-                        representation: .payload(bitmap),
-                        thumbnailPayloadID: thumbnail.id,
-                        into: database
-                    )
-                    try faultInjector.check(.databaseTransaction)
-                }
-            } catch {
-                throw mapStorageError(error, entryID: entryID)
-            }
-        case .text(let text):
-            try insertTextEntry(
-                id: entryID,
-                source: request.source,
-                capturedAt: capturedAt,
-                text: text,
-                facets: [.text],
-                database: database
-            )
-        case .color(let color):
-            try insertTextEntry(
-                id: entryID,
-                source: request.source,
-                capturedAt: capturedAt,
-                text: color,
-                facets: [.text, .color],
-                database: database
-            )
-        case .qrCode(let value):
-            try insertTextEntry(
-                id: entryID,
-                source: request.source,
-                capturedAt: capturedAt,
-                text: value,
-                facets: [.text, .qrCode],
-                database: database
-            )
-        }
-
-        return ClipboardHistoryCaptureOutcome(entryID: entryID)
+        try captureExplicit(request)
     }
 
     public func page(
@@ -221,6 +162,38 @@ extension ClipboardHistoryModule {
         guard !rows.isEmpty else {
             throw ClipboardHistoryModuleError.entryNotFound
         }
+        if request.purpose == .plainTextPaste {
+            let groupedRows = Dictionary(
+                grouping: rows,
+                by: { $0["item_index"] as Int }
+            )
+            var items: [ClipboardHistoryMaterializedItem] = []
+            for itemIndex in groupedRows.keys.sorted() {
+                guard let exactTextRow = groupedRows[itemIndex]?.first(where: {
+                    ($0["type_identifier"] as String)
+                        == "public.utf8-plain-text"
+                        && ($0["text_value"] as String?) != nil
+                }), let value: String = exactTextRow["text_value"]
+                else {
+                    throw ClipboardHistoryModuleError.operationUnavailable
+                }
+                items.append(
+                    ClipboardHistoryMaterializedItem(
+                        representations: [
+                            .text(
+                                typeIdentifier: "public.utf8-plain-text",
+                                value: value
+                            )
+                        ]
+                    )
+                )
+            }
+            return ClipboardHistoryMaterialization(items: items)
+        }
+        let fileReferences = try materializeFileReferences(
+            for: request.entryID,
+            from: database
+        )
 
         var materializedItems: [ClipboardHistoryMaterializedItem] = []
         let groupedRows = Dictionary(
@@ -230,8 +203,22 @@ extension ClipboardHistoryModule {
         for itemIndex in groupedRows.keys.sorted() {
             guard let itemRows = groupedRows[itemIndex] else { continue }
             let representations = try itemRows.map { row in
+                if (row["kind"] as String) == "fileReference" {
+                    guard let reference = fileReferences[itemIndex] else {
+                        throw ClipboardHistoryModuleError.fileReferencesUnavailable(
+                            request.entryID,
+                            count: 1
+                        )
+                    }
+                    return ClipboardHistoryMaterializedRepresentation.file(
+                        reference
+                    )
+                }
                 if let text: String = row["text_value"] {
-                    return ClipboardHistoryMaterializedRepresentation.text(text)
+                    return ClipboardHistoryMaterializedRepresentation.text(
+                        typeIdentifier: row["type_identifier"],
+                        value: text
+                    )
                 }
                 if let data: Data = row["data_value"] {
                     return .data(
@@ -263,6 +250,165 @@ extension ClipboardHistoryModule {
             )
         }
         return ClipboardHistoryMaterialization(items: materializedItems)
+    }
+
+    private func materializeFileReferences(
+        for entryID: ClipboardHistoryEntryID,
+        from database: DatabasePool
+    ) throws -> [Int: ClipboardHistoryMaterializedFileReference] {
+        let storedID = entryID.value.uuidString.lowercased()
+        let rows = try database.read { database in
+            try Row.fetchAll(
+                database,
+                sql: """
+                    SELECT item_index, captured_path, display_name,
+                           bookmark_data, identity_data
+                    FROM clipboard_file_members
+                    WHERE entry_id = ?
+                    ORDER BY item_index, member_index
+                    """,
+                arguments: [storedID]
+            )
+        }
+        guard !rows.isEmpty else { return [:] }
+
+        struct ResolvedFile {
+            let itemIndex: Int
+            let capturedPath: String
+            let displayName: String
+            let url: URL
+            let bookmark: Data
+        }
+        var resolved: [ResolvedFile] = []
+        var unavailableCount = 0
+        for row in rows {
+            guard let bookmark: Data = row["bookmark_data"],
+                let identityData: Data = row["identity_data"]
+            else {
+                unavailableCount += 1
+                continue
+            }
+            do {
+                var isStale = false
+                let url = try URL(
+                    resolvingBookmarkData: bookmark,
+                    options: [.withoutUI, .withoutMounting],
+                    relativeTo: nil,
+                    bookmarkDataIsStale: &isStale
+                )
+                let resourceValues = try url.resourceValues(
+                    forKeys: [.fileResourceIdentifierKey, .nameKey]
+                )
+                guard let currentIdentity =
+                    resourceValues.fileResourceIdentifier as? NSObject,
+                    let capturedIdentity = try NSKeyedUnarchiver
+                        .unarchivedObject(
+                            ofClasses: [
+                                NSObject.self,
+                                NSData.self,
+                                NSString.self,
+                                NSNumber.self,
+                            ],
+                            from: identityData
+                        ) as? NSObject,
+                    capturedIdentity.isEqual(currentIdentity)
+                else {
+                    unavailableCount += 1
+                    continue
+                }
+                let refreshedBookmark: Data
+                if isStale {
+                    refreshedBookmark = try url.bookmarkData(
+                        options: [],
+                        includingResourceValuesForKeys: [
+                            .contentTypeKey,
+                            .fileResourceIdentifierKey,
+                            .nameKey,
+                        ],
+                        relativeTo: nil
+                    )
+                } else {
+                    refreshedBookmark = bookmark
+                }
+                resolved.append(
+                    ResolvedFile(
+                        itemIndex: row["item_index"],
+                        capturedPath: row["captured_path"],
+                        displayName: resourceValues.name
+                            ?? (row["display_name"] as String),
+                        url: url,
+                        bookmark: refreshedBookmark
+                    )
+                )
+            } catch {
+                unavailableCount += 1
+            }
+        }
+        guard unavailableCount == 0 else {
+            throw ClipboardHistoryModuleError.fileReferencesUnavailable(
+                entryID,
+                count: unavailableCount
+            )
+        }
+
+        try database.write { database in
+            for file in resolved {
+                try database.execute(
+                    sql: """
+                        UPDATE clipboard_file_members
+                        SET current_path = ?, display_name = ?,
+                            bookmark_data = ?, availability = 'available'
+                        WHERE entry_id = ? AND item_index = ?
+                    """,
+                    arguments: [
+                        file.url.path,
+                        file.displayName,
+                        file.bookmark,
+                        storedID,
+                        file.itemIndex,
+                    ]
+                )
+                for (kind, value) in [
+                    ("fileName", file.displayName),
+                    ("currentPath", file.url.path),
+                ] {
+                    try database.execute(
+                        sql: """
+                            UPDATE clipboard_search_fields
+                            SET value = ?, normalized_value = ?
+                            WHERE entry_id = ? AND field_kind = ?
+                              AND field_index = ?
+                            """,
+                        arguments: [
+                            value,
+                            value.folding(
+                                options: [
+                                    .caseInsensitive,
+                                    .diacriticInsensitive,
+                                    .widthInsensitive,
+                                ],
+                                locale: Locale(identifier: "en_US_POSIX")
+                            ),
+                            storedID,
+                            kind,
+                            file.itemIndex,
+                        ]
+                    )
+                }
+            }
+        }
+        return Dictionary(
+            uniqueKeysWithValues: resolved.map { file in
+                (
+                    file.itemIndex,
+                    ClipboardHistoryMaterializedFileReference(
+                        capturedPath: file.capturedPath,
+                        displayName: file.displayName,
+                        currentURL: file.url
+                    )
+                )
+            }
+        )
     }
 
     public func performMaintenance(
@@ -397,12 +543,7 @@ extension ClipboardHistoryModule {
 }
 
 extension ClipboardHistoryModule {
-    fileprivate enum StoredRepresentation {
-        case text(String)
-        case payload(ClipboardHistoryPublishedPayload)
-    }
-
-    fileprivate func requiredPayloadStore() throws -> ClipboardHistoryPayloadStore {
+    func requiredPayloadStore() throws -> ClipboardHistoryPayloadStore {
         guard let payloadKey = derivedKeys?.payloadKey else {
             throw ClipboardHistoryModuleError.storeUnavailable
         }
@@ -413,34 +554,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    fileprivate func insertTextEntry(
-        id: ClipboardHistoryEntryID,
-        source: ClipboardHistoryCaptureSource,
-        capturedAt: Date,
-        text: String,
-        facets: Set<ClipboardHistoryFacet>,
-        database: DatabasePool
-    ) throws {
-        do {
-            try database.write { database in
-                try insertEntry(
-                    id: id,
-                    source: source,
-                    capturedAt: capturedAt,
-                    previewText: text,
-                    facets: facets,
-                    representation: .text(text),
-                    thumbnailPayloadID: nil,
-                    into: database
-                )
-                try faultInjector.check(.databaseTransaction)
-            }
-        } catch {
-            throw mapStorageError(error, entryID: id)
-        }
-    }
-
-    fileprivate func insertPayload(
+    func insertPayload(
         _ payload: ClipboardHistoryPublishedPayload,
         into database: Database,
         at date: Date
@@ -460,95 +574,6 @@ extension ClipboardHistoryModule {
                 payload.plaintextByteCount,
                 date.timeIntervalSince1970,
             ]
-        )
-    }
-
-    fileprivate func insertEntry(
-        id: ClipboardHistoryEntryID,
-        source: ClipboardHistoryCaptureSource,
-        capturedAt: Date,
-        previewText: String?,
-        facets: Set<ClipboardHistoryFacet>,
-        representation: StoredRepresentation,
-        thumbnailPayloadID: UUID?,
-        into database: Database
-    ) throws {
-        let storedID = id.value.uuidString.lowercased()
-        try database.execute(
-            sql: """
-                INSERT INTO clipboard_entries(
-                    id, captured_at, last_captured_at, source_bundle_id,
-                    source_display_name, preview_text, thumbnail_payload_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-            arguments: [
-                storedID,
-                capturedAt.timeIntervalSince1970,
-                capturedAt.timeIntervalSince1970,
-                source.bundleIdentifier,
-                source.displayName,
-                previewText,
-                thumbnailPayloadID?.uuidString.lowercased(),
-            ]
-        )
-        try database.execute(
-            sql: "INSERT INTO clipboard_items(entry_id, item_index) VALUES (?, 0)",
-            arguments: [storedID]
-        )
-        switch representation {
-        case .text(let text):
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_representations(
-                        entry_id, item_index, representation_index, kind,
-                        type_identifier, text_value
-                    ) VALUES (?, 0, 0, 'text', 'public.utf8-plain-text', ?)
-                    """,
-                arguments: [storedID, text]
-            )
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_search_fields(
-                        entry_id, field_kind, field_index, value,
-                        normalized_value, ranking_group
-                    ) VALUES (?, 'exactText', 0, ?, ?, 0)
-                    """,
-                arguments: [
-                    storedID,
-                    text,
-                    text.folding(
-                        options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
-                        locale: .current
-                    ),
-                ]
-            )
-        case .payload(let payload):
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_representations(
-                        entry_id, item_index, representation_index, kind,
-                        type_identifier, payload_id
-                    ) VALUES (?, 0, 0, 'bitmap', 'public.png', ?)
-                    """,
-                arguments: [storedID, payload.id.uuidString.lowercased()]
-            )
-        }
-        for facet in facets {
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_entry_facets(entry_id, facet)
-                    VALUES (?, ?)
-                    """,
-                arguments: [storedID, facet.rawValue]
-            )
-        }
-        try database.execute(
-            sql: """
-                INSERT INTO clipboard_retention_state(
-                    entry_id, retention_started_at, is_protected
-                ) VALUES (?, ?, 0)
-                """,
-            arguments: [storedID, capturedAt.timeIntervalSince1970]
         )
     }
 
@@ -628,7 +653,7 @@ extension ClipboardHistoryModule {
         }
     }
 
-    fileprivate func mapStorageError(
+    func mapStorageError(
         _ error: Error,
         entryID: ClipboardHistoryEntryID
     ) -> ClipboardHistoryModuleError {
