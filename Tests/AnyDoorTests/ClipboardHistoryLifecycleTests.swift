@@ -460,6 +460,46 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         )
     }
 
+    /// Termination must not wait on a migration: its database work is not
+    /// interruptible, and the cutover is crash-safe, so quitting mid-migration
+    /// simply resumes next launch. Awaiting it would hang Quit for the whole
+    /// first-launch conversion.
+    func testStopReturnsWhileAMigrationIsStillInFlight() async {
+        let probe = ClipboardLifecycleProbe()
+        await probe.suspendNextMigration()
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            legacyCleanupState: { .incomplete },
+            legacyPayloadDirectory: {
+                FileManager.default.temporaryDirectory
+            },
+            migrationRequest: { try Self.emptyMigrationRequest() }
+        )
+
+        lifecycle.start()
+        await probe.waitUntilMigrationStarts(count: 1)
+
+        let stopped = CompletionFlag()
+        Task {
+            await lifecycle.stop()
+            await stopped.set()
+        }
+        let deadline = Date().addingTimeInterval(2)
+        while await !stopped.isSet(), Date() < deadline {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        let returned = await stopped.isSet()
+        await probe.resumeMigration()
+        XCTAssertTrue(
+            returned,
+            "stop() must not await the suspended migration"
+        )
+        let events = await probe.recordedEvents()
+        XCTAssertTrue(events.contains(.monitoring(.stop)))
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suite = "ClipboardHistoryLifecycleTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -490,6 +530,18 @@ private enum ClipboardLifecycleEvent: Equatable, Sendable {
     case cleanup
     case monitoring(ClipboardHistoryMonitoringCommand)
     case reset
+}
+
+private actor CompletionFlag {
+    private var value = false
+
+    func set() {
+        value = true
+    }
+
+    func isSet() -> Bool {
+        value
+    }
 }
 
 private actor ClipboardLifecycleProbe {

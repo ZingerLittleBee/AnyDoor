@@ -214,12 +214,17 @@ final class ClipboardHistoryLifecycle {
         _ = await operations.setMonitoring(command, configuration)
     }
 
+    /// Stops observation for termination. The in-flight operation is cancelled
+    /// but deliberately **not** awaited: a migration performs uninterruptible
+    /// database work, so awaiting it would stall Quit for as long as the legacy
+    /// history takes to convert. The cutover is crash-safe by construction (the
+    /// snapshot survives, and the completion marker is fsynced only after
+    /// publication and verified cleanup), so quitting mid-migration is safe and
+    /// simply resumes on the next launch.
     func stop() async {
         generation += 1
-        let task = operationTask
+        operationTask?.cancel()
         operationTask = nil
-        task?.cancel()
-        await task?.value
         _ = await operations.setMonitoring(
             .stop,
             ClipboardPreferences.monitoringConfiguration(from: defaults)
