@@ -25,6 +25,8 @@ extension ClipboardHistoryModule {
         let members: [LegacyFileMemberDiagnostics]
         let digestReadCount: Int
         let maximumDigestReadSize: Int
+        let ownedPayloadCount: Int
+        let duplicateFingerprint: Data?
     }
 
     public func migrateLegacy(
@@ -185,8 +187,8 @@ extension ClipboardHistoryModule {
     ) throws -> LegacyFileDiagnostics {
         let database = try requiredDatabase()
         let storedID = entryID.value.uuidString.lowercased()
-        let members = try database.read { database in
-            try Row.fetchAll(
+        return try database.read { database in
+            let members = try Row.fetchAll(
                 database,
                 sql: """
                     SELECT captured_path, reference_provenance
@@ -206,12 +208,32 @@ extension ClipboardHistoryModule {
                     state: state
                 )
             }
+            let ownedPayloadCount = try Int.fetchOne(
+                database,
+                sql: """
+                    SELECT COUNT(*)
+                    FROM clipboard_file_members
+                    WHERE entry_id = ? AND payload_id IS NOT NULL
+                    """,
+                arguments: [storedID]
+            ) ?? 0
+            let fingerprint = try Data.fetchOne(
+                database,
+                sql: """
+                    SELECT fingerprint
+                    FROM clipboard_duplicate_candidates
+                    WHERE entry_id = ?
+                    """,
+                arguments: [storedID]
+            )
+            return LegacyFileDiagnostics(
+                members: members,
+                digestReadCount: legacyDigestReadCount,
+                maximumDigestReadSize: legacyMaximumDigestReadSize,
+                ownedPayloadCount: ownedPayloadCount,
+                duplicateFingerprint: fingerprint
+            )
         }
-        return LegacyFileDiagnostics(
-            members: members,
-            digestReadCount: legacyDigestReadCount,
-            maximumDigestReadSize: legacyMaximumDigestReadSize
-        )
     }
 
     private var legacyMigrationStagingRoot: URL {
@@ -925,7 +947,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private func legacyFileReference(
+    func legacyFileReference(
         at url: URL
     ) throws -> LegacyResolvedFileReference {
         let values = try url.resourceValues(
@@ -966,7 +988,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private func streamedFileProof(_ url: URL) throws -> StreamedFileProof {
+    func streamedFileProof(_ url: URL) throws -> StreamedFileProof {
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
         var hasher = SHA256()
@@ -1421,7 +1443,7 @@ private struct PreparedLegacyFileMember {
     let cleanupProof: LegacyCleanupProof?
 }
 
-private struct LegacyResolvedFileReference {
+struct LegacyResolvedFileReference: Sendable {
     let url: URL
     let bookmark: Data
     let identity: Data
@@ -1429,7 +1451,7 @@ private struct LegacyResolvedFileReference {
     let isRegularFile: Bool
 }
 
-private struct StreamedFileProof: Equatable {
+struct StreamedFileProof: Equatable, Sendable {
     let byteCount: Int
     let sha256: Data
 }

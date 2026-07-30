@@ -458,6 +458,9 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case invalidConfirmation
     case unsupportedLegacyTransferVersion(Int)
     case legacyMigrationFailed
+    case invalidLegacyFileRestore
+    case legacyFileRestoreCollision(URL)
+    case legacyFileRestoreFailed
 }
 
 public enum ClipboardHistoryResetConfirmation: Sendable {
@@ -628,6 +631,71 @@ public enum ClipboardHistoryLegacyMigrationOutcome:
 {
     case published(ClipboardHistoryLegacyMigrationReport)
     case alreadyPublished(ClipboardHistoryLegacyMigrationReport)
+}
+
+public struct ClipboardHistoryLegacyFileMemberID:
+    Hashable,
+    Sendable
+{
+    public let itemIndex: Int
+    public let memberIndex: Int
+
+    public init(itemIndex: Int, memberIndex: Int) {
+        self.itemIndex = itemIndex
+        self.memberIndex = memberIndex
+    }
+}
+
+public enum ClipboardHistoryLegacyFileCollisionPolicy:
+    Equatable,
+    Sendable
+{
+    case failIfExists
+    case reuseIfIdentical
+}
+
+public struct ClipboardHistoryLegacyFileDestination:
+    Equatable,
+    Sendable
+{
+    public let memberID: ClipboardHistoryLegacyFileMemberID
+    public let url: URL
+    public let collisionPolicy: ClipboardHistoryLegacyFileCollisionPolicy
+
+    public init(
+        memberID: ClipboardHistoryLegacyFileMemberID,
+        url: URL,
+        collisionPolicy: ClipboardHistoryLegacyFileCollisionPolicy =
+            .failIfExists
+    ) {
+        self.memberID = memberID
+        self.url = url
+        self.collisionPolicy = collisionPolicy
+    }
+}
+
+public struct ClipboardHistoryLegacyFileRestoreRequest:
+    Equatable,
+    Sendable
+{
+    public let entryID: ClipboardHistoryEntryID
+    public let destinations: [ClipboardHistoryLegacyFileDestination]
+
+    public init(
+        entryID: ClipboardHistoryEntryID,
+        destinations: [ClipboardHistoryLegacyFileDestination]
+    ) {
+        self.entryID = entryID
+        self.destinations = destinations
+    }
+}
+
+public enum ClipboardHistoryLegacyFileRestoreOutcome:
+    Equatable,
+    Sendable
+{
+    case restored(memberCount: Int)
+    case alreadyRestored(memberCount: Int)
 }
 
 public struct ClipboardHistoryTagDefinition: Equatable, Sendable {

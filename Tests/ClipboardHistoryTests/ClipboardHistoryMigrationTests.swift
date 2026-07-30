@@ -492,6 +492,256 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             original.resolvingSymlinksInPath()
         )
     }
+
+    func testOwnedFileRestoreCommitsAllMembersAndPreservesIdentity()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let firstOriginal = fixture.root.appendingPathComponent("first.txt")
+        let secondOriginal = fixture.root.appendingPathComponent("second.txt")
+        try fixture.writeLegacyPayload(
+            named: "first-copy",
+            data: Data("first captured".utf8)
+        )
+        try fixture.writeLegacyPayload(
+            named: "second-copy",
+            data: Data("second captured".utf8)
+        )
+        let entryID = UUID()
+        let module = fixture.makeModule()
+        _ = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: entryID,
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: "first-copy",
+                                originalURL: firstOriginal
+                            ),
+                            legacyFile(
+                                storedName: "second-copy",
+                                originalURL: secondOriginal
+                            ),
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+        let before = try await module.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        let restoreRoot = fixture.root.appendingPathComponent("Restored")
+        try FileManager.default.createDirectory(
+            at: restoreRoot,
+            withIntermediateDirectories: true
+        )
+        let firstDestination = restoreRoot.appendingPathComponent("one.txt")
+        let secondDestination = restoreRoot.appendingPathComponent("two.txt")
+
+        let outcome = try await module.restoreLegacyOwnedFiles(
+            ClipboardHistoryLegacyFileRestoreRequest(
+                entryID: ClipboardHistoryEntryID(entryID),
+                destinations: [
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: ClipboardHistoryLegacyFileMemberID(
+                            itemIndex: 1,
+                            memberIndex: 0
+                        ),
+                        url: secondDestination
+                    ),
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: ClipboardHistoryLegacyFileMemberID(
+                            itemIndex: 0,
+                            memberIndex: 0
+                        ),
+                        url: firstDestination
+                    ),
+                ]
+            )
+        )
+
+        XCTAssertEqual(outcome, .restored(memberCount: 2))
+        XCTAssertEqual(
+            try Data(contentsOf: firstDestination),
+            Data("first captured".utf8)
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: secondDestination),
+            Data("second captured".utf8)
+        )
+        let after = try await module.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        XCTAssertEqual(after.members.map(\.state), [.ordinary, .ordinary])
+        XCTAssertEqual(after.ownedPayloadCount, 0)
+        XCTAssertEqual(after.duplicateFingerprint, before.duplicateFingerprint)
+        XCTAssertEqual(
+            after.members.map(\.capturedPath),
+            [firstOriginal.path, secondOriginal.path]
+        )
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: ClipboardHistoryEntryID(entryID),
+                purpose: .normalPaste
+            )
+        )
+        XCTAssertEqual(
+            materialized.items.compactMap {
+                guard case .file(let value) = $0.representations.first else {
+                    return nil
+                }
+                return value.currentURL.resolvingSymlinksInPath()
+            },
+            [
+                firstDestination.resolvingSymlinksInPath(),
+                secondDestination.resolvingSymlinksInPath(),
+            ]
+        )
+        let repeatedOutcome = try await module.restoreLegacyOwnedFiles(
+            ClipboardHistoryLegacyFileRestoreRequest(
+                entryID: ClipboardHistoryEntryID(entryID),
+                destinations: [
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: ClipboardHistoryLegacyFileMemberID(
+                            itemIndex: 0,
+                            memberIndex: 0
+                        ),
+                        url: firstDestination,
+                        collisionPolicy: .reuseIfIdentical
+                    ),
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: ClipboardHistoryLegacyFileMemberID(
+                            itemIndex: 1,
+                            memberIndex: 0
+                        ),
+                        url: secondDestination,
+                        collisionPolicy: .reuseIfIdentical
+                    ),
+                ]
+            )
+        )
+        XCTAssertEqual(repeatedOutcome, .alreadyRestored(memberCount: 2))
+    }
+
+    func testOwnedFileRestoreRollsBackHistoryAndRetriesAfterFailure()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let firstOriginal = fixture.root.appendingPathComponent("first.txt")
+        let secondOriginal = fixture.root.appendingPathComponent("second.txt")
+        try fixture.writeLegacyPayload(
+            named: "first-copy",
+            data: Data("first captured".utf8)
+        )
+        try fixture.writeLegacyPayload(
+            named: "second-copy",
+            data: Data("second captured".utf8)
+        )
+        let entryID = UUID()
+        let failingModule = fixture.makeModule(
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.databaseTransaction]
+            )
+        )
+        _ = try await failingModule.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: entryID,
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: "first-copy",
+                                originalURL: firstOriginal
+                            ),
+                            legacyFile(
+                                storedName: "second-copy",
+                                originalURL: secondOriginal
+                            ),
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+        let restoreRoot = fixture.root.appendingPathComponent("Restored")
+        try FileManager.default.createDirectory(
+            at: restoreRoot,
+            withIntermediateDirectories: true
+        )
+        let firstDestination = restoreRoot.appendingPathComponent("one.txt")
+        let secondDestination = restoreRoot.appendingPathComponent("two.txt")
+        let failedRequest = ClipboardHistoryLegacyFileRestoreRequest(
+            entryID: ClipboardHistoryEntryID(entryID),
+            destinations: [
+                ClipboardHistoryLegacyFileDestination(
+                    memberID: ClipboardHistoryLegacyFileMemberID(
+                        itemIndex: 0,
+                        memberIndex: 0
+                    ),
+                    url: firstDestination
+                ),
+                ClipboardHistoryLegacyFileDestination(
+                    memberID: ClipboardHistoryLegacyFileMemberID(
+                        itemIndex: 1,
+                        memberIndex: 0
+                    ),
+                    url: secondDestination
+                ),
+            ]
+        )
+
+        do {
+            _ = try await failingModule.restoreLegacyOwnedFiles(failedRequest)
+            XCTFail("Expected database transaction failure")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyFileRestoreFailed
+            )
+        }
+        let failedState = try await failingModule.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        XCTAssertEqual(
+            failedState.members.map(\.state),
+            [.legacyOwned, .legacyOwned]
+        )
+        XCTAssertEqual(failedState.ownedPayloadCount, 2)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: firstDestination.path)
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: secondDestination.path)
+        )
+
+        let retryingModule = fixture.makeModule()
+        let retryOutcome = try await retryingModule.restoreLegacyOwnedFiles(
+            ClipboardHistoryLegacyFileRestoreRequest(
+                entryID: ClipboardHistoryEntryID(entryID),
+                destinations: failedRequest.destinations.map {
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: $0.memberID,
+                        url: $0.url,
+                        collisionPolicy: .reuseIfIdentical
+                    )
+                }
+            )
+        )
+        XCTAssertEqual(retryOutcome, .restored(memberCount: 2))
+        let restoredState = try await retryingModule.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        XCTAssertEqual(
+            restoredState.members.map(\.state),
+            [.ordinary, .ordinary]
+        )
+    }
 }
 
 private final class LegacyMigrationFixture {
@@ -517,11 +767,16 @@ private final class LegacyMigrationFixture {
         try? FileManager.default.removeItem(at: root)
     }
 
-    func makeModule(now: Date? = nil) -> ClipboardHistoryModule {
+    func makeModule(
+        now: Date? = nil,
+        faultInjector: ClipboardHistoryFaultInjector =
+            ClipboardHistoryFaultInjector()
+    ) -> ClipboardHistoryModule {
         let currentDate = now ?? self.now
         return ClipboardHistoryModule(
             testingStoreRoot: storeRoot,
             keyStore: keyStore,
+            faultInjector: faultInjector,
             now: { currentDate }
         )
     }
