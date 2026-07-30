@@ -6,6 +6,52 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard History is now encrypted at rest. Entries live in a dedicated
+  SQLCipher database and payloads (images, thumbnails, owned files) are
+  individually AES-GCM encrypted, keyed from a device-only Keychain item that
+  is never synced or included in a backup. A locked Keychain pauses capture
+  and resumes after unlock; a missing key or unreadable database surfaces
+  retry and an explicitly confirmed reset, never a silent wipe.
+- Search now covers every retained entry instead of the loaded page, and is
+  case-, diacritic-, and width-insensitive. Multiple words are ANDed, exact
+  field matches rank above prefixes and then substrings, and one- and
+  two-character CJK terms return complete results. Beyond the copied text it
+  searches OCR text, decoded QR values, file names, capture-time and current
+  file paths, and normalized colors.
+- Filter history by content type — Text, Link, Email, Color, Image,
+  Screenshot, File, QR Code — combined with source app, tag, and
+  favorites-only.
+- Automatic Image Text Indexing (Settings → Clipboard, off by default) runs
+  on-device Vision text recognition over bitmaps captured while it is
+  enabled, making their text searchable. QR codes in newly captured images
+  are always decoded and indexed. Neither creates a second history entry.
+- Retention presets now include 3 months, 6 months, 1 year, and Unlimited,
+  with no hidden item-count cap. Retention is age-only, and favorite or
+  tagged entries are protected from expiry indefinitely. Shortening the
+  period first reports exactly how many entries it would delete and asks for
+  confirmation.
+- Edit the text of a single-item text entry in place, keeping its id, source,
+  capture time, favorite state, and tags.
+- Settings → Clipboard reports the exact on-disk footprint of the history
+  store, its payloads, and any encrypted leftovers.
+
+### Changed
+
+- Copying is captured more reliably. Command-C and Command-X now trigger a
+  short observation burst instead of relying only on a 500 ms poll, so a
+  value overwritten shortly after being copied is far less likely to be
+  missed. Multi-item pasteboard states are preserved in full rather than
+  collapsed to a single representation.
+- New installations exclude Apple Passwords and Keychain Access from history
+  by default. Existing installations pick these up once, without
+  resurrecting an exclusion the user has already removed.
+- Existing clipboard history migrates automatically on first launch. The old
+  store is snapshotted before the cutover and removed only after the
+  encrypted copy is published and verified, so an interrupted migration
+  leaves the readable copy intact and retries on the next launch.
+
 ## [4.1.0] - 2026-07-28
 
 ### Added
