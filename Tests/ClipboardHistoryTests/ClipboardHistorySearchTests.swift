@@ -1135,6 +1135,78 @@ final class ClipboardHistorySearchTests: XCTestCase {
         return captured.entryID
     }
 
+    /// `count` and `page` answer the same question through two separate
+    /// statements, so they can drift apart silently. Every existing count test
+    /// passes an empty query, which never reaches the search path at all.
+    func testCountAgreesWithPagedResultsForTextQueries() async throws {
+        let fixture = try SearchTemporaryDatabase()
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let values = [
+            "swift actor isolation",
+            "swift concurrency",
+            "actor reentrancy",
+            "clipboard history search",
+            "SWIFT ACTOR",
+            "剪贴板 swift",
+            "unrelated entry",
+        ]
+        for value in values {
+            _ = try await Self.capture(value, in: module)
+        }
+
+        for text in [
+            "swift",
+            "actor",
+            "swift actor",
+            "actor swift",
+            "剪贴板",
+            "sw",
+            "s",
+            "nothingmatchesthis",
+        ] {
+            let query = ClipboardHistoryQuery(text: text)
+            let counted = try await module.count(query)
+            var paged = 0
+            var cursor: ClipboardHistoryCursor?
+            repeat {
+                let page = try await module.page(query, after: cursor)
+                paged += page.entries.count
+                cursor = page.nextCursor
+            } while cursor != nil
+            XCTAssertEqual(counted, paged, "count/page disagree for \(text)")
+        }
+    }
+
+    /// The count path applies the same typed filters as the page path; a
+    /// filtered count that ignored them would read as a plausible number.
+    func testCountRespectsFiltersAlongsideTheTextQuery() async throws {
+        let fixture = try SearchTemporaryDatabase()
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let favoriteID = try await Self.capture(
+            "swift favorite entry",
+            in: module
+        )
+        _ = try await Self.capture("swift plain entry", in: module)
+
+        let query = ClipboardHistoryQuery(text: "swift")
+        let unfiltered = try await module.count(query)
+        XCTAssertEqual(unfiltered, 2)
+
+        _ = try await module.apply(.setFavorite(favoriteID, true))
+        var favoritesOnly = query
+        favoritesOnly.favoritesOnly = true
+        let filtered = try await module.count(favoritesOnly)
+        XCTAssertEqual(filtered, 1)
+        let page = try await module.page(favoritesOnly)
+        XCTAssertEqual(page.entries.map(\.id), [favoriteID])
+    }
+
     /// Ranking packs `matchClass * radix + rankingGroup` into one integer so
     /// SQL's `MIN` can pick a single winning field. A ranking group that
     /// reached the radix would carry into the match class and silently
