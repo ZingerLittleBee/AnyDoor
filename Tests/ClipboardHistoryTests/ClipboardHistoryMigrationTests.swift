@@ -633,6 +633,29 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
         let before = try await module.legacyFileDiagnostics(
             for: ClipboardHistoryEntryID(entryID)
         )
+        let plan = try await module.legacyFileRestorePlan(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        XCTAssertEqual(
+            plan.ownedMembers,
+            [
+                ClipboardHistoryLegacyFileRestoreMember(
+                    id: ClipboardHistoryLegacyFileMemberID(
+                        itemIndex: 0,
+                        memberIndex: 0
+                    ),
+                    suggestedName: firstOriginal.lastPathComponent
+                ),
+                ClipboardHistoryLegacyFileRestoreMember(
+                    id: ClipboardHistoryLegacyFileMemberID(
+                        itemIndex: 1,
+                        memberIndex: 0
+                    ),
+                    suggestedName: secondOriginal.lastPathComponent
+                ),
+            ]
+        )
+        XCTAssertEqual(plan.unavailableCount, 0)
         let restoreRoot = fixture.root.appendingPathComponent("Restored")
         try FileManager.default.createDirectory(
             at: restoreRoot,

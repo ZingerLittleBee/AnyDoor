@@ -110,7 +110,7 @@ extension ClipboardHistoryModule {
         let payloadPaths: [String]
     }
 
-    func setAutomaticImageTextIndexingEnabled(
+    public func setAutomaticImageTextIndexingEnabled(
         _ enabled: Bool
     ) throws {
         let database = try requiredDatabase()
@@ -132,7 +132,7 @@ extension ClipboardHistoryModule {
         automaticImageTextIndexingEnabled = enabled
     }
 
-    func isAutomaticImageTextIndexingEnabled() throws -> Bool {
+    public func isAutomaticImageTextIndexingEnabled() throws -> Bool {
         let database = try requiredDatabase()
         return try database.read {
             try Self.automaticImageTextIndexingSetting(in: $0)

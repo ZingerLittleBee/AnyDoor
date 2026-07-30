@@ -319,9 +319,40 @@ extension ClipboardHistoryModule {
     public func replaceTagDefinitions(
         with tagIDs: Set<String>
     ) throws -> ClipboardHistoryTagDefinitionUpdate {
-        let invalidTagIDs = Set(tagIDs.filter(\.isEmpty))
+        try replaceTagDefinitions(
+            with: tagIDs.sorted().map {
+                ClipboardHistoryTagDefinition(
+                    id: $0,
+                    displayName: $0
+                )
+            }
+        )
+    }
+
+    public func replaceTagDefinitions(
+        with definitions: [ClipboardHistoryTagDefinition]
+    ) throws -> ClipboardHistoryTagDefinitionUpdate {
+        let invalidTagIDs = Set(
+            definitions.map(\.id).filter(\.isEmpty)
+        )
         guard invalidTagIDs.isEmpty else {
-            throw ClipboardHistoryModuleError.invalidTagIDs(invalidTagIDs)
+            throw ClipboardHistoryModuleError.invalidTagIDs(
+                invalidTagIDs
+            )
+        }
+        let tagIDs = Set(definitions.map(\.id))
+        guard tagIDs.count == definitions.count else {
+            throw ClipboardHistoryModuleError.invalidTagIDs(tagIDs)
+        }
+        let names = definitions.map {
+            $0.displayName.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
+        }
+        guard !names.contains(where: \.isEmpty),
+            Set(names).count == names.count
+        else {
+            throw ClipboardHistoryModuleError.invalidTagName
         }
         let database = try requiredDatabase()
         let timestamp = now().timeIntervalSince1970
@@ -376,13 +407,20 @@ extension ClipboardHistoryModule {
                     arguments: [Self.jsonArray(tagIDs)]
                 )
                 try database.execute(sql: "DELETE FROM clipboard_tag_definitions")
-                for tagID in tagIDs.sorted() {
+                for (displayOrder, definition) in
+                    definitions.enumerated()
+                {
                     try database.execute(
                         sql: """
-                            INSERT INTO clipboard_tag_definitions(id)
-                            VALUES (?)
+                            INSERT INTO clipboard_tag_definitions(
+                                id, display_name, display_order
+                            ) VALUES (?, ?, ?)
                             """,
-                        arguments: [tagID]
+                        arguments: [
+                            definition.id,
+                            names[displayOrder],
+                            displayOrder,
+                        ]
                     )
                 }
                 try database.execute(

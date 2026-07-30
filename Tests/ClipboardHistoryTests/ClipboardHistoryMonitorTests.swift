@@ -564,6 +564,39 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testExplicitBaselineAdvanceSkipsUnchangedLivePasteboard()
+        async throws
+    {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        pasteboard.setString("initial", forType: .string)
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+        pasteboard.clearContents()
+        pasteboard.setString(
+            "present while history is cleared",
+            forType: .string
+        )
+
+        monitor.establishBaseline()
+        await monitor.observeForTesting()
+
+        let page = try await module.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
+    }
+
+    @MainActor
     func testGenerationChangeBeforeSnapshotRetriesWithoutMixingSourceAndContent()
         async throws
     {

@@ -1,5 +1,11 @@
 import Foundation
 
+public extension Notification.Name {
+    static let clipboardHistoryV2DidMutate = Notification.Name(
+        "dev.bybee.AnyDoor.clipboardHistoryV2DidMutate"
+    )
+}
+
 public struct ClipboardHistoryEntryID: Hashable, Sendable {
     public let value: UUID
 
@@ -161,6 +167,12 @@ public struct ClipboardHistoryCaptureSource: Equatable, Sendable {
         bundleIdentifier: nil,
         displayName: nil,
         provenance: .unknown
+    )
+
+    public static let anyDoor = Self(
+        bundleIdentifier: "dev.bybee.AnyDoor",
+        displayName: "AnyDoor",
+        provenance: .declared
     )
 }
 
@@ -660,6 +672,41 @@ public struct ClipboardHistoryLegacyFileMemberID:
     public init(itemIndex: Int, memberIndex: Int) {
         self.itemIndex = itemIndex
         self.memberIndex = memberIndex
+    }
+}
+
+public struct ClipboardHistoryLegacyFileRestoreMember:
+    Equatable,
+    Sendable
+{
+    public let id: ClipboardHistoryLegacyFileMemberID
+    public let suggestedName: String
+
+    public init(
+        id: ClipboardHistoryLegacyFileMemberID,
+        suggestedName: String
+    ) {
+        self.id = id
+        self.suggestedName = suggestedName
+    }
+}
+
+public struct ClipboardHistoryLegacyFileRestorePlan:
+    Equatable,
+    Sendable
+{
+    public let entryID: ClipboardHistoryEntryID
+    public let ownedMembers: [ClipboardHistoryLegacyFileRestoreMember]
+    public let unavailableCount: Int
+
+    public init(
+        entryID: ClipboardHistoryEntryID,
+        ownedMembers: [ClipboardHistoryLegacyFileRestoreMember],
+        unavailableCount: Int
+    ) {
+        self.entryID = entryID
+        self.ownedMembers = ownedMembers
+        self.unavailableCount = unavailableCount
     }
 }
 

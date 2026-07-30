@@ -4,6 +4,59 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
+    public func legacyFileRestorePlan(
+        for entryID: ClipboardHistoryEntryID
+    ) throws -> ClipboardHistoryLegacyFileRestorePlan {
+        let database = try requiredDatabase()
+        let rows = try database.read { database in
+            try Row.fetchAll(
+                database,
+                sql: """
+                    SELECT item_index, member_index, display_name,
+                           captured_path, reference_provenance
+                    FROM clipboard_file_members
+                    WHERE entry_id = ?
+                    ORDER BY item_index, member_index
+                    """,
+                arguments: [
+                    entryID.value.uuidString.lowercased()
+                ]
+            )
+        }
+        guard !rows.isEmpty else {
+            throw ClipboardHistoryModuleError.entryNotFound
+        }
+        var ownedMembers:
+            [ClipboardHistoryLegacyFileRestoreMember] = []
+        var unavailableCount = 0
+        for row in rows {
+            let provenance: String = row["reference_provenance"]
+            if provenance == LegacyFileState.legacyOwned.rawValue {
+                let displayName: String = row["display_name"]
+                let capturedPath: String = row["captured_path"]
+                ownedMembers.append(
+                    ClipboardHistoryLegacyFileRestoreMember(
+                        id: ClipboardHistoryLegacyFileMemberID(
+                            itemIndex: row["item_index"],
+                            memberIndex: row["member_index"]
+                        ),
+                        suggestedName: displayName.isEmpty
+                            ? URL(fileURLWithPath: capturedPath)
+                                .lastPathComponent
+                            : displayName
+                    )
+                )
+            } else if provenance == LegacyFileState.unavailable.rawValue {
+                unavailableCount += 1
+            }
+        }
+        return ClipboardHistoryLegacyFileRestorePlan(
+            entryID: entryID,
+            ownedMembers: ownedMembers,
+            unavailableCount: unavailableCount
+        )
+    }
+
     public func restoreLegacyOwnedFiles(
         _ request: ClipboardHistoryLegacyFileRestoreRequest
     ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome {

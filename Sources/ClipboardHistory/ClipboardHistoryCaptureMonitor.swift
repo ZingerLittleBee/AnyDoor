@@ -139,6 +139,11 @@ final class ClipboardHistoryCaptureMonitor {
         self.configuration = configuration
     }
 
+    func establishBaseline() {
+        lastGeneration = pasteboard.changeCount
+        pendingCopyEventSource = nil
+    }
+
     func observeForTesting() async {
         await observe()
     }
@@ -260,6 +265,10 @@ final class ClipboardHistoryCaptureMonitor {
                         observationRequested = true
                     } else if case .captured = outcome {
                         instrumentation.recordCapture()
+                        NotificationCenter.default.post(
+                            name: .clipboardHistoryV2DidMutate,
+                            object: nil
+                        )
                     }
                 } catch {
                     // The module owns operation error presentation. Monitoring

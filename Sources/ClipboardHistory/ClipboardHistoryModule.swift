@@ -329,6 +329,10 @@ public actor ClipboardHistoryModule {
     public func monitorMetrics() -> ClipboardHistoryMonitorMetrics {
         monitorInstrumentation.snapshot()
     }
+
+    public func advanceMonitoringBaseline() async {
+        await captureMonitor?.establishBaseline()
+    }
 }
 
 extension ClipboardHistoryModule {
