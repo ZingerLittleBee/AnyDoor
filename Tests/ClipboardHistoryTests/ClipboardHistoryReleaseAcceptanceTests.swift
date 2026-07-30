@@ -5,6 +5,47 @@ import XCTest
 @testable import ClipboardHistory
 
 final class ClipboardHistoryReleaseAcceptanceTests: XCTestCase {
+    func testRemoveSyntheticGUIFixtureFromDefaultStore() async throws {
+        guard ProcessInfo.processInfo.environment[
+            "CLIPBOARD_HISTORY_REMOVE_GUI_FIXTURE"
+        ] == "1" else {
+            throw XCTSkip(
+                "Set CLIPBOARD_HISTORY_REMOVE_GUI_FIXTURE=1 for explicit cleanup"
+            )
+        }
+        let module = ClipboardHistoryModule()
+        let status = await module.status()
+        guard status.availability == .ready else {
+            print(
+                "CLIPBOARD_HISTORY_GUI_FIXTURE_CLEANUP_SKIPPED="
+                    + "\(String(describing: status.reason))"
+            )
+            return
+        }
+        var removedCount = 0
+        while true {
+            let page = try await module.page(
+                ClipboardHistoryQuery(text: "GUI fixture")
+            )
+            let syntheticEntries = page.entries.filter { entry in
+                entry.previewText?.hasPrefix("GUI fixture ") == true
+                    && (
+                        entry.source.bundleIdentifier == "com.apple.Safari"
+                            || entry.source.bundleIdentifier
+                                == "com.apple.Notes"
+                    )
+            }
+            guard !syntheticEntries.isEmpty else { break }
+            for entry in syntheticEntries {
+                let outcome = try await module.apply(.delete(entry.id))
+                if outcome == .deleted {
+                    removedCount += 1
+                }
+            }
+        }
+        print("CLIPBOARD_HISTORY_GUI_FIXTURE_REMOVED=\(removedCount)")
+    }
+
     func testLargeCorpusSearchAndRetentionCharacterization() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard environment["CLIPBOARD_HISTORY_RELEASE_ACCEPTANCE"] == "1" else {

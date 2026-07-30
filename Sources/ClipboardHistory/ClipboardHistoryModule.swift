@@ -3,8 +3,14 @@ import GRDB
 
 public actor ClipboardHistoryModule {
     public static var defaultStoreRoot: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support")
+        let applicationSupport =
+            FileManager.default.urls(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask
+            ).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support")
+        return applicationSupport
             .appendingPathComponent("dev.bybee.AnyDoor")
             .appendingPathComponent("ClipboardHistory")
     }
@@ -54,7 +60,19 @@ public actor ClipboardHistoryModule {
             suppression: suppression
         )
         let root = Self.defaultStoreRoot
-        let keyStore = ClipboardHistoryKeychainStore()
+        let acceptanceKeychainPath = ProcessInfo.processInfo.environment[
+            "ANYDOOR_CLIPBOARD_HISTORY_ACCEPTANCE_KEYCHAIN_PATH"
+        ]
+        let keyStore = if let acceptanceKeychainPath,
+            !acceptanceKeychainPath.isEmpty
+        {
+            ClipboardHistoryKeychainStore(
+                testingKeychainPath: acceptanceKeychainPath,
+                allowsInteraction: false
+            )
+        } else {
+            ClipboardHistoryKeychainStore()
+        }
         let resolution = Self.resolveStore(
             at: root,
             keyStore: keyStore,

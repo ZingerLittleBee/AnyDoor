@@ -275,6 +275,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["ANYDOOR_OPEN_SETTINGS"] == "1" {
             SettingsOpener.shared.tryOpen()
         }
+        if ProcessInfo.processInfo.environment[
+            "ANYDOOR_OPEN_CLIPBOARD_HISTORY"
+        ] == "1" {
+            ClipboardWallWindowController.shared.toggle()
+        }
     }
 
     @MainActor

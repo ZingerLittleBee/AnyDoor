@@ -1,4 +1,5 @@
 import Foundation
+import ClipboardHistory
 import SwiftData
 import XCTest
 
@@ -27,6 +28,11 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
                 expectedRoot.path
             ),
             "The fixture must never use the real user home"
+        )
+        XCTAssertTrue(
+            ClipboardHistoryModule.defaultStoreRoot.standardizedFileURL.path
+                .hasPrefix(expectedRoot.path),
+            "The v2 store must use the disposable application support root"
         )
 
         let storeDirectory = applicationSupport.appendingPathComponent(
