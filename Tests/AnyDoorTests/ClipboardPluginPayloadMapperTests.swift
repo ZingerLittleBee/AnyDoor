@@ -1,68 +1,89 @@
+import ClipboardHistory
 import PluginInterface
 import XCTest
+
 @testable import AnyDoor
 
-/// Behavioral tests for `ClipboardPluginPayloadMapper` — the Core's pure
-/// mapping from a clipboard-history entry's fields to the neutral payload
-/// handed to Native Plugins. Which payloads expose an action is each plugin's
-/// policy; the mapper only describes the entry.
 final class ClipboardPluginPayloadMapperTests: XCTestCase {
+    func testBitmapDataMapsToNeutralInMemoryPayload() {
+        let data = Data([0x89, 0x50, 0x4E, 0x47])
+        let materialization = ClipboardHistoryMaterialization(
+            items: [
+                ClipboardHistoryMaterializedItem(
+                    representations: [
+                        .data(typeIdentifier: "public.png", data)
+                    ]
+                )
+            ]
+        )
 
-    private let historyDirectory = URL(fileURLWithPath: "/tmp/history")
-
-    private func fileEntry(_ name: String, dir: String = "/tmp") -> ClipboardFileEntry {
-        ClipboardFileEntry(storedName: nil, originalName: name, originalPath: "\(dir)/\(name)")
-    }
-
-    private func payload(
-        kind: ClipboardHistoryKind?,
-        fileName: String? = nil,
-        files: [ClipboardFileEntry] = []
-    ) -> PluginClipboardPayload? {
-        ClipboardPluginPayloadMapper.payload(
-            kind: kind,
-            fileName: fileName,
-            previewTitle: "Shot",
-            files: files,
-            historyDirectory: historyDirectory
+        XCTAssertEqual(
+            ClipboardPluginPayloadMapper.payload(
+                from: materialization,
+                displayName: "Shot"
+            ),
+            .bitmap(data: data, displayName: "Shot")
         )
     }
 
-    func testBitmapKindsMapToStoredBitmapPayload() {
-        for kind in [ClipboardHistoryKind.screenshot, .image] {
-            XCTAssertEqual(
-                payload(kind: kind, fileName: "abc.png"),
-                .bitmap(
-                    fileURL: historyDirectory.appendingPathComponent("abc.png"),
-                    displayName: "Shot"
+    func testFilesMapCurrentURLsInItemAndRepresentationOrder() {
+        let first = file("/tmp/notes.txt")
+        let second = file("/tmp/photo.webp")
+        let materialization = ClipboardHistoryMaterialization(
+            items: [
+                ClipboardHistoryMaterializedItem(
+                    representations: [.file(first)]
                 ),
-                "\(kind) should map to its stored bitmap"
+                ClipboardHistoryMaterializedItem(
+                    representations: [
+                        .text(
+                            typeIdentifier: "public.utf8-plain-text",
+                            value: "ignored"
+                        ),
+                        .file(second),
+                    ]
+                ),
+            ]
+        )
+
+        XCTAssertEqual(
+            ClipboardPluginPayloadMapper.payload(
+                from: materialization,
+                displayName: "Files"
+            ),
+            .files([first.currentURL, second.currentURL])
+        )
+    }
+
+    func testTextOnlyMaterializationHasNoPluginPayload() {
+        let materialization = ClipboardHistoryMaterialization(
+            items: [
+                ClipboardHistoryMaterializedItem(
+                    representations: [
+                        .text(
+                            typeIdentifier: "public.utf8-plain-text",
+                            value: "hello"
+                        )
+                    ]
+                )
+            ]
+        )
+
+        XCTAssertNil(
+            ClipboardPluginPayloadMapper.payload(
+                from: materialization,
+                displayName: "Text"
             )
-        }
-    }
-
-    func testBitmapKindWithoutStoredFileNameKeepsNilURL() {
-        XCTAssertEqual(
-            payload(kind: .screenshot),
-            .bitmap(fileURL: nil, displayName: "Shot")
         )
     }
 
-    func testFileKindMapsOriginalPathsInOrder() {
-        XCTAssertEqual(
-            payload(kind: .file, files: [fileEntry("notes.txt"), fileEntry("photo.webp")]),
-            .files([
-                URL(fileURLWithPath: "/tmp/notes.txt"),
-                URL(fileURLWithPath: "/tmp/photo.webp"),
-            ]),
-            "all files travel, in stored order — image filtering is plugin policy"
+    private func file(
+        _ path: String
+    ) -> ClipboardHistoryMaterializedFileReference {
+        ClipboardHistoryMaterializedFileReference(
+            capturedPath: path,
+            displayName: URL(fileURLWithPath: path).lastPathComponent,
+            currentURL: URL(fileURLWithPath: path)
         )
-    }
-
-    func testOtherKindsHaveNoPayload() {
-        for kind in [ClipboardHistoryKind.text, .ocr, .color, .qrcode] {
-            XCTAssertNil(payload(kind: kind), "\(kind) should contribute no plugin payload")
-        }
-        XCTAssertNil(payload(kind: nil))
     }
 }
