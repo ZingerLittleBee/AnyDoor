@@ -2,6 +2,7 @@ import Foundation
 import LocalAuthentication
 import Security
 import XCTest
+import os
 
 @testable import ClipboardHistory
 
@@ -158,20 +159,6 @@ final class ClipboardHistoryModuleTests: XCTestCase {
             readQuery[kSecUseAuthenticationContext as String] as? LAContext
         )
         XCTAssertEqual(context?.interactionNotAllowed, false)
-        XCTAssertEqual(
-            ClipboardHistoryKeychainStore.crossIdentityAccess(
-                creator: .development,
-                accessor: .installed
-            ),
-            .mayPrompt
-        )
-        XCTAssertEqual(
-            ClipboardHistoryKeychainStore.crossIdentityAccess(
-                creator: .installed,
-                accessor: .development
-            ),
-            .mayPrompt
-        )
     }
 
     func testLockedKeychainPausesWithoutCreatingStoreAndRetryResumes() async throws {
@@ -329,54 +316,148 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertEqual(keyStore.deleteCallCount, 0)
     }
 
-    func testPinnedStoreOpensAcrossDevelopmentAndInstalledIdentityOrders() async throws {
-        for identities in [
-            (
-                ClipboardHistoryKeychainStore.ProcessIdentity.development,
-                ClipboardHistoryKeychainStore.ProcessIdentity.installed
-            ),
-            (
-                ClipboardHistoryKeychainStore.ProcessIdentity.installed,
-                ClipboardHistoryKeychainStore.ProcessIdentity.development
-            ),
+    func testProductionKeychainCrossIdentityACLBoundary() throws {
+        if ProcessInfo.processInfo.environment[
+            KeychainCrossIdentityHarness.childModeEnvironment
+        ] != nil {
+            throw XCTSkip("Parent-only cross-identity orchestration test")
+        }
+
+        let harness = try KeychainCrossIdentityHarness(
+            testBundle: Bundle(for: Self.self).bundleURL,
+            xctestExecutable: URL(
+                fileURLWithPath: ProcessInfo.processInfo.arguments[0]
+            ).resolvingSymlinksInPath()
+        )
+        XCTAssertNotEqual(
+            harness.developmentDesignatedRequirement,
+            harness.installedDesignatedRequirement
+        )
+
+        let allowsInteraction =
+            ProcessInfo.processInfo.environment[
+                "ANYDOOR_RUN_INTERACTIVE_KEYCHAIN_ACL"
+            ] == "1"
+        for order in [
+            (harness.developmentExecutable, harness.installedExecutable),
+            (harness.installedExecutable, harness.developmentExecutable),
         ] {
-            let fixture = try TemporaryStore()
-            let keyStore = TestMasterKeyStore(
-                loadResult: .missing,
-                keyToCreate: Data(repeating: 0xC7, count: 32)
+            let fixture = try TemporaryCrossIdentityFixture()
+            let creator = try harness.run(
+                executable: order.0,
+                mode: .create,
+                fixture: fixture,
+                allowsInteraction: false
             )
-            let creator = ClipboardHistoryModule(
-                testingStoreRoot: fixture.url,
-                keyStore: keyStore
+            XCTAssertEqual(creator.masterKeyResult, .key)
+            XCTAssertEqual(creator.availability, "ready")
+            XCTAssertEqual(creator.entryCount, 1)
+
+            let databaseURL = fixture.storeRoot.appendingPathComponent(
+                "history.sqlite"
             )
-            _ = try await creator.capture(
+            let databaseBefore = try Data(contentsOf: databaseURL)
+            let accessor = try harness.run(
+                executable: order.1,
+                mode: .access,
+                fixture: fixture,
+                allowsInteraction: allowsInteraction
+            )
+            if allowsInteraction {
+                XCTAssertEqual(accessor.masterKeyResult, .key)
+                XCTAssertEqual(accessor.availability, "ready")
+                XCTAssertEqual(accessor.entryCount, 1)
+            } else {
+                XCTAssertTrue(accessor.keychainWasUnlocked)
+                XCTAssertEqual(
+                    accessor.masterKeyResult,
+                    .accessDenied
+                )
+                XCTAssertEqual(accessor.availability, "unavailable")
+                XCTAssertEqual(accessor.reason, "keyAccessDenied")
+                XCTAssertEqual(accessor.entryCount, 0)
+                XCTAssertEqual(
+                    try Data(contentsOf: databaseURL),
+                    databaseBefore
+                )
+            }
+        }
+    }
+
+    func testProductionKeychainCrossIdentityChildProbe() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard
+            let modeValue = environment[
+                KeychainCrossIdentityHarness.childModeEnvironment
+            ],
+            let mode = KeychainCrossIdentityHarness.Mode(rawValue: modeValue),
+            let keychainPath = environment[
+                KeychainCrossIdentityHarness.keychainPathEnvironment
+            ],
+            let keychainPassword = environment[
+                KeychainCrossIdentityHarness.keychainPasswordEnvironment
+            ],
+            let storePath = environment[
+                KeychainCrossIdentityHarness.storePathEnvironment
+            ],
+            let resultPath = environment[
+                KeychainCrossIdentityHarness.resultPathEnvironment
+            ]
+        else {
+            throw XCTSkip("Child-only cross-identity probe")
+        }
+
+        try CommandRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/security"),
+            arguments: [
+                "unlock-keychain",
+                "-p",
+                keychainPassword,
+                keychainPath,
+            ]
+        )
+        let keyStore = ClipboardHistoryKeychainStore(
+            testingKeychainPath: keychainPath,
+            allowsInteraction: environment[
+                KeychainCrossIdentityHarness.interactionEnvironment
+            ] == "1"
+        )
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: URL(fileURLWithPath: storePath),
+            keyStore: keyStore
+        )
+        if mode == .create {
+            _ = try await module.capture(
                 ClipboardHistoryCaptureRequest(
                     source: ClipboardHistoryCaptureSource(
-                        bundleIdentifier: nil,
-                        displayName: nil
+                        bundleIdentifier: "dev.bybee.AnyDoor.keychain-harness",
+                        displayName: "Keychain Harness"
                     ),
-                    content: .text("shared identity store")
+                    content: .text("cross-identity encrypted store")
                 )
             )
-            try await creator.closeStoreForTesting()
-
-            XCTAssertEqual(
-                ClipboardHistoryKeychainStore.crossIdentityAccess(
-                    creator: identities.0,
-                    accessor: identities.1
-                ),
-                .mayPrompt
-            )
-            let accessor = ClipboardHistoryModule(
-                testingStoreRoot: fixture.url,
-                keyStore: keyStore
-            )
-            let page = try await accessor.page(ClipboardHistoryQuery())
-            XCTAssertEqual(page.entries.count, 1)
-            XCTAssertEqual(page.entries[0].previewText, "shared identity store")
-            XCTAssertEqual(keyStore.createCallCount, 1)
-            try await accessor.closeStoreForTesting()
         }
+        let status = await module.status()
+        let entries: Int
+        if status.availability == .ready {
+            entries = try await module.page(ClipboardHistoryQuery()).entries.count
+            try await module.closeStoreForTesting()
+        } else {
+            entries = 0
+        }
+        let result = KeychainCrossIdentityProbeResult(
+            masterKeyResult: KeychainCrossIdentityProbeResult.MasterKeyResult(
+                keyStore.load()
+            ),
+            availability: status.availability.harnessValue,
+            reason: status.reason?.harnessValue,
+            entryCount: entries,
+            keychainWasUnlocked: true
+        )
+        try JSONEncoder().encode(result).write(
+            to: URL(fileURLWithPath: resultPath),
+            options: .atomic
+        )
     }
 
     func testBitmapAndThumbnailPublishEncryptedBeforeReferenceAndMaterializeInMemory() async throws
@@ -419,6 +500,49 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertEqual(preview.singleDataRepresentation, plaintext)
     }
 
+    func testPayloadAuthenticationFaultDisablesOnlyThatPayloadAction() async throws {
+        let fixture = try TemporaryStore()
+        let keyStore = TestMasterKeyStore(
+            loadResult: .missing,
+            keyToCreate: Data(repeating: 0x62, count: 32)
+        )
+        let writer = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: keyStore
+        )
+        let plaintext = Data("authenticated bitmap".utf8)
+        let outcome = try await writer.capture(bitmapRequest(plaintext))
+        try await writer.closeStoreForTesting()
+
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: keyStore,
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.payloadAuthentication]
+            )
+        )
+
+        do {
+            _ = try await module.materialize(
+                ClipboardHistoryMaterializationRequest(
+                    entryID: outcome.entryID,
+                    purpose: .normalPaste
+                )
+            )
+            XCTFail("Expected payload authentication failure")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .payloadAuthenticationFailed(outcome.entryID)
+            )
+        }
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        let status = await module.status()
+        XCTAssertEqual(page.entries.count, 1)
+        XCTAssertEqual(status.availability, .ready)
+    }
+
     func testCorruptBitmapDisablesOnlyThatPayloadAction() async throws {
         let fixture = try TemporaryStore()
         let module = makeReadyModule(in: fixture)
@@ -426,7 +550,8 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         let outcome = try await module.capture(bitmapRequest(plaintext))
         let bitmap = try XCTUnwrap(
             fixture.payloadFiles().first(where: {
-                (try? Data(contentsOf: $0)[9]) == ClipboardHistoryPayloadKind.bitmap.rawValue
+                (try? Data(contentsOf: $0)[9])
+                    == ClipboardHistoryPayloadKind.bitmap.rawValue
             })
         )
         var corrupt = try Data(contentsOf: bitmap)
@@ -525,6 +650,12 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(deletion, .deleted)
         XCTAssertEqual(page.entries, [])
+        XCTAssertEqual(try fixture.payloadFiles().count, 2)
+
+        let reclamation = await module.awaitPendingReclamation()
+        XCTAssertEqual(reclamation.attemptedPayloadCount, 2)
+        XCTAssertEqual(reclamation.reclaimedPayloadCount, 0)
+        XCTAssertEqual(reclamation.failedPayloadCount, 2)
         XCTAssertEqual(try fixture.payloadFiles().count, 2)
 
         let report = try await module.performMaintenance(orphanGracePeriod: 0)
@@ -709,47 +840,390 @@ private final class TemporaryStore {
     }
 }
 
-private final class TestMasterKeyStore:
-    ClipboardHistoryMasterKeyStoring,
-    @unchecked Sendable
-{
-    var loadResult: ClipboardHistoryMasterKeyResult
-    private var keysToCreate: [Data]
-    private(set) var createCallCount = 0
-    private(set) var deleteCallCount = 0
+private struct KeychainCrossIdentityProbeResult: Codable, Equatable {
+    enum MasterKeyResult: String, Codable {
+        case key
+        case missing
+        case locked
+        case interactionRequired
+        case accessDenied
+        case failure
+
+        init(_ result: ClipboardHistoryMasterKeyResult) {
+            switch result {
+            case .key:
+                self = .key
+            case .missing:
+                self = .missing
+            case .locked:
+                self = .locked
+            case .interactionRequired:
+                self = .interactionRequired
+            case .accessDenied:
+                self = .accessDenied
+            case .failure:
+                self = .failure
+            }
+        }
+    }
+
+    let masterKeyResult: MasterKeyResult
+    let availability: String
+    let reason: String?
+    let entryCount: Int
+    let keychainWasUnlocked: Bool
+}
+
+private final class TemporaryCrossIdentityFixture {
+    let root: URL
+    let storeRoot: URL
+    let keychainURL: URL
+    let keychainPassword = "AnyDoor-ClipboardHistory-Test-Keychain"
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "AnyDoor-KeychainCrossIdentity-\(UUID().uuidString)"
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        storeRoot = root.appendingPathComponent("ClipboardHistory")
+        keychainURL = root.appendingPathComponent("integration.keychain-db")
+        try CommandRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/security"),
+            arguments: [
+                "create-keychain",
+                "-p",
+                keychainPassword,
+                keychainURL.path,
+            ]
+        )
+        try CommandRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/security"),
+            arguments: [
+                "set-keychain-settings",
+                "-lut",
+                "21600",
+                keychainURL.path,
+            ]
+        )
+    }
+
+    deinit {
+        _ = try? CommandRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/security"),
+            arguments: ["delete-keychain", keychainURL.path]
+        )
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private final class KeychainCrossIdentityHarness {
+    enum Mode: String {
+        case create
+        case access
+    }
+
+    static let childModeEnvironment =
+        "ANYDOOR_KEYCHAIN_CROSS_IDENTITY_CHILD_MODE"
+    static let keychainPathEnvironment =
+        "ANYDOOR_KEYCHAIN_CROSS_IDENTITY_KEYCHAIN_PATH"
+    static let keychainPasswordEnvironment =
+        "ANYDOOR_KEYCHAIN_CROSS_IDENTITY_KEYCHAIN_PASSWORD"
+    static let storePathEnvironment =
+        "ANYDOOR_KEYCHAIN_CROSS_IDENTITY_STORE_PATH"
+    static let resultPathEnvironment =
+        "ANYDOOR_KEYCHAIN_CROSS_IDENTITY_RESULT_PATH"
+    static let interactionEnvironment =
+        "ANYDOOR_KEYCHAIN_CROSS_IDENTITY_ALLOW_INTERACTION"
+
+    let developmentExecutable: URL
+    let installedExecutable: URL
+    let developmentDesignatedRequirement: String
+    let installedDesignatedRequirement: String
+
+    private let root: URL
+    private let testBundle: URL
+
+    init(testBundle: URL, xctestExecutable: URL) throws {
+        self.testBundle = testBundle
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "AnyDoor-XCTestIdentities-\(UUID().uuidString)"
+        )
+        let sourceLibraryRoot =
+            xctestExecutable
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceDeveloperRoot = sourceLibraryRoot.deletingLastPathComponent()
+        let identityDirectory = root.appendingPathComponent(
+            "Developer/Library/Xcode/Agents"
+        )
+        try FileManager.default.createDirectory(
+            at: identityDirectory,
+            withIntermediateDirectories: true
+        )
+        let libraryRoot = root.appendingPathComponent("Developer/Library")
+        for directory in ["Frameworks", "PrivateFrameworks"] {
+            let source = sourceLibraryRoot.appendingPathComponent(directory)
+            if FileManager.default.fileExists(atPath: source.path) {
+                try FileManager.default.createSymbolicLink(
+                    at: libraryRoot.appendingPathComponent(directory),
+                    withDestinationURL: source
+                )
+            }
+        }
+        let developerUSR = root.appendingPathComponent("Developer/usr")
+        try FileManager.default.createDirectory(
+            at: developerUSR,
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(
+            at: developerUSR.appendingPathComponent("lib"),
+            withDestinationURL: sourceDeveloperRoot.appendingPathComponent(
+                "usr/lib"
+            )
+        )
+
+        developmentExecutable = identityDirectory.appendingPathComponent(
+            "clipboard-keychain-development"
+        )
+        installedExecutable = identityDirectory.appendingPathComponent(
+            "clipboard-keychain-installed"
+        )
+        try FileManager.default.copyItem(
+            at: xctestExecutable,
+            to: developmentExecutable
+        )
+        try FileManager.default.copyItem(
+            at: xctestExecutable,
+            to: installedExecutable
+        )
+        try Self.sign(
+            developmentExecutable,
+            identifier:
+                "dev.bybee.AnyDoor.KeychainHarness.Development"
+        )
+        try Self.sign(
+            installedExecutable,
+            identifier: "dev.bybee.AnyDoor.KeychainHarness.Installed"
+        )
+        developmentDesignatedRequirement = try Self.designatedRequirement(
+            developmentExecutable
+        )
+        installedDesignatedRequirement = try Self.designatedRequirement(
+            installedExecutable
+        )
+    }
+
+    deinit {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func run(
+        executable: URL,
+        mode: Mode,
+        fixture: TemporaryCrossIdentityFixture,
+        allowsInteraction: Bool
+    ) throws -> KeychainCrossIdentityProbeResult {
+        let resultURL = fixture.root.appendingPathComponent(
+            "\(UUID().uuidString).json"
+        )
+        var environment = ProcessInfo.processInfo.environment
+        environment[Self.childModeEnvironment] = mode.rawValue
+        environment[Self.keychainPathEnvironment] = fixture.keychainURL.path
+        environment[Self.keychainPasswordEnvironment] =
+            fixture.keychainPassword
+        environment[Self.storePathEnvironment] = fixture.storeRoot.path
+        environment[Self.resultPathEnvironment] = resultURL.path
+        environment[Self.interactionEnvironment] =
+            allowsInteraction ? "1" : "0"
+        try CommandRunner.run(
+            executable: executable,
+            arguments: [
+                "-XCTest",
+                "ClipboardHistoryModuleTests/"
+                    + "testProductionKeychainCrossIdentityChildProbe",
+                testBundle.path,
+            ],
+            environment: environment
+        )
+        return try JSONDecoder().decode(
+            KeychainCrossIdentityProbeResult.self,
+            from: Data(contentsOf: resultURL)
+        )
+    }
+
+    private static func sign(_ executable: URL, identifier: String) throws {
+        try CommandRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/codesign"),
+            arguments: [
+                "--force",
+                "--sign",
+                "-",
+                "--identifier",
+                identifier,
+                executable.path,
+            ]
+        )
+    }
+
+    private static func designatedRequirement(
+        _ executable: URL
+    ) throws -> String {
+        try CommandRunner.run(
+            executable: URL(fileURLWithPath: "/usr/bin/codesign"),
+            arguments: ["--display", "--requirements", "-", executable.path]
+        )
+    }
+}
+
+private enum CommandRunner {
+    struct Failure: Error, CustomStringConvertible {
+        let command: String
+        let status: Int32
+        let output: String
+
+        var description: String {
+            "\(command) exited \(status): \(output)"
+        }
+    }
+
+    @discardableResult
+    static func run(
+        executable: URL,
+        arguments: [String],
+        environment: [String: String]? = nil
+    ) throws -> String {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.environment = environment
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        process.waitUntilExit()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let text = String(decoding: data, as: UTF8.self)
+        guard process.terminationStatus == 0 else {
+            throw Failure(
+                command: ([executable.path] + arguments)
+                    .joined(separator: " "),
+                status: process.terminationStatus,
+                output: text
+            )
+        }
+        return text
+    }
+}
+
+extension ClipboardHistoryStatus.Availability {
+    fileprivate var harnessValue: String {
+        switch self {
+        case .ready:
+            "ready"
+        case .paused:
+            "paused"
+        case .unavailable:
+            "unavailable"
+        }
+    }
+}
+
+extension ClipboardHistoryStatus.AvailabilityReason {
+    fileprivate var harnessValue: String {
+        switch self {
+        case .keychainLocked:
+            "keychainLocked"
+        case .missingKey:
+            "missingKey"
+        case .keyAccessDenied:
+            "keyAccessDenied"
+        case .keychainFailure:
+            "keychainFailure"
+        case .databaseAuthenticationFailed:
+            "databaseAuthenticationFailed"
+        case .databaseCorrupt:
+            "databaseCorrupt"
+        case .databaseIntegrityFailed:
+            "databaseIntegrityFailed"
+        case .storeIOFailure:
+            "storeIOFailure"
+        }
+    }
+}
+
+private final class TestMasterKeyStore: ClipboardHistoryMasterKeyStoring, Sendable {
+    private struct State: Sendable {
+        var loadResult: ClipboardHistoryMasterKeyResult
+        var keysToCreate: [Data]
+        var createCallCount = 0
+        var deleteCallCount = 0
+    }
+
+    private let state: OSAllocatedUnfairLock<State>
+
+    var loadResult: ClipboardHistoryMasterKeyResult {
+        get { state.withLock { $0.loadResult } }
+        set { state.withLock { $0.loadResult = newValue } }
+    }
+
+    var createCallCount: Int {
+        state.withLock { $0.createCallCount }
+    }
+
+    var deleteCallCount: Int {
+        state.withLock { $0.deleteCallCount }
+    }
 
     init(
         loadResult: ClipboardHistoryMasterKeyResult,
         keyToCreate: Data? = nil
     ) {
-        self.loadResult = loadResult
-        keysToCreate = keyToCreate.map { [$0] } ?? []
+        state = OSAllocatedUnfairLock(
+            initialState: State(
+                loadResult: loadResult,
+                keysToCreate: keyToCreate.map { [$0] } ?? []
+            )
+        )
     }
 
     init(
         loadResult: ClipboardHistoryMasterKeyResult,
         keysToCreate: [Data]
     ) {
-        self.loadResult = loadResult
-        self.keysToCreate = keysToCreate
+        state = OSAllocatedUnfairLock(
+            initialState: State(
+                loadResult: loadResult,
+                keysToCreate: keysToCreate
+            )
+        )
     }
 
     func load() -> ClipboardHistoryMasterKeyResult {
-        loadResult
+        state.withLock { $0.loadResult }
     }
 
     func create() -> ClipboardHistoryMasterKeyResult {
-        createCallCount += 1
-        guard !keysToCreate.isEmpty else { return .failure(errSecAllocate) }
-        let key = keysToCreate.removeFirst()
-        loadResult = .key(key)
-        return .key(key)
+        state.withLock {
+            $0.createCallCount += 1
+            guard !$0.keysToCreate.isEmpty else {
+                return .failure(errSecAllocate)
+            }
+            let key = $0.keysToCreate.removeFirst()
+            $0.loadResult = .key(key)
+            return .key(key)
+        }
     }
 
     func delete() -> ClipboardHistoryMasterKeyResult {
-        deleteCallCount += 1
-        loadResult = .missing
-        return .missing
+        state.withLock {
+            $0.deleteCallCount += 1
+            $0.loadResult = .missing
+            return .missing
+        }
     }
 }
 

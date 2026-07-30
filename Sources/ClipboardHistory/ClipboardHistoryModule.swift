@@ -14,6 +14,7 @@ public actor ClipboardHistoryModule {
     let storeRoot: URL
     let keyStore: (any ClipboardHistoryMasterKeyStoring)?
     let faultInjector: ClipboardHistoryFaultInjector
+    let payloadReclaimer = ClipboardHistoryPayloadReclaimer()
     let now: @Sendable () -> Date
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
@@ -260,6 +261,8 @@ extension ClipboardHistoryModule {
                 masterKey = key
             case .locked:
                 return paused(.keychainLocked)
+            case .interactionRequired:
+                return unavailable(.keyAccessDenied)
             case .accessDenied:
                 return unavailable(.keyAccessDenied)
             case .missing:
@@ -269,6 +272,8 @@ extension ClipboardHistoryModule {
             }
         case .locked:
             return paused(.keychainLocked)
+        case .interactionRequired:
+            return unavailable(.keyAccessDenied)
         case .accessDenied:
             return unavailable(.keyAccessDenied)
         case .failure:

@@ -150,11 +150,11 @@ extension ClipboardHistoryModule {
 
     public func apply(
         _ mutation: ClipboardHistoryMutation
-    ) throws -> ClipboardHistoryMutationOutcome {
+    ) async throws -> ClipboardHistoryMutationOutcome {
         let database = try requiredDatabase()
         switch mutation {
         case .delete(let entryID):
-            return try delete(entryID, from: database)
+            return try await delete(entryID, from: database)
         case .setFavorite, .setTags, .editText:
             throw ClipboardHistoryModuleError.operationUnavailable
         }
@@ -348,6 +348,12 @@ extension ClipboardHistoryModule {
             return 0
         }
         return try allocatedSize(of: storeRoot)
+    }
+
+    func awaitPendingReclamation() async
+        -> ClipboardHistoryReclamationReport
+    {
+        await payloadReclaimer.drain()
     }
 
     public func reset(
@@ -549,9 +555,10 @@ extension ClipboardHistoryModule {
     fileprivate func delete(
         _ entryID: ClipboardHistoryEntryID,
         from database: DatabasePool
-    ) throws -> ClipboardHistoryMutationOutcome {
+    ) async throws -> ClipboardHistoryMutationOutcome {
         let storedID = entryID.value.uuidString.lowercased()
-        let payloads: [(id: String, path: String)] = try database.read { database in
+        let payloads: [(id: String, path: String)] = try await database.read {
+            database in
             try Row.fetchAll(
                 database,
                 sql: """
@@ -574,7 +581,7 @@ extension ClipboardHistoryModule {
                 arguments: [storedID, storedID, storedID]
             ).map { ($0["id"], $0["relative_path"]) }
         }
-        let deleted = try database.write { database in
+        let deleted = try await database.write { database in
             try database.execute(
                 sql: "DELETE FROM clipboard_entries WHERE id = ?",
                 arguments: [storedID]
@@ -591,12 +598,10 @@ extension ClipboardHistoryModule {
         guard deleted else { return .notFound }
 
         if let payloadStore = try? requiredPayloadStore() {
-            let paths = payloads.map(\.path)
-            Task.detached(priority: .utility) {
-                for path in paths {
-                    try? payloadStore.delete(relativePath: path)
-                }
-            }
+            await payloadReclaimer.enqueue(
+                paths: payloads.map(\.path),
+                in: payloadStore
+            )
         }
         return .deleted
     }
@@ -612,7 +617,8 @@ extension ClipboardHistoryModule {
                 expectedKind: kind
             )
         } catch ClipboardHistoryStorageError.payloadAuthenticationFailed,
-            ClipboardHistoryStorageError.invalidPayloadEnvelope
+            ClipboardHistoryStorageError.invalidPayloadEnvelope,
+            ClipboardHistoryStorageError.injected(.payloadAuthentication)
         {
             throw ClipboardHistoryModuleError.payloadAuthenticationFailed(
                 entryID
@@ -628,7 +634,8 @@ extension ClipboardHistoryModule {
     ) -> ClipboardHistoryModuleError {
         switch error {
         case ClipboardHistoryStorageError.payloadAuthenticationFailed,
-            ClipboardHistoryStorageError.invalidPayloadEnvelope:
+            ClipboardHistoryStorageError.invalidPayloadEnvelope,
+            ClipboardHistoryStorageError.injected(.payloadAuthentication):
             .payloadAuthenticationFailed(entryID)
         case is ClipboardHistoryStorageError:
             .storageFailure

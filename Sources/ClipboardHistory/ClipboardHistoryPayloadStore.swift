@@ -21,6 +21,7 @@ enum ClipboardHistoryPayloadKind: UInt8, Sendable {
 
 enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case payloadWrite
+    case payloadAuthentication
     case payloadDurability
     case payloadPublication
     case databaseTransaction
@@ -256,6 +257,7 @@ struct ClipboardHistoryPayloadStore: Sendable {
                 ciphertext: envelope[(headerCount + nonceCount)..<tagStart],
                 tag: envelope[tagStart...]
             )
+            try faultInjector.check(.payloadAuthentication)
             return try AES.GCM.open(
                 sealed,
                 using: SymmetricKey(data: key),
@@ -325,5 +327,71 @@ struct ClipboardHistoryPayloadStore: Sendable {
     private static func isSafePayloadName(_ name: String) -> Bool {
         !name.isEmpty && name == URL(fileURLWithPath: name).lastPathComponent
             && name.hasSuffix(".payload")
+    }
+}
+
+struct ClipboardHistoryReclamationReport: Equatable, Sendable {
+    var attemptedPayloadCount = 0
+    var reclaimedPayloadCount = 0
+    var failedPayloadCount = 0
+
+    mutating func merge(_ other: Self) {
+        attemptedPayloadCount += other.attemptedPayloadCount
+        reclaimedPayloadCount += other.reclaimedPayloadCount
+        failedPayloadCount += other.failedPayloadCount
+    }
+}
+
+actor ClipboardHistoryPayloadReclaimer {
+    private var pending: [UUID: Task<ClipboardHistoryReclamationReport, Never>] = [:]
+    private var completed = ClipboardHistoryReclamationReport()
+
+    func enqueue(
+        paths: [String],
+        in payloadStore: ClipboardHistoryPayloadStore
+    ) {
+        guard !paths.isEmpty else { return }
+        let identifier = UUID()
+        let task = Task.detached(priority: .utility) {
+            var report = ClipboardHistoryReclamationReport()
+            for path in paths {
+                report.attemptedPayloadCount += 1
+                do {
+                    try payloadStore.delete(relativePath: path)
+                    report.reclaimedPayloadCount += 1
+                } catch {
+                    report.failedPayloadCount += 1
+                }
+            }
+            return report
+        }
+        pending[identifier] = task
+        Task { @concurrent [weak self] in
+            let report = await task.value
+            await self?.finish(identifier, report: report)
+        }
+    }
+
+    func drain() async -> ClipboardHistoryReclamationReport {
+        while !pending.isEmpty {
+            let snapshot = pending
+            for (identifier, task) in snapshot {
+                let report = await task.value
+                finish(identifier, report: report)
+            }
+        }
+        let report = completed
+        completed = ClipboardHistoryReclamationReport()
+        return report
+    }
+
+    private func finish(
+        _ identifier: UUID,
+        report: ClipboardHistoryReclamationReport
+    ) {
+        guard pending.removeValue(forKey: identifier) != nil else {
+            return
+        }
+        completed.merge(report)
     }
 }
