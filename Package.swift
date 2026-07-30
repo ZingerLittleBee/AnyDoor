@@ -188,7 +188,8 @@ let package = Package(
             name: "AnyDoorTests",
             dependencies: [
                 .product(name: "Clocks", package: "swift-clocks"),
-                "AnyDoor", "ImageCodec", "PluginInterface", "PluginSupport",
+                "AnyDoor", "ClipboardHistory", "ImageCodec",
+                "PluginInterface", "PluginSupport",
                 "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime",
             ],
             resources: [.process("Fixtures")],
