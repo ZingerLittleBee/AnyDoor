@@ -152,10 +152,18 @@ enum ClipboardHistoryLegacyAdapter {
             defaults.object(forKey: ClipboardPreferences.retentionKey)
                 as? Int ?? ClipboardRetention.thirtyDays.rawValue
         switch ClipboardRetention(rawValue: rawValue) ?? .thirtyDays {
+        case .oneDay:
+            return .oneDay
         case .sevenDays:
             return .sevenDays
         case .thirtyDays:
             return .thirtyDays
+        case .ninetyDays:
+            return .ninetyDays
+        case .oneHundredEightyDays:
+            return .oneHundredEightyDays
+        case .threeHundredSixtyFiveDays:
+            return .threeHundredSixtyFiveDays
         case .unlimited:
             return .unlimited
         }
