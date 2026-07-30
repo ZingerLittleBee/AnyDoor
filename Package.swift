@@ -197,7 +197,10 @@ let package = Package(
         ),
         .testTarget(
             name: "ClipboardHistoryTests",
-            dependencies: ["ClipboardHistory"],
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+                "ClipboardHistory",
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

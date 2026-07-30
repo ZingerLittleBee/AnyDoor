@@ -290,7 +290,7 @@ extension ClipboardHistoryModule {
 }
 
 extension ClipboardHistoryModule {
-    fileprivate struct PasteboardSnapshot: Sendable {
+    struct PasteboardSnapshot: Sendable {
         static let maximumByteCount = 128 * 1_024 * 1_024
         static let maximumPixelCount = 64 * 1_000_000
         static let richTextTypes: [NSPasteboard.PasteboardType] = [
@@ -345,6 +345,10 @@ extension ClipboardHistoryModule {
         source: ClipboardHistoryCaptureSource
     ) throws -> ClipboardHistoryCaptureOutcome {
         let database = try requiredDatabase()
+        let identity = try CanonicalIdentity(
+            snapshot: snapshot,
+            fingerprintDigest: fingerprintDigest
+        )
         let entryID = ClipboardHistoryEntryID(UUID())
         let capturedAt = now()
         let storedID = entryID.value.uuidString.lowercased()
@@ -366,6 +370,26 @@ extension ClipboardHistoryModule {
             .first
         let facets = deriveTextFacets(from: snapshot)
         let payloadStore = try requiredPayloadStore()
+        if duplicateReuseEnabled,
+            let reusedEntryID = try reusableEntry(
+                matching: identity,
+                source: source,
+                capturedAt: capturedAt,
+                containsBitmap: snapshot.items
+                    .flatMap(\.representations)
+                    .contains { representation in
+                        if case .bitmap = representation {
+                            return true
+                        }
+                        return false
+                    },
+                refreshOCRBudget: automaticImageTextIndexingEnabled,
+                database: database,
+                payloadStore: payloadStore
+            )
+        {
+            return ClipboardHistoryCaptureOutcome(entryID: reusedEntryID)
+        }
         var publishedBitmaps: [
             RepresentationPosition: (
                 bitmap: ClipboardHistoryPublishedPayload,
@@ -619,6 +643,20 @@ extension ClipboardHistoryModule {
                         """,
                     arguments: [storedID, capturedAt.timeIntervalSince1970]
                 )
+                try database.execute(
+                    sql: """
+                        INSERT INTO clipboard_duplicate_candidates(
+                            fingerprint, entry_id, canonical_byte_count,
+                            created_at
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                    arguments: [
+                        identity.fingerprint,
+                        storedID,
+                        identity.canonicalByteCount,
+                        capturedAt.timeIntervalSince1970,
+                    ]
+                )
                 try faultInjector.check(.databaseTransaction)
             }
         } catch {
@@ -772,7 +810,7 @@ extension ClipboardHistoryModule {
         )
     }
 
-    fileprivate static func normalizedColor(from data: Data) -> String? {
+    static func normalizedColor(from data: Data) -> String? {
         guard let color = NSColor(
             pasteboardPropertyList: data,
             ofType: .color

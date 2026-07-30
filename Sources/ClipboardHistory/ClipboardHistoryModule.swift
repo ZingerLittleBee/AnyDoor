@@ -16,6 +16,9 @@ public actor ClipboardHistoryModule {
     let faultInjector: ClipboardHistoryFaultInjector
     let payloadReclaimer = ClipboardHistoryPayloadReclaimer()
     let now: @Sendable () -> Date
+    let fingerprintDigest: @Sendable (Data) -> Data
+    let duplicateReuseEnabled: Bool
+    var automaticImageTextIndexingEnabled = false
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
@@ -28,6 +31,8 @@ public actor ClipboardHistoryModule {
         self.keyStore = keyStore
         faultInjector = ClipboardHistoryFaultInjector()
         now = Date.init
+        fingerprintDigest = CanonicalIdentity.sha256
+        duplicateReuseEnabled = true
         database = resolution.database
         derivedKeys = resolution.keys
         availability = resolution.availability
@@ -39,6 +44,8 @@ public actor ClipboardHistoryModule {
         keyStore = nil
         faultInjector = ClipboardHistoryFaultInjector()
         now = Date.init
+        fingerprintDigest = CanonicalIdentity.sha256
+        duplicateReuseEnabled = true
         try Self.prepareStoreDirectories(at: storeRoot)
         database = try Self.openDatabase(
             at: testingDatabaseURL,
@@ -61,7 +68,10 @@ public actor ClipboardHistoryModule {
         keyStore: any ClipboardHistoryMasterKeyStoring,
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector(),
-        now: @escaping @Sendable () -> Date = Date.init
+        now: @escaping @Sendable () -> Date = Date.init,
+        fingerprintDigest: @escaping @Sendable (Data) -> Data =
+            CanonicalIdentity.sha256,
+        duplicateReuseEnabled: Bool = true
     ) {
         let resolution = Self.resolveStore(
             at: testingStoreRoot,
@@ -71,6 +81,8 @@ public actor ClipboardHistoryModule {
         self.keyStore = keyStore
         self.faultInjector = faultInjector
         self.now = now
+        self.fingerprintDigest = fingerprintDigest
+        self.duplicateReuseEnabled = duplicateReuseEnabled
         database = resolution.database
         derivedKeys = resolution.keys
         availability = resolution.availability
