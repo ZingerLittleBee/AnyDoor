@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 import GRDB
 
@@ -17,6 +18,7 @@ extension ClipboardHistoryModule {
                         member.member_index,
                         member.current_path,
                         member.reference_provenance,
+                        member.bookmark_data,
                         member.payload_id,
                         payload.relative_path AS payload_path,
                         payload.kind AS payload_kind
@@ -42,21 +44,10 @@ extension ClipboardHistoryModule {
             guard
                 request.destinations.count == destinations.count,
                 request.destinations.count > 0,
-                request.destinations.allSatisfy({ destination in
-                    guard
-                        destination.collisionPolicy == .reuseIfIdentical,
-                        let member = storedMembers.first(where: {
-                            $0.id == destination.memberID
-                        }),
-                        member.provenance == LegacyFileState.ordinary.rawValue,
-                        let currentPath = member.currentPath
-                    else {
-                        return false
-                    }
-                    return URL(fileURLWithPath: currentPath)
-                        .resolvingSymlinksInPath()
-                        == destination.url.resolvingSymlinksInPath()
-                })
+                (try? validateAlreadyRestoredDestinations(
+                    request.destinations,
+                    storedMembers: storedMembers
+                )) == true
             else {
                 throw ClipboardHistoryModuleError.invalidLegacyFileRestore
             }
@@ -70,9 +61,9 @@ extension ClipboardHistoryModule {
         }
 
         let payloadStore = try requiredPayloadStore()
-        let prepared: [PreparedLegacyFileRestore]
+        let preparedOutputs: [PublishedLegacyFileRestore]
         do {
-            prepared = try ownedMembers.map { member in
+            let prepared = try ownedMembers.map { member in
                 guard
                     let payloadPath = member.payloadPath,
                     let payloadKind = member.payloadKind,
@@ -99,8 +90,27 @@ extension ClipboardHistoryModule {
                     )
                 )
             }
-            try validateLegacyRestoreDestinations(prepared)
-            try publishLegacyRestoreFiles(prepared)
+            let destinations = try securedLegacyRestoreDestinations(prepared)
+            try faultInjector.check(.legacyRestoreBeforePublication)
+            let outputs = try destinations.map {
+                try publishLegacyRestoreFile($0)
+            }
+            try validateDistinctLegacyRestoreOutputs(outputs)
+            for output in outputs {
+                try faultInjector.check(.legacyRestoreFileDurability)
+                try output.synchronizeFile()
+            }
+            var synchronizedDirectories: Set<LegacyRestoreFileIdentity> = []
+            for output in outputs
+            where synchronizedDirectories.insert(
+                output.destination.directory.identity
+            ).inserted {
+                try faultInjector.check(.legacyRestoreDirectoryDurability)
+                try output.destination.directory.synchronize()
+            }
+            try faultInjector.check(.legacyRestoreBeforeFinalValidation)
+            try validateLegacyRestoreOutputs(outputs)
+            preparedOutputs = outputs
         } catch let error as ClipboardHistoryModuleError {
             throw error
         } catch {
@@ -109,14 +119,29 @@ extension ClipboardHistoryModule {
 
         let resolved: [ResolvedLegacyFileRestore]
         do {
-            resolved = try prepared.map {
-                ResolvedLegacyFileRestore(
-                    prepared: $0,
-                    reference: try legacyFileReference(
-                        at: $0.destination.url
-                    )
+            resolved = try preparedOutputs.map { output in
+                let reference = try legacyFileReference(
+                    at: output.destination.requestedURL
+                )
+                guard reference.isRegularFile,
+                    try legacyRestoreFileIdentity(
+                        at: reference.url
+                    ) == output.identity
+                else {
+                    throw ClipboardHistoryModuleError
+                        .legacyFileRestoreCollision(
+                            output.destination.prepared.destination.url
+                        )
+                }
+                try output.validate()
+                return ResolvedLegacyFileRestore(
+                    output: output,
+                    reference: reference
                 )
             }
+            try validateLegacyRestoreOutputs(preparedOutputs)
+        } catch let error as ClipboardHistoryModuleError {
+            throw error
         } catch {
             throw ClipboardHistoryModuleError.legacyFileRestoreFailed
         }
@@ -124,9 +149,10 @@ extension ClipboardHistoryModule {
         let retiredPayloadPaths: [String]
         do {
             retiredPayloadPaths = try await database.write { database in
+                try validateLegacyRestoreOutputs(preparedOutputs)
                 var payloadPaths: [String] = []
                 for restored in resolved {
-                    let member = restored.prepared.member
+                    let member = restored.output.destination.prepared.member
                     guard
                         try String.fetchOne(
                             database,
@@ -220,6 +246,7 @@ extension ClipboardHistoryModule {
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)
+                try validateLegacyRestoreOutputs(preparedOutputs)
                 return payloadPaths
             }
         } catch {
@@ -227,6 +254,50 @@ extension ClipboardHistoryModule {
         }
         await enqueueReclamation(for: retiredPayloadPaths)
         return .restored(memberCount: resolved.count)
+    }
+
+    private func validateAlreadyRestoredDestinations(
+        _ destinations: [ClipboardHistoryLegacyFileDestination],
+        storedMembers: [LegacyStoredFileMember]
+    ) throws -> Bool {
+        var destinationIdentities: Set<LegacyRestoreFileIdentity> = []
+        for destination in destinations {
+            guard
+                destination.collisionPolicy == .reuseIfIdentical,
+                let member = storedMembers.first(where: {
+                    $0.id == destination.memberID
+                }),
+                member.provenance == LegacyFileState.ordinary.rawValue,
+                let currentPath = member.currentPath,
+                let bookmark = member.bookmark
+            else {
+                return false
+            }
+            var isStale = false
+            let bookmarkedURL = try URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withoutUI, .withoutMounting],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            )
+            guard !isStale else { return false }
+            let storedIdentity = try legacyRestoreFileIdentity(
+                at: bookmarkedURL
+            )
+            let currentIdentity = try legacyRestoreFileIdentity(
+                at: URL(fileURLWithPath: currentPath)
+            )
+            let requestedIdentity = try legacyRestoreFileIdentity(
+                at: destination.url
+            )
+            guard storedIdentity == currentIdentity,
+                currentIdentity == requestedIdentity,
+                destinationIdentities.insert(requestedIdentity).inserted
+            else {
+                return false
+            }
+        }
+        return true
     }
 
     private func legacyRestoreDestinations(
@@ -260,73 +331,13 @@ extension ClipboardHistoryModule {
         return destinations
     }
 
-    private func validateLegacyRestoreDestinations(
-        _ values: [PreparedLegacyFileRestore]
-    ) throws {
-        for value in values {
-            let destination = value.destination.url
-            let parentValues = try destination
-                .deletingLastPathComponent()
-                .resourceValues(
-                    forKeys: [.isDirectoryKey, .isSymbolicLinkKey]
-                )
-            guard parentValues.isDirectory == true else {
-                throw ClipboardHistoryModuleError.invalidLegacyFileRestore
-            }
-            guard FileManager.default.fileExists(atPath: destination.path)
-            else {
-                continue
-            }
-            guard value.destination.collisionPolicy == .reuseIfIdentical else {
-                throw ClipboardHistoryModuleError
-                    .legacyFileRestoreCollision(destination)
-            }
-            let resourceValues = try destination.resourceValues(
-                forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
-            )
-            guard resourceValues.isRegularFile == true,
-                resourceValues.isSymbolicLink != true,
-                try streamedFileProof(destination) == value.proof
-            else {
-                throw ClipboardHistoryModuleError
-                    .legacyFileRestoreCollision(destination)
-            }
-        }
-    }
-
-    private func publishLegacyRestoreFiles(
-        _ values: [PreparedLegacyFileRestore]
-    ) throws {
-        for value in values {
-            let destination = value.destination.url
-            if FileManager.default.fileExists(atPath: destination.path) {
-                continue
-            }
-            do {
-                try value.data.write(
-                    to: destination,
-                    options: .withoutOverwriting
-                )
-            } catch {
-                if value.destination.collisionPolicy == .reuseIfIdentical,
-                    FileManager.default.fileExists(
-                        atPath: destination.path
-                    ),
-                    try streamedFileProof(destination) == value.proof
-                {
-                    continue
-                }
-                throw ClipboardHistoryModuleError
-                    .legacyFileRestoreCollision(destination)
-            }
-        }
-    }
 }
 
 private struct LegacyStoredFileMember: Sendable {
     let id: ClipboardHistoryLegacyFileMemberID
     let currentPath: String?
     let provenance: String
+    let bookmark: Data?
     let payloadID: String?
     let payloadPath: String?
     let payloadKind: String?
@@ -338,6 +349,7 @@ private struct LegacyStoredFileMember: Sendable {
         )
         currentPath = row["current_path"]
         provenance = row["reference_provenance"]
+        bookmark = row["bookmark_data"]
         payloadID = row["payload_id"]
         payloadPath = row["payload_path"]
         payloadKind = row["payload_kind"]
@@ -352,6 +364,410 @@ private struct PreparedLegacyFileRestore: Sendable {
 }
 
 private struct ResolvedLegacyFileRestore: Sendable {
-    let prepared: PreparedLegacyFileRestore
+    let output: PublishedLegacyFileRestore
     let reference: LegacyResolvedFileReference
+}
+
+private struct SecuredLegacyRestoreDestination: Sendable {
+    let prepared: PreparedLegacyFileRestore
+    let directory: LegacyRestoreDirectory
+    let filename: String
+
+    var requestedURL: URL {
+        prepared.destination.url.standardizedFileURL
+    }
+
+    var canonicalURL: URL {
+        directory.canonicalURL.appendingPathComponent(filename)
+    }
+}
+
+private struct LegacyRestoreDestinationIdentity: Hashable {
+    let directory: LegacyRestoreFileIdentity
+    let filename: String
+}
+
+private struct LegacyRestoreFileIdentity: Hashable, Sendable {
+    let device: UInt64
+    let inode: UInt64
+
+    init(_ status: stat) {
+        device = UInt64(status.st_dev)
+        inode = UInt64(status.st_ino)
+    }
+}
+
+private final class LegacyRestoreDirectory: @unchecked Sendable {
+    let fileDescriptor: Int32
+    let canonicalURL: URL
+    let identity: LegacyRestoreFileIdentity
+
+    init(url: URL) throws {
+        canonicalURL = try canonicalLegacyRestoreDirectoryURL(url)
+        let descriptor = canonicalURL.path.withCString {
+            open($0, O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)
+        }
+        guard descriptor >= 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        do {
+            let descriptorStatus = try legacyRestoreStatus(
+                fileDescriptor: descriptor,
+                requiring: S_IFDIR
+            )
+            let pathStatus = try legacyRestoreStatus(
+                at: canonicalURL,
+                requiring: S_IFDIR
+            )
+            guard
+                LegacyRestoreFileIdentity(descriptorStatus)
+                    == LegacyRestoreFileIdentity(pathStatus)
+            else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+            }
+            fileDescriptor = descriptor
+            identity = LegacyRestoreFileIdentity(descriptorStatus)
+        } catch {
+            close(descriptor)
+            throw error
+        }
+    }
+
+    deinit {
+        close(fileDescriptor)
+    }
+
+    func validate() throws {
+        let descriptorStatus = try legacyRestoreStatus(
+            fileDescriptor: fileDescriptor,
+            requiring: S_IFDIR
+        )
+        let pathStatus = try legacyRestoreStatus(
+            at: canonicalURL,
+            requiring: S_IFDIR
+        )
+        guard LegacyRestoreFileIdentity(descriptorStatus) == identity,
+            LegacyRestoreFileIdentity(pathStatus) == identity
+        else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(ESTALE)
+        }
+    }
+
+    func synchronize() throws {
+        guard fsync(fileDescriptor) == 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+    }
+}
+
+private final class PublishedLegacyFileRestore: @unchecked Sendable {
+    let destination: SecuredLegacyRestoreDestination
+    let fileDescriptor: Int32
+    let identity: LegacyRestoreFileIdentity
+
+    init(
+        destination: SecuredLegacyRestoreDestination,
+        fileDescriptor: Int32
+    ) throws {
+        self.destination = destination
+        self.fileDescriptor = fileDescriptor
+        let status = try legacyRestoreStatus(
+            fileDescriptor: fileDescriptor,
+            requiring: S_IFREG
+        )
+        identity = LegacyRestoreFileIdentity(status)
+    }
+
+    deinit {
+        close(fileDescriptor)
+    }
+
+    func synchronizeFile() throws {
+        if fcntl(fileDescriptor, F_FULLFSYNC) != 0,
+            fsync(fileDescriptor) != 0
+        {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+    }
+
+    func validate() throws {
+        try destination.directory.validate()
+        let descriptorStatus = try legacyRestoreStatus(
+            fileDescriptor: fileDescriptor,
+            requiring: S_IFREG
+        )
+        var destinationStatus = stat()
+        let destinationResult = destination.filename.withCString {
+            fstatat(
+                destination.directory.fileDescriptor,
+                $0,
+                &destinationStatus,
+                AT_SYMLINK_NOFOLLOW
+            )
+        }
+        guard destinationResult == 0,
+            legacyRestoreFileType(destinationStatus) == S_IFREG,
+            LegacyRestoreFileIdentity(descriptorStatus) == identity,
+            LegacyRestoreFileIdentity(destinationStatus) == identity,
+            descriptorStatus.st_size
+                == off_t(destination.prepared.proof.byteCount),
+            destinationStatus.st_size
+                == off_t(destination.prepared.proof.byteCount),
+            try legacyRestoreFileIdentity(
+                at: destination.canonicalURL
+            ) == identity,
+            try legacyRestoreFileIdentity(
+                at: destination.requestedURL
+            ) == identity,
+            try streamedLegacyRestoreProof(fileDescriptor)
+                == destination.prepared.proof
+        else {
+            throw ClipboardHistoryModuleError.legacyFileRestoreCollision(
+                destination.prepared.destination.url
+            )
+        }
+    }
+}
+
+private func securedLegacyRestoreDestinations(
+    _ values: [PreparedLegacyFileRestore]
+) throws -> [SecuredLegacyRestoreDestination] {
+    var identities: Set<LegacyRestoreDestinationIdentity> = []
+    return try values.map { value in
+        let url = value.destination.url.standardizedFileURL
+        let filename = url.lastPathComponent
+        guard url.isFileURL,
+            url.path.hasPrefix("/"),
+            !filename.isEmpty,
+            filename != ".",
+            filename != ".."
+        else {
+            throw ClipboardHistoryModuleError.invalidLegacyFileRestore
+        }
+        let directory = try LegacyRestoreDirectory(
+            url: url.deletingLastPathComponent()
+        )
+        let identity = LegacyRestoreDestinationIdentity(
+            directory: directory.identity,
+            filename: filename
+        )
+        guard identities.insert(identity).inserted else {
+            throw ClipboardHistoryModuleError.invalidLegacyFileRestore
+        }
+        return SecuredLegacyRestoreDestination(
+            prepared: value,
+            directory: directory,
+            filename: filename
+        )
+    }
+}
+
+private func publishLegacyRestoreFile(
+    _ destination: SecuredLegacyRestoreDestination
+) throws -> PublishedLegacyFileRestore {
+    let createdDescriptor = destination.filename.withCString {
+        openat(
+            destination.directory.fileDescriptor,
+            $0,
+            O_CREAT | O_EXCL | O_NOFOLLOW | O_RDWR | O_CLOEXEC,
+            mode_t(0o600)
+        )
+    }
+    if createdDescriptor >= 0 {
+        do {
+            try writeLegacyRestoreData(
+                destination.prepared.data,
+                to: createdDescriptor
+            )
+        } catch {
+            close(createdDescriptor)
+            throw error
+        }
+        let output: PublishedLegacyFileRestore
+        do {
+            output = try PublishedLegacyFileRestore(
+                destination: destination,
+                fileDescriptor: createdDescriptor
+            )
+        } catch {
+            close(createdDescriptor)
+            throw error
+        }
+        try output.validate()
+        return output
+    }
+
+    let creationError = errno
+    guard creationError == EEXIST,
+        destination.prepared.destination.collisionPolicy
+            == .reuseIfIdentical
+    else {
+        if creationError == EEXIST || creationError == ELOOP {
+            throw ClipboardHistoryModuleError.legacyFileRestoreCollision(
+                destination.prepared.destination.url
+            )
+        }
+        throw ClipboardHistoryStorageError.fileOperationFailed(creationError)
+    }
+
+    let existingDescriptor = destination.filename.withCString {
+        openat(
+            destination.directory.fileDescriptor,
+            $0,
+            O_RDONLY | O_NOFOLLOW | O_CLOEXEC
+        )
+    }
+    guard existingDescriptor >= 0 else {
+        throw ClipboardHistoryModuleError.legacyFileRestoreCollision(
+            destination.prepared.destination.url
+        )
+    }
+    let output: PublishedLegacyFileRestore
+    do {
+        output = try PublishedLegacyFileRestore(
+            destination: destination,
+            fileDescriptor: existingDescriptor
+        )
+    } catch {
+        close(existingDescriptor)
+        throw ClipboardHistoryModuleError.legacyFileRestoreCollision(
+            destination.prepared.destination.url
+        )
+    }
+    try output.validate()
+    return output
+}
+
+private func validateDistinctLegacyRestoreOutputs(
+    _ outputs: [PublishedLegacyFileRestore]
+) throws {
+    var identities: Set<LegacyRestoreFileIdentity> = []
+    for output in outputs {
+        try output.validate()
+        guard identities.insert(output.identity).inserted else {
+            throw ClipboardHistoryModuleError.invalidLegacyFileRestore
+        }
+    }
+}
+
+private func validateLegacyRestoreOutputs(
+    _ outputs: [PublishedLegacyFileRestore]
+) throws {
+    try validateDistinctLegacyRestoreOutputs(outputs)
+}
+
+private func canonicalLegacyRestoreDirectoryURL(_ url: URL) throws -> URL {
+    let resolved = url.path.withCString { realpath($0, nil) }
+    guard let resolved else {
+        throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+    }
+    defer { free(resolved) }
+    return URL(
+        fileURLWithPath: String(cString: resolved),
+        isDirectory: true
+    )
+}
+
+private func legacyRestoreStatus(
+    fileDescriptor: Int32,
+    requiring fileType: mode_t
+) throws -> stat {
+    var status = stat()
+    guard fstat(fileDescriptor, &status) == 0 else {
+        throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+    }
+    guard legacyRestoreFileType(status) == fileType else {
+        throw ClipboardHistoryStorageError.fileOperationFailed(EFTYPE)
+    }
+    return status
+}
+
+private func legacyRestoreStatus(
+    at url: URL,
+    requiring fileType: mode_t
+) throws -> stat {
+    var status = stat()
+    let result = url.path.withCString { lstat($0, &status) }
+    guard result == 0 else {
+        throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+    }
+    guard legacyRestoreFileType(status) == fileType else {
+        throw ClipboardHistoryStorageError.fileOperationFailed(EFTYPE)
+    }
+    return status
+}
+
+private func legacyRestoreFileType(_ status: stat) -> mode_t {
+    status.st_mode & mode_t(S_IFMT)
+}
+
+private func legacyRestoreFileIdentity(
+    at url: URL
+) throws -> LegacyRestoreFileIdentity {
+    LegacyRestoreFileIdentity(
+        try legacyRestoreStatus(at: url, requiring: S_IFREG)
+    )
+}
+
+private func streamedLegacyRestoreProof(
+    _ fileDescriptor: Int32
+) throws -> StreamedFileProof {
+    var hasher = SHA256()
+    var byteCount = 0
+    var offset: off_t = 0
+    var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
+    while true {
+        let readCount = buffer.withUnsafeMutableBytes { bytes in
+            pread(
+                fileDescriptor,
+                bytes.baseAddress,
+                bytes.count,
+                offset
+            )
+        }
+        if readCount == 0 {
+            break
+        }
+        if readCount < 0 {
+            if errno == EINTR {
+                continue
+            }
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
+        let count = Int(readCount)
+        let chunk = Data(buffer[..<count])
+        hasher.update(data: chunk)
+        byteCount += count
+        offset += off_t(count)
+    }
+    return StreamedFileProof(
+        byteCount: byteCount,
+        sha256: Data(hasher.finalize())
+    )
+}
+
+private func writeLegacyRestoreData(
+    _ data: Data,
+    to fileDescriptor: Int32
+) throws {
+    try data.withUnsafeBytes { bytes in
+        var written = 0
+        while written < bytes.count {
+            let result = write(
+                fileDescriptor,
+                bytes.baseAddress?.advanced(by: written),
+                bytes.count - written
+            )
+            if result < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+            }
+            guard result > 0 else {
+                throw ClipboardHistoryStorageError.fileOperationFailed(EIO)
+            }
+            written += result
+        }
+    }
 }
