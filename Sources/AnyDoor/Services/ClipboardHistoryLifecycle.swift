@@ -85,7 +85,7 @@ final class ClipboardHistoryLifecycle {
     private let operations: ClipboardHistoryLifecycleOperations
     private let defaults: UserDefaults
     private let migrationRequest:
-        @MainActor () throws -> ClipboardHistoryLegacyMigrationRequest
+        (@MainActor () throws -> ClipboardHistoryLegacyMigrationRequest)?
     private let finishMigration: @MainActor () throws -> Void
 
     @ObservationIgnored private var operationTask: Task<Void, Never>?
@@ -99,8 +99,8 @@ final class ClipboardHistoryLifecycle {
         module: ClipboardHistoryModule,
         defaults: UserDefaults = .standard,
         migrationRequest:
-            @escaping @MainActor () throws
-                -> ClipboardHistoryLegacyMigrationRequest,
+            (@MainActor () throws
+                -> ClipboardHistoryLegacyMigrationRequest)?,
         finishMigration: @escaping @MainActor () throws -> Void = {}
     ) {
         operations = ClipboardHistoryLifecycleOperations(module: module)
@@ -113,8 +113,8 @@ final class ClipboardHistoryLifecycle {
         operations: ClipboardHistoryLifecycleOperations,
         defaults: UserDefaults,
         migrationRequest:
-            @escaping @MainActor () throws
-                -> ClipboardHistoryLegacyMigrationRequest,
+            (@MainActor () throws
+                -> ClipboardHistoryLegacyMigrationRequest)?,
         finishMigration: @escaping @MainActor () throws -> Void = {}
     ) {
         self.operations = operations
@@ -253,6 +253,13 @@ final class ClipboardHistoryLifecycle {
         let configuration = ClipboardPreferences.monitoringConfiguration(
             from: defaults
         )
+        guard let migrationRequest else {
+            state = .ready
+            if ClipboardPreferences.monitoringEnabled(from: defaults) {
+                _ = await operations.setMonitoring(.start, configuration)
+            }
+            return
+        }
         _ = await operations.setMonitoring(
             .migrationStarted,
             configuration

@@ -25,20 +25,22 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
             isDirectory: true
         )
         let storeURL = storeDirectory.appendingPathComponent("AnyDoor.store")
-        let legacySource = try ClipboardHistoryLegacySource(
-            applicationSupportDirectory: storeDirectory,
-            productionStoreURL: storeURL,
-            legacySchema: Schema(
-                [
-                    KeyBinding.self,
-                    BuiltinPreference.self,
-                    ClipboardHistoryItem.self,
-                    TranslationRecord.self,
-                    Quicklink.self,
-                ]
-                    + NativePluginCatalog.modelSchemaTypes
-            ),
-            payloadDirectory: ClipboardHistoryModule.defaultStoreRoot
+        let legacySource = try XCTUnwrap(
+            ClipboardHistoryLegacySource.openIfNeeded(
+                applicationSupportDirectory: storeDirectory,
+                productionStoreURL: storeURL,
+                legacySchema: Schema(
+                    [
+                        KeyBinding.self,
+                        BuiltinPreference.self,
+                        ClipboardHistoryItem.self,
+                        TranslationRecord.self,
+                        Quicklink.self,
+                    ]
+                        + NativePluginCatalog.modelSchemaTypes
+                ),
+                payloadDirectory: ClipboardHistoryModule.defaultStoreRoot
+            )
         )
         let request = try legacySource.makeMigrationRequest()
         let module = ClipboardHistoryModule()

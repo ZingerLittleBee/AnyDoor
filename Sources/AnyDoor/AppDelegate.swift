@@ -10,21 +10,34 @@ import Sparkle
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule: ClipboardHistoryModule
     private let clipboardHistoryLegacySource:
-        ClipboardHistoryLegacySource
-    @MainActor lazy var clipboardHistoryLifecycle =
-        ClipboardHistoryLifecycle(
-            module: clipboardHistoryModule,
-            migrationRequest: { [unowned self] in
+        ClipboardHistoryLegacySource?
+    @MainActor lazy var clipboardHistoryLifecycle = {
+        let migrationRequest:
+            (@MainActor () throws
+                -> ClipboardHistoryLegacyMigrationRequest)?
+        let finishMigration: @MainActor () throws -> Void
+        if let clipboardHistoryLegacySource {
+            migrationRequest = {
                 try clipboardHistoryLegacySource.makeMigrationRequest()
-            },
-            finishMigration: { [unowned self] in
+            }
+            finishMigration = {
                 try clipboardHistoryLegacySource.finishMigration()
             }
+        } else {
+            migrationRequest = nil
+            finishMigration = {}
+        }
+        return ClipboardHistoryLifecycle(
+            module: clipboardHistoryModule,
+            migrationRequest: migrationRequest,
+            finishMigration: finishMigration
         )
+    }()
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
@@ -40,7 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// How long after launch a no-window reopen is still attributed to the
     /// system's login auto-launch rather than a user relaunch.
-    static let reopenSettingsLaunchGrace: TimeInterval = 3
+    nonisolated static let reopenSettingsLaunchGrace: TimeInterval = 3
 
     override init() {
         // Force overlay (floating, auto-hiding) scrollers app-wide, regardless
@@ -67,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 + NativePluginCatalog.modelSchemaTypes
             )
             clipboardHistoryLegacySource =
-                try ClipboardHistoryLegacySource(
+                try ClipboardHistoryLegacySource.openIfNeeded(
                     applicationSupportDirectory: storeDir,
                     productionStoreURL: storeURL,
                     legacySchema: legacySchema,
@@ -409,9 +422,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let allowDefaultHandling: Bool
     }
 
-    static func reopenHandlingDecision(hasVisibleWindows: Bool,
-                                       menuBarIconVisible: Bool,
-                                       secondsSinceLaunch: TimeInterval) -> ReopenHandlingDecision {
+    nonisolated static func reopenHandlingDecision(
+        hasVisibleWindows: Bool,
+        menuBarIconVisible: Bool,
+        secondsSinceLaunch: TimeInterval
+    ) -> ReopenHandlingDecision {
         ReopenHandlingDecision(
             shouldOpenSettings: shouldOpenSettingsForReopen(
                 hasVisibleWindows: hasVisibleWindows,
@@ -441,9 +456,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// In the hidden-icon recovery case, `reopenSettingsLaunchGrace` still gates
     /// out the login auto-launch's own reopen (arriving within the grace) from a
     /// genuine later relaunch.
-    static func shouldOpenSettingsForReopen(hasVisibleWindows: Bool,
-                                            menuBarIconVisible: Bool,
-                                            secondsSinceLaunch: TimeInterval) -> Bool {
+    nonisolated static func shouldOpenSettingsForReopen(
+        hasVisibleWindows: Bool,
+        menuBarIconVisible: Bool,
+        secondsSinceLaunch: TimeInterval
+    ) -> Bool {
         guard !hasVisibleWindows else { return false }
         // Icon visible -> reachable from the menu bar; never auto-pop Settings.
         guard !menuBarIconVisible else { return false }

@@ -1,9 +1,11 @@
 import ClipboardHistory
+import Darwin
 import Foundation
 import SwiftData
 
 enum ClipboardHistoryLegacySourceError: Error {
     case incompleteSnapshot
+    case cutoverMarkerPersistenceFailed(Int32)
 }
 
 /// A crash-resilient, read-only snapshot of the pre-v2 SwiftData store.
@@ -17,12 +19,44 @@ final class ClipboardHistoryLegacySource {
         "ClipboardHistoryLegacyMigration"
     private static let snapshotStoreName = "AnyDoorLegacy.store"
     private static let snapshotPayloadDirectoryName = "Payloads"
+    private static let cutoverMarkerName =
+        "ClipboardHistoryLegacyCutover-v1.complete"
 
     private let payloadDirectory: URL
     private let snapshotDirectory: URL
     private let container: ModelContainer?
 
-    init(
+    /// Resolves the cutover before any legacy `ModelContainer` is opened.
+    ///
+    /// A completed marker is authoritative because `finishMigration()` makes
+    /// it durable only after publication and cleanup have succeeded. A
+    /// leftover snapshot is best-effort cleanup at that point, never a reason
+    /// to reopen the removed schema.
+    static func openIfNeeded(
+        applicationSupportDirectory: URL,
+        productionStoreURL: URL,
+        legacySchema: Schema,
+        payloadDirectory: URL
+    ) throws -> ClipboardHistoryLegacySource? {
+        let markerURL = cutoverMarkerURL(
+            in: applicationSupportDirectory
+        )
+        guard !FileManager.default.fileExists(atPath: markerURL.path)
+        else {
+            try? FileManager.default.removeItem(
+                at: snapshotDirectory(in: applicationSupportDirectory)
+            )
+            return nil
+        }
+        return try ClipboardHistoryLegacySource(
+            applicationSupportDirectory: applicationSupportDirectory,
+            productionStoreURL: productionStoreURL,
+            legacySchema: legacySchema,
+            payloadDirectory: payloadDirectory
+        )
+    }
+
+    private init(
         applicationSupportDirectory: URL,
         productionStoreURL: URL,
         legacySchema: Schema,
@@ -137,6 +171,13 @@ final class ClipboardHistoryLegacySource {
 
     @MainActor
     func finishMigration() throws {
+        // Persist completion before deleting the snapshot. If marker
+        // persistence fails, every readable legacy row remains available for
+        // the next launch. If snapshot deletion fails after the marker, the
+        // next launch retries only that deletion without opening its schema.
+        try Self.persistCutoverMarker(
+            in: snapshotDirectory.deletingLastPathComponent()
+        )
         guard FileManager.default.fileExists(
             atPath: snapshotDirectory.path
         ) else {
@@ -215,6 +256,97 @@ final class ClipboardHistoryLegacySource {
         } catch {
             try? fileManager.removeItem(at: stagingDirectory)
             throw error
+        }
+    }
+
+    private static func cutoverMarkerURL(
+        in applicationSupportDirectory: URL
+    ) -> URL {
+        applicationSupportDirectory.appendingPathComponent(
+            cutoverMarkerName
+        )
+    }
+
+    private static func persistCutoverMarker(
+        in applicationSupportDirectory: URL
+    ) throws {
+        let markerURL = cutoverMarkerURL(
+            in: applicationSupportDirectory
+        )
+        guard !FileManager.default.fileExists(atPath: markerURL.path)
+        else {
+            return
+        }
+        let stagingURL = applicationSupportDirectory
+            .appendingPathComponent(
+                ".\(cutoverMarkerName)-\(UUID().uuidString)"
+            )
+        let descriptor = Darwin.open(
+            stagingURL.path,
+            O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC,
+            S_IRUSR | S_IWUSR
+        )
+        guard descriptor >= 0 else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverMarkerPersistenceFailed(errno)
+        }
+        var closeRequired = true
+        defer {
+            if closeRequired {
+                Darwin.close(descriptor)
+            }
+            try? FileManager.default.removeItem(at: stagingURL)
+        }
+        let marker = Data("completed\n".utf8)
+        let writeSucceeded = marker.withUnsafeBytes { bytes in
+            var written = 0
+            while written < bytes.count {
+                let result = Darwin.write(
+                    descriptor,
+                    bytes.baseAddress?.advanced(by: written),
+                    bytes.count - written
+                )
+                guard result > 0 else {
+                    return false
+                }
+                written += result
+            }
+            return true
+        }
+        guard writeSucceeded else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverMarkerPersistenceFailed(errno)
+        }
+        guard Darwin.fcntl(descriptor, F_FULLFSYNC) == 0
+            || Darwin.fsync(descriptor) == 0
+        else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverMarkerPersistenceFailed(errno)
+        }
+        let closeResult = Darwin.close(descriptor)
+        closeRequired = false
+        guard closeResult == 0 else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverMarkerPersistenceFailed(errno)
+        }
+        guard Darwin.rename(stagingURL.path, markerURL.path) == 0 else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverMarkerPersistenceFailed(errno)
+        }
+        let directoryDescriptor = Darwin.open(
+            applicationSupportDirectory.path,
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC
+        )
+        guard directoryDescriptor >= 0 else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverMarkerPersistenceFailed(errno)
+        }
+        defer {
+            Darwin.close(directoryDescriptor)
+        }
+        guard Darwin.fsync(directoryDescriptor) == 0 else {
+            throw ClipboardHistoryLegacySourceError
+                .cutoverMarkerPersistenceFailed(errno)
         }
     }
 }

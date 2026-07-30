@@ -6,6 +6,67 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryLifecycleTests: XCTestCase {
+    func testCompletedCutoverLaunchSkipsLegacyRequestAndMigration()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe()
+        let defaults = makeDefaults()
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            migrationRequest: nil
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        let migrationCount = await probe.recordedMigrationCount()
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertEqual(migrationCount, 0)
+        XCTAssertEqual(
+            events,
+            [
+                .status,
+                .monitoring(.start),
+            ]
+        )
+    }
+
+    func testConfirmedResetAfterCompletedCutoverDoesNotRemigrate()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe(
+            availability: .unavailable,
+            reason: .databaseCorrupt
+        )
+        let defaults = makeDefaults()
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            migrationRequest: nil
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        lifecycle.resetConfirmed()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        let migrationCount = await probe.recordedMigrationCount()
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertEqual(migrationCount, 0)
+        XCTAssertEqual(
+            events,
+            [
+                .status,
+                .reset,
+                .status,
+                .monitoring(.start),
+            ]
+        )
+    }
+
     func testStartupMigratesBeforeStartingPassiveMonitoring() async throws {
         let probe = ClipboardLifecycleProbe()
         let defaults = makeDefaults()
