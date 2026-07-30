@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import ClipboardHistory
 import SwiftData
 
 /// Outcome of an import, surfaced to the UI.
@@ -17,6 +18,9 @@ struct ImportSummary: Equatable {
 /// `UserDefaults` so it is fully testable with an in-memory container.
 @MainActor
 final class BackupService {
+    private static var reconcileClipboardHistory:
+        @MainActor () async throws -> Void = {}
+
     private let context: ModelContext
     private let defaults: UserDefaults
     private let appPathResolver: (String) -> String?
@@ -38,6 +42,18 @@ final class BackupService {
         self.defaults = defaults
         self.appPathResolver = appPathResolver
         self.reconcileRuntime = reconcileRuntime
+    }
+
+    static func configureClipboardHistoryRuntime(
+        module: ClipboardHistoryModule,
+        lifecycle: ClipboardHistoryLifecycle
+    ) {
+        reconcileClipboardHistory = {
+            try await ClipboardHistoryPortableSettings.reconcile(
+                module: module
+            )
+            await lifecycle.refreshMonitoringConfiguration()
+        }
     }
 
     // MARK: - Export
@@ -212,13 +228,7 @@ final class BackupService {
         } catch {
             pluginError = error
         }
-        ClipboardTagStore.shared.reload()
-        // An import may remove tag definitions, leaving items tagged with ids
-        // that no longer exist. Sweep those ghost ids and reclaim storage.
-        await ClipboardHistoryStore.shared.cleanUpUnknownTags(
-            validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
-        )
-        await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
+        try await reconcileClipboardHistory()
         QuicklinkStore.shared.rebuild()
         PanelStore.shared.rebuild()
         HotkeyCoordinator.shared.refresh()

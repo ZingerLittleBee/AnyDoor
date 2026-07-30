@@ -75,6 +75,118 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testClipboardBackupCarriesOnlyPortableDefinitionsAndRules()
+        throws
+    {
+        let context = try makeContext()
+        context.insert(
+            ClipboardHistoryItem(
+                kind: .text,
+                text: "device-only-secret",
+                previewTitle: "device-only-secret",
+                isFavorite: true,
+                tagIDs: ["work"]
+            )
+        )
+        try context.save()
+        let defaults = makeDefaults()
+        defaults.set(
+            "[{\"id\":\"work\",\"name\":\"Work\"}]",
+            forKey: ClipboardTagStore.defaultsKey
+        )
+        defaults.set(
+            "[\"all\",\"tag:work\"]",
+            forKey: ClipboardCategoryOrder.defaultsKey
+        )
+        defaults.set(
+            ["com.apple.Passwords"],
+            forKey: ClipboardPreferences.excludedKey
+        )
+        defaults.set(
+            true,
+            forKey: ClipboardPreferences.ignoresUniversalClipboardKey
+        )
+        defaults.set(false, forKey: ClipboardPreferences.monitoringKey)
+        defaults.set(true, forKey: ClipboardPreferences.copyOnlyKey)
+        defaults.set(1, forKey: ClipboardPreferences.retentionKey)
+        defaults.set(
+            "device-only-key-material",
+            forKey: "clipboard.encryptionKey"
+        )
+        defaults.set(
+            "device-only-migration-state",
+            forKey: "clipboard.migrationState"
+        )
+
+        let snapshot = try BackupService(
+            context: context,
+            defaults: defaults,
+            appPathResolver: { _ in nil }
+        ).exportSnapshot()
+
+        XCTAssertNotNil(
+            snapshot.settings[ClipboardTagStore.defaultsKey]
+        )
+        XCTAssertNotNil(
+            snapshot.settings[ClipboardCategoryOrder.defaultsKey]
+        )
+        XCTAssertNotNil(
+            snapshot.settings[ClipboardPreferences.excludedKey]
+        )
+        XCTAssertEqual(
+            snapshot.settings[
+                ClipboardPreferences.ignoresUniversalClipboardKey
+            ],
+            .bool(true)
+        )
+        XCTAssertNil(
+            snapshot.settings[ClipboardPreferences.monitoringKey]
+        )
+        XCTAssertNil(snapshot.settings[ClipboardPreferences.copyOnlyKey])
+        XCTAssertNil(snapshot.settings[ClipboardPreferences.retentionKey])
+
+        let encoded = try BackupCodec.encode(snapshot)
+        let json = try XCTUnwrap(
+            String(data: encoded, encoding: .utf8)
+        )
+        XCTAssertFalse(json.contains("device-only-secret"))
+        XCTAssertFalse(json.contains("device-only-key-material"))
+        XCTAssertFalse(json.contains("device-only-migration-state"))
+    }
+
+    @MainActor
+    func testRestoreNeverChangesLocalClipboardMonitoringState()
+        async throws
+    {
+        let context = try makeContext()
+        let defaults = makeDefaults()
+        ClipboardPreferences.setMonitoringEnabled(true, in: defaults)
+        let imported = snapshot(
+            settings: [
+                ClipboardPreferences.monitoringKey: .bool(false),
+                ClipboardPreferences.excludedKey:
+                    .stringArray(["com.example.Secret"]),
+            ]
+        )
+        let service = BackupService(
+            context: context,
+            defaults: defaults,
+            appPathResolver: { _ in nil },
+            reconcileRuntime: {}
+        )
+
+        _ = try await service.restore(imported)
+
+        XCTAssertTrue(
+            ClipboardPreferences.monitoringEnabled(from: defaults)
+        )
+        XCTAssertEqual(
+            ClipboardPreferences.excludedBundleIDs(from: defaults),
+            ["com.example.Secret"]
+        )
+    }
+
+    @MainActor
     func testExportCollectsQuicklinksWithoutFaviconCache() throws {
         let context = try makeContext()
         let id = UUID()
