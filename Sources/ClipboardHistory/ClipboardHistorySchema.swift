@@ -37,6 +37,9 @@ extension ClipboardHistoryModule {
                 ).notNull().defaults(to: "unknown")
             }
         }
+        migrator.registerMigration("v5_indexed_search") { database in
+            try createSearchIndexSchema(in: database)
+        }
         return migrator
     }
 

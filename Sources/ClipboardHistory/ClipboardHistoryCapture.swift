@@ -31,6 +31,7 @@ extension ClipboardHistoryModule {
     ) throws -> ClipboardHistoryCaptureOutcome {
         let plainTextType = NSPasteboard.PasteboardType.string.rawValue
         let snapshot: PasteboardSnapshot
+        let explicitSearchKind: String?
         switch request.content {
         case .text(let value):
             guard !value.isEmpty else {
@@ -47,6 +48,7 @@ extension ClipboardHistoryModule {
                 extraFacets: [],
                 allowsTextInference: true
             )
+            explicitSearchKind = "exactText"
         case .ocr(let value):
             guard !value.isEmpty else {
                 throw ClipboardHistoryModuleError.operationUnavailable
@@ -62,6 +64,7 @@ extension ClipboardHistoryModule {
                 extraFacets: [],
                 allowsTextInference: false
             )
+            explicitSearchKind = "ocr"
         case .color(let value):
             guard !value.isEmpty else {
                 throw ClipboardHistoryModuleError.operationUnavailable
@@ -77,6 +80,7 @@ extension ClipboardHistoryModule {
                 extraFacets: [.color],
                 allowsTextInference: false
             )
+            explicitSearchKind = "normalizedColor"
         case .qrCode(let value):
             guard !value.isEmpty else {
                 throw ClipboardHistoryModuleError.operationUnavailable
@@ -92,6 +96,7 @@ extension ClipboardHistoryModule {
                 extraFacets: [.qrCode],
                 allowsTextInference: false
             )
+            explicitSearchKind = "qr"
         case .bitmap(let data, let provenance):
             let sourcePixelCount = try Self.imagePixelCount(in: data)
             guard sourcePixelCount <= PasteboardSnapshot.maximumPixelCount else {
@@ -118,8 +123,13 @@ extension ClipboardHistoryModule {
                 extraFacets: [],
                 allowsTextInference: false
             )
+            explicitSearchKind = nil
         }
-        return try persist(snapshot, source: request.source)
+        return try persist(
+            snapshot,
+            source: request.source,
+            explicitSearchKind: explicitSearchKind
+        )
     }
 
     public func capture(
@@ -359,7 +369,8 @@ extension ClipboardHistoryModule {
 
     fileprivate func persist(
         _ snapshot: PasteboardSnapshot,
-        source: ClipboardHistoryCaptureSource
+        source: ClipboardHistoryCaptureSource,
+        explicitSearchKind: String? = nil
     ) throws -> ClipboardHistoryCaptureOutcome {
         let database = try requiredDatabase()
         let identity = try CanonicalIdentity(
@@ -402,6 +413,7 @@ extension ClipboardHistoryModule {
                         return false
                     },
                 refreshOCRBudget: automaticImageTextIndexingEnabled,
+                explicitSearchKind: explicitSearchKind,
                 database: database,
                 payloadStore: payloadStore
             )
@@ -501,10 +513,13 @@ extension ClipboardHistoryModule {
                             )
                             try insertSearchField(
                                 value,
-                                kind: typeIdentifier
-                                    == NSPasteboard.PasteboardType.URL.rawValue
-                                    ? "url"
-                                    : "exactText",
+                                kind: explicitSearchKind
+                                    ?? (
+                                        typeIdentifier
+                                            == NSPasteboard.PasteboardType.URL.rawValue
+                                        ? "url"
+                                        : "exactText"
+                                    ),
                                 index: searchFieldIndex,
                                 entryID: storedID,
                                 into: database
@@ -677,6 +692,7 @@ extension ClipboardHistoryModule {
                         capturedAt.timeIntervalSince1970,
                     ]
                 )
+                try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)
             }
         } catch {
@@ -1093,27 +1109,14 @@ extension ClipboardHistoryModule {
         entryID: String,
         into database: Database
     ) throws {
-        try database.execute(
-            sql: """
-                INSERT INTO clipboard_search_fields(
-                    entry_id, field_kind, field_index, value,
-                    normalized_value, ranking_group
-                ) VALUES (?, ?, ?, ?, ?, 0)
-                """,
-            arguments: [
-                entryID,
-                kind,
-                index,
-                value,
-                value.folding(
-                    options: [
-                        .caseInsensitive,
-                        .diacriticInsensitive,
-                        .widthInsensitive,
-                    ],
-                    locale: Locale(identifier: "en_US_POSIX")
-                ),
-            ]
+        try Self.insertSearchField(
+            value: value,
+            kind: kind,
+            index: index,
+            rankingGroup: Self.searchRankingGroup(for: kind),
+            entryID: entryID,
+            into: database,
+            faultInjector: faultInjector
         )
     }
 }

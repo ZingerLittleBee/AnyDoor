@@ -26,6 +26,7 @@ public actor ClipboardHistoryModule {
     let fingerprintDigest: @Sendable (Data) -> Data
     let duplicateReuseEnabled: Bool
     var automaticImageTextIndexingEnabled = false
+    var searchIndexRebuildTask: Task<Void, Never>?
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
@@ -47,12 +48,20 @@ public actor ClipboardHistoryModule {
         fingerprintDigest = CanonicalIdentity.sha256
         duplicateReuseEnabled = true
         database = resolution.database
+        searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
+            for: resolution.database
+        )
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
     }
 
-    init(testingDatabaseURL: URL, databaseKey: Data) throws {
+    init(
+        testingDatabaseURL: URL,
+        databaseKey: Data,
+        faultInjector: ClipboardHistoryFaultInjector =
+            ClipboardHistoryFaultInjector()
+    ) throws {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
@@ -61,7 +70,7 @@ public actor ClipboardHistoryModule {
         )
         storeRoot = testingDatabaseURL.deletingLastPathComponent()
         keyStore = nil
-        faultInjector = ClipboardHistoryFaultInjector()
+        self.faultInjector = faultInjector
         now = Date.init
         fingerprintDigest = CanonicalIdentity.sha256
         duplicateReuseEnabled = true
@@ -69,6 +78,9 @@ public actor ClipboardHistoryModule {
         database = try Self.openDatabase(
             at: testingDatabaseURL,
             databaseKey: databaseKey
+        )
+        searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
+            for: database
         )
         let payloadKey =
             ClipboardHistoryKeyDerivation
@@ -109,6 +121,9 @@ public actor ClipboardHistoryModule {
         self.fingerprintDigest = fingerprintDigest
         self.duplicateReuseEnabled = duplicateReuseEnabled
         database = resolution.database
+        searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
+            for: resolution.database
+        )
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
@@ -163,11 +178,16 @@ public actor ClipboardHistoryModule {
 
     public func retry() async {
         guard let keyStore else { return }
+        await searchIndexRebuildTask?.value
+        searchIndexRebuildTask = nil
         if let database {
             try? database.close()
         }
         let resolution = Self.resolveStore(at: storeRoot, keyStore: keyStore)
         database = resolution.database
+        searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
+            for: resolution.database
+        )
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
@@ -257,9 +277,15 @@ extension ClipboardHistoryModule {
         return database
     }
 
-    func closeStoreForTesting() throws {
+    func closeStoreForTesting() async throws {
+        await searchIndexRebuildTask?.value
+        searchIndexRebuildTask = nil
         try database?.close()
         database = nil
+    }
+
+    func awaitSearchIndexRebuildForTesting() async {
+        await searchIndexRebuildTask?.value
     }
 
     static func createFoundationStoreForTesting(
@@ -312,10 +338,11 @@ extension ClipboardHistoryModule {
         let reason: ClipboardHistoryStatus.AvailabilityReason?
     }
 
-    enum StoreOpenError: Error {
+    enum StoreOpenError: Error, Equatable {
         case authentication
         case corrupt
         case integrity
+        case unsupportedSearchIndex
         case io
     }
 
@@ -385,6 +412,8 @@ extension ClipboardHistoryModule {
             return unavailable(.databaseCorrupt)
         } catch StoreOpenError.integrity {
             return unavailable(.databaseIntegrityFailed)
+        } catch StoreOpenError.unsupportedSearchIndex {
+            return unavailable(.searchIndexUnavailable)
         } catch {
             return unavailable(.storeIOFailure)
         }
@@ -436,6 +465,7 @@ extension ClipboardHistoryModule {
             if existed {
                 try validateIntegrity(of: database)
             }
+            try validateSearchRuntimeCapabilities(of: database)
             try database.writeWithoutTransaction { database in
                 try database.execute(sql: "PRAGMA auto_vacuum = INCREMENTAL")
                 let mode =
@@ -451,6 +481,7 @@ extension ClipboardHistoryModule {
                 try migrator.migrate(database, upTo: migrationTarget)
             } else {
                 try migrator.migrate(database)
+                try prepareSearchIndexState(in: database)
             }
             try validateIntegrity(of: database)
             return database

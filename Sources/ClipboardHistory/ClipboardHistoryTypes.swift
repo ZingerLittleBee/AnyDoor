@@ -50,19 +50,25 @@ public struct ClipboardHistoryQuery: Equatable, Sendable {
     public var sourceID: String?
     public var tagID: String?
     public var favoritesOnly: Bool
+    public var capturedAfter: Date?
+    public var capturedBefore: Date?
 
     public init(
         text: String = "",
         facet: ClipboardHistoryFacet? = nil,
         sourceID: String? = nil,
         tagID: String? = nil,
-        favoritesOnly: Bool = false
+        favoritesOnly: Bool = false,
+        capturedAfter: Date? = nil,
+        capturedBefore: Date? = nil
     ) {
         self.text = text
         self.facet = facet
         self.sourceID = sourceID
         self.tagID = tagID
         self.favoritesOnly = favoritesOnly
+        self.capturedAfter = capturedAfter
+        self.capturedBefore = capturedBefore
     }
 }
 
@@ -77,14 +83,22 @@ public struct ClipboardHistoryCursor: Equatable, Sendable {
 public struct ClipboardHistoryPage: Equatable, Sendable {
     public let entries: [ClipboardHistoryEntry]
     public let nextCursor: ClipboardHistoryCursor?
+    public let state: ClipboardHistoryPageState
 
     public init(
         entries: [ClipboardHistoryEntry],
-        nextCursor: ClipboardHistoryCursor?
+        nextCursor: ClipboardHistoryCursor?,
+        state: ClipboardHistoryPageState = .ready
     ) {
         self.entries = entries
         self.nextCursor = nextCursor
+        self.state = state
     }
+}
+
+public enum ClipboardHistoryPageState: Equatable, Sendable {
+    case ready
+    case indexing
 }
 
 public enum ClipboardHistoryMonitoringCommand: Sendable {
@@ -308,6 +322,7 @@ public struct ClipboardHistoryStatus: Equatable, Sendable {
         case databaseAuthenticationFailed
         case databaseCorrupt
         case databaseIntegrityFailed
+        case searchIndexUnavailable
         case storeIOFailure
     }
 }

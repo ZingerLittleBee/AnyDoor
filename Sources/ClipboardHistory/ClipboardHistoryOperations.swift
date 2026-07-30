@@ -12,91 +12,7 @@ extension ClipboardHistoryModule {
         _ query: ClipboardHistoryQuery,
         after cursor: ClipboardHistoryCursor? = nil
     ) throws -> ClipboardHistoryPage {
-        _ = cursor
-        guard query.text.isEmpty else {
-            throw ClipboardHistoryModuleError.operationUnavailable
-        }
-        let database = try requiredDatabase()
-        return try database.read { database in
-            var conditions: [String] = []
-            var arguments: StatementArguments = []
-            if query.favoritesOnly {
-                conditions.append("is_favorite = 1")
-            }
-            if let sourceID = query.sourceID {
-                conditions.append("source_bundle_id = ?")
-                arguments += [sourceID]
-            }
-            if let tagID = query.tagID {
-                conditions.append(
-                    """
-                    EXISTS (
-                        SELECT 1 FROM clipboard_entry_tags
-                        WHERE entry_id = clipboard_entries.id AND tag_id = ?
-                    )
-                    """
-                )
-                arguments += [tagID]
-            }
-            if let facet = query.facet {
-                conditions.append(
-                    """
-                    EXISTS (
-                        SELECT 1 FROM clipboard_entry_facets
-                        WHERE entry_id = clipboard_entries.id AND facet = ?
-                    )
-                    """
-                )
-                arguments += [facet.rawValue]
-            }
-            let predicate =
-                conditions.isEmpty
-                ? ""
-                : "WHERE \(conditions.joined(separator: " AND "))"
-            let rows = try Row.fetchAll(
-                database,
-                sql: """
-                    SELECT id, captured_at, preview_text, is_favorite,
-                           source_bundle_id, source_display_name,
-                           source_provenance
-                    FROM clipboard_entries
-                    \(predicate)
-                    ORDER BY last_captured_at DESC, id DESC
-                    LIMIT 100
-                    """,
-                arguments: arguments
-            )
-            let entries = try rows.map { row -> ClipboardHistoryEntry in
-                let identifier = try Self.entryID(from: row)
-                let facets = try String.fetchAll(
-                    database,
-                    sql: """
-                        SELECT facet
-                        FROM clipboard_entry_facets
-                        WHERE entry_id = ?
-                        """,
-                    arguments: [identifier.value.uuidString.lowercased()]
-                )
-                return ClipboardHistoryEntry(
-                    id: identifier,
-                    capturedAt: Date(
-                        timeIntervalSince1970: row["captured_at"]
-                    ),
-                    previewText: row["preview_text"],
-                    facets: Set(facets.compactMap(ClipboardHistoryFacet.init)),
-                    isFavorite: row["is_favorite"],
-                    source: ClipboardHistoryCaptureSource(
-                        bundleIdentifier: row["source_bundle_id"],
-                        displayName: row["source_display_name"],
-                        provenance:
-                            ClipboardHistoryCaptureSourceProvenance(
-                                rawValue: row["source_provenance"]
-                            ) ?? .unknown
-                    )
-                )
-            }
-            return ClipboardHistoryPage(entries: entries, nextCursor: nil)
-        }
+        try indexedPage(query, after: cursor)
     }
 
     public func apply(
@@ -382,30 +298,18 @@ extension ClipboardHistoryModule {
                     ("fileName", file.displayName),
                     ("currentPath", file.url.path),
                 ] {
-                    try database.execute(
-                        sql: """
-                            UPDATE clipboard_search_fields
-                            SET value = ?, normalized_value = ?
-                            WHERE entry_id = ? AND field_kind = ?
-                              AND field_index = ?
-                            """,
-                        arguments: [
-                            value,
-                            value.folding(
-                                options: [
-                                    .caseInsensitive,
-                                    .diacriticInsensitive,
-                                    .widthInsensitive,
-                                ],
-                                locale: Locale(identifier: "en_US_POSIX")
-                            ),
-                            storedID,
-                            kind,
-                            file.itemIndex,
-                        ]
+                    try Self.replaceSearchField(
+                        entryID: storedID,
+                        kind: kind,
+                        index: file.itemIndex,
+                        value: value,
+                        rankingGroup: Self.searchRankingGroup(for: kind),
+                        in: database,
+                        faultInjector: faultInjector
                     )
                 }
             }
+            try Self.bumpSearchIndexGeneration(in: database)
         }
         return Dictionary(
             uniqueKeysWithValues: resolved.map { file in
@@ -525,6 +429,8 @@ extension ClipboardHistoryModule {
         monitoringRequested = false
         monitoringEnabled = false
         await captureMonitor?.setEnabled(false)
+        await searchIndexRebuildTask?.value
+        searchIndexRebuildTask = nil
         try database?.close()
         database = nil
         derivedKeys = nil
@@ -545,6 +451,9 @@ extension ClipboardHistoryModule {
         }
         let resolution = Self.resolveStore(at: storeRoot, keyStore: keyStore)
         database = resolution.database
+        searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
+            for: resolution.database
+        )
         derivedKeys = resolution.keys
         availability = resolution.availability
         availabilityReason = resolution.reason
@@ -619,17 +528,29 @@ extension ClipboardHistoryModule {
             ).map { ($0["id"], $0["relative_path"]) }
         }
         let deleted = try await database.write { database in
+            guard try Int.fetchOne(
+                database,
+                sql: "SELECT 1 FROM clipboard_entries WHERE id = ?",
+                arguments: [storedID]
+            ) == 1 else {
+                return false
+            }
+            try Self.deleteSearchFields(
+                forEntryID: storedID,
+                from: database,
+                faultInjector: faultInjector
+            )
             try database.execute(
                 sql: "DELETE FROM clipboard_entries WHERE id = ?",
                 arguments: [storedID]
             )
-            guard database.changesCount > 0 else { return false }
             for payload in payloads {
                 try database.execute(
                     sql: "DELETE FROM clipboard_payloads WHERE id = ?",
                     arguments: [payload.id]
                 )
             }
+            try Self.bumpSearchIndexGeneration(in: database)
             return true
         }
         guard deleted else { return .notFound }

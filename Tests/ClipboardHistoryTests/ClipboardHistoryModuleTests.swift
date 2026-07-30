@@ -745,6 +745,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v2_encrypted_store",
                 "v3_file_reference_identity",
                 "v4_capture_source_provenance",
+                "v5_indexed_search",
             ]
         )
         XCTAssertEqual(
@@ -763,6 +764,16 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "clipboard_representations",
                 "clipboard_retention_state",
                 "clipboard_search_fields",
+                "clipboard_search_short_grams",
+                "clipboard_search_short_grams_config",
+                "clipboard_search_short_grams_data",
+                "clipboard_search_short_grams_docsize",
+                "clipboard_search_short_grams_idx",
+                "clipboard_search_trigram",
+                "clipboard_search_trigram_config",
+                "clipboard_search_trigram_data",
+                "clipboard_search_trigram_docsize",
+                "clipboard_search_trigram_idx",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -794,6 +805,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v2_encrypted_store",
                 "v3_file_reference_identity",
                 "v4_capture_source_provenance",
+                "v5_indexed_search",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)
@@ -1903,6 +1915,8 @@ extension ClipboardHistoryStatus.AvailabilityReason {
             "databaseCorrupt"
         case .databaseIntegrityFailed:
             "databaseIntegrityFailed"
+        case .searchIndexUnavailable:
+            "searchIndexUnavailable"
         case .storeIOFailure:
             "storeIOFailure"
         }

@@ -9,6 +9,7 @@ extension ClipboardHistoryModule {
         facets: Set<ClipboardHistoryFacet>,
         containsBitmap: Bool,
         refreshOCRBudget: Bool,
+        explicitSearchKind: String?,
         database: DatabasePool,
         payloadStore: ClipboardHistoryPayloadStore
     ) throws -> ClipboardHistoryEntryID? {
@@ -119,6 +120,23 @@ extension ClipboardHistoryModule {
                             )
                         }
                     }
+                    if let explicitSearchKind {
+                        try database.execute(
+                            sql: """
+                                UPDATE clipboard_search_fields
+                                SET field_kind = ?, ranking_group = ?
+                                WHERE entry_id = ?
+                                """,
+                            arguments: [
+                                explicitSearchKind,
+                                Self.searchRankingGroup(
+                                    for: explicitSearchKind
+                                ),
+                                storedID,
+                            ]
+                        )
+                    }
+                    try Self.bumpSearchIndexGeneration(in: database)
                     try faultInjector.check(.databaseTransaction)
                 }
             } catch {

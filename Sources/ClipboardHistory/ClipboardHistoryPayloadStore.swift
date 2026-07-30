@@ -25,6 +25,16 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case payloadDurability
     case payloadPublication
     case databaseTransaction
+    case searchInsertAfterField
+    case searchInsertAfterTrigram
+    case searchInsertAfterShortGrams
+    case searchDeleteAfterTrigram
+    case searchDeleteAfterShortGrams
+    case searchUpdateAfterOldTrigram
+    case searchUpdateAfterOldShortGrams
+    case searchUpdateAfterField
+    case searchUpdateAfterNewTrigram
+    case searchUpdateAfterNewShortGrams
     case payloadDeletion
     case orphanReconciliation
 }
