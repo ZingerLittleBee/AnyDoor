@@ -198,6 +198,22 @@ public struct ClipboardHistoryApplicationSource: Equatable, Sendable {
     }
 }
 
+public struct ClipboardHistorySourceSummary: Equatable, Sendable {
+    public let bundleIdentifier: String
+    public let displayName: String
+    public let count: Int
+
+    public init(
+        bundleIdentifier: String,
+        displayName: String,
+        count: Int
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.displayName = displayName
+        self.count = count
+    }
+}
+
 public struct ClipboardHistoryMonitoringConfiguration: Equatable, Sendable {
     public static let defaultExcludedBundleIdentifiers: Set<String> = [
         "com.apple.Passwords",

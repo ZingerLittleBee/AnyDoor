@@ -16,6 +16,12 @@ extension ClipboardHistoryModule {
         try indexedPage(query, after: cursor)
     }
 
+    public func sourceSummaries() throws
+        -> [ClipboardHistorySourceSummary]
+    {
+        try indexedSourceSummaries()
+    }
+
     public func apply(
         _ mutation: ClipboardHistoryMutation
     ) async throws -> ClipboardHistoryMutationOutcome {

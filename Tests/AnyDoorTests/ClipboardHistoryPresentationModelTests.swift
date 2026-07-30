@@ -241,6 +241,13 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                     nextCursor: nil
                 ),
                 ClipboardHistoryPage(entries: [], nextCursor: nil),
+            ],
+            sourceSummaries: [
+                ClipboardHistorySourceSummary(
+                    bundleIdentifier: "com.apple.Safari",
+                    displayName: "Safari",
+                    count: 1
+                )
             ]
         )
         let model = ClipboardHistoryPresentationModel(
@@ -774,6 +781,7 @@ private actor PresentationClientStub {
     private let configuredStatus: ClipboardHistoryStatus
     private var pages: [ClipboardHistoryPage]
     private let applyError: (any Error)?
+    private let sourceSummaries: [ClipboardHistorySourceSummary]
     private(set) var pageRequests: [PageRequest] = []
 
     init(
@@ -783,11 +791,13 @@ private actor PresentationClientStub {
             searchIndex: .ready
         ),
         pages: [ClipboardHistoryPage],
-        applyError: (any Error)? = nil
+        applyError: (any Error)? = nil,
+        sourceSummaries: [ClipboardHistorySourceSummary] = []
     ) {
         configuredStatus = status
         self.pages = pages
         self.applyError = applyError
+        self.sourceSummaries = sourceSummaries
     }
 
     nonisolated var operations: ClipboardHistoryPresentationOperations {
@@ -802,12 +812,19 @@ private actor PresentationClientStub {
             materialize: { _ in
                 ClipboardHistoryMaterialization(items: [])
             },
-            tagDefinitions: { [] }
+            tagDefinitions: { [] },
+            sourceSummaries: { await self.configuredSourceSummaries() }
         )
     }
 
     private func configuredStatusValue() -> ClipboardHistoryStatus {
         configuredStatus
+    }
+
+    private func configuredSourceSummaries()
+        -> [ClipboardHistorySourceSummary]
+    {
+        sourceSummaries
     }
 
     private func nextPage(

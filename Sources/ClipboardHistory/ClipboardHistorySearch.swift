@@ -3,6 +3,51 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
+    func indexedSourceSummaries() throws
+        -> [ClipboardHistorySourceSummary]
+    {
+        let database = try requiredDatabase()
+        return try database.read { database in
+            let expiryCutoff = try Self.expiryCutoff(
+                at: now(),
+                in: database
+            )
+            var conditions = ["entry.source_bundle_id IS NOT NULL"]
+            var arguments: StatementArguments = []
+            Self.appendTypedFilters(
+                ClipboardHistoryQuery(),
+                entryAlias: "entry",
+                to: &conditions,
+                arguments: &arguments,
+                expiryCutoff: expiryCutoff
+            )
+            let rows = try Row.fetchAll(
+                database,
+                sql: """
+                    SELECT entry.source_bundle_id,
+                           COALESCE(
+                               MAX(entry.source_display_name),
+                               entry.source_bundle_id
+                           ) AS source_display_name,
+                           COUNT(*) AS entry_count
+                    FROM clipboard_entries AS entry
+                    WHERE \(conditions.joined(separator: " AND "))
+                    GROUP BY entry.source_bundle_id
+                    ORDER BY source_display_name COLLATE NOCASE,
+                             entry.source_bundle_id
+                    """,
+                arguments: arguments
+            )
+            return rows.map { row in
+                ClipboardHistorySourceSummary(
+                    bundleIdentifier: row["source_bundle_id"],
+                    displayName: row["source_display_name"],
+                    count: row["entry_count"]
+                )
+            }
+        }
+    }
+
     func indexedCount(_ query: ClipboardHistoryQuery) throws -> Int {
         let database = try requiredDatabase()
         let normalizedQuery = Self.normalizedQuery(query.text)

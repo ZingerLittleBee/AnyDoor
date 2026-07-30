@@ -106,6 +106,84 @@ final class ClipboardHistorySearchTests: XCTestCase {
         XCTAssertEqual(two.entries.map(\.previewText), ["甲乙丙丁"])
     }
 
+    func testSourceSummariesRemainAuthoritativeAcrossSearches() async throws {
+        let fixture = try SearchTemporaryDatabase()
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let safari = ClipboardHistoryCaptureSource(
+            bundleIdentifier: "com.apple.Safari",
+            displayName: "Safari"
+        )
+        let notes = ClipboardHistoryCaptureSource(
+            bundleIdentifier: "com.apple.Notes",
+            displayName: "Notes"
+        )
+        let removable = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: safari,
+                content: .text("alpha searchable")
+            )
+        )
+        _ = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: safari,
+                content: .text("beta")
+            )
+        )
+        _ = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: notes,
+                content: .text("gamma")
+            )
+        )
+        _ = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: .unknown,
+                content: .text("anonymous")
+            )
+        )
+
+        _ = try await module.page(
+            ClipboardHistoryQuery(text: "searchable")
+        )
+        let initialSummaries = try await module.sourceSummaries()
+        XCTAssertEqual(
+            initialSummaries,
+            [
+                ClipboardHistorySourceSummary(
+                    bundleIdentifier: "com.apple.Notes",
+                    displayName: "Notes",
+                    count: 1
+                ),
+                ClipboardHistorySourceSummary(
+                    bundleIdentifier: "com.apple.Safari",
+                    displayName: "Safari",
+                    count: 2
+                ),
+            ]
+        )
+
+        _ = try await module.apply(.delete(removable.entryID))
+        let updatedSummaries = try await module.sourceSummaries()
+        XCTAssertEqual(
+            updatedSummaries,
+            [
+                ClipboardHistorySourceSummary(
+                    bundleIdentifier: "com.apple.Notes",
+                    displayName: "Notes",
+                    count: 1
+                ),
+                ClipboardHistorySourceSummary(
+                    bundleIdentifier: "com.apple.Safari",
+                    displayName: "Safari",
+                    count: 1
+                ),
+            ]
+        )
+    }
+
     @MainActor
     func testMultiTermSearchCombinesFieldsAcrossOrderedItems() async throws {
         let fixture = try SearchTemporaryDatabase()
