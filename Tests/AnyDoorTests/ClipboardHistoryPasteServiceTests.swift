@@ -102,6 +102,19 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
         )
     }
 
+    func testUnavailablePayloadSaysSoInsteadOfAGenericCopyFailure() {
+        // A migrated entry whose owned copy was already gone can never paste.
+        // "复制失败" alone invites the user to keep retrying it.
+        let notice = ClipboardHistoryActionFailureNotice(.payloadUnavailable)
+
+        XCTAssertEqual(notice.titleKey, .clipboardToastPayloadUnavailable)
+        XCTAssertTrue(notice.details.isEmpty)
+        XCTAssertNotEqual(
+            notice.titleKey,
+            .clipboardToastCopyFailed
+        )
+    }
+
     func testActionFailureNoticePresentsOwnedAndUnavailableCountsSeparately() {
         let id = ClipboardHistoryEntryID(UUID())
         let notice = ClipboardHistoryActionFailureNotice(

@@ -140,6 +140,8 @@ enum L10n {
         case clipboardToastCopyFailed = "clipboard.toast.copyFailed"
         case clipboardToastFileMissing = "clipboard.toast.fileMissing"
         case clipboardToastLegacyOwnedCount = "clipboard.toast.legacyOwnedCount"
+        case clipboardToastPayloadUnavailable =
+            "clipboard.toast.payloadUnavailable"
         case clipboardToastSourceIgnored = "clipboard.toast.sourceIgnored"
         case clipboardToastUnavailableCount = "clipboard.toast.unavailableCount"
         case clipboardRestoreFile = "clipboard.restore.file"

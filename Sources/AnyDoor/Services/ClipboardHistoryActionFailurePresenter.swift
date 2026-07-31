@@ -14,6 +14,12 @@ struct ClipboardHistoryActionFailureNotice: Equatable {
         case .fileReferencesUnavailable(_, let count):
             titleKey = .clipboardToastFileMissing
             details = [.unavailable(count: count)]
+        case .payloadUnavailable:
+            // A migrated entry whose owned copy was already gone, or a payload
+            // lost since. "Copy failed" alone leaves the user retrying an
+            // entry that can never paste.
+            titleKey = .clipboardToastPayloadUnavailable
+            details = []
         case .fileCollectionRequiresRestore(
             _,
             let ownedCount,

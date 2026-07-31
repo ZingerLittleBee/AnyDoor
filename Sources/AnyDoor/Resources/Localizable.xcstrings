@@ -3095,6 +3095,23 @@
         }
       }
     },
+    "clipboard.toast.payloadUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Content is no longer available"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容已不可用，无法粘贴"
+          }
+        }
+      }
+    },
     "clipboard.toast.sourceIgnored": {
       "extractionState": "manual",
       "localizations": {
