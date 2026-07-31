@@ -198,6 +198,34 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
         }
     }
 
+    func testPresentationRefreshFailureIsSilentUntilTheStoreIsReady()
+        async throws
+    {
+        let presentation = SettingsPresentation(selectedTab: .clipboard)
+        let fixture = try SettingsFixture(
+            presentation: presentation,
+            refreshOperations: .alwaysFailing
+        )
+
+        // Not ready: the lifecycle section already explains the state, so a
+        // presentation read that fails because of it must not add a second
+        // "an operation failed" error for something the user never did.
+        XCTAssertNotEqual(fixture.lifecycle.state, .ready)
+        presentation.recordShow()
+        await fixture.model.refreshForSettingsPresentation()
+        XCTAssertFalse(fixture.model.operationFailed)
+
+        fixture.lifecycle.start()
+        await waitUntil("lifecycle ready") {
+            fixture.lifecycle.state == .ready
+        }
+
+        // Ready: a failure now is genuinely unexpected and stays reported.
+        presentation.recordShow()
+        await fixture.model.refreshForSettingsPresentation()
+        XCTAssertTrue(fixture.model.operationFailed)
+    }
+
     private func request(
         _ text: String
     ) -> ClipboardHistoryCaptureRequest {
@@ -256,6 +284,22 @@ private struct SettingsFixture {
             presentation: presentation,
             defaults: defaults,
             refreshOperations: refreshOperations
+        )
+    }
+}
+
+extension ClipboardHistorySettingsRefreshOperations {
+    fileprivate enum RefreshFailure: Error {
+        case injected
+    }
+
+    fileprivate static var alwaysFailing: Self {
+        Self(
+            retentionPeriod: { throw RefreshFailure.injected },
+            automaticImageTextIndexingEnabled: {
+                throw RefreshFailure.injected
+            },
+            storageUsage: { throw RefreshFailure.injected }
         )
     }
 }

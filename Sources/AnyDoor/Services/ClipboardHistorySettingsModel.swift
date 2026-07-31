@@ -172,7 +172,7 @@ final class ClipboardHistorySettingsModel {
             guard shouldApplyRefresh(
                 expectedSettingsAppearanceGeneration
             ) else { return }
-            operationFailed = true
+            operationFailed = failureIsReportable
         }
         guard shouldApplyRefresh(expectedSettingsAppearanceGeneration)
         else { return }
@@ -338,8 +338,16 @@ final class ClipboardHistorySettingsModel {
         do {
             storageBytes = try await refreshOperations.storageUsage()
         } catch {
-            operationFailed = true
+            operationFailed = failureIsReportable
         }
+    }
+
+    /// Reading state for presentation is not a user operation. While the store
+    /// is anything but ready the lifecycle section already says why, so adding
+    /// "an operation failed, your history was not reset" on top only reads as a
+    /// second, unexplained error for something the user never asked for.
+    private var failureIsReportable: Bool {
+        lifecycle.state == .ready
     }
 
     private func reloadLocalPreferences() {
