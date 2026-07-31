@@ -61,6 +61,9 @@ versioning.
   instead of as a temporary pause that would never resolve.
 - Opening Settings → Clipboard while the store is unavailable no longer adds
   a second, unrelated "operation failed" error next to the explanation.
+- The clipboard wall now says which kind of empty it is: a search that found
+  nothing, a filter that hides everything, and a history with no entries
+  yet each read differently instead of sharing one "no history" line.
 - A copy is attributed to the app it was made in even when you switch away
   immediately afterwards. The frontmost app is now sampled the instant
   Command-C arrives rather than a moment later, so a quick app switch no
