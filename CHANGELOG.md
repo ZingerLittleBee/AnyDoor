@@ -51,6 +51,16 @@ versioning.
   store is snapshotted before the cutover and removed only after the
   encrypted copy is published and verified, so an interrupted migration
   leaves the readable copy intact and retries on the next launch.
+- A migrated image whose old copy is no longer on disk keeps its entry —
+  capture time, source, favorite state, and tags are preserved and its
+  content is reported as unavailable. Previously a single missing file
+  aborted the whole migration, leaving every entry behind a retry that could
+  never succeed.
+- A Keychain that refuses the history key while it is unlocked is now
+  reported as unavailable, with retry and an explicitly confirmed reset,
+  instead of as a temporary pause that would never resolve.
+- Opening Settings → Clipboard while the store is unavailable no longer adds
+  a second, unrelated "operation failed" error next to the explanation.
 
 ## [4.1.0] - 2026-07-28
 
