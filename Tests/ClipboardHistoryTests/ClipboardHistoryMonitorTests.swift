@@ -476,6 +476,55 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testCopyKeystrokeSourceWinsOverAnAppSwitchedToRightAfter() async throws {
+        // The tap callback samples the frontmost app at the instant Command-C
+        // arrives. A user who switches apps immediately afterwards must still
+        // see the app they copied *from* (contract 2.12/2.26.4), so the sampled
+        // source has to beat every later reading of the frontmost app.
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        let switchedTo = ClipboardHistoryApplicationSource(
+            bundleIdentifier: "com.google.Chrome",
+            displayName: "Google Chrome"
+        )
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            sourceProvider: { switchedTo },
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        await monitor.keyHintForTesting(
+            copiedIn: ClipboardHistoryApplicationSource(
+                bundleIdentifier: "com.apple.TextEdit",
+                displayName: "TextEdit"
+            )
+        )
+        pasteboard.clearContents()
+        pasteboard.setString("TESTLOOP-SWITCH", forType: .string)
+        await monitor.timerFiredForTesting()
+
+        let page = try await module.page(.init())
+        let entry = try XCTUnwrap(page.entries.first)
+        XCTAssertEqual(
+            entry.source,
+            ClipboardHistoryCaptureSource(
+                bundleIdentifier: "com.apple.TextEdit",
+                displayName: "TextEdit",
+                provenance: .copyEvent
+            )
+        )
+    }
+
+    @MainActor
     func testEventAssistedRapidCopiesRecordZeroPipelineLoss() async throws {
         let expectedCount = 100
         let fixture = try MonitorTemporaryStore()

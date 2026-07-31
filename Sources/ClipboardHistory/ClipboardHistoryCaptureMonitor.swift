@@ -84,9 +84,10 @@ final class ClipboardHistoryCaptureMonitor {
         self.snapshotRequest = snapshotRequest
         if installsSystemObservers {
             installSystemObservers()
-            eventHintSource = ClipboardHistoryCopyEventHintSource { [weak self] in
+            eventHintSource = ClipboardHistoryCopyEventHintSource {
+                [weak self] frontmost in
                 Task { @MainActor in
-                    await self?.handleKeyHint()
+                    await self?.handleKeyHint(copiedIn: frontmost)
                 }
             }
         }
@@ -151,22 +152,31 @@ final class ClipboardHistoryCaptureMonitor {
         await observe()
     }
 
-    func keyHintForTesting() async {
-        await handleKeyHint()
+    func keyHintForTesting(
+        copiedIn source: ClipboardHistoryApplicationSource? = nil
+    ) async {
+        await handleKeyHint(copiedIn: source)
     }
 
     func timerFiredForTesting() async {
         await timerFired()
     }
 
-    private func handleKeyHint() async {
+    /// `copiedIn` is the frontmost application sampled by the tap callback at
+    /// the moment the copy keystroke arrived. It is authoritative: re-reading
+    /// it here would already be too late for a user who switches apps
+    /// immediately after copying. Only a caller that has no such sample (tests)
+    /// falls back to reading it now.
+    private func handleKeyHint(
+        copiedIn sampledSource: ClipboardHistoryApplicationSource?
+    ) async {
         os_signpost(
             .event,
             log: clipboardMonitorSignpostLog,
             name: "CopyKeyHint"
         )
         instrumentation.recordKeyHint()
-        let source = sourceProvider()
+        let source = sampledSource ?? sourceProvider()
         let plan = scheduler.handle(.keyHint, at: now())
         if let source, let deadline = plan.copyEventWindowDeadline {
             pendingCopyEventSource = PendingCopyEventSource(
@@ -398,7 +408,7 @@ final class ClipboardHistoryCaptureMonitor {
         .nanoseconds(Int64(clamping: DispatchTime.now().uptimeNanoseconds))
     }
 
-    private static func frontmostApplicationSource()
+    fileprivate static func frontmostApplicationSource()
         -> ClipboardHistoryApplicationSource?
     {
         guard let application = NSWorkspace.shared.frontmostApplication,
@@ -415,7 +425,8 @@ final class ClipboardHistoryCaptureMonitor {
 
 @MainActor
 private final class ClipboardHistoryCopyEventHintSource {
-    private nonisolated let scheduleHint: @Sendable () -> Void
+    private nonisolated let scheduleHint:
+        @Sendable (ClipboardHistoryApplicationSource?) -> Void
     /// Read by the tap callback, which runs on the run loop that installed it
     /// (the main thread) but is not statically main-actor isolated — the same
     /// arrangement HotkeyService uses for its own tap storage.
@@ -426,7 +437,10 @@ private final class ClipboardHistoryCopyEventHintSource {
     /// retried later without a stop/start cycle.
     private var isRunning = false
 
-    init(scheduleHint: @escaping @Sendable () -> Void) {
+    init(
+        scheduleHint: @escaping @Sendable
+            (ClipboardHistoryApplicationSource?) -> Void
+    ) {
         self.scheduleHint = scheduleHint
     }
 
@@ -514,10 +528,19 @@ private final class ClipboardHistoryCopyEventHintSource {
         else {
             return
         }
-        // The callback only enqueues the immutable hint closure. Pasteboard
-        // access, source sampling, canonicalization, and persistence all happen
-        // later on the monitor's serialized path.
-        scheduleHint()
+        // Sample the frontmost application *here*, in the callback, rather than
+        // after the hop onto the monitor. The callback runs on the main run
+        // loop at the instant Command-C is pressed; by the time the enqueued
+        // work executes, a user who switched apps right after copying has
+        // already changed the frontmost app, and the copy would be attributed
+        // to whatever they switched to (contract 2.12/2.26.4).
+        //
+        // Everything else — pasteboard access, canonicalization, persistence —
+        // still happens later on the monitor's serialized path.
+        let frontmost = MainActor.assumeIsolated {
+            ClipboardHistoryCaptureMonitor.frontmostApplicationSource()
+        }
+        scheduleHint(frontmost)
     }
 }
 
