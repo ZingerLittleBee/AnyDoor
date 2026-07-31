@@ -58,6 +58,26 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.selectedItem?.previewText, "b")
     }
 
+    func testEmptyStateTellsSearchFilterAndAnEmptyHistoryApart() async {
+        // One "暂无历史" for all three left the user unable to tell a bad query
+        // from an empty history.
+        let state = await makeState()
+        XCTAssertEqual(state.emptyStateKey, .clipboardEmpty)
+
+        state.category = .kind(.image)
+        XCTAssertEqual(state.emptyStateKey, .clipboardEmptyFilter)
+
+        state.category = .all
+        state.sourceFilterBundleID = "com.apple.Safari"
+        XCTAssertEqual(state.emptyStateKey, .clipboardEmptyFilter)
+
+        // A query outranks a filter: the user is looking at their own search.
+        state.query = "nothing matches this"
+        XCTAssertEqual(state.emptyStateKey, .clipboardEmptySearch)
+        state.sourceFilterBundleID = nil
+        XCTAssertEqual(state.emptyStateKey, .clipboardEmptySearch)
+    }
+
     func testCategoryAndSearchAreHeld() async {
         let state = await makeState()
         state.category = .kind(.image)

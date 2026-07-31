@@ -2415,6 +2415,40 @@
         }
       }
     },
+    "clipboard.empty.filter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing matches this filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此筛选下暂无内容"
+          }
+        }
+      }
+    },
+    "clipboard.empty.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No matching results"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有匹配的结果"
+          }
+        }
+      }
+    },
     "clipboard.file.count": {
       "extractionState": "manual",
       "localizations": {

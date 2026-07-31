@@ -99,7 +99,7 @@ struct ClipboardWallView: View {
                 Spacer()
             } else if items.isEmpty {
                 Spacer()
-                LocalizedText(.clipboardEmpty).foregroundStyle(.secondary)
+                LocalizedText(state.emptyStateKey).foregroundStyle(.secondary)
                 Spacer()
             } else {
                 cards(items)

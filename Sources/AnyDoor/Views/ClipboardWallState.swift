@@ -117,6 +117,18 @@ final class ClipboardWallState {
         return items.firstIndex { $0.id == selectedID } ?? 0
     }
 
+    /// Which "nothing here" line fits the current query. An untouched history,
+    /// a search that found nothing, and a filter that hides everything are three
+    /// different situations; one shared string leaves the user unable to tell
+    /// whether their query is wrong or their history is simply empty.
+    var emptyStateKey: L10n.Key {
+        if !query.isEmpty { return .clipboardEmptySearch }
+        if sourceFilterBundleID != nil || category != .all {
+            return .clipboardEmptyFilter
+        }
+        return .clipboardEmpty
+    }
+
     var moduleQuery: ClipboardHistoryQuery {
         ClipboardHistoryQuery(
             text: query,
