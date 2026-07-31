@@ -61,6 +61,10 @@ versioning.
   instead of as a temporary pause that would never resolve.
 - Opening Settings → Clipboard while the store is unavailable no longer adds
   a second, unrelated "operation failed" error next to the explanation.
+- A copy is attributed to the app it was made in even when you switch away
+  immediately afterwards. The frontmost app is now sampled the instant
+  Command-C arrives rather than a moment later, so a quick app switch no
+  longer relabels the entry with whatever you switched to.
 
 ## [4.1.0] - 2026-07-28
 
