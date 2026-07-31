@@ -260,6 +260,76 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
         )
     }
 
+    func testMissingOwnedImageDegradesTheRowWithoutFailingTheMigration()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let now = fixture.now
+        let entries = [
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!,
+                kind: .text,
+                text: "survives",
+                capturedAt: now
+            ),
+            legacyEntry(
+                id: UUID(uuidString: "00000000-0000-0000-0000-0000000000A2")!,
+                kind: .image,
+                fileName: "gone.png",
+                capturedAt: now.addingTimeInterval(-10),
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: "com.example.shot",
+                    displayName: "Example",
+                    provenance: .legacy
+                ),
+                isFavorite: true,
+                tagIDs: ["work"]
+            ),
+        ]
+        let module = fixture.makeModule(now: now)
+
+        let outcome = try await module.migrateLegacy(
+            fixture.request(
+                entries: entries,
+                tags: [ClipboardHistoryLegacyTag(id: "work", name: "Work")],
+                retentionPeriod: .unlimited
+            )
+        )
+
+        // The whole history migrates; only the unrecoverable image loses its
+        // bytes. A single missing legacy copy must not strand every entry.
+        guard case .published(let report) = outcome else {
+            return XCTFail("expected the migration to publish, got \(outcome)")
+        }
+        XCTAssertEqual(report.retainedEntryCount, 2)
+        XCTAssertEqual(report.ownedPayloadCount, 0)
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id.value), entries.map(\.id))
+        let degraded = try XCTUnwrap(page.entries.last)
+        XCTAssertEqual(degraded.facets, [.image])
+        XCTAssertEqual(degraded.isFavorite, true)
+        XCTAssertEqual(degraded.tagIDs, ["work"])
+        XCTAssertEqual(degraded.source.displayName, "Example")
+
+        // Its content is unavailable, which is not the same as the entry being
+        // absent, and it must never satisfy a later duplicate recapture.
+        do {
+            _ = try await module.materialize(
+                ClipboardHistoryMaterializationRequest(
+                    entryID: degraded.id,
+                    purpose: .normalPaste
+                )
+            )
+            XCTFail("expected materializing a content-less entry to fail")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .payloadUnavailable(degraded.id)
+            )
+        }
+    }
+
     func testCorruptOwnedImageNeverPublishesPartialStagingStore()
         async throws
     {

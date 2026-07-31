@@ -110,7 +110,12 @@ extension ClipboardHistoryModule {
             )
         }
         guard !rows.isEmpty else {
-            throw ClipboardHistoryModuleError.entryNotFound
+            // The entry is live (checked above) but carries no representation:
+            // a migrated legacy row whose owned copy was already gone. Its
+            // content is unavailable, which is not the same as absent.
+            throw ClipboardHistoryModuleError.payloadUnavailable(
+                request.entryID
+            )
         }
         if request.purpose == .plainTextPaste {
             let groupedRows = Dictionary(

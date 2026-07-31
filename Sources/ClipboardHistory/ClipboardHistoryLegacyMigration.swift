@@ -635,8 +635,11 @@ extension ClipboardHistoryModule {
                 isProtected,
             ]
         )
+        guard let canonicalSnapshot = prepared.canonicalSnapshot else {
+            return
+        }
         let identity = try CanonicalIdentity(
-            snapshot: prepared.canonicalSnapshot,
+            snapshot: canonicalSnapshot,
             fingerprintDigest: fingerprintDigest
         )
         try database.execute(
@@ -1126,6 +1129,27 @@ extension ClipboardHistoryModule {
             guard let fileName = entry.fileName else {
                 throw ClipboardHistoryModuleError.legacyMigrationFailed
             }
+            // A legacy copy that is simply gone — a cache cleaner, a manual
+            // delete — is not a reason to abandon the whole history. The row
+            // degrades to a content-less entry that keeps its capture time,
+            // source, favorite and tags, the same way a file member without
+            // readable captured bytes is preserved rather than dropped. A
+            // payload that is present but unreadable or corrupt still fails
+            // the migration: that indicates storage trouble worth stopping for.
+            try validateLegacyPayloadName(fileName)
+            guard FileManager.default.fileExists(
+                atPath: payloadDirectory
+                    .appendingPathComponent(fileName).path
+            ) else {
+                return PreparedLegacyEntry(
+                    representations: [],
+                    facets: entry.kind == .screenshot
+                        ? [.image, .screenshot]
+                        : [.image],
+                    thumbnail: nil,
+                    canonicalSnapshot: nil
+                )
+            }
             let payloadURL = try safeLegacyPayloadURL(
                 named: fileName,
                 in: payloadDirectory
@@ -1501,7 +1525,10 @@ private struct PreparedLegacyEntry {
     let representations: [PreparedLegacyRepresentation]
     let facets: Set<ClipboardHistoryFacet>
     let thumbnail: ClipboardHistoryPublishedPayload?
-    let canonicalSnapshot: ClipboardHistoryModule.PasteboardSnapshot
+    /// `nil` when the entry has no recoverable content, which leaves it out of
+    /// duplicate reuse — an identity that cannot be re-verified must never
+    /// match a later capture (ADR-0024).
+    let canonicalSnapshot: ClipboardHistoryModule.PasteboardSnapshot?
 }
 
 private struct LegacyStagingBuildResult {
