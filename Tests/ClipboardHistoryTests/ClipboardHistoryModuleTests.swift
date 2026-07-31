@@ -869,6 +869,53 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertEqual(context?.interactionNotAllowed, false)
     }
 
+    func testInteractionNotAllowedOnAnUnlockedKeychainIsADenialNotALock() {
+        // A locked keychain is temporary and resolves when the user unlocks it,
+        // so it stays `locked`. The same OSStatus on an *unlocked* keychain
+        // means the item's ACL refused this caller with no prompt available —
+        // that never recovers, and reporting it as `locked` leaves the user
+        // waiting forever with no reset affordance.
+        XCTAssertEqual(
+            ClipboardHistoryKeychainStore.classifyInteractionNotAllowed(
+                isKeychainUnlocked: true
+            ),
+            .accessDenied
+        )
+        XCTAssertEqual(
+            ClipboardHistoryKeychainStore.classifyInteractionNotAllowed(
+                isKeychainUnlocked: false
+            ),
+            .locked
+        )
+        // An undeterminable lock state keeps the recoverable reading.
+        XCTAssertEqual(
+            ClipboardHistoryKeychainStore.classifyInteractionNotAllowed(
+                isKeychainUnlocked: nil
+            ),
+            .locked
+        )
+    }
+
+    func testKeyAccessDeniedSurfacesAsStoreUnavailableNotPaused() async throws {
+        let fixture = try TemporaryStore()
+        let keyStore = TestMasterKeyStore(loadResult: .accessDenied)
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: keyStore
+        )
+
+        let status = await module.status()
+        XCTAssertEqual(
+            status,
+            ClipboardHistoryStatus(
+                availability: .unavailable,
+                reason: .keyAccessDenied,
+                isMonitoring: false
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.url.path))
+    }
+
     func testLockedKeychainPausesWithoutCreatingStoreAndRetryResumes() async throws {
         let fixture = try TemporaryStore()
         let masterKey = Data(repeating: 0x31, count: 32)
