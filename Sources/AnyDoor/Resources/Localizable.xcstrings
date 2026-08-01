@@ -3180,6 +3180,40 @@
         }
       }
     },
+    "clipboard.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History is unavailable. Retry or reset it in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史不可用，可在设置中重试或重置。"
+          }
+        }
+      }
+    },
+    "clipboard.unavailable.keychainLocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain is locked. Clipboard History resumes once you unlock it."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串已锁定，解锁后剪贴板历史会自动恢复。"
+          }
+        }
+      }
+    },
     "clipboard.restore.chooseAnother": {
       "extractionState": "manual",
       "localizations": {

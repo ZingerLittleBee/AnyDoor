@@ -129,6 +129,21 @@ final class ClipboardWallState {
         return .clipboardEmpty
     }
 
+    /// Which line explains a store the wall cannot read. This used to reuse
+    /// the per-item "cannot preview" string, which reads as one broken entry
+    /// rather than a whole history sitting behind a key the app cannot reach —
+    /// and says nothing about where the retry and reset actions live. A locked
+    /// keychain stays its own line because it is the one case the user fixes
+    /// outside AnyDoor, and it resolves on its own once unlocked.
+    var unavailableStateKey: L10n.Key {
+        guard case .unavailable(let reason) = presentation.contentState,
+            reason == .keychainLocked
+        else {
+            return .clipboardUnavailable
+        }
+        return .clipboardUnavailableKeychainLocked
+    }
+
     var moduleQuery: ClipboardHistoryQuery {
         ClipboardHistoryQuery(
             text: query,

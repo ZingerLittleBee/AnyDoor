@@ -94,8 +94,9 @@ struct ClipboardWallView: View {
                 state.presentation.contentState
             {
                 Spacer()
-                LocalizedText(.clipboardPreviewCannotRender)
+                LocalizedText(state.unavailableStateKey)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
                 Spacer()
             } else if items.isEmpty {
                 Spacer()

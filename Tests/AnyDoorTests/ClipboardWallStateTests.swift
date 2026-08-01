@@ -21,7 +21,9 @@ final class ClipboardWallStateTests: XCTestCase {
     }
 
     private func makeState(
-        entries: [ClipboardHistoryEntry] = []
+        entries: [ClipboardHistoryEntry] = [],
+        availability: ClipboardHistoryStatus.Availability = .ready,
+        reason: ClipboardHistoryStatus.AvailabilityReason? = nil
     ) async -> ClipboardWallState {
         let page = ClipboardHistoryPage(
             entries: entries,
@@ -31,7 +33,8 @@ final class ClipboardWallStateTests: XCTestCase {
             operations: ClipboardHistoryPresentationOperations(
                 status: {
                     ClipboardHistoryStatus(
-                        availability: .ready,
+                        availability: availability,
+                        reason: reason,
                         isMonitoring: true,
                         searchIndex: .ready
                     )
@@ -76,6 +79,35 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.emptyStateKey, .clipboardEmptySearch)
         state.sourceFilterBundleID = nil
         XCTAssertEqual(state.emptyStateKey, .clipboardEmptySearch)
+    }
+
+    func testAnUnavailableStoreIsNamedInsteadOfLookingLikeABrokenPreview()
+        async
+    {
+        // Deleting the Keychain master key left the wall showing the per-item
+        // "无法预览" line, indistinguishable from one bad entry and silent about
+        // the retry/reset that live in Settings.
+        let missingKey = await makeState(
+            availability: .unavailable,
+            reason: .missingKey
+        )
+        XCTAssertEqual(missingKey.unavailableStateKey, .clipboardUnavailable)
+
+        // A locked keychain fixes itself once unlocked, so it must not tell the
+        // user to go reset their history.
+        let locked = await makeState(
+            availability: .paused,
+            reason: .keychainLocked
+        )
+        XCTAssertEqual(
+            locked.unavailableStateKey,
+            .clipboardUnavailableKeychainLocked
+        )
+
+        // A store that is fine never renders the branch, but the key must still
+        // be a safe generic rather than the locked-keychain claim.
+        let ready = await makeState()
+        XCTAssertEqual(ready.unavailableStateKey, .clipboardUnavailable)
     }
 
     func testCategoryAndSearchAreHeld() async {
