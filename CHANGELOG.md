@@ -68,6 +68,9 @@ versioning.
   immediately afterwards. The frontmost app is now sampled the instant
   Command-C arrives rather than a moment later, so a quick app switch no
   longer relabels the entry with whatever you switched to.
+- A Clipboard History reset that fails now says so instead of redisplaying the
+  "storage is unavailable" line, which made the confirmed destructive action
+  look like it had done nothing at all.
 - A clipboard wall that cannot open the history store now says so and points
   at the retry and reset in Settings, instead of showing the same "cannot
   preview" line used for a single unreadable entry. A locked Keychain reads
