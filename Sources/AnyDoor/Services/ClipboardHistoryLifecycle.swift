@@ -102,9 +102,12 @@ final class ClipboardHistoryLifecycle {
     private let legacyPayloadDirectory: (@MainActor () -> URL)?
     private let finishMigration: @MainActor () throws -> Void
     private let retrySnapshotDeletion: @MainActor () throws -> Void
+    private let isKeychainUnlocked: @Sendable () -> Bool?
+    private let keychainUnlockPollInterval: Duration
 
     @ObservationIgnored private var operationTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var keychainUnlockWatch: Task<Void, Never>?
 
     private(set) var state: ClipboardHistoryLifecycleState = .preparing
     private(set) var migrationReport:
@@ -133,6 +136,10 @@ final class ClipboardHistoryLifecycle {
         self.legacyPayloadDirectory = legacyPayloadDirectory
         self.finishMigration = finishMigration
         self.retrySnapshotDeletion = retrySnapshotDeletion
+        isKeychainUnlocked = {
+            ClipboardHistoryKeychainLock.isLoginKeychainUnlocked()
+        }
+        keychainUnlockPollInterval = Self.defaultKeychainUnlockPollInterval
     }
 
     init(
@@ -147,7 +154,12 @@ final class ClipboardHistoryLifecycle {
                 -> ClipboardHistoryLegacyMigrationRequest)?,
         finishMigration: @escaping @MainActor () throws -> Void = {},
         retrySnapshotDeletion:
-            @escaping @MainActor () throws -> Void = {}
+            @escaping @MainActor () throws -> Void = {},
+        isKeychainUnlocked: @escaping @Sendable () -> Bool? = {
+            ClipboardHistoryKeychainLock.isLoginKeychainUnlocked()
+        },
+        keychainUnlockPollInterval: Duration =
+            ClipboardHistoryLifecycle.defaultKeychainUnlockPollInterval
     ) {
         self.operations = operations
         self.defaults = defaults
@@ -158,7 +170,13 @@ final class ClipboardHistoryLifecycle {
         self.legacyPayloadDirectory = legacyPayloadDirectory
         self.finishMigration = finishMigration
         self.retrySnapshotDeletion = retrySnapshotDeletion
+        self.isKeychainUnlocked = isKeychainUnlocked
+        self.keychainUnlockPollInterval = keychainUnlockPollInterval
     }
+
+    /// Slow enough to be free, quick enough that unlocking the keychain and
+    /// copying something right after still lands in history.
+    static let defaultKeychainUnlockPollInterval: Duration = .seconds(5)
 
     func start() {
         launch(retryStoreFirst: false, resetStoreFirst: false)
@@ -225,6 +243,8 @@ final class ClipboardHistoryLifecycle {
         generation += 1
         operationTask?.cancel()
         operationTask = nil
+        keychainUnlockWatch?.cancel()
+        keychainUnlockWatch = nil
         _ = await operations.setMonitoring(
             .stop,
             ClipboardPreferences.monitoringConfiguration(from: defaults)
@@ -235,6 +255,35 @@ final class ClipboardHistoryLifecycle {
         await operationTask?.value
     }
 
+    /// A locked keychain is the one stalled state the user fixes outside
+    /// AnyDoor, and nothing tells the app when that happens — so while it lasts,
+    /// poll the *lock state* (never the item, which would re-raise the password
+    /// prompt every few seconds) and retry the store on the first unlock.
+    /// Without this the store stays paused until the next launch, which turns a
+    /// self-healing state into one that silently drops everything the user
+    /// copies after unlocking.
+    private func updateKeychainUnlockWatch() {
+        guard case .paused(.keychainLocked) = state else {
+            keychainUnlockWatch?.cancel()
+            keychainUnlockWatch = nil
+            return
+        }
+        guard keychainUnlockWatch == nil else { return }
+        let probe = isKeychainUnlocked
+        let interval = keychainUnlockPollInterval
+        keychainUnlockWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled, let self else { return }
+                guard case .paused(.keychainLocked) = state else { return }
+                guard probe() == true else { continue }
+                keychainUnlockWatch = nil
+                retry()
+                return
+            }
+        }
+    }
+
     private func launch(
         retryStoreFirst: Bool,
         resetStoreFirst: Bool
@@ -243,6 +292,7 @@ final class ClipboardHistoryLifecycle {
         generation += 1
         let requestGeneration = generation
         state = .preparing
+        updateKeychainUnlockWatch()
         operationTask = Task { @concurrent [weak self] in
             await self?.run(
                 generation: requestGeneration,
@@ -260,6 +310,7 @@ final class ClipboardHistoryLifecycle {
         defer {
             if generation == requestGeneration {
                 operationTask = nil
+                updateKeychainUnlockWatch()
             }
         }
         if resetStoreFirst {

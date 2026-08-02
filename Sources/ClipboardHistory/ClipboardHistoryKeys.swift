@@ -144,10 +144,8 @@ struct ClipboardHistoryKeychainStore: ClipboardHistoryMasterKeyStoring {
             return .key(key)
         case errSecItemNotFound:
             return .missing
-        case errSecInteractionNotAllowed:
-            return interactionNotAllowedResult(keychain: keychain)
-        case errSecAuthFailed, errSecUserCanceled:
-            return .accessDenied
+        case let status where Self.dependsOnKeychainLockState(status):
+            return promptDeniedResult(status: status, keychain: keychain)
         default:
             return .failure(status)
         }
@@ -185,10 +183,8 @@ struct ClipboardHistoryKeychainStore: ClipboardHistoryMasterKeyStoring {
             return .key(key)
         case errSecDuplicateItem:
             return load()
-        case errSecInteractionNotAllowed:
-            return interactionNotAllowedResult(keychain: keychain)
-        case errSecAuthFailed, errSecUserCanceled:
-            return .accessDenied
+        case let status where Self.dependsOnKeychainLockState(status):
+            return promptDeniedResult(status: status, keychain: keychain)
         default:
             return .failure(status)
         }
@@ -215,26 +211,41 @@ struct ClipboardHistoryKeychainStore: ClipboardHistoryMasterKeyStoring {
         switch status {
         case errSecSuccess, errSecItemNotFound:
             return .missing
-        case errSecInteractionNotAllowed:
-            return interactionNotAllowedResult(keychain: keychain)
-        case errSecAuthFailed, errSecUserCanceled:
-            return .accessDenied
+        case let status where Self.dependsOnKeychainLockState(status):
+            return promptDeniedResult(status: status, keychain: keychain)
         default:
             return .failure(status)
         }
     }
 
-    /// `errSecInteractionNotAllowed` covers two situations that must not be
-    /// reported the same way. The keychain can genuinely be locked — temporary,
-    /// resolves the moment the user unlocks it — or the item's ACL may not
-    /// trust this caller while no authorization prompt can be shown, which
-    /// never resolves on its own. Reporting the second as `locked` strands the
-    /// user in a paused state that waits forever and offers no recovery, so an
-    /// unlocked keychain downgrades it to a denial the host can act on.
-    private func interactionNotAllowedResult(
+    /// Which statuses mean nothing on their own and have to be read against the
+    /// keychain's lock state. `errSecInteractionNotAllowed` covers two
+    /// situations that must not be reported the same way: the keychain can
+    /// genuinely be locked — temporary, resolves the moment the user unlocks it
+    /// — or the item's ACL may not trust this caller while no authorization
+    /// prompt can be shown, which never resolves on its own. A dismissed or
+    /// failed password prompt is the same fork: on a still-locked keychain the
+    /// user just waved the prompt away while busy, and calling that a denial
+    /// puts "reset Clipboard History" — permanent data loss — in front of
+    /// someone whose only problem is a locked keychain.
+    static func dependsOnKeychainLockState(_ status: OSStatus) -> Bool {
+        status == errSecInteractionNotAllowed || status == errSecAuthFailed
+            || status == errSecUserCanceled
+    }
+
+    /// Reporting an ACL denial as `locked` would strand the user in a paused
+    /// state that waits forever and offers no recovery, so an unlocked keychain
+    /// downgrades a refused prompt to a denial the host can act on.
+    private func promptDeniedResult(
+        status: OSStatus,
         keychain: SecKeychain?
     ) -> ClipboardHistoryMasterKeyResult {
-        guard allowsInteraction else { return .interactionRequired }
+        // Under a policy that forbids prompting, `errSecInteractionNotAllowed`
+        // says only that a prompt was needed; the caller can retry with one.
+        // The other two statuses mean a prompt already happened and failed.
+        if status == errSecInteractionNotAllowed, !allowsInteraction {
+            return .interactionRequired
+        }
         return Self.classifyInteractionNotAllowed(
             isKeychainUnlocked: Self.isKeychainUnlocked(keychain)
         )
@@ -251,7 +262,7 @@ struct ClipboardHistoryKeychainStore: ClipboardHistoryMasterKeyStoring {
     /// `SecKeychainGetStatus` is unavailable in the modern SDK headers, so it
     /// is resolved dynamically — the same technique the testing keychain hooks
     /// above use. A `nil` keychain asks about the default (login) keychain.
-    private static func isKeychainUnlocked(_ keychain: SecKeychain?) -> Bool? {
+    static func isKeychainUnlocked(_ keychain: SecKeychain?) -> Bool? {
         guard
             let security = dlopen(
                 "/System/Library/Frameworks/Security.framework/Security",
@@ -336,6 +347,17 @@ struct ClipboardHistoryKeychainStore: ClipboardHistoryMasterKeyStoring {
             to: SetInteractionAllowed.self
         )
         return setInteractionAllowed(false)
+    }
+}
+
+/// The login keychain's lock state, read without touching the stored item — a
+/// `load()` on a locked keychain would raise the password prompt, so a poll
+/// that watches for the unlock has to ask this instead.
+public enum ClipboardHistoryKeychainLock {
+    /// `nil` when the state cannot be determined; the caller should treat that
+    /// as "still locked" rather than acting on a guess.
+    public static func isLoginKeychainUnlocked() -> Bool? {
+        ClipboardHistoryKeychainStore.isKeychainUnlocked(nil)
     }
 }
 

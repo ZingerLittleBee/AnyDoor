@@ -896,6 +896,41 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         )
     }
 
+    func testADismissedPasswordPromptIsReadAgainstTheKeychainLockState() {
+        // A cancelled or failed prompt used to be hardcoded to `accessDenied`,
+        // which turns a merely locked keychain into an unavailable store and
+        // offers "reset Clipboard History" — permanent data loss — as the
+        // remedy. All three statuses have to be read against the lock state so
+        // a locked keychain stays the temporary, self-healing case.
+        XCTAssertTrue(
+            ClipboardHistoryKeychainStore.dependsOnKeychainLockState(
+                errSecUserCanceled
+            )
+        )
+        XCTAssertTrue(
+            ClipboardHistoryKeychainStore.dependsOnKeychainLockState(
+                errSecAuthFailed
+            )
+        )
+        XCTAssertTrue(
+            ClipboardHistoryKeychainStore.dependsOnKeychainLockState(
+                errSecInteractionNotAllowed
+            )
+        )
+        // Everything else keeps its own meaning and must not be re-read as a
+        // lock — a missing item is not a locked keychain.
+        XCTAssertFalse(
+            ClipboardHistoryKeychainStore.dependsOnKeychainLockState(
+                errSecItemNotFound
+            )
+        )
+        XCTAssertFalse(
+            ClipboardHistoryKeychainStore.dependsOnKeychainLockState(
+                errSecSuccess
+            )
+        )
+    }
+
     func testKeyAccessDeniedSurfacesAsStoreUnavailableNotPaused() async throws {
         let fixture = try TemporaryStore()
         let keyStore = TestMasterKeyStore(loadResult: .accessDenied)

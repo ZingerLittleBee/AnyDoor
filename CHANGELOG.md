@@ -75,6 +75,11 @@ versioning.
   at the retry and reset in Settings, instead of showing the same "cannot
   preview" line used for a single unreadable entry. A locked Keychain reads
   as a locked Keychain, since unlocking it is all that is needed.
+- Dismissing the Keychain password prompt while the Keychain is locked no
+  longer reports the history store as unavailable and offers a reset — a
+  destructive remedy for what is only a lock. It stays a pause, and unlocking
+  the Keychain now resumes capture on its own instead of waiting for the next
+  launch.
 
 ## [4.1.0] - 2026-07-28
 

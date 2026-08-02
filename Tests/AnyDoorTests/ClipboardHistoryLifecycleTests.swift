@@ -500,6 +500,84 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         XCTAssertTrue(events.contains(.monitoring(.stop)))
     }
 
+    /// A locked keychain is documented as self-recovering: unlocking it has to
+    /// resume capture without a relaunch. Nothing notifies the app, so the
+    /// lifecycle polls the lock state and retries the store on the first unlock.
+    func testALockedKeychainResumesOnUnlockWithoutRelaunch() async throws {
+        let probe = ClipboardLifecycleProbe(
+            availability: .paused,
+            reason: .keychainLocked,
+            becomesReadyOnRetry: true
+        )
+        let unlockState = KeychainUnlockFlag(unlocked: false)
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            legacyCleanupState: { .completed },
+            migrationRequest: nil,
+            isKeychainUnlocked: { unlockState.read() },
+            keychainUnlockPollInterval: .milliseconds(10)
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .paused(.keychainLocked))
+
+        unlockState.set(true)
+        let resumed = await Self.wait(untilTrue: {
+            lifecycle.state == .ready
+        })
+
+        XCTAssertTrue(
+            resumed,
+            "unlocking the keychain must resume the store on its own"
+        )
+        let events = await probe.recordedEvents()
+        XCTAssertTrue(events.contains(.retryStore))
+    }
+
+    /// The poll must never retry on a guess: an undeterminable lock state reads
+    /// as still locked, and retrying on a locked keychain would re-raise the
+    /// password prompt every few seconds.
+    func testAStillLockedKeychainIsNeverRetried() async throws {
+        let probe = ClipboardLifecycleProbe(
+            availability: .paused,
+            reason: .keychainLocked,
+            becomesReadyOnRetry: true
+        )
+        let unlockState = KeychainUnlockFlag(unlocked: nil)
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            legacyCleanupState: { .completed },
+            migrationRequest: nil,
+            isKeychainUnlocked: { unlockState.read() },
+            keychainUnlockPollInterval: .milliseconds(10)
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        unlockState.set(false)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        XCTAssertEqual(lifecycle.state, .paused(.keychainLocked))
+        let events = await probe.recordedEvents()
+        XCTAssertFalse(events.contains(.retryStore))
+        await lifecycle.stop()
+    }
+
+    private static func wait(
+        untilTrue predicate: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if predicate() { return true }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return predicate()
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suite = "ClipboardHistoryLifecycleTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
@@ -530,6 +608,29 @@ private enum ClipboardLifecycleEvent: Equatable, Sendable {
     case cleanup
     case monitoring(ClipboardHistoryMonitoringCommand)
     case reset
+}
+
+/// The lock-state probe is synchronous, so the test's stand-in needs its own
+/// lock rather than actor isolation.
+private final class KeychainUnlockFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var unlocked: Bool?
+
+    init(unlocked: Bool?) {
+        self.unlocked = unlocked
+    }
+
+    func set(_ value: Bool?) {
+        lock.lock()
+        defer { lock.unlock() }
+        unlocked = value
+    }
+
+    func read() -> Bool? {
+        lock.lock()
+        defer { lock.unlock() }
+        return unlocked
+    }
 }
 
 private actor CompletionFlag {
