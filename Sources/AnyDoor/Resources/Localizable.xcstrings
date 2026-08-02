@@ -8706,6 +8706,23 @@
         }
       }
     },
+    "settings.clipboard.state.resetFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resetting Clipboard History failed. Check the storage folder's permissions and free space, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置剪贴板历史失败。请检查存储目录的权限和可用空间后重试。"
+          }
+        }
+      }
+    },
     "settings.clipboard.state.storeUnavailable": {
       "extractionState": "manual",
       "localizations": {

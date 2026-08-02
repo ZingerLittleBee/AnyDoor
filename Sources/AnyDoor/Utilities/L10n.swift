@@ -294,6 +294,8 @@ enum L10n {
         case settingsClipboardMigrationFailed = "settings.clipboard.state.migrationFailed"
         case settingsClipboardStoreUnavailable = "settings.clipboard.state.storeUnavailable"
         case settingsClipboardStorePaused = "settings.clipboard.state.paused"
+        case settingsClipboardResetFailed =
+            "settings.clipboard.state.resetFailed"
         case settingsClipboardReset = "settings.clipboard.reset"
         case settingsClipboardResetTitle = "settings.clipboard.reset.title"
         case settingsClipboardResetMessage = "settings.clipboard.reset.message"

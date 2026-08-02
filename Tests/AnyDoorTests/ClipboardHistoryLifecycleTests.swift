@@ -713,3 +713,52 @@ private actor ClipboardLifecycleProbe {
         reason = nil
     }
 }
+
+@MainActor
+final class ClipboardLifecycleRecoveryTests: XCTestCase {
+    /// A confirmed reset that fails used to render the storeUnavailable line,
+    /// so the destructive button looked like it had done nothing and invited a
+    /// second press. Every stalled state must name itself.
+    func testEveryStalledStateHasItsOwnLine() {
+        let states: [ClipboardHistoryLifecycleState] = [
+            .migrationFailed,
+            .storeUnavailable(nil),
+            .resetFailed,
+            .paused(.keychainLocked),
+        ]
+        let messages = states.compactMap {
+            ClipboardLifecycleRecovery(state: $0)?.message
+        }
+        XCTAssertEqual(messages.count, states.count)
+        XCTAssertEqual(Set(messages).count, states.count)
+    }
+
+    /// Reset is the one irreversible way out, so it is offered only where it is
+    /// the actual remedy — never for a keychain lock that resolves on unlock.
+    func testResetIsOfferedOnlyWhereItIsTheRemedy() {
+        XCTAssertEqual(
+            ClipboardLifecycleRecovery(state: .storeUnavailable(nil))?
+                .includesReset,
+            true
+        )
+        XCTAssertEqual(
+            ClipboardLifecycleRecovery(state: .resetFailed)?.includesReset,
+            true
+        )
+        XCTAssertEqual(
+            ClipboardLifecycleRecovery(state: .paused(.keychainLocked))?
+                .includesReset,
+            false
+        )
+        XCTAssertEqual(
+            ClipboardLifecycleRecovery(state: .migrationFailed)?.includesReset,
+            false
+        )
+    }
+
+    func testHealthyAndTransientStatesOfferNoRecoverySection() {
+        XCTAssertNil(ClipboardLifecycleRecovery(state: .ready))
+        XCTAssertNil(ClipboardLifecycleRecovery(state: .preparing))
+        XCTAssertNil(ClipboardLifecycleRecovery(state: .migrating))
+    }
+}

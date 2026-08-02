@@ -399,3 +399,49 @@ final class ClipboardHistoryLifecycle {
         }
     }
 }
+
+/// The recovery affordance a stalled lifecycle state offers in Settings: the
+/// line that explains it, and whether the destructive reset is one of the ways
+/// out. Kept out of the `@ViewBuilder` so the mapping can be pinned by a test —
+/// a state that silently borrows another state's line reads to the user as
+/// nothing having happened at all.
+struct ClipboardLifecycleRecovery: Equatable {
+    let message: L10n.Key
+    let includesReset: Bool
+
+    init?(state: ClipboardHistoryLifecycleState) {
+        switch state {
+        case .migrationFailed:
+            self.init(
+                message: .settingsClipboardMigrationFailed,
+                includesReset: false
+            )
+        case .storeUnavailable:
+            self.init(
+                message: .settingsClipboardStoreUnavailable,
+                includesReset: true
+            )
+        case .resetFailed:
+            // Reset stays offered: the cause is usually external (permissions,
+            // a full disk) and clears without the app restarting.
+            self.init(
+                message: .settingsClipboardResetFailed,
+                includesReset: true
+            )
+        case .paused:
+            // A locked keychain resolves itself; offering a reset here is how a
+            // user wipes their own history over a temporary lock.
+            self.init(
+                message: .settingsClipboardStorePaused,
+                includesReset: false
+            )
+        case .preparing, .migrating, .ready:
+            return nil
+        }
+    }
+
+    private init(message: L10n.Key, includesReset: Bool) {
+        self.message = message
+        self.includesReset = includesReset
+    }
+}

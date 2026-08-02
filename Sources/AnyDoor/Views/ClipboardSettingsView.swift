@@ -210,21 +210,15 @@ struct ClipboardSettingsView: View {
                     LocalizedText(.settingsClipboardMigrating)
                 }
             }
-        case .migrationFailed:
-            recoverySection(
-                message: .settingsClipboardMigrationFailed,
-                includesReset: false
-            )
-        case .storeUnavailable, .resetFailed:
-            recoverySection(
-                message: .settingsClipboardStoreUnavailable,
-                includesReset: true
-            )
-        case .paused:
-            recoverySection(
-                message: .settingsClipboardStorePaused,
-                includesReset: false
-            )
+        case .migrationFailed, .storeUnavailable, .resetFailed, .paused:
+            if let recovery = ClipboardLifecycleRecovery(
+                state: model.lifecycle.state
+            ) {
+                recoverySection(
+                    message: recovery.message,
+                    includesReset: recovery.includesReset
+                )
+            }
         case .ready:
             EmptyView()
         }
