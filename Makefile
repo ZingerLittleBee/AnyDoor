@@ -22,7 +22,14 @@ RESOURCE_BUNDLE := .build/release/$(APP_NAME)_$(APP_NAME).bundle
 # app as a different app: Accessibility and Screen Recording grants are dropped
 # and Keychain ACLs stop matching. A Developer ID signature keeps the identity
 # stable across rebuilds, so the grants survive. Ad hoc remains the fallback.
+#
+# The install itself replaces the bundle rather than copying over it: macOS
+# guards a signed app's executable behind the App Management permission, so
+# `cp` onto the running layout fails with "Operation not permitted" unless the
+# calling terminal happens to hold that grant. Removing first needs no grant,
+# and the bundle is fully reconstructed below anyway.
 install: swift-release
+	@rm -rf $(APP_DIR)
 	@mkdir -p $(APP_DIR)/Contents/MacOS
 	@mkdir -p $(APP_DIR)/Contents/Resources
 	@mkdir -p $(APP_DIR)/Contents/Frameworks
