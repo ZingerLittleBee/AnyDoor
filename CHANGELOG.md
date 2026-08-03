@@ -123,6 +123,12 @@ versioning.
 - Settings → Sync: the WebDAV server-address placeholder no longer jiggles
   when the field gains focus (it is now drawn as a static overlay instead of
   the native prompt, which macOS re-renders on focus in grouped forms).
+- Clipboard wall: the tab order you arranged is restored on the first open
+  after launch. It used to appear only from the second open.
+- Clipboard wall: the category name field is focused every time the create or
+  rename dialog opens, not just the first time in a session.
+- Clipboard: searching while the search index is rebuilding now says so
+  instead of reporting an empty history.
 
 ## [4.0.1] - 2026-07-28
 
