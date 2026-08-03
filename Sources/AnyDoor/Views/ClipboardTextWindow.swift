@@ -286,7 +286,10 @@ final class ClipboardTextPanelModel {
     }
 
     var isDirty: Bool { isEditable && text != originalText }
-    var canSave: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// Only a zero-length edit is refused, matching the store, which accepts a
+    /// whitespace-only edit exactly as it accepts a whitespace-only copy.
+    /// Trimming here disabled Save for text the store would have kept.
+    var canSave: Bool { !text.isEmpty }
 
     /// Preview-follow: swap to another item without recreating the panel.
     func replace(entry: ClipboardHistoryEntry, text: String) {

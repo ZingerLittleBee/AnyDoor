@@ -75,10 +75,17 @@ final class ClipboardTextPanelModelTests: XCTestCase {
         XCTAssertTrue(dismissed)
     }
 
-    func testCanSaveRejectsWhitespaceOnlyText() {
+    /// The store refuses a zero-length edit and keeps a whitespace-only one
+    /// (`ClipboardHistoryRetention.editText`, pinned by
+    /// `ClipboardHistoryRetentionTests`), exactly as it treats a whitespace-only
+    /// copy. Save has to draw the same line, or the panel refuses text the
+    /// store would have kept.
+    func testCanSaveRejectsOnlyZeroLengthText() {
         let model = makeModel(text: "hello", isEditable: true)
-        model.text = "   \n\t"
+        model.text = ""
         XCTAssertFalse(model.canSave)
+        model.text = "   \n\t"
+        XCTAssertTrue(model.canSave)
         model.text = "ok"
         XCTAssertTrue(model.canSave)
     }
