@@ -86,7 +86,7 @@ struct ClipboardWallView: View {
                 Spacer()
             } else if state.presentation.contentState == .indexing {
                 Spacer()
-                LocalizedText(.clipboardEmpty)
+                LocalizedText(.clipboardIndexing)
                     .foregroundStyle(.secondary)
                 ProgressView()
                 Spacer()

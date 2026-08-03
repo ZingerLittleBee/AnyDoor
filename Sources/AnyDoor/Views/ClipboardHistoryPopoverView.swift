@@ -114,7 +114,7 @@ struct ClipboardHistoryPopoverView: View {
         case .indexing:
             VStack(spacing: 8) {
                 ProgressView()
-                LocalizedText(.clipboardEmpty)
+                LocalizedText(.clipboardIndexing)
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
