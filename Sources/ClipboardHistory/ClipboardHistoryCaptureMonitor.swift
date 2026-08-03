@@ -318,9 +318,13 @@ final class ClipboardHistoryCaptureMonitor {
         generation: Int
     ) -> ClipboardHistoryPasteboardMetadata {
         let items = pasteboard.pasteboardItems ?? []
+        // Union the pasteboard's own type list: a legacy non-UTI type name
+        // (`Pasteboard generator type`) survives verbatim there, while
+        // `NSPasteboardItem.types` reports it dynamically UTI-encoded, so an
+        // exclusion marker written that way would never match here.
         let advertisedTypes = Set(
             items.flatMap(\.types).map(\.rawValue)
-        )
+        ).union((pasteboard.types ?? []).map(\.rawValue))
         let sourceType = NSPasteboard.PasteboardType(
             "org.nspasteboard.source"
         )

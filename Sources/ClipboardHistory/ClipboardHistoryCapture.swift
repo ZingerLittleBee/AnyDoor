@@ -162,7 +162,13 @@ extension ClipboardHistoryModule {
             return .rejected(.empty)
         }
 
+        // The pasteboard's own type list as well as the per-item lists: a
+        // legacy non-UTI type name (`Pasteboard generator type`, written by
+        // apps that still call `declareTypes`) is reported verbatim by
+        // `NSPasteboard.types` but dynamically UTI-encoded ("dyn.a…") in
+        // `NSPasteboardItem.types`, where it would never match a marker.
         let advertisedTypes = Set(pasteboardItems.flatMap(\.types))
+            .union(pasteboard.types ?? [])
         if !advertisedTypes.isDisjoint(with: PasteboardSnapshot.exclusionTypes) {
             return .rejected(.excluded)
         }

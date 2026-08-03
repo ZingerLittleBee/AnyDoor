@@ -375,6 +375,49 @@ final class ClipboardHistorySourcePersistenceTests: XCTestCase {
 }
 
 final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
+    /// `Pasteboard generator type` is not a UTI, so an app can only advertise
+    /// it through `declareTypes`. Read back per item it comes out dynamically
+    /// encoded ("dyn.a…"), which matches no marker — the pasteboard's own type
+    /// list is the only place it survives verbatim.
+    @MainActor
+    func testALegacyNamedExclusionMarkerIsStillExcluded() async throws {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        let marker = NSPasteboard.PasteboardType("Pasteboard generator type")
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        pasteboard.declareTypes([marker, .string], owner: nil)
+        pasteboard.setString("generated", forType: .string)
+        pasteboard.setString("1", forType: marker)
+        XCTAssertFalse(
+            (pasteboard.pasteboardItems ?? []).flatMap(\.types).contains(marker),
+            "The item-level list is expected to hide the legacy name"
+        )
+
+        await monitor.observeForTesting()
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries, [])
+        let direct = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: ClipboardHistoryCaptureSource(
+                bundleIdentifier: nil,
+                displayName: nil
+            )
+        )
+        XCTAssertEqual(direct, .skipped(.excluded))
+    }
+
     @MainActor
     func testBaselineResumeAndSelfWritesNeverImportCurrentPasteboard() async throws {
         let fixture = try MonitorTemporaryStore()
