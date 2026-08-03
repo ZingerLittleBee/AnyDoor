@@ -99,7 +99,7 @@ struct ClipboardHistoryRow: View {
         if let color = preview?.normalizedColor {
             return Color(nsColor: color)
         }
-        return Color(hex: entry.previewText) ?? .gray
+        return Color(colorLiteral: entry.previewText) ?? .gray
     }
 
     private var relativeTimestamp: String {
@@ -124,7 +124,4 @@ struct ClipboardHistoryRow: View {
         return formatter
     }
 
-    static func swatchColor(forHex hex: String?) -> Color? {
-        Color(hex: hex)
-    }
 }

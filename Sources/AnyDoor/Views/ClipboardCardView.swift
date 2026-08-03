@@ -283,7 +283,7 @@ struct ClipboardCardView: View {
         if let color = previewMaterialization?.normalizedColor {
             return Color(nsColor: color)
         }
-        return Color(hex: entry.previewText) ?? .black
+        return Color(colorLiteral: entry.previewText) ?? .black
     }
 
     private func imagePreview(_ image: NSImage) -> some View {

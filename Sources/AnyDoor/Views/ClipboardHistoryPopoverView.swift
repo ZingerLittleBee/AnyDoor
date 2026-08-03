@@ -259,7 +259,7 @@ struct ClipboardHistoryPopoverView: View {
             if let color = materialization?.normalizedColor {
                 return Color(nsColor: color)
             }
-            return Color(hex: entry.previewText) ?? .gray
+            return Color(colorLiteral: entry.previewText) ?? .gray
         }
     }
 }

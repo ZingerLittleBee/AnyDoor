@@ -135,6 +135,9 @@ versioning.
 - Clipboard: `localhost:3000`, `example.com:8080`, and a bare IPv6 address are
   recognized as links, while a host with an empty label (`example..com`) no
   longer is.
+- Clipboard wall: a copied color literal shows its actual color. Only
+  `#RRGGBB` was drawn; `#F00`, `#FF0000AA`, `rgb()`/`rgba()`, `hsl()`/`hsla()`,
+  and the SwiftUI form all rendered as a black card.
 
 ## [4.0.1] - 2026-07-28
 
