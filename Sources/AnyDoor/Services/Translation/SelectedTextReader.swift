@@ -10,6 +10,11 @@ enum SelectedTextReader {
     /// Best-effort selected text. Tries AX, then the clipboard fallback.
     @MainActor
     static func read() async -> String? {
+        // Invoked from the command palette, AnyDoor is still the active app for
+        // a beat after the palette closes. Reading now would inspect AnyDoor's
+        // own (empty) selection and send the synthesized Cmd-C to AnyDoor, so
+        // wait for the user's app to come back to the front first.
+        await waitForFrontmostAppToChange()
         if let ax = readViaAccessibility() { return ax }
         // When invoked from a hotkey the user is likely still holding its
         // modifiers (e.g. ⌘⌥T). Those flags would merge into the synthesized
@@ -29,6 +34,25 @@ enum SelectedTextReader {
     /// How many steps that wait is allowed to take — 800 ms, enough for a slow
     /// app to service Cmd-C with a large selection.
     static let settleStepBudget = 40
+
+    /// Return once AnyDoor is no longer the frontmost app, or `timeout`
+    /// elapses. Returns immediately when it was never frontmost, which is the
+    /// usual hotkey case for this accessory app.
+    @MainActor
+    private static func waitForFrontmostAppToChange(
+        timeout: TimeInterval = 0.5
+    ) async {
+        let step: UInt64 = 20_000_000 // 20 ms
+        let maxIterations = Int((timeout * 1_000_000_000) / Double(step))
+        for _ in 0..<maxIterations {
+            let front = NSWorkspace.shared.frontmostApplication
+            guard
+                front?.processIdentifier
+                    == NSRunningApplication.current.processIdentifier
+            else { return }
+            try? await Task.sleep(nanoseconds: step)
+        }
+    }
 
     /// Poll the live modifier state and return once Command/Control/Option/Shift
     /// are all released, or `timeout` elapses. Prevents a held hotkey modifier

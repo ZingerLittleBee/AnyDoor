@@ -75,6 +75,10 @@ versioning.
   at the retry and reset in Settings, instead of showing the same "cannot
   preview" line used for a single unreadable entry. A locked Keychain reads
   as a locked Keychain, since unlocking it is all that is needed.
+- Dismissing the Command Palette hands focus back to the app it was summoned
+  from, the way the clipboard wall already did. Commands that act on the app
+  in front of you — translating the selected text, above all — were reading
+  AnyDoor's own empty selection instead of yours.
 - Translating the selected text no longer leaves the selection on the
   clipboard, or in clipboard history, when the app being read is slow to
   answer Command-C. The read now waits for the copy to actually land instead
