@@ -129,6 +129,9 @@ versioning.
   rename dialog opens, not just the first time in a session.
 - Clipboard: searching while the search index is rebuilding now says so
   instead of reporting an empty history.
+- Clipboard wall: an edit down to spaces or newlines can be saved again. Save
+  refused it while the store accepted exactly that content (and still captures
+  a whitespace-only copy); only a zero-length edit is refused now.
 
 ## [4.0.1] - 2026-07-28
 
