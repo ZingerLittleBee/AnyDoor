@@ -1050,23 +1050,31 @@ extension ClipboardHistoryModule {
     }
 
     fileprivate static func isLink(_ value: String) -> Bool {
-        guard let components = URLComponents(string: value) else {
-            return false
+        // A bare IPv6 literal has no parsable scheme and only becomes a URL
+        // once bracketed, so neither branch below can recognize it.
+        var literal = in6_addr()
+        if value.withCString({ inet_pton(AF_INET6, $0, &literal) }) == 1 {
+            return true
         }
-        if let scheme = components.scheme?.lowercased() {
+        if let scheme = URLComponents(string: value)?.scheme?.lowercased() {
             guard !["javascript", "data", "vbscript", "file", "mailto"]
                 .contains(scheme)
             else {
                 return false
             }
-            guard value.contains("://") else { return false }
-            if ["http", "https"].contains(scheme) {
-                return isValidHost(components.host)
+            // Without `://` this is not a scheme at all: `localhost:3000` and
+            // `example.com:8080` parse their host as the scheme, so they have
+            // to be re-read as a bare host:port below rather than rejected.
+            if value.contains("://") {
+                let components = URLComponents(string: value)
+                if ["http", "https"].contains(scheme) {
+                    return isValidHost(components?.host)
+                }
+                return Self.matches(
+                    scheme,
+                    pattern: #"^[A-Za-z][A-Za-z0-9+.-]*$"#
+                ) && !(components?.host ?? "").isEmpty
             }
-            return Self.matches(
-                scheme,
-                pattern: #"^[A-Za-z][A-Za-z0-9+.-]*$"#
-            ) && !(components.host ?? "").isEmpty
         }
 
         guard !value.hasPrefix("/"),
@@ -1095,7 +1103,12 @@ extension ClipboardHistoryModule {
         else {
             return false
         }
-        return host.split(separator: ".").allSatisfy { label in
+        // Keep the empty subsequences: dropping them let `example..com` pass
+        // as the two valid labels around the empty one.
+        return host.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        ).allSatisfy { label in
             Self.matches(
                 String(label),
                 pattern: #"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$"#

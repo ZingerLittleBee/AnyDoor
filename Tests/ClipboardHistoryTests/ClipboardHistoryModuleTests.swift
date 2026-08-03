@@ -522,6 +522,50 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertEqual(screenshotPage.entries.map(\.id), [firstParty.entryID])
     }
 
+    /// The host grammar behind the Link facet, kept as a pure table so the
+    /// negatives stay cheap enough to enumerate. The end-to-end capture path
+    /// is covered by the test below.
+    func testLinkInferenceAcceptsHostsWithoutSchemeAndRejectsMalformedOnes() {
+        let cases: [(String, Bool)] = [
+            ("https://example.com/a", true),
+            ("http://example.com", true),
+            ("example.com", true),
+            ("raycast://extensions/x", true),
+            ("192.168.1.1", true),
+            // A bare host:port parses its host as the URL scheme, and a bare
+            // IPv6 literal parses as no URL at all.
+            ("localhost:3000", true),
+            ("example.com:8080", true),
+            ("2001:db8::1", true),
+            ("::1", true),
+            // A scheme with no `://` is not a host:port.
+            ("tel:+15551234", false),
+            ("note:12", false),
+            ("javascript:alert(1)", false),
+            ("data:text/html,<b>x", false),
+            ("vbscript:msgbox", false),
+            ("/Users/me/file.txt", false),
+            // Empty labels are still labels.
+            ("example..com", false),
+            (".example.com", false),
+            ("example.com.", false),
+            ("https://{{host}}/x", false),
+            ("https://a.com /b", false),
+            ("see https://example.com here", false),
+        ]
+
+        for (value, isLink) in cases {
+            let facets = ClipboardHistoryModule.inferredFacets(
+                forExactText: value
+            )
+            XCTAssertEqual(
+                facets.contains(.link),
+                isLink,
+                "Unexpected link inference for \(value)"
+            )
+        }
+    }
+
     @MainActor
     func testExactTextDerivesClosedOverlappingFacetsWithoutRewritingPayload()
         async throws

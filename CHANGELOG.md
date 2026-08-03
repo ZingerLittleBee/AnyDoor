@@ -132,6 +132,9 @@ versioning.
 - Clipboard wall: an edit down to spaces or newlines can be saved again. Save
   refused it while the store accepted exactly that content (and still captures
   a whitespace-only copy); only a zero-length edit is refused now.
+- Clipboard: `localhost:3000`, `example.com:8080`, and a bare IPv6 address are
+  recognized as links, while a host with an empty label (`example..com`) no
+  longer is.
 
 ## [4.0.1] - 2026-07-28
 
