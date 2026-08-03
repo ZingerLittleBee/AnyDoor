@@ -117,6 +117,23 @@ extension ClipboardHistoryModule {
                     """
             )
         }
+        migrator.registerMigration("v11_bounded_preview_text") { database in
+            // Rows captured before the preview bound existed still carry the
+            // whole canonical text, which is exactly what makes the wall
+            // unusable — including the wall the user would need in order to
+            // delete such an entry. Cut them down to the same bound every
+            // writer now applies; the content itself is untouched.
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_entries
+                    SET preview_text = substr(preview_text, 1, \(
+                        previewTextCharacterLimit
+                    ))
+                    WHERE preview_text IS NOT NULL
+                      AND length(preview_text) > \(previewTextCharacterLimit)
+                    """
+            )
+        }
         return migrator
     }
 

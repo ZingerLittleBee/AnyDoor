@@ -855,7 +855,7 @@ extension ClipboardHistoryModule {
                         WHERE id = ?
                         """,
                     arguments: [
-                        text,
+                        Self.boundedPreviewText(text),
                         date.timeIntervalSince1970,
                         storedID,
                     ]

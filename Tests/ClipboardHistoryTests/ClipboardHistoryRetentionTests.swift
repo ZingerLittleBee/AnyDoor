@@ -1003,6 +1003,64 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
         XCTAssertEqual(replacement.entries, [])
     }
 
+    /// A card renders `preview_text` and a page carries one copy per row, so
+    /// an unbounded preview turned an accepted large copy into gigabytes of
+    /// SwiftUI text layout. The preview is bounded on capture and on edit; the
+    /// content it previews stays whole.
+    func testALargeTextIsPreviewedByABoundedPrefixWhileItsContentStaysWhole()
+        async throws
+    {
+        let fixture = try RetentionTemporaryStore()
+        let module = fixture.makeModule()
+        let limit = ClipboardHistoryModule.previewTextCharacterLimit
+        let captured = String(repeating: "a", count: limit * 3)
+        let entry = try await module.capture(textRequest(captured))
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(
+            page.entries.first?.previewText,
+            String(captured.prefix(limit))
+        )
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: entry.entryID,
+                purpose: .normalPaste
+            )
+        )
+        XCTAssertEqual(
+            materialized.items.first?.representations.first,
+            .text(
+                typeIdentifier: "public.utf8-plain-text",
+                value: captured
+            )
+        )
+
+        let edited = String(repeating: "b", count: limit * 2)
+        guard case .updated = try await module.apply(
+            .editText(entry.entryID, edited)
+        ) else {
+            return XCTFail("Expected the text edit to update the entry")
+        }
+        let afterEdit = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(
+            afterEdit.entries.first?.previewText,
+            String(edited.prefix(limit))
+        )
+        let rematerialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: entry.entryID,
+                purpose: .normalPaste
+            )
+        )
+        XCTAssertEqual(
+            rematerialized.items.first?.representations.first,
+            .text(
+                typeIdentifier: "public.utf8-plain-text",
+                value: edited
+            )
+        )
+    }
+
     private func textRequest(
         _ value: String
     ) -> ClipboardHistoryCaptureRequest {

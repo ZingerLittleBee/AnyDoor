@@ -525,7 +525,7 @@ extension ClipboardHistoryModule {
                 source.bundleIdentifier,
                 source.displayName,
                 source.provenance.rawValue,
-                entry.previewText,
+                entry.previewText.map(Self.boundedPreviewText),
                 entry.isFavorite,
                 prepared.thumbnail?.id.uuidString.lowercased(),
             ]
@@ -711,8 +711,8 @@ extension ClipboardHistoryModule {
                 source.bundleIdentifier,
                 source.displayName,
                 source.provenance.rawValue,
-                entry.previewText
-                    ?? preparedMembers.first?.displayName,
+                (entry.previewText ?? preparedMembers.first?.displayName)
+                    .map(Self.boundedPreviewText),
                 entry.isFavorite,
             ]
         )

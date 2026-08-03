@@ -401,6 +401,7 @@ extension ClipboardHistoryModule {
                 }
             }
             .first
+            .map(Self.boundedPreviewText)
         let facets = deriveTextFacets(from: snapshot)
         let payloadStore = try requiredPayloadStore()
         if duplicateReuseEnabled,

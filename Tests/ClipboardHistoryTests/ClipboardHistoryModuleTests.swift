@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import GRDB
 import ImageIO
 import LocalAuthentication
 import Security
@@ -729,6 +730,59 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertTrue(capabilities.hasTrigramTokenizer)
     }
 
+    /// A store written before the preview bound existed can hold an entry
+    /// whose preview is the whole canonical text. Opening it must cut those
+    /// rows down, otherwise the wall stays unusable on exactly the history
+    /// that needs pruning.
+    func testOpeningAPreBoundStoreCutsAnOversizedStoredPreview() async throws {
+        let fixture = try TemporaryDatabase()
+        let limit = ClipboardHistoryModule.previewTextCharacterLimit
+        let oversized = String(repeating: "a", count: limit * 2)
+        let legacy = try ClipboardHistoryModule.openDatabase(
+            at: fixture.url,
+            databaseKey: fixture.key,
+            migrationTarget: "v10_recency_paging_index"
+        )
+        try await legacy.write { database in
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_entries(
+                        id, captured_at, last_captured_at, source_bundle_id,
+                        source_display_name, source_provenance, preview_text
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                arguments: [
+                    UUID().uuidString.lowercased(),
+                    0.0,
+                    0.0,
+                    "dev.bybee.tests",
+                    "Tests",
+                    "unknown",
+                    oversized,
+                ]
+            )
+        }
+        try legacy.close()
+
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        _ = try await module.storageDiagnostics()
+        let reopened = try ClipboardHistoryModule.openDatabase(
+            at: fixture.url,
+            databaseKey: fixture.key
+        )
+        let stored = try await reopened.read { database in
+            try String.fetchOne(
+                database,
+                sql: "SELECT preview_text FROM clipboard_entries"
+            )
+        }
+        try reopened.close()
+        XCTAssertEqual(stored, String(oversized.prefix(limit)))
+    }
+
     func testEncryptedStoreAppliesVersionedMigrationsAndPassesIntegrityChecks()
         async throws
     {
@@ -753,6 +807,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v8_legacy_migration",
                 "v9_retention_delete_index",
                 "v10_recency_paging_index",
+                "v11_bounded_preview_text",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -792,6 +847,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v8_legacy_migration",
                 "v9_retention_delete_index",
                 "v10_recency_paging_index",
+                "v11_bounded_preview_text",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)
