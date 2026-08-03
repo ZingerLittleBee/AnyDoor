@@ -774,6 +774,10 @@ struct ClipboardWallView: View {
             .textFieldStyle(.roundedBorder)
             .focused($tagFieldFocused)
             .onAppear { tagFieldFocused = true }
+            // The flag survives the dialog it belongs to, so without this the
+            // second and every later dialog asks for focus it already claims,
+            // SwiftUI sees no change, and the field opens dead to the keyboard.
+            .onDisappear { tagFieldFocused = false }
     }
 
     private func tagName(for id: String) -> String {
