@@ -536,6 +536,50 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         XCTAssertTrue(events.contains(.retryStore))
     }
 
+    /// In practice a keychain locks because the *screen* locked, and on this
+    /// path the login keychain's own lock flag is not a reliable witness — a
+    /// GUI app can be handed the key while `SecKeychainGetStatus` still reports
+    /// locked. So the screen-unlock notification resumes the store on its own,
+    /// without waiting for the poll to agree.
+    func testAScreenUnlockResumesTheStoreWithoutWaitingForThePoll() async throws
+    {
+        let probe = ClipboardLifecycleProbe(
+            availability: .paused,
+            reason: .keychainLocked,
+            becomesReadyOnRetry: true
+        )
+        let notifications = NotificationCenter()
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            legacyCleanupState: { .completed },
+            migrationRequest: nil,
+            // The poll never fires: only the notification can resume this.
+            isKeychainUnlocked: { false },
+            keychainUnlockPollInterval: .seconds(60),
+            unlockNotifications: notifications
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .paused(.keychainLocked))
+
+        notifications.post(
+            name: ClipboardHistoryLifecycle.screenUnlockNotification,
+            object: nil
+        )
+        let resumed = await Self.wait(untilTrue: {
+            lifecycle.state == .ready
+        })
+
+        XCTAssertTrue(
+            resumed,
+            "a screen unlock must resume the store on its own"
+        )
+        let events = await probe.recordedEvents()
+        XCTAssertTrue(events.contains(.retryStore))
+    }
+
     /// The poll must never retry on a guess: an undeterminable lock state reads
     /// as still locked, and retrying on a locked keychain would re-raise the
     /// password prompt every few seconds.

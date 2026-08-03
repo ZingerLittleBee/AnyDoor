@@ -104,10 +104,12 @@ final class ClipboardHistoryLifecycle {
     private let retrySnapshotDeletion: @MainActor () throws -> Void
     private let isKeychainUnlocked: @Sendable () -> Bool?
     private let keychainUnlockPollInterval: Duration
+    private let unlockNotifications: NotificationCenter
 
     @ObservationIgnored private var operationTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var keychainUnlockWatch: Task<Void, Never>?
+    @ObservationIgnored private var screenUnlockObserver: (any NSObjectProtocol)?
 
     private(set) var state: ClipboardHistoryLifecycleState = .preparing
     private(set) var migrationReport:
@@ -140,6 +142,7 @@ final class ClipboardHistoryLifecycle {
             ClipboardHistoryKeychainLock.isLoginKeychainUnlocked()
         }
         keychainUnlockPollInterval = Self.defaultKeychainUnlockPollInterval
+        unlockNotifications = DistributedNotificationCenter.default()
     }
 
     init(
@@ -159,7 +162,9 @@ final class ClipboardHistoryLifecycle {
             ClipboardHistoryKeychainLock.isLoginKeychainUnlocked()
         },
         keychainUnlockPollInterval: Duration =
-            ClipboardHistoryLifecycle.defaultKeychainUnlockPollInterval
+            ClipboardHistoryLifecycle.defaultKeychainUnlockPollInterval,
+        unlockNotifications: NotificationCenter =
+            DistributedNotificationCenter.default()
     ) {
         self.operations = operations
         self.defaults = defaults
@@ -172,6 +177,7 @@ final class ClipboardHistoryLifecycle {
         self.retrySnapshotDeletion = retrySnapshotDeletion
         self.isKeychainUnlocked = isKeychainUnlocked
         self.keychainUnlockPollInterval = keychainUnlockPollInterval
+        self.unlockNotifications = unlockNotifications
     }
 
     /// Slow enough to be free, quick enough that unlocking the keychain and
@@ -245,6 +251,10 @@ final class ClipboardHistoryLifecycle {
         operationTask = nil
         keychainUnlockWatch?.cancel()
         keychainUnlockWatch = nil
+        if let screenUnlockObserver {
+            unlockNotifications.removeObserver(screenUnlockObserver)
+            self.screenUnlockObserver = nil
+        }
         _ = await operations.setMonitoring(
             .stop,
             ClipboardPreferences.monitoringConfiguration(from: defaults)
@@ -255,18 +265,50 @@ final class ClipboardHistoryLifecycle {
         await operationTask?.value
     }
 
+    /// The notification macOS actually posts when the session comes back — in
+    /// practice a keychain locks because the screen locked, and it is that
+    /// unlock, not a `security lock-keychain`, that restores access.
+    static let screenUnlockNotification = Notification.Name(
+        "com.apple.screenIsUnlocked"
+    )
+
     /// A locked keychain is the one stalled state the user fixes outside
-    /// AnyDoor, and nothing tells the app when that happens — so while it lasts,
-    /// poll the *lock state* (never the item, which would re-raise the password
-    /// prompt every few seconds) and retry the store on the first unlock.
-    /// Without this the store stays paused until the next launch, which turns a
-    /// self-healing state into one that silently drops everything the user
-    /// copies after unlocking.
+    /// AnyDoor, and nothing in-process tells the app when that happens — so
+    /// while it lasts, watch for the unlock two ways and retry the store on the
+    /// first sign of it. Without this the store stays paused until the next
+    /// launch, which turns a self-healing state into one that silently drops
+    /// everything the user copies after unlocking.
+    ///
+    /// Two signals because neither covers the other: the screen-unlock
+    /// notification is the one that fires in the real scenario, and the lock
+    /// state poll also catches a keychain locked on its own (a timeout, or
+    /// `security lock-keychain`). Neither ever reads the keychain *item* — that
+    /// would re-raise the password prompt every few seconds.
     private func updateKeychainUnlockWatch() {
         guard case .paused(.keychainLocked) = state else {
             keychainUnlockWatch?.cancel()
             keychainUnlockWatch = nil
+            if let screenUnlockObserver {
+                unlockNotifications.removeObserver(screenUnlockObserver)
+                self.screenUnlockObserver = nil
+            }
             return
+        }
+        if screenUnlockObserver == nil {
+            screenUnlockObserver = unlockNotifications.addObserver(
+                forName: Self.screenUnlockNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self,
+                        case .paused(.keychainLocked) = self.state
+                    else {
+                        return
+                    }
+                    self.retry()
+                }
+            }
         }
         guard keychainUnlockWatch == nil else { return }
         let probe = isKeychainUnlocked
