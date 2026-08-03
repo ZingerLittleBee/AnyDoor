@@ -16,6 +16,12 @@ APP_DIR := /Applications/$(APP_BUNDLE)
 BINARY := .build/release/$(APP_NAME)
 RESOURCE_BUNDLE := .build/release/$(APP_NAME)_$(APP_NAME).bundle
 
+# Signs with SIGNING_IDENTITY (.env) when the certificate is present. An ad-hoc
+# signature has no team, so the app's designated requirement collapses to its
+# cdhash -- which changes on every rebuild, and macOS then reads the reinstalled
+# app as a different app: Accessibility and Screen Recording grants are dropped
+# and Keychain ACLs stop matching. A Developer ID signature keeps the identity
+# stable across rebuilds, so the grants survive. Ad hoc remains the fallback.
 install: swift-release
 	@mkdir -p $(APP_DIR)/Contents/MacOS
 	@mkdir -p $(APP_DIR)/Contents/Resources
@@ -52,7 +58,16 @@ install: swift-release
 	@if otool -L $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -q '/usr/lib/libsqlite3'; then \
 	  echo "AnyDoor must not bind the system SQLite library" >&2; exit 1; \
 	fi
-	@codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 || true
+	@bash -lc '$(LOAD_ENV); \
+	  if [[ -n "$${SIGNING_IDENTITY:-}" ]] \
+	    && security find-identity -v -p codesigning \
+	      | grep -q "$$SIGNING_IDENTITY"; then \
+	    codesign --force --deep --sign "$$SIGNING_IDENTITY" $(APP_DIR) \
+	      >/dev/null 2>&1 && echo "Signed as $$SIGNING_IDENTITY"; \
+	  else \
+	    codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 \
+	      && echo "Signed ad hoc; system permissions need re-granting"; \
+	  fi' || true
 	@touch $(APP_DIR)
 	@echo "Installed $(APP_DIR)"
 
