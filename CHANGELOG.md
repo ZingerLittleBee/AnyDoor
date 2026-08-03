@@ -39,6 +39,11 @@ versioning.
 
 ### Changed
 
+- A very large copied text no longer makes the history wall unusable. The
+  preview a card renders is now a bounded prefix instead of the whole copied
+  text, so a 128 MiB copy is still stored and pasted in full without pinning
+  gigabytes of memory or leaving the app redrawing forever. Entries stored
+  before this are trimmed on first launch.
 - Copying is captured more reliably. Command-C and Command-X now trigger a
   short observation burst instead of relying only on a 500 ms poll, so a
   value overwritten shortly after being copied is far less likely to be
