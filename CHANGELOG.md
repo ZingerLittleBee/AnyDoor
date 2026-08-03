@@ -75,6 +75,11 @@ versioning.
   at the retry and reset in Settings, instead of showing the same "cannot
   preview" line used for a single unreadable entry. A locked Keychain reads
   as a locked Keychain, since unlocking it is all that is needed.
+- Translating the selected text no longer leaves the selection on the
+  clipboard, or in clipboard history, when the app being read is slow to
+  answer Command-C. The read now waits for the copy to actually land instead
+  of a fixed moment, so the original clipboard is restored and nothing is
+  recorded.
 - Dismissing the Keychain password prompt while the Keychain is locked no
   longer reports the history store as unavailable and offers a reset — a
   destructive remedy for what is only a lock. It stays a pause, and unlocking

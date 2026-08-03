@@ -19,9 +19,16 @@ enum SelectedTextReader {
         return await readViaClipboard(
             pasteboard: .general,
             copy: { synthesizeCopy() },
-            settle: { try? await Task.sleep(nanoseconds: 200_000_000) }
+            settle: { try? await Task.sleep(nanoseconds: settleStepNanoseconds) }
         )
     }
+
+    /// One poll step of the wait for the synthesized copy to land.
+    static let settleStepNanoseconds: UInt64 = 20_000_000 // 20 ms
+
+    /// How many steps that wait is allowed to take — 800 ms, enough for a slow
+    /// app to service Cmd-C with a large selection.
+    static let settleStepBudget = 40
 
     /// Poll the live modifier state and return once Command/Control/Option/Shift
     /// are all released, or `timeout` elapses. Prevents a held hotkey modifier
@@ -63,16 +70,26 @@ enum SelectedTextReader {
     }
 
     /// Pasteboard fallback: snapshot current pasteboard contents, trigger
-    /// `copy`, wait for `settle`, then read the copied selection only if the
-    /// pasteboard's `changeCount` advanced and the result is non-blank. The
-    /// prior contents are always restored before returning.
+    /// `copy`, wait for the pasteboard to actually change, then read the copied
+    /// selection only if the result is non-blank. The prior contents are always
+    /// restored before returning.
+    ///
+    /// The wait polls `changeCount` rather than sleeping a fixed amount. A
+    /// fixed wait was the bug: an app slow to service Cmd-C (a terminal with a
+    /// large selection, say) writes the pasteboard *after* the wait, so nothing
+    /// is read, the snapshot is never restored — the user's clipboard silently
+    /// becomes their selection — and the late write lands outside the
+    /// self-write window, where clipboard history captures it as if the user
+    /// had copied it. Polling ends the moment the copy lands, which is also
+    /// faster than the old fixed delay in the common case.
     @MainActor
     static func readViaClipboard(
         pasteboard: NSPasteboard,
         selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel? =
             ClipboardSelfWrites.current,
         copy: () -> Void,
-        settle: () async -> Void
+        settle: () async -> Void,
+        settleStepBudget: Int = SelectedTextReader.settleStepBudget
     ) async -> String? {
         let previous = PasteboardSnapshot(pasteboard)
         let beforeCount = pasteboard.changeCount
@@ -80,7 +97,10 @@ enum SelectedTextReader {
         defer { selfWrite?.finish(pasteboard: pasteboard) }
 
         copy()
-        await settle()
+        for _ in 0..<max(1, settleStepBudget) {
+            await settle()
+            if pasteboard.changeCount != beforeCount { break }
+        }
 
         var result: String?
         if pasteboard.changeCount != beforeCount {
