@@ -111,7 +111,10 @@ struct ClipboardWallView: View {
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
         .task {
-            await state.reload()
+            // Restore the tab order before the first await: it depends on
+            // nothing the reload fetches, and behind the reload a slow or
+            // cancelled first load left the wall showing the default order
+            // until the user closed and reopened it.
             state.setCategories(
                 ClipboardCategoryOrder.apply(
                     to: ClipboardWallState.order(
@@ -119,6 +122,7 @@ struct ClipboardWallView: View {
                     )
                 )
             )
+            await state.reload()
         }
         .onChange(of: state.presentation.tags) { _, newTags in
             state.setCategories(ClipboardCategoryOrder.apply(
