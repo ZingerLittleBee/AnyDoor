@@ -1,6 +1,6 @@
 # testloop — 2026-08-06 — clipboard-history
 
-**Verdict:** stopped: source attribution is ambiguous under computer use · **Rounds:** 4
+**Verdict:** pass · **Rounds:** 4 plus manual physical-input confirmation
 
 ## Covered
 
@@ -16,6 +16,8 @@
   enabled state and unrelated history remained untouched.
 - Measured targeted line coverage of 75.68% for AnyDoor clipboard model/services,
   96.29% for Image Conversion clipboard policy, and 3.68% for clipboard UI code.
+- Repeated the source-attribution check with physical keyboard and mouse input;
+  the history card correctly identified TextEdit as the source.
 
 ## Found & fixed
 
@@ -23,10 +25,7 @@
 
 ## Still open
 
-- A controlled TextEdit copy produced exactly one card, but the card showed
-  `Ghostty` and its menu showed `Ignore “Ghostty”` instead of TextEdit. The live
-  observation reproduced twice. `ClipboardWatcher` samples
-  `NSWorkspace.shared.frontmostApplication` when polling, so this may be a real
-  focus/polling race or a computer-use focus semantic where events target
-  TextEdit while Ghostty remains system-frontmost. A manual physical-input check
-  is needed before changing the implementation.
+- None. Computer use had attributed the controlled TextEdit copy to `Ghostty`,
+  but the manual physical-input check correctly reported TextEdit. The earlier
+  mismatch was a computer-use focus artifact rather than a reproduced product
+  failure.
