@@ -1,7 +1,7 @@
 # testloop — 2026-08-08 — clipboard keyboard and paste
 
-**Verdict:** stopped: Space behavior remains inconsistent under Computer Use ·
-**Rounds:** 2 (campaign rounds 8–9)
+**Verdict:** pass · **Rounds:** 2 (campaign rounds 8–9) plus physical-keyboard
+confirmation
 
 ## Covered
 
@@ -12,6 +12,8 @@
 - Space preview opened and closed successfully in round 8. The same action had
   no visible effect twice in round 9, despite a selected card and an otherwise
   responsive wall.
+- A final physical Space-key check passed, confirming the product behavior and
+  identifying the round 9 result as a Computer Use input artifact.
 - Reproduced an Enter-paste failure in round 8, then verified the destination
   received the exact Unicode marker immediately after the fix in round 9.
 
@@ -24,8 +26,5 @@
 
 ## Still open
 
-- Computer Use produced conflicting Space-preview results across independent
-  runs. The controller and selection-model paths pass automated tests, so one
-  physical Space-key confirmation remains before changing preview code.
 - Universal Clipboard, multi-display behavior, and long-duration soak coverage
   still require external devices or elapsed wall-clock conditions.
