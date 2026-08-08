@@ -39,6 +39,10 @@ versioning.
 
 ### Changed
 
+- Pasting from the clipboard wall now restores the destination through Launch
+  Services before synthesizing Command-V. On macOS 14+, direct activation from
+  an accessory app could be ignored, closing the wall without inserting the
+  selected history item.
 - A very large copied text no longer makes the history wall unusable. The
   preview a card renders is now a bounded prefix instead of the whole copied
   text, so a 128 MiB copy is still stored and pasted in full without pinning
