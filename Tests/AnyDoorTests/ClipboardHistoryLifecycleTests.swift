@@ -6,6 +6,41 @@ import XCTest
 
 @MainActor
 final class ClipboardHistoryLifecycleTests: XCTestCase {
+    func testMigrationPreparationFailureRetriesWithoutTouchingStore()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe()
+        var preparationAttempts = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            migrationPreparation: {
+                preparationAttempts += 1
+                if preparationAttempts == 1 {
+                    throw CocoaError(.fileWriteNoPermission)
+                }
+                return .suspendForRelaunch
+            },
+            migrationRequest: nil
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+        XCTAssertEqual(preparationAttempts, 1)
+        let failedEvents = await probe.recordedEvents()
+        XCTAssertEqual(failedEvents, [])
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .preparing)
+        XCTAssertEqual(preparationAttempts, 2)
+        let retriedEvents = await probe.recordedEvents()
+        XCTAssertEqual(retriedEvents, [])
+    }
+
     func testPublishedRecoveryCleansSnapshotWithoutReadingLegacySource()
         async throws
     {

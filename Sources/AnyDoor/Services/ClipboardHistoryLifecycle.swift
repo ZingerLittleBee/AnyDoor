@@ -12,6 +12,11 @@ enum ClipboardHistoryLifecycleState: Equatable {
     case resetFailed
 }
 
+enum ClipboardHistoryMigrationPreparation: Equatable {
+    case proceed
+    case suspendForRelaunch
+}
+
 struct ClipboardHistoryLifecycleOperations: Sendable {
     let status: @Sendable () async -> ClipboardHistoryStatus
     let setMonitoring:
@@ -95,6 +100,8 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
 final class ClipboardHistoryLifecycle {
     private let operations: ClipboardHistoryLifecycleOperations
     private let defaults: UserDefaults
+    private let migrationPreparation:
+        @MainActor () async throws -> ClipboardHistoryMigrationPreparation
     private let migrationRequest:
         (@MainActor () throws -> ClipboardHistoryLegacyMigrationRequest)?
     private let legacyCleanupState:
@@ -118,6 +125,9 @@ final class ClipboardHistoryLifecycle {
     init(
         module: ClipboardHistoryModule,
         defaults: UserDefaults = .standard,
+        migrationPreparation:
+            @escaping @MainActor () async throws
+                -> ClipboardHistoryMigrationPreparation = { .proceed },
         legacyCleanupState:
             (@MainActor () throws
                 -> ClipboardHistoryLegacyCleanupState)? = nil,
@@ -131,6 +141,7 @@ final class ClipboardHistoryLifecycle {
     ) {
         operations = ClipboardHistoryLifecycleOperations(module: module)
         self.defaults = defaults
+        self.migrationPreparation = migrationPreparation
         self.migrationRequest = migrationRequest
         self.legacyCleanupState =
             legacyCleanupState
@@ -148,6 +159,9 @@ final class ClipboardHistoryLifecycle {
     init(
         operations: ClipboardHistoryLifecycleOperations,
         defaults: UserDefaults,
+        migrationPreparation:
+            @escaping @MainActor () async throws
+                -> ClipboardHistoryMigrationPreparation = { .proceed },
         legacyCleanupState:
             (@MainActor () throws
                 -> ClipboardHistoryLegacyCleanupState)? = nil,
@@ -168,6 +182,7 @@ final class ClipboardHistoryLifecycle {
     ) {
         self.operations = operations
         self.defaults = defaults
+        self.migrationPreparation = migrationPreparation
         self.migrationRequest = migrationRequest
         self.legacyCleanupState =
             legacyCleanupState
@@ -378,6 +393,18 @@ final class ClipboardHistoryLifecycle {
                 operationTask = nil
                 updateKeychainUnlockWatch()
             }
+        }
+        do {
+            guard try await migrationPreparation() == .proceed else {
+                return
+            }
+        } catch {
+            guard generation == requestGeneration else { return }
+            state = .migrationFailed
+            return
+        }
+        guard !Task.isCancelled, generation == requestGeneration else {
+            return
         }
         if resetStoreFirst {
             do {

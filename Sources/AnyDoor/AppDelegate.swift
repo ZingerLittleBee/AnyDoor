@@ -14,6 +14,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule: ClipboardHistoryModule
+    private let persistenceBootstrap: AppPersistenceBootstrap
     @MainActor lazy var clipboardHistoryLifecycle = {
         let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
@@ -28,6 +29,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         return ClipboardHistoryLifecycle(
             module: clipboardHistoryModule,
+            migrationPreparation:
+                persistenceBootstrap.migrationPreparation,
             legacyCleanupState: {
                 ClipboardHistoryLegacySource.cleanupState(
                     in: storeDirectory
@@ -87,20 +90,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // scrollbar entirely, and the one-frame flash that any after-the-fact
         // restyling causes on a Settings tab switch. See OverlayScrollers.swift.
         UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
+        clipboardHistoryModule = ClipboardHistoryModule()
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
-            try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
-            // Preserve the removed SwiftData entity as raw files before the
-            // reduced production schema opens. Recovery still opens this
-            // snapshot only when the encrypted store says unpublished.
-            try ClipboardHistoryLegacySource.prepareSnapshotIfNeeded(
-                applicationSupportDirectory: storeDir,
-                productionStoreURL: storeURL
-            )
-            let config = ModelConfiguration(url: storeURL)
-            clipboardHistoryModule = ClipboardHistoryModule()
             // Core-owned model types plus every plugin's (ADR-0005: plugin
             // schema is registered unconditionally, so user data survives
             // Uninstall and a later Install restores it).
@@ -111,10 +105,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ]
                 + NativePluginCatalog.modelSchemaTypes
             )
-            modelContainer = try ModelContainer(for: schema, configurations: config)
+            let bootstrap = try AppPersistenceBootstrap.make(
+                schema: schema,
+                storeURL: storeURL,
+                prepareLegacySnapshot: {
+                    try FileManager.default.createDirectory(
+                        at: storeDir,
+                        withIntermediateDirectories: true
+                    )
+                    try ClipboardHistoryLegacySource
+                        .prepareSnapshotIfNeeded(
+                            applicationSupportDirectory: storeDir,
+                            productionStoreURL: storeURL
+                        )
+                },
+                requestRelaunch: Self.requestRelaunch
+            )
+            persistenceBootstrap = bootstrap
+            modelContainer = bootstrap.modelContainer
 
             let legacyURL = appSupport.appendingPathComponent("default.store")
-            if FileManager.default.fileExists(atPath: legacyURL.path) {
+            if !bootstrap.isRecoveryMode,
+                FileManager.default.fileExists(atPath: legacyURL.path)
+            {
                 Self.migrateLegacyStore(from: legacyURL, into: modelContainer)
             }
         } catch {
@@ -150,9 +163,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Run migrations / seeding on the main context
         let context = modelContainer.mainContext
-        KeyBindingOrderBackfill.runIfNeeded(in: context)
-        BuiltinPreferenceSeeder.seedIfNeeded(in: context)
-        QuicklinkSeeder.seedIfNeeded(in: context)
+        if persistenceBootstrap.isRecoveryMode {
+            Self.seedRecoveryBuiltinPreferences(in: context)
+        } else {
+            KeyBindingOrderBackfill.runIfNeeded(in: context)
+            BuiltinPreferenceSeeder.seedIfNeeded(in: context)
+            QuicklinkSeeder.seedIfNeeded(in: context)
+        }
 
         // The v2 lifecycle owns migration and passive observation. It never
         // starts the monitor before the encrypted store and migration are
@@ -182,7 +199,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // One-time usage-trace migration writes the install state directly and
         // must precede the bootstrap, which activates the migrated-installed
         // plugins through the normal launch path.
-        PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
+        if !persistenceBootstrap.isRecoveryMode {
+            PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
+        }
         let coreProviders = BuiltinProviderRegistry.makeAll(
             clipboardHistoryModule: clipboardHistoryModule,
             clipboardHistoryLifecycle: clipboardHistoryLifecycle,
@@ -287,13 +306,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Config Sync (ADR-0010). Started last so its initial tick captures
         // fully seeded stores; no-op unless the user enabled sync.
-        SyncCoordinator.shared.bootstrap(modelContainer: modelContainer)
+        if !persistenceBootstrap.isRecoveryMode {
+            SyncCoordinator.shared.bootstrap(modelContainer: modelContainer)
+        }
 
         // First-run onboarding. Shows once on a clean install; afterwards it is
         // only reachable from Settings (the window opts out of state restoration
         // and reverts the app to `.accessory` when closed).
-        if !OnboardingState.hasCompleted() {
+        if !persistenceBootstrap.isRecoveryMode,
+            !OnboardingState.hasCompleted()
+        {
             OnboardingWindowController.shared.show()
+        }
+
+        if persistenceBootstrap.isRecoveryMode {
+            SettingsOpener.shared.tryOpen(tab: .clipboard)
         }
 
         // Dev-only probe: auto-open a window at launch so UI work can be
@@ -486,6 +513,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func refreshBindings() {
         PanelStore.shared.rebuild()
         HotkeyCoordinator.shared.refresh()
+    }
+
+    private static func requestRelaunch() async throws {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.addsToRecentItems = false
+        configuration.createsNewApplicationInstance = true
+
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            _ = try await NSWorkspace.shared.openApplication(
+                at: Bundle.main.bundleURL,
+                configuration: configuration
+            )
+        } else {
+            guard let executableURL = Bundle.main.executableURL else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = Array(CommandLine.arguments.dropFirst())
+            try process.run()
+        }
+        NSApplication.shared.terminate(nil)
+    }
+
+    private static func seedRecoveryBuiltinPreferences(
+        in context: ModelContext
+    ) {
+        for item in BuiltinItem.allCases {
+            context.insert(
+                BuiltinPreference(
+                    itemKey: item.rawValue,
+                    isVisible: item.defaultVisibility,
+                    displayOrder: item.defaultOrder,
+                    keyCode: nil,
+                    modifierFlags: nil
+                )
+            )
+        }
+        do {
+            try context.save()
+        } catch {
+            logger.error(
+                "Recovery preference seeding failed: \(error)"
+            )
+        }
     }
 
     // MARK: - Legacy store migration (unchanged behavior, just preserved)
