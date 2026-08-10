@@ -74,7 +74,7 @@ install: swift-release
 	  else \
 	    codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 \
 	      && echo "Signed ad hoc; system permissions need re-granting"; \
-	  fi' || true
+	  fi'
 	@touch $(APP_DIR)
 	@echo "Installed $(APP_DIR)"
 

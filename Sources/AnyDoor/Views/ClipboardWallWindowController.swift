@@ -109,7 +109,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // category tab or search term.
         state.category = .all
         state.query = ""
-        state.sourceFilterBundleID = nil
+        state.sourceFilterID = nil
         // Open in card-navigation mode (search field unfocused); typing focuses
         // it. Reset here so a prior session's focus state never leaks in.
         state.isSearchFocused = false

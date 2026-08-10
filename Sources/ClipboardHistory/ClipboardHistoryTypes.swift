@@ -59,7 +59,7 @@ public enum ClipboardHistoryFacet: String, CaseIterable, Sendable {
 public struct ClipboardHistoryQuery: Equatable, Sendable {
     public var text: String
     public var facet: ClipboardHistoryFacet?
-    public var sourceID: String?
+    public var sourceID: ClipboardHistorySourceID?
     public var tagID: String?
     public var favoritesOnly: Bool
     public var capturedAfter: Date?
@@ -68,7 +68,7 @@ public struct ClipboardHistoryQuery: Equatable, Sendable {
     public init(
         text: String = "",
         facet: ClipboardHistoryFacet? = nil,
-        sourceID: String? = nil,
+        sourceID: ClipboardHistorySourceID? = nil,
         tagID: String? = nil,
         favoritesOnly: Bool = false,
         capturedAfter: Date? = nil,
@@ -177,6 +177,28 @@ public struct ClipboardHistoryCaptureSource: Equatable, Sendable {
         displayName: "AnyDoor",
         provenance: .declared
     )
+
+    public var sourceID: ClipboardHistorySourceID {
+        if let bundleIdentifier {
+            return .application(bundleIdentifier)
+        }
+        return provenance == .universalClipboard
+            ? .universalClipboard
+            : .unknown
+    }
+}
+
+public enum ClipboardHistorySourceID: Codable, Equatable, Hashable, Sendable {
+    case application(String)
+    case universalClipboard
+    case unknown
+
+    public var applicationBundleIdentifier: String? {
+        guard case .application(let bundleIdentifier) = self else {
+            return nil
+        }
+        return bundleIdentifier
+    }
 }
 
 public enum ClipboardHistoryCaptureSourceProvenance: String, Sendable {
@@ -199,16 +221,30 @@ public struct ClipboardHistoryApplicationSource: Equatable, Sendable {
 }
 
 public struct ClipboardHistorySourceSummary: Equatable, Sendable {
-    public let bundleIdentifier: String
-    public let displayName: String
+    public let id: ClipboardHistorySourceID
+    public let displayName: String?
     public let count: Int
+
+    public var bundleIdentifier: String? {
+        id.applicationBundleIdentifier
+    }
 
     public init(
         bundleIdentifier: String,
         displayName: String,
         count: Int
     ) {
-        self.bundleIdentifier = bundleIdentifier
+        id = .application(bundleIdentifier)
+        self.displayName = displayName
+        self.count = count
+    }
+
+    public init(
+        id: ClipboardHistorySourceID,
+        displayName: String?,
+        count: Int
+    ) {
+        self.id = id
         self.displayName = displayName
         self.count = count
     }

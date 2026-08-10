@@ -173,11 +173,10 @@ enum ClipboardHistoryContentState: Equatable {
 }
 
 struct ClipboardHistoryPresentationSource: Equatable, Identifiable {
-    let bundleID: String
+    let id: ClipboardHistorySourceID
+    let bundleID: String?
     let name: String
     let count: Int
-
-    var id: String { bundleID }
 }
 
 enum ClipboardHistoryActionFailure: Equatable {
@@ -540,8 +539,8 @@ final class ClipboardHistoryPresentationModel {
             case .deleted:
                 let entryID = mutation.entryID
                 let deletedIndex = entries.firstIndex { $0.id == entryID }
-                let deletedSourceID = deletedIndex.flatMap {
-                    entries[$0].source.bundleIdentifier
+                let deletedSourceID = deletedIndex.map {
+                    entries[$0].source.sourceID
                 }
                 entries.removeAll { $0.id == entryID }
                 if let deletedSourceID {
@@ -687,8 +686,9 @@ final class ClipboardHistoryPresentationModel {
             tags = loadedTags
             sources = loadedSources.map {
                 ClipboardHistoryPresentationSource(
+                    id: $0.id,
                     bundleID: $0.bundleIdentifier,
-                    name: $0.displayName,
+                    name: Self.sourceName(for: $0),
                     count: $0.count
                 )
             }
@@ -802,9 +802,22 @@ final class ClipboardHistoryPresentationModel {
         )
     }
 
-    private func decrementSource(_ bundleID: String) {
+    private static func sourceName(
+        for summary: ClipboardHistorySourceSummary
+    ) -> String {
+        switch summary.id {
+        case .application(let bundleIdentifier):
+            return summary.displayName ?? bundleIdentifier
+        case .universalClipboard:
+            return L(.clipboardSourceUniversal)
+        case .unknown:
+            return L(.clipboardSourceUnknown)
+        }
+    }
+
+    private func decrementSource(_ sourceID: ClipboardHistorySourceID) {
         guard let index = sources.firstIndex(where: {
-            $0.bundleID == bundleID
+            $0.id == sourceID
         }) else {
             return
         }
@@ -813,6 +826,7 @@ final class ClipboardHistoryPresentationModel {
             sources.remove(at: index)
         } else {
             sources[index] = ClipboardHistoryPresentationSource(
+                id: source.id,
                 bundleID: source.bundleID,
                 name: source.name,
                 count: source.count - 1

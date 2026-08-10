@@ -205,7 +205,12 @@ final class ClipboardHistoryLifecycle {
     }
 
     func resetConfirmed() {
-        guard case .storeUnavailable = state else { return }
+        switch state {
+        case .storeUnavailable, .resetFailed:
+            break
+        case .preparing, .migrating, .ready, .paused, .migrationFailed:
+            return
+        }
         launch(retryStoreFirst: false, resetStoreFirst: true)
     }
 
@@ -272,12 +277,10 @@ final class ClipboardHistoryLifecycle {
         "com.apple.screenIsUnlocked"
     )
 
-    /// A locked keychain is the one stalled state the user fixes outside
-    /// AnyDoor, and nothing in-process tells the app when that happens — so
-    /// while it lasts, watch for the unlock two ways and retry the store on the
-    /// first sign of it. Without this the store stays paused until the next
-    /// launch, which turns a self-healing state into one that silently drops
-    /// everything the user copies after unlocking.
+    /// The login keychain can lock while an already-open store still holds its
+    /// key in memory, and nothing in-process reports that transition. Poll its
+    /// lock flag while ready so capture pauses promptly, then watch for unlock
+    /// and retry the store from a fresh baseline.
     ///
     /// Two signals because neither covers the other: the screen-unlock
     /// notification is the one that fires in the real scenario, and the lock
@@ -285,7 +288,9 @@ final class ClipboardHistoryLifecycle {
     /// `security lock-keychain`). Neither ever reads the keychain *item* — that
     /// would re-raise the password prompt every few seconds.
     private func updateKeychainUnlockWatch() {
-        guard case .paused(.keychainLocked) = state else {
+        let watchesLockState = state == .ready
+            || state == .paused(.keychainLocked)
+        guard watchesLockState else {
             keychainUnlockWatch?.cancel()
             keychainUnlockWatch = nil
             if let screenUnlockObserver {
@@ -294,7 +299,11 @@ final class ClipboardHistoryLifecycle {
             }
             return
         }
-        if screenUnlockObserver == nil {
+        if state == .ready, let screenUnlockObserver {
+            unlockNotifications.removeObserver(screenUnlockObserver)
+            self.screenUnlockObserver = nil
+        }
+        if state == .paused(.keychainLocked), screenUnlockObserver == nil {
             screenUnlockObserver = unlockNotifications.addObserver(
                 forName: Self.screenUnlockNotification,
                 object: nil,
@@ -317,11 +326,26 @@ final class ClipboardHistoryLifecycle {
             while !Task.isCancelled {
                 try? await Task.sleep(for: interval)
                 guard !Task.isCancelled, let self else { return }
-                guard case .paused(.keychainLocked) = state else { return }
-                guard probe() == true else { continue }
-                keychainUnlockWatch = nil
-                retry()
-                return
+                switch state {
+                case .ready:
+                    guard probe() == false else { continue }
+                    state = .paused(.keychainLocked)
+                    _ = await operations.setMonitoring(
+                        .stop,
+                        ClipboardPreferences.monitoringConfiguration(
+                            from: defaults
+                        )
+                    )
+                    updateKeychainUnlockWatch()
+                case .paused(.keychainLocked):
+                    guard probe() == true else { continue }
+                    keychainUnlockWatch = nil
+                    retry()
+                    return
+                case .preparing, .migrating, .storeUnavailable,
+                    .migrationFailed, .resetFailed, .paused:
+                    return
+                }
             }
         }
     }

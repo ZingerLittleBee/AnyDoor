@@ -2925,6 +2925,40 @@
         }
       }
     },
+    "clipboard.source.universal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Universal Clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通用剪贴板"
+          }
+        }
+      }
+    },
+    "clipboard.source.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知来源"
+          }
+        }
+      }
+    },
     "clipboard.tag.confirm": {
       "extractionState": "manual",
       "localizations": {

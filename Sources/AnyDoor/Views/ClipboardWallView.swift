@@ -55,16 +55,16 @@ struct ClipboardWallView: View {
     @State private var sourceMenuRequested = false
 
     private struct SourceOption: Identifiable, Equatable {
-        let bundleID: String
+        let id: ClipboardHistorySourceID
+        let bundleID: String?
         let name: String
         let count: Int
-
-        var id: String { bundleID }
     }
 
     private var sourceOptions: [SourceOption] {
         state.presentation.sources.map { source in
             SourceOption(
+                id: source.id,
                 bundleID: source.bundleID,
                 name: source.name,
                 count: source.count
@@ -128,8 +128,8 @@ struct ClipboardWallView: View {
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: newTags)))
         }
-        .onChange(of: sources.map(\.bundleID)) { _, ids in
-            if let selected = state.sourceFilterBundleID, !ids.contains(selected) {
+        .onChange(of: sources.map(\.id)) { _, ids in
+            if let selected = state.sourceFilterID, !ids.contains(selected) {
                 state.clearSourceFilter()
             }
         }
@@ -139,7 +139,7 @@ struct ClipboardWallView: View {
         .onChange(of: state.category) { _, _ in
             state.filtersDidChange()
         }
-        .onChange(of: state.sourceFilterBundleID) { _, _ in
+        .onChange(of: state.sourceFilterID) { _, _ in
             state.filtersDidChange()
         }
         // The ⌘K shortcut (handled by the window controller) bumps this token;
@@ -211,7 +211,7 @@ struct ClipboardWallView: View {
                 Label {
                     Text(sourceFilterTitle(sources)).lineLimit(1)
                 } icon: {
-                    SourceFilterLeadingIcon(bundleID: state.sourceFilterBundleID)
+                    SourceFilterLeadingIcon(sourceID: state.sourceFilterID)
                 }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
@@ -232,10 +232,10 @@ struct ClipboardWallView: View {
                 requested: $sourceMenuRequested,
                 allTitle: L(.clipboardSourceAll),
                 options: sources,
-                selectedBundleID: state.sourceFilterBundleID,
-                onSelect: { bundleID in
-                    if let bundleID {
-                        state.sourceFilterBundleID = bundleID
+                selectedSourceID: state.sourceFilterID,
+                onSelect: { sourceID in
+                    if let sourceID {
+                        state.sourceFilterID = sourceID
                     } else {
                         state.clearSourceFilter()
                     }
@@ -249,8 +249,12 @@ struct ClipboardWallView: View {
     /// (or while the icon resolves / when the bundle ID maps to no installed
     /// app). Reads the warm `AppIconCache` synchronously first to avoid a flash.
     private struct SourceFilterLeadingIcon: View {
-        let bundleID: String?
+        let sourceID: ClipboardHistorySourceID?
         @State private var icon: NSImage?
+
+        private var bundleID: String? {
+            sourceID?.applicationBundleIdentifier
+        }
 
         var body: some View {
             Group {
@@ -259,11 +263,15 @@ struct ClipboardWallView: View {
                         .resizable()
                         .interpolation(.high)
                         .frame(width: 15, height: 15)
+                } else if sourceID == .universalClipboard {
+                    Image(systemName: "iphone.and.arrow.forward")
+                } else if sourceID == .unknown {
+                    Image(systemName: "questionmark.app")
                 } else {
                     Image(systemName: "app.connected.to.app.below.fill")
                 }
             }
-            .task(id: bundleID) {
+            .task(id: sourceID) {
                 guard let bundleID else { icon = nil; return }
                 if let warm = AppIconCache.cachedForBundle(bundleID) {
                     icon = warm
@@ -285,8 +293,8 @@ struct ClipboardWallView: View {
         @Binding var requested: Bool
         let allTitle: String
         let options: [SourceOption]
-        let selectedBundleID: String?
-        let onSelect: (String?) -> Void
+        let selectedSourceID: ClipboardHistorySourceID?
+        let onSelect: (ClipboardHistorySourceID?) -> Void
 
         func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -300,7 +308,7 @@ struct ClipboardWallView: View {
             let coordinator = context.coordinator
             coordinator.allTitle = allTitle
             coordinator.options = options
-            coordinator.selectedBundleID = selectedBundleID
+            coordinator.selectedSourceID = selectedSourceID
             coordinator.onSelect = onSelect
             guard requested else { return }
             // Defer past the current view update before mutating state or
@@ -316,8 +324,8 @@ struct ClipboardWallView: View {
             weak var anchor: NSView?
             var allTitle = ""
             var options: [SourceOption] = []
-            var selectedBundleID: String?
-            var onSelect: (String?) -> Void = { _ in }
+            var selectedSourceID: ClipboardHistorySourceID?
+            var onSelect: (ClipboardHistorySourceID?) -> Void = { _ in }
 
             func popUp() {
                 guard let anchor else { return }
@@ -326,7 +334,7 @@ struct ClipboardWallView: View {
 
                 let all = NSMenuItem(title: allTitle, action: #selector(pickAll), keyEquivalent: "")
                 all.target = self
-                all.state = selectedBundleID == nil ? .on : .off
+                all.state = selectedSourceID == nil ? .on : .off
                 menu.addItem(all)
 
                 if !options.isEmpty { menu.addItem(.separator()) }
@@ -335,9 +343,9 @@ struct ClipboardWallView: View {
                                           action: #selector(pick(_:)),
                                           keyEquivalent: "")
                     item.target = self
-                    item.representedObject = option.bundleID
-                    item.state = selectedBundleID == option.bundleID ? .on : .off
-                    item.image = Self.icon(forBundleID: option.bundleID)
+                    item.representedObject = option.id
+                    item.state = selectedSourceID == option.id ? .on : .off
+                    item.image = Self.icon(for: option)
                     menu.addItem(item)
                 }
 
@@ -358,7 +366,16 @@ struct ClipboardWallView: View {
             /// list. Falls back to a generic `app` symbol when the bundle ID maps
             /// to no installed app. Copies before resizing so the shared cached
             /// image (used at full size by the cards) is never mutated.
-            private static func icon(forBundleID bundleID: String) -> NSImage {
+            private static func icon(for option: SourceOption) -> NSImage {
+                guard let bundleID = option.bundleID else {
+                    let symbol = option.id == .universalClipboard
+                        ? "iphone.and.arrow.forward"
+                        : "questionmark.app"
+                    return NSImage(
+                        systemSymbolName: symbol,
+                        accessibilityDescription: option.name
+                    ) ?? NSImage()
+                }
                 let resolved: NSImage
                 if let warm = AppIconCache.cachedForBundle(bundleID) {
                     resolved = warm
@@ -374,7 +391,7 @@ struct ClipboardWallView: View {
 
             @objc private func pickAll() { onSelect(nil) }
             @objc private func pick(_ sender: NSMenuItem) {
-                onSelect(sender.representedObject as? String)
+                onSelect(sender.representedObject as? ClipboardHistorySourceID)
             }
         }
     }
@@ -386,8 +403,11 @@ struct ClipboardWallView: View {
     }
 
     private func sourceFilterTitle(_ sources: [SourceOption]) -> String {
-        guard let selected = state.sourceFilterBundleID else { return L(.clipboardSourceAll) }
-        return sources.first { $0.bundleID == selected }?.name ?? selected
+        guard let selected = state.sourceFilterID else {
+            return L(.clipboardSourceAll)
+        }
+        return sources.first { $0.id == selected }?.name
+            ?? L(.clipboardSourceUnknown)
     }
 
     @ViewBuilder

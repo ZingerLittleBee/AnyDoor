@@ -144,11 +144,22 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 content: .text("anonymous")
             )
         )
+        _ = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: .universalClipboard,
+                content: .text("remote")
+            )
+        )
 
         _ = try await module.page(
             ClipboardHistoryQuery(text: "searchable")
         )
         let initialSummaries = try await module.sourceSummaries()
+        XCTAssertEqual(
+            initialSummaries.reduce(0) { $0 + $1.count },
+            5,
+            "source summaries must include Unknown and Universal Clipboard"
+        )
         XCTAssertEqual(
             initialSummaries,
             [
@@ -162,8 +173,26 @@ final class ClipboardHistorySearchTests: XCTestCase {
                     displayName: "Safari",
                     count: 2
                 ),
+                ClipboardHistorySourceSummary(
+                    id: .universalClipboard,
+                    displayName: nil,
+                    count: 1
+                ),
+                ClipboardHistorySourceSummary(
+                    id: .unknown,
+                    displayName: nil,
+                    count: 1
+                ),
             ]
         )
+        let universalPage = try await module.page(
+            ClipboardHistoryQuery(sourceID: .universalClipboard)
+        )
+        XCTAssertEqual(universalPage.entries.map(\.previewText), ["remote"])
+        let unknownPage = try await module.page(
+            ClipboardHistoryQuery(sourceID: .unknown)
+        )
+        XCTAssertEqual(unknownPage.entries.map(\.previewText), ["anonymous"])
 
         _ = try await module.apply(.delete(removable.entryID))
         let updatedSummaries = try await module.sourceSummaries()
@@ -178,6 +207,16 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 ClipboardHistorySourceSummary(
                     bundleIdentifier: "com.apple.Safari",
                     displayName: "Safari",
+                    count: 1
+                ),
+                ClipboardHistorySourceSummary(
+                    id: .universalClipboard,
+                    displayName: nil,
+                    count: 1
+                ),
+                ClipboardHistorySourceSummary(
+                    id: .unknown,
+                    displayName: nil,
                     count: 1
                 ),
             ]
@@ -361,7 +400,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
             ClipboardHistoryQuery(
                 text: "needle",
                 facet: .link,
-                sourceID: "dev.bybee.filtered",
+                sourceID: .application("dev.bybee.filtered"),
                 tagID: "important",
                 favoritesOnly: true,
                 capturedAfter: captured.capturedAt.addingTimeInterval(-1),
@@ -611,14 +650,14 @@ final class ClipboardHistorySearchTests: XCTestCase {
         let sourceRestart = try await module.page(
             ClipboardHistoryQuery(
                 text: "bulk-token",
-                sourceID: "source-a"
+                sourceID: .application("source-a")
             ),
             after: first.nextCursor
         )
         let expectedSourceFirst = try await module.page(
             ClipboardHistoryQuery(
                 text: "bulk-token",
-                sourceID: "source-a"
+                sourceID: .application("source-a")
             )
         )
         XCTAssertEqual(sourceRestart, expectedSourceFirst)

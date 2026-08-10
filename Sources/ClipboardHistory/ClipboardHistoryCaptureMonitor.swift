@@ -33,6 +33,7 @@ final class ClipboardHistoryCaptureMonitor {
     private let snapshotRequest:
         @MainActor (NSPasteboard, Int) ->
             ClipboardHistoryPasteboardCaptureRequest
+    private let isKeychainUnlocked: @Sendable () -> Bool?
     private let policy = ClipboardHistoryObservationPolicy()
 
     private var configuration: ClipboardHistoryMonitoringConfiguration
@@ -71,6 +72,7 @@ final class ClipboardHistoryCaptureMonitor {
                     expectedGeneration: generation
                 )
             },
+        isKeychainUnlocked: @escaping @Sendable () -> Bool? = { true },
         installsSystemObservers: Bool = true
     ) {
         self.module = module
@@ -82,9 +84,12 @@ final class ClipboardHistoryCaptureMonitor {
         self.sourceProvider = sourceProvider
         nowProvider = now
         self.snapshotRequest = snapshotRequest
+        self.isKeychainUnlocked = isKeychainUnlocked
         if installsSystemObservers {
             installSystemObservers()
-            eventHintSource = ClipboardHistoryCopyEventHintSource {
+            eventHintSource = ClipboardHistoryCopyEventHintSource(
+                initialSource: sourceProvider()
+            ) {
                 [weak self] frontmost in
                 Task { @MainActor in
                     await self?.handleKeyHint(copiedIn: frontmost)
@@ -272,6 +277,7 @@ final class ClipboardHistoryCaptureMonitor {
             case .exclude:
                 break
             case .capture(let source):
+                guard isKeychainUnlocked() != false else { break }
                 do {
                     let outcome = try await module.capture(
                         snapshotRequest(pasteboard, generation),
@@ -390,6 +396,20 @@ final class ClipboardHistoryCaptureMonitor {
                 }
             }
         }
+        workspaceObservers.append(
+            center.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.eventHintSource?.updateSource(
+                        self.sourceProvider()
+                    )
+                }
+            }
+        )
     }
 
     private func now() -> Duration {
@@ -428,9 +448,11 @@ final class ClipboardHistoryCaptureMonitor {
 }
 
 @MainActor
-private final class ClipboardHistoryCopyEventHintSource {
+final class ClipboardHistoryCopyEventHintSource {
     private nonisolated let scheduleHint:
         @Sendable (ClipboardHistoryApplicationSource?) -> Void
+    private nonisolated let sourceSnapshot:
+        OSAllocatedUnfairLock<ClipboardHistoryApplicationSource?>
     /// Read by the tap callback, which runs on the run loop that installed it
     /// (the main thread) but is not statically main-actor isolated — the same
     /// arrangement HotkeyService uses for its own tap storage.
@@ -442,10 +464,18 @@ private final class ClipboardHistoryCopyEventHintSource {
     private var isRunning = false
 
     init(
+        initialSource: ClipboardHistoryApplicationSource?,
         scheduleHint: @escaping @Sendable
             (ClipboardHistoryApplicationSource?) -> Void
     ) {
+        sourceSnapshot = OSAllocatedUnfairLock(initialState: initialSource)
         self.scheduleHint = scheduleHint
+    }
+
+    nonisolated func updateSource(
+        _ source: ClipboardHistoryApplicationSource?
+    ) {
+        sourceSnapshot.withLock { $0 = source }
     }
 
     func start() {
@@ -532,18 +562,11 @@ private final class ClipboardHistoryCopyEventHintSource {
         else {
             return
         }
-        // Sample the frontmost application *here*, in the callback, rather than
-        // after the hop onto the monitor. The callback runs on the main run
-        // loop at the instant Command-C is pressed; by the time the enqueued
-        // work executes, a user who switched apps right after copying has
-        // already changed the frontmost app, and the copy would be attributed
-        // to whatever they switched to (contract 2.12/2.26.4).
-        //
-        // Everything else — pasteboard access, canonicalization, persistence —
-        // still happens later on the monitor's serialized path.
-        let frontmost = MainActor.assumeIsolated {
-            ClipboardHistoryCaptureMonitor.frontmostApplicationSource()
-        }
+        // Activation notifications maintain this immutable source snapshot.
+        // The event-tap callback only matches the shortcut, reads the snapshot,
+        // and dispatches the hint; AppKit lookup and every other operation stay
+        // outside the callback budget.
+        let frontmost = sourceSnapshot.withLock { $0 }
         scheduleHint(frontmost)
     }
 }

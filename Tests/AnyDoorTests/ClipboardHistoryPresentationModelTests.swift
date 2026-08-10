@@ -74,7 +74,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             ClipboardHistoryQuery(
                 text: "needle",
                 facet: .image,
-                sourceID: "com.example.Source",
+                sourceID: .application("com.example.Source"),
                 tagID: "work",
                 favoritesOnly: true
             )
@@ -86,7 +86,10 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertNil(requests[2].cursor)
         XCTAssertEqual(requests[1].query.text, "needle")
         XCTAssertEqual(requests[2].query.facet, .image)
-        XCTAssertEqual(requests[2].query.sourceID, "com.example.Source")
+        XCTAssertEqual(
+            requests[2].query.sourceID,
+            .application("com.example.Source")
+        )
         XCTAssertEqual(requests[2].query.tagID, "work")
         XCTAssertTrue(requests[2].query.favoritesOnly)
     }
@@ -256,13 +259,16 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         await model.load()
 
         await model.setQuery(
-            ClipboardHistoryQuery(sourceID: "com.example.Empty")
+            ClipboardHistoryQuery(
+                sourceID: .application("com.example.Empty")
+            )
         )
 
         XCTAssertEqual(
             model.sources,
             [
                 ClipboardHistoryPresentationSource(
+                    id: .application("com.apple.Safari"),
                     bundleID: "com.apple.Safari",
                     name: "Safari",
                     count: 1
@@ -404,7 +410,9 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
     func testChangingEachFilterDiscardsSuspendedInitialPage() async {
         let filters = [
             ClipboardHistoryQuery(facet: .image),
-            ClipboardHistoryQuery(sourceID: "com.example.Source"),
+            ClipboardHistoryQuery(
+                sourceID: .application("com.example.Source")
+            ),
             ClipboardHistoryQuery(tagID: "work"),
             ClipboardHistoryQuery(favoritesOnly: true),
             ClipboardHistoryQuery(

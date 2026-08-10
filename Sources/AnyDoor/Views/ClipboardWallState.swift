@@ -68,7 +68,7 @@ final class ClipboardWallState {
     let presentation: ClipboardHistoryPresentationModel
 
     var category: ClipboardWallCategory = .all
-    var sourceFilterBundleID: String?
+    var sourceFilterID: ClipboardHistorySourceID?
     var query = ""
     var isSearchFocused = false
     private(set) var prefersInstantScroll = false
@@ -123,7 +123,7 @@ final class ClipboardWallState {
     /// whether their query is wrong or their history is simply empty.
     var emptyStateKey: L10n.Key {
         if !query.isEmpty { return .clipboardEmptySearch }
-        if sourceFilterBundleID != nil || category != .all {
+        if sourceFilterID != nil || category != .all {
             return .clipboardEmptyFilter
         }
         return .clipboardEmpty
@@ -148,7 +148,7 @@ final class ClipboardWallState {
         ClipboardHistoryQuery(
             text: query,
             facet: category.facetFilter,
-            sourceID: sourceFilterBundleID,
+            sourceID: sourceFilterID,
             tagID: category.tagFilter,
             favoritesOnly: category == .favorites
         )
@@ -271,7 +271,7 @@ final class ClipboardWallState {
     }
 
     func clearSourceFilter() {
-        sourceFilterBundleID = nil
+        sourceFilterID = nil
     }
 
     func requestOpenSourceMenu() {

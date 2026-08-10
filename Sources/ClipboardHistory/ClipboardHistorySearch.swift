@@ -12,7 +12,7 @@ extension ClipboardHistoryModule {
                 at: now(),
                 in: database
             )
-            var conditions = ["entry.source_bundle_id IS NOT NULL"]
+            var conditions: [String] = []
             var arguments: StatementArguments = []
             Self.appendTypedFilters(
                 ClipboardHistoryQuery(),
@@ -21,26 +21,51 @@ extension ClipboardHistoryModule {
                 arguments: &arguments,
                 expiryCutoff: expiryCutoff
             )
+            let predicate = conditions.isEmpty
+                ? "1"
+                : conditions.joined(separator: " AND ")
             let rows = try Row.fetchAll(
                 database,
                 sql: """
                     SELECT entry.source_bundle_id,
+                           entry.source_provenance,
                            COALESCE(
                                MAX(entry.source_display_name),
                                entry.source_bundle_id
                            ) AS source_display_name,
                            COUNT(*) AS entry_count
                     FROM clipboard_entries AS entry
-                    WHERE \(conditions.joined(separator: " AND "))
-                    GROUP BY entry.source_bundle_id
-                    ORDER BY source_display_name COLLATE NOCASE,
-                             entry.source_bundle_id
+                    WHERE \(predicate)
+                    GROUP BY entry.source_bundle_id,
+                             CASE
+                                 WHEN entry.source_bundle_id IS NULL
+                                   AND entry.source_provenance = 'universalClipboard'
+                                 THEN 'universalClipboard'
+                                 WHEN entry.source_bundle_id IS NULL
+                                 THEN 'unknown'
+                                 ELSE ''
+                             END
+                    ORDER BY entry.source_bundle_id IS NULL,
+                             source_display_name COLLATE NOCASE,
+                             entry.source_provenance
                     """,
                 arguments: arguments
             )
             return rows.map { row in
-                ClipboardHistorySourceSummary(
-                    bundleIdentifier: row["source_bundle_id"],
+                let bundleIdentifier: String? = row["source_bundle_id"]
+                let provenance = ClipboardHistoryCaptureSourceProvenance(
+                    rawValue: row["source_provenance"]
+                ) ?? .unknown
+                let id: ClipboardHistorySourceID
+                if let bundleIdentifier {
+                    id = .application(bundleIdentifier)
+                } else if provenance == .universalClipboard {
+                    id = .universalClipboard
+                } else {
+                    id = .unknown
+                }
+                return ClipboardHistorySourceSummary(
+                    id: id,
                     displayName: row["source_display_name"],
                     count: row["entry_count"]
                 )
@@ -554,8 +579,29 @@ extension ClipboardHistoryModule {
             conditions.append("\(entryAlias).is_favorite = 1")
         }
         if let sourceID = query.sourceID {
-            conditions.append("\(entryAlias).source_bundle_id = ?")
-            arguments += [sourceID]
+            switch sourceID {
+            case .application(let bundleIdentifier):
+                conditions.append("\(entryAlias).source_bundle_id = ?")
+                arguments += [bundleIdentifier]
+            case .universalClipboard:
+                conditions.append(
+                    "\(entryAlias).source_bundle_id IS NULL "
+                        + "AND \(entryAlias).source_provenance = ?"
+                )
+                arguments += [
+                    ClipboardHistoryCaptureSourceProvenance
+                        .universalClipboard.rawValue
+                ]
+            case .unknown:
+                conditions.append(
+                    "\(entryAlias).source_bundle_id IS NULL "
+                        + "AND \(entryAlias).source_provenance <> ?"
+                )
+                arguments += [
+                    ClipboardHistoryCaptureSourceProvenance
+                        .universalClipboard.rawValue
+                ]
+            }
         }
         if let tagID = query.tagID {
             conditions.append(
@@ -695,7 +741,7 @@ private struct SearchCursorBinding: Codable, Equatable {
     init(
         normalizedQuery: String,
         facet: String?,
-        sourceID: String?,
+        sourceID: ClipboardHistorySourceID?,
         tagID: String?,
         favoritesOnly: Bool,
         capturedAfter: Double?,
@@ -721,7 +767,7 @@ private struct SearchCursorBinding: Codable, Equatable {
 private struct SearchCursorInput: Codable {
     let normalizedQuery: String
     let facet: String?
-    let sourceID: String?
+    let sourceID: ClipboardHistorySourceID?
     let tagID: String?
     let favoritesOnly: Bool
     let capturedAfter: Double?

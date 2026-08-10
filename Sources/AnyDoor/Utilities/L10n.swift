@@ -124,6 +124,8 @@ enum L10n {
         case clipboardSearchPlaceholder = "clipboard.search.placeholder"
         case clipboardSourceAll = "clipboard.source.all"
         case clipboardSourceFilterHelp = "clipboard.source.filterHelp"
+        case clipboardSourceUniversal = "clipboard.source.universal"
+        case clipboardSourceUnknown = "clipboard.source.unknown"
         case clipboardKindColor = "clipboard.kind.color"
         case clipboardKindOcr = "clipboard.kind.ocr"
         case clipboardKindQrcode = "clipboard.kind.qrcode"

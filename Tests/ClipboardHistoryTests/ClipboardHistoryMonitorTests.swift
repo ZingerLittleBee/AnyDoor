@@ -1,6 +1,7 @@
 import AppKit
-import XCTest
 import GRDB
+import os
+import XCTest
 
 @testable import ClipboardHistory
 
@@ -375,6 +376,69 @@ final class ClipboardHistorySourcePersistenceTests: XCTestCase {
 }
 
 final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
+    @MainActor
+    func testCopyEventHintReadsTheCachedActivationSource() throws {
+        let initial = ClipboardHistoryApplicationSource(
+            bundleIdentifier: "com.example.Initial",
+            displayName: "Initial"
+        )
+        let activated = ClipboardHistoryApplicationSource(
+            bundleIdentifier: "com.example.Activated",
+            displayName: "Activated"
+        )
+        let received = OSAllocatedUnfairLock<
+            ClipboardHistoryApplicationSource?
+        >(initialState: nil)
+        let source = ClipboardHistoryCopyEventHintSource(
+            initialSource: initial
+        ) { hint in
+            received.withLock { $0 = hint }
+        }
+        source.updateSource(activated)
+        let event = try XCTUnwrap(
+            CGEvent(
+                keyboardEventSource: nil,
+                virtualKey: 8,
+                keyDown: true
+            )
+        )
+        event.flags = .maskCommand
+
+        source.receive(event)
+
+        XCTAssertEqual(received.withLock { $0 }, activated)
+    }
+
+    @MainActor
+    func testLockedKeychainSkipsEveryObservedGenerationBeforeCapture()
+        async throws
+    {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        pasteboard.setString("baseline", forType: .string)
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            isKeychainUnlocked: { false },
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        pasteboard.clearContents()
+        pasteboard.setString("must not persist", forType: .string)
+        await monitor.observeForTesting()
+
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries, [])
+    }
+
     /// `Pasteboard generator type` is not a UTI, so an app can only advertise
     /// it through `declareTypes`. Read back per item it comes out dynamically
     /// encoded ("dyn.a…"), which matches no marker — the pasteboard's own type

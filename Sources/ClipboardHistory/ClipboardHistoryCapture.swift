@@ -139,7 +139,14 @@ extension ClipboardHistoryModule {
         switch request.snapshotRead {
         case .rejected(let rejection):
             return .skipped(rejection)
-        case .snapshot(let snapshot):
+        case .snapshot(let candidate):
+            let snapshot: PasteboardSnapshot
+            switch Self.canonicalizedSnapshot(from: candidate) {
+            case .rejected(let rejection):
+                return .skipped(rejection)
+            case .snapshot(let value):
+                snapshot = value
+            }
             let outcome = try persist(snapshot, source: source)
             return .captured(outcome)
         }
@@ -173,46 +180,26 @@ extension ClipboardHistoryModule {
             return .rejected(.excluded)
         }
 
-        var snapshotItems: [PasteboardSnapshot.Item] = []
-        var byteCount = 0
-        var pixelCount = 0
-        var hasUnsupportedItem = false
+        var snapshotItems: [PasteboardSnapshotCandidate.Item] = []
         for pasteboardItem in pasteboardItems {
-            var representations: [PasteboardSnapshot.Representation] = []
+            var representations: [PasteboardSnapshotCandidate.Representation] = []
             if let text = pasteboardItem.string(forType: .string), !text.isEmpty {
-                let bytes = text.lengthOfBytes(using: .utf8)
-                guard byteCount <= PasteboardSnapshot.maximumByteCount - bytes else {
-                    return .rejected(.contentTooLarge)
-                }
-                byteCount += bytes
                 representations.append(
                     .text(typeIdentifier: NSPasteboard.PasteboardType.string.rawValue, value: text)
                 )
             }
             for type in PasteboardSnapshot.richTextTypes {
                 if let data = pasteboardItem.data(forType: type) {
-                    guard byteCount <= PasteboardSnapshot.maximumByteCount - data.count else {
-                        return .rejected(.contentTooLarge)
-                    }
-                    byteCount += data.count
                     representations.append(
                         .data(typeIdentifier: type.rawValue, value: data)
                     )
                 }
             }
             if let colorData = pasteboardItem.data(forType: .color),
-                let normalizedColor = Self.normalizedColor(from: colorData)
+                let normalizedValue = Self.normalizedColor(from: colorData)
             {
-                let colorByteCount = colorData.count
-                    + normalizedColor.lengthOfBytes(using: .utf8)
-                guard byteCount <= PasteboardSnapshot.maximumByteCount
-                    - colorByteCount
-                else {
-                    return .rejected(.contentTooLarge)
-                }
-                byteCount += colorByteCount
                 representations.append(
-                    .color(data: colorData, normalizedValue: normalizedColor)
+                    .color(data: colorData, normalizedValue: normalizedValue)
                 )
             }
             let fileURLText = pasteboardItem.string(forType: .fileURL)
@@ -221,33 +208,13 @@ extension ClipboardHistoryModule {
                 }
             var capturedFileURL = false
             if let fileURLText {
-                guard let fileReference = try? Self.fileReference(
-                    from: fileURLText
-                ) else {
-                    return .rejected(.invalidFileReference)
-                }
-                let metadataByteCount = fileReference.bookmark.count
-                    + fileReference.identity.count
-                    + fileReference.capturedPath.lengthOfBytes(using: .utf8)
-                    + fileReference.displayName.lengthOfBytes(using: .utf8)
-                guard byteCount <= PasteboardSnapshot.maximumByteCount
-                    - metadataByteCount
-                else {
-                    return .rejected(.contentTooLarge)
-                }
-                byteCount += metadataByteCount
                 capturedFileURL = true
-                representations.append(.file(fileReference))
+                representations.append(.fileURL(fileURLText))
             }
             if !capturedFileURL,
                 let url = pasteboardItem.string(forType: .URL),
                 !url.isEmpty
             {
-                let bytes = url.lengthOfBytes(using: .utf8)
-                guard byteCount <= PasteboardSnapshot.maximumByteCount - bytes else {
-                    return .rejected(.contentTooLarge)
-                }
-                byteCount += bytes
                 representations.append(
                     .text(typeIdentifier: NSPasteboard.PasteboardType.URL.rawValue, value: url)
                 )
@@ -255,74 +222,41 @@ extension ClipboardHistoryModule {
             if let imageData = PasteboardSnapshot.imageTypes.lazy.compactMap({
                 pasteboardItem.data(forType: $0)
             }).first {
-                guard let imagePixelCount = try? Self.imagePixelCount(
-                    in: imageData
-                ) else {
-                    if representations.isEmpty {
-                        hasUnsupportedItem = true
-                    }
-                    snapshotItems.append(
-                        PasteboardSnapshot.Item(
-                            representations: representations
-                        )
-                    )
-                    continue
-                }
-                guard pixelCount <= PasteboardSnapshot.maximumPixelCount
-                    - imagePixelCount
-                else {
-                    return .rejected(.imageTooLarge)
-                }
-                guard let bitmap = try? Self.canonicalBitmap(from: imageData) else {
-                    if representations.isEmpty {
-                        hasUnsupportedItem = true
-                    }
-                    snapshotItems.append(
-                        PasteboardSnapshot.Item(
-                            representations: representations
-                        )
-                    )
-                    continue
-                }
-                guard byteCount <= PasteboardSnapshot.maximumByteCount
-                    - bitmap.png.count
-                else {
-                    return .rejected(.contentTooLarge)
-                }
-                pixelCount += imagePixelCount
-                byteCount += bitmap.png.count
-                representations.append(
-                    .bitmap(
-                        png: bitmap.png,
-                        thumbnail: bitmap.thumbnail,
-                        isScreenshot: false
-                    )
+                representations.append(.bitmap(imageData))
+            }
+            snapshotItems.append(
+                PasteboardSnapshotCandidate.Item(
+                    representations: representations
                 )
-            }
-
-            if representations.isEmpty {
-                hasUnsupportedItem = true
-            }
-            snapshotItems.append(PasteboardSnapshot.Item(representations: representations))
+            )
         }
 
         guard pasteboard.changeCount == initialChangeCount else {
             return .rejected(.generationChanged)
         }
-        guard !hasUnsupportedItem else {
-            return .rejected(.unsupportedItem)
-        }
-
-        let snapshot = PasteboardSnapshot(
-            items: snapshotItems,
-            extraFacets: [],
-            allowsTextInference: true
+        return .snapshot(
+            PasteboardSnapshotCandidate(items: snapshotItems)
         )
-        return .snapshot(snapshot)
     }
 }
 
 extension ClipboardHistoryModule {
+    struct PasteboardSnapshotCandidate: Sendable {
+        let items: [Item]
+
+        struct Item: Sendable {
+            let representations: [Representation]
+        }
+
+        enum Representation: Sendable {
+            case text(typeIdentifier: String, value: String)
+            case data(typeIdentifier: String, value: Data)
+            case color(data: Data, normalizedValue: String)
+            case fileURL(String)
+            case bitmap(Data)
+        }
+    }
+
     struct PasteboardSnapshot: Sendable {
         static let maximumByteCount = 128 * 1_024 * 1_024
         static let maximumPixelCount = 64 * 1_000_000
@@ -369,8 +303,118 @@ extension ClipboardHistoryModule {
     }
 
     fileprivate enum PasteboardSnapshotRead: Sendable {
+        case snapshot(PasteboardSnapshotCandidate)
+        case rejected(ClipboardHistoryCaptureRejection)
+    }
+
+    private enum PasteboardCanonicalizationResult {
         case snapshot(PasteboardSnapshot)
         case rejected(ClipboardHistoryCaptureRejection)
+    }
+
+    private static func canonicalizedSnapshot(
+        from candidate: PasteboardSnapshotCandidate
+    ) -> PasteboardCanonicalizationResult {
+        var items: [PasteboardSnapshot.Item] = []
+        var byteCount = 0
+        var pixelCount = 0
+
+        for candidateItem in candidate.items {
+            var representations: [PasteboardSnapshot.Representation] = []
+            for representation in candidateItem.representations {
+                switch representation {
+                case .text(let typeIdentifier, let value):
+                    let bytes = value.lengthOfBytes(using: .utf8)
+                    guard byteCount <= PasteboardSnapshot.maximumByteCount
+                        - bytes
+                    else {
+                        return .rejected(.contentTooLarge)
+                    }
+                    byteCount += bytes
+                    representations.append(
+                        .text(typeIdentifier: typeIdentifier, value: value)
+                    )
+                case .data(let typeIdentifier, let value):
+                    guard byteCount <= PasteboardSnapshot.maximumByteCount
+                        - value.count
+                    else {
+                        return .rejected(.contentTooLarge)
+                    }
+                    byteCount += value.count
+                    representations.append(
+                        .data(typeIdentifier: typeIdentifier, value: value)
+                    )
+                case .color(let data, let normalizedValue):
+                    let bytes = data.count
+                        + normalizedValue.lengthOfBytes(using: .utf8)
+                    guard byteCount <= PasteboardSnapshot.maximumByteCount
+                        - bytes
+                    else {
+                        return .rejected(.contentTooLarge)
+                    }
+                    byteCount += bytes
+                    representations.append(
+                        .color(data: data, normalizedValue: normalizedValue)
+                    )
+                case .fileURL(let value):
+                    guard let reference = try? fileReference(from: value) else {
+                        return .rejected(.invalidFileReference)
+                    }
+                    let bytes = reference.bookmark.count
+                        + reference.identity.count
+                        + reference.capturedPath.lengthOfBytes(using: .utf8)
+                        + reference.displayName.lengthOfBytes(using: .utf8)
+                    guard byteCount <= PasteboardSnapshot.maximumByteCount
+                        - bytes
+                    else {
+                        return .rejected(.contentTooLarge)
+                    }
+                    byteCount += bytes
+                    representations.append(.file(reference))
+                case .bitmap(let data):
+                    guard let sourcePixelCount = try? imagePixelCount(in: data)
+                    else {
+                        continue
+                    }
+                    guard pixelCount <= PasteboardSnapshot.maximumPixelCount
+                        - sourcePixelCount
+                    else {
+                        return .rejected(.imageTooLarge)
+                    }
+                    guard let bitmap = try? canonicalBitmap(from: data) else {
+                        continue
+                    }
+                    guard byteCount <= PasteboardSnapshot.maximumByteCount
+                        - bitmap.png.count
+                    else {
+                        return .rejected(.contentTooLarge)
+                    }
+                    pixelCount += sourcePixelCount
+                    byteCount += bitmap.png.count
+                    representations.append(
+                        .bitmap(
+                            png: bitmap.png,
+                            thumbnail: bitmap.thumbnail,
+                            isScreenshot: false
+                        )
+                    )
+                }
+            }
+            guard !representations.isEmpty else {
+                return .rejected(.unsupportedItem)
+            }
+            items.append(PasteboardSnapshot.Item(
+                representations: representations
+            ))
+        }
+
+        return .snapshot(
+            PasteboardSnapshot(
+                items: items,
+                extraFacets: [],
+                allowsTextInference: true
+            )
+        )
     }
 
     fileprivate func persist(
@@ -846,7 +890,6 @@ extension ClipboardHistoryModule {
         return output as Data
     }
 
-    @MainActor
     fileprivate static func fileReference(
         from value: String
     ) throws -> PasteboardSnapshot.FileReference {

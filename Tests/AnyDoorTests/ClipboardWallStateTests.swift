@@ -71,13 +71,13 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.emptyStateKey, .clipboardEmptyFilter)
 
         state.category = .all
-        state.sourceFilterBundleID = "com.apple.Safari"
+        state.sourceFilterID = .application("com.apple.Safari")
         XCTAssertEqual(state.emptyStateKey, .clipboardEmptyFilter)
 
         // A query outranks a filter: the user is looking at their own search.
         state.query = "nothing matches this"
         XCTAssertEqual(state.emptyStateKey, .clipboardEmptySearch)
-        state.sourceFilterBundleID = nil
+        state.sourceFilterID = nil
         XCTAssertEqual(state.emptyStateKey, .clipboardEmptySearch)
     }
 
@@ -114,10 +114,13 @@ final class ClipboardWallStateTests: XCTestCase {
         let state = await makeState()
         state.category = .kind(.image)
         state.query = "foo"
-        state.sourceFilterBundleID = "com.apple.Safari"
+        state.sourceFilterID = .application("com.apple.Safari")
         XCTAssertEqual(state.category, .kind(.image))
         XCTAssertEqual(state.query, "foo")
-        XCTAssertEqual(state.sourceFilterBundleID, "com.apple.Safari")
+        XCTAssertEqual(
+            state.sourceFilterID,
+            .application("com.apple.Safari")
+        )
     }
 
     func testCategoryCyclingWrapsBothWays() async {
@@ -203,9 +206,9 @@ final class ClipboardWallStateTests: XCTestCase {
 
     func testClearingSourceFilterRestoresAllSources() async {
         let state = await makeState()
-        state.sourceFilterBundleID = "com.apple.Safari"
+        state.sourceFilterID = .application("com.apple.Safari")
         state.clearSourceFilter()
-        XCTAssertNil(state.sourceFilterBundleID)
+        XCTAssertNil(state.sourceFilterID)
     }
 
     func testRefreshQuerySendsEveryFilterToModule() async {
@@ -236,14 +239,17 @@ final class ClipboardWallStateTests: XCTestCase {
         let state = ClipboardWallState(presentation: presentation)
         state.query = "needle"
         state.category = .kind(.image)
-        state.sourceFilterBundleID = "com.example.Source"
+        state.sourceFilterID = .application("com.example.Source")
 
         await state.refreshQuery()
 
         let query = await recorder.lastQuery
         XCTAssertEqual(query?.text, "needle")
         XCTAssertEqual(query?.facet, .image)
-        XCTAssertEqual(query?.sourceID, "com.example.Source")
+        XCTAssertEqual(
+            query?.sourceID,
+            .application("com.example.Source")
+        )
     }
 
     /// Every keystroke used to fire its own search on the module actor that

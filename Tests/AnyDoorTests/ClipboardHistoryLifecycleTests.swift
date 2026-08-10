@@ -213,6 +213,32 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         )
     }
 
+    func testFailedResetCanBeConfirmedAgain() async throws {
+        let probe = ClipboardLifecycleProbe(
+            availability: .unavailable,
+            reason: .databaseCorrupt,
+            resetFailuresRemaining: 1
+        )
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            migrationRequest: nil
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        lifecycle.resetConfirmed()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .resetFailed)
+
+        lifecycle.resetConfirmed()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(events.filter { $0 == .reset }.count, 2)
+    }
+
     func testStartupMigratesBeforeStartingPassiveMonitoring() async throws {
         let probe = ClipboardLifecycleProbe()
         let defaults = makeDefaults()
@@ -536,6 +562,46 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         XCTAssertTrue(events.contains(.retryStore))
     }
 
+    func testLockingKeychainWhileReadyPausesCaptureAndResumesFromBaseline()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe(
+            becomesReadyOnRetry: true
+        )
+        let unlockState = KeychainUnlockFlag(unlocked: true)
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            legacyCleanupState: { .completed },
+            migrationRequest: nil,
+            isKeychainUnlocked: { unlockState.read() },
+            keychainUnlockPollInterval: .milliseconds(10)
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+
+        unlockState.set(false)
+        let paused = await Self.wait(untilTrue: {
+            lifecycle.state == .paused(.keychainLocked)
+        })
+        XCTAssertTrue(paused, "locking the keychain must pause capture")
+
+        unlockState.set(true)
+        let resumed = await Self.wait(untilTrue: {
+            lifecycle.state == .ready
+        })
+        XCTAssertTrue(resumed, "unlocking must establish a new baseline")
+
+        let events = await probe.recordedEvents()
+        XCTAssertTrue(events.contains(.monitoring(.stop)))
+        XCTAssertGreaterThanOrEqual(
+            events.filter { $0 == .monitoring(.start) }.count,
+            2
+        )
+    }
+
     /// In practice a keychain locks because the *screen* locked, and on this
     /// path the login keychain's own lock flag is not a reliable witness — a
     /// GUI app can be handed the key while `SecKeychainGetStatus` still reports
@@ -697,6 +763,7 @@ private actor ClipboardLifecycleProbe {
     private var reason: ClipboardHistoryStatus.AvailabilityReason?
     private var migrationFailuresRemaining: Int
     private var cleanupFailuresRemaining: Int
+    private var resetFailuresRemaining: Int
     private let becomesReadyOnRetry: Bool
     private let publicationState:
         ClipboardHistoryLegacyMigrationPublicationState
@@ -708,6 +775,7 @@ private actor ClipboardLifecycleProbe {
         reason: ClipboardHistoryStatus.AvailabilityReason? = nil,
         migrationFailuresRemaining: Int = 0,
         cleanupFailuresRemaining: Int = 0,
+        resetFailuresRemaining: Int = 0,
         becomesReadyOnRetry: Bool = false,
         publicationState:
             ClipboardHistoryLegacyMigrationPublicationState = .notPublished
@@ -716,6 +784,7 @@ private actor ClipboardLifecycleProbe {
         self.reason = reason
         self.migrationFailuresRemaining = migrationFailuresRemaining
         self.cleanupFailuresRemaining = cleanupFailuresRemaining
+        self.resetFailuresRemaining = resetFailuresRemaining
         self.becomesReadyOnRetry = becomesReadyOnRetry
         self.publicationState = publicationState
     }
@@ -854,6 +923,10 @@ private actor ClipboardLifecycleProbe {
 
     private func resetStore() async throws {
         events.append(.reset)
+        if resetFailuresRemaining > 0 {
+            resetFailuresRemaining -= 1
+            throw ClipboardHistoryModuleError.resetFailed
+        }
         availability = .ready
         reason = nil
     }

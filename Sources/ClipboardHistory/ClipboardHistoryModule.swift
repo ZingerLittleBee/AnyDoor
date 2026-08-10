@@ -234,7 +234,10 @@ public actor ClipboardHistoryModule {
                 module: self,
                 suppression: selfWriteSuppression,
                 instrumentation: monitorInstrumentation,
-                configuration: monitoringConfiguration
+                configuration: monitoringConfiguration,
+                isKeychainUnlocked: {
+                    ClipboardHistoryKeychainLock.isLoginKeychainUnlocked()
+                }
             )
             captureMonitor = monitor
         }
