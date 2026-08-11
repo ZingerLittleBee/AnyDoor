@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := dev
-.PHONY: dev build swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun
+.PHONY: dev build swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun beta-release beta-release-dryrun
 
 dev:
 	watchexec -r -e swift -- swift run AnyDoor
@@ -53,7 +53,7 @@ uninstall:
 # Pin SPM dependency and downloaded CLI tools to the same Sparkle release.
 SPARKLE_VERSION := 2.9.2
 LOAD_ENV := set -a; [[ ! -f .env ]] || source .env; set +a
-RELEASE_GOAL := $(filter release release-dryrun,$(firstword $(MAKECMDGOALS)))
+RELEASE_GOAL := $(filter release release-dryrun beta-release beta-release-dryrun,$(firstword $(MAKECMDGOALS)))
 RELEASE_VERSION := $(or $(VERSION),$(if $(RELEASE_GOAL),$(word 2,$(MAKECMDGOALS))))
 
 ifneq ($(RELEASE_GOAL),)
@@ -77,3 +77,9 @@ release: sparkle-tools
 
 release-dryrun: sparkle-tools
 	@bash -lc '$(LOAD_ENV); DRYRUN=1 ./scripts/release.sh "$(RELEASE_VERSION)"'
+
+beta-release: sparkle-tools
+	@bash -lc '$(LOAD_ENV); ./scripts/beta-release.sh "$(RELEASE_VERSION)"'
+
+beta-release-dryrun: sparkle-tools
+	@bash -lc '$(LOAD_ENV); DRYRUN=1 ./scripts/beta-release.sh "$(RELEASE_VERSION)"'

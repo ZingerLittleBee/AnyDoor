@@ -6,7 +6,9 @@ on:
   pull_request:
     paths:
       - 'feed/**'
+      - 'scripts/beta-release.sh'
       - 'scripts/release.sh'
+      - 'scripts/release-driver.sh'
       - 'scripts/resolve-release-version.sh'
       - 'scripts/validate-appcast.py'
       - 'scripts/verify-feed-bootstrap.sh'

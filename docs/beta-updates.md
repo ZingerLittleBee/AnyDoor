@@ -47,13 +47,19 @@ release script also requires the latest non-prerelease Stable tag to be an
 ancestor of the Beta branch, so a Stable hotfix must be merged into the Beta
 line before another Beta can ship.
 
-Use the release identity as the only argument. The suffix determines the
-channel; there is no independent channel flag.
+Stable and Beta use separate commands. The Stable command rejects prerelease
+identities, while the Beta command requires an explicit `X.Y.Z-beta.N`
+identity. Both delegate packaging to one internal driver so signing and
+notarization cannot drift between channels.
 
 ```bash
 make release 4.1.1
-make release 4.2.0-beta.1
+make beta-release 4.2.0-beta.1
 ```
+
+The matching validation-only commands are `make release-dryrun` and
+`make beta-release-dryrun`. A Beta release never falls back to an inferred
+version.
 
 Beta releases snapshot `[Unreleased]` into their release notes without cutting
 the changelog. Stable releases perform the normal changelog cut.
@@ -92,7 +98,8 @@ discovery but does not affect the installed application.
 3. Enable GitHub immutable releases.
 4. Publish Stable `4.1.1` from `main`.
 5. Create `release/4.2-beta` from the bridge and merge the Clipboard feature.
-6. Publish `4.2.0-beta.1` as a GitHub prerelease.
+6. Publish `4.2.0-beta.1` with `make beta-release 4.2.0-beta.1`; it becomes a
+   GitHub prerelease.
 7. Merge the stabilized release branch into `main` and publish `4.2.0`.
 
 Publishing, workflow dispatch, Cloudflare deployment, and repository-setting

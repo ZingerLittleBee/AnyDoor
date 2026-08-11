@@ -37,6 +37,27 @@ final class ReleaseVersionTests: XCTestCase {
         XCTAssertNotEqual(result.status, 0)
     }
 
+    func testStableEntryPointRejectsBetaIdentity() throws {
+        let result = try runReleaseEntryPoint("release.sh", arguments: ["4.2.0-beta.1"])
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.stderr.contains("use 'make beta-release 4.2.0-beta.1'"))
+    }
+
+    func testBetaEntryPointRejectsStableIdentity() throws {
+        let result = try runReleaseEntryPoint("beta-release.sh", arguments: ["4.2.0"])
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.stderr.contains("use 'make release 4.2.0'"))
+    }
+
+    func testBetaEntryPointRequiresExplicitVersion() throws {
+        let result = try runReleaseEntryPoint("beta-release.sh", arguments: [])
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.stderr.contains("Usage: scripts/beta-release.sh X.Y.Z-beta.N"))
+    }
+
     func testBumpScriptWritesAppleCompliantBetaBundleVersions() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -90,6 +111,23 @@ final class ReleaseVersionTests: XCTestCase {
             process.terminationStatus,
             String(decoding: stdout.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
                 .trimmingCharacters(in: .newlines),
+            String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        )
+    }
+
+    private func runReleaseEntryPoint(
+        _ name: String,
+        arguments: [String]
+    ) throws -> (status: Int32, stderr: String) {
+        let process = Process()
+        let stderr = Pipe()
+        process.executableURL = repositoryRoot.appendingPathComponent("scripts/\(name)")
+        process.arguments = arguments
+        process.standardError = stderr
+        try process.run()
+        process.waitUntilExit()
+        return (
+            process.terminationStatus,
             String(decoding: stderr.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
         )
     }

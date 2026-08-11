@@ -11,9 +11,10 @@ versioning.
 - Beta updates are now an explicit per-device opt-in under Settings → General.
   Stable remains the default; turning Beta updates off affects future update
   checks and does not downgrade the installed app.
-- Release tooling now supports signed Beta prereleases through Sparkle channels,
-  deterministic numeric build versions, immutable release snapshots, and an
-  independently deployed canonical update feed.
+- The dedicated `make beta-release` pipeline now publishes signed Beta
+  prereleases through Sparkle channels, deterministic numeric build versions,
+  immutable release snapshots, and an independently deployed canonical update
+  feed without accepting Beta identities in the Stable release command.
 
 ## [4.1.0] - 2026-07-28
 
