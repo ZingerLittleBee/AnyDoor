@@ -3,7 +3,8 @@
 # Usage:
 #   scripts/release.sh                     # patch+1
 #   scripts/release.sh 1.2.3               # explicit version
-#   DRYRUN=1 scripts/release.sh 1.2.3      # stop after appcast generation
+#   scripts/release.sh 4.2.0-beta.1        # beta from release/4.2-beta
+#   DRYRUN=1 scripts/release.sh 1.2.3       # stop after appcast generation
 
 set -euo pipefail
 
@@ -18,9 +19,9 @@ SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-AnyDoor-Notary}"
 REPO_URL="${REPO_URL:-https://github.com/ZingerLittleBee/AnyDoor}"
 DOWNLOAD_URL_BASE="$REPO_URL/releases/download"
+CANONICAL_FEED_URL="${CANONICAL_FEED_URL:-https://anydoor.dev/appcast.xml}"
 
 DIST="$REPO_ROOT/dist"
-ARCHIVE="$REPO_ROOT/scripts/release-archive"
 SPARKLE_BIN="$REPO_ROOT/scripts/sparkle-bin"
 
 # Minimum macOS version stamped into the binary's LC_BUILD_VERSION `minos`
@@ -36,9 +37,21 @@ die() { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 # instructions tailored to where the script failed.
 LAST_STEP=0
 RECOVERY_HINT=""
+BASE_APPCAST=""
+ARCHIVE=""
+RELEASE_LOCK=""
 
 on_exit() {
     local code=$?
+    if [[ -n "$BASE_APPCAST" ]]; then
+        rm -f "$BASE_APPCAST"
+    fi
+    if [[ -n "$ARCHIVE" && -d "$ARCHIVE" ]]; then
+        rm -rf "$ARCHIVE"
+    fi
+    if [[ -n "$RELEASE_LOCK" && -d "$RELEASE_LOCK" ]]; then
+        rmdir "$RELEASE_LOCK"
+    fi
     if [[ $code -eq 0 ]]; then
         return
     fi
@@ -49,16 +62,46 @@ on_exit() {
 }
 trap on_exit EXIT
 
+# Resolve the identity before preflight so branch policy is channel-aware.
+if [[ -z "$REQUESTED_VERSION" ]]; then
+    current_short="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)"
+    IFS='.' read -r current_major current_minor current_patch <<<"$current_short"
+    [[ -n "${current_patch:-}" ]] || die "current short version is not X.Y.Z: $current_short"
+    REQUESTED_VERSION="$current_major.$current_minor.$((10#$current_patch + 1))"
+fi
+IFS=$'\t' read -r VER CHANNEL SHORT_VERSION BUILD_VERSION DISPLAY_VERSION \
+    < <(scripts/resolve-release-version.sh "$REQUESTED_VERSION")
+IFS='.' read -r RELEASE_MAJOR RELEASE_MINOR _ <<<"$SHORT_VERSION"
+lock_path="$(git rev-parse --git-path anydoor-release.lock)"
+mkdir "$lock_path" 2>/dev/null || die "another release process holds $lock_path"
+RELEASE_LOCK="$lock_path"
+
 # --- 1. Preflight ---------------------------------------------------------
 LAST_STEP=1
 RECOVERY_HINT="nothing to undo; preflight aborted before any mutation"
 log "Preflight checks"
 
 [[ -z "$(git status --porcelain)" ]] || die "working tree is dirty; commit or stash first"
-[[ "$(git branch --show-current)" == "main" ]] || die "must release from main"
-
 git fetch origin --tags --quiet
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] || die "local main is not in sync with origin/main"
+CURRENT_BRANCH="$(git branch --show-current)"
+if [[ "$CHANNEL" == "stable" ]]; then
+  [[ "$CURRENT_BRANCH" == "main" ]] || die "Stable releases must run from main"
+  [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] \
+    || die "local main is not in sync with origin/main"
+else
+  EXPECTED_BRANCH="release/$RELEASE_MAJOR.$RELEASE_MINOR-beta"
+  [[ "$CURRENT_BRANCH" == "$EXPECTED_BRANCH" ]] \
+    || die "Beta $VER must run from $EXPECTED_BRANCH"
+  git rev-parse "origin/$CURRENT_BRANCH" >/dev/null 2>&1 \
+    || die "Beta branch has no remote tracking ref: origin/$CURRENT_BRANCH"
+  [[ "$(git rev-parse HEAD)" == "$(git rev-parse "origin/$CURRENT_BRANCH")" ]] \
+    || die "local Beta branch is not in sync with origin/$CURRENT_BRANCH"
+  latest_stable_tag="$(git tag --list 'v[0-9]*' --sort=-version:refname \
+    | grep -Ev -- '-(beta|rc|alpha)\.' | head -n 1)"
+  [[ -n "$latest_stable_tag" ]] || die "no Stable release tag found"
+  git merge-base --is-ancestor "$latest_stable_tag" HEAD \
+    || die "$CURRENT_BRANCH must contain latest Stable $latest_stable_tag before releasing Beta"
+fi
 
 grep -q '^## \[Unreleased\]' CHANGELOG.md || die "CHANGELOG.md is missing '## [Unreleased]' section"
 notes_body="$(awk '/^## \[Unreleased\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md | sed '/./,$!d')"
@@ -90,6 +133,11 @@ command -v create-dmg >/dev/null 2>&1 \
 command -v pnpm >/dev/null 2>&1 \
   || die "pnpm not found in PATH — required to build the example Script Plugin packages"
 
+BASE_APPCAST="$(mktemp "${TMPDIR:-/tmp}/anydoor-appcast-base.XXXXXX")"
+curl --fail --silent --show-error "$CANONICAL_FEED_URL" -o "$BASE_APPCAST" \
+  || die "canonical feed is unavailable: $CANONICAL_FEED_URL"
+xmllint --noout "$BASE_APPCAST"
+
 # The build step force-overrides LC_BUILD_VERSION `minos` to MIN_MACOS via
 # `-platform_version`. The linker applies that value unconditionally (only a
 # warning if the compiled objects target a newer min), so a Package.swift
@@ -107,8 +155,13 @@ plist_min="$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.pli
 LAST_STEP=2
 RECOVERY_HINT="nothing to undo; version not yet written"
 log "Resolve version"
-VER="$(scripts/bump-version.sh "$REQUESTED_VERSION")"
-log "VERSION → $VER"
+resolved="$(scripts/bump-version.sh "$VER")"
+[[ "$resolved" == "$VER" ]] || die "version resolver drifted: expected $VER, got $resolved"
+plist_short="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)"
+plist_build="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" Info.plist)"
+[[ "$plist_short" == "$SHORT_VERSION" && "$plist_build" == "$BUILD_VERSION" ]] \
+  || die "Info.plist version mismatch after bump"
+log "RELEASE → $VER ($CHANNEL, short $SHORT_VERSION, build $BUILD_VERSION)"
 
 git rev-parse "v$VER" >/dev/null 2>&1 && die "tag v$VER already exists locally"
 git ls-remote --tags origin "v$VER" | grep -q . && die "tag v$VER already exists on origin"
@@ -119,9 +172,11 @@ git ls-remote --tags origin "v$VER" | grep -q . && die "tag v$VER already exists
 # --- 3. Mutate CHANGELOG and emit release notes --------------------------
 LAST_STEP=3
 RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md"
-log "Update CHANGELOG"
-TODAY="$(date +%Y-%m-%d)"
-python3 - "$VER" "$TODAY" <<'PY'
+mkdir -p "$DIST"
+if [[ "$CHANNEL" == "stable" ]]; then
+  log "Cut CHANGELOG"
+  TODAY="$(date +%Y-%m-%d)"
+  python3 - "$VER" "$TODAY" <<'PY'
 import re, sys, pathlib
 ver, today = sys.argv[1], sys.argv[2]
 path = pathlib.Path("CHANGELOG.md")
@@ -130,8 +185,7 @@ text = re.sub(r"^## \[Unreleased\]", f"## [Unreleased]\n\n## [{ver}] - {today}",
 path.write_text(text)
 PY
 
-mkdir -p "$DIST"
-python3 - "$VER" <<'PY' > "$DIST/release-notes.md"
+  python3 - "$VER" <<'PY' > "$DIST/release-notes.md"
 import re, sys, pathlib
 ver = sys.argv[1]
 text = pathlib.Path("CHANGELOG.md").read_text()
@@ -142,11 +196,15 @@ if m is None:
     raise SystemExit(f"could not find section for {ver} in CHANGELOG.md")
 print(m.group(1).strip())
 PY
+else
+  log "Snapshot [Unreleased] notes without cutting CHANGELOG"
+  printf '%s\n' "$notes_body" > "$DIST/release-notes.md"
+fi
 [[ -s "$DIST/release-notes.md" ]] || die "failed to extract release notes for $VER"
 
 # --- 4. Build ------------------------------------------------------------
 LAST_STEP=4
-RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
+RECOVERY_HINT="git restore Info.plist CHANGELOG.md appcast.xml && rm -rf dist/"
 # Build a Universal Binary so a single artifact runs on both Apple Silicon
 # and Intel Macs. The `swiftbuild` backend is required here: the default
 # `native` backend dispatches multi-arch builds to xcbuild, which (as of
@@ -309,81 +367,54 @@ log "→ $ED_SIGNATURE_OUTPUT"
 
 # --- 10. Generate appcast -----------------------------------------------
 LAST_STEP=10
-RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md && rm -rf dist/"
+RECOVERY_HINT="git restore Info.plist CHANGELOG.md appcast.xml && rm -rf dist/"
 log "Generate appcast.xml"
-mkdir -p "$ARCHIVE"
+ARCHIVE="$(mktemp -d "${TMPDIR:-/tmp}/anydoor-appcast.XXXXXX")"
+curl --fail --silent --show-error "$CANONICAL_FEED_URL" -o "$BASE_APPCAST" \
+  || die "canonical feed is unavailable: $CANONICAL_FEED_URL"
+xmllint --noout "$BASE_APPCAST"
+cp "$BASE_APPCAST" "$ARCHIVE/appcast.xml"
 cp "$ZIP" "$ARCHIVE/"
-"$SPARKLE_BIN/generate_appcast" "$ARCHIVE" \
-  --maximum-deltas 0 \
-  --download-url-prefix "$DOWNLOAD_URL_BASE/" \
+cp "$DIST/release-notes.md" "$ARCHIVE/AnyDoor-$VER.md"
+APPCAST_ARGS=(
+  --maximum-deltas 0
+  --download-url-prefix "$DOWNLOAD_URL_BASE/v$VER/"
   --link "$REPO_URL"
+  --versions "$BUILD_VERSION"
+  --embed-release-notes
+)
+if [[ "$CHANNEL" == "beta" ]]; then
+  APPCAST_ARGS+=(--channel beta)
+fi
+"$SPARKLE_BIN/generate_appcast" "$ARCHIVE" \
+  "${APPCAST_ARGS[@]}"
 
 APPCAST="$ARCHIVE/appcast.xml"
 [[ -f "$APPCAST" ]] || die "generate_appcast did not produce $APPCAST"
 
-# generate_appcast emits enclosure URLs like
-#   <DOWNLOAD_URL_BASE>/<filename>
-# We need <DOWNLOAD_URL_BASE>/v<version>/<filename> so each release's zip
-# is fetched from its own version-tagged release page (not /latest/).
-python3 - "$APPCAST" <<'PY'
-import re, sys, pathlib
-path = pathlib.Path(sys.argv[1])
-text = path.read_text()
-def fix(m):
-    url = m.group(1)
-    fname = url.rsplit("/", 1)[-1]
-    # AnyDoor-1.2.3.zip → v1.2.3
-    ver_match = re.search(r"AnyDoor-(\d+\.\d+\.\d+)\.zip$", fname)
-    if not ver_match:
-        return m.group(0)
-    ver = ver_match.group(1)
-    base = url.rsplit("/", 1)[0]
-    return f'url="{base}/v{ver}/{fname}"'
-text = re.sub(r'url="([^"]+AnyDoor-\d+\.\d+\.\d+\.zip)"', fix, text)
-path.write_text(text)
-PY
+# generate_appcast reads the Apple-compliant short version from the bundle.
+# Give only the new item its human-facing Beta label.
+scripts/set-appcast-display.py \
+  --appcast "$APPCAST" \
+  --build-version "$BUILD_VERSION" \
+  --display-version "$DISPLAY_VERSION"
 
-# Inject release notes into this version's <description><![CDATA[…]]>
-python3 - "$APPCAST" "$VER" "$DIST/release-notes.md" <<'PY'
-import sys, pathlib, re
-appcast = pathlib.Path(sys.argv[1])
-ver = sys.argv[2]
-notes = pathlib.Path(sys.argv[3]).read_text().strip()
-text = appcast.read_text()
-# Locate the item whose sparkle:shortVersionString matches ver, then either
-# replace existing <description> or insert one before <enclosure>.
-item_re = re.compile(
-    r'(<item>.*?<sparkle:shortVersionString>' + re.escape(ver) +
-    r'</sparkle:shortVersionString>.*?)(<enclosure )',
-    re.DOTALL,
-)
-def repl(m):
-    block = m.group(1)
-    block = re.sub(r'<description>.*?</description>', '', block, flags=re.DOTALL)
-    # Sparkle 2.9+ renders inline release notes as Markdown when the
-    # description carries sparkle:format="markdown" (requires macOS 12+, which
-    # our macOS 14 minimum satisfies). Without it, Sparkle treats the CDATA as
-    # HTML and shows the raw "###"/"-" markers literally.
-    cdata = f'<description sparkle:format="markdown"><![CDATA[\n{notes}\n]]></description>\n'
-    return block + cdata + m.group(2)
-new_text, count = item_re.subn(repl, text, count=1)
-if count == 0:
-    raise SystemExit(f"could not find item for version {ver} in appcast")
-appcast.write_text(new_text)
-PY
-
-xmllint --noout "$APPCAST"
-
-URL_RE='^https://github\.com/ZingerLittleBee/AnyDoor/releases/download/v[0-9]+\.[0-9]+\.[0-9]+/AnyDoor-[0-9]+\.[0-9]+\.[0-9]+\.zip$'
-while IFS= read -r url; do
-  [[ "$url" =~ $URL_RE ]] || die "appcast enclosure URL fails version-pinning regex: $url"
-done < <(grep -oE 'url="[^"]+AnyDoor-[^"]+\.zip"' "$APPCAST" | sed 's/^url="\(.*\)"$/\1/')
+scripts/validate-appcast.py \
+  --appcast "$APPCAST" \
+  --release-id "$VER" \
+  --channel "$CHANNEL" \
+  --short-version "$SHORT_VERSION" \
+  --build-version "$BUILD_VERSION" \
+  --display-version "$DISPLAY_VERSION"
 
 cp "$APPCAST" "$REPO_ROOT/appcast.xml"
+rm -rf "$ARCHIVE"
+ARCHIVE=""
+APPCAST="$REPO_ROOT/appcast.xml"
 
 if [[ "$DRYRUN" == "1" ]]; then
   log "Dry run: stopping before git commit / push / release."
-  log "To reset working tree: git checkout -- Info.plist CHANGELOG.md && rm -f appcast.xml"
+  log "To reset working tree: git restore Info.plist CHANGELOG.md appcast.xml && rm -rf dist/"
   exit 0
 fi
 
@@ -391,25 +422,30 @@ fi
 LAST_STEP=11
 RECOVERY_HINT="git tag -d v\$VER (if the tag was created) && rm -rf dist/  # the commit is on main locally — keep it if you intend to retry from step 12"
 log "git commit + tag"
-git add Info.plist CHANGELOG.md appcast.xml
-git commit -m "release: v$VER"
+git add Info.plist appcast.xml
+if [[ "$CHANNEL" == "stable" ]]; then
+  git add CHANGELOG.md
+fi
+git commit -m "chore: release v$VER"
 git tag "v$VER"
 
 # --- 12. Push --------------------------------------------------------
 LAST_STEP=12
 RECOVERY_HINT="resolve git push failure (auth/conflict), then retry from step 12 (no local cleanup needed)"
 log "git push (commit + tag)"
-git push origin main
+git push origin "$CURRENT_BRANCH"
 git push origin "v$VER"
 
 # --- 13. Create draft release, upload assets, publish ------------------
 LAST_STEP=13
 RECOVERY_HINT="gh release delete v\$VER --yes  # the release was a draft, so no clients ever saw it"
-log "gh release create v$VER (draft)"
+log "gh release create v$VER (draft $CHANNEL)"
+RELEASE_ARGS=(--draft --title "AnyDoor $DISPLAY_VERSION" --notes-file "$DIST/release-notes.md")
+if [[ "$CHANNEL" == "beta" ]]; then
+  RELEASE_ARGS+=(--prerelease)
+fi
 gh release create "v$VER" \
-  --draft \
-  --title "AnyDoor $VER" \
-  --notes-file "$DIST/release-notes.md" \
+  "${RELEASE_ARGS[@]}" \
   "$DMG" "$ZIP" "$APPCAST" "${PLUGIN_ZIPS[@]}"
 
 log "Publish release"
