@@ -16,7 +16,8 @@ installed Beta.
 ## Version identity
 
 Release tags and archive names carry the SemVer prerelease identity. Apple's
-bundle keys remain numeric:
+bundle keys remain numeric. Release identity components are canonical decimal
+integers without leading zeros:
 
 | Release | Tag and archive | Short version | Build version | Appcast display |
 | --- | --- | --- | --- | --- |

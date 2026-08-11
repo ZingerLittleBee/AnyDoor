@@ -43,7 +43,7 @@ final class SparkleUpdaterBridge: NSObject, SPUUpdaterDelegate {
     }
 
     nonisolated func allowedChannels(for updater: SPUUpdater) -> Set<String> {
-        betaUpdatesEnabledProvider() ? ["beta"] : []
+        UpdateService.allowedChannels(betaUpdatesEnabled: betaUpdatesEnabledProvider())
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {

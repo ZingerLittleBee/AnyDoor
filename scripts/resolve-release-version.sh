@@ -7,6 +7,10 @@ set -euo pipefail
 
 release_id="${1:-}"
 
+is_canonical_integer() {
+    [[ "$1" == "0" || "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
 if [[ "$release_id" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
     major="${BASH_REMATCH[1]}"
     minor="${BASH_REMATCH[2]}"
@@ -19,7 +23,8 @@ elif [[ "$release_id" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)-beta\.([0-9]+)$ ]]; then
     minor="${BASH_REMATCH[2]}"
     patch="${BASH_REMATCH[3]}"
     beta_number="${BASH_REMATCH[4]}"
-    if (( 10#$beta_number < 1 || 10#$beta_number > 98 )); then
+    if [[ ! "$beta_number" =~ ^[1-9][0-9]*$ ]] \
+        || (( 10#$beta_number > 98 )); then
         echo "Beta number must be between 1 and 98: $release_id" >&2
         exit 1
     fi
@@ -30,6 +35,13 @@ else
     echo "Release version must be X.Y.Z or X.Y.Z-beta.N: $release_id" >&2
     exit 1
 fi
+
+for component in "$major" "$minor" "$patch"; do
+    if ! is_canonical_integer "$component"; then
+        echo "Release version components must not contain leading zeros: $release_id" >&2
+        exit 1
+    fi
+done
 
 short_version="$major.$minor.$patch"
 build_version="$major.$minor.$((10#$patch * 100 + slot))"

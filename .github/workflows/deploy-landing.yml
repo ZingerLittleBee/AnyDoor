@@ -16,7 +16,7 @@ on:
 
 # Avoid overlapping deploys; let the newest tag win.
 concurrency:
-  group: landing-${{ github.ref }}
+  group: landing-${{ github.event_name == 'release' && 'deploy' || github.ref }}
   cancel-in-progress: true
 
 permissions:

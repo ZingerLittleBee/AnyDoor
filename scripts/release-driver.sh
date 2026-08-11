@@ -119,7 +119,7 @@ grep -q '^## \[Unreleased\]' CHANGELOG.md || die "CHANGELOG.md is missing '## [U
 notes_body="$(awk '/^## \[Unreleased\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md | sed '/./,$!d')"
 [[ -n "$notes_body" ]] || die "'## [Unreleased]' section is empty — write release notes first"
 
-# Detect the placeholder EdDSA key from Chunk A. release.sh must never ship a
+# Detect the placeholder EdDSA key from Chunk A. The release driver must never ship a
 # build with the placeholder still in Info.plist; Sparkle would refuse every
 # update on the client side.
 pubkey="$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" Info.plist 2>/dev/null || true)"
@@ -146,7 +146,8 @@ command -v pnpm >/dev/null 2>&1 \
   || die "pnpm not found in PATH — required to build the example Script Plugin packages"
 
 BASE_APPCAST="$(mktemp "${TMPDIR:-/tmp}/anydoor-appcast-base.XXXXXX")"
-curl --fail --silent --show-error "$CANONICAL_FEED_URL" -o "$BASE_APPCAST" \
+curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+  "$CANONICAL_FEED_URL" -o "$BASE_APPCAST" \
   || die "canonical feed is unavailable: $CANONICAL_FEED_URL"
 xmllint --noout "$BASE_APPCAST"
 
@@ -382,7 +383,8 @@ LAST_STEP=10
 RECOVERY_HINT="git restore Info.plist CHANGELOG.md appcast.xml && rm -rf dist/"
 log "Generate appcast.xml"
 ARCHIVE="$(mktemp -d "${TMPDIR:-/tmp}/anydoor-appcast.XXXXXX")"
-curl --fail --silent --show-error "$CANONICAL_FEED_URL" -o "$BASE_APPCAST" \
+curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+  "$CANONICAL_FEED_URL" -o "$BASE_APPCAST" \
   || die "canonical feed is unavailable: $CANONICAL_FEED_URL"
 xmllint --noout "$BASE_APPCAST"
 cp "$BASE_APPCAST" "$ARCHIVE/appcast.xml"
@@ -432,7 +434,7 @@ fi
 
 # --- 11. Git commit + tag ------------------------------------------------
 LAST_STEP=11
-RECOVERY_HINT="git tag -d v\$VER (if the tag was created) && rm -rf dist/  # the commit is on main locally — keep it if you intend to retry from step 12"
+RECOVERY_HINT="git tag -d v$VER (if the tag was created) && rm -rf dist/  # the commit is on $CURRENT_BRANCH locally — keep it if you intend to retry from step 12"
 log "git commit + tag"
 git add Info.plist appcast.xml
 if [[ "$CHANNEL" == "stable" ]]; then
@@ -450,7 +452,7 @@ git push origin "v$VER"
 
 # --- 13. Create draft release, upload assets, publish ------------------
 LAST_STEP=13
-RECOVERY_HINT="gh release delete v\$VER --yes  # the release was a draft, so no clients ever saw it"
+RECOVERY_HINT="gh release delete v$VER --yes  # the release was a draft, so no clients ever saw it"
 log "gh release create v$VER (draft $CHANNEL)"
 RELEASE_ARGS=(--draft --title "AnyDoor $DISPLAY_VERSION" --notes-file "$DIST/release-notes.md")
 if [[ "$CHANNEL" == "beta" ]]; then

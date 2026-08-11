@@ -63,12 +63,14 @@ jobs:
             --build-version "$build_version" \
             --display-version "$display_version"
           curl --fail --silent --show-error --head \
+            --connect-timeout 10 --max-time 60 \
             "https://github.com/ZingerLittleBee/AnyDoor/releases/download/v${release_id}/AnyDoor-${release_id}.zip"
 
       - name: Guard canonical feed against rollback
         if: github.event_name == 'release'
         run: |
           curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 60 \
             -H 'Cache-Control: no-cache' \
             'https://anydoor.dev/appcast.xml' \
             -o /tmp/live-appcast.xml
@@ -97,6 +99,7 @@ jobs:
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap)
         run: |
           curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 60 \
             -H 'Cache-Control: no-cache' \
             "https://anydoor.dev/appcast.xml?deployment=${GITHUB_RUN_ID}" \
             -o /tmp/deployed-appcast.xml

@@ -37,6 +37,13 @@ final class ReleaseVersionTests: XCTestCase {
         XCTAssertNotEqual(result.status, 0)
     }
 
+    func testLeadingZeroVersionComponentsAreRejected() throws {
+        for version in ["04.2.0", "4.02.0", "4.2.00", "4.2.0-beta.01"] {
+            let result = try runResolver(version)
+            XCTAssertNotEqual(result.status, 0, version)
+        }
+    }
+
     func testStableEntryPointRejectsBetaIdentity() throws {
         let result = try runReleaseEntryPoint("release.sh", arguments: ["4.2.0-beta.1"])
 
