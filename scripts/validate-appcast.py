@@ -96,6 +96,20 @@ def validate(args: argparse.Namespace) -> list[str]:
                 f"({latest_stable})"
             )
 
+    if args.channel == "beta":
+        beta_builds = [
+            build
+            for build, item in by_build.items()
+            if child_text(item, "channel", sparkle=True) == "beta"
+        ]
+        if beta_builds:
+            latest_beta = max(beta_builds, key=numeric_version)
+            if latest_beta != args.build_version:
+                errors.append(
+                    f"new Beta build {args.build_version} is not the latest Beta build "
+                    f"({latest_beta})"
+                )
+
     expected_build = numeric_version(args.build_version)
     major, minor, patch = (int(part) for part in args.short_version.split("."))
     slot = 99 if args.channel == "stable" else int(args.release_id.rsplit(".", 1)[1])

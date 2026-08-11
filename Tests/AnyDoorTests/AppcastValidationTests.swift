@@ -39,6 +39,15 @@ final class AppcastValidationTests: XCTestCase {
         XCTAssertTrue(result.stderr.contains("candidate channel"))
     }
 
+    func testOlderBetaCandidateFailsWhenNewerBetaExists() throws {
+        let appcast = try makeAppcast(betaChannel: "beta", newerBetaBuild: "4.2.2")
+
+        let result = try validate(appcast)
+
+        XCTAssertNotEqual(result.status, 0)
+        XCTAssertTrue(result.stderr.contains("is not the latest Beta build"))
+    }
+
     private func validate(_ appcast: URL) throws -> (status: Int32, stderr: String) {
         let process = Process()
         let stderr = Pipe()
@@ -60,11 +69,22 @@ final class AppcastValidationTests: XCTestCase {
         )
     }
 
-    private func makeAppcast(betaChannel: String?) throws -> URL {
+    private func makeAppcast(betaChannel: String?, newerBetaBuild: String? = nil) throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let channel = betaChannel.map { "<sparkle:channel>\($0)</sparkle:channel>" } ?? ""
+        let newerBetaItem = newerBetaBuild.map {
+            """
+            <item>
+              <title>4.2.0 Beta 2</title>
+              <sparkle:version>\($0)</sparkle:version>
+              <sparkle:shortVersionString>4.2.0 Beta 2</sparkle:shortVersionString>
+              <sparkle:channel>beta</sparkle:channel>
+              <enclosure url="https://example.com/beta-2.zip" sparkle:edSignature="beta-2" />
+            </item>
+            """
+        } ?? ""
         let xml = """
         <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
           <channel>
@@ -81,6 +101,7 @@ final class AppcastValidationTests: XCTestCase {
               \(channel)
               <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.0-beta.1/AnyDoor-4.2.0-beta.1.zip" sparkle:edSignature="beta" />
             </item>
+            \(newerBetaItem)
           </channel>
         </rss>
         """

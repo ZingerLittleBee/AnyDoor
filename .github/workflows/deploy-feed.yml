@@ -9,6 +9,7 @@ on:
       - 'scripts/release.sh'
       - 'scripts/resolve-release-version.sh'
       - 'scripts/validate-appcast.py'
+      - 'scripts/verify-feed-bootstrap.sh'
       - 'scripts/verify-feed-publication.py'
       - '.github/workflows/deploy-feed.yml'
   workflow_dispatch:
@@ -81,6 +82,7 @@ jobs:
             echo 'Bootstrap feed must contain Stable items only' >&2
             exit 1
           fi
+          scripts/verify-feed-bootstrap.sh 'https://anydoor.dev/appcast.xml'
 
       - name: Deploy canonical feed
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap)
