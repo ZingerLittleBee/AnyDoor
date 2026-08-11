@@ -93,6 +93,7 @@ final class UpdateServiceTests: XCTestCase {
         let scheduledCheckInterval = try XCTUnwrap(plist["SUScheduledCheckInterval"] as? TimeInterval)
 
         XCTAssertEqual(plist["SUEnableAutomaticChecks"] as? Bool, true)
+        XCTAssertEqual(plist["SUFeedURL"] as? String, "https://anydoor.dev/appcast.xml")
         XCTAssertEqual(scheduledCheckInterval,
                        UpdateService.defaultCheckInterval,
                        accuracy: 0.5)
