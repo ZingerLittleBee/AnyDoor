@@ -4,9 +4,46 @@ import XCTest
 @MainActor
 final class UpdateServiceTests: XCTestCase {
 
+    func testBetaUpdatesDefaultToDisabled() {
+        let fake = FakeUpdater()
+        let service = makeService(adapter: fake)
+
+        XCTAssertFalse(service.betaUpdatesEnabled)
+        XCTAssertEqual(service.allowedChannels, [])
+    }
+
+    func testBetaTogglePersistsClearsBannerAndResetsUpdateCycleOnce() {
+        let fake = FakeUpdater()
+        var persisted = false
+        let service = UpdateService(
+            adapter: fake,
+            skippedVersionProvider: { nil },
+            betaUpdatesEnabledProvider: { persisted },
+            betaUpdatesEnabledWriter: { persisted = $0 }
+        )
+        service.didFindUpdate(internalVersion: "4.2.1", displayVersion: "4.2.0 Beta 1")
+
+        service.betaUpdatesEnabled = true
+
+        XCTAssertTrue(persisted)
+        XCTAssertEqual(service.allowedChannels, ["beta"])
+        XCTAssertNil(service.availableVersion)
+        XCTAssertEqual(fake.resetUpdateCycleCallCount, 1)
+        XCTAssertEqual(fake.checkForUpdatesInBackgroundCallCount, 0)
+    }
+
+    func testSettingBetaToggleToCurrentValueDoesNotResetCycle() {
+        let fake = FakeUpdater()
+        let service = makeService(adapter: fake)
+
+        service.betaUpdatesEnabled = false
+
+        XCTAssertEqual(fake.resetUpdateCycleCallCount, 0)
+    }
+
     func testAutomaticChecksTogglePersistsThroughAdapter() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        let service = makeService(adapter: fake)
 
         service.automaticChecksEnabled = false
         XCTAssertFalse(fake.automaticallyChecksForUpdates)
@@ -19,14 +56,14 @@ final class UpdateServiceTests: XCTestCase {
         let fake = FakeUpdater()
         fake.updateCheckInterval = 7 * 86_400  // any stale value
 
-        _ = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        _ = makeService(adapter: fake)
 
         XCTAssertEqual(fake.updateCheckInterval, UpdateService.defaultCheckInterval, accuracy: 0.5)
     }
 
     func testRebindResetsAdapterToDefaultCheckInterval() {
         let initial = FakeUpdater()
-        let service = UpdateService(adapter: initial, skippedVersionProvider: { nil })
+        let service = makeService(adapter: initial)
 
         let replacement = FakeUpdater()
         replacement.updateCheckInterval = 30 * 86_400
@@ -37,7 +74,7 @@ final class UpdateServiceTests: XCTestCase {
 
     func testCheckForUpdatesForwardsToAdapter() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        let service = makeService(adapter: fake)
 
         service.checkForUpdates()
         XCTAssertEqual(fake.checkForUpdatesCallCount, 1)
@@ -45,7 +82,7 @@ final class UpdateServiceTests: XCTestCase {
 
     func testCheckForUpdatesInBackgroundForwardsToAdapter() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        let service = makeService(adapter: fake)
 
         service.checkForUpdatesInBackground()
         XCTAssertEqual(fake.checkForUpdatesInBackgroundCallCount, 1)
@@ -63,52 +100,72 @@ final class UpdateServiceTests: XCTestCase {
 
     func testFoundUpdatePopulatesAvailableVersion() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        let service = makeService(adapter: fake)
 
-        service.didFindUpdate(version: "1.2.0")
+        service.didFindUpdate(internalVersion: "120", displayVersion: "1.2.0")
         XCTAssertEqual(service.availableVersion, "1.2.0")
     }
 
     func testSkippedVersionIsSuppressedFromBanner() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { "1.2.0" })
+        let service = UpdateService(
+            adapter: fake,
+            skippedVersionProvider: { "120" },
+            betaUpdatesEnabledProvider: { false },
+            betaUpdatesEnabledWriter: { _ in }
+        )
 
-        service.didFindUpdate(version: "1.2.0")
+        service.didFindUpdate(internalVersion: "120", displayVersion: "1.2.0")
         XCTAssertNil(service.availableVersion, "skipped version must not show banner")
     }
 
     func testNewerVersionAfterSkipStillSurfaces() {
         let fake = FakeUpdater()
-        var skipped: String? = "1.2.0"
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { skipped })
+        var skipped: String? = "120"
+        let service = UpdateService(
+            adapter: fake,
+            skippedVersionProvider: { skipped },
+            betaUpdatesEnabledProvider: { false },
+            betaUpdatesEnabledWriter: { _ in }
+        )
 
-        service.didFindUpdate(version: "1.2.1")
+        service.didFindUpdate(internalVersion: "121", displayVersion: "1.2.1")
         XCTAssertEqual(service.availableVersion, "1.2.1")
 
         // After the user later skips 1.2.1 as well, the banner clears on next check.
-        skipped = "1.2.1"
-        service.didFindUpdate(version: "1.2.1")
+        skipped = "121"
+        service.didFindUpdate(internalVersion: "121", displayVersion: "1.2.1")
         XCTAssertNil(service.availableVersion)
     }
 
     func testDismissBannerForThisSessionClearsAvailableVersion() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        let service = makeService(adapter: fake)
 
-        service.didFindUpdate(version: "1.2.0")
+        service.didFindUpdate(internalVersion: "120", displayVersion: "1.2.0")
         service.dismissBannerForThisSession()
         XCTAssertNil(service.availableVersion)
     }
 
     func testNoUpdateFoundClearsAvailableVersion() {
         let fake = FakeUpdater()
-        let service = UpdateService(adapter: fake, skippedVersionProvider: { nil })
+        let service = makeService(adapter: fake)
 
-        service.didFindUpdate(version: "1.2.0")
+        service.didFindUpdate(internalVersion: "120", displayVersion: "1.2.0")
         service.didNotFindUpdate()
         XCTAssertNil(service.availableVersion)
     }
 
+}
+
+@MainActor
+private func makeService(adapter: FakeUpdater) -> UpdateService {
+    UpdateService(
+        adapter: adapter,
+        skippedVersionProvider: { nil },
+        betaUpdatesEnabledProvider: { false },
+        betaUpdatesEnabledWriter: { _ in }
+    )
 }
 
 @MainActor
@@ -117,9 +174,11 @@ private final class FakeUpdater: UpdaterAdapter {
     var updateCheckInterval: TimeInterval = 86_400
     var checkForUpdatesCallCount: Int = 0
     var checkForUpdatesInBackgroundCallCount: Int = 0
+    var resetUpdateCycleCallCount: Int = 0
 
     func checkForUpdates() { checkForUpdatesCallCount += 1 }
     func checkForUpdatesInBackground() { checkForUpdatesInBackgroundCallCount += 1 }
+    func resetUpdateCycle() { resetUpdateCycleCallCount += 1 }
 }
 
 private func loadAppInfoPlist() throws -> [String: Any] {

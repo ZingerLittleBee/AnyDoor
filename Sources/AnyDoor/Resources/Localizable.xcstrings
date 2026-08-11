@@ -7703,6 +7703,40 @@
         }
       }
     },
+    "settings.about.betaUpdates": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Receive Beta updates"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "接收 Beta 更新"
+          }
+        }
+      }
+    },
+    "settings.about.betaUpdatesHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beta builds may be less reliable. Turning this off does not downgrade the installed app."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Beta 版本可能不够稳定。关闭后不会降级已安装的版本。"
+          }
+        }
+      }
+    },
     "settings.about.checkNow": {
       "extractionState": "manual",
       "localizations": {
