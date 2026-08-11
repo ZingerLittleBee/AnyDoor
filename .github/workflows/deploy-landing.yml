@@ -14,9 +14,11 @@ on:
       - '.github/workflows/deploy-landing.yml'
   workflow_dispatch:
 
-# Avoid overlapping deploys; let the newest tag win.
+# Serialize Stable deploys so the newest Stable tag wins. Prerelease workflow
+# runs use their own ref group and therefore cannot cancel a Stable deploy
+# before the prerelease-only job guard skips them.
 concurrency:
-  group: landing-${{ github.event_name == 'release' && 'deploy' || github.ref }}
+  group: landing-${{ github.event_name == 'release' && github.event.release.prerelease == false && 'deploy' || github.ref }}
   cancel-in-progress: true
 
 permissions:
