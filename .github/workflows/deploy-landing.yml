@@ -1,16 +1,13 @@
 name: Landing
 
-# Rebuild and deploy the marketing landing page to Cloudflare Workers whenever a
-# release tag (v*) is pushed. release.sh pushes such a tag at the end of every
-# release, so a new version automatically refreshes the site. Also exposed as a
-# manual trigger for ad-hoc redeploys.
+# Rebuild and deploy the marketing landing page only for a published Stable
+# release. Beta prereleases update the independent appcast route instead.
 #
 # A pull request that touches landing/ runs the same build without deploying, so
 # a broken site surfaces on the PR instead of during a release.
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
   pull_request:
     paths:
       - 'landing/**'
@@ -27,6 +24,7 @@ permissions:
 
 jobs:
   landing:
+    if: github.event_name != 'release' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -34,12 +32,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Test Stable release metadata
+        run: bun test
 
       - name: Build
         if: github.event_name == 'pull_request'

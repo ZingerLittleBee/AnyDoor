@@ -1,11 +1,8 @@
-// Resolved at build time from the repo's CHANGELOG.md so the marketing page
-// always reflects the most recently shipped release. Vite inlines the file
-// contents via the `?raw` query, so no fs access is needed at runtime.
+// Resolved from the latest default-channel appcast item. Beta items may sort
+// first in the mixed feed, but must never change Stable marketing metadata.
 
-import changelog from '../../../CHANGELOG.md?raw';
+import appcast from '../../../appcast.xml?raw';
+import { parseLatestStableRelease } from './appcast-metadata';
 
-const FALLBACK = '1.0.0';
-
-// Match the first `## [x.y.z]` heading; skip `[Unreleased]`.
-const match = changelog.match(/^##\s*\[(\d+\.\d+\.\d+)\]/m);
-export const latestVersion = match?.[1] ?? FALLBACK;
+export const latestStableRelease = parseLatestStableRelease(appcast);
+export const latestVersion = latestStableRelease.version;
