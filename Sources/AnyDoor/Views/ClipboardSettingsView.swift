@@ -98,19 +98,26 @@ struct ClipboardSettingsView: View {
                     .foregroundStyle(.secondary)
                 }
 
-                Toggle(
-                    isOn: Binding(
-                        get: { model.ignoresUniversalClipboard },
-                        set: { ignored in
-                            Task {
-                                await model.setIgnoresUniversalClipboard(
-                                    ignored
-                                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Toggle(
+                        isOn: Binding(
+                            get: { model.ignoresUniversalClipboard },
+                            set: { ignored in
+                                Task {
+                                    await model.setIgnoresUniversalClipboard(
+                                        ignored
+                                    )
+                                }
                             }
-                        }
+                        )
+                    ) {
+                        LocalizedText(.settingsClipboardIgnoreUniversal)
+                    }
+                    LocalizedText(
+                        .settingsClipboardIgnoreUniversalTip
                     )
-                ) {
-                    LocalizedText(.settingsClipboardIgnoreUniversal)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
                 clipboardExcludedAppsEditor

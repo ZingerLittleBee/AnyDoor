@@ -291,6 +291,7 @@ enum L10n {
         case settingsClipboardAutomaticIndexing = "settings.clipboard.automaticIndexing"
         case settingsClipboardAutomaticIndexingTip = "settings.clipboard.automaticIndexing.tip"
         case settingsClipboardIgnoreUniversal = "settings.clipboard.ignoreUniversal"
+        case settingsClipboardIgnoreUniversalTip = "settings.clipboard.ignoreUniversal.tip"
         case settingsClipboardStorageUsage = "settings.clipboard.storageUsage"
         case settingsClipboardClearProtected = "settings.clipboard.clear.protected"
         case settingsClipboardClearAffected = "settings.clipboard.clear.affected"

@@ -8519,6 +8519,23 @@
         }
       }
     },
+    "settings.clipboard.ignoreUniversal.tip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stops saving new items copied on your other Apple devices. Copies made on this Mac and existing history are unaffected."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后，不再保存从其他 Apple 设备同步来的新内容。本机复制和已有历史不受影响。"
+          }
+        }
+      }
+    },
     "settings.clipboard.operationFailed": {
       "extractionState": "manual",
       "localizations": {
