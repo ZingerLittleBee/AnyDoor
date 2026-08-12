@@ -95,11 +95,24 @@ when you need them.
 
 ### Clipboard history
 
-- Background watcher records text, images, and files copied to the
-  pasteboard, with a searchable Liquid Glass "wall" to browse and re-paste.
-- Recognizes text (OCR), barcodes, and colors inside captured images.
-- Per-source exclusions — skip history from password managers and other
-  chosen apps; excluded sources travel with backups.
+- Capture text, images, screenshots, files, colors, and QR codes in a
+  searchable Liquid Glass wall, then copy or paste any retained item.
+- Search the full retained history, including copied text, OCR, decoded QR
+  values, file names and paths, and colors; narrow results by content type,
+  source app, tag, or favorites.
+- History is encrypted at rest with a device-only key kept in the macOS
+  Keychain. The key is never synced or included in a backup.
+- Optional on-device Automatic Image Text Indexing makes text in newly
+  captured images searchable; QR codes in new images are indexed
+  automatically.
+- Keep history for 1 day, 7 days, 30 days, 3 months, 6 months, 1 year, or
+  Unlimited. Favorites and tagged entries are protected from automatic
+  expiry.
+- Edit single text entries in place and see the history's exact storage
+  footprint in Settings.
+- Apple Passwords and Keychain Access are excluded by default. You can
+  exclude more apps or ignore new items arriving through Universal Clipboard
+  without affecting copies made on this Mac or existing history.
 
 ### Translation
 
@@ -265,8 +278,10 @@ records: [docs/plugins.md](docs/plugins.md).
   recorder, type badges (toggle / action / submenu).
 - **Quicklinks** tab: create / edit command-palette entries with a link type
   picker, keyword, Open With override, hotkey, and visibility; drag to reorder.
-- **Clipboard** tab: history monitoring, copy-only capture, retention
-  window, per-source app exclusions, and clear-all history.
+- **Clipboard** tab: history monitoring, paste behavior (auto-paste or copy
+  only), retention with favorite / tag protection, automatic image text
+  indexing, source-app and Universal Clipboard exclusions, storage usage,
+  and history clearing.
 - **Screenshot** tab: save location, filename template, auto-save /
   auto-copy, timer-delay presets, quick-access overlay timeout, and
   recording options.
@@ -274,10 +289,13 @@ records: [docs/plugins.md](docs/plugins.md).
   provider/API-key setup, Apple language-pack downloads, and history retention.
 - **Plugins** tab: install / uninstall plugins, sideload script plugin
   packages, and manage script-plugin developer mode.
+- **Sync** tab: optional Config Sync through a shared folder or WebDAV, sync
+  status and setup documentation, and one-shot configuration backup /
+  restore.
 - **General** tab: launch at login, language, menu bar icon style, Hyper
   Key, command palette hotkey, scheduled shutdown, accessibility /
   automation / screen-recording permission status with one-click request,
-  configuration backup / restore, and auto-update controls.
+  and auto-update controls.
 
 ### Auto-update
 
@@ -302,10 +320,13 @@ Setup, what syncs, conflict semantics, and troubleshooting:
 
 ### Backup & restore
 
-- Export app shortcuts, built-in preferences, clipboard / capture settings,
-  translation target languages, auto-speak, service definitions, the installed
-  plugin set, and other whitelisted general settings into a versioned snapshot,
-  and import it on another Mac.
+- Export app shortcuts, built-in preferences, Quicklinks, portable clipboard
+  settings (tags, category order, ignored sources, and the Ignore Universal
+  Clipboard preference), portable capture settings (save location, filename,
+  auto-copy, auto-save, sound, delay, and overlay timeout), translation
+  preferences and service definitions, the installed plugin set, and other
+  whitelisted general settings into a versioned snapshot, and import it on
+  another Mac.
 - Clipboard history, translation history, API keys, and machine-specific keys
   are excluded; app paths are re-resolved from bundle IDs on import, and
   changes apply without a relaunch.
