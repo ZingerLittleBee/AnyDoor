@@ -3,6 +3,25 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>4.1.1</title>
+            <pubDate>Wed, 12 Aug 2026 20:21:38 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>4.1.199</sparkle:version>
+            <sparkle:shortVersionString>4.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[### Added
+
+- Beta updates are now an explicit per-device opt-in under Settings → General.
+  Stable remains the default; turning Beta updates off affects future update
+  checks and does not downgrade the installed app.
+- The dedicated `make beta-release` pipeline now publishes signed Beta
+  prereleases through Sparkle channels, deterministic numeric build versions,
+  immutable release snapshots, and an independently deployed canonical update
+  feed without accepting Beta identities in the Stable release command.
+]]></description>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.1.1/AnyDoor-4.1.1.zip" length="13729857" type="application/octet-stream" sparkle:edSignature="w00qZMVr99GWMnxfLdKrl49rE9JrxKaPqy+piwsLTPyPtskeVsQQhXkIHjslqrihstFnUrVQDd0jjXj7un23Aw=="/>
+        </item>
+        <item>
             <title>4.1.0</title>
             <pubDate>Tue, 28 Jul 2026 23:38:50 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -37,7 +56,7 @@
   when the field gains focus (it is now drawn as a static overlay instead of
   the native prompt, which macOS re-renders on focus in grouped forms).
 ]]></description>
-<enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.1.0/AnyDoor-4.1.0.zip" length="13728766" type="application/octet-stream" sparkle:edSignature="0S/yNbL8bLtxRLwycjHUaqMtBijA3VizI0vzscp4zBJJfNuMPU/slW8+xFtyw6AQW1gHRjtAxgDy3HV5LjjVDw=="/>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.1.0/AnyDoor-4.1.0.zip" length="13728766" type="application/octet-stream" sparkle:edSignature="0S/yNbL8bLtxRLwycjHUaqMtBijA3VizI0vzscp4zBJJfNuMPU/slW8+xFtyw6AQW1gHRjtAxgDy3HV5LjjVDw=="/>
         </item>
         <item>
             <title>4.0.1</title>
@@ -47,15 +66,6 @@
             <sparkle:shortVersionString>4.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.0.1/AnyDoor-4.0.1.zip" length="13392550" type="application/octet-stream" sparkle:edSignature="dHPJj5a4zSyt1l1qvGfUPfQW1EiSQ2tUdKZHdJXWImNxirw9RfhxJ/DSja1bPeaH+2C+Ett5mQMVh26KxBXFBw=="/>
-        </item>
-        <item>
-            <title>4.0.0</title>
-            <pubDate>Fri, 24 Jul 2026 00:17:42 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>4.0.0</sparkle:version>
-            <sparkle:shortVersionString>4.0.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.0.0/AnyDoor-4.0.0.zip" length="13366846" type="application/octet-stream" sparkle:edSignature="IhNq4yKmPH0RSnpxzHr+5Nc3ReOqDNW24ntHMuED+rcWc1mB5hJSg7+9BOx/s/t1UNdtM93plA8clm6+fO1+BQ=="/>
         </item>
         <item>
             <title>1.2.0</title>
