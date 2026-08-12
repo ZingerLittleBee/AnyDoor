@@ -174,6 +174,7 @@ let package = Package(
             name: "AnyDoorTests",
             dependencies: [
                 .product(name: "Clocks", package: "swift-clocks"),
+                .product(name: "Sparkle", package: "Sparkle"),
                 "AnyDoor", "ImageCodec", "PluginInterface", "PluginSupport",
                 "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime",
             ],

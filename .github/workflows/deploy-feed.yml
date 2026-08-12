@@ -1,0 +1,106 @@
+name: Update Feed
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    paths:
+      - 'feed/**'
+      - 'scripts/beta-release.sh'
+      - 'scripts/release.sh'
+      - 'scripts/release-driver.sh'
+      - 'scripts/resolve-release-version.sh'
+      - 'scripts/validate-appcast.py'
+      - 'scripts/verify-feed-bootstrap.sh'
+      - 'scripts/verify-feed-publication.py'
+      - '.github/workflows/deploy-feed.yml'
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: 'Deploy the checked-in Stable-only feed when the endpoint does not exist yet'
+        type: boolean
+        default: false
+
+concurrency:
+  group: anydoor-update-feed
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release snapshot
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Prepare worker asset
+        run: cp appcast.xml feed/src/appcast.xml
+
+      - name: Validate worker bundle
+        run: bunx wrangler@4.94.0 deploy --dry-run --config feed/wrangler.jsonc
+
+      - name: Validate release snapshot
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          release_id="${RELEASE_TAG#v}"
+          IFS=$'\t' read -r resolved channel short_version build_version display_version \
+            < <(scripts/resolve-release-version.sh "$release_id")
+          test "$resolved" = "$release_id"
+          scripts/validate-appcast.py \
+            --appcast appcast.xml \
+            --release-id "$release_id" \
+            --channel "$channel" \
+            --short-version "$short_version" \
+            --build-version "$build_version" \
+            --display-version "$display_version"
+          curl --fail --silent --show-error --head \
+            --connect-timeout 10 --max-time 60 \
+            "https://github.com/ZingerLittleBee/AnyDoor/releases/download/v${release_id}/AnyDoor-${release_id}.zip"
+
+      - name: Guard canonical feed against rollback
+        if: github.event_name == 'release'
+        run: |
+          curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 60 \
+            -H 'Cache-Control: no-cache' \
+            'https://anydoor.dev/appcast.xml' \
+            -o /tmp/live-appcast.xml
+          scripts/verify-feed-publication.py \
+            --live /tmp/live-appcast.xml \
+            --candidate appcast.xml
+
+      - name: Validate bootstrap feed
+        if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
+        run: |
+          xmllint --noout appcast.xml
+          if grep -q '<sparkle:channel>' appcast.xml; then
+            echo 'Bootstrap feed must contain Stable items only' >&2
+            exit 1
+          fi
+          scripts/verify-feed-bootstrap.sh 'https://anydoor.dev/appcast.xml'
+
+      - name: Deploy canonical feed
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap)
+        run: bunx wrangler@4.94.0 deploy --config feed/wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify deployed bytes
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap)
+        run: |
+          curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 60 \
+            -H 'Cache-Control: no-cache' \
+            "https://anydoor.dev/appcast.xml?deployment=${GITHUB_RUN_ID}" \
+            -o /tmp/deployed-appcast.xml
+          cmp appcast.xml /tmp/deployed-appcast.xml

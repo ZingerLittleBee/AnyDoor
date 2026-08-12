@@ -218,6 +218,15 @@ struct GeneralSettingsView: View {
 
                 Toggle(isOn: $updateService.automaticChecksEnabled) { LocalizedText(.settingsAboutAutoCheck) }
 
+                Toggle(isOn: $updateService.betaUpdatesEnabled) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        LocalizedText(.settingsAboutBetaUpdates)
+                        LocalizedText(.settingsAboutBetaUpdatesHelp)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Button { updateService.checkForUpdates() } label: { LocalizedText(.settingsAboutCheckNow) }
             } header: {
                 LocalizedText(.settingsGeneralAbout)

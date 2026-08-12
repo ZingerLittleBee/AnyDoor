@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Resolve the next version and write it into Info.plist.
+# Resolve the next release identity and write Apple-compliant versions into Info.plist.
 # Usage:
 #   scripts/bump-version.sh            # patch+1
 #   scripts/bump-version.sh 1.2.3      # explicit
@@ -8,7 +8,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PLIST="$REPO_ROOT/Info.plist"
+PLIST="${PLIST:-$REPO_ROOT/Info.plist}"
 
 requested="${1:-}"
 
@@ -21,16 +21,15 @@ if [[ -z "$requested" ]]; then
     echo "current CFBundleShortVersionString '$current' is not MAJOR.MINOR.PATCH" >&2
     exit 1
   fi
-  next="${major}.${minor}.$((patch + 1))"
+  release_id="${major}.${minor}.$((patch + 1))"
 else
-  if ! [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "VERSION '$requested' must be strict semver MAJOR.MINOR.PATCH (no pre-release suffixes)" >&2
-    exit 1
-  fi
-  next="$requested"
+  release_id="$requested"
 fi
 
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $next" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $next" "$PLIST"
+IFS=$'\t' read -r resolved _ short_version build_version _ \
+  < <("$REPO_ROOT/scripts/resolve-release-version.sh" "$release_id")
 
-echo "$next"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $short_version" "$PLIST"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_version" "$PLIST"
+
+echo "$resolved"
