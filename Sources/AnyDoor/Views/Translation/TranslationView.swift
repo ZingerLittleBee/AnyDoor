@@ -266,7 +266,7 @@ struct TranslationView: View {
     }
 
     private func copy(_ text: String) {
-        ClipboardWatcher.selfWrite(string: text)
+        ClipboardSelfWrites.write(string: text)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 }

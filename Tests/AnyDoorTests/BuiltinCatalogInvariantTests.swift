@@ -5,6 +5,7 @@ import Testing
 import PluginInterface
 import ImageConversionPlugin
 @testable import AnyDoor
+@testable import ClipboardHistory
 @testable import HostsPlugin
 
 /// Pins the implicit contracts a new `BuiltinItem` case must satisfy. Each of
@@ -51,8 +52,27 @@ struct BuiltinCatalogInvariantTests {
     /// The full production provider set: Core providers plus every plugin's.
     @MainActor
     private static func allProviders() throws -> [any BuiltinProvider] {
-        try BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { _ in })
+        try BuiltinProviderRegistry.makeAll(
+            clipboardHistoryModule: makeClipboardHistoryModule(),
+            onKeepAwakeChange: { _ in }
+        )
             + makeProductionPlugins().flatMap(\.providers)
+    }
+
+    private static func makeClipboardHistoryModule() throws
+        -> ClipboardHistoryModule
+    {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return try ClipboardHistoryModule(
+            testingDatabaseURL:
+                directory.appendingPathComponent("history.sqlite"),
+            databaseKey: Data(repeating: 0x42, count: 32)
+        )
     }
 
     @MainActor

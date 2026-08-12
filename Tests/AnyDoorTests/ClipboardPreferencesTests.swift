@@ -20,8 +20,13 @@ final class ClipboardPreferencesTests: XCTestCase {
         super.tearDown()
     }
 
-    func testExcludedBundleIDsDefaultToEmpty() {
-        XCTAssertEqual(ClipboardPreferences.excludedBundleIDs(from: defaults), [])
+    func testFirstDefaultExclusionMergeSeedsPasswordsAndKeychainAccess() {
+        ClipboardPreferences.mergeDefaultExclusionsIfNeeded(in: defaults)
+
+        XCTAssertEqual(
+            ClipboardPreferences.excludedBundleIDs(from: defaults),
+            ["com.apple.Passwords", "com.apple.keychainaccess"]
+        )
     }
 
     func testAddingExcludedBundleIDAppendsOnceAndPreservesOrder() {
@@ -37,11 +42,58 @@ final class ClipboardPreferencesTests: XCTestCase {
     }
 
     func testRemovingExcludedBundleIDPersists() {
+        ClipboardPreferences.mergeDefaultExclusionsIfNeeded(in: defaults)
         ClipboardPreferences.addExcludedBundleID("com.apple.Safari", to: defaults)
-        ClipboardPreferences.addExcludedBundleID("com.apple.finder", to: defaults)
+        ClipboardPreferences.removeExcludedBundleID(
+            "com.apple.Passwords",
+            from: defaults
+        )
 
-        ClipboardPreferences.removeExcludedBundleID("com.apple.Safari", from: defaults)
+        ClipboardPreferences.mergeDefaultExclusionsIfNeeded(in: defaults)
 
-        XCTAssertEqual(ClipboardPreferences.excludedBundleIDs(from: defaults), ["com.apple.finder"])
+        XCTAssertEqual(
+            ClipboardPreferences.excludedBundleIDs(from: defaults),
+            ["com.apple.keychainaccess", "com.apple.Safari"]
+        )
+    }
+
+    func testUpgradeDefaultMergePreservesExistingExclusions() {
+        defaults.set(
+            ["com.example.Bank"],
+            forKey: ClipboardPreferences.excludedKey
+        )
+
+        ClipboardPreferences.mergeDefaultExclusionsIfNeeded(in: defaults)
+
+        XCTAssertEqual(
+            ClipboardPreferences.excludedBundleIDs(from: defaults),
+            [
+                "com.example.Bank",
+                "com.apple.Passwords",
+                "com.apple.keychainaccess",
+            ]
+        )
+    }
+
+    func testUniversalClipboardRuleDefaultsOffAndIsPortable() {
+        XCTAssertFalse(
+            ClipboardPreferences.ignoresUniversalClipboard(from: defaults)
+        )
+
+        ClipboardPreferences.setIgnoresUniversalClipboard(
+            true,
+            in: defaults
+        )
+
+        XCTAssertTrue(
+            ClipboardPreferences.ignoresUniversalClipboard(from: defaults)
+        )
+    }
+
+    func testDeviceLocalDefaultsMatchClipboardHistoryContract() {
+        XCTAssertTrue(
+            ClipboardPreferences.monitoringEnabled(from: defaults)
+        )
+        XCTAssertFalse(ClipboardPreferences.copyOnly(from: defaults))
     }
 }

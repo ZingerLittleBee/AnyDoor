@@ -19,4 +19,5 @@ DerivedData/
 /video/out/
 
 # testloop scratch artifacts
-.testloop/
+.testloop/*
+!.testloop/reports/

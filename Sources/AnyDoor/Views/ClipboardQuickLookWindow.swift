@@ -25,6 +25,7 @@ final class ClipboardQuickLookWindow {
     /// The file currently previewed, so a repeated request for the same URL is
     /// a no-op instead of a flicker-inducing rebuild.
     private var previewedURL: URL?
+    private var previewedBitmap: Data?
 
     private init() {}
 
@@ -37,6 +38,7 @@ final class ClipboardQuickLookWindow {
         if isVisible, previewedURL == url { return }
         if let panel, let containerView {
             previewedURL = url
+            previewedBitmap = nil
             if let screen = panel.screen ?? NSScreen.main {
                 panel.setFrame(Self.panelRect(for: url, on: screen), display: true, animate: false)
             }
@@ -44,6 +46,24 @@ final class ClipboardQuickLookWindow {
             return
         }
         present(url: url)
+    }
+
+    func show(bitmapData: Data) {
+        if isVisible, previewedBitmap == bitmapData { return }
+        if let panel, let containerView {
+            previewedURL = nil
+            previewedBitmap = bitmapData
+            if let screen = panel.screen ?? NSScreen.main {
+                panel.setFrame(
+                    Self.panelRect(for: bitmapData, on: screen),
+                    display: true,
+                    animate: false
+                )
+            }
+            replaceContent(with: bitmapData, in: containerView)
+            return
+        }
+        present(bitmapData: bitmapData)
     }
 
     func close() {
@@ -56,6 +76,7 @@ final class ClipboardQuickLookWindow {
         panel?.orderOut(nil)
         panel = nil
         previewedURL = nil
+        previewedBitmap = nil
     }
 
     private func present(url: URL) {
@@ -92,11 +113,30 @@ final class ClipboardQuickLookWindow {
         panel = p
         containerView = container
         previewedURL = url
+        previewedBitmap = nil
         replaceContent(with: url, in: container)
 
         // orderFrontRegardless: the app is not active (the wall is a
         // non-activating panel), and the preview must still show.
         p.orderFrontRegardless()
+        installMouseMonitors()
+    }
+
+    private func present(bitmapData: Data) {
+        close()
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else {
+            return
+        }
+        let rect = Self.panelRect(for: bitmapData, on: screen)
+        let panel = makePanel(rect: rect)
+        let container = makeContainer(rect: rect)
+        panel.contentView = container
+        self.panel = panel
+        containerView = container
+        previewedURL = nil
+        previewedBitmap = bitmapData
+        replaceContent(with: bitmapData, in: container)
+        panel.orderFrontRegardless()
         installMouseMonitors()
     }
 
@@ -145,6 +185,21 @@ final class ClipboardQuickLookWindow {
         previewView = preview
     }
 
+    private func replaceContent(with data: Data, in container: NSView) {
+        previewView?.close()
+        previewView = nil
+        container.subviews.forEach { $0.removeFromSuperview() }
+        guard let image = NSImage(data: data) else {
+            container.addSubview(Self.missingFileView(frame: container.bounds))
+            return
+        }
+        let imageView = NSImageView(frame: container.bounds)
+        imageView.autoresizingMask = [.width, .height]
+        imageView.image = image
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+        container.addSubview(imageView)
+    }
+
     private static func missingFileView(frame: NSRect) -> NSView {
         let image = NSImageView()
         image.image = NSImage(
@@ -190,6 +245,19 @@ final class ClipboardQuickLookWindow {
         return centered(size, in: visible)
     }
 
+    private static func panelRect(
+        for data: Data,
+        on screen: NSScreen
+    ) -> NSRect {
+        let visible = screen.visibleFrame
+        let size = ClipboardQuickLookGeometry.panelSize(
+            pixelSize: pixelSize(of: data),
+            backingScale: screen.backingScaleFactor,
+            visibleSize: visible.size
+        )
+        return centered(size, in: visible)
+    }
+
     private static func centered(_ size: NSSize, in frame: NSRect) -> NSRect {
         NSRect(
             x: (frame.midX - size.width / 2).rounded(),
@@ -211,6 +279,63 @@ final class ClipboardQuickLookWindow {
         return (5...8).contains(orientation)
             ? CGSize(width: height, height: width)
             : CGSize(width: width, height: height)
+    }
+
+    private static func pixelSize(of data: Data) -> CGSize? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let properties = CGImageSourceCopyPropertiesAtIndex(
+                source,
+                0,
+                nil
+            ) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+            let height = properties[kCGImagePropertyPixelHeight] as? CGFloat,
+            width > 0,
+            height > 0
+        else {
+            return nil
+        }
+        let orientation =
+            properties[kCGImagePropertyOrientation] as? Int ?? 1
+        return (5...8).contains(orientation)
+            ? CGSize(width: height, height: width)
+            : CGSize(width: width, height: height)
+    }
+
+    private func makePanel(rect: NSRect) -> NSPanel {
+        let panel = NonKeyPanel(
+            contentRect: rect,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .floating
+        panel.hasShadow = true
+        panel.isMovableByWindowBackground = true
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        panel.isRestorable = false
+        panel.collectionBehavior = [
+            .fullScreenAuxiliary,
+            .moveToActiveSpace,
+        ]
+        return panel
+    }
+
+    private func makeContainer(rect: NSRect) -> NSView {
+        let container = NSView(
+            frame: NSRect(origin: .zero, size: rect.size)
+        )
+        container.wantsLayer = true
+        container.layer?.cornerRadius = 12
+        container.layer?.cornerCurve = .continuous
+        container.layer?.masksToBounds = true
+        container.layer?.backgroundColor =
+            NSColor.windowBackgroundColor.cgColor
+        container.autoresizingMask = [.width, .height]
+        return container
     }
 }
 

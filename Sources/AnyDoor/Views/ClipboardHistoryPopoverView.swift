@@ -1,28 +1,24 @@
-import PluginInterface
 import AppKit
 import Carbon.HIToolbox
+import ClipboardHistory
+import PluginSupport
 import SwiftUI
 
-/// Root SwiftUI view shown inside the Clipboard History `HoverPopover`.
-///
-/// Renders the newest-first cached items for a single `ClipboardHistoryKind`
-/// plus an optional in-popover preview overlay. Drives hover/keyboard selection
-/// via `ClipboardHistorySelectionModel`. Reads `store.cachedItems[kind]` so
-/// `@Observable` tracking refreshes the body when new records arrive.
 struct ClipboardHistoryPopoverView: View {
     private static let popoverWidth: CGFloat = 320
     private static let popoverHeight: CGFloat = 420
 
-    let store: ClipboardHistoryStore
-    let kind: ClipboardHistoryKind
+    @Bindable var presentation: ClipboardHistoryPresentationModel
+    let facet: ClipboardHistoryFacet
+    let titleKey: L10n.Key
     let onHoverChange: @MainActor (Bool) -> Void
     let onDismissPopover: () -> Void
     let onCopyAndClosePanel: () -> Void
 
     @State private var selection = ClipboardHistorySelectionModel()
 
-    private var items: [ClipboardHistoryItem] {
-        store.cachedItems[kind] ?? []
+    private var entries: [ClipboardHistoryEntry] {
+        presentation.entries
     }
 
     var body: some View {
@@ -32,105 +28,125 @@ struct ClipboardHistoryPopoverView: View {
                 Divider()
                 content
             }
-
             if let previewID = selection.previewedID,
-               let previewItem = items.first(where: { $0.id == previewID }) {
-                previewOverlay(for: previewItem)
+                let entry = entries.first(where: { $0.id == previewID })
+            {
+                PreviewOverlay(
+                    entry: entry,
+                    presentation: presentation,
+                    onClose: selection.closePreview
+                )
             }
         }
-        .frame(width: Self.popoverWidth, height: Self.popoverHeight)
+        .frame(
+            width: Self.popoverWidth,
+            height: Self.popoverHeight
+        )
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onHoverSafe(perform: onHoverChange)
-        .onAppear {
-            selection.replaceItems(items.map(\.id))
+        .task {
+            await presentation.setQuery(
+                ClipboardHistoryQuery(facet: facet)
+            )
+            selection.replaceItems(entries.map(\.id))
         }
-        .onChange(of: items.map(\.id)) { _, newIDs in
-            selection.replaceItems(newIDs)
+        .onChange(of: entries.map(\.id)) { _, ids in
+            selection.replaceItems(ids)
         }
         .background(
             KeyboardMonitor(
                 selection: selection,
-                items: items,
-                store: store,
+                entries: entries,
+                presentation: presentation,
                 onCopyAndClosePanel: onCopyAndClosePanel,
                 onDismissPopover: onDismissPopover
             )
         )
     }
 
-    // MARK: Header
-
     private var header: some View {
         HStack(spacing: 6) {
-            LocalizedText(kind.titleKey).font(.headline)
-            Text(L(.clipboardHeaderCountSuffix, items.count))
+            LocalizedText(titleKey).font(.headline)
+            Text(L(.clipboardHeaderCountSuffix, entries.count))
                 .font(.caption)
                 .foregroundStyle(.tertiary)
             Spacer()
-            if !items.isEmpty {
-                keyboardHint
+            if !entries.isEmpty {
+                HStack(spacing: 6) {
+                    hintChip("↑↓", labelKey: .clipboardHintSelect)
+                    hintChip("Space", labelKey: .clipboardHintPreview)
+                    hintChip("⏎", labelKey: .clipboardHintCopy)
+                }
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
 
-    private var keyboardHint: some View {
-        HStack(spacing: 6) {
-            hintChip("↑↓", labelKey: .clipboardHintSelect)
-            hintChip("Space", labelKey: .clipboardHintPreview)
-            hintChip("⏎", labelKey: .clipboardHintCopy)
-        }
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-    }
-
-    private func hintChip(_ key: String, labelKey: L10n.Key) -> some View {
+    private func hintChip(
+        _ key: String,
+        labelKey: L10n.Key
+    ) -> some View {
         HStack(spacing: 3) {
             Text(key)
                 .font(.system(size: 10, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    RoundedRectangle(cornerRadius: 3)
                         .fill(Color.primary.opacity(0.08))
                 )
             LocalizedText(labelKey)
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
         }
-        .fixedSize(horizontal: true, vertical: false)
+        .fixedSize()
     }
-
-    // MARK: Content
 
     @ViewBuilder
     private var content: some View {
-        if items.isEmpty {
-            VStack {
-                Spacer()
-                LocalizedText(.clipboardEmpty).foregroundStyle(.secondary)
-                Spacer()
+        switch presentation.contentState {
+        case .loading:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .indexing:
+            VStack(spacing: 8) {
+                ProgressView()
+                LocalizedText(.clipboardIndexing)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
+        case .empty:
+            LocalizedText(.clipboardEmpty)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .unavailable:
+            LocalizedText(.clipboardPreviewCannotRender)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .content:
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(items) { item in
+                    ForEach(entries, id: \.id) { entry in
                         ClipboardHistoryRow(
-                            item: item,
-                            isSelected: selection.selectedID == item.id,
-                            store: store
+                            entry: entry,
+                            isSelected: selection.selectedID == entry.id,
+                            presentation: presentation
                         )
                         .onHoverSafe { hovering in
-                            if hovering { selection.select(item.id) }
+                            if hovering {
+                                selection.select(entry.id)
+                            }
                         }
                         .onTapGesture {
-                            copyAndClose(item)
+                            copyAndClose(entry)
+                        }
+                        .task {
+                            await presentation.prefetchIfNeeded(
+                                visibleID: entry.id
+                            )
                         }
                     }
                 }
@@ -141,118 +157,125 @@ struct ClipboardHistoryPopoverView: View {
         }
     }
 
-    // MARK: Preview overlay
-
-    @ViewBuilder
-    private func previewOverlay(for item: ClipboardHistoryItem) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 6) {
-                LocalizedText(.clipboardPreviewTitle).font(.headline)
-                Spacer()
-                Button {
-                    selection.closePreview()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(L(.clipboardPreviewClose))
+    private func copyAndClose(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let materialization = await presentation.materialization(
+                for: entry.id,
+                purpose: .normalPaste,
+                usesCache: false
+            ) else {
+                ClipboardHistoryActionFailurePresenter.present(
+                    presentation.actionFailure
+                )
+                return
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            Divider()
-            previewBody(for: item)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(12)
+            do {
+                try ClipboardSelfWrites.perform { pasteboard in
+                    try ClipboardHistoryPasteService.write(
+                        materialization,
+                        to: pasteboard
+                    )
+                }
+                onCopyAndClosePanel()
+            } catch {
+                ClipboardHistoryActionFailurePresenter.present(.unknown)
+            }
         }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(8)
-        // Block click-through onto the underlying list, so taps on the
-        // preview overlay don't accidentally re-copy a row beneath it.
-        .contentShape(Rectangle())
-        .onTapGesture { /* swallow */ }
     }
 
-    @ViewBuilder
-    private func previewBody(for item: ClipboardHistoryItem) -> some View {
-        switch item.historyKind {
-        case .ocr, .qrcode:
-            ScrollView {
-                Text(item.text ?? "")
-                    .font(.system(.body, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .overlayScrollers()
+    private struct PreviewOverlay: View {
+        let entry: ClipboardHistoryEntry
+        let presentation: ClipboardHistoryPresentationModel
+        let onClose: () -> Void
+
+        @State private var materialization:
+            ClipboardHistoryMaterialization?
+
+        var body: some View {
+            VStack(spacing: 0) {
+                HStack {
+                    LocalizedText(.clipboardPreviewTitle).font(.headline)
+                    Spacer()
+                    Button(action: onClose) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(L(.clipboardPreviewClose))
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                Divider()
+                preview
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(12)
             }
-        case .color:
-            VStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(ClipboardHistoryRow.swatchColor(forHex: item.colorHex) ?? Color.gray)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
-                    )
-                    .frame(height: 140)
-                Text(item.colorHex ?? "—")
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(8)
+            .contentShape(Rectangle())
+            .onTapGesture {}
+            .task(id: entry.id) {
+                materialization = await presentation.materialization(
+                    for: entry.id,
+                    purpose: .preview,
+                    recordsFailure: false
+                )
             }
-        case .screenshot:
-            if let url = store.screenshotURL(for: item),
-               let image = NSImage(contentsOf: url) {
+        }
+
+        @ViewBuilder
+        private var preview: some View {
+            if let data = materialization?.firstBitmapData,
+                let image = NSImage(data: data)
+            {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if entry.presentationFacet == .color {
+                VStack(spacing: 12) {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(swatchColor)
+                        .frame(height: 140)
+                    Text(entry.previewText ?? "—")
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+            } else if let text = entry.previewText {
+                ScrollView {
+                    Text(text)
+                        .font(.system(.body, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                        .overlayScrollers()
+                }
             } else {
-                LocalizedText(.clipboardPreviewMissingFile).foregroundStyle(.secondary)
+                LocalizedText(.clipboardPreviewCannotRender)
+                    .foregroundStyle(.secondary)
             }
-        case .text, .image, .file, .none:
-            // The per-kind hover popover intentionally renders only the four legacy
-            // kinds (ocr/color/qrcode/screenshot). text/image/file are surfaced
-            // exclusively in the clipboard wall, so they fall back here by design.
-            LocalizedText(.clipboardPreviewCannotRender).foregroundStyle(.secondary)
         }
-    }
 
-    // MARK: Copy
-
-    private func copyAndClose(_ item: ClipboardHistoryItem) {
-        Task {
-            do {
-                try await store.copyToPasteboard(item)
-                onCopyAndClosePanel()
-            } catch {
-                ToastPresenter.shared.show(.failure(L(.clipboardToastCopyFailed)))
+        private var swatchColor: Color {
+            if let color = materialization?.normalizedColor {
+                return Color(nsColor: color)
             }
+            return Color(colorLiteral: entry.previewText) ?? .gray
         }
     }
 }
 
-// MARK: - Keyboard monitor
-
-/// Routes Up/Down/Space/Return/Esc into selection + copy logic.
-///
-/// Implementation note: previous version used `NSEvent.addLocalMonitorForEvents`,
-/// but in the menu-bar + non-activating popover combo, arrow / Return keys
-/// were intercepted by upstream handlers before reaching the local monitor
-/// (Space happened to slip through, which made the bug confusing). Now we
-/// install a first-responder NSView inside the popover panel that overrides
-/// `keyDown(with:)` directly, which gets the events first via the panel's
-/// own responder chain.
 private struct KeyboardMonitor: NSViewRepresentable {
     let selection: ClipboardHistorySelectionModel
-    let items: [ClipboardHistoryItem]
-    let store: ClipboardHistoryStore
+    let entries: [ClipboardHistoryEntry]
+    let presentation: ClipboardHistoryPresentationModel
     let onCopyAndClosePanel: () -> Void
     let onDismissPopover: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             selection: selection,
-            items: items,
-            store: store,
+            entries: entries,
+            presentation: presentation,
             onCopyAndClosePanel: onCopyAndClosePanel,
             onDismissPopover: onDismissPopover
         )
@@ -260,11 +283,9 @@ private struct KeyboardMonitor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> KeyHandlerView {
         let view = KeyHandlerView()
-        view.onKeyDown = { [weak coordinator = context.coordinator] keyCode in
-            guard let coordinator else { return false }
-            return coordinator.handle(keyCode: keyCode)
+        view.onKeyDown = { [weak coordinator = context.coordinator] code in
+            coordinator?.handle(keyCode: code) ?? false
         }
-        // Defer first-responder grab until the view is in a window.
         DispatchQueue.main.async { [weak view] in
             guard let view, let window = view.window else { return }
             window.makeFirstResponder(view)
@@ -272,12 +293,13 @@ private struct KeyboardMonitor: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: KeyHandlerView, context: Context) {
-        context.coordinator.items = items
+    func updateNSView(
+        _ nsView: KeyHandlerView,
+        context: Context
+    ) {
+        context.coordinator.entries = entries
         context.coordinator.onCopyAndClosePanel = onCopyAndClosePanel
         context.coordinator.onDismissPopover = onDismissPopover
-        // Re-assert first-responder in case the panel re-mounted us without
-        // hooking up focus (e.g., updateContent swap inside HoverPopover).
         if let window = nsView.window, window.firstResponder !== nsView {
             window.makeFirstResponder(nsView)
         }
@@ -286,21 +308,21 @@ private struct KeyboardMonitor: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         let selection: ClipboardHistorySelectionModel
-        var items: [ClipboardHistoryItem]
-        let store: ClipboardHistoryStore
+        var entries: [ClipboardHistoryEntry]
+        let presentation: ClipboardHistoryPresentationModel
         var onCopyAndClosePanel: () -> Void
         var onDismissPopover: () -> Void
 
         init(
             selection: ClipboardHistorySelectionModel,
-            items: [ClipboardHistoryItem],
-            store: ClipboardHistoryStore,
+            entries: [ClipboardHistoryEntry],
+            presentation: ClipboardHistoryPresentationModel,
             onCopyAndClosePanel: @escaping () -> Void,
             onDismissPopover: @escaping () -> Void
         ) {
             self.selection = selection
-            self.items = items
-            self.store = store
+            self.entries = entries
+            self.presentation = presentation
             self.onCopyAndClosePanel = onCopyAndClosePanel
             self.onDismissPopover = onDismissPopover
         }
@@ -309,54 +331,56 @@ private struct KeyboardMonitor: NSViewRepresentable {
             switch keyCode {
             case kVK_UpArrow:
                 selection.moveUp()
-                return true
             case kVK_DownArrow:
                 selection.moveDown()
-                return true
             case kVK_Space:
-                // Screenshot items open a dedicated 60%-screen preview panel
-                // and dismiss the popover; other kinds use the inline overlay.
-                if let id = selection.selectedID,
-                   let item = items.first(where: { $0.id == id }),
-                   item.historyKind == .screenshot {
-                    if let url = store.screenshotURL(for: item),
-                       let image = NSImage(contentsOf: url) {
-                        ScreenshotPreviewWindow.shared.show(image: image)
-                    }
-                    onDismissPopover()
-                    return true
-                }
                 selection.togglePreview()
-                return true
             case kVK_Return:
-                guard let id = selection.selectedID,
-                      let item = items.first(where: { $0.id == id }) else { return true }
+                guard let entry = selectedEntry else { return true }
                 Task {
+                    guard let value = await presentation.materialization(
+                        for: entry.id,
+                        purpose: .normalPaste,
+                        usesCache: false
+                    ) else {
+                        ClipboardHistoryActionFailurePresenter.present(
+                            presentation.actionFailure
+                        )
+                        return
+                    }
                     do {
-                        try await self.store.copyToPasteboard(item)
-                        self.onCopyAndClosePanel()
+                        try ClipboardSelfWrites.perform { pasteboard in
+                            try ClipboardHistoryPasteService.write(
+                                value,
+                                to: pasteboard
+                            )
+                        }
+                        onCopyAndClosePanel()
                     } catch {
-                        ToastPresenter.shared.show(.failure(L(.clipboardToastCopyFailed)))
+                        ClipboardHistoryActionFailurePresenter.present(
+                            .unknown
+                        )
                     }
                 }
-                return true
             case kVK_Escape:
                 if selection.previewedID != nil {
                     selection.closePreview()
                 } else {
                     onDismissPopover()
                 }
-                return true
             default:
                 return false
             }
+            return true
+        }
+
+        private var selectedEntry: ClipboardHistoryEntry? {
+            guard let id = selection.selectedID else { return nil }
+            return entries.first { $0.id == id }
         }
     }
 }
 
-/// First-responder NSView whose only job is to forward `keyDown` to a
-/// SwiftUI-owned handler. Returning `false` calls `super.keyDown` so we
-/// don't accidentally swallow keys we don't recognize (e.g., ⌘+letter).
 final class KeyHandlerView: NSView {
     var onKeyDown: ((Int) -> Bool)?
 
@@ -364,7 +388,7 @@ final class KeyHandlerView: NSView {
     override var canBecomeKeyView: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        if let handler = onKeyDown, handler(Int(event.keyCode)) {
+        if onKeyDown?(Int(event.keyCode)) == true {
             return
         }
         super.keyDown(with: event)

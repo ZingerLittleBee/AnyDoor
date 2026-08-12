@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import Foundation
 import PluginInterface
 
@@ -8,6 +9,11 @@ import PluginInterface
 /// Every error is absorbed and mapped to a toast — `run()` never propagates.
 actor OCRProvider: ActionProvider {
     let itemKey: BuiltinItem = .ocr
+    private let module: ClipboardHistoryModule
+
+    init(module: ClipboardHistoryModule) {
+        self.module = module
+    }
 
     var permission: PermissionStatus { .notRequired }
 
@@ -25,8 +31,17 @@ actor OCRProvider: ActionProvider {
             let text = lines.joined(separator: "\n")
             // Self-write so the watcher doesn't re-capture this OCR result as
             // a generic text entry.
-            await ClipboardWatcher.selfWrite(string: text)
-            await ClipboardHistoryStore.shared.recordText(kind: .ocr, text: text)
+            await ClipboardSelfWrites.write(string: text)
+            _ = try await module.capture(
+                ClipboardHistoryCaptureRequest(
+                    source: .anyDoor,
+                    content: .ocr(text)
+                )
+            )
+            NotificationCenter.default.post(
+                name: .clipboardHistoryV2DidMutate,
+                object: nil
+            )
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
             await ToastPresenter.shared.show(.success(successMsg))
         } catch OCRError.screenCapturePermissionDenied {

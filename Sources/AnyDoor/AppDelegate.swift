@@ -5,18 +5,70 @@ import SwiftData
 import SwiftUI
 import OSLog
 import AskForPermission
+import ClipboardHistory
 import Sparkle
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
+    let clipboardHistoryModule: ClipboardHistoryModule
+    private let persistenceBootstrap: AppPersistenceBootstrap
+    @MainActor lazy var clipboardHistoryLifecycle = {
+        let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        ).first!
+        let storeDirectory = appSupport.appendingPathComponent(
+            "dev.bybee.AnyDoor",
+            isDirectory: true
+        )
+        let storeURL = storeDirectory.appendingPathComponent(
+            "AnyDoor.store"
+        )
+        return ClipboardHistoryLifecycle(
+            module: clipboardHistoryModule,
+            migrationPreparation:
+                persistenceBootstrap.migrationPreparation,
+            legacyCleanupState: {
+                ClipboardHistoryLegacySource.cleanupState(
+                    in: storeDirectory
+                )
+            },
+            legacyPayloadDirectory: {
+                ClipboardHistoryLegacySource.snapshotPayloadDirectory(
+                    in: storeDirectory
+                )
+            },
+            migrationRequest: {
+                let source =
+                    try ClipboardHistoryLegacySource.openForMigration(
+                        applicationSupportDirectory: storeDirectory,
+                        productionStoreURL: storeURL,
+                        payloadDirectory:
+                            ClipboardHistoryModule.defaultStoreRoot
+                    )
+                return try source.makeMigrationRequest()
+            },
+            finishMigration: {
+                try ClipboardHistoryLegacySource.finishMigration(
+                    in: storeDirectory
+                )
+            },
+            retrySnapshotDeletion: {
+                try ClipboardHistoryLegacySource.retrySnapshotDeletion(
+                    in: storeDirectory
+                )
+            }
+        )
+    }()
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
+    private var clipboardHistoryFailureObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
-    private var clipboardWatcher: ClipboardWatcher?
 
     /// Monotonic process-launch reference (seconds since boot). Captured at
     /// instantiation — the earliest reliable point, since the delegate exists
@@ -26,7 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// How long after launch a no-window reopen is still attributed to the
     /// system's login auto-launch rather than a user relaunch.
-    static let reopenSettingsLaunchGrace: TimeInterval = 3
+    nonisolated static let reopenSettingsLaunchGrace: TimeInterval = 3
 
     override init() {
         // Force overlay (floating, auto-hiding) scrollers app-wide, regardless
@@ -38,26 +90,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // scrollbar entirely, and the one-frame flash that any after-the-fact
         // restyling causes on a Settings tab switch. See OverlayScrollers.swift.
         UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
+        clipboardHistoryModule = ClipboardHistoryModule()
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
-            try FileManager.default.createDirectory(at: storeDir, withIntermediateDirectories: true)
             let storeURL = storeDir.appendingPathComponent("AnyDoor.store")
-            let config = ModelConfiguration(url: storeURL)
             // Core-owned model types plus every plugin's (ADR-0005: plugin
             // schema is registered unconditionally, so user data survives
             // Uninstall and a later Install restores it).
             let schema = Schema(
                 [
-                    KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
+                    KeyBinding.self, BuiltinPreference.self,
                     TranslationRecord.self, Quicklink.self,
                 ]
                 + NativePluginCatalog.modelSchemaTypes
             )
-            modelContainer = try ModelContainer(for: schema, configurations: config)
+            let bootstrap = try AppPersistenceBootstrap.make(
+                schema: schema,
+                storeURL: storeURL,
+                prepareLegacySnapshot: {
+                    try FileManager.default.createDirectory(
+                        at: storeDir,
+                        withIntermediateDirectories: true
+                    )
+                    try ClipboardHistoryLegacySource
+                        .prepareSnapshotIfNeeded(
+                            applicationSupportDirectory: storeDir,
+                            productionStoreURL: storeURL
+                        )
+                },
+                requestRelaunch: Self.requestRelaunch
+            )
+            persistenceBootstrap = bootstrap
+            modelContainer = bootstrap.modelContainer
 
             let legacyURL = appSupport.appendingPathComponent("default.store")
-            if FileManager.default.fileExists(atPath: legacyURL.path) {
+            if !bootstrap.isRecoveryMode,
+                FileManager.default.fileExists(atPath: legacyURL.path)
+            {
                 Self.migrateLegacyStore(from: legacyURL, into: modelContainer)
             }
         } catch {
@@ -70,49 +140,75 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
         AskForPermission.configure(appName: "AnyDoor")
-        SettingsWindowController.bootstrap(modelContainer: modelContainer)
+        ClipboardPreferences.mergeDefaultExclusionsIfNeeded()
+        ClipboardSelfWrites.configure(
+            clipboardHistoryModule.pasteboardSelfWrites
+        )
+        BackupService.configureClipboardHistoryRuntime(
+            module: clipboardHistoryModule,
+            lifecycle: clipboardHistoryLifecycle
+        )
+        SettingsWindowController.bootstrap(
+            modelContainer: modelContainer,
+            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardHistoryLifecycle: clipboardHistoryLifecycle
+        )
+        ClipboardWallWindowController.shared.configure(
+            module: clipboardHistoryModule,
+            lifecycle: clipboardHistoryLifecycle
+        )
+        CaptureCoordinator.shared.configure(
+            clipboardHistoryModule: clipboardHistoryModule
+        )
 
         // Run migrations / seeding on the main context
         let context = modelContainer.mainContext
-        KeyBindingOrderBackfill.runIfNeeded(in: context)
-        BuiltinPreferenceSeeder.seedIfNeeded(in: context)
-        QuicklinkSeeder.seedIfNeeded(in: context)
-
-        // Bootstrap clipboard history store so providers can record entries.
-        ClipboardHistoryStore.shared.bootstrap(modelContainer: modelContainer)
-        ClipboardHistoryStore.shared.setMaxAge(ClipboardPreferences.retention.maxAge)
-        // First drop tag ids whose definition no longer exists (crash between
-        // a registry delete and the item sweep), then run the forced prune so
-        // rows that were exempt only by a ghost tag are reclaimed — including
-        // their on-disk payloads — right at launch.
-        Task {
-            await ClipboardHistoryStore.shared.cleanUpUnknownTags(
-                validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
-            )
-            await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
+        if persistenceBootstrap.isRecoveryMode {
+            Self.seedRecoveryBuiltinPreferences(in: context)
+        } else {
+            KeyBindingOrderBackfill.runIfNeeded(in: context)
+            BuiltinPreferenceSeeder.seedIfNeeded(in: context)
+            QuicklinkSeeder.seedIfNeeded(in: context)
         }
 
-        // Start the clipboard watcher. Internal pasteboard writes suppress
-        // their own capture through `ClipboardWatcher.selfWrite`.
-        let watcher = ClipboardWatcher(store: ClipboardHistoryStore.shared)
-        watcher.start()
-        clipboardWatcher = watcher
-        ClipboardWatcher.shared = watcher
-        ClipboardWallWindowController.shared.modelContainer = modelContainer
-
+        // The v2 lifecycle owns migration and passive observation. It never
+        // starts the monitor before the encrypted store and migration are
+        // ready, and it leaves failures explicit for Settings to recover.
+        clipboardHistoryLifecycle.start()
+        clipboardHistoryFailureObserver =
+            NotificationCenter.default.addObserver(
+                forName: .clipboardHistoryV2OperationDidFail,
+                object: nil,
+                queue: .main
+            ) { _ in
+                MainThreadIsolation.run {
+                    ToastPresenter.shared.show(
+                        .failure(L(.settingsClipboardOperationFailed))
+                    )
+                }
+            }
         // Native Plugins: the registry loads the installed set, activates the
         // installed plugins, and owns surface composition for launch and
         // later lifecycle changes. Core control flow names no plugin beyond
         // this list (ADR-0007).
-        let pluginHost = CorePluginHost(modelContainer: modelContainer)
+        let pluginHost = CorePluginHost(
+            modelContainer: modelContainer,
+            selfWrites: clipboardHistoryModule.pasteboardSelfWrites
+        )
         let plugins = NativePluginCatalog.makePlugins(host: pluginHost)
         // One-time usage-trace migration writes the install state directly and
         // must precede the bootstrap, which activates the migrated-installed
         // plugins through the normal launch path.
-        PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
-        let coreProviders = BuiltinProviderRegistry.makeAll(onKeepAwakeChange: { state in
-            PanelStore.shared.onKeepAwakeStateChange(state)
-        })
+        if !persistenceBootstrap.isRecoveryMode {
+            PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
+        }
+        let coreProviders = BuiltinProviderRegistry.makeAll(
+            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardHistoryLifecycle: clipboardHistoryLifecycle,
+            onKeepAwakeChange: { state in
+                PanelStore.shared.onKeepAwakeStateChange(state)
+            }
+        )
         PluginRegistry.shared.bootstrap(
             plugins: plugins,
             modelContainer: modelContainer,
@@ -189,7 +285,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Menu bar status item. Replaces SwiftUI `MenuBarExtra`, whose
         // `isInserted: false` state infinite-loops the scene graph on macOS 26.
-        let menuBar = MenuBarController(modelContainer: modelContainer)
+        let menuBar = MenuBarController(
+            modelContainer: modelContainer,
+            clipboardHistoryModule: clipboardHistoryModule
+        )
         menuBar.install()
         menuBarController = menuBar
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -200,20 +299,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Run synchronously on the main thread via MainThreadIsolation rather
             // than MainActor.assumeIsolated, whose swift_task_isCurrentExecutor
             // check can fault on the main thread after a ScreenCaptureKit capture
-            // (see ClipboardWatcher / MainThreadIsolation).
+            // (see the clipboard monitor / MainThreadIsolation).
             MainThreadIsolation.run { menuBar?.syncFromPreferences() }
         }
         bootstrapUpdater()
 
         // Config Sync (ADR-0010). Started last so its initial tick captures
         // fully seeded stores; no-op unless the user enabled sync.
-        SyncCoordinator.shared.bootstrap(modelContainer: modelContainer)
+        if !persistenceBootstrap.isRecoveryMode {
+            SyncCoordinator.shared.bootstrap(modelContainer: modelContainer)
+        }
 
         // First-run onboarding. Shows once on a clean install; afterwards it is
         // only reachable from Settings (the window opts out of state restoration
         // and reverts the app to `.accessory` when closed).
-        if !OnboardingState.hasCompleted() {
+        if !persistenceBootstrap.isRecoveryMode,
+            !OnboardingState.hasCompleted()
+        {
             OnboardingWindowController.shared.show()
+        }
+
+        if persistenceBootstrap.isRecoveryMode {
+            SettingsOpener.shared.tryOpen(tab: .clipboard)
         }
 
         // Dev-only probe: auto-open a window at launch so UI work can be
@@ -221,6 +328,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // item. No effect unless the env var is set.
         if ProcessInfo.processInfo.environment["ANYDOOR_OPEN_SETTINGS"] == "1" {
             SettingsOpener.shared.tryOpen()
+        }
+        if ProcessInfo.processInfo.environment[
+            "ANYDOOR_OPEN_CLIPBOARD_HISTORY"
+        ] == "1" {
+            ClipboardWallWindowController.shared.toggle()
         }
     }
 
@@ -263,8 +375,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let clipboardHistoryFailureObserver {
+            NotificationCenter.default.removeObserver(
+                clipboardHistoryFailureObserver
+            )
+        }
         HotkeyService.shared.stop()
-        clipboardWatcher?.stop()
     }
 
     // MARK: - State restoration
@@ -284,19 +400,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard HyperKeyController.shared.hasPersistedSignatures else {
-            return .terminateNow
-        }
-        Task {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    try? await HyperKeyController.shared.clear()
+        let lifecycle = clipboardHistoryLifecycle
+        Task { @MainActor in
+            await lifecycle.stop()
+            if HyperKeyController.shared.hasPersistedSignatures {
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        try? await HyperKeyController.shared.clear()
+                    }
+                    group.addTask {
+                        try? await Task.sleep(nanoseconds: 500_000_000)
+                    }
+                    await group.next()
+                    group.cancelAll()
                 }
-                group.addTask {
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                }
-                await group.next()
-                group.cancelAll()
             }
             NSApp.reply(toApplicationShouldTerminate: true)
         }
@@ -345,9 +462,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let allowDefaultHandling: Bool
     }
 
-    static func reopenHandlingDecision(hasVisibleWindows: Bool,
-                                       menuBarIconVisible: Bool,
-                                       secondsSinceLaunch: TimeInterval) -> ReopenHandlingDecision {
+    nonisolated static func reopenHandlingDecision(
+        hasVisibleWindows: Bool,
+        menuBarIconVisible: Bool,
+        secondsSinceLaunch: TimeInterval
+    ) -> ReopenHandlingDecision {
         ReopenHandlingDecision(
             shouldOpenSettings: shouldOpenSettingsForReopen(
                 hasVisibleWindows: hasVisibleWindows,
@@ -377,9 +496,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// In the hidden-icon recovery case, `reopenSettingsLaunchGrace` still gates
     /// out the login auto-launch's own reopen (arriving within the grace) from a
     /// genuine later relaunch.
-    static func shouldOpenSettingsForReopen(hasVisibleWindows: Bool,
-                                            menuBarIconVisible: Bool,
-                                            secondsSinceLaunch: TimeInterval) -> Bool {
+    nonisolated static func shouldOpenSettingsForReopen(
+        hasVisibleWindows: Bool,
+        menuBarIconVisible: Bool,
+        secondsSinceLaunch: TimeInterval
+    ) -> Bool {
         guard !hasVisibleWindows else { return false }
         // Icon visible -> reachable from the menu bar; never auto-pop Settings.
         guard !menuBarIconVisible else { return false }
@@ -392,6 +513,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func refreshBindings() {
         PanelStore.shared.rebuild()
         HotkeyCoordinator.shared.refresh()
+    }
+
+    private static func requestRelaunch() async throws {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.addsToRecentItems = false
+        configuration.createsNewApplicationInstance = true
+
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            _ = try await NSWorkspace.shared.openApplication(
+                at: Bundle.main.bundleURL,
+                configuration: configuration
+            )
+        } else {
+            guard let executableURL = Bundle.main.executableURL else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = Array(CommandLine.arguments.dropFirst())
+            try process.run()
+        }
+        NSApplication.shared.terminate(nil)
+    }
+
+    private static func seedRecoveryBuiltinPreferences(
+        in context: ModelContext
+    ) {
+        for item in BuiltinItem.allCases {
+            context.insert(
+                BuiltinPreference(
+                    itemKey: item.rawValue,
+                    isVisible: item.defaultVisibility,
+                    displayOrder: item.defaultOrder,
+                    keyCode: nil,
+                    modifierFlags: nil
+                )
+            )
+        }
+        do {
+            try context.save()
+        } catch {
+            logger.error(
+                "Recovery preference seeding failed: \(error)"
+            )
+        }
     }
 
     // MARK: - Legacy store migration (unchanged behavior, just preserved)

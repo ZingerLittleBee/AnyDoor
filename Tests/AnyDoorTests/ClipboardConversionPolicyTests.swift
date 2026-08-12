@@ -15,12 +15,7 @@ final class ClipboardConversionPolicyTests: XCTestCase {
 
     func testBitmapPayloadsAreAlwaysConvertible() {
         XCTAssertTrue(ClipboardConversionPolicy.isConvertible(
-            .bitmap(fileURL: url("shot.png"), displayName: "Shot")
-        ))
-        // A missing stored file only fails at load time; the menu still offers
-        // the action and the commit reports the failure.
-        XCTAssertTrue(ClipboardConversionPolicy.isConvertible(
-            .bitmap(fileURL: nil, displayName: "Shot")
+            .bitmap(data: Data([0x89, 0x50]), displayName: "Shot")
         ))
     }
 
@@ -52,27 +47,15 @@ final class ClipboardConversionPolicyTests: XCTestCase {
         return dir
     }
 
-    func testBitmapPayloadLoadsStoredBitmap() throws {
-        let dir = try makeTempDirectory()
-        let stored = dir.appendingPathComponent("stored.png")
+    func testBitmapPayloadLoadsInMemoryBitmap() throws {
         let data = Data([0x89, 0x50, 0x4E, 0x47])
-        try data.write(to: stored)
 
         let items = try XCTUnwrap(ClipboardConversionPolicy.basketItems(
-            for: .bitmap(fileURL: stored, displayName: "Shot")
+            for: .bitmap(data: data, displayName: "Shot")
         ))
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items[0].payload, .bitmap(data))
         XCTAssertEqual(items[0].displayName, "Shot")
-    }
-
-    func testBitmapPayloadWithMissingStoredFileLoadsNothing() {
-        XCTAssertNil(ClipboardConversionPolicy.basketItems(
-            for: .bitmap(fileURL: nil, displayName: "Shot")
-        ))
-        XCTAssertNil(ClipboardConversionPolicy.basketItems(
-            for: .bitmap(fileURL: url("gone.png", dir: "/nonexistent"), displayName: "Shot")
-        ))
     }
 
     func testFilePayloadKeepsOnlySurvivingImageFiles() throws {

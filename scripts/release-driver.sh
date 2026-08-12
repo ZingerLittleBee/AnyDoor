@@ -239,8 +239,7 @@ RECOVERY_HINT="git restore Info.plist CHANGELOG.md appcast.xml && rm -rf dist/"
 # `native` backend dispatches multi-arch builds to xcbuild, which (as of
 # Swift 6.3) fails to resolve our `XCStringsCompilerPlugin` build-tool
 # plugin with "Unable to resolve build file ... PACKAGE-TARGET" errors.
-# Sparkle.framework is taken from the matching macos-arm64_x86_64 slice of
-# Sparkle.xcframework.
+# Bundled frameworks are taken from their matching macos-arm64_x86_64 slices.
 #
 # The `swiftbuild` backend writes the deployment-target version (14.0) into
 # the binary's LC_BUILD_VERSION `sdk` field instead of the real SDK version
@@ -294,12 +293,41 @@ done
 log "Sparkle.framework → $SPARKLE_FW"
 ditto "$SPARKLE_FW" "$APP/Contents/Frameworks/Sparkle.framework"
 
+SQLCIPHER_FW=""
+for candidate in \
+  "$BIN_PATH/SQLCipher.framework" \
+  "$BIN_PATH/PackageFrameworks/SQLCipher.framework" \
+  "$BIN_PATH/../PackageFrameworks/SQLCipher.framework" \
+  ".build/artifacts/sqlcipher.swift/SQLCipher/SQLCipher.xcframework/macos-arm64_x86_64/SQLCipher.framework"; do
+  if [[ -d "$candidate" ]]; then
+    SQLCIPHER_FW="$candidate"
+    break
+  fi
+done
+[[ -n "$SQLCIPHER_FW" ]] || die "could not find SQLCipher.framework under $BIN_PATH"
+log "SQLCipher.framework → $SQLCIPHER_FW"
+ditto "$SQLCIPHER_FW" "$APP/Contents/Frameworks/SQLCipher.framework"
+
 # SwiftPM doesn't know about app-bundle layout, so the built executable only
 # has @loader_path on its rpath list. Add @executable_path/../Frameworks so
-# dyld can resolve Sparkle from Contents/Frameworks at launch.
+# dyld can resolve bundled frameworks from Contents/Frameworks at launch.
 if ! otool -l "$APP/Contents/MacOS/AnyDoor" | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then
   install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/AnyDoor"
 fi
+
+otool -L "$APP/Contents/MacOS/AnyDoor" \
+  | grep -q '@rpath/SQLCipher.framework/Versions/A/SQLCipher' \
+  || die "AnyDoor is not bound to the bundled SQLCipher framework"
+if otool -L "$APP/Contents/MacOS/AnyDoor" | grep -q '/usr/lib/libsqlite3'; then
+  die "AnyDoor must not bind the system SQLite library"
+fi
+for binary in \
+  "$APP/Contents/MacOS/AnyDoor" \
+  "$APP/Contents/Frameworks/SQLCipher.framework/Versions/A/SQLCipher"; do
+  architectures="$(lipo -archs "$binary")"
+  [[ "$architectures" == *arm64* && "$architectures" == *x86_64* ]] \
+    || die "$binary is not universal (found: $architectures)"
+done
 
 # --- 6. Codesign (depth-first) -------------------------------------------
 LAST_STEP=6
@@ -319,6 +347,7 @@ for helper in "$FW_ROOT/Autoupdate" "$FW_ROOT/Autoupdate.app" "$FW_ROOT/Updater.
 done
 
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Frameworks/Sparkle.framework"
+codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Frameworks/SQLCipher.framework"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Resources/AnyDoor_AnyDoor.bundle"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoorHostsHelper"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoor"

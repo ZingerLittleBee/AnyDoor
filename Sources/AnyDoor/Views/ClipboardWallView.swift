@@ -1,32 +1,29 @@
 import AppKit
+import ClipboardHistory
 import PluginInterface
 import PluginSupport
-import SwiftData
 import SwiftUI
 
 /// The card-wall content: category tabs, a search field, a horizontal row of
-/// cards, and a keyboard-hint footer. Items come from a SwiftData `@Query`, so
-/// the view re-renders automatically whenever the watcher records a new copy —
-/// no manual reload plumbing. The filtered list is mirrored into
-/// `ClipboardWallState` so the window controller's keyboard handling (paste /
-/// delete the selected item) operates on exactly what the view shows.
+/// cards, and a keyboard-hint footer.
 struct ClipboardWallView: View {
-    @Query(sort: \ClipboardHistoryItem.createdAt, order: .reverse)
-    private var allItems: [ClipboardHistoryItem]
-
     @Bindable var state: ClipboardWallState
-    let historyDirectory: URL
-    let onSelect: (ClipboardHistoryItem, _ plain: Bool) -> Void
-    let onToggleFavorite: (ClipboardHistoryItem) -> Void
+    let onSelect: (ClipboardHistoryEntry, _ plain: Bool) -> Void
+    let onToggleFavorite: (ClipboardHistoryEntry) -> Void
     /// Context-menu actions, injected by the window controller.
-    let onEdit: (ClipboardHistoryItem) -> Void
-    let onCopy: (ClipboardHistoryItem) -> Void
-    let onPluginAction: (ClipboardHistoryItem, NativePluginID, PluginClipboardAction) -> Void
-    let onRevealInFinder: (ClipboardHistoryItem) -> Void
-    let onDelete: (ClipboardHistoryItem) -> Void
-    let onToggleTag: (ClipboardHistoryItem, String) -> Void
-    let onNewTag: (ClipboardHistoryItem) -> Void
-    let onIgnoreSource: (ClipboardHistoryItem) -> Void
+    let onEdit: (ClipboardHistoryEntry) -> Void
+    let onCopy: (ClipboardHistoryEntry) -> Void
+    let onPluginAction:
+        (
+            NativePluginID,
+            PluginClipboardAction,
+            PluginClipboardPayload
+        ) -> Void
+    let onRevealInFinder: (ClipboardHistoryEntry) -> Void
+    let onDelete: (ClipboardHistoryEntry) -> Void
+    let onToggleTag: (ClipboardHistoryEntry, String) -> Void
+    let onNewTag: (ClipboardHistoryEntry) -> Void
+    let onIgnoreSource: (ClipboardHistoryEntry) -> Void
     let onTagDialogCommit: () -> Void
     let onTagDialogCancel: () -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
@@ -57,60 +54,53 @@ struct ClipboardWallView: View {
     /// anchor (see `SourceFilterMenuAnchor`) to pop the native menu.
     @State private var sourceMenuRequested = false
 
-    /// The query result narrowed by the active category tab and search text.
-    private var filtered: [ClipboardHistoryItem] {
-        ClipboardSearch.filter(allItems,
-                               category: state.category.kindFilter,
-                               favoritesOnly: state.category == .favorites,
-                               tagID: state.category.tagFilter,
-                               sourceBundleID: state.sourceFilterBundleID,
-                               query: state.query)
-    }
-
-    /// An order-sensitive signature of the displayed items, used as the
-    /// `onChange` trigger for mirroring the list into state. Hashing avoids
-    /// allocating a fresh `[UUID]` on every body evaluation (which `items.map`
-    /// would); `count` is folded in so the value also moves on size changes.
-    private func itemsSignature(_ items: [ClipboardHistoryItem]) -> Int {
-        var hasher = Hasher()
-        hasher.combine(items.count)
-        for item in items { hasher.combine(item.id) }
-        return hasher.finalize()
-    }
-
     private struct SourceOption: Identifiable, Equatable {
-        let bundleID: String
+        let id: ClipboardHistorySourceID
+        let bundleID: String?
         let name: String
         let count: Int
-
-        var id: String { bundleID }
     }
 
     private var sourceOptions: [SourceOption] {
-        let grouped = Dictionary(grouping: allItems.compactMap { item -> (String, String)? in
-            guard let bundleID = item.sourceBundleID else { return nil }
-            return (bundleID, item.sourceAppName ?? bundleID)
-        }, by: \.0)
-
-        return grouped.map { bundleID, rows in
-            SourceOption(bundleID: bundleID, name: rows.first?.1 ?? bundleID, count: rows.count)
-        }
-        .sorted { lhs, rhs in
-            lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        state.presentation.sources.map { source in
+            SourceOption(
+                id: source.id,
+                bundleID: source.bundleID,
+                name: source.name,
+                count: source.count
+            )
         }
     }
 
     var body: some View {
-        let items = filtered
+        let items = state.items
         // Compute the source grouping once per body eval and thread it through;
         // it is O(n) over allItems, and the menu, trigger title, and the two
         // onChange dependencies below would otherwise each recompute it.
         let sources = sourceOptions
         return VStack(spacing: 10) {
             tabs(sources)
-            if items.isEmpty {
+            if state.presentation.contentState == .loading {
                 Spacer()
-                LocalizedText(.clipboardEmpty).foregroundStyle(.secondary)
+                ProgressView()
+                Spacer()
+            } else if state.presentation.contentState == .indexing {
+                Spacer()
+                LocalizedText(.clipboardIndexing)
+                    .foregroundStyle(.secondary)
+                ProgressView()
+                Spacer()
+            } else if case .unavailable =
+                state.presentation.contentState
+            {
+                Spacer()
+                LocalizedText(state.unavailableStateKey)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                Spacer()
+            } else if items.isEmpty {
+                Spacer()
+                LocalizedText(state.emptyStateKey).foregroundStyle(.secondary)
                 Spacer()
             } else {
                 cards(items)
@@ -120,22 +110,37 @@ struct ClipboardWallView: View {
         .padding(14)
         .frame(maxWidth: .infinity)
         .background(.ultraThinMaterial)
-        // Mirror the displayed list into state for the controller's keyboard
-        // handling. Runs after the view updates, so it never mutates during body.
-        .onAppear { state.setItems(items) }
-        .onChange(of: itemsSignature(items)) { _, _ in state.setItems(items) }
-        .onAppear {
-            state.setCategories(ClipboardCategoryOrder.apply(
-                to: ClipboardWallState.order(tags: ClipboardTagStore.shared.tags)))
+        .task {
+            // Restore the tab order before the first await: it depends on
+            // nothing the reload fetches, and behind the reload a slow or
+            // cancelled first load left the wall showing the default order
+            // until the user closed and reopened it.
+            state.setCategories(
+                ClipboardCategoryOrder.apply(
+                    to: ClipboardWallState.order(
+                        tags: state.presentation.tags
+                    )
+                )
+            )
+            await state.reload()
         }
-        .onChange(of: ClipboardTagStore.shared.tags) { _, newTags in
+        .onChange(of: state.presentation.tags) { _, newTags in
             state.setCategories(ClipboardCategoryOrder.apply(
                 to: ClipboardWallState.order(tags: newTags)))
         }
-        .onChange(of: sources.map(\.bundleID)) { _, ids in
-            if let selected = state.sourceFilterBundleID, !ids.contains(selected) {
+        .onChange(of: sources.map(\.id)) { _, ids in
+            if let selected = state.sourceFilterID, !ids.contains(selected) {
                 state.clearSourceFilter()
             }
+        }
+        .onChange(of: state.query) { _, _ in
+            state.queryTextDidChange()
+        }
+        .onChange(of: state.category) { _, _ in
+            state.filtersDidChange()
+        }
+        .onChange(of: state.sourceFilterID) { _, _ in
+            state.filtersDidChange()
         }
         // The ⌘K shortcut (handled by the window controller) bumps this token;
         // open the native source menu in response, when there is anything to filter.
@@ -206,7 +211,7 @@ struct ClipboardWallView: View {
                 Label {
                     Text(sourceFilterTitle(sources)).lineLimit(1)
                 } icon: {
-                    SourceFilterLeadingIcon(bundleID: state.sourceFilterBundleID)
+                    SourceFilterLeadingIcon(sourceID: state.sourceFilterID)
                 }
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
@@ -227,10 +232,10 @@ struct ClipboardWallView: View {
                 requested: $sourceMenuRequested,
                 allTitle: L(.clipboardSourceAll),
                 options: sources,
-                selectedBundleID: state.sourceFilterBundleID,
-                onSelect: { bundleID in
-                    if let bundleID {
-                        state.sourceFilterBundleID = bundleID
+                selectedSourceID: state.sourceFilterID,
+                onSelect: { sourceID in
+                    if let sourceID {
+                        state.sourceFilterID = sourceID
                     } else {
                         state.clearSourceFilter()
                     }
@@ -244,8 +249,12 @@ struct ClipboardWallView: View {
     /// (or while the icon resolves / when the bundle ID maps to no installed
     /// app). Reads the warm `AppIconCache` synchronously first to avoid a flash.
     private struct SourceFilterLeadingIcon: View {
-        let bundleID: String?
+        let sourceID: ClipboardHistorySourceID?
         @State private var icon: NSImage?
+
+        private var bundleID: String? {
+            sourceID?.applicationBundleIdentifier
+        }
 
         var body: some View {
             Group {
@@ -254,11 +263,15 @@ struct ClipboardWallView: View {
                         .resizable()
                         .interpolation(.high)
                         .frame(width: 15, height: 15)
+                } else if sourceID == .universalClipboard {
+                    Image(systemName: "iphone.and.arrow.forward")
+                } else if sourceID == .unknown {
+                    Image(systemName: "questionmark.app")
                 } else {
                     Image(systemName: "app.connected.to.app.below.fill")
                 }
             }
-            .task(id: bundleID) {
+            .task(id: sourceID) {
                 guard let bundleID else { icon = nil; return }
                 if let warm = AppIconCache.cachedForBundle(bundleID) {
                     icon = warm
@@ -280,8 +293,8 @@ struct ClipboardWallView: View {
         @Binding var requested: Bool
         let allTitle: String
         let options: [SourceOption]
-        let selectedBundleID: String?
-        let onSelect: (String?) -> Void
+        let selectedSourceID: ClipboardHistorySourceID?
+        let onSelect: (ClipboardHistorySourceID?) -> Void
 
         func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -295,7 +308,7 @@ struct ClipboardWallView: View {
             let coordinator = context.coordinator
             coordinator.allTitle = allTitle
             coordinator.options = options
-            coordinator.selectedBundleID = selectedBundleID
+            coordinator.selectedSourceID = selectedSourceID
             coordinator.onSelect = onSelect
             guard requested else { return }
             // Defer past the current view update before mutating state or
@@ -311,8 +324,8 @@ struct ClipboardWallView: View {
             weak var anchor: NSView?
             var allTitle = ""
             var options: [SourceOption] = []
-            var selectedBundleID: String?
-            var onSelect: (String?) -> Void = { _ in }
+            var selectedSourceID: ClipboardHistorySourceID?
+            var onSelect: (ClipboardHistorySourceID?) -> Void = { _ in }
 
             func popUp() {
                 guard let anchor else { return }
@@ -321,7 +334,7 @@ struct ClipboardWallView: View {
 
                 let all = NSMenuItem(title: allTitle, action: #selector(pickAll), keyEquivalent: "")
                 all.target = self
-                all.state = selectedBundleID == nil ? .on : .off
+                all.state = selectedSourceID == nil ? .on : .off
                 menu.addItem(all)
 
                 if !options.isEmpty { menu.addItem(.separator()) }
@@ -330,9 +343,9 @@ struct ClipboardWallView: View {
                                           action: #selector(pick(_:)),
                                           keyEquivalent: "")
                     item.target = self
-                    item.representedObject = option.bundleID
-                    item.state = selectedBundleID == option.bundleID ? .on : .off
-                    item.image = Self.icon(forBundleID: option.bundleID)
+                    item.representedObject = option.id
+                    item.state = selectedSourceID == option.id ? .on : .off
+                    item.image = Self.icon(for: option)
                     menu.addItem(item)
                 }
 
@@ -353,7 +366,16 @@ struct ClipboardWallView: View {
             /// list. Falls back to a generic `app` symbol when the bundle ID maps
             /// to no installed app. Copies before resizing so the shared cached
             /// image (used at full size by the cards) is never mutated.
-            private static func icon(forBundleID bundleID: String) -> NSImage {
+            private static func icon(for option: SourceOption) -> NSImage {
+                guard let bundleID = option.bundleID else {
+                    let symbol = option.id == .universalClipboard
+                        ? "iphone.and.arrow.forward"
+                        : "questionmark.app"
+                    return NSImage(
+                        systemSymbolName: symbol,
+                        accessibilityDescription: option.name
+                    ) ?? NSImage()
+                }
                 let resolved: NSImage
                 if let warm = AppIconCache.cachedForBundle(bundleID) {
                     resolved = warm
@@ -369,7 +391,7 @@ struct ClipboardWallView: View {
 
             @objc private func pickAll() { onSelect(nil) }
             @objc private func pick(_ sender: NSMenuItem) {
-                onSelect(sender.representedObject as? String)
+                onSelect(sender.representedObject as? ClipboardHistorySourceID)
             }
         }
     }
@@ -381,8 +403,11 @@ struct ClipboardWallView: View {
     }
 
     private func sourceFilterTitle(_ sources: [SourceOption]) -> String {
-        guard let selected = state.sourceFilterBundleID else { return L(.clipboardSourceAll) }
-        return sources.first { $0.bundleID == selected }?.name ?? selected
+        guard let selected = state.sourceFilterID else {
+            return L(.clipboardSourceAll)
+        }
+        return sources.first { $0.id == selected }?.name
+            ?? L(.clipboardSourceUnknown)
     }
 
     @ViewBuilder
@@ -400,7 +425,7 @@ struct ClipboardWallView: View {
             if let key = cat.titleKey {
                 LocalizedText(key)
             } else if let id = cat.tagFilter {
-                Text(ClipboardTagStore.shared.name(for: id) ?? "")
+                Text(tagName(for: id))
             }
         }
         .font(.caption)
@@ -608,7 +633,7 @@ struct ClipboardWallView: View {
             // but a dirty editor resolves its discard prompt first.
             guard ClipboardTextWindow.shared.yieldToModal() else { return }
             state.presentTagDialog(.rename(tagID: tagID),
-                                   initialText: ClipboardTagStore.shared.name(for: tagID) ?? "")
+                                   initialText: tagName(for: tagID))
         })
         menu.addItem(ClosureMenuItem(title: L(.clipboardTagDelete), systemImage: "trash") {
             guard ClipboardTextWindow.shared.yieldToModal() else { return }
@@ -617,30 +642,7 @@ struct ClipboardWallView: View {
         return menu
     }
 
-    /// Memoizes `matchSnippet` for the current query so a wall re-render (e.g. a
-    /// selection change re-evaluates every visible card's body) or a re-realized
-    /// card while scrolling doesn't re-fold the item's text. Scoped to one query:
-    /// switching queries clears it, so a stale snippet can only briefly survive an
-    /// in-place item edit under the same query (display-only). `[UUID: String?]`
-    /// distinguishes a cached nil result from an absent entry.
-    @MainActor
-    private enum MatchSnippetCache {
-        private static var query = ""
-        private static var cache: [UUID: String?] = [:]
-
-        static func snippet(for item: ClipboardHistoryItem, query: String) -> String? {
-            if query != self.query {
-                self.query = query
-                cache.removeAll(keepingCapacity: true)
-            }
-            if let cached = cache[item.id] { return cached }
-            let computed = ClipboardSearch.matchSnippet(for: item, query: query)
-            cache[item.id] = computed
-            return computed
-        }
-    }
-
-    private func cards(_ items: [ClipboardHistoryItem]) -> some View {
+    private func cards(_ items: [ClipboardHistoryEntry]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 // Lazy so only on-screen cards are realized; a plain HStack would
@@ -648,16 +650,18 @@ struct ClipboardWallView: View {
                 LazyHStack(spacing: 10) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                         ClipboardCardView(
-                            item: item,
+                            entry: item,
                             isSelected: index == state.selectedIndex,
-                            historyDirectory: historyDirectory,
-                            matchSnippet: MatchSnippetCache.snippet(for: item, query: state.query),
+                            presentation: state.presentation,
                             onToggleFavorite: { onToggleFavorite(item) },
                             // Select the card the user right-clicked so the
                             // action visibly applies to it.
                             onEdit: { state.select(index); onEdit(item) },
                             onCopy: { state.select(index); onCopy(item) },
-                            onPluginAction: { state.select(index); onPluginAction(item, $0, $1) },
+                            onPluginAction: {
+                                state.select(index)
+                                onPluginAction($0, $1, $2)
+                            },
                             onRevealInFinder: { state.select(index); onRevealInFinder(item) },
                             onToggleTag: { state.select(index); onToggleTag(item, $0) },
                             onNewTag: { state.select(index); onNewTag(item) },
@@ -674,6 +678,9 @@ struct ClipboardWallView: View {
                         // same card within the system double-click interval
                         // pastes. Manual timing avoids the count:2 gesture delay.
                         .onTapGesture { handleTap(index: index, item: item) }
+                        .task {
+                            await state.prefetchIfNeeded(visibleID: item.id)
+                        }
                     }
                 }
                 .padding(.vertical, 2)
@@ -703,7 +710,13 @@ struct ClipboardWallView: View {
             hint("⌘K", .clipboardHintFilterSource)
             hint("⌥", .clipboardHintEditCategories)
             hint("↵", .clipboardHintCopy)
-            hint("⌥↵", .clipboardHintPastePlain)
+            if let selectedID = state.presentation.selectedID,
+                state.presentation.supportsPlainTextPaste(
+                    for: selectedID
+                )
+            {
+                hint("⌥↵", .clipboardHintPastePlain)
+            }
             hint("space", .clipboardHintPreview)
             hint("⌫", .clipboardHintDelete)
             hint("esc", .clipboardHintClose)
@@ -720,7 +733,7 @@ struct ClipboardWallView: View {
     /// card navigation — a card is not focusable, so without this the search
     /// field would keep the caret and arrows would move it instead of the
     /// selection.
-    private func handleTap(index: Int, item: ClipboardHistoryItem) {
+    private func handleTap(index: Int, item: ClipboardHistoryEntry) {
         state.isSearchFocused = false
         let now = Date()
         if let last = lastTap, last.index == index,
@@ -749,7 +762,12 @@ struct ClipboardWallView: View {
                     LocalizedText(.clipboardTagRenameTitle).font(.headline)
                     tagNameField
                 case .confirmDelete(let tagID):
-                    Text(L(.clipboardTagDeletePrompt, ClipboardTagStore.shared.name(for: tagID) ?? ""))
+                    Text(
+                        L(
+                            .clipboardTagDeletePrompt,
+                            tagName(for: tagID)
+                        )
+                    )
                         .font(.callout)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -780,5 +798,13 @@ struct ClipboardWallView: View {
             .textFieldStyle(.roundedBorder)
             .focused($tagFieldFocused)
             .onAppear { tagFieldFocused = true }
+            // The flag survives the dialog it belongs to, so without this the
+            // second and every later dialog asks for focus it already claims,
+            // SwiftUI sees no change, and the field opens dead to the keyboard.
+            .onDisappear { tagFieldFocused = false }
+    }
+
+    private func tagName(for id: String) -> String {
+        state.presentation.tags.first { $0.id == id }?.displayName ?? ""
     }
 }

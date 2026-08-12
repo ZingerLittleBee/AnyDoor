@@ -15,7 +15,7 @@ enum PortActions {
 
     @MainActor
     static func copyToPasteboard(_ text: String) {
-        ClipboardWatcher.selfWrite(string: text)
+        ClipboardSelfWrites.write(string: text)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 

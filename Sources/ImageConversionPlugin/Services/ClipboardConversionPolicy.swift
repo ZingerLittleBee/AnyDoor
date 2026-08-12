@@ -26,14 +26,12 @@ enum ClipboardConversionPolicy {
         urls.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) ?? false }
     }
 
-    /// Load a payload into basket items: bitmaps enter in-memory (output →
+    /// Load a payload into basket items: bitmaps stay in memory (output →
     /// Downloads); file lists enter their image files as references (output →
-    /// beside the original). Nil when nothing loads — the stored bitmap is
-    /// gone, or no image file survives on disk.
+    /// beside the original). Nil when no image file survives on disk.
     static func basketItems(for payload: PluginClipboardPayload) -> [ImageConversionBasketItem]? {
         switch payload {
-        case .bitmap(let fileURL, let displayName):
-            guard let fileURL, let data = try? Data(contentsOf: fileURL) else { return nil }
+        case .bitmap(let data, let displayName):
             return [.bitmap(data, displayName: displayName)]
         case .files(let urls):
             let existing = imageFileURLs(from: urls)

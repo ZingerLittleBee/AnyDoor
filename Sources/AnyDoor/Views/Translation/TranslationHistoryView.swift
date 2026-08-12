@@ -254,7 +254,7 @@ struct TranslationHistoryView: View {
     /// `TranslationView.copy`: notes the self-write so AnyDoor's own clipboard
     /// history ignores it, then shows the success toast.
     private func copyTranslation(_ text: String) {
-        ClipboardWatcher.selfWrite(string: text)
+        ClipboardSelfWrites.write(string: text)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 

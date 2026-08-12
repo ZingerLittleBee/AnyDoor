@@ -1,167 +1,295 @@
+import ClipboardHistory
 import SwiftUI
 
-/// A clipboard-wall filter tab. `favorites` and `tag` cut across kinds, so
-/// they are their own cases rather than a `ClipboardHistoryKind`.
 enum ClipboardWallCategory: Hashable {
     case all
     case favorites
     case kind(ClipboardHistoryKind)
-    /// A user-defined category; the payload is the `ClipboardTag.id`.
     case tag(String)
 
-    /// L10n key for builtin tabs; nil for custom tags, whose free-form names
-    /// come from `ClipboardTagStore` instead.
     var titleKey: L10n.Key? {
         switch self {
-        case .all: return .clipboardCategoryAll
-        case .favorites: return .clipboardCategoryFavorites
-        case .kind(let kind): return kind.titleKey
-        case .tag: return nil
+        case .all:
+            return .clipboardCategoryAll
+        case .favorites:
+            return .clipboardCategoryFavorites
+        case .kind(let kind):
+            return kind.titleKey
+        case .tag:
+            return nil
         }
     }
 
-    /// The kind to narrow by; nil for the cross-kind tabs.
+    var facetFilter: ClipboardHistoryFacet? {
+        guard case .kind(let kind) = self else { return nil }
+        switch kind {
+        case .text, .ocr:
+            return .text
+        case .color:
+            return .color
+        case .qrcode:
+            return .qrCode
+        case .screenshot:
+            return .screenshot
+        case .image:
+            return .image
+        case .file:
+            return .file
+        }
+    }
+
     var kindFilter: ClipboardHistoryKind? {
         if case .kind(let kind) = self { return kind }
         return nil
     }
 
-    /// The tag id to narrow by; nil for builtin tabs.
     var tagFilter: String? {
         if case .tag(let id) = self { return id }
         return nil
     }
 
-    /// Stable string identity used to persist the user's tab order
-    /// (`ClipboardCategoryOrder`).
     var persistentID: String {
         switch self {
-        case .all: return "all"
-        case .favorites: return "favorites"
-        case .kind(let kind): return "kind:\(kind.rawValue)"
-        case .tag(let id): return "tag:\(id)"
+        case .all:
+            return "all"
+        case .favorites:
+            return "favorites"
+        case .kind(let kind):
+            return "kind:\(kind.rawValue)"
+        case .tag(let id):
+            return "tag:\(id)"
         }
     }
 }
 
-/// Observable view state for the clipboard wall: the active category tab, the
-/// search query, the rendered items, and the keyboard selection index. The
-/// window controller pushes items in (after querying the store) and reads the
-/// selection back on Enter.
 @MainActor
 @Observable
 final class ClipboardWallState {
-    var category: ClipboardWallCategory = .all
-    /// Optional source-app filter. This is deliberately independent from the
-    /// content search query so metadata never creates surprising text matches.
-    var sourceFilterBundleID: String?
-    /// The live search filter. Edited through the focusable `WallSearchField`
-    /// (a real NSTextField, so an input method editor can compose CJK text) when
-    /// in input mode; the controller also clears it on Esc.
-    var query: String = ""
-    /// Whether the search field currently owns keyboard focus (input mode). When
-    /// false the wall is in card-navigation mode: arrow keys move the selection,
-    /// Enter pastes, etc. Two-way: the controller and views write it to command
-    /// a mode switch (WallSearchField grabs/releases first responder to match),
-    /// and the field reports real focus changes (a mouse click into it, the
-    /// editor resigning) back into it — so the flag can never diverge from
-    /// where keys actually land.
-    var isSearchFocused: Bool = false
-    private(set) var items: [ClipboardHistoryItem] = []
-    private(set) var selectedIndex: Int = 0
+    let presentation: ClipboardHistoryPresentationModel
 
-    /// The in-wall tag dialog (create / rename / delete-confirm). Rendered as
-    /// an overlay by `ClipboardWallView`; the window controller routes Return
-    /// and Esc to commit/cancel while this is non-nil.
+    var category: ClipboardWallCategory = .all
+    var sourceFilterID: ClipboardHistorySourceID?
+    var query = ""
+    var isSearchFocused = false
+    private(set) var prefersInstantScroll = false
+
     enum TagDialog {
-        case create(item: ClipboardHistoryItem)
+        case create(entryID: ClipboardHistoryEntryID)
         case rename(tagID: String)
         case confirmDelete(tagID: String)
     }
+
     var tagDialog: TagDialog?
-    /// Backing text for the dialog's name field.
-    var tagDialogText: String = ""
+    var tagDialogText = ""
+    var isReorderModifierHeld = false
 
-    /// True while ⌘ is held, fed by the controller's flagsChanged monitor.
-    /// Gates the tab capsules' drag-to-reorder gesture so a plain drag in the
-    /// tab row never fights the row's horizontal scrolling or tab clicks.
-    var isReorderModifierHeld: Bool = false
+    private(set) var categories =
+        ClipboardWallState.order(tags: [])
+    private(set) var sourceMenuOpenToken = 0
 
-    /// One-stop dialog presenter: seeds the name field, releases search focus
-    /// (the overlay owns the keyboard), and raises the dialog.
-    func presentTagDialog(_ dialog: TagDialog, initialText: String = "") {
-        // A right-click tunneling through the dimmer must not swap an open
-        // dialog mid-flight.
+    /// How long typing has to settle before a search runs. Long enough to
+    /// swallow a burst of keystrokes, short enough not to read as lag.
+    private static let searchDebounce = Duration.milliseconds(150)
+
+    /// Injected so tests can drive the debounce with a fake clock instead of
+    /// sleeping for real. Production always gets `ContinuousClock`.
+    private let clock: any Clock<Duration>
+    private var searchTask: Task<Void, Never>?
+
+    init(
+        presentation: ClipboardHistoryPresentationModel,
+        clock: any Clock<Duration> = ContinuousClock()
+    ) {
+        self.presentation = presentation
+        self.clock = clock
+    }
+
+    var items: [ClipboardHistoryEntry] {
+        presentation.entries
+    }
+
+    var selectedItem: ClipboardHistoryEntry? {
+        presentation.selectedEntry
+    }
+
+    var selectedIndex: Int {
+        guard let selectedID = presentation.selectedID else { return 0 }
+        return items.firstIndex { $0.id == selectedID } ?? 0
+    }
+
+    /// Which "nothing here" line fits the current query. An untouched history,
+    /// a search that found nothing, and a filter that hides everything are three
+    /// different situations; one shared string leaves the user unable to tell
+    /// whether their query is wrong or their history is simply empty.
+    var emptyStateKey: L10n.Key {
+        if !query.isEmpty { return .clipboardEmptySearch }
+        if sourceFilterID != nil || category != .all {
+            return .clipboardEmptyFilter
+        }
+        return .clipboardEmpty
+    }
+
+    /// Which line explains a store the wall cannot read. This used to reuse
+    /// the per-item "cannot preview" string, which reads as one broken entry
+    /// rather than a whole history sitting behind a key the app cannot reach —
+    /// and says nothing about where the retry and reset actions live. A locked
+    /// keychain stays its own line because it is the one case the user fixes
+    /// outside AnyDoor, and it resolves on its own once unlocked.
+    var unavailableStateKey: L10n.Key {
+        guard case .unavailable(let reason) = presentation.contentState,
+            reason == .keychainLocked
+        else {
+            return .clipboardUnavailable
+        }
+        return .clipboardUnavailableKeychainLocked
+    }
+
+    var moduleQuery: ClipboardHistoryQuery {
+        ClipboardHistoryQuery(
+            text: query,
+            facet: category.facetFilter,
+            sourceID: sourceFilterID,
+            tagID: category.tagFilter,
+            favoritesOnly: category == .favorites
+        )
+    }
+
+    func reload() async {
+        if presentation.query == moduleQuery {
+            await presentation.reload()
+        } else {
+            await presentation.setQuery(moduleQuery)
+        }
+    }
+
+    func refreshQuery() async {
+        searchTask?.cancel()
+        searchTask = nil
+        await presentation.setQuery(moduleQuery)
+    }
+
+    /// A keystroke. Each search costs tens of milliseconds on the module actor
+    /// that also serves capture, and a run of keystrokes only ever wants the
+    /// last one, so typing coalesces into a single search.
+    ///
+    /// Clearing the field is exempt: it falls back to the unfiltered browse
+    /// query, which is cheap, and delaying it would just feel broken.
+    func queryTextDidChange() {
+        searchTask?.cancel()
+        guard !query.isEmpty else {
+            applyQuery()
+            return
+        }
+        searchTask = Task { [weak self, clock] in
+            try? await clock.sleep(for: Self.searchDebounce)
+            guard !Task.isCancelled, let self else { return }
+            await presentation.setQuery(moduleQuery)
+        }
+    }
+
+    /// A category or source click. Discrete and deliberate, so it applies
+    /// immediately — and it drops any keystroke still waiting, whose text is
+    /// already part of the query being applied.
+    func filtersDidChange() {
+        searchTask?.cancel()
+        applyQuery()
+    }
+
+    private func applyQuery() {
+        searchTask = Task { [weak self] in
+            guard let self else { return }
+            await presentation.setQuery(moduleQuery)
+        }
+    }
+
+    func awaitPendingSearchForTesting() async {
+        await searchTask?.value
+    }
+
+    func prefetchIfNeeded(visibleID: ClipboardHistoryEntryID) async {
+        await presentation.prefetchIfNeeded(visibleID: visibleID)
+    }
+
+    func presentTagDialog(
+        _ dialog: TagDialog,
+        initialText: String = ""
+    ) {
         guard tagDialog == nil else { return }
         tagDialogText = initialText
         isSearchFocused = false
         tagDialog = dialog
     }
 
-    /// Tab display order: All and Favorites, then the user's custom tags in
-    /// registry order, then the kind tabs.
-    static func order(tags: [ClipboardTag]) -> [ClipboardWallCategory] {
+    static func order(
+        tags: [ClipboardHistoryTagDefinition]
+    ) -> [ClipboardWallCategory] {
         [.all, .favorites]
             + tags.map { .tag($0.id) }
-            + [.kind(.text), .kind(.image), .kind(.file),
-               .kind(.screenshot), .kind(.color), .kind(.ocr), .kind(.qrcode)]
+            + [
+                .kind(.text),
+                .kind(.image),
+                .kind(.file),
+                .kind(.screenshot),
+                .kind(.color),
+                .kind(.ocr),
+                .kind(.qrcode),
+            ]
     }
-
-    /// The current tab order; the view pushes a fresh order in whenever the
-    /// tag registry changes. Kept on the state so Tab-cycling is testable.
-    private(set) var categories: [ClipboardWallCategory] = ClipboardWallState.order(tags: [])
 
     func setCategories(_ order: [ClipboardWallCategory]) {
         guard order != categories else { return }
         categories = order
-        // The active tag may have just been deleted; never strand the wall on
-        // a tab that no longer exists.
-        if !order.contains(category) { category = .all }
+        if !order.contains(category) {
+            category = .all
+        }
     }
 
-    func setItems(_ newItems: [ClipboardHistoryItem]) {
-        items = newItems
-        selectedIndex = min(selectedIndex, max(0, newItems.count - 1))
-        if newItems.isEmpty { selectedIndex = 0 }
+    func moveLeft() {
+        prefersInstantScroll = false
+        presentation.moveSelection(by: -1)
     }
 
-    var selectedItem: ClipboardHistoryItem? {
-        guard items.indices.contains(selectedIndex) else { return nil }
-        return items[selectedIndex]
+    func moveRight() {
+        prefersInstantScroll = false
+        presentation.moveSelection(by: 1)
     }
 
-    /// When true the next selection change scrolls instantly instead of
-    /// animating — set by the jump-to-ends commands (⌘← / ⌘→) so a long jump
-    /// gives instant feedback rather than a multi-frame scroll animation across
-    /// the whole list. The single-step moves reset it.
-    private(set) var prefersInstantScroll = false
-
-    func moveLeft() { prefersInstantScroll = false; selectedIndex = max(0, selectedIndex - 1) }
-    func moveRight() { prefersInstantScroll = false; selectedIndex = min(max(0, items.count - 1), selectedIndex + 1) }
     func select(_ index: Int) {
-        if items.indices.contains(index) { prefersInstantScroll = false; selectedIndex = index }
+        guard items.indices.contains(index) else { return }
+        prefersInstantScroll = false
+        presentation.select(items[index].id)
     }
 
-    /// Jump the selection to the first / last card (⌘← / ⌘→); scrolls instantly.
-    func moveToStart() { prefersInstantScroll = true; selectedIndex = 0 }
-    func moveToEnd() { prefersInstantScroll = true; selectedIndex = max(0, items.count - 1) }
+    func moveToStart() {
+        prefersInstantScroll = true
+        presentation.moveSelectionToStart()
+    }
+
+    func moveToEnd() {
+        prefersInstantScroll = true
+        presentation.moveSelectionToEnd()
+    }
 
     func clearSourceFilter() {
-        sourceFilterBundleID = nil
+        sourceFilterID = nil
     }
 
-    /// Bumped to ask the wall to open the source-filter menu from the keyboard
-    /// shortcut (⌘K). `ClipboardWallView` watches this and pops the native menu.
-    private(set) var sourceMenuOpenToken = 0
-    func requestOpenSourceMenu() { sourceMenuOpenToken += 1 }
+    func requestOpenSourceMenu() {
+        sourceMenuOpenToken += 1
+    }
 
-    /// Cycle the active category tab (Tab / Shift-Tab), wrapping at both ends.
-    func selectNextCategory() { stepCategory(by: 1) }
-    func selectPreviousCategory() { stepCategory(by: -1) }
+    func selectNextCategory() {
+        stepCategory(by: 1)
+    }
+
+    func selectPreviousCategory() {
+        stepCategory(by: -1)
+    }
 
     private func stepCategory(by delta: Int) {
-        let order = categories
-        let current = order.firstIndex(of: category) ?? 0
-        category = order[(current + delta + order.count) % order.count]
+        let current = categories.firstIndex(of: category) ?? 0
+        category = categories[
+            (current + delta + categories.count) % categories.count
+        ]
     }
 }

@@ -9,7 +9,7 @@ actor ClearClipboardProvider: ActionProvider {
 
     func run() async throws {
         await MainActor.run {
-            ClipboardWatcher.selfWrite { ClipboardActions.clear($0) }
+            ClipboardSelfWrites.perform { ClipboardActions.clear($0) }
             ToastPresenter.shared.show(.success(L(.toastClipboardCleared)))
         }
     }

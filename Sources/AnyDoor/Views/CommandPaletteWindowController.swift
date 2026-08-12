@@ -17,6 +17,18 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
     private weak var searchAnchor: CommandPaletteSearchAnchorView?
     private var keyMonitor: Any?
     private var isClosing = false
+    /// Who had focus before the palette activated AnyDoor, so dismissal can
+    /// hand it back — the same contract `ClipboardWallWindowController` keeps.
+    /// Without it AnyDoor stays frontmost after a command runs, and anything
+    /// that acts on the user's app (translating the selected text, say) reads
+    /// the palette's own empty selection instead of theirs.
+    /// Held strongly: `NSWorkspace.frontmostApplication` hands back an object
+    /// nobody else retains, so a weak reference here is nil by the time the
+    /// palette closes.
+    private var previousApp: NSRunningApplication?
+    /// False only when focus already moved elsewhere on its own (a click in
+    /// another app), where reactivating would snatch it back.
+    private var restoresFocusOnClose = true
     /// State retained across a close while the user sat on a plugin surface (a
     /// pushed list or Detail), so the next plain open resumes there — hiding
     /// the palette mid-read must not reset a v2ex post back to the root.
@@ -233,6 +245,13 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         layoutSearchField()
 
         restorePosition()
+        if let front = NSWorkspace.shared.frontmostApplication,
+            front.processIdentifier
+                != NSRunningApplication.current.processIdentifier
+        {
+            previousApp = front
+        }
+        restoresFocusOnClose = true
         activationGate.presentWhenActive(prepareForActivation: { [weak self, weak pickerState] in
             guard let self, let pickerState, self.state === pickerState else { return }
             self.window?.orderFrontRegardless()
@@ -694,7 +713,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             Task { await PanelStore.shared.run(item) }
         case .copyToClipboard(let text, let toast):
             close()
-            ClipboardWatcher.selfWrite(string: text)
+            ClipboardSelfWrites.write(string: text)
             switch toast {
             case .calc(let display):
                 ToastPresenter.shared.show(.success(L(.toastCalcCopied, display)))
@@ -946,8 +965,29 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         isClosing = true
         savePosition()
         resetPresentation()
+        if restoresFocusOnClose { restoreFocusToPreviousApp() }
+        previousApp = nil
+        restoresFocusOnClose = true
         super.close()
         isClosing = false
+    }
+
+    /// Hands activation back to whoever the palette took it from. Plain
+    /// `NSRunningApplication.activate()` is silently ignored on macOS 14+ when
+    /// the caller is the active app, so use the handoff API meant for it, and
+    /// fall back to hiding AnyDoor — which yields activation to the app behind
+    /// it — when even that is refused.
+    private func restoreFocusToPreviousApp() {
+        guard let previousApp, !previousApp.isTerminated else { return }
+        _ = previousApp.activate(from: .current)
+        // The handoff reports success even when the system defers it, and an
+        // accessory app that keeps activation this way stays frontmost with no
+        // windows at all. Hiding is what actually yields it — safe here only
+        // while nothing else of ours is on screen.
+        let hasOtherWindows = NSApp.windows.contains {
+            $0.isVisible && $0 !== window
+        }
+        if !hasOtherWindows { NSApp.hide(nil) }
     }
 
     private func resetPresentation() {
@@ -975,8 +1015,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         savePosition()
     }
 
-    /// Close when focus moves away (Spotlight UX).
+    /// Close when focus moves away (Spotlight UX). That click already chose the
+    /// next app, so do not drag focus back to where the palette came from.
     func windowDidResignKey(_ notification: Notification) {
+        restoresFocusOnClose = false
         close()
     }
 }

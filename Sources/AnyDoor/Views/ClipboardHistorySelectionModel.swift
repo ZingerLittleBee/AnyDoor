@@ -1,14 +1,15 @@
 import Foundation
+import ClipboardHistory
 import Observation
 
 @MainActor
 @Observable
 final class ClipboardHistorySelectionModel {
-    private var orderedIDs: [UUID] = []
-    private(set) var selectedID: UUID?
-    private(set) var previewedID: UUID?
+    private var orderedIDs: [ClipboardHistoryEntryID] = []
+    private(set) var selectedID: ClipboardHistoryEntryID?
+    private(set) var previewedID: ClipboardHistoryEntryID?
 
-    func replaceItems(_ ids: [UUID]) {
+    func replaceItems(_ ids: [ClipboardHistoryEntryID]) {
         orderedIDs = ids
         if let selectedID, ids.contains(selectedID) {
             return
@@ -17,7 +18,7 @@ final class ClipboardHistorySelectionModel {
         previewedID = nil
     }
 
-    func select(_ id: UUID) {
+    func select(_ id: ClipboardHistoryEntryID) {
         guard orderedIDs.contains(id) else { return }
         selectedID = id
     }

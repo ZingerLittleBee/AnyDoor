@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import ClipboardHistory
 import SwiftData
 
 /// Outcome of an import, surfaced to the UI.
@@ -17,6 +18,9 @@ struct ImportSummary: Equatable {
 /// `UserDefaults` so it is fully testable with an in-memory container.
 @MainActor
 final class BackupService {
+    private static var reconcileClipboardHistory:
+        @MainActor () async throws -> Void = {}
+
     private let context: ModelContext
     private let defaults: UserDefaults
     private let appPathResolver: (String) -> String?
@@ -38,6 +42,18 @@ final class BackupService {
         self.defaults = defaults
         self.appPathResolver = appPathResolver
         self.reconcileRuntime = reconcileRuntime
+    }
+
+    static func configureClipboardHistoryRuntime(
+        module: ClipboardHistoryModule,
+        lifecycle: ClipboardHistoryLifecycle
+    ) {
+        reconcileClipboardHistory = {
+            try await ClipboardHistoryPortableSettings.reconcile(
+                module: module
+            )
+            await lifecycle.refreshMonitoringConfiguration()
+        }
     }
 
     // MARK: - Export
@@ -205,6 +221,11 @@ final class BackupService {
         ScheduledShutdownService.shared.reloadFromDefaults()
         CaptureSettings.shared.reloadFromDefaults()
         TranslationSettings.shared.reloadFromDefaults()
+        // Both reconcilers are best-effort across every requested transition:
+        // a failure must not skip the remaining live refreshes below, or an
+        // import would silently leave quicklinks, panel rows, and hotkeys
+        // stale. Failures are collected and rethrown once everything else has
+        // converged.
         let pluginError: (any Error)?
         do {
             try await PluginRegistry.shared.reconcileAfterImport()
@@ -212,19 +233,22 @@ final class BackupService {
         } catch {
             pluginError = error
         }
-        ClipboardTagStore.shared.reload()
-        // An import may remove tag definitions, leaving items tagged with ids
-        // that no longer exist. Sweep those ghost ids and reclaim storage.
-        await ClipboardHistoryStore.shared.cleanUpUnknownTags(
-            validIDs: Set(ClipboardTagStore.shared.tags.map(\.id))
-        )
-        await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: true)
+        let clipboardHistoryError: (any Error)?
+        do {
+            try await reconcileClipboardHistory()
+            clipboardHistoryError = nil
+        } catch {
+            clipboardHistoryError = error
+        }
         QuicklinkStore.shared.rebuild()
         PanelStore.shared.rebuild()
         HotkeyCoordinator.shared.refresh()
 
         if let pluginError {
             throw pluginError
+        }
+        if let clipboardHistoryError {
+            throw clipboardHistoryError
         }
     }
 

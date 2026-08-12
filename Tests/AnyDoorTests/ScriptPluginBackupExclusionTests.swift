@@ -44,7 +44,11 @@ final class ScriptPluginBackupExclusionTests: XCTestCase {
     @MainActor
     func testExportedSnapshotNeverContainsScriptInstallState() throws {
         let container = try ModelContainer(
-            for: Schema([KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self, Quicklink.self]),
+            for: Schema([
+                KeyBinding.self,
+                BuiltinPreference.self,
+                Quicklink.self,
+            ]),
             configurations: ModelConfiguration(isStoredInMemoryOnly: true, allowsSave: true)
         )
         let context = ModelContext(container)

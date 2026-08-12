@@ -16,7 +16,20 @@ APP_DIR := /Applications/$(APP_BUNDLE)
 BINARY := .build/release/$(APP_NAME)
 RESOURCE_BUNDLE := .build/release/$(APP_NAME)_$(APP_NAME).bundle
 
+# Signs with SIGNING_IDENTITY (.env) when the certificate is present. An ad-hoc
+# signature has no team, so the app's designated requirement collapses to its
+# cdhash -- which changes on every rebuild, and macOS then reads the reinstalled
+# app as a different app: Accessibility and Screen Recording grants are dropped
+# and Keychain ACLs stop matching. A Developer ID signature keeps the identity
+# stable across rebuilds, so the grants survive. Ad hoc remains the fallback.
+#
+# The install itself replaces the bundle rather than copying over it: macOS
+# guards a signed app's executable behind the App Management permission, so
+# `cp` onto the running layout fails with "Operation not permitted" unless the
+# calling terminal happens to hold that grant. Removing first needs no grant,
+# and the bundle is fully reconstructed below anyway.
 install: swift-release
+	@rm -rf $(APP_DIR)
 	@mkdir -p $(APP_DIR)/Contents/MacOS
 	@mkdir -p $(APP_DIR)/Contents/Resources
 	@mkdir -p $(APP_DIR)/Contents/Frameworks
@@ -33,14 +46,35 @@ install: swift-release
 	  .build/release/PackageFrameworks/Sparkle.framework; do \
 	  if [ -d "$$cand" ]; then SPARKLE_FW="$$cand"; break; fi; \
 	done; \
-	if [ -n "$$SPARKLE_FW" ]; then \
-	  rm -rf $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
-	  ditto "$$SPARKLE_FW" $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
-	fi
+	if [ -z "$$SPARKLE_FW" ]; then echo "Missing Sparkle.framework" >&2; exit 1; fi; \
+	rm -rf $(APP_DIR)/Contents/Frameworks/Sparkle.framework; \
+	ditto "$$SPARKLE_FW" $(APP_DIR)/Contents/Frameworks/Sparkle.framework
+	@SQLCIPHER_FW=""; for cand in \
+	  .build/release/SQLCipher.framework \
+	  .build/release/PackageFrameworks/SQLCipher.framework \
+	  .build/artifacts/sqlcipher.swift/SQLCipher/SQLCipher.xcframework/macos-arm64_x86_64/SQLCipher.framework; do \
+	  if [ -d "$$cand" ]; then SQLCIPHER_FW="$$cand"; break; fi; \
+	done; \
+	if [ -z "$$SQLCIPHER_FW" ]; then echo "Missing SQLCipher.framework" >&2; exit 1; fi; \
+	rm -rf $(APP_DIR)/Contents/Frameworks/SQLCipher.framework; \
+	ditto "$$SQLCIPHER_FW" $(APP_DIR)/Contents/Frameworks/SQLCipher.framework
 	@if ! otool -l $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -A2 LC_RPATH | grep -q "@executable_path/../Frameworks"; then \
 	  install_name_tool -add_rpath "@executable_path/../Frameworks" $(APP_DIR)/Contents/MacOS/$(APP_NAME); \
 	fi
-	@codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 || true
+	@otool -L $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -q '@rpath/SQLCipher.framework/Versions/A/SQLCipher'
+	@if otool -L $(APP_DIR)/Contents/MacOS/$(APP_NAME) | grep -q '/usr/lib/libsqlite3'; then \
+	  echo "AnyDoor must not bind the system SQLite library" >&2; exit 1; \
+	fi
+	@bash -lc '$(LOAD_ENV); \
+	  if [[ -n "$${SIGNING_IDENTITY:-}" ]] \
+	    && security find-identity -v -p codesigning \
+	      | grep -q "$$SIGNING_IDENTITY"; then \
+	    codesign --force --deep --sign "$$SIGNING_IDENTITY" $(APP_DIR) \
+	      >/dev/null 2>&1 && echo "Signed as $$SIGNING_IDENTITY"; \
+	  else \
+	    codesign --force --deep --sign - $(APP_DIR) >/dev/null 2>&1 \
+	      && echo "Signed ad hoc; system permissions need re-granting"; \
+	  fi'
 	@touch $(APP_DIR)
 	@echo "Installed $(APP_DIR)"
 

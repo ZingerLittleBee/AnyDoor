@@ -66,7 +66,7 @@ final class ScriptPluginRegistry {
                 case .failure(let message): ToastPresenter.shared.show(.failure(message))
                 }
             },
-            writePasteboard: { text in ClipboardWatcher.selfWrite(string: text) },
+            writePasteboard: { text in ClipboardSelfWrites.write(string: text) },
             openURL: { url in NSWorkspace.shared.open(url) },
             translate: { text in try await PluginTranslator.translate(text) }
         )

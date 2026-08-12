@@ -1,8 +1,8 @@
 import AppKit
+import ClipboardHistory
 import PluginInterface
 import PluginSupport
 import QuartzCore
-import SwiftData
 import SwiftUI
 
 /// Bottom, full-width overlay that hosts the clipboard card wall. Summoned by
@@ -12,15 +12,18 @@ import SwiftUI
 final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate {
     static let shared = ClipboardWallWindowController()
 
-    /// The shared SwiftData container, injected by AppDelegate. Needed so the
-    /// wall's @Query observes the same context the watcher writes to.
-    var modelContainer: ModelContainer?
-
-    private let state = ClipboardWallState()
-    /// Rebuilt fresh on every show. Reusing it across opens breaks SwiftUI
-    /// reactivity — a reused host that was ordered out does not re-subscribe to
-    /// its @Query/@Observable sources, so new captures only appeared after a tab
-    /// switch forced a body re-evaluation. A LazyHStack keeps the rebuild cheap.
+    private var configuredState: ClipboardWallState?
+    private var clipboardHistoryLifecycle: ClipboardHistoryLifecycle?
+    private var state: ClipboardWallState {
+        guard let configuredState else {
+            preconditionFailure(
+                "ClipboardWallWindowController must be configured before use"
+            )
+        }
+        return configuredState
+    }
+    /// Rebuilt fresh on every show so an ordered-out host cannot retain stale
+    /// observation state. A LazyHStack keeps the rebuild cheap.
     private var hostingView: NSHostingView<AnyView>?
     /// The wall's search field, published by `WallSearchField`. Held so the key
     /// monitor can make it first responder synchronously for type-to-focus.
@@ -29,6 +32,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private var scrollMonitor: Any?
     private var flagsMonitor: Any?
     private var globalMouseMonitor: Any?
+    private var previewTask: Task<Void, Never>?
     /// Accumulated scroll delta; selection advances each time it crosses a step.
     private var scrollAccum: CGFloat = 0
     private static let scrollStep: CGFloat = 40
@@ -47,8 +51,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private var isAnimating = false
     private static let panelHeight: CGFloat = 325
     private static let animationDuration: TimeInterval = 0.22
-
-    private var historyDirectory: URL { ClipboardHistoryStore.defaultHistoryDirectory() }
 
     private init() {
         let panel = ClipboardWallPanel(
@@ -79,8 +81,19 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    func configure(
+        module: ClipboardHistoryModule,
+        lifecycle: ClipboardHistoryLifecycle
+    ) {
+        guard configuredState == nil else { return }
+        configuredState = ClipboardWallState(
+            presentation: ClipboardHistoryPresentationModel(module: module)
+        )
+        clipboardHistoryLifecycle = lifecycle
+    }
+
     func toggle() {
-        guard !isAnimating else { return }
+        guard configuredState != nil, !isAnimating else { return }
         // The wall hotkey while the editor is up steps the editor down first
         // (dirty-checked) instead of silently tearing the whole stack down.
         if ClipboardTextWindow.shared.isEditing {
@@ -96,6 +109,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // category tab or search term.
         state.category = .all
         state.query = ""
+        state.sourceFilterID = nil
         // Open in card-navigation mode (search field unfocused); typing focuses
         // it. Reset here so a prior session's focus state never leaks in.
         state.isSearchFocused = false
@@ -105,10 +119,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // Seed from the live flags: ⌥ may already be held when the wall opens,
         // and the monitor only reports subsequent changes.
         state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.option)
-        // Force the watcher to capture immediately so content copied just before
-        // opening shows up now, rather than after the next ~0.5s poll tick. The
-        // @Query-backed view re-renders on its own once the store changes.
-        Task { await ClipboardWatcher.shared?.poll() }
         installHostingView()
         installMonitors()
         // Preview → editor handoff ("e" key / the preview header's edit
@@ -151,10 +161,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         }, completionHandler: { [weak self] in
             MainThreadIsolation.run { self?.isAnimating = false }
         })
-
-        // Enforce retention off the critical path; the @Query view reflects any
-        // resulting deletions automatically.
-        Task { await ClipboardHistoryStore.shared.pruneExpiredAndOverflow(force: false) }
     }
 
     /// Slide the panel down off-screen, then close it. When `restoreFocus` is
@@ -169,7 +175,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             completion?()
             return
         }
-        if restoreFocus { previousApp?.activate() }
+        if restoreFocus { restorePreviousApplicationFocus() }
         let bounds = screen.frame
         let height = window.frame.height
         let offScreen = NSRect(x: bounds.minX, y: bounds.minY - height,
@@ -188,49 +194,70 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         })
     }
 
-    /// The wall content, with the shared SwiftData container injected so its
-    /// @Query observes the same context the watcher writes to. Wrapped in AnyView
-    /// because `.modelContainer` changes the concrete view type.
+    /// Restore the app that owned keyboard focus before the wall opened.
+    /// `NSRunningApplication.activate()` is ignored in this situation on
+    /// macOS 14+, because AnyDoor is an accessory app. Launch Services is
+    /// allowed to honor the user-initiated focus transfer before we synthesize
+    /// Command-V.
+    private func restorePreviousApplicationFocus() {
+        guard let previousApp, !previousApp.isActive else { return }
+        guard let bundleURL = previousApp.bundleURL else {
+            previousApp.activate()
+            return
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(
+            at: bundleURL,
+            configuration: configuration
+        ) { _, _ in }
+    }
+
     private func makeWallView() -> AnyView {
         let view = ClipboardWallView(
             state: state,
-            historyDirectory: historyDirectory,
             onSelect: { [weak self] item, plain in self?.paste(item, plain: plain) },
-            onToggleFavorite: { item in
-                Task { await ClipboardHistoryStore.shared.toggleFavorite(item) }
+            onToggleFavorite: { [weak self] item in
+                self?.performMutation(
+                    .setFavorite(item.id, !item.isFavorite)
+                )
             },
             onEdit: { [weak self] item in self?.beginEdit(item) },
             onCopy: { [weak self] item in self?.copyWithoutPasting(item) },
-            onPluginAction: { [weak self] item, owner, action in
-                self?.performPluginAction(action, owner: owner, on: item)
+            onPluginAction: { [weak self] owner, action, payload in
+                self?.performPluginAction(
+                    action,
+                    owner: owner,
+                    payload: payload
+                )
             },
             onRevealInFinder: { [weak self] item in self?.revealInFinder(item) },
-            onDelete: { item in
-                Task { await ClipboardHistoryStore.shared.delete(item) }
+            onDelete: { [weak self] item in
+                self?.performMutation(.delete(item.id))
             },
-            onToggleTag: { item, tagID in
-                Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tagID) }
+            onToggleTag: { [weak self] item, tagID in
+                var tagIDs = item.tagIDs
+                if !tagIDs.insert(tagID).inserted {
+                    tagIDs.remove(tagID)
+                }
+                self?.performMutation(.setTags(item.id, tagIDs))
             },
             onNewTag: { [weak self] item in
                 // A floating preview must not stay over the modal overlay,
                 // but a dirty editor resolves its discard prompt first.
                 ClipboardQuickLookWindow.shared.close()
                 guard ClipboardTextWindow.shared.yieldToModal() else { return }
-                self?.state.presentTagDialog(.create(item: item))
+                self?.state.presentTagDialog(.create(entryID: item.id))
             },
             onIgnoreSource: { [weak self] item in self?.ignoreSource(item) },
             onTagDialogCommit: { [weak self] in self?.commitTagDialog() },
             onTagDialogCancel: { [weak self] in self?.cancelTagDialog() },
             registerSearchField: { [weak self] field in self?.searchField = field }
         )
-        if let modelContainer {
-            return AnyView(view.modelContainer(modelContainer))
-        }
         return AnyView(view)
     }
 
-    /// Build and install a fresh SwiftUI host. The view is @Query-backed, so a
-    /// fresh host re-subscribes and re-renders on store changes on every open.
+    /// Build and install a fresh SwiftUI host on every open.
     private func installHostingView() {
         let host = NSHostingView(rootView: makeWallView())
         host.frame = window?.contentLayoutRect ?? .zero
@@ -431,7 +458,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             if let item = state.selectedItem {
                 // The preview would otherwise keep showing the deleted item.
                 closePreviews()
-                Task { await ClipboardHistoryStore.shared.delete(item) }
+                performMutation(.delete(item.id))
             }
             return true
         default:
@@ -533,20 +560,42 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         return characters.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
     }
 
-    private func paste(_ item: ClipboardHistoryItem, plain: Bool) {
-        if !ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) {
-            ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
-            return
-        }
-        ClipboardWatcher.selfWrite { pb in
-            ClipboardPasteService.writePayload(for: item, asPlainText: plain, to: pb, historyDirectory: historyDirectory)
-        }
-        // Slide out first; reactivating the prior app returns focus there, so
-        // the synthesized ⌘V lands in it rather than on our panel.
-        dismiss(restoreFocus: true) { [copyOnly = ClipboardPreferences.copyOnly] in
-            guard !copyOnly else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                ClipboardPasteService.synthesizePaste()
+    private func paste(
+        _ entry: ClipboardHistoryEntry,
+        plain: Bool
+    ) {
+        Task {
+            let purpose: ClipboardHistoryMaterializationPurpose =
+                plain ? .plainTextPaste : .normalPaste
+            guard let materialization =
+                await state.presentation.materialization(
+                    for: entry.id,
+                    purpose: purpose,
+                    usesCache: false
+                )
+            else {
+                presentActionFailure()
+                return
+            }
+            do {
+                try ClipboardSelfWrites.perform { pasteboard in
+                    try ClipboardHistoryPasteService.write(
+                        materialization,
+                        to: pasteboard
+                    )
+                }
+            } catch {
+                ClipboardHistoryActionFailurePresenter.present(.unknown)
+                return
+            }
+            // Slide out first; reactivating the prior app returns focus there,
+            // so the synthesized Command-V lands in it rather than on our panel.
+            dismiss(restoreFocus: true) {
+                [copyOnly = ClipboardPreferences.copyOnly] in
+                guard !copyOnly else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    ClipboardHistoryPasteService.synthesizePaste()
+                }
             }
         }
     }
@@ -556,24 +605,59 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// "Edit" from a card's context menu: open the floating text editor. The
     /// wall stays open behind it (windowDidResignKey exempts the text panel);
     /// key status returns to the wall when the editor closes.
-    private func beginEdit(_ item: ClipboardHistoryItem) {
-        guard item.historyKind?.isTextBearing == true else { return }
-        ClipboardTextWindow.shared.showEditor(item: item) { [weak self] in
-            self?.window?.makeKey()
+    private func beginEdit(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let materialization =
+                await state.presentation.materialization(
+                    for: entry.id,
+                    purpose: .hostAction
+                ),
+                let text = materialization.editableText
+            else {
+                presentActionFailure()
+                return
+            }
+            ClipboardTextWindow.shared.showEditor(
+                entry: entry,
+                text: text,
+                onSave: { [weak self] text in
+                    self?.performMutation(.editText(entry.id, text))
+                },
+                onClose: { [weak self] in
+                    self?.window?.makeKey()
+                }
+            )
         }
     }
 
     /// "Copy" from a card's context menu: write the payload to the pasteboard
     /// without pasting or dismissing the wall.
-    private func copyWithoutPasting(_ item: ClipboardHistoryItem) {
-        guard ClipboardPasteService.canPaste(item, historyDirectory: historyDirectory) else {
-            ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
-            return
+    private func copyWithoutPasting(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let materialization =
+                await state.presentation.materialization(
+                    for: entry.id,
+                    purpose: .normalPaste,
+                    usesCache: false
+                )
+            else {
+                presentActionFailure()
+                return
+            }
+            do {
+                try ClipboardSelfWrites.perform { pasteboard in
+                    try ClipboardHistoryPasteService.write(
+                        materialization,
+                        to: pasteboard
+                    )
+                }
+                ToastPresenter.shared.show(
+                    .success(L(.toastCopiedToClipboard))
+                )
+            } catch {
+                ClipboardHistoryActionFailurePresenter.present(.unknown)
+            }
         }
-        ClipboardWatcher.selfWrite { pb in
-            ClipboardPasteService.writePayload(for: item, asPlainText: false, to: pb, historyDirectory: historyDirectory)
-        }
-        ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
     }
 
     /// ⌘C in the read-only preview: copy the current text selection to the
@@ -582,13 +666,190 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private func copyPreviewSelection() {
         guard let selection = ClipboardTextWindow.shared.selectedPreviewText(),
               !selection.isEmpty else {
-            if let item = ClipboardTextWindow.shared.previewedItem {
-                copyWithoutPasting(item)
+            if let entry = ClipboardTextWindow.shared.previewedEntry {
+                copyWithoutPasting(entry)
             }
             return
         }
-        ClipboardWatcher.selfWrite(string: selection)
+        ClipboardSelfWrites.write(string: selection)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+
+    /// `apply` already patches the loaded page (and refetches itself when the
+    /// mutation can change page membership), so this must not reload on top of
+    /// it — that would snap a deep scroll position back to the first page after
+    /// every delete or favourite toggle.
+    private func performMutation(_ mutation: ClipboardHistoryMutation) {
+        Task {
+            await state.presentation.apply(mutation)
+            if state.presentation.actionFailure != nil {
+                presentActionFailure()
+            }
+        }
+    }
+
+    private func presentActionFailure() {
+        if case .fileCollectionRequiresRestore(
+            let entryID,
+            let ownedCount,
+            _
+        ) = state.presentation.actionFailure,
+            ownedCount > 0
+        {
+            Task { await restoreLegacyFiles(for: entryID) }
+            return
+        }
+        ClipboardHistoryActionFailurePresenter.present(
+            state.presentation.actionFailure
+        )
+    }
+
+    private func restoreLegacyFiles(
+        for entryID: ClipboardHistoryEntryID
+    ) async {
+        guard let plan =
+            await state.presentation.legacyFileRestorePlan(for: entryID),
+            !plan.ownedMembers.isEmpty
+        else {
+            ClipboardHistoryActionFailurePresenter.present(
+                state.presentation.actionFailure
+            )
+            return
+        }
+        guard let destinations = chooseRestoreDestinations(for: plan) else {
+            return
+        }
+        await performRestore(plan: plan, destinations: destinations)
+    }
+
+    private func chooseRestoreDestinations(
+        for plan: ClipboardHistoryLegacyFileRestorePlan
+    ) -> [ClipboardHistoryLegacyFileDestination]? {
+        if plan.ownedMembers.count == 1,
+            let member = plan.ownedMembers.first
+        {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = member.suggestedName
+            panel.title = L(.clipboardRestoreFile)
+            guard panel.runModal() == .OK, let url = panel.url else {
+                return nil
+            }
+            return [
+                ClipboardHistoryLegacyFileDestination(
+                    memberID: member.id,
+                    url: url
+                )
+            ]
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = L(.clipboardRestoreFiles)
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        guard panel.runModal() == .OK, let directory = panel.url else {
+            return nil
+        }
+        var usedNames = Set<String>()
+        return plan.ownedMembers.map { member in
+            let name = uniqueRestoreName(
+                member.suggestedName,
+                usedNames: &usedNames
+            )
+            return ClipboardHistoryLegacyFileDestination(
+                memberID: member.id,
+                url: directory.appendingPathComponent(name)
+            )
+        }
+    }
+
+    private func uniqueRestoreName(
+        _ suggestedName: String,
+        usedNames: inout Set<String>
+    ) -> String {
+        let safeName = URL(fileURLWithPath: suggestedName)
+            .lastPathComponent
+        let initial = safeName.isEmpty ? "Restored File" : safeName
+        guard !usedNames.contains(initial) else {
+            let url = URL(fileURLWithPath: initial)
+            let stem = url.deletingPathExtension().lastPathComponent
+            let ext = url.pathExtension
+            var suffix = 2
+            while true {
+                let candidate = ext.isEmpty
+                    ? "\(stem) \(suffix)"
+                    : "\(stem) \(suffix).\(ext)"
+                if usedNames.insert(candidate).inserted {
+                    return candidate
+                }
+                suffix += 1
+            }
+        }
+        usedNames.insert(initial)
+        return initial
+    }
+
+    private func performRestore(
+        plan: ClipboardHistoryLegacyFileRestorePlan,
+        destinations: [ClipboardHistoryLegacyFileDestination]
+    ) async {
+        let existing = destinations.filter {
+            FileManager.default.fileExists(atPath: $0.url.path)
+        }
+        var effectiveDestinations = destinations
+        if !existing.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = L(.clipboardRestoreCollisionTitle)
+            alert.informativeText = L(.clipboardRestoreCollisionMessage)
+            alert.alertStyle = .warning
+            alert.addButton(
+                withTitle: L(.clipboardRestoreReuseIdentical)
+            )
+            alert.addButton(
+                withTitle: L(.clipboardRestoreChooseAnother)
+            )
+            alert.addButton(withTitle: L(.settingsPanelCancel))
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                let existingURLs = Set(existing.map(\.url))
+                effectiveDestinations = destinations.map { destination in
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: destination.memberID,
+                        url: destination.url,
+                        collisionPolicy:
+                            existingURLs.contains(destination.url)
+                            ? .reuseIfIdentical
+                            : .failIfExists
+                    )
+                }
+            case .alertSecondButtonReturn:
+                guard let replacement =
+                    chooseRestoreDestinations(for: plan)
+                else {
+                    return
+                }
+                await performRestore(
+                    plan: plan,
+                    destinations: replacement
+                )
+                return
+            default:
+                return
+            }
+        }
+
+        let request = ClipboardHistoryLegacyFileRestoreRequest(
+            entryID: plan.entryID,
+            destinations: effectiveDestinations
+        )
+        if await state.presentation.restoreLegacyOwnedFiles(request) {
+            await state.presentation.reload()
+        } else {
+            ClipboardHistoryActionFailurePresenter.present(
+                state.presentation.actionFailure
+            )
+        }
     }
 
     /// A plugin-contributed action from a card's context menu, routed back
@@ -599,11 +860,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private func performPluginAction(
         _ action: PluginClipboardAction,
         owner: NativePluginID,
-        on item: ClipboardHistoryItem
+        payload: PluginClipboardPayload
     ) {
-        guard let payload = ClipboardPluginPayloadMapper.payload(
-            for: item, historyDirectory: historyDirectory
-        ) else { return }
         let context = PluginClipboardActionContext(dismissHistoryWindow: { [weak self] then in
             guard let self else {
                 then()
@@ -626,60 +884,86 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// original path; falls back to the stored copy when the original is gone.
     /// Activating Finder resigns the wall's key status and dismisses it, which
     /// is fine — the user is leaving for Finder anyway.
-    private func revealInFinder(_ item: ClipboardHistoryItem) {
-        let fm = FileManager.default
-        let urls = item.files.compactMap { entry -> URL? in
-            if fm.fileExists(atPath: entry.originalPath) {
-                return URL(fileURLWithPath: entry.originalPath)
+    private func revealInFinder(_ entry: ClipboardHistoryEntry) {
+        Task {
+            guard let materialization =
+                await state.presentation.materialization(
+                    for: entry.id,
+                    purpose: .hostAction,
+                    usesCache: false
+                )
+            else {
+                presentActionFailure()
+                return
             }
-            if let stored = entry.storedName {
-                let copy = historyDirectory.appendingPathComponent(stored)
-                if fm.fileExists(atPath: copy.path) { return copy }
+            let urls = materialization.fileURLs
+            guard !urls.isEmpty else {
+                ClipboardHistoryActionFailurePresenter.present(
+                    .operationUnavailable
+                )
+                return
             }
-            return nil
+            NSWorkspace.shared.activateFileViewerSelecting(urls)
         }
-        guard !urls.isEmpty else {
-            ToastPresenter.shared.show(.failure(L(.clipboardToastFileMissing)))
-            return
-        }
-        NSWorkspace.shared.activateFileViewerSelecting(urls)
     }
 
     /// "Ignore Source App" from a card's context menu: future captures from
-    /// that app are skipped by ClipboardWatcher. Existing history stays intact.
-    private func ignoreSource(_ item: ClipboardHistoryItem) {
-        guard let bundleID = item.sourceBundleID else { return }
+    /// that app are skipped by the v2 monitor. Existing history stays intact.
+    private func ignoreSource(_ entry: ClipboardHistoryEntry) {
+        guard let bundleID = entry.source.bundleIdentifier else { return }
         ClipboardPreferences.addExcludedBundleID(bundleID)
-        let name = item.sourceAppName ?? bundleID
+        Task {
+            await clipboardHistoryLifecycle?
+                .refreshMonitoringConfiguration()
+        }
+        let name = entry.source.displayName ?? bundleID
         ToastPresenter.shared.show(.success(L(.clipboardToastSourceIgnored, name)))
     }
 
     // MARK: - Tag dialog
 
-    /// Commit the in-wall tag dialog. Create assigns the new (or existing
-    /// same-named) tag to the right-clicked item in one step; rename and
-    /// delete go through the registry, and delete additionally sweeps the id
-    /// off all items so they regain prunability.
+    /// Commit the in-wall tag dialog through the module-owned definition
+    /// operations. The dialog closes only after the module accepts the change.
     private func commitTagDialog() {
         guard let dialog = state.tagDialog else { return }
-        switch dialog {
-        case .create(let item):
-            // Empty name → keep the dialog open instead of silently closing.
-            guard let tag = ClipboardTagStore.shared.createTag(name: state.tagDialogText) else { return }
-            // The item may have been deleted or pruned while the dialog was
-            // up; writing to a deleted PersistentModel is undefined.
-            if !item.isDeleted, !item.tagIDs.contains(tag.id) {
-                Task { await ClipboardHistoryStore.shared.toggleTag(item, tagID: tag.id) }
-            }
-        case .rename(let tagID):
-            let trimmed = state.tagDialogText.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            ClipboardTagStore.shared.renameTag(id: tagID, to: trimmed)
-        case .confirmDelete(let tagID):
-            ClipboardTagStore.shared.deleteTag(id: tagID)
-            Task { await ClipboardHistoryStore.shared.removeTagFromAllItems(tagID) }
+        let name = state.tagDialogText
+        if case .create = dialog,
+            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return
         }
-        cancelTagDialog()
+        if case .rename = dialog,
+            name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return
+        }
+        Task {
+            let succeeded: Bool
+            switch dialog {
+            case .create(let entryID):
+                succeeded =
+                    await state.presentation.createTagDefinition(
+                        named: name,
+                        assigningTo: entryID
+                    )
+            case .rename(let tagID):
+                succeeded =
+                    await state.presentation.renameTagDefinition(
+                        id: tagID,
+                        to: name
+                    )
+            case .confirmDelete(let tagID):
+                succeeded =
+                    await state.presentation.deleteTagDefinition(
+                        id: tagID
+                    )
+            }
+            guard succeeded else {
+                presentActionFailure()
+                return
+            }
+            cancelTagDialog()
+        }
     }
 
     private func cancelTagDialog() {
@@ -693,23 +977,14 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// file open the Quick Look panel; color has no preview (the card already
     /// shows the value). Pressing Space again closes whichever is up.
     private func togglePreview() {
-        guard let item = state.selectedItem else { return }
-        if item.historyKind?.isTextBearing == true {
-            ClipboardQuickLookWindow.shared.close()
-            if ClipboardTextWindow.shared.isPreviewVisible {
-                ClipboardTextWindow.shared.close()
-            } else {
-                ClipboardTextWindow.shared.showPreview(item: item)
-            }
+        guard let entry = state.selectedItem else { return }
+        if ClipboardTextWindow.shared.isPreviewVisible
+            || ClipboardQuickLookWindow.shared.isVisible
+        {
+            closePreviews()
             return
         }
-        if ClipboardQuickLookWindow.shared.isVisible {
-            ClipboardQuickLookWindow.shared.close()
-            return
-        }
-        guard let url = quickLookURL(for: item) else { return }
-        ClipboardTextWindow.shared.close()
-        ClipboardQuickLookWindow.shared.show(url: url)
+        presentPreview(for: entry)
     }
 
     /// Keep an open preview in step with the keyboard selection (Finder Quick
@@ -717,41 +992,58 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// panel follows file-backed ones, and each closes when the selection moves
     /// to a kind it can't show.
     private func syncPreview() {
-        if ClipboardTextWindow.shared.isPreviewVisible {
-            if let item = state.selectedItem, item.historyKind?.isTextBearing == true {
-                ClipboardTextWindow.shared.showPreview(item: item)
-            } else {
-                ClipboardTextWindow.shared.close()
-            }
+        guard ClipboardTextWindow.shared.isPreviewVisible
+                || ClipboardQuickLookWindow.shared.isVisible,
+            let entry = state.selectedItem
+        else {
+            return
         }
-        if ClipboardQuickLookWindow.shared.isVisible {
-            if let url = quickLookURL(for: state.selectedItem) {
-                ClipboardQuickLookWindow.shared.show(url: url)
-            } else {
-                ClipboardQuickLookWindow.shared.close()
-            }
-        }
+        presentPreview(for: entry)
     }
 
     /// Drops both floating previews. Used wherever the selection or the visible
     /// item set is about to change under them (delete, tab switch, search).
     private func closePreviews() {
+        previewTask?.cancel()
+        previewTask = nil
         if ClipboardTextWindow.shared.isPreviewVisible { ClipboardTextWindow.shared.close() }
         ClipboardQuickLookWindow.shared.close()
     }
 
-    private func quickLookURL(for item: ClipboardHistoryItem?) -> URL? {
-        guard let item, let kind = item.historyKind else { return nil }
-        switch kind {
-        case .image, .screenshot:
-            guard let f = item.fileName else { return nil }
-            return historyDirectory.appendingPathComponent(f)
-        case .file:
-            if let stored = item.files.first?.storedName { return historyDirectory.appendingPathComponent(stored) }
-            if let path = item.files.first?.originalPath { return URL(fileURLWithPath: path) }
-            return nil
-        default:
-            return nil   // text/color preview is already visible on the card
+    private func presentPreview(for entry: ClipboardHistoryEntry) {
+        previewTask?.cancel()
+        previewTask = Task {
+            guard let materialization =
+                await state.presentation.materialization(
+                    for: entry.id,
+                    purpose: .preview
+                ),
+                !Task.isCancelled,
+                state.selectedItem?.id == entry.id
+            else {
+                if state.presentation.actionFailure != nil {
+                    presentActionFailure()
+                }
+                closePreviews()
+                return
+            }
+            if let text = materialization.exactTexts?.joined(
+                separator: "\n"
+            ), !text.isEmpty {
+                ClipboardQuickLookWindow.shared.close()
+                ClipboardTextWindow.shared.showPreview(
+                    entry: entry,
+                    text: text
+                )
+            } else if let data = materialization.firstBitmapData {
+                ClipboardTextWindow.shared.close()
+                ClipboardQuickLookWindow.shared.show(bitmapData: data)
+            } else if let url = materialization.fileURLs.first {
+                ClipboardTextWindow.shared.close()
+                ClipboardQuickLookWindow.shared.show(url: url)
+            } else {
+                closePreviews()
+            }
         }
     }
 
