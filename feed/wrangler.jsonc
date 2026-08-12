@@ -1,0 +1,21 @@
+{
+  "$schema": "../landing/node_modules/wrangler/config-schema.json",
+  "name": "anydoor-feed",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-12",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "anydoor.dev/appcast.xml*",
+      "zone_name": "anydoor.dev"
+    }
+  ],
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.xml"],
+      "fallthrough": true
+    }
+  ]
+}

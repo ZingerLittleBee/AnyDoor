@@ -117,7 +117,7 @@ jobs:
 
   universal-build:
     name: Universal release build (arm64 + x86_64)
-    # Mirrors step 4 of scripts/release.sh. The debug job only compiles arm64,
+    # Mirrors step 4 of scripts/release-driver.sh. The debug job only compiles arm64,
     # so the x86_64 halves of every `#if arch(arm64)` else-branch (the Intel DDC
     # brightness backend, most notably) are type-checked nowhere else until
     # release day. Too slow for every PR, cheap once per merge.

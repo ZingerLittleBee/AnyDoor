@@ -219,6 +219,8 @@ enum L10n {
         case updateBannerDismissForSession = "update.banner.dismissForSession"
         case updateBannerViewAndInstall = "update.banner.viewAndInstall"
         case settingsAboutAutoCheck = "settings.about.autoCheck"
+        case settingsAboutBetaUpdates = "settings.about.betaUpdates"
+        case settingsAboutBetaUpdatesHelp = "settings.about.betaUpdatesHelp"
         case settingsAboutCheckNow = "settings.about.checkNow"
         case settingsAboutCurrentVersion = "settings.about.currentVersion"
         case settingsAppPickerEmpty = "settings.appPicker.empty"

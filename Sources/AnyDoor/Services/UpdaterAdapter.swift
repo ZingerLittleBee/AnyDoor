@@ -12,4 +12,6 @@ protocol UpdaterAdapter: AnyObject {
     func checkForUpdates()
     /// Silent check; populates `UpdateService.availableVersion` via the delegate path.
     func checkForUpdatesInBackground()
+    /// Reschedule after a channel preference changes. Sparkle may check immediately.
+    func resetUpdateCycle()
 }

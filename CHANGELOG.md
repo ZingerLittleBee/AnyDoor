@@ -99,6 +99,18 @@ versioning.
   the Keychain now resumes capture on its own instead of waiting for the next
   launch.
 
+## [4.1.1] - 2026-08-12
+
+### Added
+
+- Beta updates are now an explicit per-device opt-in under Settings → General.
+  Stable remains the default; turning Beta updates off affects future update
+  checks and does not downgrade the installed app.
+- The dedicated `make beta-release` pipeline now publishes signed Beta
+  prereleases through Sparkle channels, deterministic numeric build versions,
+  immutable release snapshots, and an independently deployed canonical update
+  feed without accepting Beta identities in the Stable release command.
+
 ## [4.1.0] - 2026-07-28
 
 ### Added
