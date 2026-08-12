@@ -20,6 +20,10 @@ on:
         description: 'Deploy the checked-in Stable-only feed when the endpoint does not exist yet'
         type: boolean
         default: false
+      repair:
+        description: 'Redeploy routing only when the live feed exactly matches the checked-in feed'
+        type: boolean
+        default: false
 
 concurrency:
   group: anydoor-update-feed
@@ -81,6 +85,10 @@ jobs:
       - name: Validate bootstrap feed
         if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
         run: |
+          if [[ "${{ inputs.repair }}" == 'true' ]]; then
+            echo 'Bootstrap and repair cannot run together' >&2
+            exit 1
+          fi
           python3 -c 'import xml.etree.ElementTree as ET; ET.parse("appcast.xml")'
           if grep -q '<sparkle:channel>' appcast.xml; then
             echo 'Bootstrap feed must contain Stable items only' >&2
@@ -88,15 +96,25 @@ jobs:
           fi
           scripts/verify-feed-bootstrap.sh 'https://anydoor.dev/appcast.xml'
 
+      - name: Validate repair feed
+        if: github.event_name == 'workflow_dispatch' && inputs.repair
+        run: |
+          curl --fail --silent --show-error \
+            --connect-timeout 10 --max-time 60 \
+            -H 'Cache-Control: no-cache' \
+            'https://anydoor.dev/appcast.xml' \
+            -o /tmp/live-appcast.xml
+          cmp appcast.xml /tmp/live-appcast.xml
+
       - name: Deploy canonical feed
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap)
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.repair))
         run: bunx wrangler@4.94.0 deploy --config feed/wrangler.jsonc
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Verify deployed bytes
-        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.bootstrap)
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && (inputs.bootstrap || inputs.repair))
         run: |
           curl --fail --silent --show-error \
             --connect-timeout 10 --max-time 60 \
