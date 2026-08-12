@@ -5,6 +5,11 @@ enum ClipboardWallCategory: Hashable {
     case all
     case favorites
     case kind(ClipboardHistoryKind)
+    // Link and Email are facets, not display kinds: a link entry still
+    // renders as text, so these categories exist beside `kind` instead of
+    // widening `ClipboardHistoryKind` with values no entry ever carries.
+    case link
+    case email
     case tag(String)
 
     var titleKey: L10n.Key? {
@@ -15,26 +20,38 @@ enum ClipboardWallCategory: Hashable {
             return .clipboardCategoryFavorites
         case .kind(let kind):
             return kind.titleKey
+        case .link:
+            return .clipboardKindLink
+        case .email:
+            return .clipboardKindEmail
         case .tag:
             return nil
         }
     }
 
     var facetFilter: ClipboardHistoryFacet? {
-        guard case .kind(let kind) = self else { return nil }
-        switch kind {
-        case .text, .ocr:
-            return .text
-        case .color:
-            return .color
-        case .qrcode:
-            return .qrCode
-        case .screenshot:
-            return .screenshot
-        case .image:
-            return .image
-        case .file:
-            return .file
+        switch self {
+        case .all, .favorites, .tag:
+            return nil
+        case .link:
+            return .link
+        case .email:
+            return .email
+        case .kind(let kind):
+            switch kind {
+            case .text, .ocr:
+                return .text
+            case .color:
+                return .color
+            case .qrcode:
+                return .qrCode
+            case .screenshot:
+                return .screenshot
+            case .image:
+                return .image
+            case .file:
+                return .file
+            }
         }
     }
 
@@ -56,6 +73,10 @@ enum ClipboardWallCategory: Hashable {
             return "favorites"
         case .kind(let kind):
             return "kind:\(kind.rawValue)"
+        case .link:
+            return "facet:link"
+        case .email:
+            return "facet:email"
         case .tag(let id):
             return "tag:\(id)"
         }
@@ -227,6 +248,8 @@ final class ClipboardWallState {
             + tags.map { .tag($0.id) }
             + [
                 .kind(.text),
+                .link,
+                .email,
                 .kind(.image),
                 .kind(.file),
                 .kind(.screenshot),

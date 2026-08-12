@@ -133,6 +133,8 @@ enum L10n {
         case clipboardKindText = "clipboard.kind.text"
         case clipboardKindImage = "clipboard.kind.image"
         case clipboardKindFile = "clipboard.kind.file"
+        case clipboardKindLink = "clipboard.kind.link"
+        case clipboardKindEmail = "clipboard.kind.email"
         case clipboardPreviewCannotRender = "clipboard.preview.cannotRender"
         case clipboardPreviewClose = "clipboard.preview.close"
         case clipboardPreviewMissingFile = "clipboard.preview.missingFile"

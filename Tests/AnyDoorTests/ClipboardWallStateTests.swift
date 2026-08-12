@@ -198,6 +198,25 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(ClipboardWallCategory.kind(.text).kindFilter, .text)
     }
 
+    func testLinkAndEmailCategoriesFilterByFacet() {
+        XCTAssertEqual(ClipboardWallCategory.link.facetFilter, .link)
+        XCTAssertEqual(ClipboardWallCategory.email.facetFilter, .email)
+        XCTAssertNil(ClipboardWallCategory.link.kindFilter)
+        XCTAssertNil(ClipboardWallCategory.email.kindFilter)
+        XCTAssertNil(ClipboardWallCategory.link.tagFilter)
+        XCTAssertEqual(ClipboardWallCategory.link.persistentID, "facet:link")
+        XCTAssertEqual(ClipboardWallCategory.email.persistentID, "facet:email")
+    }
+
+    func testDefaultOrderListsLinkAndEmailAfterText() {
+        let order = ClipboardWallState.order(tags: [])
+        guard let text = order.firstIndex(of: .kind(.text)) else {
+            return XCTFail("Text category missing from default order")
+        }
+        XCTAssertEqual(order[text + 1], .link)
+        XCTAssertEqual(order[text + 2], .email)
+    }
+
     func testEmptyItemsHasNilSelection() async {
         let state = await makeState()
         XCTAssertNil(state.selectedItem)
