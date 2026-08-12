@@ -467,7 +467,9 @@ make release 1.1.0
 
 Run this before every real release. It signs, notarizes, packages, signs the
 Sparkle update, and generates `appcast.xml`, but stops before committing,
-tagging, pushing, or creating a GitHub release.
+tagging, pushing, or creating a GitHub release. Candidate artifacts are built
+in an isolated temporary directory; tracked release files and temporary
+artifacts are restored when the command succeeds, fails, or is interrupted.
 
 This uses the same preflight checks as a real release: run it from a clean
 `main` branch that is in sync with `origin/main`.
@@ -480,12 +482,8 @@ If no version is passed, the script increments the patch version from the
 current `CFBundleShortVersionString`. The current value must already be strict
 `MAJOR.MINOR.PATCH`.
 
-Expected outputs include:
-
-- `dist/AnyDoor.app`
-- `dist/AnyDoor-1.0.1.zip`
-- `dist/AnyDoor-1.0.1.dmg`
-- `appcast.xml`
+The successful command leaves the working tree clean and does not overwrite an
+existing `dist/` directory.
 
 ### Real release
 

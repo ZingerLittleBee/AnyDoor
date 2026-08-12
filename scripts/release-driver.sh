@@ -8,6 +8,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
+source "$REPO_ROOT/scripts/release-dryrun-state.sh"
 
 DRYRUN="${DRYRUN:-0}"
 REQUESTED_VERSION="${1:-}"
@@ -47,6 +48,8 @@ RELEASE_LOCK=""
 
 on_exit() {
     local code=$?
+    trap - EXIT
+    set +e
     if [[ -n "$BASE_APPCAST" ]]; then
         rm -f "$BASE_APPCAST"
     fi
@@ -56,13 +59,21 @@ on_exit() {
     if [[ -n "$RELEASE_LOCK" && -d "$RELEASE_LOCK" ]]; then
         rmdir "$RELEASE_LOCK"
     fi
+    if [[ -n "$RELEASE_DRYRUN_STATE" ]]; then
+        if release_dryrun_restore "$REPO_ROOT"; then
+            log "Dry-run working tree and release artifacts restored."
+        else
+            code=1
+        fi
+    fi
     if [[ $code -eq 0 ]]; then
-        return
+        exit 0
     fi
     printf '\033[1;31m✗\033[0m release driver failed at step %s (exit %s)\n' "$LAST_STEP" "$code" >&2
     if [[ -n "$RECOVERY_HINT" ]]; then
         printf '\033[1;33m→\033[0m Recovery: %s\n' "$RECOVERY_HINT" >&2
     fi
+    exit "$code"
 }
 trap on_exit EXIT
 
@@ -163,6 +174,11 @@ grep -q "\.macOS(\.v${MIN_MACOS_MAJOR})" Package.swift \
 plist_min="$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.plist 2>/dev/null || true)"
 [[ "$plist_min" == "$MIN_MACOS" ]] \
   || die "Info.plist LSMinimumSystemVersion ($plist_min) does not match MIN_MACOS ($MIN_MACOS) — update MIN_MACOS in scripts/release-driver.sh, Package.swift's .macOS(...), and Info.plist LSMinimumSystemVersion together"
+
+if [[ "$DRYRUN" == "1" ]]; then
+  release_dryrun_prepare "$REPO_ROOT" || die "could not prepare isolated dry-run state"
+  DIST="$RELEASE_DRYRUN_DIST"
+fi
 
 # --- 2. Resolve version --------------------------------------------------
 LAST_STEP=2
@@ -428,7 +444,6 @@ APPCAST="$REPO_ROOT/appcast.xml"
 
 if [[ "$DRYRUN" == "1" ]]; then
   log "Dry run: stopping before git commit / push / release."
-  log "To reset working tree: git restore Info.plist CHANGELOG.md appcast.xml && rm -rf dist/"
   exit 0
 fi
 

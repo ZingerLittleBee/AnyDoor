@@ -60,7 +60,8 @@ make beta-release 4.2.0-beta.1
 
 The matching validation-only commands are `make release-dryrun` and
 `make beta-release-dryrun`. A Beta release never falls back to an inferred
-version.
+version. Both dry runs restore tracked release files and discard their isolated
+candidate artifacts on success, failure, or interruption.
 
 Beta releases snapshot `[Unreleased]` into their release notes without cutting
 the changelog. Stable releases perform the normal changelog cut.
