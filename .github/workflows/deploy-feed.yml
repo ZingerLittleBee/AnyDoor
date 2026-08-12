@@ -81,7 +81,7 @@ jobs:
       - name: Validate bootstrap feed
         if: github.event_name == 'workflow_dispatch' && inputs.bootstrap
         run: |
-          xmllint --noout appcast.xml
+          python3 -c 'import xml.etree.ElementTree as ET; ET.parse("appcast.xml")'
           if grep -q '<sparkle:channel>' appcast.xml; then
             echo 'Bootstrap feed must contain Stable items only' >&2
             exit 1
