@@ -7,7 +7,7 @@
   "preview_urls": false,
   "routes": [
     {
-      "pattern": "anydoor.dev/appcast.xml",
+      "pattern": "anydoor.dev/appcast.xml*",
       "zone_name": "anydoor.dev"
     }
   ],
