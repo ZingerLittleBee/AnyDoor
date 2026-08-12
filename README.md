@@ -377,6 +377,10 @@ and Sparkle zip, then published to GitHub Releases with an updated appcast.
 The release Make targets automatically load `.env` through `bash`, so the same
 commands work from fish, zsh, bash, or sh.
 
+Stable release setup is documented below. For the release-branch policy,
+first and subsequent Beta commands, feed verification, and recovery guidance,
+see the [Beta release runbook](docs/beta-updates.md#beta-release-runbook).
+
 ### Packaging commands
 
 ```bash

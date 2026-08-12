@@ -318,6 +318,9 @@ make swift-release
 发布相关的 Make target 会通过 `bash` 自动加载 `.env`，所以同一组命令可以在
 fish、zsh、bash 或 sh 里直接使用。
 
+下面记录 Stable 发布的本机配置。Beta 的 release 分支规则、首次与后续版本
+命令、Feed 验证和失败恢复见 [Beta 发布操作手册](docs/beta-updates.md#beta-release-runbook)。
+
 ### 打包相关命令
 
 ```bash
