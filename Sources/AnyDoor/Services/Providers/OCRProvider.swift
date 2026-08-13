@@ -1,6 +1,4 @@
 import AppKit
-import ClipboardHistory
-import Foundation
 import PluginInterface
 
 /// Captures a screen region, recognizes its text with Vision, copies the text to
@@ -9,10 +7,10 @@ import PluginInterface
 /// Every error is absorbed and mapped to a toast — `run()` never propagates.
 actor OCRProvider: ActionProvider {
     let itemKey: BuiltinItem = .ocr
-    private let module: ClipboardHistoryModule
+    private let clipboardProduction: ClipboardProductionAdapter
 
-    init(module: ClipboardHistoryModule) {
-        self.module = module
+    init(clipboardProduction: ClipboardProductionAdapter) {
+        self.clipboardProduction = clipboardProduction
     }
 
     var permission: PermissionStatus { .notRequired }
@@ -29,19 +27,7 @@ actor OCRProvider: ActionProvider {
                 return
             }
             let text = lines.joined(separator: "\n")
-            // Self-write so the watcher doesn't re-capture this OCR result as
-            // a generic text entry.
-            await ClipboardSelfWrites.write(string: text)
-            _ = try await module.capture(
-                ClipboardHistoryCaptureRequest(
-                    source: .anyDoor,
-                    content: .ocr(text)
-                )
-            )
-            NotificationCenter.default.post(
-                name: .clipboardHistoryV2DidMutate,
-                object: nil
-            )
+            _ = try await clipboardProduction.produceOCR(text)
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
             await ToastPresenter.shared.show(.success(successMsg))
         } catch OCRError.screenCapturePermissionDenied {
