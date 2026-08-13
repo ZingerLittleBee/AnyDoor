@@ -3,10 +3,17 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
+    struct MutationApplyResult: Sendable {
+        let outcome: ClipboardHistoryMutationOutcome
+        let didMutate: Bool
+    }
+
     public func capture(
         _ request: ClipboardHistoryCaptureRequest
     ) throws -> ClipboardHistoryCaptureOutcome {
-        try captureExplicit(request)
+        let outcome = try captureExplicit(request)
+        publishMutation()
+        return outcome
     }
 
     public func page(
@@ -26,24 +33,29 @@ extension ClipboardHistoryModule {
         _ mutation: ClipboardHistoryMutation
     ) async throws -> ClipboardHistoryMutationOutcome {
         let database = try requiredDatabase()
+        let result: MutationApplyResult
         switch mutation {
         case .delete(let entryID):
-            return try await delete(entryID, from: database)
+            result = try await delete(entryID, from: database)
         case .setFavorite(let entryID, let isFavorite):
-            return try setFavorite(
+            result = try setFavorite(
                 isFavorite,
                 for: entryID,
                 in: database
             )
         case .setTags(let entryID, let tagIDs):
-            return try setTags(tagIDs, for: entryID, in: database)
+            result = try setTags(tagIDs, for: entryID, in: database)
         case .editText(let entryID, let text):
-            return try await editText(
+            result = try await editText(
                 text,
                 for: entryID,
                 in: database
             )
         }
+        if result.didMutate {
+            publishMutation()
+        }
+        return result.outcome
     }
 
     public func materialize(
@@ -579,7 +591,7 @@ extension ClipboardHistoryModule {
     fileprivate func delete(
         _ entryID: ClipboardHistoryEntryID,
         from database: DatabasePool
-    ) async throws -> ClipboardHistoryMutationOutcome {
+    ) async throws -> MutationApplyResult {
         let storedID = entryID.value.uuidString.lowercased()
         let date = now()
         let result: EntryDeletionResult
@@ -606,10 +618,15 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
-        guard result.didDelete else { return .notFound }
+        guard result.didDelete else {
+            return MutationApplyResult(
+                outcome: .notFound,
+                didMutate: false
+            )
+        }
         cancelDerivedJobs(for: [storedID])
         await enqueueReclamation(for: result.payloadPaths)
-        return .deleted
+        return MutationApplyResult(outcome: .deleted, didMutate: true)
     }
 
     fileprivate func materializePayload(

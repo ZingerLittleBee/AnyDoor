@@ -371,7 +371,6 @@ final class ClipboardHistoryPresentationModel {
             )
             upsertTagDefinition(assignment.definition)
             replaceEntry(assignment.entry)
-            notifyMutation()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -390,7 +389,6 @@ final class ClipboardHistoryPresentationModel {
                 name
             )
             upsertTagDefinition(definition)
-            notifyMutation()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -415,7 +413,6 @@ final class ClipboardHistoryPresentationModel {
                     source: entry.source
                 )
             }
-            notifyMutation()
             return true
         } catch {
             actionFailure = ClipboardHistoryActionFailure(error)
@@ -532,7 +529,6 @@ final class ClipboardHistoryPresentationModel {
                     entries[index] = entry
                 }
                 invalidateMaterializations(for: entry.id)
-                notifyMutation()
                 if Self.requiresRefetch(for: mutation, query: query) {
                     await loadFirstPage(preservingSelection: true)
                 }
@@ -559,7 +555,6 @@ final class ClipboardHistoryPresentationModel {
                 if entries.isEmpty {
                     contentState = .empty
                 }
-                notifyMutation()
             case .notFound:
                 break
             }
@@ -793,13 +788,6 @@ final class ClipboardHistoryPresentationModel {
         }
         entries[index] = entry
         invalidateMaterializations(for: entry.id)
-    }
-
-    private func notifyMutation() {
-        NotificationCenter.default.post(
-            name: .clipboardHistoryV2DidMutate,
-            object: nil
-        )
     }
 
     private static func sourceName(
