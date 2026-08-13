@@ -52,11 +52,15 @@ struct BuiltinCatalogInvariantTests {
     /// The full production provider set: Core providers plus every plugin's.
     @MainActor
     private static func allProviders() throws -> [any BuiltinProvider] {
-        try BuiltinProviderRegistry.makeAll(
-            clipboardHistoryModule: makeClipboardHistoryModule(),
+        let module = try makeClipboardHistoryModule()
+        return BuiltinProviderRegistry.makeAll(
+            clipboardProduction: ClipboardProductionAdapter(
+                module: module,
+                selfWrites: module.pasteboardSelfWrites
+            ),
             onKeepAwakeChange: { _ in }
         )
-            + makeProductionPlugins().flatMap(\.providers)
+            + (try makeProductionPlugins()).flatMap(\.providers)
     }
 
     private static func makeClipboardHistoryModule() throws

@@ -22,6 +22,7 @@ final class CaptureCoordinator {
 
     private let settings: CaptureSettings
     private var clipboardHistoryModule: ClipboardHistoryModule?
+    private var clipboardProduction: ClipboardProductionAdapter?
     private let selectionOverlay = SelectionOverlayWindow()
     private var lastRegionRequest: CaptureRequest?
     private var inFlight = false
@@ -33,13 +34,16 @@ final class CaptureCoordinator {
     }
 
     func configure(
-        clipboardHistoryModule: ClipboardHistoryModule
+        clipboardHistoryModule: ClipboardHistoryModule,
+        clipboardProduction: ClipboardProductionAdapter
     ) {
         precondition(
-            self.clipboardHistoryModule == nil,
+            self.clipboardHistoryModule == nil
+                && self.clipboardProduction == nil,
             "CaptureCoordinator may only be configured once"
         )
         self.clipboardHistoryModule = clipboardHistoryModule
+        self.clipboardProduction = clipboardProduction
     }
 
     /// Entry point used by every provider. Guards against re-entrancy.
@@ -293,8 +297,9 @@ final class CaptureCoordinator {
     /// Apply output policy and show the quick-access overlay. The PNG encode and
     /// auto-save disk write run OFF the main actor (a fullscreen Retina/5K grab
     /// is tens of MB; doing them inline beachballed the menu bar / all UI until
-    /// the shot landed). The clipboard copy stays inline so it is ready instantly;
-    /// the overlay + toast resume on the main actor once the heavy work finishes.
+    /// the shot landed). Once encoding finishes, the production adapter performs
+    /// the optional clipboard copy and explicit history capture in order; the
+    /// overlay and toast resume on the main actor afterward.
     ///
     /// Safe w.r.t. the SCK executor-tracking bug documented on the type: the
     /// capture grab is already complete and synchronous, and this mirrors the
@@ -306,18 +311,9 @@ final class CaptureCoordinator {
 
         let image = NSImage(cgImage: cg, size: .zero)
 
-        // Cheap and latency-sensitive: copy to the pasteboard right away (AppKit
-        // encodes the bitmap lazily) so the clipboard is ready the instant the
-        // shot lands, before the PNG encode below.
-        if settings.autoCopy {
-            ClipboardSelfWrites.perform { pb in
-                pb.clearContents()
-                pb.writeObjects([image])
-            }
-        }
-
         // Snapshot the main-actor settings the off-main save needs (all Sendable).
         let autoSave = settings.autoSave
+        let autoCopy = settings.autoCopy
         let saveDir = settings.saveDirectory
         let template = settings.namingTemplate
         let overlayTimeout = settings.overlayTimeout
@@ -335,6 +331,24 @@ final class CaptureCoordinator {
                 return
             }
 
+            let recordedID = HistoryIDBox()
+            if let clipboardProduction = self.clipboardProduction {
+                do {
+                    recordedID.value = try await clipboardProduction
+                        .produceScreenshot(
+                            image: image,
+                            png: png,
+                            copyToPasteboard: autoCopy
+                        ).capture.entryID
+                } catch {
+                    ToastPresenter.shared.show(
+                        .failure(L(.captureToastFailed))
+                    )
+                }
+            } else {
+                ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+            }
+
             var savedURL: URL?
             if autoSave {
                 savedURL = await Task.detached(priority: .userInitiated) {
@@ -344,29 +358,6 @@ final class CaptureCoordinator {
                     ToastPresenter.shared.show(.success(L(.captureToastSaved, saveDir.lastPathComponent)))
                 } else {
                     ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
-                }
-            }
-
-            // Shared box so the delete action can remove the exact history entry
-            // once the async record completes (both hops run on the main actor).
-            let recordedID = HistoryIDBox()
-            if let module = self.clipboardHistoryModule {
-                Task {
-                    recordedID.value = try? await module.capture(
-                        ClipboardHistoryCaptureRequest(
-                            source: .anyDoor,
-                            content: .bitmap(
-                                png,
-                                provenance: .anyDoorScreenshot
-                            )
-                        )
-                    ).entryID
-                    if recordedID.value != nil {
-                        NotificationCenter.default.post(
-                            name: .clipboardHistoryV2DidMutate,
-                            object: nil
-                        )
-                    }
                 }
             }
 
@@ -388,14 +379,7 @@ final class CaptureCoordinator {
                         let module = self.clipboardHistoryModule
                     {
                         Task {
-                            if (try? await module.apply(.delete(id)))
-                                != nil
-                            {
-                                NotificationCenter.default.post(
-                                    name: .clipboardHistoryV2DidMutate,
-                                    object: nil
-                                )
-                            }
+                            _ = try? await module.apply(.delete(id))
                         }
                     }
                     ToastPresenter.shared.show(.success(L(.captureToastDeleted)))
@@ -476,11 +460,16 @@ final class CaptureCoordinator {
     }
 
     private func copyToPasteboard(_ image: NSImage) {
-        ClipboardSelfWrites.perform { pb in
-            pb.clearContents()
-            pb.writeObjects([image])
+        guard let clipboardProduction else {
+            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+            return
         }
-        ToastPresenter.shared.show(.success(L(.captureToastCopied)))
+        do {
+            try clipboardProduction.copyExistingScreenshot(image)
+            ToastPresenter.shared.show(.success(L(.captureToastCopied)))
+        } catch {
+            ToastPresenter.shared.show(.failure(L(.captureToastFailed)))
+        }
     }
 
     private func runOCR(_ image: NSImage) {
@@ -495,22 +484,24 @@ final class CaptureCoordinator {
                         ToastPresenter.shared.show(.failure(L(.toastOcrNoText)))
                         return
                     }
-                    ClipboardSelfWrites.write(string: text)
-                    if let module = self.clipboardHistoryModule {
-                        Task {
-                            _ = try? await module.capture(
-                                ClipboardHistoryCaptureRequest(
-                                    source: .anyDoor,
-                                    content: .ocr(text)
-                                )
+                    guard let clipboardProduction = self.clipboardProduction else {
+                        ToastPresenter.shared.show(
+                            .failure(L(.toastRecognitionFailed))
+                        )
+                        return
+                    }
+                    Task {
+                        do {
+                            _ = try await clipboardProduction.produceOCR(text)
+                            ToastPresenter.shared.show(
+                                .success(L(.toastCopiedToClipboard))
                             )
-                            NotificationCenter.default.post(
-                                name: .clipboardHistoryV2DidMutate,
-                                object: nil
+                        } catch {
+                            ToastPresenter.shared.show(
+                                .failure(L(.toastRecognitionFailed))
                             )
                         }
                     }
-                    ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
                 }
             } catch {
                 await MainActor.run { ToastPresenter.shared.show(.failure(L(.toastRecognitionFailed))) }
@@ -544,9 +535,7 @@ final class CaptureCoordinator {
     }
 }
 
-/// Mutable holder for the recorded history id, shared between the async record
-/// task and the overlay's delete action. Main-actor confined, so the two hops
-/// never race.
+/// Mutable holder for the recorded history id captured by the overlay actions.
 @MainActor private final class HistoryIDBox {
     var value: ClipboardHistoryEntryID?
 }

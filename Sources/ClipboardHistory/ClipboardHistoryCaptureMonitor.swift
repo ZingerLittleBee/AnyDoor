@@ -287,10 +287,6 @@ final class ClipboardHistoryCaptureMonitor {
                         observationRequested = true
                     } else if case .captured = outcome {
                         instrumentation.recordCapture()
-                        NotificationCenter.default.post(
-                            name: .clipboardHistoryV2DidMutate,
-                            object: nil
-                        )
                     }
                 } catch {
                     reportOperationFailureIfNeeded(at: now())

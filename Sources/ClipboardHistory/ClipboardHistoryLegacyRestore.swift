@@ -306,6 +306,7 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.legacyFileRestoreFailed
         }
         await enqueueReclamation(for: retiredPayloadPaths)
+        publishMutation()
         return .restored(memberCount: resolved.count)
     }
 

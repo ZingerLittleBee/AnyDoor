@@ -1,4 +1,3 @@
-import ClipboardHistory
 import Foundation
 import PluginInterface
 
@@ -15,7 +14,7 @@ import PluginInterface
 @MainActor
 enum BuiltinProviderRegistry {
     static func makeAll(
-        clipboardHistoryModule: ClipboardHistoryModule,
+        clipboardProduction: ClipboardProductionAdapter,
         clipboardHistoryLifecycle: ClipboardHistoryLifecycle? = nil,
         onKeepAwakeChange: @escaping @MainActor @Sendable (KeepAwakeState) -> Void
     ) -> [any BuiltinProvider] {
@@ -46,9 +45,9 @@ enum BuiltinProviderRegistry {
             RestartMenuBarProvider(),
             FlushDNSProvider(),
             KeyboardLockProvider(),
-            OCRProvider(module: clipboardHistoryModule),
-            QRCodeProvider(module: clipboardHistoryModule),
-            PickColorProvider(module: clipboardHistoryModule),
+            OCRProvider(clipboardProduction: clipboardProduction),
+            QRCodeProvider(clipboardProduction: clipboardProduction),
+            PickColorProvider(clipboardProduction: clipboardProduction),
             ClipboardMonitoringProvider(
                 lifecycle: clipboardHistoryLifecycle
             ),
