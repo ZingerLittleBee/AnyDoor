@@ -14,6 +14,7 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule: ClipboardHistoryModule
+    let clipboardProduction: ClipboardProductionAdapter
     private let persistenceBootstrap: AppPersistenceBootstrap
     @MainActor lazy var clipboardHistoryLifecycle = {
         let appSupport = FileManager.default.urls(
@@ -90,7 +91,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // scrollbar entirely, and the one-frame flash that any after-the-fact
         // restyling causes on a Settings tab switch. See OverlayScrollers.swift.
         UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
-        clipboardHistoryModule = ClipboardHistoryModule()
+        let clipboardHistoryModule = ClipboardHistoryModule()
+        self.clipboardHistoryModule = clipboardHistoryModule
+        clipboardProduction = ClipboardProductionAdapter(
+            module: clipboardHistoryModule,
+            selfWrites: clipboardHistoryModule.pasteboardSelfWrites
+        )
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
@@ -158,7 +164,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             lifecycle: clipboardHistoryLifecycle
         )
         CaptureCoordinator.shared.configure(
-            clipboardHistoryModule: clipboardHistoryModule
+            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardProduction: clipboardProduction
         )
 
         // Run migrations / seeding on the main context
@@ -203,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             PluginUsageMigration.runIfNeeded(plugins: plugins, in: context)
         }
         let coreProviders = BuiltinProviderRegistry.makeAll(
-            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardProduction: clipboardProduction,
             clipboardHistoryLifecycle: clipboardHistoryLifecycle,
             onKeepAwakeChange: { state in
                 PanelStore.shared.onKeepAwakeStateChange(state)
