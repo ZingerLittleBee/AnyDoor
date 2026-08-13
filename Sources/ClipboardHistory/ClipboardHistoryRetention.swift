@@ -49,7 +49,7 @@ extension ClipboardHistoryModule {
         let database = try requiredDatabase()
         let storedEntryID = entryID.value.uuidString.lowercased()
         let timestamp = now()
-        return try mapMutationStorageFailure {
+        let result: TagAssignmentMutationResult = try mapMutationStorageFailure {
             try database.write { database in
                 guard try isLiveEntry(
                     storedEntryID,
@@ -130,18 +130,25 @@ extension ClipboardHistoryModule {
                     try Self.bumpHistoryRevision(in: database)
                     try Self.bumpSearchIndexGeneration(in: database)
                 }
-                return ClipboardHistoryTagAssignment(
-                    definition: definition,
-                    entry: try Self.entry(
-                        from: try requiredEntryRow(
-                            storedEntryID,
+                return TagAssignmentMutationResult(
+                    assignment: ClipboardHistoryTagAssignment(
+                        definition: definition,
+                        entry: try Self.entry(
+                            from: try requiredEntryRow(
+                                storedEntryID,
+                                in: database
+                            ),
                             in: database
-                        ),
-                        in: database
-                    )
+                        )
+                    ),
+                    didMutate: insertedDefinition || !hadMembership
                 )
             }
         }
+        if result.didMutate {
+            publishMutation()
+        }
+        return result.assignment
     }
 
     public func renameTagDefinition(
@@ -155,7 +162,7 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.invalidTagName
         }
         let database = try requiredDatabase()
-        return try mapMutationStorageFailure {
+        let result: TagDefinitionMutationResult = try mapMutationStorageFailure {
             try database.write { database in
                 guard
                     let currentName = try String.fetchOne(
@@ -186,7 +193,8 @@ extension ClipboardHistoryModule {
                 guard !duplicateExists else {
                     throw ClipboardHistoryModuleError.duplicateTagName
                 }
-                if currentName != displayName {
+                let didMutate = currentName != displayName
+                if didMutate {
                     try database.execute(
                         sql: """
                             UPDATE clipboard_tag_definitions
@@ -197,12 +205,19 @@ extension ClipboardHistoryModule {
                     )
                     try Self.bumpHistoryRevision(in: database)
                 }
-                return ClipboardHistoryTagDefinition(
-                    id: id,
-                    displayName: displayName
+                return TagDefinitionMutationResult(
+                    definition: ClipboardHistoryTagDefinition(
+                        id: id,
+                        displayName: displayName
+                    ),
+                    didMutate: didMutate
                 )
             }
         }
+        if result.didMutate {
+            publishMutation()
+        }
+        return result.definition
     }
 
     public func deleteTagDefinition(
@@ -210,7 +225,7 @@ extension ClipboardHistoryModule {
     ) throws -> ClipboardHistoryTagDefinitionUpdate {
         let database = try requiredDatabase()
         let timestamp = now().timeIntervalSince1970
-        return try mapMutationStorageFailure {
+        let result: TagDefinitionUpdateMutationResult = try mapMutationStorageFailure {
             try database.write { database in
                 let definitionExists =
                     (try Bool.fetchOne(
@@ -308,12 +323,19 @@ extension ClipboardHistoryModule {
                     try Self.bumpHistoryRevision(in: database)
                     try Self.bumpSearchIndexGeneration(in: database)
                 }
-                return ClipboardHistoryTagDefinitionUpdate(
-                    removedMembershipCount: removedMembershipCount,
-                    unprotectedEntryCount: newlyUnprotected.count
+                return TagDefinitionUpdateMutationResult(
+                    update: ClipboardHistoryTagDefinitionUpdate(
+                        removedMembershipCount: removedMembershipCount,
+                        unprotectedEntryCount: newlyUnprotected.count
+                    ),
+                    didMutate: definitionExists || removedMembershipCount > 0
                 )
             }
         }
+        if result.didMutate {
+            publishMutation()
+        }
+        return result.update
     }
 
     public func replaceTagDefinitions(
@@ -356,15 +378,42 @@ extension ClipboardHistoryModule {
         }
         let database = try requiredDatabase()
         let timestamp = now().timeIntervalSince1970
-        return try mapMutationStorageFailure {
+        let normalizedDefinitions = zip(definitions, names).map {
+            ClipboardHistoryTagDefinition(
+                id: $0.0.id,
+                displayName: $0.1
+            )
+        }
+        let result: TagDefinitionUpdateMutationResult = try mapMutationStorageFailure {
             try database.write { database in
-                let oldDefinitions = Set(
-                    try String.fetchAll(
-                        database,
-                        sql: "SELECT id FROM clipboard_tag_definitions"
+                let currentDefinitions = try Row.fetchAll(
+                    database,
+                    sql: """
+                        SELECT id, display_name
+                        FROM clipboard_tag_definitions
+                        ORDER BY display_order, id
+                        """
+                ).map {
+                    ClipboardHistoryTagDefinition(
+                        id: $0["id"],
+                        displayName: $0["display_name"]
                     )
+                }
+                guard currentDefinitions != normalizedDefinitions else {
+                    return TagDefinitionUpdateMutationResult(
+                        update: ClipboardHistoryTagDefinitionUpdate(
+                            removedMembershipCount: 0,
+                            unprotectedEntryCount: 0
+                        ),
+                        didMutate: false
+                    )
+                }
+                let oldDefinitionIDs = Set(
+                    currentDefinitions.map(\.id)
                 )
-                let removedDefinitions = oldDefinitions.subtracting(tagIDs)
+                let removedDefinitions = oldDefinitionIDs.subtracting(
+                    tagIDs
+                )
                 let removedMembershipCount: Int
                 if removedDefinitions.isEmpty {
                     removedMembershipCount = 0
@@ -408,7 +457,7 @@ extension ClipboardHistoryModule {
                 )
                 try database.execute(sql: "DELETE FROM clipboard_tag_definitions")
                 for (displayOrder, definition) in
-                    definitions.enumerated()
+                    normalizedDefinitions.enumerated()
                 {
                     try database.execute(
                         sql: """
@@ -418,7 +467,7 @@ extension ClipboardHistoryModule {
                             """,
                         arguments: [
                             definition.id,
-                            names[displayOrder],
+                            definition.displayName,
                             displayOrder,
                         ]
                     )
@@ -469,16 +518,21 @@ extension ClipboardHistoryModule {
                         arguments: [timestamp, entryID]
                     )
                 }
-                if oldDefinitions != tagIDs || removedMembershipCount > 0 {
-                    try Self.bumpHistoryRevision(in: database)
-                    try Self.bumpSearchIndexGeneration(in: database)
-                }
-                return ClipboardHistoryTagDefinitionUpdate(
-                    removedMembershipCount: removedMembershipCount,
-                    unprotectedEntryCount: newlyUnprotected.count
+                try Self.bumpHistoryRevision(in: database)
+                try Self.bumpSearchIndexGeneration(in: database)
+                return TagDefinitionUpdateMutationResult(
+                    update: ClipboardHistoryTagDefinitionUpdate(
+                        removedMembershipCount: removedMembershipCount,
+                        unprotectedEntryCount: newlyUnprotected.count
+                    ),
+                    didMutate: true
                 )
             }
         }
+        if result.didMutate {
+            publishMutation()
+        }
+        return result.update
     }
 
     public func prepareRetentionChange(
@@ -495,7 +549,8 @@ extension ClipboardHistoryModule {
                     return RetentionPreparationResult(
                         preparation: .applied(period),
                         payloadPaths: [],
-                        deletedEntryIDs: []
+                        deletedEntryIDs: [],
+                        didMutate: false
                     )
                 }
                 let affectedIDs = try retentionReductionEntryIDs(
@@ -513,7 +568,8 @@ extension ClipboardHistoryModule {
                     return RetentionPreparationResult(
                         preparation: .confirmationRequired(preview),
                         payloadPaths: [],
-                        deletedEntryIDs: []
+                        deletedEntryIDs: [],
+                        didMutate: false
                     )
                 }
 
@@ -528,7 +584,8 @@ extension ClipboardHistoryModule {
                 return RetentionPreparationResult(
                     preparation: .applied(period),
                     payloadPaths: payloadPaths,
-                    deletedEntryIDs: Set(expiredIDs)
+                    deletedEntryIDs: Set(expiredIDs),
+                    didMutate: true
                 )
             }
         } catch let error as ClipboardHistoryModuleError {
@@ -538,6 +595,9 @@ extension ClipboardHistoryModule {
         }
         cancelDerivedJobs(for: preparation.deletedEntryIDs)
         await enqueueReclamation(for: preparation.payloadPaths)
+        if preparation.didMutate {
+            publishMutation()
+        }
         return preparation.preparation
     }
 
@@ -573,6 +633,20 @@ extension ClipboardHistoryModule {
         }
         let database = try requiredDatabase()
         let date = now()
+        let finalizesClear: Bool
+        if case .clear = payload.operation {
+            finalizesClear = true
+        } else {
+            finalizesClear = false
+        }
+        if finalizesClear {
+            isFinalizingClear = true
+        }
+        defer {
+            if finalizesClear {
+                isFinalizingClear = false
+            }
+        }
         let result: ConfirmationApplyResult
         do {
             result = try await database.write {
@@ -607,7 +681,8 @@ extension ClipboardHistoryModule {
                             )
                         ),
                         payloadPaths: [],
-                        deletedEntryIDs: []
+                        deletedEntryIDs: [],
+                        didMutate: false
                     )
                 }
 
@@ -620,14 +695,18 @@ extension ClipboardHistoryModule {
                 if case .retention(let period) = payload.operation {
                     try setRetentionPeriod(period, in: database)
                 }
-                if currentIDs.isEmpty, allDeletedIDs.isEmpty {
-                    try Self.bumpHistoryRevision(in: database)
+                let didMutate = switch payload.operation {
+                case .retention:
+                    true
+                case .clear:
+                    !allDeletedIDs.isEmpty
                 }
                 try faultInjector.check(.databaseTransaction)
                 return ConfirmationApplyResult(
                     outcome: .applied(deletedCount: currentIDs.count),
                     payloadPaths: payloadPaths,
-                    deletedEntryIDs: allDeletedIDs
+                    deletedEntryIDs: allDeletedIDs,
+                    didMutate: didMutate
                 )
             }
         } catch let error as ClipboardHistoryModuleError {
@@ -635,8 +714,17 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
+        if case .clear = payload.operation,
+            case .applied = result.outcome
+        {
+            await captureMonitor?.establishBaseline()
+            isFinalizingClear = false
+        }
         cancelDerivedJobs(for: result.deletedEntryIDs)
         await enqueueReclamation(for: result.payloadPaths)
+        if result.didMutate {
+            publishMutation()
+        }
         return result.outcome
     }
 
@@ -644,13 +732,39 @@ extension ClipboardHistoryModule {
         _ isFavorite: Bool,
         for entryID: ClipboardHistoryEntryID,
         in database: DatabasePool
-    ) throws -> ClipboardHistoryMutationOutcome {
+    ) throws -> MutationApplyResult {
         let storedID = entryID.value.uuidString.lowercased()
         let timestamp = now()
         return try mapMutationStorageFailure {
             try database.write { database in
                 guard try isLiveEntry(storedID, at: timestamp, in: database) else {
-                    return .notFound
+                    return MutationApplyResult(
+                        outcome: .notFound,
+                        didMutate: false
+                    )
+                }
+                let currentFavorite = try Bool.fetchOne(
+                    database,
+                    sql: """
+                        SELECT is_favorite
+                        FROM clipboard_entries
+                        WHERE id = ?
+                        """,
+                    arguments: [storedID]
+                ) ?? false
+                if currentFavorite == isFavorite {
+                    return MutationApplyResult(
+                        outcome: .updated(
+                            try Self.entry(
+                                from: try requiredEntryRow(
+                                    storedID,
+                                    in: database
+                                ),
+                                in: database
+                            )
+                        ),
+                        didMutate: false
+                    )
                 }
                 let wasProtected = try protectionState(
                     for: storedID,
@@ -677,11 +791,17 @@ extension ClipboardHistoryModule {
                 }
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
-                return .updated(
-                    try Self.entry(
-                        from: try requiredEntryRow(storedID, in: database),
-                        in: database
-                    )
+                return MutationApplyResult(
+                    outcome: .updated(
+                        try Self.entry(
+                            from: try requiredEntryRow(
+                                storedID,
+                                in: database
+                            ),
+                            in: database
+                        )
+                    ),
+                    didMutate: true
                 )
             }
         }
@@ -691,13 +811,16 @@ extension ClipboardHistoryModule {
         _ tagIDs: Set<String>,
         for entryID: ClipboardHistoryEntryID,
         in database: DatabasePool
-    ) throws -> ClipboardHistoryMutationOutcome {
+    ) throws -> MutationApplyResult {
         let storedID = entryID.value.uuidString.lowercased()
         let timestamp = now()
         return try mapMutationStorageFailure {
             try database.write { database in
                 guard try isLiveEntry(storedID, at: timestamp, in: database) else {
-                    return .notFound
+                    return MutationApplyResult(
+                        outcome: .notFound,
+                        didMutate: false
+                    )
                 }
                 let validTagIDs = Set(
                     try String.fetchAll(
@@ -708,6 +831,31 @@ extension ClipboardHistoryModule {
                 let invalidTagIDs = tagIDs.subtracting(validTagIDs)
                 guard invalidTagIDs.isEmpty else {
                     throw ClipboardHistoryModuleError.invalidTagIDs(invalidTagIDs)
+                }
+                let currentTagIDs = Set(
+                    try String.fetchAll(
+                        database,
+                        sql: """
+                            SELECT tag_id
+                            FROM clipboard_entry_tags
+                            WHERE entry_id = ?
+                            """,
+                        arguments: [storedID]
+                    )
+                )
+                if currentTagIDs == tagIDs {
+                    return MutationApplyResult(
+                        outcome: .updated(
+                            try Self.entry(
+                                from: try requiredEntryRow(
+                                    storedID,
+                                    in: database
+                                ),
+                                in: database
+                            )
+                        ),
+                        didMutate: false
+                    )
                 }
                 let wasProtected = try protectionState(
                     for: storedID,
@@ -742,11 +890,17 @@ extension ClipboardHistoryModule {
                 }
                 try Self.bumpHistoryRevision(in: database)
                 try Self.bumpSearchIndexGeneration(in: database)
-                return .updated(
-                    try Self.entry(
-                        from: try requiredEntryRow(storedID, in: database),
-                        in: database
-                    )
+                return MutationApplyResult(
+                    outcome: .updated(
+                        try Self.entry(
+                            from: try requiredEntryRow(
+                                storedID,
+                                in: database
+                            ),
+                            in: database
+                        )
+                    ),
+                    didMutate: true
                 )
             }
         }
@@ -756,7 +910,7 @@ extension ClipboardHistoryModule {
         _ text: String,
         for entryID: ClipboardHistoryEntryID,
         in database: DatabasePool
-    ) async throws -> ClipboardHistoryMutationOutcome {
+    ) async throws -> MutationApplyResult {
         guard !text.isEmpty else {
             throw ClipboardHistoryModuleError.invalidTextEdit
         }
@@ -787,7 +941,13 @@ extension ClipboardHistoryModule {
         do {
             result = try await database.write { database in
                 guard try isLiveEntry(storedID, at: date, in: database) else {
-                    return TextEditResult(outcome: .notFound, payloadPaths: [])
+                    return TextEditResult(
+                        outcome: MutationApplyResult(
+                            outcome: .notFound,
+                            didMutate: false
+                        ),
+                        payloadPaths: []
+                    )
                 }
                 let itemCount =
                     try Int.fetchOne(
@@ -983,11 +1143,17 @@ extension ClipboardHistoryModule {
                 try Self.bumpSearchIndexGeneration(in: database)
                 try faultInjector.check(.databaseTransaction)
                 return TextEditResult(
-                    outcome: .updated(
-                        try Self.entry(
-                            from: try requiredEntryRow(storedID, in: database),
-                            in: database
-                        )
+                    outcome: MutationApplyResult(
+                        outcome: .updated(
+                            try Self.entry(
+                                from: try requiredEntryRow(
+                                    storedID,
+                                    in: database
+                                ),
+                                in: database
+                            )
+                        ),
+                        didMutate: true
                     ),
                     payloadPaths: payloadPaths
                 )
@@ -1451,17 +1617,34 @@ private struct RetentionPreparationResult {
     let preparation: ClipboardHistoryRetentionChangePreparation
     let payloadPaths: [String]
     let deletedEntryIDs: Set<String>
+    let didMutate: Bool
 }
 
 private struct ConfirmationApplyResult {
     let outcome: ClipboardHistoryDestructiveApplyOutcome
     let payloadPaths: [String]
     let deletedEntryIDs: Set<String>
+    let didMutate: Bool
 }
 
 private struct TextEditResult {
-    let outcome: ClipboardHistoryMutationOutcome
+    let outcome: ClipboardHistoryModule.MutationApplyResult
     let payloadPaths: [String]
+}
+
+private struct TagAssignmentMutationResult: Sendable {
+    let assignment: ClipboardHistoryTagAssignment
+    let didMutate: Bool
+}
+
+private struct TagDefinitionMutationResult: Sendable {
+    let definition: ClipboardHistoryTagDefinition
+    let didMutate: Bool
+}
+
+private struct TagDefinitionUpdateMutationResult: Sendable {
+    let update: ClipboardHistoryTagDefinitionUpdate
+    let didMutate: Bool
 }
 
 private enum ConfirmationOperation: Codable {

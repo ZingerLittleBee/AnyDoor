@@ -631,7 +631,9 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             )
         }
         let entryID = UUID()
-        let module = fixture.makeModule()
+        let center = NotificationCenter()
+        let recorder = ClipboardHistoryMutationRecorder(center: center)
+        let module = fixture.makeModule(notificationCenter: center)
 
         _ = try await module.migrateLegacy(
             fixture.request(
@@ -655,6 +657,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
                 retentionPeriod: .unlimited
             )
         )
+        recorder.reset()
 
         let migrated = try await module.legacyFileDiagnostics(
             for: ClipboardHistoryEntryID(entryID)
@@ -684,10 +687,28 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             )
         )
         XCTAssertEqual(outcome, .restored(memberCount: 1))
+        XCTAssertEqual(recorder.count, 1)
         XCTAssertEqual(
             try Data(contentsOf: destination),
             Data("captured".utf8)
         )
+        let repeatedOutcome = try await module.restoreLegacyOwnedFiles(
+            ClipboardHistoryLegacyFileRestoreRequest(
+                entryID: ClipboardHistoryEntryID(entryID),
+                destinations: [
+                    ClipboardHistoryLegacyFileDestination(
+                        memberID: ClipboardHistoryLegacyFileMemberID(
+                            itemIndex: 1,
+                            memberIndex: 0
+                        ),
+                        url: destination,
+                        collisionPolicy: .reuseIfIdentical
+                    )
+                ]
+            )
+        )
+        XCTAssertEqual(repeatedOutcome, .alreadyRestored(memberCount: 1))
+        XCTAssertEqual(recorder.count, 1)
     }
 
     func testOwnedFileRestoreCommitsAllMembersAndPreservesIdentity()
@@ -1645,14 +1666,16 @@ private final class LegacyMigrationFixture {
     func makeModule(
         now: Date? = nil,
         faultInjector: ClipboardHistoryFaultInjector =
-            ClipboardHistoryFaultInjector()
+            ClipboardHistoryFaultInjector(),
+        notificationCenter: NotificationCenter = .default
     ) -> ClipboardHistoryModule {
         let currentDate = now ?? self.now
         return ClipboardHistoryModule(
             testingStoreRoot: storeRoot,
             keyStore: keyStore,
             faultInjector: faultInjector,
-            now: { currentDate }
+            now: { currentDate },
+            notificationCenter: notificationCenter
         )
     }
 

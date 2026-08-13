@@ -20,8 +20,10 @@ public actor ClipboardHistoryModule {
     var monitoringRequested = false
     var monitoringConfiguration = ClipboardHistoryMonitoringConfiguration()
     var captureMonitor: ClipboardHistoryCaptureMonitor?
+    var isFinalizingClear = false
     let selfWriteSuppression: ClipboardHistorySelfWriteSuppression
     let monitorInstrumentation: ClipboardHistoryMonitorInstrumentation
+    let notificationCenter: NotificationCenter
     public nonisolated let pasteboardSelfWrites:
         ClipboardHistoryPasteboardSelfWriteFunnel
     let storeRoot: URL
@@ -56,6 +58,7 @@ public actor ClipboardHistoryModule {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        notificationCenter = .default
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )
@@ -115,11 +118,13 @@ public actor ClipboardHistoryModule {
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector(),
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
-            ClipboardHistoryVisionRecognizer()
+            ClipboardHistoryVisionRecognizer(),
+        notificationCenter: NotificationCenter = .default
     ) throws {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        self.notificationCenter = notificationCenter
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )
@@ -174,11 +179,13 @@ public actor ClipboardHistoryModule {
             CanonicalIdentity.sha256,
         duplicateReuseEnabled: Bool = true,
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
-            ClipboardHistoryVisionRecognizer()
+            ClipboardHistoryVisionRecognizer(),
+        notificationCenter: NotificationCenter = .default
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        self.notificationCenter = notificationCenter
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )
@@ -351,8 +358,17 @@ public actor ClipboardHistoryModule {
         monitorInstrumentation.snapshot()
     }
 
-    public func advanceMonitoringBaseline() async {
-        await captureMonitor?.establishBaseline()
+    func publishMutation() {
+        notificationCenter.post(
+            name: .clipboardHistoryV2DidMutate,
+            object: nil
+        )
+    }
+
+    func installCaptureMonitorForTesting(
+        _ monitor: ClipboardHistoryCaptureMonitor
+    ) {
+        captureMonitor = monitor
     }
 }
 

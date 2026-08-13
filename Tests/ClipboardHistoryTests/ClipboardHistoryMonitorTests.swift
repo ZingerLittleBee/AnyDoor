@@ -483,6 +483,55 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     }
 
     @MainActor
+    func testConfirmedClearAdvancesTheActiveMonitorBaseline() async throws {
+        let fixture = try MonitorTemporaryStore()
+        let center = NotificationCenter()
+        let recorder = ClipboardHistoryMutationRecorder(center: center)
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore(),
+            notificationCenter: center
+        )
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        pasteboard.clearContents()
+        pasteboard.setString("baseline", forType: .string)
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pasteboard,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+        await module.installCaptureMonitorForTesting(monitor)
+
+        pasteboard.clearContents()
+        pasteboard.setString("stored history", forType: .string)
+        await monitor.observeForTesting()
+        XCTAssertEqual(recorder.count, 1)
+        let storedPage = try await module.page(.init())
+        XCTAssertEqual(storedPage.entries.count, 1)
+        recorder.reset()
+        pasteboard.clearContents()
+        pasteboard.setString("pending clipboard", forType: .string)
+
+        let preview = try await module.previewClearHistory(
+            scope: .includingProtected
+        )
+        let clearOutcome = try await module.confirm(preview.token)
+        XCTAssertEqual(
+            clearOutcome,
+            .applied(deletedCount: 1)
+        )
+        XCTAssertEqual(recorder.count, 1)
+
+        await monitor.observeForTesting()
+        let page = try await module.page(.init())
+        XCTAssertEqual(page.entries, [])
+        XCTAssertEqual(recorder.count, 1)
+    }
+
+    @MainActor
     func testBaselineResumeAndSelfWritesNeverImportCurrentPasteboard() async throws {
         let fixture = try MonitorTemporaryStore()
         let module = ClipboardHistoryModule(

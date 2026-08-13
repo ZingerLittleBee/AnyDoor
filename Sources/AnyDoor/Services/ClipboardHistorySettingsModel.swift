@@ -281,7 +281,6 @@ final class ClipboardHistorySettingsModel {
             switch try await module.confirm(confirmation.preview.token) {
             case .applied:
                 clearConfirmation = nil
-                await module.advanceMonitoringBaseline()
                 await refreshStorageUsage()
             case .stale(let preview):
                 clearConfirmation = ClipboardHistoryClearConfirmation(

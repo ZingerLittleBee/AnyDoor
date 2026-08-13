@@ -136,6 +136,9 @@ extension ClipboardHistoryModule {
         _ request: ClipboardHistoryPasteboardCaptureRequest,
         source: ClipboardHistoryCaptureSource
     ) throws -> ClipboardHistoryPasteboardCaptureOutcome {
+        guard !isFinalizingClear else {
+            return .skipped(.generationChanged)
+        }
         switch request.snapshotRead {
         case .rejected(let rejection):
             return .skipped(rejection)
@@ -148,6 +151,7 @@ extension ClipboardHistoryModule {
                 snapshot = value
             }
             let outcome = try persist(snapshot, source: source)
+            publishMutation()
             return .captured(outcome)
         }
     }
