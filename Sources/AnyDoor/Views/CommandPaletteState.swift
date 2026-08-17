@@ -1012,9 +1012,9 @@ final class CommandPaletteState {
         query: String
     ) -> [PluginRowDescriptor] {
         rows.enumerated()
-            .map { index, row in
+            .map { index, row -> (PluginRowDescriptor, CommandPaletteQueryMatch.Key) in
                 let rank = pluginRowRank(row, query: query) ?? .other
-                (row, CommandPaletteQueryMatch.Key(rank: rank, index: index))
+                return (row, CommandPaletteQueryMatch.Key(rank: rank, index: index))
             }
             .sorted { $0.1 < $1.1 }
             .map(\.0)
