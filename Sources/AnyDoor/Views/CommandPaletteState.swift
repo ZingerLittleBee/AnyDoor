@@ -9,16 +9,18 @@ struct CommandPaletteSection: Identifiable {
     /// string; Core sections keep the typed convenience initializer.
     let titleKey: String
     let entries: [PanelEntry]
-    var id: String { titleKey }
+    /// `titleKey` plus an optional rank-tier suffix so a header can appear
+    /// once per tier without colliding in `ForEach`.
+    let id: String
 
     init(titleKey: L10n.Key, entries: [PanelEntry]) {
-        self.titleKey = titleKey.rawValue
-        self.entries = entries
+        self.init(rawTitleKey: titleKey.rawValue, entries: entries)
     }
 
-    init(rawTitleKey: String, entries: [PanelEntry]) {
+    init(rawTitleKey: String, entries: [PanelEntry], identitySuffix: String? = nil) {
         self.titleKey = rawTitleKey
         self.entries = entries
+        self.id = identitySuffix.map { "\(rawTitleKey)#\($0)" } ?? rawTitleKey
     }
 }
 
@@ -874,22 +876,21 @@ final class CommandPaletteState {
         return sections
     }
 
-    /// Filter `allSections` and order them so a title prefix outranks a later
-    /// or fuzzier hit, including across section boundaries. Equal ranks keep
-    /// the original section/entry order.
+    /// Filter `allSections` and emit one slice per rank tier so flattened
+    /// order is globally rank-correct. A section that spans tiers is shown
+    /// once per tier (same header) rather than dragging a later hit above a
+    /// prefix in another section. Equal ranks keep the original section and
+    /// entry order.
     private func rankedRootSections(query: String) -> [CommandPaletteSection] {
-        let prepared = allSections.enumerated().compactMap {
-            sectionIndex, section -> (CommandPaletteSection, CommandPaletteQueryMatch.Key)? in
-            let matches = CommandPaletteQueryMatch.ranked(section.entries) {
-                rootRank(of: $0, query: query)
-            }
-            guard let best = matches.map(\.rank).min() else { return nil }
-            return (
-                CommandPaletteSection(rawTitleKey: section.titleKey, entries: matches.map(\.item)),
-                CommandPaletteQueryMatch.Key(rank: best, index: sectionIndex)
+        CommandPaletteQueryMatch.rankedByGlobalTiers(allSections, items: \.entries) {
+            rootRank(of: $0, query: query)
+        }.map { section, entries, rank in
+            CommandPaletteSection(
+                rawTitleKey: section.titleKey,
+                entries: entries,
+                identitySuffix: rank.identitySuffix
             )
         }
-        return prepared.sorted { $0.1 < $1.1 }.map(\.0)
     }
 
     private func rootRank(of entry: PanelEntry, query: String) -> CommandPaletteQueryMatch.Rank? {

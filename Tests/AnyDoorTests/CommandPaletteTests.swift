@@ -875,6 +875,44 @@ final class CommandPaletteTests: XCTestCase {
     }
 
     @MainActor
+    func testPrefixOutranksLaterHitEvenWhenTheyShareASection() {
+        let watch = titledEntry("Watch", bundleID: "watch")
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionCommands,
+                    entries: [watch, keepAwake]
+                ),
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [warp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "wa"
+
+        // Watch (prefix) must not drag Keep Awake (other) above Warp (prefix).
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Watch", "Warp", "Keep Awake"])
+        XCTAssertEqual(
+            state.filteredSections.map(\.titleKey),
+            [
+                L10n.Key.commandPaletteSectionCommands.rawValue,
+                L10n.Key.commandPaletteSectionApplications.rawValue,
+                L10n.Key.commandPaletteSectionCommands.rawValue,
+            ]
+        )
+        XCTAssertEqual(
+            Set(state.filteredSections.map(\.id)).count,
+            state.filteredSections.count,
+            "split rank-tier slices of the same header need distinct identities"
+        )
+    }
+
+    @MainActor
     func testEmptyQueryKeepsOriginalSectionOrder() {
         let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
         let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")

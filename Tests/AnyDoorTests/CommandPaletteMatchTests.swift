@@ -77,6 +77,37 @@ final class CommandPaletteMatchTests: XCTestCase {
         XCTAssertEqual(ranked.map(\.rank), [.exact, .prefix, .other])
     }
 
+    func testPrefixRankFollowsLocalizedUnicodeEquivalence() {
+        // Precomposed É (U+00C9) vs decomposed e + combining acute. Candidate
+        // matching uses localized case-insensitive contains against the
+        // current locale; prefix rank must accept the same start.
+        let precomposed = "\u{00C9}clair"
+        let decomposed = "e\u{0301}"
+        XCTAssertEqual(rank(title: precomposed, query: decomposed), .prefix)
+        XCTAssertEqual(rank(title: "Keep \u{00C9}clair", query: decomposed), .other)
+        XCTAssertEqual(rank(title: "E\u{0301}clair", query: "\u{00E9}"), .prefix)
+    }
+
+    func testExactRankFollowsLocalizedUnicodeEquivalence() {
+        XCTAssertEqual(
+            rank(title: "\u{00C9}clair", query: "e\u{0301}clair"),
+            .exact
+        )
+    }
+
+    func testGlobalTiersLiftALaterSectionPrefixAboveAnEarlierOther() {
+        let sections = [
+            (name: "commands", titles: ["Watch", "Keep Awake"]),
+            (name: "apps", titles: ["Warp"]),
+        ]
+        let ranked = CommandPaletteQueryMatch.rankedByGlobalTiers(sections, items: \.titles) {
+            CommandPaletteQueryMatch.rank(titles: [$0], query: "wa")
+        }
+        XCTAssertEqual(ranked.map(\.section.name), ["commands", "apps", "commands"])
+        XCTAssertEqual(ranked.flatMap(\.items), ["Watch", "Warp", "Keep Awake"])
+        XCTAssertEqual(ranked.map(\.rank), [.prefix, .prefix, .other])
+    }
+
     private func rank(title: String, query: String) -> CommandPaletteQueryMatch.Rank? {
         CommandPaletteQueryMatch.rank(titles: [title], query: query)
     }

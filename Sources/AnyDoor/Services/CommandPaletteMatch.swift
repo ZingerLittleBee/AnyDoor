@@ -9,13 +9,23 @@ import Foundation
 enum CommandPaletteQueryMatch {
     /// Lower is better. Exact titles stay ahead of a mere prefix; a prefix
     /// stays ahead of substring, word-later, alias, or subtitle hits.
-    enum Rank: Int, Comparable {
+    enum Rank: Int, CaseIterable, Comparable {
         case exact = 0
         case prefix = 1
         case other = 2
 
         static func < (lhs: Rank, rhs: Rank) -> Bool {
             lhs.rawValue < rhs.rawValue
+        }
+
+        /// Distinguishes a title-search slice when the same section header is
+        /// emitted once per rank tier.
+        var identitySuffix: String {
+            switch self {
+            case .exact: return "exact"
+            case .prefix: return "prefix"
+            case .other: return "other"
+            }
         }
     }
 
@@ -69,11 +79,43 @@ enum CommandPaletteQueryMatch {
         .map { (item: $0.0, rank: $0.1) }
     }
 
+    /// Emits each section once per rank tier that has survivors, in tier order
+    /// then original section order. Flattened items are therefore globally
+    /// rank-correct; a section may appear more than once if it spans tiers.
+    static func rankedByGlobalTiers<Section, Item>(
+        _ sections: [Section],
+        items: (Section) -> [Item],
+        rank: (Item) -> Rank?
+    ) -> [(section: Section, items: [Item], rank: Rank)] {
+        let prepared = sections.map { section in
+            let scored = items(section).enumerated().compactMap { index, item -> (Item, Int, Rank)? in
+                guard let rank = rank(item) else { return nil }
+                return (item, index, rank)
+            }
+            return (section, scored)
+        }
+        return Rank.allCases.flatMap { band in
+            prepared.compactMap { section, scored -> (Section, [Item], Rank)? in
+                let slice = scored.filter { $0.2 == band }.sorted { $0.1 < $1.1 }.map(\.0)
+                guard !slice.isEmpty else { return nil }
+                return (section, slice, band)
+            }
+        }
+    }
+
     private static func rank(title: String, needle: String) -> Rank {
         if title.localizedCaseInsensitiveCompare(needle) == .orderedSame {
             return .exact
         }
-        if title.range(of: needle, options: [.caseInsensitive, .anchored]) != nil {
+        // Same comparison family as `localizedCaseInsensitiveContains`:
+        // current-locale, case-insensitive, including Unicode equivalence.
+        // Do not drop the locale — a nil-locale `.anchored` range can refuse
+        // prefix rank to a candidate the contains check already accepted.
+        if title.range(
+            of: needle,
+            options: [.caseInsensitive, .anchored],
+            locale: .current
+        ) != nil {
             return .prefix
         }
         return .other
