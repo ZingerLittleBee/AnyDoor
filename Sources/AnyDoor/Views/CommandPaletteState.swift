@@ -785,10 +785,13 @@ final class CommandPaletteState {
         guard case .options(let optionsLevel) = level else { return [] }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return optionsLevel.entries }
-        return optionsLevel.entries.filter {
-            $0.title.localizedCaseInsensitiveContains(trimmed)
-                || ($0.subtitle?.localizedCaseInsensitiveContains(trimmed) ?? false)
-        }
+        return CommandPaletteQueryMatch.ranked(optionsLevel.entries) { entry in
+            CommandPaletteQueryMatch.rank(
+                titles: [entry.title],
+                secondary: [entry.subtitle].compactMap { $0 },
+                query: trimmed
+            )
+        }.map(\.item)
     }
 
     /// Bumped when an async plugin row source finishes (re)loading, so a visible
@@ -839,12 +842,7 @@ final class CommandPaletteState {
         }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return allSections }
-        var sections = allSections.compactMap { section in
-            let matched = section.entries.filter { entry in
-                rootEntry(entry, matches: trimmed)
-            }
-            return matched.isEmpty ? nil : CommandPaletteSection(rawTitleKey: section.titleKey, entries: matched)
-        }
+        var sections = rankedRootSections(query: trimmed)
         // Insert special sections at index 0 in reverse priority order, so the
         // last inserted ends up on top. Final order: quicklink argument, dev-tool
         // keyword-completion hint, calc, conversion, ports, plugin rows (hosts),
@@ -876,10 +874,30 @@ final class CommandPaletteState {
         return sections
     }
 
-    private func rootEntry(_ entry: PanelEntry, matches query: String) -> Bool {
-        entry.localizedTitle().localizedCaseInsensitiveContains(query)
-            || entry.title.localizedCaseInsensitiveContains(query)
-            || entry.searchAliases.contains { $0.localizedCaseInsensitiveContains(query) }
+    /// Filter `allSections` and order them so a title prefix outranks a later
+    /// or fuzzier hit, including across section boundaries. Equal ranks keep
+    /// the original section/entry order.
+    private func rankedRootSections(query: String) -> [CommandPaletteSection] {
+        let prepared = allSections.enumerated().compactMap {
+            sectionIndex, section -> (CommandPaletteSection, CommandPaletteQueryMatch.Key)? in
+            let matches = CommandPaletteQueryMatch.ranked(section.entries) {
+                rootRank(of: $0, query: query)
+            }
+            guard let best = matches.map(\.rank).min() else { return nil }
+            return (
+                CommandPaletteSection(rawTitleKey: section.titleKey, entries: matches.map(\.item)),
+                CommandPaletteQueryMatch.Key(rank: best, index: sectionIndex)
+            )
+        }
+        return prepared.sorted { $0.1 < $1.1 }.map(\.0)
+    }
+
+    private func rootRank(of entry: PanelEntry, query: String) -> CommandPaletteQueryMatch.Rank? {
+        CommandPaletteQueryMatch.rank(
+            titles: [entry.localizedTitle(), entry.title],
+            secondary: entry.searchAliases,
+            query: query
+        )
     }
 
     /// Builds one section per registered plugin row source, listing every row
@@ -948,8 +966,9 @@ final class CommandPaletteState {
     /// palette). Mirrors Raycast: typing an extension's display name surfaces
     /// all of its rows, so a query matching `sectionTitle` shows every row;
     /// otherwise each row is kept when the query matches its own title or
-    /// subtitle (`pluginRowMatches`). Case-insensitive throughout. An empty
-    /// query yields nothing — plugin rows are query-gated at the root.
+    /// subtitle (`pluginRowMatches`). Survivors are then ranked so a title
+    /// prefix outranks a later or subtitle hit. Case-insensitive throughout.
+    /// An empty query yields nothing — plugin rows are query-gated at the root.
     nonisolated static func filterRootPluginRows(
         _ rows: [PluginRowDescriptor],
         query: String,
@@ -957,16 +976,46 @@ final class CommandPaletteState {
     ) -> [PluginRowDescriptor] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return [] }
-        if sectionTitle.localizedCaseInsensitiveContains(trimmed) { return rows }
-        return rows.filter { pluginRowMatches($0, query: trimmed) }
+        let filtered = if sectionTitle.localizedCaseInsensitiveContains(trimmed) {
+            rows
+        } else {
+            rows.filter { pluginRowMatches($0, query: trimmed) }
+        }
+        return rankedPluginRows(filtered, query: trimmed)
     }
 
     /// Whether a plugin row matches a query on its own text — title or subtitle,
     /// case-insensitively. Shared by the root and pushed-list levels; the root
     /// level additionally shows every row when the section title itself matches.
     nonisolated static func pluginRowMatches(_ row: PluginRowDescriptor, query: String) -> Bool {
-        row.title.localizedCaseInsensitiveContains(query)
-            || (row.subtitle?.localizedCaseInsensitiveContains(query) ?? false)
+        pluginRowRank(row, query: query) != nil
+    }
+
+    /// Title prefix / exact ranks outrank a subtitle or later-in-title hit.
+    /// Rows kept only because the section title matched (no row-text hit) stay
+    /// at `.other` so they sort after real title matches without dropping.
+    nonisolated private static func rankedPluginRows(
+        _ rows: [PluginRowDescriptor],
+        query: String
+    ) -> [PluginRowDescriptor] {
+        rows.enumerated()
+            .map { index, row in
+                let rank = pluginRowRank(row, query: query) ?? .other
+                (row, CommandPaletteQueryMatch.Key(rank: rank, index: index))
+            }
+            .sorted { $0.1 < $1.1 }
+            .map(\.0)
+    }
+
+    nonisolated private static func pluginRowRank(
+        _ row: PluginRowDescriptor,
+        query: String
+    ) -> CommandPaletteQueryMatch.Rank? {
+        CommandPaletteQueryMatch.rank(
+            titles: [row.title],
+            secondary: [row.subtitle].compactMap { $0 },
+            query: query
+        )
     }
 
     /// The two host-synthesized status rows for an async plugin row source. Both
@@ -1250,9 +1299,14 @@ final class CommandPaletteState {
             // level matches each row's title or subtitle only (not the section
             // title). An empty query shows all, like the options level.
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            content = .rows(trimmed.isEmpty ? rows : rows.filter {
-                Self.pluginRowMatches($0, query: trimmed)
-            })
+            content = .rows(
+                trimmed.isEmpty
+                    ? rows
+                    : Self.rankedPluginRows(
+                        rows.filter { Self.pluginRowMatches($0, query: trimmed) },
+                        query: trimmed
+                    )
+            )
         }
         return Self.pluginContentEntries(sourceKey: listLevel.sourceKey, content: content)
     }

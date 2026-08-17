@@ -883,6 +883,43 @@ final class CommandPalettePluginStateTests: XCTestCase {
         XCTAssertEqual(filtered.count, Self.v2exRows.count)
     }
 
+    /// A title prefix outranks a later-in-title hit, even when the prefix row
+    /// was registered later.
+    func testRowTitlePrefixOutranksLaterSubstring() {
+        let rows = [
+            PluginRowDescriptor(id: "awake", title: "Keep Awake", symbol: "cup.and.saucer", commit: .closeThenAct),
+            PluginRowDescriptor(id: "warp", title: "Warp", symbol: "app.fill", commit: .closeThenAct),
+        ]
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            rows, query: "wa", sectionTitle: "Apps"
+        )
+        XCTAssertEqual(filtered.map(\.id), ["warp", "awake"])
+    }
+
+    /// Prefix ranking is case-insensitive and ignores surrounding whitespace.
+    func testRowTitlePrefixRankingIsNormalized() {
+        let rows = [
+            PluginRowDescriptor(id: "awake", title: "keep awake", symbol: "cup.and.saucer", commit: .closeThenAct),
+            PluginRowDescriptor(id: "warp", title: "WARP", symbol: "app.fill", commit: .closeThenAct),
+        ]
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            rows, query: "  Wa  ", sectionTitle: "Apps"
+        )
+        XCTAssertEqual(filtered.map(\.id), ["warp", "awake"])
+    }
+
+    /// Equal ranks keep registration order.
+    func testEqualRankPluginRowsKeepOriginalOrder() {
+        let rows = [
+            PluginRowDescriptor(id: "watch", title: "Watch", symbol: "app.fill", commit: .closeThenAct),
+            PluginRowDescriptor(id: "warp", title: "Warp", symbol: "app.fill", commit: .closeThenAct),
+        ]
+        let filtered = CommandPaletteState.filterRootPluginRows(
+            rows, query: "wa", sectionTitle: "Apps"
+        )
+        XCTAssertEqual(filtered.map(\.id), ["watch", "warp"])
+    }
+
     /// When the section title does not match, rows filter by their own title.
     func testRowTitleMatchNarrowsWithinSource() {
         let filtered = CommandPaletteState.filterRootPluginRows(

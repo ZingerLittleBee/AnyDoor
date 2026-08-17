@@ -806,6 +806,90 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertFalse(state.isCurrencyContext)
     }
 
+    // MARK: - Prefix ranking
+
+    @MainActor
+    func testTitlePrefixOutranksLaterSubstringAcrossSections() {
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [keepAwake]),
+                CommandPaletteSection(titleKey: .commandPaletteSectionApplications, entries: [warp]),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "wa"
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Warp", "Keep Awake"])
+        XCTAssertEqual(
+            state.filteredSections.map(\.titleKey),
+            [
+                L10n.Key.commandPaletteSectionApplications.rawValue,
+                L10n.Key.commandPaletteSectionCommands.rawValue,
+            ]
+        )
+    }
+
+    @MainActor
+    func testPrefixRankingIsCaseInsensitiveAndNormalized() {
+        let keepAwake = titledEntry("keep awake", bundleID: "keep-awake")
+        let warp = titledEntry("WARP", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [keepAwake]),
+                CommandPaletteSection(titleKey: .commandPaletteSectionApplications, entries: [warp]),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "  Wa  "
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["WARP", "keep awake"])
+    }
+
+    @MainActor
+    func testEqualRankKeepsOriginalSectionAndEntryOrder() {
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let alwaysOn = titledEntry("Always On", bundleID: "always-on")
+        let watch = titledEntry("Watch", bundleID: "com.apple.watch")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionCommands,
+                    entries: [keepAwake, alwaysOn]
+                ),
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [watch, warp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "wa"
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Watch", "Warp", "Keep Awake", "Always On"])
+    }
+
+    @MainActor
+    func testEmptyQueryKeepsOriginalSectionOrder() {
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [keepAwake]),
+                CommandPaletteSection(titleKey: .commandPaletteSectionApplications, entries: [warp]),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Keep Awake", "Warp"])
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 
@@ -854,6 +938,15 @@ final class CommandPaletteTests: XCTestCase {
         keyword: String?
     ) -> QuicklinkTemplateCandidate {
         QuicklinkTemplateCandidate(id: id, title: title, keyword: keyword, link: link)
+    }
+
+    private func titledEntry(_ title: String, bundleID: String) -> PanelEntry {
+        .paletteRow(
+            source: .installedApp(bundleID: bundleID, path: "/Applications/\(bundleID).app"),
+            displayOrder: 0,
+            title: title,
+            symbol: "app.fill"
+        )
     }
 
     private func portRecord(port: UInt16, pid: pid_t, processName: String) -> PortRecord {

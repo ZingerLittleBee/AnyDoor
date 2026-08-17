@@ -39,6 +39,8 @@ versioning.
 
 ### Changed
 
+- Command Palette search now ranks a title that starts with the query ahead of
+  a later or fuzzier match, so `wa` surfaces Warp before Keep Awake.
 - Pasting from the clipboard wall now restores the destination through Launch
   Services before synthesizing Command-V. On macOS 14+, direct activation from
   an accessory app could be ignored, closing the wall without inserting the
