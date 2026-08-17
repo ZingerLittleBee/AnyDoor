@@ -913,6 +913,25 @@ final class CommandPaletteTests: XCTestCase {
     }
 
     @MainActor
+    func testPluginOtherMatchDoesNotOutrankCoreTitlePrefix() {
+        let keepAwake = HostProfile(name: "Keep Awake", isActive: false)
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [warp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: [hostsRowSourceRegistration(profiles: [keepAwake])]
+        )
+        state.query = "wa"
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Warp", "Keep Awake"])
+    }
+
+    @MainActor
     func testEmptyQueryKeepsOriginalSectionOrder() {
         let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
         let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")

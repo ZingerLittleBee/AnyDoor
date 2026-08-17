@@ -845,16 +845,13 @@ final class CommandPaletteState {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return allSections }
         var sections = rankedRootSections(query: trimmed)
-        // Insert special sections at index 0 in reverse priority order, so the
-        // last inserted ends up on top. Final order: quicklink argument, dev-tool
-        // keyword-completion hint, calc, conversion, ports, plugin rows (hosts),
-        // dev tools.
+        // Insert dedicated synthetic sections at index 0 in reverse priority
+        // order, so the last inserted ends up on top. Final order: quicklink
+        // argument, dev-tool keyword-completion hint, calc, conversion, ports,
+        // dev tools. Normal plugin root rows rank with Core sections rather
+        // than occupying a reserved slot.
         if let dev = devToolsSection(matching: trimmed) {
             sections.insert(dev, at: 0)
-        }
-        // Reversed so on-screen order follows registration order.
-        for section in pluginRowSections(matching: trimmed).reversed() {
-            sections.insert(section, at: 0)
         }
         if let ports = portSection(matching: trimmed) {
             sections.insert(ports, at: 0)
@@ -876,14 +873,16 @@ final class CommandPaletteState {
         return sections
     }
 
-    /// Filter `allSections` and emit one slice per rank tier so flattened
-    /// order is globally rank-correct. A section that spans tiers is shown
-    /// once per tier (same header) rather than dragging a later hit above a
-    /// prefix in another section. Equal ranks keep the original section and
-    /// entry order.
+    /// Filter Core and plugin root sections and emit one slice per rank tier
+    /// so flattened order is globally rank-correct, including when a plugin
+    /// `.other` hit would otherwise sit above a Core title prefix. A section
+    /// that spans tiers is shown once per tier (same header). Equal ranks
+    /// keep the original section and entry order (plugin sources first,
+    /// then Core `allSections`).
     private func rankedRootSections(query: String) -> [CommandPaletteSection] {
-        CommandPaletteQueryMatch.rankedByGlobalTiers(allSections, items: \.entries) {
-            rootRank(of: $0, query: query)
+        let combined = pluginRowSections(matching: query) + allSections
+        return CommandPaletteQueryMatch.rankedByGlobalTiers(combined, items: \.entries) {
+            rankedRootRank(of: $0, query: query)
         }.map { section, entries, rank in
             CommandPaletteSection(
                 rawTitleKey: section.titleKey,
@@ -891,6 +890,19 @@ final class CommandPaletteState {
                 identitySuffix: rank.identitySuffix
             )
         }
+    }
+
+    private func rankedRootRank(
+        of entry: PanelEntry,
+        query: String
+    ) -> CommandPaletteQueryMatch.Rank? {
+        if case .pluginRow(_, let descriptor) = entry.source {
+            // Already-filtered plugin rows (including section-title-only
+            // survivors and status placeholders) stay in `.other` rather
+            // than being dropped by a nil rank.
+            return Self.pluginRowRank(descriptor, query: query) ?? .other
+        }
+        return rootRank(of: entry, query: query)
     }
 
     private func rootRank(of entry: PanelEntry, query: String) -> CommandPaletteQueryMatch.Rank? {
