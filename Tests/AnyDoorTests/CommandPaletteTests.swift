@@ -947,6 +947,39 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertEqual(state.flatEntries.map(\.title), ["Keep Awake", "Warp"])
     }
 
+    @MainActor
+    func testLocalizedAppNameAndUnlocalizedAliasBothMatch() {
+        // The palette title is the localized display name; the Info.plist name
+        // stays an alias so both queries hit.
+        let localizedApp = PanelEntry.paletteRow(
+            source: .installedApp(
+                bundleID: "com.example.internal",
+                path: "/Applications/InternalName-macOS.app"
+            ),
+            displayOrder: 0,
+            title: "示例应用",
+            searchAliases: ["InternalName-macOS"],
+            symbol: "app.fill",
+            kind: .submenu
+        )
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [localizedApp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+
+        state.query = "示"
+        XCTAssertEqual(state.flatEntries.map(\.title), ["示例应用"])
+
+        state.query = "InternalName"
+        XCTAssertEqual(state.flatEntries.map(\.title), ["示例应用"])
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 

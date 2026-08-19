@@ -520,6 +520,7 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
                     source: .installedApp(bundleID: app.bundleID, path: app.path),
                     displayOrder: unboundOrder + Double(offset),
                     title: app.displayName,
+                    searchAliases: app.searchAliases,
                     symbol: "app.fill",
                     kind: .submenu
                 )

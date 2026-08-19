@@ -5,6 +5,10 @@ struct InstalledApp: Identifiable, Hashable, Sendable {
     let bundleID: String
     let displayName: String
     let path: String
+    /// Unlocalized Info.plist names and the on-disk basename, when they differ
+    /// from `displayName`. Palette search treats these as aliases so typing
+    /// the internal bundle name still finds the localized display name.
+    let searchAliases: [String]
     var id: String { bundleID }
 
     var isSystemApp: Bool { path.hasPrefix("/System/") }
@@ -103,11 +107,53 @@ enum InstalledAppsScanner {
               !bundleID.isEmpty else {
             return nil
         }
-        let info = bundle.infoDictionary
-        let name = preferredName
-            ?? (info?["CFBundleDisplayName"] as? String)
-            ?? (info?["CFBundleName"] as? String)
-            ?? url.deletingPathExtension().lastPathComponent
-        return InstalledApp(bundleID: bundleID, displayName: name, path: path)
+        // `object(forInfoDictionaryKey:)` returns the localized value when an
+        // InfoPlist.strings file exists. `infoDictionary` does not — it would
+        // surface an internal bundle name and miss a query for the name shown
+        // in Finder.
+        let localized = nonEmptyString(bundle.object(forInfoDictionaryKey: "CFBundleDisplayName"))
+            ?? nonEmptyString(bundle.object(forInfoDictionaryKey: kCFBundleNameKey as String))
+        let unlocalized = nonEmptyString(bundle.infoDictionary?["CFBundleDisplayName"])
+            ?? nonEmptyString(bundle.infoDictionary?[kCFBundleNameKey as String])
+        let basename = url.deletingPathExtension().lastPathComponent
+        let name = preferredName ?? localized ?? unlocalized ?? basename
+        return InstalledApp(
+            bundleID: bundleID,
+            displayName: name,
+            path: path,
+            searchAliases: aliases(
+                forDisplayName: name,
+                localized: localized,
+                unlocalized: unlocalized,
+                basename: basename
+            )
+        )
+    }
+
+    private static func nonEmptyString(_ value: Any?) -> String? {
+        guard let string = value as? String else { return nil }
+        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func aliases(
+        forDisplayName name: String,
+        localized: String?,
+        unlocalized: String?,
+        basename: String
+    ) -> [String] {
+        var seen: Set<String> = [folded(name)]
+        var result: [String] = []
+        for candidate in [localized, unlocalized, basename] {
+            guard let candidate, !candidate.isEmpty else { continue }
+            if seen.insert(folded(candidate)).inserted {
+                result.append(candidate)
+            }
+        }
+        return result
+    }
+
+    private static func folded(_ value: String) -> String {
+        value.folding(options: .caseInsensitive, locale: .current)
     }
 }

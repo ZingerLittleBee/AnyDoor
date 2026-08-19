@@ -43,6 +43,9 @@ versioning.
 
 ### Changed
 
+- Command Palette now uses each app's localized display name rather than the
+  unlocalized Info.plist value, so searching the name shown in Finder finds
+  the app. The unlocalized bundle name stays searchable as an alias.
 - Command Palette search now ranks a title that starts with the query ahead of
   a later or fuzzier match, so `wa` surfaces Warp before Keep Awake.
 - Pasting from the clipboard wall now restores the destination through Launch
