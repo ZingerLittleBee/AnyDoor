@@ -26,10 +26,11 @@ final class HotkeyService {
     /// dispatcher decides what to do with it.
     fileprivate nonisolated(unsafe) var dispatcher: (@MainActor @Sendable (HotkeyAction) -> Void)?
 
-    /// When true, the CGEvent callback drops every key/flag event that doesn't match a
-    /// registered hotkey. Used by the "keyboard lock" feature so the user can wipe the
-    /// keyboard without producing input. Hotkeys still fire so the same shortcut can
-    /// toggle the lock back off.
+    /// When true, the CGEvent callback swallows keyboard-originated events
+    /// (keys, flags, and NX_SYSDEFINED aux control buttons) before any matching
+    /// branch. Used by the "keyboard lock" feature so the keyboard produces no
+    /// input. Mouse-originated events still pass through so the lock can be
+    /// released from the menu-bar row.
     fileprivate nonisolated(unsafe) var keyboardLocked: Bool = false
 
     // MARK: - Hyper Key support
@@ -130,6 +131,11 @@ final class HotkeyService {
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
+            // NX_SYSDEFINED — media / brightness / volume / Mission Control
+            // keys. CGEventType has no named case; NSEvent.EventType.systemDefined
+            // is raw 14. Mouse aux buttons also arrive as NX_SYSDEFINED
+            // (subtype 7), so the lock branch distinguishes them by subtype.
+            | (CGEventMask(1) << UInt64(NSEvent.EventType.systemDefined.rawValue))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
@@ -229,6 +235,49 @@ final class HotkeyService {
     }
 }
 
+// MARK: - Keyboard lock decision
+
+/// Pure policy for the keyboard-lock swallow branch. Extracted so the C tap
+/// callback stays thin and the decision can be unit-tested without a live tap.
+enum KeyboardLockEventPolicy {
+    /// NX_SYSDEFINED (`NSEvent.EventType.systemDefined`). Media, brightness,
+    /// volume, mute, play/pause, and Mission Control keys arrive as this type
+    /// rather than `keyDown`. `CGEventType` has no named case. Subtype 8
+    /// identifies a keyboard media key; subtype 7 is a mouse aux button and
+    /// must pass through.
+    static let systemDefinedType = CGEventType(
+        rawValue: UInt32(NSEvent.EventType.systemDefined.rawValue)
+    )!
+
+    /// NX_SUBTYPE_AUX_CONTROL_BUTTONS — keyboard-originated special keys.
+    static let auxControlButtonsSubtype: Int16 = 8
+
+    /// NX_SUBTYPE_AUX_MOUSE_BUTTONS — mouse-originated special buttons.
+    /// Must never be swallowed: unlocking the keyboard is mouse-only.
+    static let auxMouseButtonsSubtype: Int16 = 7
+
+    /// Whether the keyboard-lock tap should drop this event.
+    ///
+    /// While locked, ordinary key / flag events and keyboard-originated
+    /// `NX_SYSDEFINED` aux control buttons (subtype 8) are swallowed. Mouse
+    /// aux buttons (subtype 7) and every other type pass through. While
+    /// unlocked, nothing is swallowed here — matching stays in the callback.
+    nonisolated static func shouldSwallow(
+        locked: Bool,
+        type: CGEventType,
+        systemDefinedSubtype: Int16?
+    ) -> Bool {
+        guard locked else { return false }
+        switch type {
+        case .keyDown, .keyUp, .flagsChanged:
+            return true
+        default:
+            return type == systemDefinedType
+                && systemDefinedSubtype == auxControlButtonsSubtype
+        }
+    }
+}
+
 // MARK: - CGEvent Callback
 
 private let modifierMask: UInt64 = CGEventFlags.maskCommand.rawValue
@@ -261,13 +310,27 @@ private func hotkeyCallback(
     }
 
     // Keyboard lock: the keyboard produces nothing at all — no characters, no
-    // modifier-state changes, no hotkeys, no Hyper combos, and no Quick Press
-    // (which would otherwise synthesize real key events). This has to come
+    // modifier-state changes, no hotkeys, no Hyper combos, no Quick Press
+    // (which would otherwise synthesize real key events), and no media /
+    // function keys (NX_SYSDEFINED aux control buttons). This has to come
     // before every matching branch below, otherwise a match returns first and
     // the lock never sees the event. Releasing the lock is mouse-only, and
     // quitting AnyDoor drops it too, so the keyboard can't be bricked.
     if service.keyboardLocked {
-        if type == .keyDown || type == .keyUp || type == .flagsChanged { return nil }
+        // Construct NSEvent only on the locked + NX_SYSDEFINED path so the
+        // ordinary key hot path stays cheap (the tap has a ~1s budget).
+        // A nil NSEvent is a deliberate fail-open: the event passes through,
+        // because the one unacceptable failure mode is breaking the mouse.
+        let systemDefinedSubtype: Int16? = type == KeyboardLockEventPolicy.systemDefinedType
+            ? NSEvent(cgEvent: event)?.subtype.rawValue
+            : nil
+        if KeyboardLockEventPolicy.shouldSwallow(
+            locked: true,
+            type: type,
+            systemDefinedSubtype: systemDefinedSubtype
+        ) {
+            return nil
+        }
         return Unmanaged.passUnretained(event)
     }
 

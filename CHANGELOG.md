@@ -101,6 +101,14 @@ versioning.
   the Keychain now resumes capture on its own instead of waiting for the next
   launch.
 
+### Fixed
+
+- Disable Keyboard now also blocks media and function keys (brightness,
+  volume, mute, play/pause, Mission Control). They previously still worked
+  because those keys arrive as `NX_SYSDEFINED` events, which the tap did not
+  listen for. Mouse input, including extra mouse buttons, is unchanged so
+  the lock can still be released from the menu bar.
+
 ## [4.1.1] - 2026-08-12
 
 ### Added
