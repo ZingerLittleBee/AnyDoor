@@ -36,6 +36,10 @@ versioning.
   capture time, favorite state, and tags.
 - Settings → Clipboard reports the exact on-disk footprint of the history
   store, its payloads, and any encrypted leftovers.
+- Disable Keyboard can now be turned off with its own bound hotkey. While
+  the lock is on, that combo (including a Hyper-key binding) is the only
+  keystroke that is acted on; it still never reaches the frontmost app.
+  Without a hotkey, unlock stays mouse-only from the menu bar.
 
 ### Changed
 
@@ -100,6 +104,14 @@ versioning.
   destructive remedy for what is only a lock. It stays a pause, and unlocking
   the Keychain now resumes capture on its own instead of waiting for the next
   launch.
+
+### Fixed
+
+- Disable Keyboard now also blocks media and function keys (brightness,
+  volume, mute, play/pause, Mission Control). They previously still worked
+  because those keys arrive as `NX_SYSDEFINED` events, which the tap did not
+  listen for. Mouse input, including extra mouse buttons, is unchanged so
+  the lock can still be released from the menu bar.
 
 ## [4.1.1] - 2026-08-12
 
