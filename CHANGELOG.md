@@ -36,6 +36,10 @@ versioning.
   capture time, favorite state, and tags.
 - Settings → Clipboard reports the exact on-disk footprint of the history
   store, its payloads, and any encrypted leftovers.
+- Disable Keyboard can now be turned off with its own bound hotkey. While
+  the lock is on, that combo (including a Hyper-key binding) is the only
+  keystroke that is acted on; it still never reaches the frontmost app.
+  Without a hotkey, unlock stays mouse-only from the menu bar.
 
 ### Changed
 
