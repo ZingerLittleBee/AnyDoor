@@ -3,6 +3,123 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>4.2.0 Beta 2</title>
+            <pubDate>Wed, 19 Aug 2026 22:11:56 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:channel>beta</sparkle:channel>
+            <sparkle:version>4.2.2</sparkle:version>
+            <sparkle:shortVersionString>4.2.0 Beta 2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[### Added
+
+- Clipboard History is now encrypted at rest. Entries live in a dedicated
+  SQLCipher database and payloads (images, thumbnails, owned files) are
+  individually AES-GCM encrypted, keyed from a device-only Keychain item that
+  is never synced or included in a backup. A locked Keychain pauses capture
+  and resumes after unlock; a missing key or unreadable database surfaces
+  retry and an explicitly confirmed reset, never a silent wipe.
+- Search now covers every retained entry instead of the loaded page, and is
+  case-, diacritic-, and width-insensitive. Multiple words are ANDed, exact
+  field matches rank above prefixes and then substrings, and one- and
+  two-character CJK terms return complete results. Beyond the copied text it
+  searches OCR text, decoded QR values, file names, capture-time and current
+  file paths, and normalized colors.
+- Filter history by content type — Text, Link, Email, Color, Image,
+  Screenshot, File, QR Code — combined with source app, tag, and
+  favorites-only.
+- Automatic Image Text Indexing (Settings → Clipboard, off by default) runs
+  on-device Vision text recognition over bitmaps captured while it is
+  enabled, making their text searchable. QR codes in newly captured images
+  are always decoded and indexed. Neither creates a second history entry.
+- Retention presets now include 3 months, 6 months, 1 year, and Unlimited,
+  with no hidden item-count cap. Retention is age-only, and favorite or
+  tagged entries are protected from expiry indefinitely. Shortening the
+  period first reports exactly how many entries it would delete and asks for
+  confirmation.
+- Edit the text of a single-item text entry in place, keeping its id, source,
+  capture time, favorite state, and tags.
+- Settings → Clipboard reports the exact on-disk footprint of the history
+  store, its payloads, and any encrypted leftovers.
+- Disable Keyboard can now be turned off with its own bound hotkey. While
+  the lock is on, that combo (including a Hyper-key binding) is the only
+  keystroke that is acted on; it still never reaches the frontmost app.
+  Without a hotkey, unlock stays mouse-only from the menu bar.
+
+### Changed
+
+- Command Palette search now ranks a title that starts with the query ahead of
+  a later or fuzzier match, so `wa` surfaces Warp before Keep Awake.
+- Pasting from the clipboard wall now restores the destination through Launch
+  Services before synthesizing Command-V. On macOS 14+, direct activation from
+  an accessory app could be ignored, closing the wall without inserting the
+  selected history item.
+- A very large copied text no longer makes the history wall unusable. The
+  preview a card renders is now a bounded prefix instead of the whole copied
+  text, so a 128 MiB copy is still stored and pasted in full without pinning
+  gigabytes of memory or leaving the app redrawing forever. Entries stored
+  before this are trimmed on first launch.
+- Copying is captured more reliably. Command-C and Command-X now trigger a
+  short observation burst instead of relying only on a 500 ms poll, so a
+  value overwritten shortly after being copied is far less likely to be
+  missed. Multi-item pasteboard states are preserved in full rather than
+  collapsed to a single representation.
+- New installations exclude Apple Passwords and Keychain Access from history
+  by default. Existing installations pick these up once, without
+  resurrecting an exclusion the user has already removed.
+- Existing clipboard history migrates automatically on first launch. The old
+  store is snapshotted before the cutover and removed only after the
+  encrypted copy is published and verified, so an interrupted migration
+  leaves the readable copy intact and retries on the next launch.
+- A migrated image whose old copy is no longer on disk keeps its entry —
+  capture time, source, favorite state, and tags are preserved and its
+  content is reported as unavailable. Previously a single missing file
+  aborted the whole migration, leaving every entry behind a retry that could
+  never succeed.
+- A Keychain that refuses the history key while it is unlocked is now
+  reported as unavailable, with retry and an explicitly confirmed reset,
+  instead of as a temporary pause that would never resolve.
+- Opening Settings → Clipboard while the store is unavailable no longer adds
+  a second, unrelated "operation failed" error next to the explanation.
+- The clipboard wall now says which kind of empty it is: a search that found
+  nothing, a filter that hides everything, and a history with no entries
+  yet each read differently instead of sharing one "no history" line.
+- A copy is attributed to the app it was made in even when you switch away
+  immediately afterwards. The frontmost app is now sampled the instant
+  Command-C arrives rather than a moment later, so a quick app switch no
+  longer relabels the entry with whatever you switched to.
+- A Clipboard History reset that fails now says so instead of redisplaying the
+  "storage is unavailable" line, which made the confirmed destructive action
+  look like it had done nothing at all.
+- A clipboard wall that cannot open the history store now says so and points
+  at the retry and reset in Settings, instead of showing the same "cannot
+  preview" line used for a single unreadable entry. A locked Keychain reads
+  as a locked Keychain, since unlocking it is all that is needed.
+- Dismissing the Command Palette hands focus back to the app it was summoned
+  from, the way the clipboard wall already did. Commands that act on the app
+  in front of you — translating the selected text, above all — were reading
+  AnyDoor's own empty selection instead of yours.
+- Translating the selected text no longer leaves the selection on the
+  clipboard, or in clipboard history, when the app being read is slow to
+  answer Command-C. The read now waits for the copy to actually land instead
+  of a fixed moment, so the original clipboard is restored and nothing is
+  recorded.
+- Dismissing the Keychain password prompt while the Keychain is locked no
+  longer reports the history store as unavailable and offers a reset — a
+  destructive remedy for what is only a lock. It stays a pause, and unlocking
+  the Keychain now resumes capture on its own instead of waiting for the next
+  launch.
+
+### Fixed
+
+- Disable Keyboard now also blocks media and function keys (brightness,
+  volume, mute, play/pause, Mission Control). They previously still worked
+  because those keys arrive as `NX_SYSDEFINED` events, which the tap did not
+  listen for. Mouse input, including extra mouse buttons, is unchanged so
+  the lock can still be released from the menu bar.
+]]></description>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.0-beta.2/AnyDoor-4.2.0-beta.2.zip" length="20102572" type="application/octet-stream" sparkle:edSignature="qvfKiyRiDe/O9hzsqijmerozR4U3/U/PZe0YwKwyAbe0XUVLydME9ixLKdlb1Byx/5jzVZ2vMLuD8FTEeg/DCA=="/>
+        </item>
+        <item>
             <title>4.2.0 Beta 1</title>
             <pubDate>Wed, 12 Aug 2026 22:05:39 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
