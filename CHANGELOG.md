@@ -43,6 +43,9 @@ versioning.
 
 ### Changed
 
+- Release builds strip local and debug symbols from the app, the privileged
+  helper, and bundled SQLCipher before signing. The download is smaller; app
+  behavior is unchanged.
 - Command Palette now uses each app's localized display name rather than the
   unlocalized Info.plist value, so searching the name shown in Finder finds
   the app. The unlocalized bundle name stays searchable as an alias.

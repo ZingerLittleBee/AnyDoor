@@ -315,6 +315,24 @@ if ! otool -l "$APP/Contents/MacOS/AnyDoor" | grep -A2 LC_RPATH | grep -q "@exec
   install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/AnyDoor"
 fi
 
+# SPM release Mach-Os still carry local and debug nlists (~half the fat
+# executable). Strip the assembled copies after rpath is set and before
+# codesign: strip invalidates any ad-hoc signature the linker wrote.
+# -x keeps the global/undefined symbols dyld needs; -S drops debug nlists.
+# Sparkle is a prebuilt release framework with nested helpers and is left
+# alone.
+log "Strip local and debug symbols"
+for binary in \
+  "$APP/Contents/MacOS/AnyDoor" \
+  "$APP/Contents/MacOS/AnyDoorHostsHelper" \
+  "$APP/Contents/Frameworks/SQLCipher.framework/Versions/A/SQLCipher"; do
+  [[ -f "$binary" ]] || die "missing $binary"
+  before="$(stat -f%z "$binary")"
+  strip -xS "$binary"
+  after="$(stat -f%z "$binary")"
+  log "$(basename "$binary"): $before → $after bytes"
+done
+
 otool -L "$APP/Contents/MacOS/AnyDoor" \
   | grep -q '@rpath/SQLCipher.framework/Versions/A/SQLCipher' \
   || die "AnyDoor is not bound to the bundled SQLCipher framework"
