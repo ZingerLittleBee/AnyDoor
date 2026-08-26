@@ -33,6 +33,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private var flagsMonitor: Any?
     private var globalMouseMonitor: Any?
     private var previewTask: Task<Void, Never>?
+    /// The in-flight ⌘→ step. Held so a key repeat can be dropped instead of
+    /// stacking page requests behind a held-down arrow.
+    private var endNavigationTask: Task<Void, Never>?
     /// Accumulated scroll delta; selection advances each time it crosses a step.
     private var scrollAccum: CGFloat = 0
     private static let scrollStep: CGFloat = 40
@@ -312,6 +315,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         flagsMonitor = nil
         globalMouseMonitor = nil
         scrollAccum = 0
+        // A page fetch started by ⌘→ has no one left to follow it once the wall
+        // is gone; the next show reloads from the first page anyway.
+        endNavigationTask?.cancel()
+        endNavigationTask = nil
     }
 
     /// Step the selection as scroll delta accumulates past `scrollStep`. Uses
@@ -427,10 +434,15 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             if event.modifierFlags.contains(.command) { state.moveToStart() }
             else { state.moveLeft() }
             syncPreview(); return true
-        case 124:                                        // → / ⌘→ (jump to last)
+        case 124:                                        // → / ⌘→ (toward the end)
             if inputMode { return false }                // move the text caret
-            if event.modifierFlags.contains(.command) { state.moveToEnd() }
-            else { state.moveRight() }
+            if event.modifierFlags.contains(.command) {
+                // Consumed here and now; the step itself may need a page fetch,
+                // so it finishes asynchronously and syncs the preview then.
+                moveTowardHistoryEnd()
+                return true
+            }
+            state.moveRight()
             syncPreview(); return true
         case 125:                                        // ↓ — leave the search field
             guard inputMode else { return false }
@@ -467,6 +479,29 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             // click). Swallow plain printable keys so stray typing in card
             // navigation doesn't fall through to the window and beep.
             return isPlainPrintable(event)
+        }
+    }
+
+    /// ⌘→: select the loaded tail, or — when already there — load one more page
+    /// and follow it.
+    ///
+    /// The key event is consumed synchronously by the caller and the step runs
+    /// in a single retained task. A repeat arriving while that task is in flight
+    /// is dropped rather than queued: holding the arrow down must not stack page
+    /// requests, and each press has to be able to observe where the previous one
+    /// landed before it decides whether to fetch at all.
+    private func moveTowardHistoryEnd() {
+        guard endNavigationTask == nil else { return }
+        endNavigationTask = Task { [weak self] in
+            guard let self else { return }
+            await state.moveToEnd()
+            // Cancelled means the wall closed under the fetch and this slot may
+            // already belong to a later press; leave it alone.
+            guard !Task.isCancelled else { return }
+            endNavigationTask = nil
+            // An open preview follows the selection this step ended on, not the
+            // one the key press started from.
+            syncPreview()
         }
     }
 

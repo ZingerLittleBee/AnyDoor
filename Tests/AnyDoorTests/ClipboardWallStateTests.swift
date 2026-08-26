@@ -126,6 +126,37 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.selectedIndex, 1)
     }
 
+    /// ⌘→ walks to the tail the wall has actually loaded and asks the store for
+    /// nothing on the way. The forwarding is async because reaching the end may
+    /// have to fetch, but the scroll preference is set either way — and with the
+    /// whole result set already loaded, pressing again is inert rather than a
+    /// wasted page request. What a press does once there *is* more history is
+    /// covered by ClipboardHistoryPresentationModelTests, which can build the
+    /// module cursors that requires.
+    func testMoveToEndWalksToTheLoadedTailWithoutAskingForAPage() async {
+        let items = entries(["a", "b", "c"])
+        let feed = ClipboardWallEntryFeed(items)
+        let state = await makeState(feed: feed)
+        state.select(items[0].id)
+        let requestsAfterLoad = await feed.pageRequestCount
+
+        await state.moveToEnd()
+
+        XCTAssertEqual(state.selectedID, items[2].id)
+        XCTAssertTrue(state.prefersInstantScroll)
+
+        await state.moveToEnd()
+
+        XCTAssertEqual(state.selectedID, items[2].id)
+        XCTAssertEqual(state.items.count, 3)
+        let requestsAfterWalk = await feed.pageRequestCount
+        XCTAssertEqual(
+            requestsAfterWalk,
+            requestsAfterLoad,
+            "walking a fully loaded prefix may not cost a page"
+        )
+    }
+
     func testEmptyStateTellsSearchFilterAndAnEmptyHistoryApart() async {
         // One "暂无历史" for all three left the user unable to tell a bad query
         // from an empty history.
@@ -448,6 +479,9 @@ final class ClipboardWallStateTests: XCTestCase {
 /// wall (a capture prepending an entry) between two loads.
 private actor ClipboardWallEntryFeed {
     private var entries: [ClipboardHistoryEntry]
+    /// Counted so a test can tell "the wall moved within what it has loaded"
+    /// apart from "the wall asked the store for more".
+    private(set) var pageRequestCount = 0
 
     init(_ entries: [ClipboardHistoryEntry]) {
         self.entries = entries
@@ -458,7 +492,8 @@ private actor ClipboardWallEntryFeed {
     }
 
     func page() -> ClipboardHistoryPage {
-        ClipboardHistoryPage(
+        pageRequestCount += 1
+        return ClipboardHistoryPage(
             entries: entries,
             nextCursor: nil,
             cursorDisposition: .initial
