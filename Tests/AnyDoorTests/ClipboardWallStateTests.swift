@@ -128,29 +128,59 @@ final class ClipboardWallStateTests: XCTestCase {
 
     /// The render window is what keeps a deep history scrollable: everything
     /// outside it is a fixed-width spacer, so the per-step SwiftUI cost is
-    /// bounded by the window, not by how many pages are loaded.
-    func testRenderWindowCentresOnSelectionAndClampsAtBothEnds() async {
-        let radius = ClipboardWallState.renderRadius
-        let items = entries((0..<(radius * 4)).map(String.init))
-        let state = await makeState(entries: items)
+    /// bounded by the window, not by how many pages are loaded. The window is
+    /// sticky: within one slide quantum every selection step yields the exact
+    /// same range (no ForEach membership change on a wheel tick), and it
+    /// slides by whole steps only at quantum boundaries.
+    func testRenderWindowIsStickyWithinAQuantumAndSlidesAtItsBoundary() {
+        typealias State = ClipboardWallState
+        let radius = State.renderRadius
+        let step = State.renderSlideStep
+        let count = step * 20
 
-        // Selection starts at the head: the window is clamped there.
-        XCTAssertEqual(state.renderWindow, 0..<(radius + 1))
+        // Every selection inside one quantum shares one window.
+        let anchor = step * 5
+        let expected = (anchor - radius)..<(anchor + step + radius)
+        for center in anchor..<(anchor + step) {
+            XCTAssertEqual(
+                State.renderWindow(center: center, count: count),
+                expected
+            )
+        }
 
-        state.select(items[radius * 2].id)
+        // Crossing the boundary slides the whole window by exactly one step.
         XCTAssertEqual(
-            state.renderWindow,
-            (radius * 2 - radius)..<(radius * 2 + radius + 1)
+            State.renderWindow(center: anchor + step, count: count),
+            (anchor + step - radius)..<(anchor + step * 2 + radius)
         )
-
-        state.select(items[items.count - 1].id)
         XCTAssertEqual(
-            state.renderWindow,
-            (items.count - 1 - radius)..<items.count
+            State.renderWindow(center: anchor - 1, count: count),
+            (anchor - step - radius)..<(anchor + radius)
         )
     }
 
-    func testRenderWindowCoversASmallListEntirely() async {
+    /// Whatever the selection, it sits inside the window with at least a
+    /// radius of real cards on each unclamped side — the guarantee that keeps
+    /// every visible card real on any display width.
+    func testRenderWindowAlwaysContainsTheSelectionWithMargin() {
+        typealias State = ClipboardWallState
+        let radius = State.renderRadius
+        let count = 2242
+        for center in [0, 1, radius, 100, 1000, count - 2, count - 1] {
+            let window = State.renderWindow(center: center, count: count)
+            XCTAssertTrue(window.contains(center), "center \(center)")
+            if window.lowerBound > 0 {
+                XCTAssertGreaterThanOrEqual(center - window.lowerBound, radius)
+            }
+            if window.upperBound < count {
+                XCTAssertGreaterThanOrEqual(
+                    window.upperBound - 1 - center, radius
+                )
+            }
+        }
+    }
+
+    func testRenderWindowCoversASmallListEntirelyAndHandlesEmpty() async {
         let items = entries(["a", "b", "c"])
         let state = await makeState(entries: items)
         XCTAssertEqual(state.renderWindow, 0..<3)

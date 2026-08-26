@@ -159,12 +159,21 @@ final class ClipboardWallState {
         return items.firstIndex { $0.id == selectedID }
     }
 
-    /// How many cards to each side of the selection the wall materializes as
-    /// real views. Comfortably past half a viewport (about 11 cards on a 5K
-    /// display), so everything visible — plus a prefetch margin whose cards
-    /// can decode their previews before they scroll on screen — is always a
-    /// real card.
-    static let renderRadius = 60
+    /// How many cards past the window anchor the wall materializes as real
+    /// views, each side. Comfortably past half a viewport (about 11 cards on
+    /// a 5K display), so everything visible — plus a margin whose cards can
+    /// decode their previews before they scroll on screen — is always a real
+    /// card.
+    static let renderRadius = 45
+
+    /// How far the selection travels before the window slides. The anchor is
+    /// the selection quantized to this step, which is what makes the window
+    /// sticky *without stored state*: within a quantum every selection step
+    /// leaves the window identical (the common wheel tick costs one
+    /// `isSelected` flip and zero ForEach membership changes), and crossing
+    /// a quantum boundary slides the whole window by one step at once —
+    /// touching only cards far outside the viewport.
+    static let renderSlideStep = 30
 
     /// The slice of `items` rendered as cards. Everything outside it is stood
     /// in for by two fixed-width spacers, so the scroll geometry is identical
@@ -173,11 +182,15 @@ final class ClipboardWallState {
     /// anchored to the selection (every scroll input is translated into
     /// selection movement), so off-window cards are never visible.
     var renderWindow: Range<Int> {
-        let count = items.count
+        Self.renderWindow(center: selectedIndex ?? 0, count: items.count)
+    }
+
+    static func renderWindow(center: Int, count: Int) -> Range<Int> {
         guard count > 0 else { return 0..<0 }
-        let center = min(max(selectedIndex ?? 0, 0), count - 1)
-        let lower = max(0, center - Self.renderRadius)
-        let upper = min(count, center + Self.renderRadius + 1)
+        let clamped = min(max(center, 0), count - 1)
+        let anchor = (clamped / renderSlideStep) * renderSlideStep
+        let lower = max(0, anchor - renderRadius)
+        let upper = min(count, anchor + renderSlideStep + renderRadius)
         return lower..<upper
     }
 

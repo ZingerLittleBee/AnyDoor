@@ -672,6 +672,9 @@ struct ClipboardWallView: View {
                                     * Self.cardSlot - Self.cardSpacing,
                                 height: 1
                             )
+                            // Pure geometry, not content: VoiceOver must not
+                            // land on a pad standing in for off-window cards.
+                            .accessibilityHidden(true)
                             .id(Self.leadingPadID)
                     }
                     // Straight over the slice: enumerating first copied a whole
@@ -718,6 +721,7 @@ struct ClipboardWallView: View {
                                     * Self.cardSlot - Self.cardSpacing,
                                 height: 1
                             )
+                            .accessibilityHidden(true)
                             .id(Self.trailingPadID)
                     }
                     // The tail sentinel: the visible boundary of the loaded
