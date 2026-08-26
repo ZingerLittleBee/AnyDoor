@@ -13,7 +13,8 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             pages: [
                 ClipboardHistoryPage(
                     entries: [first, second],
-                    nextCursor: cursor
+                    nextCursor: cursor,
+                    cursorDisposition: .initial
                 )
             ]
         )
@@ -37,8 +38,16 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let cursor = ClipboardHistoryCursor(token: Data("next".utf8))
         let client = PresentationClientStub(
             pages: [
-                ClipboardHistoryPage(entries: firstPage, nextCursor: cursor),
-                ClipboardHistoryPage(entries: [next], nextCursor: nil),
+                ClipboardHistoryPage(
+                    entries: firstPage,
+                    nextCursor: cursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: [next],
+                    nextCursor: nil,
+                    cursorDisposition: .continued
+                ),
             ]
         )
         let model = ClipboardHistoryPresentationModel(operations: client.operations)
@@ -59,9 +68,21 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let cursor = ClipboardHistoryCursor(token: Data("next".utf8))
         let client = PresentationClientStub(
             pages: [
-                ClipboardHistoryPage(entries: [entry(0)], nextCursor: cursor),
-                ClipboardHistoryPage(entries: [entry(1)], nextCursor: cursor),
-                ClipboardHistoryPage(entries: [entry(2)], nextCursor: nil),
+                ClipboardHistoryPage(
+                    entries: [entry(0)],
+                    nextCursor: cursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: [entry(1)],
+                    nextCursor: cursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: [entry(2)],
+                    nextCursor: nil,
+                    cursorDisposition: .initial
+                ),
             ]
         )
         let model = ClipboardHistoryPresentationModel(operations: client.operations)
@@ -100,11 +121,13 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             pages: [
                 ClipboardHistoryPage(
                     entries: [entry(0), selected],
-                    nextCursor: nil
+                    nextCursor: nil,
+                    cursorDisposition: .initial
                 ),
                 ClipboardHistoryPage(
                     entries: [entry(2), selected],
-                    nextCursor: nil
+                    nextCursor: nil,
+                    cursorDisposition: .initial
                 ),
             ]
         )
@@ -141,6 +164,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                 ClipboardHistoryPage(
                     entries: [],
                     nextCursor: nil,
+                    cursorDisposition: .initial,
                     state: .indexing
                 )
             ]
@@ -153,7 +177,11 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
 
         let emptyClient = PresentationClientStub(
             pages: [
-                ClipboardHistoryPage(entries: [], nextCursor: nil)
+                ClipboardHistoryPage(
+                    entries: [],
+                    nextCursor: nil,
+                    cursorDisposition: .initial
+                )
             ],
             applyError: ClipboardHistoryModuleError.storageFailure
         )
@@ -241,9 +269,14 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             pages: [
                 ClipboardHistoryPage(
                     entries: [sourcedEntry],
-                    nextCursor: nil
+                    nextCursor: nil,
+                    cursorDisposition: .initial
                 ),
-                ClipboardHistoryPage(entries: [], nextCursor: nil),
+                ClipboardHistoryPage(
+                    entries: [],
+                    nextCursor: nil,
+                    cursorDisposition: .initial
+                ),
             ],
             sourceSummaries: [
                 ClipboardHistorySourceSummary(
@@ -383,7 +416,8 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             requestID: 1,
             page: ClipboardHistoryPage(
                 entries: [replacement],
-                nextCursor: nil
+                nextCursor: nil,
+                cursorDisposition: .initial
             )
         )
         await replacementLoad.value
@@ -394,6 +428,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                 nextCursor: ClipboardHistoryCursor(
                     token: Data("stale".utf8)
                 ),
+                cursorDisposition: .initial,
                 state: .failed(.rebuildFailed)
             )
         )
@@ -444,7 +479,8 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                 requestID: 1,
                 page: ClipboardHistoryPage(
                     entries: [replacement],
-                    nextCursor: nil
+                    nextCursor: nil,
+                    cursorDisposition: .initial
                 )
             )
             await replacementLoad.value
@@ -454,7 +490,8 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                     entries: [entry(60 + index)],
                     nextCursor: ClipboardHistoryCursor(
                         token: Data("stale-\(index)".utf8)
-                    )
+                    ),
+                    cursorDisposition: .initial
                 )
             )
             await initialLoad.value
@@ -494,7 +531,8 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             requestID: 0,
             page: ClipboardHistoryPage(
                 entries: firstPage,
-                nextCursor: firstCursor
+                nextCursor: firstCursor,
+                cursorDisposition: .initial
             )
         )
         await initialLoad.value
@@ -522,7 +560,8 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             requestID: 2,
             page: ClipboardHistoryPage(
                 entries: [replacement],
-                nextCursor: replacementCursor
+                nextCursor: replacementCursor,
+                cursorDisposition: .initial
             )
         )
         await replacementLoad.value
@@ -533,6 +572,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                 nextCursor: ClipboardHistoryCursor(
                     token: Data("stale-next".utf8)
                 ),
+                cursorDisposition: .continued,
                 state: .failed(.stateUnavailable)
             )
         )
@@ -552,7 +592,8 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             requestID: 3,
             page: ClipboardHistoryPage(
                 entries: [final],
-                nextCursor: nil
+                nextCursor: nil,
+                cursorDisposition: .continued
             )
         )
         await replacementPrefetch.value
@@ -619,8 +660,16 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let cursor = ClipboardHistoryCursor(token: Data("next".utf8))
         let client = PresentationClientStub(
             pages: [
-                ClipboardHistoryPage(entries: firstPage, nextCursor: cursor),
-                ClipboardHistoryPage(entries: [second], nextCursor: nil),
+                ClipboardHistoryPage(
+                    entries: firstPage,
+                    nextCursor: cursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: [second],
+                    nextCursor: nil,
+                    cursorDisposition: .continued
+                ),
             ]
         )
         let model = ClipboardHistoryPresentationModel(
@@ -655,7 +704,11 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                     )
                 },
                 page: { _, _ in
-                    ClipboardHistoryPage(entries: entries, nextCursor: nil)
+                    ClipboardHistoryPage(
+                        entries: entries,
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    )
                 },
                 apply: { _ in .notFound },
                 materialize: { request in
@@ -715,7 +768,11 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                     )
                 },
                 page: { _, _ in
-                    ClipboardHistoryPage(entries: [], nextCursor: nil)
+                    ClipboardHistoryPage(
+                        entries: [],
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    )
                 },
                 apply: { _ in .notFound },
                 materialize: { _ in materialization },
@@ -822,7 +879,8 @@ private actor TagPresentationClient {
             page: { _, _ in
                 await ClipboardHistoryPage(
                     entries: [self.entry],
-                    nextCursor: nil
+                    nextCursor: nil,
+                    cursorDisposition: .initial
                 )
             },
             apply: { _ in .notFound },

@@ -165,12 +165,24 @@ extension ClipboardHistoryModule {
                     from: $0.token
                 ) }
                 .flatMap { $0.binding == binding ? $0 : nil }
+            // A cursor whose binding no longer matches is dropped rather than
+            // rejected, so the caller gets the first page instead of an
+            // error. That is invisible in the entries, hence the disposition.
+            let disposition: ClipboardHistoryCursorDisposition
+            if cursor == nil {
+                disposition = .initial
+            } else if validCursor != nil {
+                disposition = .continued
+            } else {
+                disposition = .restarted
+            }
 
             if normalizedQuery.isEmpty {
                 return try Self.browsePage(
                     query,
                     binding: binding,
                     cursor: validCursor,
+                    disposition: disposition,
                     expiryCutoff: expiryCutoff,
                     in: database
                 )
@@ -182,12 +194,14 @@ extension ClipboardHistoryModule {
                 return ClipboardHistoryPage(
                     entries: [],
                     nextCursor: nil,
+                    cursorDisposition: disposition,
                     state: .indexing
                 )
             case .failed(let reason):
                 return ClipboardHistoryPage(
                     entries: [],
                     nextCursor: nil,
+                    cursorDisposition: disposition,
                     state: .failed(reason)
                 )
             }
@@ -196,6 +210,7 @@ extension ClipboardHistoryModule {
                 normalizedQuery: normalizedQuery,
                 binding: binding,
                 cursor: validCursor,
+                disposition: disposition,
                 expiryCutoff: expiryCutoff,
                 in: database
             )
@@ -206,6 +221,7 @@ extension ClipboardHistoryModule {
         _ query: ClipboardHistoryQuery,
         binding: SearchCursorBinding,
         cursor: SearchCursorPayload?,
+        disposition: ClipboardHistoryCursorDisposition,
         expiryCutoff: Double?,
         in database: Database
     ) throws -> ClipboardHistoryPage {
@@ -282,7 +298,8 @@ extension ClipboardHistoryModule {
             : nil
         return ClipboardHistoryPage(
             entries: entries,
-            nextCursor: nextCursor
+            nextCursor: nextCursor,
+            cursorDisposition: disposition
         )
     }
 
@@ -291,6 +308,7 @@ extension ClipboardHistoryModule {
         normalizedQuery: String,
         binding: SearchCursorBinding,
         cursor: SearchCursorPayload?,
+        disposition: ClipboardHistoryCursorDisposition,
         expiryCutoff: Double?,
         in database: Database
     ) throws -> ClipboardHistoryPage {
@@ -300,6 +318,7 @@ extension ClipboardHistoryModule {
                 query,
                 binding: binding,
                 cursor: cursor,
+                disposition: disposition,
                 expiryCutoff: expiryCutoff,
                 in: database
             )
@@ -308,7 +327,11 @@ extension ClipboardHistoryModule {
             terms: terms,
             normalizedQuery: normalizedQuery
         ) else {
-            return ClipboardHistoryPage(entries: [], nextCursor: nil)
+            return ClipboardHistoryPage(
+                entries: [],
+                nextCursor: nil,
+                cursorDisposition: disposition
+            )
         }
 
         var conditions: [String] = []
@@ -397,7 +420,8 @@ extension ClipboardHistoryModule {
             : nil
         return ClipboardHistoryPage(
             entries: entries,
-            nextCursor: nextCursor
+            nextCursor: nextCursor,
+            cursorDisposition: disposition
         )
     }
 

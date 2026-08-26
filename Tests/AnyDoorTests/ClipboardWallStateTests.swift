@@ -27,7 +27,8 @@ final class ClipboardWallStateTests: XCTestCase {
     ) async -> ClipboardWallState {
         let page = ClipboardHistoryPage(
             entries: entries,
-            nextCursor: nil
+            nextCursor: nil,
+            cursorDisposition: .initial
         )
         let presentation = ClipboardHistoryPresentationModel(
             operations: ClipboardHistoryPresentationOperations(
@@ -245,7 +246,8 @@ final class ClipboardWallStateTests: XCTestCase {
                     await recorder.record(query)
                     return ClipboardHistoryPage(
                         entries: [],
-                        nextCursor: nil
+                        nextCursor: nil,
+                        cursorDisposition: .initial
                     )
                 },
                 apply: { _ in .notFound },
@@ -361,7 +363,11 @@ final class ClipboardWallStateTests: XCTestCase {
                 },
                 page: { query, _ in
                     await recorder.record(query)
-                    return ClipboardHistoryPage(entries: [], nextCursor: nil)
+                    return ClipboardHistoryPage(
+                        entries: [],
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    )
                 },
                 apply: { _ in .notFound },
                 materialize: { _ in

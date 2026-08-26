@@ -635,14 +635,17 @@ final class ClipboardHistorySearchTests: XCTestCase {
         let query = ClipboardHistoryQuery(text: "bulk-token")
         var cursor: ClipboardHistoryCursor?
         var pageSizes: [Int] = []
+        var dispositions: [ClipboardHistoryCursorDisposition] = []
         var identifiers: [ClipboardHistoryEntryID] = []
         repeat {
             let page = try await module.page(query, after: cursor)
             pageSizes.append(page.entries.count)
+            dispositions.append(page.cursorDisposition)
             identifiers += page.entries.map(\.id)
             cursor = page.nextCursor
         } while cursor != nil
         XCTAssertEqual(pageSizes, [100, 100, 5])
+        XCTAssertEqual(dispositions, [.initial, .continued, .continued])
         XCTAssertEqual(identifiers.count, 205)
         XCTAssertEqual(Set(identifiers).count, 205)
 
@@ -660,7 +663,16 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 sourceID: .application("source-a")
             )
         )
-        XCTAssertEqual(sourceRestart, expectedSourceFirst)
+        // The restart returns the first page, but says so instead of passing
+        // for a continuation — everything except the disposition matches.
+        XCTAssertEqual(sourceRestart.entries, expectedSourceFirst.entries)
+        XCTAssertEqual(
+            sourceRestart.nextCursor,
+            expectedSourceFirst.nextCursor
+        )
+        XCTAssertEqual(sourceRestart.state, expectedSourceFirst.state)
+        XCTAssertEqual(sourceRestart.cursorDisposition, .restarted)
+        XCTAssertEqual(expectedSourceFirst.cursorDisposition, .initial)
 
         let changedQuery = try await module.page(
             ClipboardHistoryQuery(text: "bulk-token 10"),
@@ -669,7 +681,14 @@ final class ClipboardHistorySearchTests: XCTestCase {
         let expectedChangedQuery = try await module.page(
             ClipboardHistoryQuery(text: "bulk-token 10")
         )
-        XCTAssertEqual(changedQuery, expectedChangedQuery)
+        XCTAssertEqual(changedQuery.entries, expectedChangedQuery.entries)
+        XCTAssertEqual(
+            changedQuery.nextCursor,
+            expectedChangedQuery.nextCursor
+        )
+        XCTAssertEqual(changedQuery.state, expectedChangedQuery.state)
+        XCTAssertEqual(changedQuery.cursorDisposition, .restarted)
+        XCTAssertEqual(expectedChangedQuery.cursorDisposition, .initial)
 
         let newEntry = try await Self.capture(
             "bulk-token newest",
@@ -679,6 +698,93 @@ final class ClipboardHistorySearchTests: XCTestCase {
             query,
             after: first.nextCursor
         )
+        XCTAssertEqual(generationRestart.entries.first?.id, newEntry)
+        XCTAssertEqual(generationRestart.entries.count, 100)
+        XCTAssertEqual(generationRestart.cursorDisposition, .restarted)
+    }
+
+    /// Browsing keysets off the same binding as searching, and the caller
+    /// cannot tell an honored cursor from a dropped one by looking at the
+    /// entries: a capture that bumps the index generation silently hands back
+    /// the first page. The disposition is the only signal.
+    func testBrowsePagesReportWhetherTheCursorWasHonored() async throws {
+        let fixture = try SearchTemporaryDatabase()
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        await module.awaitSearchIndexRebuildForTesting()
+        let database = try await module.requiredDatabase()
+        try await database.write { database in
+            for index in 0..<150 {
+                let id = UUID().uuidString.lowercased()
+                let source = index.isMultiple(of: 2) ? "source-a" : "source-b"
+                let timestamp = Double(index + 1)
+                try database.execute(
+                    sql: """
+                        INSERT INTO clipboard_entries(
+                            id, captured_at, last_captured_at,
+                            source_bundle_id, source_display_name,
+                            source_provenance, preview_text
+                        ) VALUES (?, ?, ?, ?, ?, 'declared', ?)
+                        """,
+                    arguments: [
+                        id,
+                        timestamp,
+                        timestamp,
+                        source,
+                        source,
+                        "browse-token \(index)",
+                    ]
+                )
+                try database.execute(
+                    sql: """
+                        INSERT INTO clipboard_retention_state(
+                            entry_id, retention_started_at, is_protected
+                        ) VALUES (?, ?, 0)
+                        """,
+                    arguments: [
+                        id,
+                        Date().timeIntervalSince1970,
+                    ]
+                )
+            }
+        }
+
+        let first = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(first.cursorDisposition, .initial)
+        XCTAssertEqual(first.entries.count, 100)
+        let cursor = try XCTUnwrap(first.nextCursor)
+
+        let second = try await module.page(
+            ClipboardHistoryQuery(),
+            after: cursor
+        )
+        XCTAssertEqual(second.cursorDisposition, .continued)
+        XCTAssertEqual(second.entries.count, 50)
+        XCTAssertNil(second.nextCursor)
+
+        let filterRestart = try await module.page(
+            ClipboardHistoryQuery(sourceID: .application("source-a")),
+            after: cursor
+        )
+        let expectedFilterFirst = try await module.page(
+            ClipboardHistoryQuery(sourceID: .application("source-a"))
+        )
+        XCTAssertEqual(filterRestart.entries, expectedFilterFirst.entries)
+        XCTAssertEqual(
+            filterRestart.nextCursor,
+            expectedFilterFirst.nextCursor
+        )
+        XCTAssertEqual(filterRestart.cursorDisposition, .restarted)
+        XCTAssertEqual(expectedFilterFirst.cursorDisposition, .initial)
+
+        let newEntry = try await Self.capture("browse newest", in: module)
+        let generationRestart = try await module.page(
+            ClipboardHistoryQuery(),
+            after: cursor
+        )
+        XCTAssertEqual(generationRestart.cursorDisposition, .restarted)
         XCTAssertEqual(generationRestart.entries.first?.id, newEntry)
         XCTAssertEqual(generationRestart.entries.count, 100)
     }
@@ -711,6 +817,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         )
         XCTAssertEqual(indexing.state, .indexing)
         XCTAssertEqual(indexing.entries, [])
+        XCTAssertEqual(indexing.cursorDisposition, .initial)
         let browsing = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(browsing.entries.map(\.id), [entry])
         try await database.write { database in
