@@ -251,6 +251,14 @@ final class ClipboardWallState {
         }
     }
 
+    /// Stops a running expansion without lifting the constraint. Called when
+    /// the wall dismisses: mounting more cards into a window that is sliding
+    /// away is pure cost, and the next show re-arms the constraint anyway.
+    func cancelMountExpansion() {
+        mountExpansionTask?.cancel()
+        mountExpansionTask = nil
+    }
+
     static func constrainedWindow(
         center: Int, count: Int, radius: Int
     ) -> Range<Int> {
