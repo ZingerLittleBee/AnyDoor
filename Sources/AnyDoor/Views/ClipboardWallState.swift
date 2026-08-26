@@ -133,9 +133,30 @@ final class ClipboardWallState {
         presentation.selectedEntry
     }
 
-    var selectedIndex: Int {
-        guard let selectedID = presentation.selectedID else { return 0 }
-        return items.firstIndex { $0.id == selectedID } ?? 0
+    /// The selected entry's identity, not its position. A card compares this
+    /// once (O(1)) instead of every realized card re-deriving an index by
+    /// scanning the whole array, and it stays correct when entries are added
+    /// or removed around the selection.
+    var selectedID: ClipboardHistoryEntryID? {
+        presentation.selectedID
+    }
+
+    /// Where the selected entry currently sits, and the wall's scroll-follow
+    /// signal. It has to be position rather than identity: a capture landing
+    /// while the wall is open prepends an entry and slides the selected card
+    /// sideways without changing what is selected, and the card still has to
+    /// be brought back to the centre.
+    ///
+    /// Position is also what makes the signal quiet in the other direction —
+    /// appending a page past the selection leaves this unchanged, so
+    /// prefetching cannot yank the viewport back to the selected card.
+    ///
+    /// This is an O(N) scan, so read it **once per body evaluation at the
+    /// container level**. Card highlighting compares `selectedID` instead;
+    /// reading this from every realized card is what made selection O(R×N).
+    var selectedIndex: Int? {
+        guard let selectedID = presentation.selectedID else { return nil }
+        return items.firstIndex { $0.id == selectedID }
     }
 
     /// Which "nothing here" line fits the current query. An untouched history,
@@ -277,10 +298,9 @@ final class ClipboardWallState {
         presentation.moveSelection(by: 1)
     }
 
-    func select(_ index: Int) {
-        guard items.indices.contains(index) else { return }
+    func select(_ id: ClipboardHistoryEntryID) {
         prefersInstantScroll = false
-        presentation.select(items[index].id)
+        presentation.select(id)
     }
 
     func moveToStart() {

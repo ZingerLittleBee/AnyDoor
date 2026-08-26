@@ -33,7 +33,14 @@ struct ClipboardWallView: View {
     /// The most recent single tap, used to detect a double-click manually so
     /// selection fires instantly instead of waiting out SwiftUI's count:2
     /// disambiguation delay.
-    private struct TapRecord { let index: Int; let date: Date }
+    ///
+    /// Keyed by entry ID, not position: a capture landing while the wall is
+    /// open shifts every index, and a second tap would then be matched against
+    /// whichever card had moved into the first tap's slot.
+    private struct TapRecord {
+        let id: ClipboardHistoryEntryID
+        let date: Date
+    }
     @State private var lastTap: TapRecord?
     @FocusState private var tagFieldFocused: Bool
 
@@ -648,25 +655,31 @@ struct ClipboardWallView: View {
                 // Lazy so only on-screen cards are realized; a plain HStack would
                 // build and lay out every card on open and stutter the slide-in.
                 LazyHStack(spacing: 10) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    // Straight over `items`: enumerating first copied a whole
+                    // (index, entry) array on every body evaluation — including
+                    // every arrow-key press — for no gain, since selection is an
+                    // ID comparison and the ForEach key is the entry ID anyway.
+                    ForEach(items, id: \.id) { item in
                         ClipboardCardView(
                             entry: item,
-                            isSelected: index == state.selectedIndex,
+                            isSelected: item.id == state.selectedID,
                             presentation: state.presentation,
                             onToggleFavorite: { onToggleFavorite(item) },
                             // Select the card the user right-clicked so the
                             // action visibly applies to it.
-                            onEdit: { state.select(index); onEdit(item) },
-                            onCopy: { state.select(index); onCopy(item) },
+                            onEdit: { state.select(item.id); onEdit(item) },
+                            onCopy: { state.select(item.id); onCopy(item) },
                             onPluginAction: {
-                                state.select(index)
+                                state.select(item.id)
                                 onPluginAction($0, $1, $2)
                             },
-                            onRevealInFinder: { state.select(index); onRevealInFinder(item) },
-                            onToggleTag: { state.select(index); onToggleTag(item, $0) },
-                            onNewTag: { state.select(index); onNewTag(item) },
-                            onIgnoreSource: { state.select(index); onIgnoreSource(item) },
-                            onDelete: { state.select(index); onDelete(item) },
+                            onRevealInFinder: {
+                                state.select(item.id); onRevealInFinder(item)
+                            },
+                            onToggleTag: { state.select(item.id); onToggleTag(item, $0) },
+                            onNewTag: { state.select(item.id); onNewTag(item) },
+                            onIgnoreSource: { state.select(item.id); onIgnoreSource(item) },
+                            onDelete: { state.select(item.id); onDelete(item) },
                             menuSuppressed: { state.tagDialog != nil }
                         )
                         // Identify by the item's stable id (matching the ForEach
@@ -677,7 +690,7 @@ struct ClipboardWallView: View {
                         // Single tap selects immediately; a second tap on the
                         // same card within the system double-click interval
                         // pastes. Manual timing avoids the count:2 gesture delay.
-                        .onTapGesture { handleTap(index: index, item: item) }
+                        .onTapGesture { handleTap(item) }
                         .task {
                             await state.prefetchIfNeeded(visibleID: item.id)
                         }
@@ -685,17 +698,22 @@ struct ClipboardWallView: View {
                 }
                 .padding(.vertical, 2)
             }
+            // Follows the selected entry's position, not just its identity, so
+            // a card that slides sideways under a prepended capture is
+            // re-centred too. Resolved once here at the container level — the
+            // O(N) lookup this costs is the one the cards no longer each pay.
             .onChange(of: state.selectedIndex) { _, new in
-                guard items.indices.contains(new) else { return }
+                guard let new, items.indices.contains(new) else { return }
+                let target = items[new].id
                 // Jump-to-ends scrolls instantly: animating across the whole
                 // list would run a multi-frame scroll animation (CADisplayLink +
                 // GPU compositing, and a layout pass as the offset sweeps past
                 // cards). A direct jump gives instant feedback and skips that;
                 // single steps still animate for visual continuity.
                 if state.prefersInstantScroll {
-                    proxy.scrollTo(items[new].id, anchor: .center)
+                    proxy.scrollTo(target, anchor: .center)
                 } else {
-                    withAnimation { proxy.scrollTo(items[new].id, anchor: .center) }
+                    withAnimation { proxy.scrollTo(target, anchor: .center) }
                 }
             }
         }
@@ -733,16 +751,16 @@ struct ClipboardWallView: View {
     /// card navigation — a card is not focusable, so without this the search
     /// field would keep the caret and arrows would move it instead of the
     /// selection.
-    private func handleTap(index: Int, item: ClipboardHistoryEntry) {
+    private func handleTap(_ item: ClipboardHistoryEntry) {
         state.isSearchFocused = false
         let now = Date()
-        if let last = lastTap, last.index == index,
+        if let last = lastTap, last.id == item.id,
            now.timeIntervalSince(last.date) <= NSEvent.doubleClickInterval {
             lastTap = nil
             onSelect(item, false)
         } else {
-            state.select(index)
-            lastTap = TapRecord(index: index, date: now)
+            state.select(item.id)
+            lastTap = TapRecord(id: item.id, date: now)
         }
     }
 
