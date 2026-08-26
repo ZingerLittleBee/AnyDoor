@@ -198,8 +198,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             return
         }
         if restoreFocus { restorePreviousApplicationFocus() }
+        // Mounting more cards into a window that is sliding away is pure
+        // cost; the next show re-arms the opening constraint anyway.
         configuredState?.cancelMountExpansion()
-        freezeContentForDismissal()
         let bounds = screen.frame
         let height = window.frame.height
         let offScreen = NSRect(x: bounds.minX, y: bounds.minY - height,
@@ -213,6 +214,12 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             MainThreadIsolation.run {
                 self?.isAnimating = false
                 self?.close()
+                // Tear the SwiftUI tree down now, after the slide-out: the
+                // next show installs a fresh hosting view anyway, and
+                // releasing the old one there would bill its whole-tree
+                // teardown to the open path.
+                self?.window?.contentView = nil
+                self?.hostingView = nil
                 completion?()
             }
         })
@@ -282,30 +289,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     }
 
     /// Build and install a fresh SwiftUI host on every open.
-    /// Swap the live SwiftUI content for a bitmap snapshot before the
-    /// slide-out. The hosting view is rebuilt fresh on every show anyway,
-    /// and freezing it here makes the dismiss animation immune to
-    /// main-thread SwiftUI work — mount-expansion slices, materialization
-    /// results still landing on mounted cards — that would otherwise starve
-    /// the window animator's frames.
-    private func freezeContentForDismissal() {
-        guard let window, let hostingView,
-            hostingView.bounds.width > 0, hostingView.bounds.height > 0,
-            let bitmap = hostingView.bitmapImageRepForCachingDisplay(
-                in: hostingView.bounds
-            )
-        else { return }
-        hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
-        let image = NSImage(size: hostingView.bounds.size)
-        image.addRepresentation(bitmap)
-        let imageView = NSImageView(image: image)
-        imageView.frame = hostingView.frame
-        imageView.autoresizingMask = [.width, .height]
-        imageView.imageScaling = .scaleAxesIndependently
-        window.contentView = imageView
-        self.hostingView = nil
-    }
-
     private func installHostingView() {
         let host = NSHostingView(rootView: makeWallView())
         host.frame = window?.contentLayoutRect ?? .zero

@@ -163,8 +163,11 @@ final class ClipboardWallState {
     /// views, each side. Comfortably past half a viewport (about 11 cards on
     /// a 5K display), so everything visible — plus a margin whose cards can
     /// decode their previews before they scroll on screen — is always a real
-    /// card.
-    static let renderRadius = 45
+    /// card. Kept deliberately tight: the row is eager, so whole-tree
+    /// invalidations (the panel resigning key on dismissal flips
+    /// controlActiveState for every mounted card) cost O(window), and the
+    /// dismiss animation's smoothness depends on that lump staying small.
+    static let renderRadius = 24
 
     /// How far the selection travels before the window slides. The anchor is
     /// the selection quantized to this step, which is what makes the window
@@ -173,7 +176,7 @@ final class ClipboardWallState {
     /// `isSelected` flip and zero ForEach membership changes), and crossing
     /// a quantum boundary slides the whole window by one step at once —
     /// touching only cards far outside the viewport.
-    static let renderSlideStep = 30
+    static let renderSlideStep = 16
 
     /// The slice of `items` rendered as cards. Everything outside it is stood
     /// in for by two fixed-width spacers, so the scroll geometry is identical
