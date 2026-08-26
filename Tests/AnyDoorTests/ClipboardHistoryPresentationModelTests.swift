@@ -1595,6 +1595,65 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertEqual(requests.map(\.cursor), [nil, firstCursor])
     }
 
+    /// The exact seam of the growth check: a `.restarted` replacement that is
+    /// precisely as deep as the prefix it replaces, with a different tail.
+    /// Depth is unchanged, so there is no new history to move into — the press
+    /// must not advance, even though the tail ID differs. This is the case that
+    /// separates `>` from `>=`; the shallower case above cannot.
+    func testEndNavigationDoesNotFollowASameDepthRebaseWithADifferentTail()
+        async
+    {
+        let firstPage = (0..<3).map(entry)
+        // The capture that bumped the index generation and invalidated the
+        // cursor the wall was holding. It pushes the prefix along by one, so
+        // the new generation is three deep again but ends one entry earlier.
+        let captured = entry(100)
+        let replacement = [captured, firstPage[0], firstPage[1]]
+        let firstCursor = cursor("first")
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: firstPage,
+                    nextCursor: firstCursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: replacement,
+                    nextCursor: nil,
+                    cursorDisposition: .restarted
+                ),
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+
+        await model.moveTowardHistoryEnd()
+        XCTAssertEqual(model.selectedID, firstPage[2].id)
+
+        await model.moveTowardHistoryEnd()
+
+        XCTAssertEqual(model.entries.map(\.id), replacement.map(\.id))
+        XCTAssertEqual(
+            model.entries.count,
+            firstPage.count,
+            "the replacement has to be exactly as deep to pin the seam"
+        )
+        XCTAssertNotEqual(
+            model.selectedID,
+            replacement[2].id,
+            """
+            the same depth is not more history, so the press may not advance \
+            to the replacement's tail
+            """
+        )
+        XCTAssertEqual(model.selectedID, captured.id)
+        XCTAssertEqual(model.pagingState, .complete)
+        let requests = await client.pageRequests
+        XCTAssertEqual(requests.map(\.cursor), [nil, firstCursor])
+    }
+
     /// A page that fails to load leaves the selection where the user can see
     /// it, and the retained cursor turns the next press into the retry.
     func testFailedEndNavigationKeepsTheSelectionAndRetriesOnTheNextPress()
