@@ -1537,6 +1537,64 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertEqual(requests.map(\.cursor), [nil, firstCursor])
     }
 
+    /// A `.restarted` page rebases the prefix onto the current index
+    /// generation, and that replacement may legally be no deeper than what it
+    /// replaces — a capture landed and retention evicted the tail the wall was
+    /// holding. The replacement's tail is then a different, *newer* entry, so
+    /// following it by identity would drag the selection back toward the head
+    /// while still presenting it as the end of the history. Only real growth
+    /// may be followed.
+    func testEndNavigationDoesNotFollowARebaseThatDoesNotDeepenThePrefix()
+        async
+    {
+        let firstPage = (0..<3).map(entry)
+        // The capture that bumped the index generation and invalidated the
+        // cursor the wall was holding.
+        let captured = entry(100)
+        let firstCursor = cursor("first")
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: firstPage,
+                    nextCursor: firstCursor,
+                    cursorDisposition: .initial
+                ),
+                // The new generation is shorter than the prefix it replaces,
+                // and it ends here.
+                ClipboardHistoryPage(
+                    entries: [captured, firstPage[0]],
+                    nextCursor: nil,
+                    cursorDisposition: .restarted
+                ),
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+
+        await model.moveTowardHistoryEnd()
+        XCTAssertEqual(model.selectedID, firstPage[2].id)
+
+        await model.moveTowardHistoryEnd()
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            [captured.id, firstPage[0].id]
+        )
+        XCTAssertEqual(model.pagingState, .complete)
+        XCTAssertEqual(
+            model.selectedID,
+            captured.id,
+            """
+            the selection the rebase reconciled to must stand: the prefix was \
+            replaced, not extended, so the press has nothing to follow
+            """
+        )
+        let requests = await client.pageRequests
+        XCTAssertEqual(requests.map(\.cursor), [nil, firstCursor])
+    }
+
     /// A page that fails to load leaves the selection where the user can see
     /// it, and the retained cursor turns the next press into the retry.
     func testFailedEndNavigationKeepsTheSelectionAndRetriesOnTheNextPress()

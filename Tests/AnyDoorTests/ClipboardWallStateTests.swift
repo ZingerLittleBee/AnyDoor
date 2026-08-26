@@ -126,70 +126,35 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.selectedIndex, 1)
     }
 
-    /// ⌘→ is progressive: the first press only reaches the tail the wall has
-    /// actually loaded, and the next one extends the history by a page and
-    /// follows it. Jumping straight to the loaded tail is what made page one's
-    /// last card look like the end of a much longer history.
-    func testMoveToEndWalksToTheLoadedTailBeforeLoadingMore() async {
-        let firstPage = entries(["a", "b"])
-        let secondPage = entries(["c"])
-        let feed = ClipboardWallPagedFeed(
-            pages: [
-                ClipboardHistoryPage(
-                    entries: firstPage,
-                    nextCursor: ClipboardHistoryCursor(
-                        token: Data("first".utf8)
-                    ),
-                    cursorDisposition: .initial
-                ),
-                ClipboardHistoryPage(
-                    entries: secondPage,
-                    nextCursor: nil,
-                    cursorDisposition: .continued
-                ),
-            ]
-        )
-        let presentation = ClipboardHistoryPresentationModel(
-            operations: ClipboardHistoryPresentationOperations(
-                status: {
-                    ClipboardHistoryStatus(
-                        availability: .ready,
-                        isMonitoring: true,
-                        searchIndex: .ready
-                    )
-                },
-                page: { _, cursor in try await feed.page(after: cursor) },
-                apply: { _ in .notFound },
-                materialize: { _ in
-                    ClipboardHistoryMaterialization(items: [])
-                },
-                tagDefinitions: { [] }
-            )
-        )
-        await presentation.load()
-        let state = ClipboardWallState(presentation: presentation)
-        state.select(firstPage[0].id)
+    /// ⌘→ walks to the tail the wall has actually loaded and asks the store for
+    /// nothing on the way. The forwarding is async because reaching the end may
+    /// have to fetch, but the scroll preference is set either way — and with the
+    /// whole result set already loaded, pressing again is inert rather than a
+    /// wasted page request. What a press does once there *is* more history is
+    /// covered by ClipboardHistoryPresentationModelTests, which can build the
+    /// module cursors that requires.
+    func testMoveToEndWalksToTheLoadedTailWithoutAskingForAPage() async {
+        let items = entries(["a", "b", "c"])
+        let feed = ClipboardWallEntryFeed(items)
+        let state = await makeState(feed: feed)
+        state.select(items[0].id)
+        let requestsAfterLoad = await feed.pageRequestCount
 
         await state.moveToEnd()
 
-        XCTAssertEqual(state.selectedID, firstPage[1].id)
+        XCTAssertEqual(state.selectedID, items[2].id)
         XCTAssertTrue(state.prefersInstantScroll)
-        let requestsAfterWalk = await feed.requestedCursors.count
+
+        await state.moveToEnd()
+
+        XCTAssertEqual(state.selectedID, items[2].id)
+        XCTAssertEqual(state.items.count, 3)
+        let requestsAfterWalk = await feed.pageRequestCount
         XCTAssertEqual(
             requestsAfterWalk,
-            1,
-            "walking to a loaded tail may not cost a page"
+            requestsAfterLoad,
+            "walking a fully loaded prefix may not cost a page"
         )
-
-        await state.moveToEnd()
-
-        XCTAssertEqual(
-            state.items.map(\.id),
-            (firstPage + secondPage).map(\.id)
-        )
-        XCTAssertEqual(state.selectedID, secondPage[0].id)
-        let requestsAfterFetch = await feed.requestedCursors.count
-        XCTAssertEqual(requestsAfterFetch, 2)
     }
 
     func testEmptyStateTellsSearchFilterAndAnEmptyHistoryApart() async {
@@ -514,6 +479,9 @@ final class ClipboardWallStateTests: XCTestCase {
 /// wall (a capture prepending an entry) between two loads.
 private actor ClipboardWallEntryFeed {
     private var entries: [ClipboardHistoryEntry]
+    /// Counted so a test can tell "the wall moved within what it has loaded"
+    /// apart from "the wall asked the store for more".
+    private(set) var pageRequestCount = 0
 
     init(_ entries: [ClipboardHistoryEntry]) {
         self.entries = entries
@@ -524,32 +492,12 @@ private actor ClipboardWallEntryFeed {
     }
 
     func page() -> ClipboardHistoryPage {
-        ClipboardHistoryPage(
+        pageRequestCount += 1
+        return ClipboardHistoryPage(
             entries: entries,
             nextCursor: nil,
             cursorDisposition: .initial
         )
-    }
-}
-
-/// A multi-page source, so a test can tell "the wall reached its loaded tail"
-/// apart from "the wall asked the store for more history".
-private actor ClipboardWallPagedFeed {
-    private var pages: [ClipboardHistoryPage]
-    private(set) var requestedCursors: [ClipboardHistoryCursor?] = []
-
-    init(pages: [ClipboardHistoryPage]) {
-        self.pages = pages
-    }
-
-    func page(
-        after cursor: ClipboardHistoryCursor?
-    ) throws -> ClipboardHistoryPage {
-        requestedCursors.append(cursor)
-        guard !pages.isEmpty else {
-            throw ClipboardHistoryModuleError.operationUnavailable
-        }
-        return pages.removeFirst()
     }
 }
 

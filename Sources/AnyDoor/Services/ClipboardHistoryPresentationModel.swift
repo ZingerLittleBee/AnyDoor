@@ -510,16 +510,22 @@ final class ClipboardHistoryPresentationModel {
             // to follow.
             return
         case .moreAvailable, .failed:
+            let loadedDepth = entries.count
             await loadNextPage()
-            // The prefix either grew by a page or was rebased onto the current
-            // index generation; both leave a deeper tail for the press to
-            // follow. A failed fetch changes neither, so the selection stays.
-            guard let extendedTailID = entries.last?.id,
-                extendedTailID != tailID
+            // Only actual growth is followed. A rebase onto the current index
+            // generation may legally publish a replacement that is no deeper
+            // than the prefix it replaces — retention can evict the tail while
+            // the wall is open — and its tail is then a *different, newer*
+            // entry, not more history. Following it by identity would move the
+            // selection back toward the head while presenting it as the end,
+            // which is the same lie in a new shape. A failed fetch grows
+            // nothing either, so the selection stays.
+            guard entries.count > loadedDepth,
+                let deeperTailID = entries.last?.id
             else {
                 return
             }
-            selectedID = extendedTailID
+            selectedID = deeperTailID
         }
     }
 
@@ -786,7 +792,23 @@ final class ClipboardHistoryPresentationModel {
             try await operations.page(requestQuery, cursor)
         }
         pagingTask = task
-        return try await task.value
+        // The task is unstructured so `loadFirstPage` can cancel a fetch it
+        // does not await, but `Task.value` ignores the *caller's* cancellation:
+        // without this handler a cancelled caller — the wall closing under a
+        // ⌘→ step — would leave the request running and still publishing into a
+        // hidden wall. Cancel it and keep awaiting, so the request is drained
+        // rather than orphaned.
+        return try await withTaskCancellationHandler {
+            let page = try await task.value
+            // Cancellation is best-effort inside the module, so a request that
+            // ran to completion anyway must still be dropped here rather than
+            // published: `loadNextPage` treats a `CancellationError` as "leave
+            // every piece of state alone".
+            try Task.checkCancellation()
+            return page
+        } onCancel: {
+            task.cancel()
+        }
     }
 
     /// Whether `mutation` can change *which* entries satisfy `query`, in which
