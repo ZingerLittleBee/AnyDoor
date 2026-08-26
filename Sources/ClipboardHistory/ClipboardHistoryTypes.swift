@@ -440,7 +440,13 @@ public struct ClipboardHistoryMaterializationRequest: Equatable, Sendable {
 public enum ClipboardHistoryMaterializationPurpose: Equatable, Sendable {
     case normalPaste
     case plainTextPaste
+    /// Card/list rendering: a bitmap entry answers with its stored thumbnail
+    /// instead of the full payload.
     case preview
+    /// Full-size preview (the wall's Space Quick Look): same read-only intent
+    /// as `preview`, but a bitmap entry answers with the original payload so
+    /// the preview window can size itself to the image's real pixels.
+    case fullPreview
     case hostAction
 }
 

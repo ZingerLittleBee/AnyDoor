@@ -1016,7 +1016,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             guard let materialization =
                 await state.presentation.materialization(
                     for: entry.id,
-                    purpose: .preview
+                    purpose: .fullPreview
                 ),
                 !Task.isCancelled,
                 state.selectedItem?.id == entry.id

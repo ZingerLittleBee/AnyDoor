@@ -1398,6 +1398,39 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         )
     }
 
+    func testPreviewMaterializesThumbnailWhileFullPreviewKeepsOriginalPixels()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let outcome = try await module.capture(
+            bitmapRequest(try makeGrayPNG(width: 1_244, height: 1_466))
+        )
+
+        let preview = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: outcome.entryID,
+                purpose: .preview
+            )
+        )
+        let fullPreview = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: outcome.entryID,
+                purpose: .fullPreview
+            )
+        )
+
+        let previewSize = try XCTUnwrap(
+            preview.singleDataRepresentation.flatMap(pixelSize)
+        )
+        XCTAssertLessThanOrEqual(max(previewSize.width, previewSize.height), 512)
+
+        let fullSize = try XCTUnwrap(
+            fullPreview.singleDataRepresentation.flatMap(pixelSize)
+        )
+        XCTAssertEqual(fullSize, CGSize(width: 1_244, height: 1_466))
+    }
+
     func testPayloadAuthenticationFaultDisablesOnlyThatPayloadAction() async throws {
         let fixture = try TemporaryStore()
         let keyStore = TestMasterKeyStore(
@@ -2214,11 +2247,15 @@ extension Data {
 
 extension ClipboardHistoryModuleTests {
     fileprivate func makeOversizedPixelPNG() throws -> Data {
+        try makeGrayPNG(width: 8_001, height: 8_000)
+    }
+
+    fileprivate func makeGrayPNG(width: Int, height: Int) throws -> Data {
         let context = try XCTUnwrap(
             CGContext(
                 data: nil,
-                width: 8_001,
-                height: 8_000,
+                width: width,
+                height: height,
                 bitsPerComponent: 8,
                 bytesPerRow: 0,
                 space: CGColorSpaceCreateDeviceGray(),
@@ -2238,6 +2275,18 @@ extension ClipboardHistoryModuleTests {
         CGImageDestinationAddImage(destination, image, nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         return data as Data
+    }
+
+    fileprivate func pixelSize(of data: Data) -> CGSize? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+                as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? CGFloat,
+            let height = properties[kCGImagePropertyPixelHeight] as? CGFloat
+        else {
+            return nil
+        }
+        return CGSize(width: width, height: height)
     }
 
     @MainActor
