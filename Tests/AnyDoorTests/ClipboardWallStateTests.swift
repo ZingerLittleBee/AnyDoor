@@ -311,7 +311,8 @@ final class ClipboardWallStateTests: XCTestCase {
                     await recorder.record(query)
                     return ClipboardHistoryPage(
                         entries: [],
-                        nextCursor: nil
+                        nextCursor: nil,
+                        cursorDisposition: .initial
                     )
                 },
                 apply: { _ in .notFound },
@@ -427,7 +428,11 @@ final class ClipboardWallStateTests: XCTestCase {
                 },
                 page: { query, _ in
                     await recorder.record(query)
-                    return ClipboardHistoryPage(entries: [], nextCursor: nil)
+                    return ClipboardHistoryPage(
+                        entries: [],
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    )
                 },
                 apply: { _ in .notFound },
                 materialize: { _ in
@@ -453,7 +458,11 @@ private actor ClipboardWallEntryFeed {
     }
 
     func page() -> ClipboardHistoryPage {
-        ClipboardHistoryPage(entries: entries, nextCursor: nil)
+        ClipboardHistoryPage(
+            entries: entries,
+            nextCursor: nil,
+            cursorDisposition: .initial
+        )
     }
 }
 
