@@ -126,6 +126,77 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.selectedIndex, 1)
     }
 
+    /// The render window is what keeps a deep history scrollable: everything
+    /// outside it is a fixed-width spacer, so the per-step SwiftUI cost is
+    /// bounded by the window, not by how many pages are loaded.
+    func testRenderWindowCentresOnSelectionAndClampsAtBothEnds() async {
+        let radius = ClipboardWallState.renderRadius
+        let items = entries((0..<(radius * 4)).map(String.init))
+        let state = await makeState(entries: items)
+
+        // Selection starts at the head: the window is clamped there.
+        XCTAssertEqual(state.renderWindow, 0..<(radius + 1))
+
+        state.select(items[radius * 2].id)
+        XCTAssertEqual(
+            state.renderWindow,
+            (radius * 2 - radius)..<(radius * 2 + radius + 1)
+        )
+
+        state.select(items[items.count - 1].id)
+        XCTAssertEqual(
+            state.renderWindow,
+            (items.count - 1 - radius)..<items.count
+        )
+    }
+
+    func testRenderWindowCoversASmallListEntirely() async {
+        let items = entries(["a", "b", "c"])
+        let state = await makeState(entries: items)
+        XCTAssertEqual(state.renderWindow, 0..<3)
+
+        let empty = await makeState()
+        XCTAssertEqual(empty.renderWindow, 0..<0)
+    }
+
+    /// Paging is driven by the selection approaching the loaded tail — the one
+    /// signal every navigation route (wheel, arrows, clicks, ⌘→) goes through.
+    /// It never fires from a failure (no auto-retry) and never while nothing
+    /// more exists to load.
+    func testShouldPrefetchOnlyNearTheTailWithMoreAvailable() {
+        let distance = ClipboardWallState.prefetchDistance
+        XCTAssertTrue(
+            ClipboardWallState.shouldPrefetch(
+                selectedIndex: 100 - distance,
+                count: 100,
+                pagingState: .moreAvailable
+            )
+        )
+        XCTAssertFalse(
+            ClipboardWallState.shouldPrefetch(
+                selectedIndex: 100 - distance - 1,
+                count: 100,
+                pagingState: .moreAvailable
+            )
+        )
+        XCTAssertFalse(
+            ClipboardWallState.shouldPrefetch(
+                selectedIndex: nil,
+                count: 100,
+                pagingState: .moreAvailable
+            )
+        )
+        for state in [ClipboardHistoryPagingState.complete, .loading, .failed] {
+            XCTAssertFalse(
+                ClipboardWallState.shouldPrefetch(
+                    selectedIndex: 99,
+                    count: 100,
+                    pagingState: state
+                )
+            )
+        }
+    }
+
     /// ⌘→ walks to the tail the wall has actually loaded and asks the store for
     /// nothing on the way. The forwarding is async because reaching the end may
     /// have to fetch, but the scroll preference is set either way — and with the

@@ -159,6 +159,28 @@ final class ClipboardWallState {
         return items.firstIndex { $0.id == selectedID }
     }
 
+    /// How many cards to each side of the selection the wall materializes as
+    /// real views. Comfortably past half a viewport (about 11 cards on a 5K
+    /// display), so everything visible — plus a prefetch margin whose cards
+    /// can decode their previews before they scroll on screen — is always a
+    /// real card.
+    static let renderRadius = 60
+
+    /// The slice of `items` rendered as cards. Everything outside it is stood
+    /// in for by two fixed-width spacers, so the scroll geometry is identical
+    /// to rendering the full list while per-event SwiftUI cost stays O(window)
+    /// no matter how many pages are loaded — the wall's viewport is always
+    /// anchored to the selection (every scroll input is translated into
+    /// selection movement), so off-window cards are never visible.
+    var renderWindow: Range<Int> {
+        let count = items.count
+        guard count > 0 else { return 0..<0 }
+        let center = min(max(selectedIndex ?? 0, 0), count - 1)
+        let lower = max(0, center - Self.renderRadius)
+        let upper = min(count, center + Self.renderRadius + 1)
+        return lower..<upper
+    }
+
     /// Which "nothing here" line fits the current query. An untouched history,
     /// a search that found nothing, and a filter that hides everything are three
     /// different situations; one shared string leaves the user unable to tell
@@ -296,11 +318,51 @@ final class ClipboardWallState {
     func moveRight() {
         prefersInstantScroll = false
         presentation.moveSelection(by: 1)
+        prefetchIfNearTail()
     }
 
     func select(_ id: ClipboardHistoryEntryID) {
         prefersInstantScroll = false
         presentation.select(id)
+        prefetchIfNearTail()
+    }
+
+    /// How close the selection may get to the loaded tail before the next page
+    /// is requested. Wider than the presentation model's own row-appearance
+    /// distance because the wall centres the selection, so up to half a
+    /// viewport of cards (about 11 on a 5K display) is already visible to the
+    /// selection's right when the trigger fires.
+    static let prefetchDistance = 24
+
+    /// The wall pages on *selection*, not on view lifecycle: every route to
+    /// the boundary — wheel, arrows, card clicks, ⌘→ — moves the selection, so
+    /// this is the one complete signal for "the user is approaching the end of
+    /// what is loaded". A trigger tied to the sentinel's view lifetime is not
+    /// reliable either way: a LazyHStack never disposes a realized sentinel,
+    /// so a boundary-keyed task re-fires after every append and chain-loads
+    /// the entire store.
+    static func shouldPrefetch(
+        selectedIndex: Int?,
+        count: Int,
+        pagingState: ClipboardHistoryPagingState
+    ) -> Bool {
+        guard pagingState == .moreAvailable, let selectedIndex else {
+            return false
+        }
+        return selectedIndex + prefetchDistance >= count
+    }
+
+    private func prefetchIfNearTail() {
+        guard Self.shouldPrefetch(
+            selectedIndex: selectedIndex,
+            count: items.count,
+            pagingState: presentation.pagingState
+        ) else { return }
+        // Unstructured on purpose: the fetch belongs to the presentation
+        // model, not to whichever key press started it. `loadNextPage()` is
+        // single-flight, so a run of steps inside the trigger zone still
+        // issues one request.
+        Task { await presentation.loadNextPage() }
     }
 
     func moveToStart() {

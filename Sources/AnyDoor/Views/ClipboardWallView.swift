@@ -655,11 +655,30 @@ struct ClipboardWallView: View {
                 // Lazy so only on-screen cards are realized; a plain HStack would
                 // build and lay out every card on open and stutter the slide-in.
                 LazyHStack(spacing: 10) {
-                    // Straight over `items`: enumerating first copied a whole
+                    // Render only a window of cards around the selection and
+                    // stand in for the rest with two exact-width spacers. Card
+                    // geometry is fixed (230pt + 10pt spacing), so every
+                    // in-window card sits at precisely the offset it would in
+                    // the full layout: sliding the window never moves content
+                    // under the viewport. Without the cap, every realized card
+                    // is re-evaluated on every selection step — laziness only
+                    // bounds creation, not updates — and a deep history makes
+                    // each wheel tick O(loaded).
+                    let window = state.renderWindow
+                    if window.lowerBound > 0 {
+                        Color.clear
+                            .frame(
+                                width: CGFloat(window.lowerBound)
+                                    * Self.cardSlot - Self.cardSpacing,
+                                height: 1
+                            )
+                            .id(Self.leadingPadID)
+                    }
+                    // Straight over the slice: enumerating first copied a whole
                     // (index, entry) array on every body evaluation — including
                     // every arrow-key press — for no gain, since selection is an
                     // ID comparison and the ForEach key is the entry ID anyway.
-                    ForEach(items, id: \.id) { item in
+                    ForEach(items[window], id: \.id) { item in
                         ClipboardCardView(
                             entry: item,
                             isSelected: item.id == state.selectedID,
@@ -692,12 +711,20 @@ struct ClipboardWallView: View {
                         // pastes. Manual timing avoids the count:2 gesture delay.
                         .onTapGesture { handleTap(item) }
                     }
-                    // The tail sentinel. It is both the visible boundary of the
-                    // loaded prefix and the wall's only automatic paging
-                    // trigger, which is why the cards above carry no prefetch
-                    // task any more: a per-card trigger fires from wherever a
-                    // card happens to be realized, while this one fires exactly
-                    // when the user reaches the end of what is loaded.
+                    if window.upperBound < items.count {
+                        Color.clear
+                            .frame(
+                                width: CGFloat(items.count - window.upperBound)
+                                    * Self.cardSlot - Self.cardSpacing,
+                                height: 1
+                            )
+                            .id(Self.trailingPadID)
+                    }
+                    // The tail sentinel: the visible boundary of the loaded
+                    // prefix, with manual load-more/retry affordances. Paging
+                    // itself is driven by the selection approaching the tail
+                    // (ClipboardWallState.shouldPrefetch) — never by this
+                    // view's lifecycle, which a lazy container controls.
                     pagingSentinel(state.presentation.pagingState)
                         .id(Self.sentinelID)
                 }
@@ -729,22 +756,21 @@ struct ClipboardWallView: View {
     /// the same LazyHStack (and `ScrollViewReader`) addresses.
     private static let sentinelID = "wallPagingSentinel"
 
+    /// Stable identities for the two render-window pads, so a window slide
+    /// only resizes them instead of tearing them down.
+    private static let leadingPadID = "wallLeadingPad"
+    private static let trailingPadID = "wallTrailingPad"
+
+    /// One card's footprint along the row: the card plus the LazyHStack
+    /// spacing that follows it. The pad widths derive from this, and the
+    /// arithmetic must stay exact — an off-window pad standing in for n cards
+    /// spans n slots minus the one spacing the stack itself inserts.
+    private static let cardSpacing: CGFloat = 10
+    private static let cardSlot: CGFloat = 230 + cardSpacing
+
     /// Width of the sentinel card. Narrower than a real card (230pt) so it
     /// reads as chrome at the end of the row rather than as one more entry.
     private static let sentinelWidth: CGFloat = 132
-
-    /// Which loaded boundary the sentinel is currently sitting on. Both halves
-    /// matter: the count advances on an append, and the tail identity changes
-    /// when a rebase republishes a prefix of the same depth.
-    private struct PagingBoundary: Equatable {
-        let count: Int
-        let lastID: ClipboardHistoryEntryID?
-    }
-
-    private var pagingBoundary: PagingBoundary {
-        let entries = state.presentation.entries
-        return PagingBoundary(count: entries.count, lastID: entries.last?.id)
-    }
 
     /// The boundary of the loaded prefix, rendered as the last element of the
     /// row so momentum scrolling always lands on a truthful answer instead of a
@@ -754,12 +780,12 @@ struct ClipboardWallView: View {
     private func pagingSentinel(
         _ pagingState: ClipboardHistoryPagingState
     ) -> some View {
-        // The automatic trigger lives on this Group — an identity that
-        // survives every paging-state transition — NOT on the
-        // `.moreAvailable` button. A task on the button dies the moment
-        // `loadNextPage()` publishes `.loading` and the switch swaps the
-        // button out, which cancels the fetch it just started and strands
-        // the sentinel on a spinner nothing will resolve.
+        // Deliberately no automatic trigger anywhere on this view: a task
+        // keyed to the loaded boundary re-fires after every append for as
+        // long as the lazy container keeps the sentinel realized — which is
+        // forever — and chain-loads the entire store. The automatic path is
+        // the selection-driven prefetch in ClipboardWallState; these are the
+        // manual affordances.
         Group {
             switch pagingState {
             case .moreAvailable:
@@ -806,21 +832,6 @@ struct ClipboardWallView: View {
                     .multilineTextAlignment(.center)
                     .frame(width: 76, height: 230)
             }
-        }
-        // Scrolling the sentinel into view *is* the request for the next page:
-        // the LazyHStack only realizes it at the loaded boundary. Keyed on the
-        // boundary rather than left unkeyed, because the element ID is stable
-        // on purpose and a lazy container is free to keep the realized
-        // sentinel across an append — an unkeyed task would then arm exactly
-        // once and paging would stall after the first page. Each new boundary
-        // re-runs the check instead, which is also what fills the viewport
-        // when one page does not. The `.moreAvailable` guard keeps a failure
-        // from auto-retrying and a re-appearing sentinel from double-loading.
-        .task(id: pagingBoundary) {
-            guard state.presentation.pagingState == .moreAvailable else {
-                return
-            }
-            await state.presentation.loadNextPage()
         }
     }
 
