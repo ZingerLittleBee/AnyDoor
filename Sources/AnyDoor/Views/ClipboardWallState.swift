@@ -182,7 +182,12 @@ final class ClipboardWallState {
     /// anchored to the selection (every scroll input is translated into
     /// selection movement), so off-window cards are never visible.
     var renderWindow: Range<Int> {
-        Self.renderWindow(center: selectedIndex ?? 0, count: items.count)
+        if isOpeningMountConstrained {
+            return Self.constrainedWindow(
+                center: selectedIndex ?? 0, count: items.count
+            )
+        }
+        return Self.renderWindow(center: selectedIndex ?? 0, count: items.count)
     }
 
     static func renderWindow(center: Int, count: Int) -> Range<Int> {
@@ -192,6 +197,30 @@ final class ClipboardWallState {
         let lower = max(0, anchor - renderRadius)
         let upper = min(count, anchor + renderSlideStep + renderRadius)
         return lower..<upper
+    }
+
+    /// How many cards each side of the selection mount while the wall slides
+    /// in. Enough to cover the widest viewport (about 22 visible cards on a
+    /// 5K display) so nothing on screen is missing, but a fraction of the
+    /// full window: the row is laid out eagerly, and mounting the full
+    /// window before the open animation both delays it and starves its
+    /// frames with the mounted cards' materialization updates.
+    static let openingRadius = 16
+
+    /// True from just before the wall's slide-in until the animation
+    /// completes; `renderWindow` mounts only the viewport-sized opening
+    /// window while set, and lifting it grows the row to the full sticky
+    /// window off the animation's critical path.
+    private(set) var isOpeningMountConstrained = false
+
+    func beginConstrainedMount() { isOpeningMountConstrained = true }
+    func finishConstrainedMount() { isOpeningMountConstrained = false }
+
+    static func constrainedWindow(center: Int, count: Int) -> Range<Int> {
+        guard count > 0 else { return 0..<0 }
+        let clamped = min(max(center, 0), count - 1)
+        return max(0, clamped - openingRadius)
+            ..< min(count, clamped + openingRadius + 1)
     }
 
     /// Which "nothing here" line fits the current query. An untouched history,

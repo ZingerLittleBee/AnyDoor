@@ -122,6 +122,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // Seed from the live flags: ⌥ may already be held when the wall opens,
         // and the monitor only reports subsequent changes.
         state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.option)
+        // Mount only a viewport-sized opening window for the slide-in; the
+        // full sticky window grows in once the animation has finished (see
+        // the completion handler below), keeping the eager row's mount cost
+        // off the open path.
+        state.beginConstrainedMount()
         installHostingView()
         installMonitors()
         // Preview → editor handoff ("e" key / the preview header's edit
@@ -162,7 +167,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             ctx.timingFunction = CAMediaTimingFunction(name: .linear)
             window.animator().setFrame(onScreen, display: true)
         }, completionHandler: { [weak self] in
-            MainThreadIsolation.run { self?.isAnimating = false }
+            MainThreadIsolation.run {
+                self?.isAnimating = false
+                self?.configuredState?.finishConstrainedMount()
+            }
         })
     }
 

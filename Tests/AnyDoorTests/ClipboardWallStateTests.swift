@@ -189,6 +189,28 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(empty.renderWindow, 0..<0)
     }
 
+    /// While the wall slides in, only a viewport-sized window mounts — the
+    /// eager row's full mount cost would otherwise delay the animation and
+    /// starve its frames. Lifting the constraint grows the row to the full
+    /// sticky window.
+    func testConstrainedMountShrinksTheWindowUntilLifted() async {
+        let radius = ClipboardWallState.openingRadius
+        let items = entries((0..<300).map(String.init))
+        let state = await makeState(entries: items)
+
+        state.beginConstrainedMount()
+        XCTAssertEqual(state.renderWindow, 0..<(radius + 1))
+
+        state.select(items[150].id)
+        XCTAssertEqual(state.renderWindow, (150 - radius)..<(150 + radius + 1))
+
+        state.finishConstrainedMount()
+        XCTAssertEqual(
+            state.renderWindow,
+            ClipboardWallState.renderWindow(center: 150, count: 300)
+        )
+    }
+
     /// Paging is driven by the selection approaching the loaded tail — the one
     /// signal every navigation route (wheel, arrows, clicks, ⌘→) goes through.
     /// It never fires from a failure (no auto-retry) and never while nothing
