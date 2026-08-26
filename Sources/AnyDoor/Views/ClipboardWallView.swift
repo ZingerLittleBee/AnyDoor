@@ -691,10 +691,15 @@ struct ClipboardWallView: View {
                         // same card within the system double-click interval
                         // pastes. Manual timing avoids the count:2 gesture delay.
                         .onTapGesture { handleTap(item) }
-                        .task {
-                            await state.prefetchIfNeeded(visibleID: item.id)
-                        }
                     }
+                    // The tail sentinel. It is both the visible boundary of the
+                    // loaded prefix and the wall's only automatic paging
+                    // trigger, which is why the cards above carry no prefetch
+                    // task any more: a per-card trigger fires from wherever a
+                    // card happens to be realized, while this one fires exactly
+                    // when the user reaches the end of what is loaded.
+                    pagingSentinel(state.presentation.pagingState)
+                        .id(Self.sentinelID)
                 }
                 .padding(.vertical, 2)
             }
@@ -719,6 +724,95 @@ struct ClipboardWallView: View {
         }
     }
 
+    /// Identity of the tail sentinel. Stable across pages so appending never
+    /// re-creates it, and a `String` so it cannot collide with the entry IDs
+    /// the same LazyHStack (and `ScrollViewReader`) addresses.
+    private static let sentinelID = "wallPagingSentinel"
+
+    /// Width of the sentinel card. Narrower than a real card (230pt) so it
+    /// reads as chrome at the end of the row rather than as one more entry.
+    private static let sentinelWidth: CGFloat = 132
+
+    /// The boundary of the loaded prefix, rendered as the last element of the
+    /// row so momentum scrolling always lands on a truthful answer instead of a
+    /// silent stop: more history, a fetch in flight, a retryable failure, or the
+    /// real end of this query's result set.
+    @ViewBuilder
+    private func pagingSentinel(
+        _ pagingState: ClipboardHistoryPagingState
+    ) -> some View {
+        switch pagingState {
+        case .moreAvailable:
+            sentinelCard {
+                Image(systemName: "chevron.right.circle")
+                    .font(.system(size: 18))
+                LocalizedText(.clipboardPagingLoadMore)
+            }
+            // Scrolling the sentinel into view *is* the request for the next
+            // page: the LazyHStack only realizes it at the loaded boundary, and
+            // discards it again once a page lands and pushes it out of the
+            // realized window, so the next approach re-arms the trigger. If the
+            // sentinel is still visible after a page (a short page, a wide
+            // window), it fires again and fills the viewport.
+            .task { await state.presentation.loadNextPage() }
+            // A manual escape hatch for the case the automatic trigger cannot
+            // cover: the sentinel already realized and parked on screen.
+            .onTapGesture { loadNextPage() }
+        case .loading:
+            sentinelCard {
+                ProgressView().controlSize(.small)
+                LocalizedText(.clipboardPagingLoading)
+            }
+        case .failed:
+            sentinelCard {
+                Image(systemName: "exclamationmark.arrow.circlepath")
+                    .font(.system(size: 18))
+                LocalizedText(.clipboardPagingRetry)
+                    .multilineTextAlignment(.center)
+            }
+            // The loaded entries and the cursor survive a paging failure, so a
+            // retry resumes from the same position rather than reloading.
+            .onTapGesture { loadNextPage() }
+        case .complete:
+            // Nothing is pending here, so this is a marker rather than an
+            // affordance: a plain dimmed label, not another card competing with
+            // the entries for attention.
+            LocalizedText(.clipboardPagingEnd)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .frame(width: 76, height: 230)
+        }
+    }
+
+    /// A card-shaped slot for the three pending paging states. The dashed
+    /// border is what separates it from a real entry: same footprint, visibly
+    /// not content.
+    private func sentinelCard<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 8) { content() }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(width: Self.sentinelWidth, height: 230)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(
+                        Color.secondary.opacity(0.35),
+                        style: StrokeStyle(lineWidth: 1, dash: [4, 3])
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// Fire-and-forget page load for the sentinel's click affordances.
+    /// `loadNextPage()` is single-flight, so a click landing on top of the
+    /// automatic trigger (or a run of impatient clicks) issues one fetch.
+    private func loadNextPage() {
+        Task { await state.presentation.loadNextPage() }
+    }
+
     private var hints: some View {
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
@@ -738,8 +832,36 @@ struct ClipboardWallView: View {
             hint("space", .clipboardHintPreview)
             hint("⌫", .clipboardHintDelete)
             hint("esc", .clipboardHintClose)
+            Spacer(minLength: 12)
+            loadedCount
         }
         .font(.caption2).foregroundStyle(.secondary)
+    }
+
+    /// How much of this query's result set is loaded. The pair is what makes
+    /// the boundary legible ("100 of 2169" reads as "there is more"), and it
+    /// follows the active query because both numbers are refreshed together
+    /// whenever the presentation publishes a new prefix.
+    ///
+    /// The total is best-effort: when the count is unavailable only the loaded
+    /// number is shown. A fabricated total would be exactly the lie the
+    /// sentinel exists to remove.
+    @ViewBuilder
+    private var loadedCount: some View {
+        // This is a formatted string rather than a `LocalizedText`, so read the
+        // language preference here to keep the same observation dependency that
+        // re-renders the rest of the footer when the user switches language.
+        let _ = LocalizationManager.shared.preference
+        let loaded = state.presentation.entries.count
+        if loaded > 0 {
+            if let total = state.presentation.totalCount {
+                Text(L(.clipboardPagingLoadedOfTotal, loaded, total))
+                    .monospacedDigit()
+            } else {
+                Text(L(.clipboardPagingLoaded, loaded))
+                    .monospacedDigit()
+            }
+        }
     }
 
     private func hint(_ key: String, _ label: L10n.Key) -> some View {
