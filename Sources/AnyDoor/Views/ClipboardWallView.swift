@@ -698,17 +698,22 @@ struct ClipboardWallView: View {
                 }
                 .padding(.vertical, 2)
             }
-            .onChange(of: state.selectedID) { _, new in
-                guard let new else { return }
+            // Follows the selected entry's position, not just its identity, so
+            // a card that slides sideways under a prepended capture is
+            // re-centred too. Resolved once here at the container level — the
+            // O(N) lookup this costs is the one the cards no longer each pay.
+            .onChange(of: state.selectedIndex) { _, new in
+                guard let new, items.indices.contains(new) else { return }
+                let target = items[new].id
                 // Jump-to-ends scrolls instantly: animating across the whole
                 // list would run a multi-frame scroll animation (CADisplayLink +
                 // GPU compositing, and a layout pass as the offset sweeps past
                 // cards). A direct jump gives instant feedback and skips that;
                 // single steps still animate for visual continuity.
                 if state.prefersInstantScroll {
-                    proxy.scrollTo(new, anchor: .center)
+                    proxy.scrollTo(target, anchor: .center)
                 } else {
-                    withAnimation { proxy.scrollTo(new, anchor: .center) }
+                    withAnimation { proxy.scrollTo(target, anchor: .center) }
                 }
             }
         }

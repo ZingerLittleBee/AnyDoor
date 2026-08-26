@@ -141,6 +141,24 @@ final class ClipboardWallState {
         presentation.selectedID
     }
 
+    /// Where the selected entry currently sits, and the wall's scroll-follow
+    /// signal. It has to be position rather than identity: a capture landing
+    /// while the wall is open prepends an entry and slides the selected card
+    /// sideways without changing what is selected, and the card still has to
+    /// be brought back to the centre.
+    ///
+    /// Position is also what makes the signal quiet in the other direction —
+    /// appending a page past the selection leaves this unchanged, so
+    /// prefetching cannot yank the viewport back to the selected card.
+    ///
+    /// This is an O(N) scan, so read it **once per body evaluation at the
+    /// container level**. Card highlighting compares `selectedID` instead;
+    /// reading this from every realized card is what made selection O(R×N).
+    var selectedIndex: Int? {
+        guard let selectedID = presentation.selectedID else { return nil }
+        return items.firstIndex { $0.id == selectedID }
+    }
+
     /// Which "nothing here" line fits the current query. An untouched history,
     /// a search that found nothing, and a filter that hides everything are three
     /// different situations; one shared string leaves the user unable to tell

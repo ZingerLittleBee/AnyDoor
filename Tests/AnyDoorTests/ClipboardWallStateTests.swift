@@ -88,12 +88,15 @@ final class ClipboardWallStateTests: XCTestCase {
 
     /// A capture landing while the wall is open prepends an entry, so every
     /// index shifts by one. Selection is held by ID, so the card the user
-    /// picked stays selected instead of the wall jumping to its neighbour.
+    /// picked stays selected instead of the wall jumping to its neighbour —
+    /// while `selectedIndex` does move, which is what tells the wall to
+    /// re-centre the card that just slid sideways.
     func testSelectionSurvivesAnEntryAppend() async {
         let original = entries(["a", "b", "c"])
         let feed = ClipboardWallEntryFeed(original)
         let state = await makeState(feed: feed)
         state.select(original[1].id)
+        XCTAssertEqual(state.selectedIndex, 1)
 
         let captured = entries(["x"])
         await feed.replace(with: captured + original)
@@ -102,11 +105,25 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(state.items.count, 4)
         XCTAssertEqual(state.selectedID, original[1].id)
         XCTAssertEqual(state.selectedItem?.previewText, "b")
-        // The index moved; the selection did not.
-        XCTAssertEqual(
-            state.items.firstIndex { $0.id == original[1].id },
-            2
-        )
+        // The scroll-follow signal moved; the selection did not.
+        XCTAssertEqual(state.selectedIndex, 2)
+    }
+
+    /// The other half of the scroll-follow contract: a page appended past the
+    /// selection must leave the signal alone, or prefetching while the user
+    /// scrolls would drag the viewport back to the selected card.
+    func testAppendingPastTheSelectionLeavesTheScrollSignalAlone() async {
+        let original = entries(["a", "b", "c"])
+        let feed = ClipboardWallEntryFeed(original)
+        let state = await makeState(feed: feed)
+        state.select(original[1].id)
+        XCTAssertEqual(state.selectedIndex, 1)
+
+        await feed.replace(with: original + entries(["d", "e"]))
+        await state.reload()
+
+        XCTAssertEqual(state.items.count, 5)
+        XCTAssertEqual(state.selectedIndex, 1)
     }
 
     func testEmptyStateTellsSearchFilterAndAnEmptyHistoryApart() async {
@@ -269,6 +286,7 @@ final class ClipboardWallStateTests: XCTestCase {
         let state = await makeState()
         XCTAssertNil(state.selectedItem)
         XCTAssertNil(state.selectedID)
+        XCTAssertNil(state.selectedIndex)
     }
 
     func testClearingSourceFilterRestoresAllSources() async {
