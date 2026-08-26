@@ -652,18 +652,24 @@ struct ClipboardWallView: View {
     private func cards(_ items: [ClipboardHistoryEntry]) -> some View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                // Lazy so only on-screen cards are realized; a plain HStack would
-                // build and lay out every card on open and stutter the slide-in.
-                LazyHStack(spacing: 10) {
+                // Eager on purpose. The render window below caps the child
+                // count, so eager layout is affordable — and it is what makes
+                // the geometry *trustworthy*: a lazy stack estimates the size
+                // of any child it has disposed from the average of placed
+                // ones, so at the tail of a deep history the huge leading pad
+                // (off-screen, hence disposable) would be estimated at one
+                // card's width, collapsing the content size under the
+                // viewport — the wall visibly lurched and blanked near the
+                // loaded tail. An eager HStack measures every child, always.
+                HStack(spacing: 10) {
                     // Render only a window of cards around the selection and
                     // stand in for the rest with two exact-width spacers. Card
                     // geometry is fixed (230pt + 10pt spacing), so every
                     // in-window card sits at precisely the offset it would in
                     // the full layout: sliding the window never moves content
-                    // under the viewport. Without the cap, every realized card
-                    // is re-evaluated on every selection step — laziness only
-                    // bounds creation, not updates — and a deep history makes
-                    // each wheel tick O(loaded).
+                    // under the viewport. Without the cap, every mounted card
+                    // is re-evaluated on every selection step, and a deep
+                    // history makes each wheel tick O(loaded).
                     let window = state.renderWindow
                     if window.lowerBound > 0 {
                         Color.clear
@@ -728,7 +734,7 @@ struct ClipboardWallView: View {
                     // prefix, with manual load-more/retry affordances. Paging
                     // itself is driven by the selection approaching the tail
                     // (ClipboardWallState.shouldPrefetch) — never by this
-                    // view's lifecycle, which a lazy container controls.
+                    // view's lifecycle.
                     pagingSentinel(state.presentation.pagingState)
                         .id(Self.sentinelID)
                 }
@@ -757,7 +763,7 @@ struct ClipboardWallView: View {
 
     /// Identity of the tail sentinel. Stable across pages so appending never
     /// re-creates it, and a `String` so it cannot collide with the entry IDs
-    /// the same LazyHStack (and `ScrollViewReader`) addresses.
+    /// the same row (and `ScrollViewReader`) addresses.
     private static let sentinelID = "wallPagingSentinel"
 
     /// Stable identities for the two render-window pads, so a window slide
@@ -765,7 +771,7 @@ struct ClipboardWallView: View {
     private static let leadingPadID = "wallLeadingPad"
     private static let trailingPadID = "wallTrailingPad"
 
-    /// One card's footprint along the row: the card plus the LazyHStack
+    /// One card's footprint along the row: the card plus the stack
     /// spacing that follows it. The pad widths derive from this, and the
     /// arithmetic must stay exact — an off-window pad standing in for n cards
     /// spans n slots minus the one spacing the stack itself inserts.
@@ -786,10 +792,10 @@ struct ClipboardWallView: View {
     ) -> some View {
         // Deliberately no automatic trigger anywhere on this view: a task
         // keyed to the loaded boundary re-fires after every append for as
-        // long as the lazy container keeps the sentinel realized — which is
-        // forever — and chain-loads the entire store. The automatic path is
-        // the selection-driven prefetch in ClipboardWallState; these are the
-        // manual affordances.
+        // long as the sentinel stays mounted — which, as the row's permanent
+        // last element, is forever — and chain-loads the entire store. The
+        // automatic path is the selection-driven prefetch in
+        // ClipboardWallState; these are the manual affordances.
         Group {
             switch pagingState {
             case .moreAvailable:
