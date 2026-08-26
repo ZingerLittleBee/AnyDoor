@@ -35,7 +35,8 @@ final class ClipboardWallStateTests: XCTestCase {
     private func makeState(
         feed: ClipboardWallEntryFeed,
         availability: ClipboardHistoryStatus.Availability = .ready,
-        reason: ClipboardHistoryStatus.AvailabilityReason? = nil
+        reason: ClipboardHistoryStatus.AvailabilityReason? = nil,
+        clock: any Clock<Duration> = ContinuousClock()
     ) async -> ClipboardWallState {
         let presentation = ClipboardHistoryPresentationModel(
             operations: ClipboardHistoryPresentationOperations(
@@ -56,7 +57,7 @@ final class ClipboardWallStateTests: XCTestCase {
             )
         )
         await presentation.load()
-        return ClipboardWallState(presentation: presentation)
+        return ClipboardWallState(presentation: presentation, clock: clock)
     }
 
     func testSelectionClampsAndMoves() async {
@@ -191,24 +192,51 @@ final class ClipboardWallStateTests: XCTestCase {
 
     /// While the wall slides in, only a viewport-sized window mounts — the
     /// eager row's full mount cost would otherwise delay the animation and
-    /// starve its frames. Lifting the constraint grows the row to the full
-    /// sticky window.
-    func testConstrainedMountShrinksTheWindowUntilLifted() async {
-        let radius = ClipboardWallState.openingRadius
-        let items = entries((0..<300).map(String.init))
-        let state = await makeState(entries: items)
+    /// starve its frames. After the animation, the window grows back to the
+    /// full sticky window one slice per tick, so no single body pass mounts
+    /// a large lump of cards right as the user starts interacting.
+    func testConstrainedMountGrowsToTheFullWindowInSlices() async {
+        let clock = TestClock()
+        let feed = ClipboardWallEntryFeed(entries((0..<300).map(String.init)))
+        let state = await makeState(feed: feed, clock: clock)
+        let items = state.items
 
-        state.beginConstrainedMount()
-        XCTAssertEqual(state.renderWindow, 0..<(radius + 1))
+        state.beginConstrainedMount(radius: 10)
+        XCTAssertEqual(state.renderWindow, 0..<11)
 
         state.select(items[150].id)
-        XCTAssertEqual(state.renderWindow, (150 - radius)..<(150 + radius + 1))
+        XCTAssertEqual(state.renderWindow, 140..<161)
 
-        state.finishConstrainedMount()
+        state.expandMountAfterOpening()
+        await clock.advance(by: ClipboardWallState.mountExpansionInterval)
+        let step = ClipboardWallState.mountExpansionStep
+        XCTAssertEqual(state.renderWindow, (150 - 10 - step)..<(150 + 10 + step + 1))
+
+        // Enough ticks to cross the full radius: the constraint lifts and the
+        // sticky window takes over.
+        for _ in 0..<4 {
+            await clock.advance(by: ClipboardWallState.mountExpansionInterval)
+        }
+        XCTAssertNil(state.mountRadius)
         XCTAssertEqual(
             state.renderWindow,
             ClipboardWallState.renderWindow(center: 150, count: 300)
         )
+    }
+
+    /// Re-opening the wall mid-expansion restarts from the opening radius
+    /// instead of racing the previous expansion task.
+    func testReconstrainingCancelsARunningExpansion() async {
+        let clock = TestClock()
+        let feed = ClipboardWallEntryFeed(entries((0..<300).map(String.init)))
+        let state = await makeState(feed: feed, clock: clock)
+
+        state.beginConstrainedMount(radius: 10)
+        state.expandMountAfterOpening()
+        state.beginConstrainedMount(radius: 10)
+        await clock.advance(by: ClipboardWallState.mountExpansionInterval)
+        // The cancelled task must not have grown or lifted the constraint.
+        XCTAssertEqual(state.mountRadius, 10)
     }
 
     /// Paging is driven by the selection approaching the loaded tail — the one

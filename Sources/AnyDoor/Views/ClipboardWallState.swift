@@ -182,9 +182,11 @@ final class ClipboardWallState {
     /// anchored to the selection (every scroll input is translated into
     /// selection movement), so off-window cards are never visible.
     var renderWindow: Range<Int> {
-        if isOpeningMountConstrained {
+        if let mountRadius {
             return Self.constrainedWindow(
-                center: selectedIndex ?? 0, count: items.count
+                center: selectedIndex ?? 0,
+                count: items.count,
+                radius: mountRadius
             )
         }
         return Self.renderWindow(center: selectedIndex ?? 0, count: items.count)
@@ -199,28 +201,62 @@ final class ClipboardWallState {
         return lower..<upper
     }
 
-    /// How many cards each side of the selection mount while the wall slides
-    /// in. Enough to cover the widest viewport (about 22 visible cards on a
-    /// 5K display) so nothing on screen is missing, but a fraction of the
-    /// full window: the row is laid out eagerly, and mounting the full
-    /// window before the open animation both delays it and starves its
-    /// frames with the mounted cards' materialization updates.
+    /// Fallback opening radius when the caller cannot measure the screen.
+    /// The controller normally passes a radius derived from the actual
+    /// display width, so a laptop mounts far fewer cards than a 5K screen.
     static let openingRadius = 16
 
-    /// True from just before the wall's slide-in until the animation
-    /// completes; `renderWindow` mounts only the viewport-sized opening
-    /// window while set, and lifting it grows the row to the full sticky
-    /// window off the animation's critical path.
-    private(set) var isOpeningMountConstrained = false
+    /// How much the constrained mount radius grows per expansion tick, and
+    /// how far apart the ticks land. Growing to the full window in slices
+    /// keeps any single body pass to a couple dozen new cards instead of
+    /// one ninety-card lump right when the user starts interacting.
+    static let mountExpansionStep = 24
+    static let mountExpansionInterval = Duration.milliseconds(80)
 
-    func beginConstrainedMount() { isOpeningMountConstrained = true }
-    func finishConstrainedMount() { isOpeningMountConstrained = false }
+    /// While non-nil, `renderWindow` mounts only `mountRadius` cards around
+    /// the selection. Set just before the wall's slide-in — the row is laid
+    /// out eagerly, and mounting the full window up front both delays the
+    /// animation and starves its frames with the mounted cards'
+    /// materialization updates — then grown in slices by
+    /// `expandMountAfterOpening()` until the full sticky window takes over.
+    private(set) var mountRadius: Int?
+    private var mountExpansionTask: Task<Void, Never>?
 
-    static func constrainedWindow(center: Int, count: Int) -> Range<Int> {
+    func beginConstrainedMount(radius: Int = ClipboardWallState.openingRadius) {
+        mountExpansionTask?.cancel()
+        mountExpansionTask = nil
+        mountRadius = max(1, radius)
+    }
+
+    /// Grows the mounted window back to the full sticky window, one slice
+    /// per tick, off the open animation's critical path.
+    func expandMountAfterOpening() {
+        mountExpansionTask?.cancel()
+        guard mountRadius != nil else { return }
+        mountExpansionTask = Task { [weak self] in
+            while true {
+                guard let clock = self?.clock else { return }
+                try? await clock.sleep(for: Self.mountExpansionInterval)
+                guard let self, !Task.isCancelled,
+                    let current = self.mountRadius
+                else { return }
+                let next = current + Self.mountExpansionStep
+                if next >= Self.renderRadius + Self.renderSlideStep {
+                    self.mountRadius = nil
+                    self.mountExpansionTask = nil
+                    return
+                }
+                self.mountRadius = next
+            }
+        }
+    }
+
+    static func constrainedWindow(
+        center: Int, count: Int, radius: Int
+    ) -> Range<Int> {
         guard count > 0 else { return 0..<0 }
         let clamped = min(max(center, 0), count - 1)
-        return max(0, clamped - openingRadius)
-            ..< min(count, clamped + openingRadius + 1)
+        return max(0, clamped - radius)..<min(count, clamped + radius + 1)
     }
 
     /// Which "nothing here" line fits the current query. An untouched history,
