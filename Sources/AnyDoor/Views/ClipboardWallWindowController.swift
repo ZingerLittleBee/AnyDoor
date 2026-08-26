@@ -122,6 +122,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // Seed from the live flags: ⌥ may already be held when the wall opens,
         // and the monitor only reports subsequent changes.
         state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.option)
+        // Selection joins the reset above: the wall always opens at the
+        // newest entry. A deep selection retained from the previous session
+        // would otherwise centre the render window far from the head while
+        // the fresh scroll view sits at offset zero — showing only the
+        // leading pad's blank space, with nothing firing a scroll-to (the
+        // selected index has not changed, so onChange stays quiet).
+        state.moveToStart()
         // Mount only a viewport-sized opening window for the slide-in — sized
         // from the actual screen, so a laptop mounts far fewer cards than a
         // 5K display — and grow to the full sticky window in slices once the
