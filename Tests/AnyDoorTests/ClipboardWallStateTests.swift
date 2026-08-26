@@ -25,10 +25,19 @@ final class ClipboardWallStateTests: XCTestCase {
         availability: ClipboardHistoryStatus.Availability = .ready,
         reason: ClipboardHistoryStatus.AvailabilityReason? = nil
     ) async -> ClipboardWallState {
-        let page = ClipboardHistoryPage(
-            entries: entries,
-            nextCursor: nil
+        await makeState(
+            feed: ClipboardWallEntryFeed(entries),
+            availability: availability,
+            reason: reason
         )
+    }
+
+    private func makeState(
+        feed: ClipboardWallEntryFeed,
+        availability: ClipboardHistoryStatus.Availability = .ready,
+        reason: ClipboardHistoryStatus.AvailabilityReason? = nil,
+        clock: any Clock<Duration> = ContinuousClock()
+    ) async -> ClipboardWallState {
         let presentation = ClipboardHistoryPresentationModel(
             operations: ClipboardHistoryPresentationOperations(
                 status: {
@@ -39,7 +48,7 @@ final class ClipboardWallStateTests: XCTestCase {
                         searchIndex: .ready
                     )
                 },
-                page: { _, _ in page },
+                page: { _, _ in await feed.page() },
                 apply: { _ in .notFound },
                 materialize: { _ in
                     ClipboardHistoryMaterialization(items: [])
@@ -48,17 +57,255 @@ final class ClipboardWallStateTests: XCTestCase {
             )
         )
         await presentation.load()
-        return ClipboardWallState(presentation: presentation)
+        return ClipboardWallState(presentation: presentation, clock: clock)
     }
 
     func testSelectionClampsAndMoves() async {
-        let state = await makeState(entries: entries(["a", "b", "c"]))
-        XCTAssertEqual(state.selectedIndex, 0)
+        let items = entries(["a", "b", "c"])
+        let state = await makeState(entries: items)
+        XCTAssertEqual(state.selectedID, items[0].id)
         state.moveRight(); state.moveRight(); state.moveRight()   // clamps at last
-        XCTAssertEqual(state.selectedIndex, 2)
+        XCTAssertEqual(state.selectedID, items[2].id)
         state.moveLeft()
-        XCTAssertEqual(state.selectedIndex, 1)
+        XCTAssertEqual(state.selectedID, items[1].id)
         XCTAssertEqual(state.selectedItem?.previewText, "b")
+    }
+
+    /// Clicking a card selects that entry, and an ID the wall is not showing
+    /// (a card deleted between the click and its handler) leaves the current
+    /// selection alone rather than clearing it.
+    func testSelectingByIDPicksThatEntryAndIgnoresUnknownIDs() async {
+        let items = entries(["a", "b", "c"])
+        let state = await makeState(entries: items)
+
+        state.select(items[2].id)
+        XCTAssertEqual(state.selectedID, items[2].id)
+        XCTAssertEqual(state.selectedItem?.previewText, "c")
+
+        let stranger = entries(["gone"])[0]
+        state.select(stranger.id)
+        XCTAssertEqual(state.selectedID, items[2].id)
+    }
+
+    /// A capture landing while the wall is open prepends an entry, so every
+    /// index shifts by one. Selection is held by ID, so the card the user
+    /// picked stays selected instead of the wall jumping to its neighbour —
+    /// while `selectedIndex` does move, which is what tells the wall to
+    /// re-centre the card that just slid sideways.
+    func testSelectionSurvivesAnEntryAppend() async {
+        let original = entries(["a", "b", "c"])
+        let feed = ClipboardWallEntryFeed(original)
+        let state = await makeState(feed: feed)
+        state.select(original[1].id)
+        XCTAssertEqual(state.selectedIndex, 1)
+
+        let captured = entries(["x"])
+        await feed.replace(with: captured + original)
+        await state.reload()
+
+        XCTAssertEqual(state.items.count, 4)
+        XCTAssertEqual(state.selectedID, original[1].id)
+        XCTAssertEqual(state.selectedItem?.previewText, "b")
+        // The scroll-follow signal moved; the selection did not.
+        XCTAssertEqual(state.selectedIndex, 2)
+    }
+
+    /// The other half of the scroll-follow contract: a page appended past the
+    /// selection must leave the signal alone, or prefetching while the user
+    /// scrolls would drag the viewport back to the selected card.
+    func testAppendingPastTheSelectionLeavesTheScrollSignalAlone() async {
+        let original = entries(["a", "b", "c"])
+        let feed = ClipboardWallEntryFeed(original)
+        let state = await makeState(feed: feed)
+        state.select(original[1].id)
+        XCTAssertEqual(state.selectedIndex, 1)
+
+        await feed.replace(with: original + entries(["d", "e"]))
+        await state.reload()
+
+        XCTAssertEqual(state.items.count, 5)
+        XCTAssertEqual(state.selectedIndex, 1)
+    }
+
+    /// The render window is what keeps a deep history scrollable: everything
+    /// outside it is a fixed-width spacer, so the per-step SwiftUI cost is
+    /// bounded by the window, not by how many pages are loaded. The window is
+    /// sticky: within one slide quantum every selection step yields the exact
+    /// same range (no ForEach membership change on a wheel tick), and it
+    /// slides by whole steps only at quantum boundaries.
+    func testRenderWindowIsStickyWithinAQuantumAndSlidesAtItsBoundary() {
+        typealias State = ClipboardWallState
+        let radius = State.renderRadius
+        let step = State.renderSlideStep
+        let count = step * 20
+
+        // Every selection inside one quantum shares one window.
+        let anchor = step * 5
+        let expected = (anchor - radius)..<(anchor + step + radius)
+        for center in anchor..<(anchor + step) {
+            XCTAssertEqual(
+                State.renderWindow(center: center, count: count),
+                expected
+            )
+        }
+
+        // Crossing the boundary slides the whole window by exactly one step.
+        XCTAssertEqual(
+            State.renderWindow(center: anchor + step, count: count),
+            (anchor + step - radius)..<(anchor + step * 2 + radius)
+        )
+        XCTAssertEqual(
+            State.renderWindow(center: anchor - 1, count: count),
+            (anchor - step - radius)..<(anchor + radius)
+        )
+    }
+
+    /// Whatever the selection, it sits inside the window with at least a
+    /// radius of real cards on each unclamped side — the guarantee that keeps
+    /// every visible card real on any display width.
+    func testRenderWindowAlwaysContainsTheSelectionWithMargin() {
+        typealias State = ClipboardWallState
+        let radius = State.renderRadius
+        let count = 2242
+        for center in [0, 1, radius, 100, 1000, count - 2, count - 1] {
+            let window = State.renderWindow(center: center, count: count)
+            XCTAssertTrue(window.contains(center), "center \(center)")
+            if window.lowerBound > 0 {
+                XCTAssertGreaterThanOrEqual(center - window.lowerBound, radius)
+            }
+            if window.upperBound < count {
+                XCTAssertGreaterThanOrEqual(
+                    window.upperBound - 1 - center, radius
+                )
+            }
+        }
+    }
+
+    func testRenderWindowCoversASmallListEntirelyAndHandlesEmpty() async {
+        let items = entries(["a", "b", "c"])
+        let state = await makeState(entries: items)
+        XCTAssertEqual(state.renderWindow, 0..<3)
+
+        let empty = await makeState()
+        XCTAssertEqual(empty.renderWindow, 0..<0)
+    }
+
+    /// While the wall slides in, only a viewport-sized window mounts — the
+    /// eager row's full mount cost would otherwise delay the animation and
+    /// starve its frames. After the animation, the window grows back to the
+    /// full sticky window one slice per tick, so no single body pass mounts
+    /// a large lump of cards right as the user starts interacting.
+    func testConstrainedMountGrowsToTheFullWindowInSlices() async {
+        let clock = TestClock()
+        let feed = ClipboardWallEntryFeed(entries((0..<300).map(String.init)))
+        let state = await makeState(feed: feed, clock: clock)
+        let items = state.items
+
+        state.beginConstrainedMount(radius: 10)
+        XCTAssertEqual(state.renderWindow, 0..<11)
+
+        state.select(items[150].id)
+        XCTAssertEqual(state.renderWindow, 140..<161)
+
+        state.expandMountAfterOpening()
+        await clock.advance(by: ClipboardWallState.mountExpansionInterval)
+        let step = ClipboardWallState.mountExpansionStep
+        XCTAssertEqual(state.renderWindow, (150 - 10 - step)..<(150 + 10 + step + 1))
+
+        // Enough ticks to cross the full radius: the constraint lifts and the
+        // sticky window takes over.
+        for _ in 0..<4 {
+            await clock.advance(by: ClipboardWallState.mountExpansionInterval)
+        }
+        XCTAssertNil(state.mountRadius)
+        XCTAssertEqual(
+            state.renderWindow,
+            ClipboardWallState.renderWindow(center: 150, count: 300)
+        )
+    }
+
+    /// Re-opening the wall mid-expansion restarts from the opening radius
+    /// instead of racing the previous expansion task.
+    func testReconstrainingCancelsARunningExpansion() async {
+        let clock = TestClock()
+        let feed = ClipboardWallEntryFeed(entries((0..<300).map(String.init)))
+        let state = await makeState(feed: feed, clock: clock)
+
+        state.beginConstrainedMount(radius: 10)
+        state.expandMountAfterOpening()
+        state.beginConstrainedMount(radius: 10)
+        await clock.advance(by: ClipboardWallState.mountExpansionInterval)
+        // The cancelled task must not have grown or lifted the constraint.
+        XCTAssertEqual(state.mountRadius, 10)
+    }
+
+    /// Paging is driven by the selection approaching the loaded tail — the one
+    /// signal every navigation route (wheel, arrows, clicks, ⌘→) goes through.
+    /// It never fires from a failure (no auto-retry) and never while nothing
+    /// more exists to load.
+    func testShouldPrefetchOnlyNearTheTailWithMoreAvailable() {
+        let distance = ClipboardWallState.prefetchDistance
+        XCTAssertTrue(
+            ClipboardWallState.shouldPrefetch(
+                selectedIndex: 100 - distance,
+                count: 100,
+                pagingState: .moreAvailable
+            )
+        )
+        XCTAssertFalse(
+            ClipboardWallState.shouldPrefetch(
+                selectedIndex: 100 - distance - 1,
+                count: 100,
+                pagingState: .moreAvailable
+            )
+        )
+        XCTAssertFalse(
+            ClipboardWallState.shouldPrefetch(
+                selectedIndex: nil,
+                count: 100,
+                pagingState: .moreAvailable
+            )
+        )
+        for state in [ClipboardHistoryPagingState.complete, .loading, .failed] {
+            XCTAssertFalse(
+                ClipboardWallState.shouldPrefetch(
+                    selectedIndex: 99,
+                    count: 100,
+                    pagingState: state
+                )
+            )
+        }
+    }
+
+    /// ⌘→ walks to the tail the wall has actually loaded and asks the store for
+    /// nothing on the way. The forwarding is async because reaching the end may
+    /// have to fetch, but the scroll preference is set either way — and with the
+    /// whole result set already loaded, pressing again is inert rather than a
+    /// wasted page request. What a press does once there *is* more history is
+    /// covered by ClipboardHistoryPresentationModelTests, which can build the
+    /// module cursors that requires.
+    func testMoveToEndWalksToTheLoadedTailWithoutAskingForAPage() async {
+        let items = entries(["a", "b", "c"])
+        let feed = ClipboardWallEntryFeed(items)
+        let state = await makeState(feed: feed)
+        state.select(items[0].id)
+        let requestsAfterLoad = await feed.pageRequestCount
+
+        await state.moveToEnd()
+
+        XCTAssertEqual(state.selectedID, items[2].id)
+        XCTAssertTrue(state.prefersInstantScroll)
+
+        await state.moveToEnd()
+
+        XCTAssertEqual(state.selectedID, items[2].id)
+        XCTAssertEqual(state.items.count, 3)
+        let requestsAfterWalk = await feed.pageRequestCount
+        XCTAssertEqual(
+            requestsAfterWalk,
+            requestsAfterLoad,
+            "walking a fully loaded prefix may not cost a page"
+        )
     }
 
     func testEmptyStateTellsSearchFilterAndAnEmptyHistoryApart() async {
@@ -220,7 +467,8 @@ final class ClipboardWallStateTests: XCTestCase {
     func testEmptyItemsHasNilSelection() async {
         let state = await makeState()
         XCTAssertNil(state.selectedItem)
-        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertNil(state.selectedID)
+        XCTAssertNil(state.selectedIndex)
     }
 
     func testClearingSourceFilterRestoresAllSources() async {
@@ -245,7 +493,8 @@ final class ClipboardWallStateTests: XCTestCase {
                     await recorder.record(query)
                     return ClipboardHistoryPage(
                         entries: [],
-                        nextCursor: nil
+                        nextCursor: nil,
+                        cursorDisposition: .initial
                     )
                 },
                 apply: { _ in .notFound },
@@ -361,7 +610,11 @@ final class ClipboardWallStateTests: XCTestCase {
                 },
                 page: { query, _ in
                     await recorder.record(query)
-                    return ClipboardHistoryPage(entries: [], nextCursor: nil)
+                    return ClipboardHistoryPage(
+                        entries: [],
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    )
                 },
                 apply: { _ in .notFound },
                 materialize: { _ in
@@ -369,6 +622,32 @@ final class ClipboardWallStateTests: XCTestCase {
                 },
                 tagDefinitions: { [] }
             )
+        )
+    }
+}
+
+/// A mutable page source, so a test can let the store change under an open
+/// wall (a capture prepending an entry) between two loads.
+private actor ClipboardWallEntryFeed {
+    private var entries: [ClipboardHistoryEntry]
+    /// Counted so a test can tell "the wall moved within what it has loaded"
+    /// apart from "the wall asked the store for more".
+    private(set) var pageRequestCount = 0
+
+    init(_ entries: [ClipboardHistoryEntry]) {
+        self.entries = entries
+    }
+
+    func replace(with entries: [ClipboardHistoryEntry]) {
+        self.entries = entries
+    }
+
+    func page() -> ClipboardHistoryPage {
+        pageRequestCount += 1
+        return ClipboardHistoryPage(
+            entries: entries,
+            nextCursor: nil,
+            cursorDisposition: .initial
         )
     }
 }

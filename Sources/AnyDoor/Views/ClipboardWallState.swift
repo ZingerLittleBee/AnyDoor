@@ -133,9 +133,141 @@ final class ClipboardWallState {
         presentation.selectedEntry
     }
 
-    var selectedIndex: Int {
-        guard let selectedID = presentation.selectedID else { return 0 }
-        return items.firstIndex { $0.id == selectedID } ?? 0
+    /// The selected entry's identity, not its position. A card compares this
+    /// once (O(1)) instead of every realized card re-deriving an index by
+    /// scanning the whole array, and it stays correct when entries are added
+    /// or removed around the selection.
+    var selectedID: ClipboardHistoryEntryID? {
+        presentation.selectedID
+    }
+
+    /// Where the selected entry currently sits, and the wall's scroll-follow
+    /// signal. It has to be position rather than identity: a capture landing
+    /// while the wall is open prepends an entry and slides the selected card
+    /// sideways without changing what is selected, and the card still has to
+    /// be brought back to the centre.
+    ///
+    /// Position is also what makes the signal quiet in the other direction —
+    /// appending a page past the selection leaves this unchanged, so
+    /// prefetching cannot yank the viewport back to the selected card.
+    ///
+    /// This is an O(N) scan, so read it **once per body evaluation at the
+    /// container level**. Card highlighting compares `selectedID` instead;
+    /// reading this from every realized card is what made selection O(R×N).
+    var selectedIndex: Int? {
+        guard let selectedID = presentation.selectedID else { return nil }
+        return items.firstIndex { $0.id == selectedID }
+    }
+
+    /// How many cards past the window anchor the wall materializes as real
+    /// views, each side. Comfortably past half a viewport (about 11 cards on
+    /// a 5K display), so everything visible — plus a margin whose cards can
+    /// decode their previews before they scroll on screen — is always a real
+    /// card. Kept deliberately tight: the row is eager, so whole-tree
+    /// invalidations (the panel resigning key on dismissal flips
+    /// controlActiveState for every mounted card) cost O(window), and the
+    /// dismiss animation's smoothness depends on that lump staying small.
+    static let renderRadius = 24
+
+    /// How far the selection travels before the window slides. The anchor is
+    /// the selection quantized to this step, which is what makes the window
+    /// sticky *without stored state*: within a quantum every selection step
+    /// leaves the window identical (the common wheel tick costs one
+    /// `isSelected` flip and zero ForEach membership changes), and crossing
+    /// a quantum boundary slides the whole window by one step at once —
+    /// touching only cards far outside the viewport.
+    static let renderSlideStep = 16
+
+    /// The slice of `items` rendered as cards. Everything outside it is stood
+    /// in for by two fixed-width spacers, so the scroll geometry is identical
+    /// to rendering the full list while per-event SwiftUI cost stays O(window)
+    /// no matter how many pages are loaded — the wall's viewport is always
+    /// anchored to the selection (every scroll input is translated into
+    /// selection movement), so off-window cards are never visible.
+    var renderWindow: Range<Int> {
+        if let mountRadius {
+            return Self.constrainedWindow(
+                center: selectedIndex ?? 0,
+                count: items.count,
+                radius: mountRadius
+            )
+        }
+        return Self.renderWindow(center: selectedIndex ?? 0, count: items.count)
+    }
+
+    static func renderWindow(center: Int, count: Int) -> Range<Int> {
+        guard count > 0 else { return 0..<0 }
+        let clamped = min(max(center, 0), count - 1)
+        let anchor = (clamped / renderSlideStep) * renderSlideStep
+        let lower = max(0, anchor - renderRadius)
+        let upper = min(count, anchor + renderSlideStep + renderRadius)
+        return lower..<upper
+    }
+
+    /// Fallback opening radius when the caller cannot measure the screen.
+    /// The controller normally passes a radius derived from the actual
+    /// display width, so a laptop mounts far fewer cards than a 5K screen.
+    static let openingRadius = 16
+
+    /// How much the constrained mount radius grows per expansion tick, and
+    /// how far apart the ticks land. Growing to the full window in slices
+    /// keeps any single body pass to a couple dozen new cards instead of
+    /// one ninety-card lump right when the user starts interacting.
+    static let mountExpansionStep = 24
+    static let mountExpansionInterval = Duration.milliseconds(80)
+
+    /// While non-nil, `renderWindow` mounts only `mountRadius` cards around
+    /// the selection. Set just before the wall's slide-in — the row is laid
+    /// out eagerly, and mounting the full window up front both delays the
+    /// animation and starves its frames with the mounted cards'
+    /// materialization updates — then grown in slices by
+    /// `expandMountAfterOpening()` until the full sticky window takes over.
+    private(set) var mountRadius: Int?
+    private var mountExpansionTask: Task<Void, Never>?
+
+    func beginConstrainedMount(radius: Int = ClipboardWallState.openingRadius) {
+        mountExpansionTask?.cancel()
+        mountExpansionTask = nil
+        mountRadius = max(1, radius)
+    }
+
+    /// Grows the mounted window back to the full sticky window, one slice
+    /// per tick, off the open animation's critical path.
+    func expandMountAfterOpening() {
+        mountExpansionTask?.cancel()
+        guard mountRadius != nil else { return }
+        mountExpansionTask = Task { [weak self] in
+            while true {
+                guard let clock = self?.clock else { return }
+                try? await clock.sleep(for: Self.mountExpansionInterval)
+                guard let self, !Task.isCancelled,
+                    let current = self.mountRadius
+                else { return }
+                let next = current + Self.mountExpansionStep
+                if next >= Self.renderRadius + Self.renderSlideStep {
+                    self.mountRadius = nil
+                    self.mountExpansionTask = nil
+                    return
+                }
+                self.mountRadius = next
+            }
+        }
+    }
+
+    /// Stops a running expansion without lifting the constraint. Called when
+    /// the wall dismisses: mounting more cards into a window that is sliding
+    /// away is pure cost, and the next show re-arms the constraint anyway.
+    func cancelMountExpansion() {
+        mountExpansionTask?.cancel()
+        mountExpansionTask = nil
+    }
+
+    static func constrainedWindow(
+        center: Int, count: Int, radius: Int
+    ) -> Range<Int> {
+        guard count > 0 else { return 0..<0 }
+        let clamped = min(max(center, 0), count - 1)
+        return max(0, clamped - radius)..<min(count, clamped + radius + 1)
     }
 
     /// Which "nothing here" line fits the current query. An untouched history,
@@ -275,12 +407,51 @@ final class ClipboardWallState {
     func moveRight() {
         prefersInstantScroll = false
         presentation.moveSelection(by: 1)
+        prefetchIfNearTail()
     }
 
-    func select(_ index: Int) {
-        guard items.indices.contains(index) else { return }
+    func select(_ id: ClipboardHistoryEntryID) {
         prefersInstantScroll = false
-        presentation.select(items[index].id)
+        presentation.select(id)
+        prefetchIfNearTail()
+    }
+
+    /// How close the selection may get to the loaded tail before the next page
+    /// is requested. Wider than the presentation model's own row-appearance
+    /// distance because the wall centres the selection, so up to half a
+    /// viewport of cards (about 11 on a 5K display) is already visible to the
+    /// selection's right when the trigger fires.
+    static let prefetchDistance = 24
+
+    /// The wall pages on *selection*, not on view lifecycle: every route to
+    /// the boundary — wheel, arrows, card clicks, ⌘→ — moves the selection, so
+    /// this is the one complete signal for "the user is approaching the end of
+    /// what is loaded". A trigger tied to the sentinel's view lifetime is not
+    /// reliable either way: a LazyHStack never disposes a realized sentinel,
+    /// so a boundary-keyed task re-fires after every append and chain-loads
+    /// the entire store.
+    static func shouldPrefetch(
+        selectedIndex: Int?,
+        count: Int,
+        pagingState: ClipboardHistoryPagingState
+    ) -> Bool {
+        guard pagingState == .moreAvailable, let selectedIndex else {
+            return false
+        }
+        return selectedIndex + prefetchDistance >= count
+    }
+
+    private func prefetchIfNearTail() {
+        guard Self.shouldPrefetch(
+            selectedIndex: selectedIndex,
+            count: items.count,
+            pagingState: presentation.pagingState
+        ) else { return }
+        // Unstructured on purpose: the fetch belongs to the presentation
+        // model, not to whichever key press started it. `loadNextPage()` is
+        // single-flight, so a run of steps inside the trigger zone still
+        // issues one request.
+        Task { await presentation.loadNextPage() }
     }
 
     func moveToStart() {
@@ -288,9 +459,12 @@ final class ClipboardWallState {
         presentation.moveSelectionToStart()
     }
 
-    func moveToEnd() {
+    /// ⌘→. Async because reaching the end of the history may have to fetch the
+    /// next page first; the scroll preference is set up front so the jump to the
+    /// loaded tail is instant either way.
+    func moveToEnd() async {
         prefersInstantScroll = true
-        presentation.moveSelectionToEnd()
+        await presentation.moveTowardHistoryEnd()
     }
 
     func clearSourceFilter() {

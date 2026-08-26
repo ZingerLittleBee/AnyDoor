@@ -95,17 +95,38 @@ public struct ClipboardHistoryCursor: Equatable, Sendable {
 public struct ClipboardHistoryPage: Equatable, Sendable {
     public let entries: [ClipboardHistoryEntry]
     public let nextCursor: ClipboardHistoryCursor?
+    public let cursorDisposition: ClipboardHistoryCursorDisposition
     public let state: ClipboardHistoryPageState
 
     public init(
         entries: [ClipboardHistoryEntry],
         nextCursor: ClipboardHistoryCursor?,
+        cursorDisposition: ClipboardHistoryCursorDisposition,
         state: ClipboardHistoryPageState = .ready
     ) {
         self.entries = entries
         self.nextCursor = nextCursor
+        self.cursorDisposition = cursorDisposition
         self.state = state
     }
+}
+
+/// What happened to the cursor a page was requested with.
+///
+/// A cursor is opaque and binds to the query, the filters and the search
+/// index generation, so a caller cannot tell a continuation from a silent
+/// restart by looking at the returned entries — only the module knows. A
+/// capture bumps the generation, which invalidates every outstanding cursor,
+/// so `.restarted` is a routine outcome rather than an error: the page is
+/// valid, it is just the first page of the current generation instead of the
+/// continuation that was asked for.
+public enum ClipboardHistoryCursorDisposition: Equatable, Sendable {
+    /// No cursor was supplied; the page is the first page.
+    case initial
+    /// The supplied cursor was valid and honored.
+    case continued
+    /// The supplied cursor was invalid; the page is the first page.
+    case restarted
 }
 
 public enum ClipboardHistoryPageState: Equatable, Sendable {
