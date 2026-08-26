@@ -576,76 +576,49 @@ final class ClipboardHistoryPresentationModel {
     ///
     /// `head` is the restarted page — the first page of the new generation. It
     /// is accumulated locally and the chain is followed until the accumulator
-    /// covers the depth the user had already loaded plus one more page, the
-    /// chain ends, or the fetch budget runs out. The entries currently on
-    /// screen are untouched until that succeeds, so the wall never shows a
-    /// half-rebased array.
+    /// covers the depth the user had already loaded plus one more page, or the
+    /// chain ends. The entries currently on screen are untouched until that
+    /// succeeds, so the wall never shows a half-rebased array — and a recovery
+    /// that cannot reach the old depth keeps the old prefix rather than
+    /// shrinking what the user can see.
     private func rebase(
         onto head: ClipboardHistoryPage,
         requestRevision: Int,
         requestQuery: ClipboardHistoryQuery
     ) async {
         let targetDepth = entries.count
-        let preferredID = selectedID
         var restart = head
         var restartsRemaining = Self.rebaseRestartAllowance
 
         while true {
-            var rebasedEntries: [ClipboardHistoryEntry] = []
-            var seenIDs: Set<ClipboardHistoryEntryID> = []
-            var page = restart
-            var budget = Self.rebaseBudget(
+            let outcome = await walkRebaseChain(
+                from: restart,
                 targetDepth: targetDepth,
-                pageSize: restart.entries.count
+                requestRevision: requestRevision,
+                requestQuery: requestQuery
             )
-            var restartedAgain: ClipboardHistoryPage?
-
-            chain: while true {
-                for entry in page.entries {
-                    guard seenIDs.insert(entry.id).inserted else { continue }
-                    rebasedEntries.append(entry)
-                }
-                guard rebasedEntries.count <= targetDepth,
-                    let cursor = page.nextCursor,
-                    budget > 0
-                else {
-                    break chain
-                }
-                budget -= 1
-
-                let fetched: ClipboardHistoryPage
-                do {
-                    fetched = try await fetchPage(
-                        query: requestQuery,
-                        cursor: cursor
-                    )
-                } catch {
-                    guard requestRevision == revision,
-                        !(error is CancellationError)
-                    else {
-                        return
-                    }
-                    pagingState = .failed
-                    return
-                }
-                guard requestRevision == revision, requestQuery == query else {
-                    return
-                }
-                guard case .ready = fetched.state else {
-                    // The index went away mid-rebase. Keep what is on screen
-                    // and let the user retry rather than publishing a prefix
-                    // that is shallower than the one it would replace.
-                    pagingState = .failed
-                    return
-                }
-                if fetched.cursorDisposition == .restarted {
-                    restartedAgain = fetched
-                    break chain
-                }
-                page = fetched
-            }
-
-            if let restartedAgain {
+            switch outcome {
+            case .rebuilt(let rebuiltEntries, let cursor):
+                await commitRebase(
+                    rebuiltEntries,
+                    nextCursor: cursor,
+                    requestRevision: requestRevision,
+                    requestQuery: requestQuery
+                )
+                return
+            case .budgetExhausted:
+                // The new generation is deeper than one recovery is allowed to
+                // walk. Publishing here would replace the visible prefix with a
+                // shallower one, so keep the old entries and the old cursor and
+                // let the user retry.
+                pagingState = .failed
+                return
+            case .failed:
+                pagingState = .failed
+                return
+            case .discarded:
+                return
+            case .restarted(let next):
                 guard restartsRemaining > 0 else {
                     // The store is mutating faster than the prefix can be
                     // rebuilt. Keep the old entries and the old cursor and
@@ -654,24 +627,104 @@ final class ClipboardHistoryPresentationModel {
                     return
                 }
                 restartsRemaining -= 1
-                restart = restartedAgain
-                continue
+                restart = next
             }
+        }
+    }
 
-            entries = rebasedEntries
-            nextCursor = page.nextCursor
-            pagingState = page.nextCursor == nil ? .complete : .moreAvailable
-            contentState = entries.isEmpty ? .empty : .content
-            reconcileSelection(preferredID: preferredID)
-            let currentIDs = Set(entries.map(\.id))
-            pruneMaterializations { currentIDs.contains($0.entryID) }
-            // The old total belongs to the old generation.
-            await refreshTotalCount(
-                requestRevision: requestRevision,
-                requestQuery: requestQuery
-            )
+    /// Accumulates the new generation's prefix from `head` along its cursor,
+    /// stopping as soon as it covers `targetDepth` plus one page. Publishes
+    /// nothing: the caller decides what to do with the outcome.
+    private func walkRebaseChain(
+        from head: ClipboardHistoryPage,
+        targetDepth: Int,
+        requestRevision: Int,
+        requestQuery: ClipboardHistoryQuery
+    ) async -> RebaseChainOutcome {
+        var rebasedEntries: [ClipboardHistoryEntry] = []
+        var seenIDs: Set<ClipboardHistoryEntryID> = []
+        var page = head
+        var budget = Self.rebaseBudget(
+            targetDepth: targetDepth,
+            pageSize: head.entries.count
+        )
+
+        while true {
+            for entry in page.entries {
+                guard seenIDs.insert(entry.id).inserted else { continue }
+                rebasedEntries.append(entry)
+            }
+            if rebasedEntries.count > targetDepth {
+                return .rebuilt(rebasedEntries, page.nextCursor)
+            }
+            guard let cursor = page.nextCursor else {
+                // The new generation genuinely has nothing more behind this
+                // page, so a shallower prefix is the truth, not a shortfall.
+                return .rebuilt(rebasedEntries, nil)
+            }
+            guard budget > 0 else { return .budgetExhausted }
+            budget -= 1
+
+            let fetched: ClipboardHistoryPage
+            do {
+                fetched = try await fetchPage(
+                    query: requestQuery,
+                    cursor: cursor
+                )
+            } catch {
+                guard requestRevision == revision,
+                    !(error is CancellationError)
+                else {
+                    return .discarded
+                }
+                return .failed
+            }
+            guard requestRevision == revision, requestQuery == query else {
+                return .discarded
+            }
+            guard case .ready = fetched.state else {
+                // The index went away mid-rebase. Keep what is on screen and
+                // let the user retry rather than publishing a prefix that is
+                // shallower than the one it would replace.
+                return .failed
+            }
+            if fetched.cursorDisposition == .restarted {
+                return .restarted(fetched)
+            }
+            page = fetched
+        }
+    }
+
+    /// Publishes a rebuilt prefix in one step.
+    ///
+    /// The count is fetched *before* anything is published, because it belongs
+    /// to the new generation: entries, cursor, total and paging state all have
+    /// to become visible together or the footer would describe the old
+    /// generation's result set for one frame. Selection is reconciled against
+    /// the live `selectedID` rather than a value snapshotted before the awaits
+    /// — the model is reentrant, so the user may well have picked a different
+    /// card while the old entries were still on screen, and that choice wins.
+    private func commitRebase(
+        _ rebasedEntries: [ClipboardHistoryEntry],
+        nextCursor cursor: ClipboardHistoryCursor?,
+        requestRevision: Int,
+        requestQuery: ClipboardHistoryQuery
+    ) async {
+        let refreshedCount = await Self.bestEffortCount(
+            operations,
+            requestQuery
+        )
+        guard requestRevision == revision, requestQuery == query else {
             return
         }
+        entries = rebasedEntries
+        nextCursor = cursor
+        totalCount = refreshedCount
+        pagingState = cursor == nil ? .complete : .moreAvailable
+        contentState = entries.isEmpty ? .empty : .content
+        reconcileSelection(preferredID: selectedID)
+        let currentIDs = Set(entries.map(\.id))
+        pruneMaterializations { currentIDs.contains($0.entryID) }
     }
 
     /// How many continuation fetches a rebase may spend: roughly one walk of
@@ -695,17 +748,6 @@ final class ClipboardHistoryPresentationModel {
         }
         pagingTask = task
         return try await task.value
-    }
-
-    private func refreshTotalCount(
-        requestRevision: Int,
-        requestQuery: ClipboardHistoryQuery
-    ) async {
-        let count = try? await operations.count(requestQuery)
-        guard requestRevision == revision, requestQuery == query else {
-            return
-        }
-        totalCount = count
     }
 
     /// Whether `mutation` can change *which* entries satisfy `query`, in which
@@ -899,10 +941,12 @@ final class ClipboardHistoryPresentationModel {
                 selectedID = nil
                 contentState = .unavailable(status.reason)
                 pagingState = .complete
+                totalCount = nil
                 return
             }
             guard let loadedPage = result.page else {
                 pagingState = .complete
+                totalCount = nil
                 return
             }
             totalCount = result.totalCount
@@ -1065,6 +1109,23 @@ final class ClipboardHistoryPresentationModel {
             )
         }
     }
+}
+
+/// How a walk of a restarted cursor chain ended. Only `.rebuilt` is publishable
+/// — every other outcome deliberately leaves the visible prefix alone.
+private enum RebaseChainOutcome {
+    /// The prefix was rebuilt to at least the previous depth, or the chain
+    /// genuinely ended before reaching it.
+    case rebuilt([ClipboardHistoryEntry], ClipboardHistoryCursor?)
+    /// A further `.restarted` page arrived while walking.
+    case restarted(ClipboardHistoryPage)
+    /// The fetch budget ran out before the previous depth was covered.
+    case budgetExhausted
+    /// The walk failed in a way the user can retry.
+    case failed
+    /// The request went stale (revision or query changed, or it was cancelled);
+    /// nothing may be published and no state may be touched.
+    case discarded
 }
 
 /// Everything one first-page load resolves in a single cancellable unit. The

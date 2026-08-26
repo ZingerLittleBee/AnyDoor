@@ -1173,6 +1173,193 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         )
     }
 
+    func testSelectionMadeDuringARebaseSurvivesTheAtomicReplace() async {
+        let original = (0..<2).map(entry)
+        let captured = entry(100)
+        let deeper = entry(2)
+        let firstCursor = cursor("first")
+        let rebaseCursor = cursor("rebase")
+        let client = ControlledPresentationClient()
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+
+        let initialLoad = Task { await model.load() }
+        await waitUntil("initial page request") {
+            await client.requestCount == 1
+        }
+        await client.release(
+            requestID: 0,
+            page: ClipboardHistoryPage(
+                entries: original,
+                nextCursor: firstCursor,
+                cursorDisposition: .initial
+            )
+        )
+        await initialLoad.value
+        XCTAssertEqual(model.selectedID, original[0].id)
+
+        let rebase = Task { await model.loadNextPage() }
+        await waitUntil("stale continuation request") {
+            await client.requestCount == 2
+        }
+        await client.release(
+            requestID: 1,
+            page: ClipboardHistoryPage(
+                entries: [captured, original[0]],
+                nextCursor: rebaseCursor,
+                cursorDisposition: .restarted
+            )
+        )
+        await waitUntil("rebase continuation request") {
+            await client.requestCount == 3
+        }
+
+        // The old entries are still on screen, so the user can still act on
+        // them. The model is reentrant across the rebase's awaits, so this
+        // choice must not be undone by a selection snapshotted before them.
+        model.select(original[1].id)
+
+        await client.release(
+            requestID: 2,
+            page: ClipboardHistoryPage(
+                entries: [original[1], deeper],
+                nextCursor: nil,
+                cursorDisposition: .continued
+            )
+        )
+        await rebase.value
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            [captured.id, original[0].id, original[1].id, deeper.id]
+        )
+        XCTAssertEqual(
+            model.selectedID,
+            original[1].id,
+            "a selection made while the old prefix was visible wins over the "
+                + "one the rebase started with"
+        )
+        XCTAssertEqual(model.pagingState, .complete)
+    }
+
+    func testBudgetExhaustionKeepsTheOldPrefixInsteadOfShrinkingIt() async {
+        let original = (0..<9).map(entry)
+        let firstCursor = cursor("first")
+        let restartCursor = cursor("restart")
+        let continuationCursors = (2...5).map { cursor("rebase-\($0)") }
+        let recovered = entry(200)
+        // The restarted head is four entries wide against a nine-entry prefix,
+        // so the walk may spend ceil(9 / 4) + 1 = 4 continuation fetches. Every
+        // continuation returns a single entry, so the budget runs out with the
+        // accumulator at 8 — one short of the old depth — and a cursor still in
+        // hand. Publishing that would take a row away from the user.
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: original,
+                    nextCursor: firstCursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: (100..<104).map(entry),
+                    nextCursor: restartCursor,
+                    cursorDisposition: .restarted
+                ),
+            ] + continuationCursors.enumerated().map { index, nextCursor in
+                ClipboardHistoryPage(
+                    entries: [entry(104 + index)],
+                    nextCursor: nextCursor,
+                    cursorDisposition: .continued
+                )
+            } + [
+                ClipboardHistoryPage(
+                    entries: [recovered],
+                    nextCursor: nil,
+                    cursorDisposition: .continued
+                )
+            ],
+            counts: [9]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+        model.select(original[4].id)
+
+        await model.loadNextPage()
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            original.map(\.id),
+            "an exhausted rebase must never replace the visible prefix with a "
+                + "shallower one"
+        )
+        XCTAssertEqual(model.selectedID, original[4].id)
+        XCTAssertEqual(model.pagingState, .failed)
+        XCTAssertEqual(model.totalCount, 9)
+        XCTAssertNil(model.actionFailure)
+
+        // The old cursor is retained, so the failure is retryable.
+        await model.loadNextPage()
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            original.map(\.id) + [recovered.id]
+        )
+        XCTAssertEqual(model.pagingState, .complete)
+        let requests = await client.pageRequests
+        XCTAssertEqual(
+            requests.map(\.cursor),
+            [
+                nil,
+                firstCursor,
+                restartCursor,
+                continuationCursors[0],
+                continuationCursors[1],
+                continuationCursors[2],
+                firstCursor,
+            ]
+        )
+    }
+
+    func testUnavailableReloadClearsTheStaleTotal() async {
+        let entries = (0..<3).map(entry)
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: entries,
+                    nextCursor: nil,
+                    cursorDisposition: .initial
+                )
+            ],
+            counts: [12]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+        XCTAssertEqual(model.totalCount, 12)
+
+        await client.setStatus(
+            ClipboardHistoryStatus(
+                availability: .unavailable,
+                reason: .missingKey,
+                isMonitoring: false
+            )
+        )
+        await model.reload()
+
+        XCTAssertEqual(model.contentState, .unavailable(.missingKey))
+        XCTAssertTrue(model.entries.isEmpty)
+        XCTAssertNil(
+            model.totalCount,
+            "a total that describes a store the model can no longer read is a "
+                + "lie, not a cached value"
+        )
+        XCTAssertEqual(model.pagingState, .complete)
+    }
+
     func testQueryChangeDiscardsARebaseThatIsStillInFlight() async {
         let original = (0..<2).map(entry)
         let replacement = entry(200)
@@ -1505,7 +1692,7 @@ private actor PresentationClientStub {
         let cursor: ClipboardHistoryCursor?
     }
 
-    private let configuredStatus: ClipboardHistoryStatus
+    private var configuredStatus: ClipboardHistoryStatus
     private var pages: [ClipboardHistoryPage]
     /// Consumed like `pages`, except the last value repeats. An empty list
     /// makes every count fail, which is the "count unavailable" case.
@@ -1551,6 +1738,10 @@ private actor PresentationClientStub {
             tagDefinitions: { [] },
             sourceSummaries: { await self.configuredSourceSummaries() }
         )
+    }
+
+    func setStatus(_ status: ClipboardHistoryStatus) {
+        configuredStatus = status
     }
 
     private func configuredStatusValue() -> ClipboardHistoryStatus {
