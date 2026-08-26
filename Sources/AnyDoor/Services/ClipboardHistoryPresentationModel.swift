@@ -584,12 +584,17 @@ final class ClipboardHistoryPresentationModel {
                 pagingState = .failed
             }
         } catch {
-            guard requestRevision == revision,
-                !(error is CancellationError)
-            else {
-                return
+            guard requestRevision == revision else { return }
+            if error is CancellationError {
+                // The canceller was this request's own driver (the sentinel's
+                // view task, or an end-navigation task torn down with the
+                // wall), not a newer request — those bump `revision`. The
+                // cursor is untouched, so re-arm the boundary: leaving
+                // `.loading` published would show a spinner nothing resolves.
+                pagingState = .moreAvailable
+            } else {
+                pagingState = .failed
             }
-            pagingState = .failed
         }
     }
 
@@ -802,8 +807,8 @@ final class ClipboardHistoryPresentationModel {
             let page = try await task.value
             // Cancellation is best-effort inside the module, so a request that
             // ran to completion anyway must still be dropped here rather than
-            // published: `loadNextPage` treats a `CancellationError` as "leave
-            // every piece of state alone".
+            // published: `loadNextPage` answers a `CancellationError` by
+            // re-arming the boundary without touching the entries or cursor.
             try Task.checkCancellation()
             return page
         } onCancel: {

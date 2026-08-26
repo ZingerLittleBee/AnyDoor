@@ -754,61 +754,73 @@ struct ClipboardWallView: View {
     private func pagingSentinel(
         _ pagingState: ClipboardHistoryPagingState
     ) -> some View {
-        switch pagingState {
-        case .moreAvailable:
-            Button {
-                loadNextPage()
-            } label: {
-                sentinelCard {
-                    Image(systemName: "chevron.right.circle")
-                        .font(.system(size: 18))
-                    LocalizedText(.clipboardPagingLoadMore)
+        // The automatic trigger lives on this Group — an identity that
+        // survives every paging-state transition — NOT on the
+        // `.moreAvailable` button. A task on the button dies the moment
+        // `loadNextPage()` publishes `.loading` and the switch swaps the
+        // button out, which cancels the fetch it just started and strands
+        // the sentinel on a spinner nothing will resolve.
+        Group {
+            switch pagingState {
+            case .moreAvailable:
+                Button {
+                    loadNextPage()
+                } label: {
+                    sentinelCard {
+                        Image(systemName: "chevron.right.circle")
+                            .font(.system(size: 18))
+                        LocalizedText(.clipboardPagingLoadMore)
+                    }
                 }
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L(.clipboardPagingLoadMore))
-            // Scrolling the sentinel into view *is* the request for the next
-            // page: the LazyHStack only realizes it at the loaded boundary.
-            // Keyed on the boundary rather than left unkeyed, because the
-            // element ID is stable on purpose and a lazy container is free to
-            // keep the realized sentinel across an append — an unkeyed task
-            // would then arm exactly once and paging would stall after the
-            // first page. Each new boundary re-runs the check instead, which is
-            // also what fills the viewport when one page does not.
-            .task(id: pagingBoundary) {
-                await state.presentation.loadNextPage()
-            }
-        case .loading:
-            sentinelCard {
-                ProgressView().controlSize(.small)
-                LocalizedText(.clipboardPagingLoading)
-            }
-        case .failed:
-            // The loaded entries and the cursor survive a paging failure, so a
-            // retry resumes from the same position rather than reloading. No
-            // automatic trigger here: a failure that reproduces would retry
-            // forever.
-            Button {
-                loadNextPage()
-            } label: {
+                .buttonStyle(.plain)
+                .accessibilityLabel(L(.clipboardPagingLoadMore))
+            case .loading:
                 sentinelCard {
-                    Image(systemName: "exclamationmark.arrow.circlepath")
-                        .font(.system(size: 18))
-                    LocalizedText(.clipboardPagingRetry)
-                        .multilineTextAlignment(.center)
+                    ProgressView().controlSize(.small)
+                    LocalizedText(.clipboardPagingLoading)
                 }
+            case .failed:
+                // The loaded entries and the cursor survive a paging failure,
+                // so a retry resumes from the same position rather than
+                // reloading. No automatic trigger here: a failure that
+                // reproduces would retry forever.
+                Button {
+                    loadNextPage()
+                } label: {
+                    sentinelCard {
+                        Image(systemName: "exclamationmark.arrow.circlepath")
+                            .font(.system(size: 18))
+                        LocalizedText(.clipboardPagingRetry)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(L(.clipboardPagingRetryAction))
+            case .complete:
+                // Nothing is pending here, so this is a marker rather than an
+                // affordance: a plain dimmed label, not another card competing
+                // with the entries for attention.
+                LocalizedText(.clipboardPagingEnd)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .frame(width: 76, height: 230)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L(.clipboardPagingRetryAction))
-        case .complete:
-            // Nothing is pending here, so this is a marker rather than an
-            // affordance: a plain dimmed label, not another card competing with
-            // the entries for attention.
-            LocalizedText(.clipboardPagingEnd)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.center)
-                .frame(width: 76, height: 230)
+        }
+        // Scrolling the sentinel into view *is* the request for the next page:
+        // the LazyHStack only realizes it at the loaded boundary. Keyed on the
+        // boundary rather than left unkeyed, because the element ID is stable
+        // on purpose and a lazy container is free to keep the realized
+        // sentinel across an append — an unkeyed task would then arm exactly
+        // once and paging would stall after the first page. Each new boundary
+        // re-runs the check instead, which is also what fills the viewport
+        // when one page does not. The `.moreAvailable` guard keeps a failure
+        // from auto-retrying and a re-appearing sentinel from double-loading.
+        .task(id: pagingBoundary) {
+            guard state.presentation.pagingState == .moreAvailable else {
+                return
+            }
+            await state.presentation.loadNextPage()
         }
     }
 
@@ -842,6 +854,9 @@ struct ClipboardWallView: View {
     }
 
     private var hints: some View {
+        // The hint row stays centred, as it was before the count existed; the
+        // count is an overlay pinned to the trailing edge so adding it never
+        // shoves the hints off-centre.
         HStack(spacing: 16) {
             hint("←→", .clipboardHintSelect)
             hint("⌘←→", .clipboardHintJumpEnds)
@@ -860,9 +875,9 @@ struct ClipboardWallView: View {
             hint("space", .clipboardHintPreview)
             hint("⌫", .clipboardHintDelete)
             hint("esc", .clipboardHintClose)
-            Spacer(minLength: 12)
-            loadedCount
         }
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .trailing) { loadedCount }
         .font(.caption2).foregroundStyle(.secondary)
     }
 

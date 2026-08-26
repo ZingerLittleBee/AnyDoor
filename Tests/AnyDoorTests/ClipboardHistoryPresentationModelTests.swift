@@ -607,6 +607,87 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         )
     }
 
+    /// The sentinel's view task dies whenever SwiftUI swaps the sentinel to
+    /// its loading appearance, cancelling the fetch it just started. That
+    /// cancellation must re-arm `.moreAvailable` — a published `.loading`
+    /// would spin forever with nothing left to resolve it — and keep the
+    /// cursor, so the next trigger resumes from the same boundary.
+    func testCancelledNextPageLoadRearmsTheBoundaryAndKeepsTheCursor()
+        async
+    {
+        let firstPage = [entry(0), entry(1)]
+        let next = entry(2)
+        let firstCursor = ClipboardHistoryCursor(
+            token: Data("first".utf8)
+        )
+        let client = ControlledPresentationClient()
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+
+        let initialLoad = Task { await model.load() }
+        await waitUntil("initial page request") {
+            await client.requestCount == 1
+        }
+        await client.release(
+            requestID: 0,
+            page: ClipboardHistoryPage(
+                entries: firstPage,
+                nextCursor: firstCursor,
+                cursorDisposition: .initial
+            )
+        )
+        await initialLoad.value
+        XCTAssertEqual(model.pagingState, .moreAvailable)
+
+        let cancelledLoad = Task { await model.loadNextPage() }
+        await waitUntil("next page request") {
+            await client.requestCount == 2
+        }
+        XCTAssertEqual(model.pagingState, .loading)
+        cancelledLoad.cancel()
+        await waitUntil("next page cancellation") {
+            await client.cancelledRequestIDs.contains(1)
+        }
+        // Even a request that completed under the covers is dropped rather
+        // than published once its caller was cancelled.
+        await client.release(
+            requestID: 1,
+            page: ClipboardHistoryPage(
+                entries: [next],
+                nextCursor: nil,
+                cursorDisposition: .continued
+            )
+        )
+        await cancelledLoad.value
+
+        XCTAssertEqual(model.entries, firstPage)
+        XCTAssertEqual(model.pagingState, .moreAvailable)
+        XCTAssertNil(model.actionFailure)
+
+        let retriedLoad = Task { await model.loadNextPage() }
+        await waitUntil("retried next page request") {
+            await client.requestCount == 3
+        }
+        await client.release(
+            requestID: 2,
+            page: ClipboardHistoryPage(
+                entries: [next],
+                nextCursor: nil,
+                cursorDisposition: .continued
+            )
+        )
+        await retriedLoad.value
+
+        XCTAssertEqual(model.entries, firstPage + [next])
+        XCTAssertEqual(model.pagingState, .complete)
+        let requests = await client.requests
+        XCTAssertEqual(
+            requests.map(\.cursor),
+            [nil, firstCursor, firstCursor]
+        )
+    }
+
     func testRefetchPolicyOnlyTriggersWhenQueryMembershipCanChange() {
         typealias Model = ClipboardHistoryPresentationModel
         let id = entry(0).id
