@@ -840,6 +840,7 @@ private enum MaterializationPurposeKey: Hashable {
     case normalPaste
     case plainTextPaste
     case preview
+    case fullPreview
     case hostAction
 
     init(_ purpose: ClipboardHistoryMaterializationPurpose) {
@@ -850,6 +851,8 @@ private enum MaterializationPurposeKey: Hashable {
             self = .plainTextPaste
         case .preview:
             self = .preview
+        case .fullPreview:
+            self = .fullPreview
         case .hostAction:
             self = .hostAction
         }

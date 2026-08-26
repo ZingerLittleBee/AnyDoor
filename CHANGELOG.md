@@ -118,6 +118,9 @@ versioning.
   because those keys arrive as `NX_SYSDEFINED` events, which the tap did not
   listen for. Mouse input, including extra mouse buttons, is unchanged so
   the lock can still be released from the menu bar.
+- The clipboard wall's Space preview now shows a copied image at its full
+  size. It previously rendered the 512 px card thumbnail, so a large image
+  opened as a small, slightly blurry window.
 
 ## [4.1.1] - 2026-08-12
 
