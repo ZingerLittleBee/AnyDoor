@@ -733,6 +733,19 @@ struct ClipboardWallView: View {
     /// reads as chrome at the end of the row rather than as one more entry.
     private static let sentinelWidth: CGFloat = 132
 
+    /// Which loaded boundary the sentinel is currently sitting on. Both halves
+    /// matter: the count advances on an append, and the tail identity changes
+    /// when a rebase republishes a prefix of the same depth.
+    private struct PagingBoundary: Equatable {
+        let count: Int
+        let lastID: ClipboardHistoryEntryID?
+    }
+
+    private var pagingBoundary: PagingBoundary {
+        let entries = state.presentation.entries
+        return PagingBoundary(count: entries.count, lastID: entries.last?.id)
+    }
+
     /// The boundary of the loaded prefix, rendered as the last element of the
     /// row so momentum scrolling always lands on a truthful answer instead of a
     /// silent stop: more history, a fetch in flight, a retryable failure, or the
@@ -743,36 +756,50 @@ struct ClipboardWallView: View {
     ) -> some View {
         switch pagingState {
         case .moreAvailable:
-            sentinelCard {
-                Image(systemName: "chevron.right.circle")
-                    .font(.system(size: 18))
-                LocalizedText(.clipboardPagingLoadMore)
+            Button {
+                loadNextPage()
+            } label: {
+                sentinelCard {
+                    Image(systemName: "chevron.right.circle")
+                        .font(.system(size: 18))
+                    LocalizedText(.clipboardPagingLoadMore)
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L(.clipboardPagingLoadMore))
             // Scrolling the sentinel into view *is* the request for the next
-            // page: the LazyHStack only realizes it at the loaded boundary, and
-            // discards it again once a page lands and pushes it out of the
-            // realized window, so the next approach re-arms the trigger. If the
-            // sentinel is still visible after a page (a short page, a wide
-            // window), it fires again and fills the viewport.
-            .task { await state.presentation.loadNextPage() }
-            // A manual escape hatch for the case the automatic trigger cannot
-            // cover: the sentinel already realized and parked on screen.
-            .onTapGesture { loadNextPage() }
+            // page: the LazyHStack only realizes it at the loaded boundary.
+            // Keyed on the boundary rather than left unkeyed, because the
+            // element ID is stable on purpose and a lazy container is free to
+            // keep the realized sentinel across an append — an unkeyed task
+            // would then arm exactly once and paging would stall after the
+            // first page. Each new boundary re-runs the check instead, which is
+            // also what fills the viewport when one page does not.
+            .task(id: pagingBoundary) {
+                await state.presentation.loadNextPage()
+            }
         case .loading:
             sentinelCard {
                 ProgressView().controlSize(.small)
                 LocalizedText(.clipboardPagingLoading)
             }
         case .failed:
-            sentinelCard {
-                Image(systemName: "exclamationmark.arrow.circlepath")
-                    .font(.system(size: 18))
-                LocalizedText(.clipboardPagingRetry)
-                    .multilineTextAlignment(.center)
-            }
             // The loaded entries and the cursor survive a paging failure, so a
-            // retry resumes from the same position rather than reloading.
-            .onTapGesture { loadNextPage() }
+            // retry resumes from the same position rather than reloading. No
+            // automatic trigger here: a failure that reproduces would retry
+            // forever.
+            Button {
+                loadNextPage()
+            } label: {
+                sentinelCard {
+                    Image(systemName: "exclamationmark.arrow.circlepath")
+                        .font(.system(size: 18))
+                    LocalizedText(.clipboardPagingRetry)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L(.clipboardPagingRetryAction))
         case .complete:
             // Nothing is pending here, so this is a marker rather than an
             // affordance: a plain dimmed label, not another card competing with
@@ -806,9 +833,10 @@ struct ClipboardWallView: View {
             .contentShape(RoundedRectangle(cornerRadius: 10))
     }
 
-    /// Fire-and-forget page load for the sentinel's click affordances.
-    /// `loadNextPage()` is single-flight, so a click landing on top of the
-    /// automatic trigger (or a run of impatient clicks) issues one fetch.
+    /// Fire-and-forget page load for the sentinel's buttons, which need a
+    /// synchronous action. `loadNextPage()` is single-flight, so a press
+    /// landing on top of the automatic trigger (or a run of impatient
+    /// presses) still issues one fetch.
     private func loadNextPage() {
         Task { await state.presentation.loadNextPage() }
     }
@@ -845,7 +873,8 @@ struct ClipboardWallView: View {
     ///
     /// The total is best-effort: when the count is unavailable only the loaded
     /// number is shown. A fabricated total would be exactly the lie the
-    /// sentinel exists to remove.
+    /// sentinel exists to remove. Zero is shown like any other number — a
+    /// search that matched nothing has truthfully loaded 0 of 0.
     @ViewBuilder
     private var loadedCount: some View {
         // This is a formatted string rather than a `LocalizedText`, so read the
@@ -853,14 +882,12 @@ struct ClipboardWallView: View {
         // re-renders the rest of the footer when the user switches language.
         let _ = LocalizationManager.shared.preference
         let loaded = state.presentation.entries.count
-        if loaded > 0 {
-            if let total = state.presentation.totalCount {
-                Text(L(.clipboardPagingLoadedOfTotal, loaded, total))
-                    .monospacedDigit()
-            } else {
-                Text(L(.clipboardPagingLoaded, loaded))
-                    .monospacedDigit()
-            }
+        if let total = state.presentation.totalCount {
+            Text(L(.clipboardPagingLoadedOfTotal, loaded, total))
+                .monospacedDigit()
+        } else {
+            Text(L(.clipboardPagingLoaded, loaded))
+                .monospacedDigit()
         }
     }
 

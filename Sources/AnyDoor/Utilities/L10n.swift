@@ -127,6 +127,7 @@ enum L10n {
         case clipboardPagingLoadedOfTotal = "clipboard.paging.loadedOfTotal"
         case clipboardPagingLoading = "clipboard.paging.loading"
         case clipboardPagingRetry = "clipboard.paging.retry"
+        case clipboardPagingRetryAction = "clipboard.paging.retryAction"
         case clipboardSearchPlaceholder = "clipboard.search.placeholder"
         case clipboardSourceAll = "clipboard.source.all"
         case clipboardSourceFilterHelp = "clipboard.source.filterHelp"

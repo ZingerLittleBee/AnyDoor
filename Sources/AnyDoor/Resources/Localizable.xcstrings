@@ -2942,6 +2942,23 @@
         }
       }
     },
+    "clipboard.paging.retryAction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
+          }
+        }
+      }
+    },
     "clipboard.preview.cannotRender": {
       "extractionState": "manual",
       "localizations": {
