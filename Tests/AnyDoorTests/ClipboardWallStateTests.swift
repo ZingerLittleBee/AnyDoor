@@ -25,10 +25,18 @@ final class ClipboardWallStateTests: XCTestCase {
         availability: ClipboardHistoryStatus.Availability = .ready,
         reason: ClipboardHistoryStatus.AvailabilityReason? = nil
     ) async -> ClipboardWallState {
-        let page = ClipboardHistoryPage(
-            entries: entries,
-            nextCursor: nil
+        await makeState(
+            feed: ClipboardWallEntryFeed(entries),
+            availability: availability,
+            reason: reason
         )
+    }
+
+    private func makeState(
+        feed: ClipboardWallEntryFeed,
+        availability: ClipboardHistoryStatus.Availability = .ready,
+        reason: ClipboardHistoryStatus.AvailabilityReason? = nil
+    ) async -> ClipboardWallState {
         let presentation = ClipboardHistoryPresentationModel(
             operations: ClipboardHistoryPresentationOperations(
                 status: {
@@ -39,7 +47,7 @@ final class ClipboardWallStateTests: XCTestCase {
                         searchIndex: .ready
                     )
                 },
-                page: { _, _ in page },
+                page: { _, _ in await feed.page() },
                 apply: { _ in .notFound },
                 materialize: { _ in
                     ClipboardHistoryMaterialization(items: [])
@@ -52,13 +60,53 @@ final class ClipboardWallStateTests: XCTestCase {
     }
 
     func testSelectionClampsAndMoves() async {
-        let state = await makeState(entries: entries(["a", "b", "c"]))
-        XCTAssertEqual(state.selectedIndex, 0)
+        let items = entries(["a", "b", "c"])
+        let state = await makeState(entries: items)
+        XCTAssertEqual(state.selectedID, items[0].id)
         state.moveRight(); state.moveRight(); state.moveRight()   // clamps at last
-        XCTAssertEqual(state.selectedIndex, 2)
+        XCTAssertEqual(state.selectedID, items[2].id)
         state.moveLeft()
-        XCTAssertEqual(state.selectedIndex, 1)
+        XCTAssertEqual(state.selectedID, items[1].id)
         XCTAssertEqual(state.selectedItem?.previewText, "b")
+    }
+
+    /// Clicking a card selects that entry, and an ID the wall is not showing
+    /// (a card deleted between the click and its handler) leaves the current
+    /// selection alone rather than clearing it.
+    func testSelectingByIDPicksThatEntryAndIgnoresUnknownIDs() async {
+        let items = entries(["a", "b", "c"])
+        let state = await makeState(entries: items)
+
+        state.select(items[2].id)
+        XCTAssertEqual(state.selectedID, items[2].id)
+        XCTAssertEqual(state.selectedItem?.previewText, "c")
+
+        let stranger = entries(["gone"])[0]
+        state.select(stranger.id)
+        XCTAssertEqual(state.selectedID, items[2].id)
+    }
+
+    /// A capture landing while the wall is open prepends an entry, so every
+    /// index shifts by one. Selection is held by ID, so the card the user
+    /// picked stays selected instead of the wall jumping to its neighbour.
+    func testSelectionSurvivesAnEntryAppend() async {
+        let original = entries(["a", "b", "c"])
+        let feed = ClipboardWallEntryFeed(original)
+        let state = await makeState(feed: feed)
+        state.select(original[1].id)
+
+        let captured = entries(["x"])
+        await feed.replace(with: captured + original)
+        await state.reload()
+
+        XCTAssertEqual(state.items.count, 4)
+        XCTAssertEqual(state.selectedID, original[1].id)
+        XCTAssertEqual(state.selectedItem?.previewText, "b")
+        // The index moved; the selection did not.
+        XCTAssertEqual(
+            state.items.firstIndex { $0.id == original[1].id },
+            2
+        )
     }
 
     func testEmptyStateTellsSearchFilterAndAnEmptyHistoryApart() async {
@@ -220,7 +268,7 @@ final class ClipboardWallStateTests: XCTestCase {
     func testEmptyItemsHasNilSelection() async {
         let state = await makeState()
         XCTAssertNil(state.selectedItem)
-        XCTAssertEqual(state.selectedIndex, 0)
+        XCTAssertNil(state.selectedID)
     }
 
     func testClearingSourceFilterRestoresAllSources() async {
@@ -370,6 +418,24 @@ final class ClipboardWallStateTests: XCTestCase {
                 tagDefinitions: { [] }
             )
         )
+    }
+}
+
+/// A mutable page source, so a test can let the store change under an open
+/// wall (a capture prepending an entry) between two loads.
+private actor ClipboardWallEntryFeed {
+    private var entries: [ClipboardHistoryEntry]
+
+    init(_ entries: [ClipboardHistoryEntry]) {
+        self.entries = entries
+    }
+
+    func replace(with entries: [ClipboardHistoryEntry]) {
+        self.entries = entries
+    }
+
+    func page() -> ClipboardHistoryPage {
+        ClipboardHistoryPage(entries: entries, nextCursor: nil)
     }
 }
 

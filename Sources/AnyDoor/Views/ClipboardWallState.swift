@@ -133,9 +133,12 @@ final class ClipboardWallState {
         presentation.selectedEntry
     }
 
-    var selectedIndex: Int {
-        guard let selectedID = presentation.selectedID else { return 0 }
-        return items.firstIndex { $0.id == selectedID } ?? 0
+    /// The selected entry's identity, not its position. A card compares this
+    /// once (O(1)) instead of every realized card re-deriving an index by
+    /// scanning the whole array, and it stays correct when entries are added
+    /// or removed around the selection.
+    var selectedID: ClipboardHistoryEntryID? {
+        presentation.selectedID
     }
 
     /// Which "nothing here" line fits the current query. An untouched history,
@@ -277,10 +280,9 @@ final class ClipboardWallState {
         presentation.moveSelection(by: 1)
     }
 
-    func select(_ index: Int) {
-        guard items.indices.contains(index) else { return }
+    func select(_ id: ClipboardHistoryEntryID) {
         prefersInstantScroll = false
-        presentation.select(items[index].id)
+        presentation.select(id)
     }
 
     func moveToStart() {
