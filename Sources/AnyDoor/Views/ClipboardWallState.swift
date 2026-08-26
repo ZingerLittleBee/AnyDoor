@@ -308,9 +308,12 @@ final class ClipboardWallState {
         presentation.moveSelectionToStart()
     }
 
-    func moveToEnd() {
+    /// ⌘→. Async because reaching the end of the history may have to fetch the
+    /// next page first; the scroll preference is set up front so the jump to the
+    /// loaded tail is instant either way.
+    func moveToEnd() async {
         prefersInstantScroll = true
-        presentation.moveSelectionToEnd()
+        await presentation.moveTowardHistoryEnd()
     }
 
     func clearSourceFilter() {

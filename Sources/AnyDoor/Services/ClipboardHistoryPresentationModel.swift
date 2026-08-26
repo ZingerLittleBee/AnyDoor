@@ -480,8 +480,47 @@ final class ClipboardHistoryPresentationModel {
         selectedID = entries.first?.id
     }
 
-    func moveSelectionToEnd() {
-        selectedID = entries.last?.id
+    /// Steps the selection toward the end of the history, one honest step per
+    /// call.
+    ///
+    /// Jumping straight to `entries.last` made the selected-card highlight
+    /// claim the loaded prefix was the whole history: with one page loaded, the
+    /// key landed on entry 100 of 2169 and presented it as the oldest one. So
+    /// the first press only reaches the loaded tail, and a press that is
+    /// *already* on the tail extends the prefix by exactly one page and follows
+    /// it — the key can no longer describe a boundary that is only an artefact
+    /// of how far paging has got.
+    ///
+    /// A failed paging attempt retains its cursor, so a later press is the
+    /// retry; the selection stays where it is until a page actually lands.
+    func moveTowardHistoryEnd() async {
+        guard let tailID = entries.last?.id else {
+            selectedID = nil
+            return
+        }
+        guard selectedID == tailID else {
+            selectedID = tailID
+            return
+        }
+        switch pagingState {
+        case .complete, .loading:
+            // Nothing more to reach, or a fetch someone else started is already
+            // in flight — `loadNextPage()` is single-flight and would return
+            // without extending anything, leaving this press with no new tail
+            // to follow.
+            return
+        case .moreAvailable, .failed:
+            await loadNextPage()
+            // The prefix either grew by a page or was rebased onto the current
+            // index generation; both leave a deeper tail for the press to
+            // follow. A failed fetch changes neither, so the selection stays.
+            guard let extendedTailID = entries.last?.id,
+                extendedTailID != tailID
+            else {
+                return
+            }
+            selectedID = extendedTailID
+        }
     }
 
     /// Extends the loaded prefix by one page.

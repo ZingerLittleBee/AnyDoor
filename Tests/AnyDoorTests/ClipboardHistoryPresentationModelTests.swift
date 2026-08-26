@@ -1434,6 +1434,233 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertNil(model.actionFailure)
     }
 
+    /// ⌘→ from the middle of the loaded prefix is a selection move, not a
+    /// fetch: the tail is already on screen, and reaching it is what tells the
+    /// user where the loaded history currently ends.
+    func testEndNavigationReachesTheLoadedTailBeforeFetchingAnything() async {
+        let firstPage = (0..<3).map(entry)
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: firstPage,
+                    nextCursor: cursor("first"),
+                    cursorDisposition: .initial
+                )
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+        model.select(firstPage[0].id)
+
+        await model.moveTowardHistoryEnd()
+
+        XCTAssertEqual(model.selectedID, firstPage[2].id)
+        XCTAssertEqual(model.pagingState, .moreAvailable)
+        let requests = await client.pageRequests
+        XCTAssertEqual(
+            requests.count,
+            1,
+            "reaching an already loaded tail may not cost a page"
+        )
+    }
+
+    /// With the whole result set loaded there is nothing behind the tail, so a
+    /// press that is already there is inert — the stub is out of pages, so any
+    /// fetch would show up as a paging failure.
+    func testEndNavigationOnACompletePrefixNeverFetches() async {
+        let onlyPage = (0..<3).map(entry)
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: onlyPage,
+                    nextCursor: nil,
+                    cursorDisposition: .initial
+                )
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+
+        await model.moveTowardHistoryEnd()
+        await model.moveTowardHistoryEnd()
+
+        XCTAssertEqual(model.selectedID, onlyPage[2].id)
+        XCTAssertEqual(model.entries.map(\.id), onlyPage.map(\.id))
+        XCTAssertEqual(model.pagingState, .complete)
+        let requests = await client.pageRequests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    /// The press that lands on a tail with more history behind it extends the
+    /// prefix by exactly one page and follows it, so the highlight never claims
+    /// a boundary that is only how far paging has got.
+    func testEndNavigationFromTheTailLoadsOnePageAndFollowsIt() async {
+        let firstPage = (0..<2).map(entry)
+        let secondPage = [entry(2), entry(3)]
+        let firstCursor = cursor("first")
+        let secondCursor = cursor("second")
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: firstPage,
+                    nextCursor: firstCursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: secondPage,
+                    nextCursor: secondCursor,
+                    cursorDisposition: .continued
+                ),
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+
+        await model.moveTowardHistoryEnd()
+        XCTAssertEqual(model.selectedID, firstPage[1].id)
+
+        await model.moveTowardHistoryEnd()
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            (firstPage + secondPage).map(\.id)
+        )
+        XCTAssertEqual(model.selectedID, secondPage[1].id)
+        XCTAssertEqual(model.pagingState, .moreAvailable)
+        let requests = await client.pageRequests
+        XCTAssertEqual(requests.map(\.cursor), [nil, firstCursor])
+    }
+
+    /// A page that fails to load leaves the selection where the user can see
+    /// it, and the retained cursor turns the next press into the retry.
+    func testFailedEndNavigationKeepsTheSelectionAndRetriesOnTheNextPress()
+        async
+    {
+        let firstPage = (0..<2).map(entry)
+        let recovered = entry(2)
+        let firstCursor = cursor("first")
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: firstPage,
+                    nextCursor: firstCursor,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: [],
+                    nextCursor: nil,
+                    cursorDisposition: .continued,
+                    state: .failed(.stateUnavailable)
+                ),
+                ClipboardHistoryPage(
+                    entries: [recovered],
+                    nextCursor: nil,
+                    cursorDisposition: .continued
+                ),
+            ]
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+        await model.load()
+
+        await model.moveTowardHistoryEnd()
+        await model.moveTowardHistoryEnd()
+
+        XCTAssertEqual(model.pagingState, .failed)
+        XCTAssertEqual(model.entries.map(\.id), firstPage.map(\.id))
+        XCTAssertEqual(model.selectedID, firstPage[1].id)
+        XCTAssertNil(
+            model.actionFailure,
+            "a paging failure is a boundary condition, not a destructive one"
+        )
+
+        await model.moveTowardHistoryEnd()
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            firstPage.map(\.id) + [recovered.id]
+        )
+        XCTAssertEqual(model.selectedID, recovered.id)
+        XCTAssertEqual(model.pagingState, .complete)
+        let requests = await client.pageRequests
+        XCTAssertEqual(
+            requests.map(\.cursor),
+            [nil, firstCursor, firstCursor],
+            "the retry must resume from the cursor the failure retained"
+        )
+    }
+
+    /// A held-down ⌘→ must not stack page requests: while a fetch is in flight
+    /// the selection is already as deep as the loaded prefix goes, so a repeat
+    /// is inert rather than a second request for the same cursor.
+    func testConcurrentEndNavigationIssuesASingleFetch() async {
+        let firstPage = (0..<2).map(entry)
+        let next = entry(2)
+        let firstCursor = cursor("first")
+        let client = ControlledPresentationClient()
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+
+        let initialLoad = Task { await model.load() }
+        await waitUntil("initial page request") {
+            await client.requestCount == 1
+        }
+        await client.release(
+            requestID: 0,
+            page: ClipboardHistoryPage(
+                entries: firstPage,
+                nextCursor: firstCursor,
+                cursorDisposition: .initial
+            )
+        )
+        await initialLoad.value
+
+        // The first press only walks to the loaded tail.
+        await model.moveTowardHistoryEnd()
+        XCTAssertEqual(model.selectedID, firstPage[1].id)
+        let requestCountAfterWalk = await client.requestCount
+        XCTAssertEqual(requestCountAfterWalk, 1)
+
+        let inFlight = Task { await model.moveTowardHistoryEnd() }
+        await waitUntil("load-more request") {
+            await client.requestCount == 2
+        }
+        XCTAssertEqual(model.pagingState, .loading)
+
+        await model.moveTowardHistoryEnd()
+
+        let requestCountDuringFlight = await client.requestCount
+        XCTAssertEqual(requestCountDuringFlight, 2)
+        XCTAssertEqual(model.selectedID, firstPage[1].id)
+
+        await client.release(
+            requestID: 1,
+            page: ClipboardHistoryPage(
+                entries: [next],
+                nextCursor: nil,
+                cursorDisposition: .continued
+            )
+        )
+        await inFlight.value
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            firstPage.map(\.id) + [next.id]
+        )
+        XCTAssertEqual(model.selectedID, next.id)
+        XCTAssertEqual(model.pagingState, .complete)
+        let requests = await client.requests
+        XCTAssertEqual(requests.map(\.cursor), [nil, firstCursor])
+    }
+
     private func cursor(_ token: String) -> ClipboardHistoryCursor {
         ClipboardHistoryCursor(token: Data(token.utf8))
     }
