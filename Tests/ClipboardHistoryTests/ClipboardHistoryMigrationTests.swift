@@ -172,9 +172,11 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             )
             XCTAssertEqual(diagnostics.jobs, [])
         }
+        await module.awaitSearchIndexRebuildForTesting()
         let duplicatePage = try await module.page(
             ClipboardHistoryQuery(text: "duplicate")
         )
+        XCTAssertEqual(duplicatePage.state, .ready)
         XCTAssertEqual(duplicatePage.entries.count, 2)
     }
 
@@ -510,6 +512,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
 
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(page.entries[0].facets, [.file])
+        await module.awaitSearchIndexRebuildForTesting()
         for query in [
             "equal.txt",
             "changed.txt",
@@ -519,6 +522,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             let matches = try await module.page(
                 ClipboardHistoryQuery(text: query)
             )
+            XCTAssertEqual(matches.state, .ready)
             XCTAssertEqual(
                 matches.entries.map(\.id.value),
                 [entryID]

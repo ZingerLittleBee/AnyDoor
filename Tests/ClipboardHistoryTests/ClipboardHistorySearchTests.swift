@@ -789,6 +789,95 @@ final class ClipboardHistorySearchTests: XCTestCase {
         XCTAssertEqual(generationRestart.entries.count, 100)
     }
 
+    /// `prepareSearchIndexState` must not persist `indexing` for a healthy
+    /// ready index. FTS integrity-check is an INSERT, so a `DatabasePool`
+    /// reader cannot run it; a swallowed `SQLITE_READONLY` is not
+    /// index-only corruption and must not change search state.
+    func testPrepareSearchIndexStateLeavesAHealthyReadyIndexUntouched()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let entry = try await Self.capture(
+            "healthy integrity searchable",
+            in: module
+        )
+        let database = try await module.requiredDatabase()
+        let generation = try await database.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        try await Self.assertSearchIntegrity(module)
+
+        try ClipboardHistoryModule.prepareSearchIndexState(in: database)
+
+        let status = try await database.read {
+            try ClipboardHistoryModule.searchIndexStatus(in: $0)
+        }
+        XCTAssertEqual(status, .ready)
+        let page = try await module.page(
+            ClipboardHistoryQuery(text: "integrity")
+        )
+        XCTAssertEqual(page.state, .ready)
+        XCTAssertEqual(page.entries.map(\.id), [entry])
+        let generationAfterPrepare = try await database.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        XCTAssertEqual(generationAfterPrepare, generation)
+        try await Self.assertSearchIntegrity(module)
+    }
+
+    /// Opening a healthy captured store must keep search ready. A reader
+    /// integrity-check that maps `SQLITE_READONLY` to corruption would mark
+    /// `indexing` and start a rebuild. Do not await that rebuild: waiting
+    /// hides the false positive, and an index-generation bump is the
+    /// race-free signal that one ran.
+    func testReopeningAHealthyStoreKeepsSearchReadyWithoutRebuild()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let entry = try await Self.capture(
+            "healthy reopen searchable",
+            in: original
+        )
+        let originalDatabase = try await original.requiredDatabase()
+        let originalGeneration = try await originalDatabase.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        let readyBeforeClose = try await original.page(
+            ClipboardHistoryQuery(text: "reopen")
+        )
+        XCTAssertEqual(readyBeforeClose.state, .ready)
+        XCTAssertEqual(readyBeforeClose.entries.map(\.id), [entry])
+        try await original.closeStoreForTesting()
+
+        let reopened = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let status = await reopened.status()
+        XCTAssertEqual(status.searchIndex, .ready)
+        let page = try await reopened.page(
+            ClipboardHistoryQuery(text: "reopen")
+        )
+        XCTAssertEqual(page.state, .ready)
+        XCTAssertEqual(page.entries.map(\.id), [entry])
+        let browsing = try await reopened.page(ClipboardHistoryQuery())
+        XCTAssertEqual(browsing.entries.map(\.id), [entry])
+        let reopenedDatabase = try await reopened.requiredDatabase()
+        let reopenedGeneration = try await reopenedDatabase.read {
+            try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+        }
+        XCTAssertEqual(reopenedGeneration, originalGeneration)
+        try await Self.assertSearchIntegrity(reopened)
+    }
+
     func testIndexingStateKeepsBrowsingAndVersionMismatchRebuilds()
         async throws
     {
