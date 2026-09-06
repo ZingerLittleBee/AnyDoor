@@ -256,7 +256,7 @@ final class KeepAwakeProviderTests: XCTestCase {
         // cache instead of leaving an optimistically-written value behind.
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
-            for: KeyBinding.self, BuiltinPreference.self, ClipboardHistoryItem.self,
+            for: KeyBinding.self, BuiltinPreference.self,
             configurations: config
         )
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)

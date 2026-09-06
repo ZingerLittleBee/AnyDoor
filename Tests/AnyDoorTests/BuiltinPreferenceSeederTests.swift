@@ -20,7 +20,6 @@ final class BuiltinPreferenceSeederTests: XCTestCase {
         let schema = Schema([
             KeyBinding.self,
             BuiltinPreference.self,
-            ClipboardHistoryItem.self,
         ])
         let config = ModelConfiguration(
             isStoredInMemoryOnly: true,

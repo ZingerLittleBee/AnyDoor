@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import PluginInterface
 import SwiftData
 
@@ -9,9 +10,15 @@ import SwiftData
 @MainActor
 final class CorePluginHost: PluginHostServices {
     let modelContainer: ModelContainer
+    private let selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel
 
-    init(modelContainer: ModelContainer) {
+    init(
+        modelContainer: ModelContainer,
+        selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel =
+            ClipboardSelfWrites.current
+    ) {
         self.modelContainer = modelContainer
+        self.selfWrites = selfWrites
     }
 
     /// Reads route through `LocalizationManager` (an `@Observable`), so a
@@ -43,7 +50,7 @@ final class CorePluginHost: PluginHostServices {
     }
 
     func pasteboardSelfWrite(_ body: (NSPasteboard) throws -> Void) rethrows {
-        try ClipboardWatcher.selfWrite(body)
+        try selfWrites.perform(body)
     }
 
     func runAppleScript(_ source: String) async throws -> String {

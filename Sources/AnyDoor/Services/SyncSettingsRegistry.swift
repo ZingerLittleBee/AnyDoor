@@ -53,6 +53,10 @@ enum SyncSettingsRegistry {
         Entry(key: "clipboard.customTags", type: .string),
         Entry(key: "clipboard.categoryOrder", type: .string),
         Entry(key: "clipboard.excludedBundleIDs", type: .stringArray),
+        Entry(
+            key: ClipboardPreferences.ignoresUniversalClipboardKey,
+            type: .bool
+        ),
         Entry(key: "pickColor.format", type: .string),
         Entry(key: "capture.saveDirectory", type: .string),
         Entry(key: "capture.namingTemplate", type: .string),

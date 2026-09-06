@@ -40,6 +40,9 @@ final class SpotlightPickerState {
             result = pool.filter { app in
                 app.displayName.localizedCaseInsensitiveContains(trimmed)
                     || app.bundleID.localizedCaseInsensitiveContains(trimmed)
+                    || app.searchAliases.contains {
+                        $0.localizedCaseInsensitiveContains(trimmed)
+                    }
             }
         }
         cache = (query: trimmed, result: result)

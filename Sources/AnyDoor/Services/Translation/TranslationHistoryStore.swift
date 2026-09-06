@@ -3,7 +3,7 @@ import Observation
 import SwiftData
 
 /// Persists successful translations and serves the favorites + history panel.
-/// `@MainActor` and context-backed, mirroring `ClipboardHistoryStore`: a single
+/// `@MainActor` and context-backed: a single
 /// shared `mainContext` is captured in `configure` after the ModelContainer is
 /// ready (`TranslationHistoryStore.shared.configure(modelContainer:)` from the
 /// app). Every method no-ops when no context is wired (unit tests / pre-bootstrap).
@@ -11,7 +11,7 @@ import SwiftData
 /// `@Observable` so a SwiftUI list re-renders when history changes. Reads
 /// (`recent`/`favorites`) return live SwiftData fetches; mutations bump
 /// `revision`, which the history view observes to refresh its snapshot — the
-/// same "publish a tracked token, re-fetch in body" idiom `ClipboardHistoryStore`
+/// same "publish a tracked token, re-fetch in body" idiom the former clipboard store
 /// uses with its `cachedItems`.
 @MainActor
 @Observable

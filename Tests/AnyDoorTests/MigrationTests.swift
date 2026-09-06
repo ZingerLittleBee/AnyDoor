@@ -37,7 +37,6 @@ final class MigrationTests: XCTestCase {
             let oldSchema = Schema([
                 KeyBinding.self,
                 BuiltinPreference.self,
-                ClipboardHistoryItem.self,
                 HostProfile.self,
                 TranslationRecord.self,
                 ImageConversionRecord.self,
@@ -61,7 +60,6 @@ final class MigrationTests: XCTestCase {
             let newSchema = Schema([
                 KeyBinding.self,
                 BuiltinPreference.self,
-                ClipboardHistoryItem.self,
                 HostProfile.self,
                 TranslationRecord.self,
                 ImageConversionRecord.self,
@@ -199,38 +197,5 @@ final class KeyBindingOrderBackfillTests: XCTestCase {
 
         let rows = try context.fetch(FetchDescriptor<KeyBinding>())
         XCTAssertEqual(rows[0].displayOrder, 500)
-    }
-}
-
-final class ClipboardHistoryItemModelTests: XCTestCase {
-    func testClipboardHistoryKindMetadata() {
-        XCTAssertEqual(ClipboardHistoryKind.ocr.titleKey, .clipboardKindOcr)
-        XCTAssertEqual(ClipboardHistoryKind.color.titleKey, .clipboardKindColor)
-        XCTAssertEqual(ClipboardHistoryKind.qrcode.titleKey, .clipboardKindQrcode)
-        XCTAssertEqual(ClipboardHistoryKind.screenshot.titleKey, .clipboardKindScreenshot)
-    }
-
-    func testClipboardHistoryItemCanBePersisted() throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: ClipboardHistoryItem.self, configurations: config)
-        let context = ModelContext(container)
-
-        let item = ClipboardHistoryItem(
-            kind: .ocr,
-            text: "hello",
-            fileName: nil,
-            colorHex: nil,
-            previewTitle: "hello",
-            previewSubtitle: "5 字符",
-            createdAt: Date(timeIntervalSinceReferenceDate: 10)
-        )
-        context.insert(item)
-        try context.save()
-
-        let rows = try context.fetch(FetchDescriptor<ClipboardHistoryItem>())
-        XCTAssertEqual(rows.count, 1)
-        XCTAssertEqual(rows[0].kind, ClipboardHistoryKind.ocr.rawValue)
-        XCTAssertEqual(rows[0].text, "hello")
-        XCTAssertNil(rows[0].colorHex)
     }
 }

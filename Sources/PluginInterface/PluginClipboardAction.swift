@@ -6,12 +6,10 @@ import Foundation
 /// and the plugin never sees the host's history model (ADR-0007). Cases grow
 /// when a plugin needs another payload shape.
 public enum PluginClipboardPayload: Hashable, Sendable {
-    /// A stored-bitmap entry (screenshot or copied image). `fileURL` points at
-    /// the history's stored bitmap and is nil when the stored file name is
-    /// missing; loading it is deferred to `performClipboardAction`.
-    case bitmap(fileURL: URL?, displayName: String)
-    /// A file-list entry's original paths, in stored order. Existence is
-    /// unchecked — the exposure decision must stay disk-free.
+    /// A decrypted stored bitmap. The bytes remain in memory and the plugin
+    /// never learns the module's encrypted payload path.
+    case bitmap(data: Data, displayName: String)
+    /// Resolved user-owned file references in stored order.
     case files([URL])
 }
 

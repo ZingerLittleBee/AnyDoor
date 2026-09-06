@@ -14,6 +14,8 @@ import PluginInterface
 @MainActor
 enum BuiltinProviderRegistry {
     static func makeAll(
+        clipboardProduction: ClipboardProductionAdapter,
+        clipboardHistoryLifecycle: ClipboardHistoryLifecycle? = nil,
         onKeepAwakeChange: @escaping @MainActor @Sendable (KeepAwakeState) -> Void
     ) -> [any BuiltinProvider] {
         [
@@ -43,10 +45,12 @@ enum BuiltinProviderRegistry {
             RestartMenuBarProvider(),
             FlushDNSProvider(),
             KeyboardLockProvider(),
-            OCRProvider(),
-            QRCodeProvider(),
-            PickColorProvider(),
-            ClipboardMonitoringProvider(),
+            OCRProvider(clipboardProduction: clipboardProduction),
+            QRCodeProvider(clipboardProduction: clipboardProduction),
+            PickColorProvider(clipboardProduction: clipboardProduction),
+            ClipboardMonitoringProvider(
+                lifecycle: clipboardHistoryLifecycle
+            ),
             WindowLayoutProvider(item: .windowLeftHalf, action: .leftHalf),
             WindowLayoutProvider(item: .windowRightHalf, action: .rightHalf),
             WindowLayoutProvider(item: .windowMaximize, action: .maximize),

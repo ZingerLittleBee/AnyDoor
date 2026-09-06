@@ -2415,6 +2415,40 @@
         }
       }
     },
+    "clipboard.empty.filter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing matches this filter"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此筛选下暂无内容"
+          }
+        }
+      }
+    },
+    "clipboard.empty.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No matching results"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "没有匹配的结果"
+          }
+        }
+      }
+    },
     "clipboard.file.count": {
       "extractionState": "manual",
       "localizations": {
@@ -2557,13 +2591,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "First/last"
+            "value": "First/load more"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "首/尾"
+            "value": "首/加载更多"
           }
         }
       }
@@ -2636,6 +2670,23 @@
         }
       }
     },
+    "clipboard.indexing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebuilding search index…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在重建搜索索引…"
+          }
+        }
+      }
+    },
     "clipboard.kind.color": {
       "extractionState": "manual",
       "localizations": {
@@ -2649,6 +2700,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "屏幕取色"
+          }
+        }
+      }
+    },
+    "clipboard.kind.email": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "邮箱"
           }
         }
       }
@@ -2683,6 +2751,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "图片"
+          }
+        }
+      }
+    },
+    "clipboard.kind.link": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Link"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "链接"
           }
         }
       }
@@ -2751,6 +2836,125 @@
           "stringUnit": {
             "state": "translated",
             "value": "文本"
+          }
+        }
+      }
+    },
+    "clipboard.paging.end": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "End of history"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已到末尾"
+          }
+        }
+      }
+    },
+    "clipboard.paging.loadMore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load more"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加载更多"
+          }
+        }
+      }
+    },
+    "clipboard.paging.loaded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loaded %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加载 %lld 条"
+          }
+        }
+      }
+    },
+    "clipboard.paging.loadedOfTotal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loaded %1$lld of %2$lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已加载 %1$lld / 共 %2$lld 条"
+          }
+        }
+      }
+    },
+    "clipboard.paging.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在加载…"
+          }
+        }
+      }
+    },
+    "clipboard.paging.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Load failed\nClick to retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "加载失败\n点按重试"
+          }
+        }
+      }
+    },
+    "clipboard.paging.retryAction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Retry"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重试"
           }
         }
       }
@@ -2870,6 +3074,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "按来源应用筛选剪贴板历史"
+          }
+        }
+      }
+    },
+    "clipboard.source.universal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Universal Clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通用剪贴板"
+          }
+        }
+      }
+    },
+    "clipboard.source.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unknown"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未知来源"
           }
         }
       }
@@ -3078,6 +3316,40 @@
         }
       }
     },
+    "clipboard.toast.legacyOwnedCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files requiring restore: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "待恢复文件：%lld"
+          }
+        }
+      }
+    },
+    "clipboard.toast.payloadUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Content is no longer available"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容已不可用，无法粘贴"
+          }
+        }
+      }
+    },
     "clipboard.toast.sourceIgnored": {
       "extractionState": "manual",
       "localizations": {
@@ -3091,6 +3363,159 @@
           "stringUnit": {
             "state": "translated",
             "value": "已忽略来自 %@ 的后续复制"
+          }
+        }
+      }
+    },
+    "clipboard.toast.unavailableCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unavailable files: %lld"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不可用文件：%lld"
+          }
+        }
+      }
+    },
+    "clipboard.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History is unavailable. Retry or reset it in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史不可用，可在设置中重试或重置。"
+          }
+        }
+      }
+    },
+    "clipboard.unavailable.keychainLocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keychain is locked. Clipboard History resumes once you unlock it."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "钥匙串已锁定，解锁后剪贴板历史会自动恢复。"
+          }
+        }
+      }
+    },
+    "clipboard.restore.chooseAnother": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose Another Location"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择其他位置"
+          }
+        }
+      }
+    },
+    "clipboard.restore.collision.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One or more files already exist. AnyDoor will only reuse files whose contents are identical and will never overwrite them."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "一个或多个文件已存在。AnyDoor 只会复用内容完全相同的文件，绝不会覆盖它们。"
+          }
+        }
+      }
+    },
+    "clipboard.restore.collision.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Files Already Exist"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件已存在"
+          }
+        }
+      }
+    },
+    "clipboard.restore.file": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore File…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复文件…"
+          }
+        }
+      }
+    },
+    "clipboard.restore.files": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restore Files…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "恢复文件…"
+          }
+        }
+      }
+    },
+    "clipboard.restore.reuseIdentical": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reuse Identical Files"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "复用相同文件"
           }
         }
       }
@@ -8043,6 +8468,74 @@
         }
       }
     },
+    "settings.clipboard.automaticIndexing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic Image Text Indexing"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动索引图片文字"
+          }
+        }
+      }
+    },
+    "settings.clipboard.automaticIndexing.tip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only images captured after this is enabled are indexed. Existing history is not backfilled."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "仅索引启用后捕获的图片，不会回填现有历史。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.clear.affected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld entries will be cleared."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将清除 %lld 条记录。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.clear.protected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Also clear tagged and favorite entries"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "同时清除已加标签和收藏的记录"
+          }
+        }
+      }
+    },
     "settings.clipboard.copyOnly": {
       "extractionState": "manual",
       "localizations": {
@@ -8162,6 +8655,108 @@
         }
       }
     },
+    "settings.clipboard.ignoreUniversal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore Universal Clipboard"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "忽略通用剪贴板"
+          }
+        }
+      }
+    },
+    "settings.clipboard.ignoreUniversal.tip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stops saving new items copied on your other Apple devices. Copies made on this Mac and existing history are unaffected."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启后，不再保存从其他 Apple 设备同步来的新内容。本机复制和已有历史不受影响。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.operationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Clipboard History operation failed. Your existing history was not reset."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史操作失败，现有历史未被重置。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.reset": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Clipboard History…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置剪贴板历史…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.reset.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This permanently deletes encrypted history and creates a new device-only key. It cannot be undone."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会永久删除加密历史并创建新的仅限本设备密钥，无法撤销。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.reset.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reset Clipboard History?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置剪贴板历史？"
+          }
+        }
+      }
+    },
     "settings.clipboard.retention": {
       "extractionState": "manual",
       "localizations": {
@@ -8175,6 +8770,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "保留时长"
+          }
+        }
+      }
+    },
+    "settings.clipboard.retention.1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 day"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 天"
+          }
+        }
+      }
+    },
+    "settings.clipboard.retention.180": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "6 months (180 days)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "6 个月（180 天）"
           }
         }
       }
@@ -8213,6 +8842,57 @@
         }
       }
     },
+    "settings.clipboard.retention.365": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 year (365 days)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "1 年（365 天）"
+          }
+        }
+      }
+    },
+    "settings.clipboard.retention.90": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3 months (90 days)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "3 个月（90 天）"
+          }
+        }
+      }
+    },
+    "settings.clipboard.retention.affected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Changing retention will delete %lld entries."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "更改保留时长将删除 %lld 条记录。"
+          }
+        }
+      }
+    },
     "settings.clipboard.retention.unlimited": {
       "extractionState": "manual",
       "localizations": {
@@ -8226,6 +8906,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "不限"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.migrating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Migrating Clipboard History…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在迁移剪贴板历史…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.migrationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History migration failed. The previous history is unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史迁移失败，原历史保持不变。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.paused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History is paused until its device key becomes available."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史已暂停，等待本设备密钥可用。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.resetFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Resetting Clipboard History failed. Check the storage folder's permissions and free space, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重置剪贴板历史失败。请检查存储目录的权限和可用空间后重试。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.storeUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History storage is unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史存储不可用。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.storageUsage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "History Storage Usage"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "历史存储用量"
           }
         }
       }

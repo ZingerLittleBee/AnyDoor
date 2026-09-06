@@ -1,3 +1,4 @@
+import ClipboardHistory
 import SwiftUI
 
 /// Settings content: a fixed-width, non-collapsible sidebar on the left with
@@ -7,12 +8,19 @@ import SwiftUI
 /// transparent titlebar), so the sidebar runs full height and wraps the
 /// traffic lights at their standard position.
 struct SettingsView: View {
+    let clipboardHistoryModule: ClipboardHistoryModule
+    let clipboardHistoryLifecycle: ClipboardHistoryLifecycle
+    let presentation: SettingsPresentation
     @State private var opener = SettingsOpener.shared
-    @State private var selectedTab: SettingsTab = .panel
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedTab) {
+            List(
+                selection: Binding(
+                    get: { presentation.selectedTab },
+                    set: { presentation.selectedTab = $0 }
+                )
+            ) {
                 ForEach(SettingsTab.allCases, id: \.self) { tab in
                     sidebarRow(tab)
                 }
@@ -33,19 +41,23 @@ struct SettingsView: View {
             }
         } detail: {
             detailView
-                .modifier(DetailNavigationTitle(selectedTab: selectedTab))
+                .modifier(
+                    DetailNavigationTitle(
+                        selectedTab: presentation.selectedTab
+                    )
+                )
                 .modifier(RemoveToolbarTitleOnTahoe())
         }
         // Honor a deep-link request (e.g. the translation gear) then clear it so
         // a later plain open lands on the last-selected tab.
         .onChange(of: opener.desiredTab) { _, tab in
             guard let tab else { return }
-            selectedTab = tab
+            presentation.selectedTab = tab
             opener.desiredTab = nil
         }
         .onAppear {
             if let tab = opener.desiredTab {
-                selectedTab = tab
+                presentation.selectedTab = tab
                 opener.desiredTab = nil
             }
         }
@@ -65,7 +77,7 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var detailView: some View {
-        switch selectedTab {
+        switch presentation.selectedTab {
         case .panel: PanelSettingsView()
         case .quicklinks: QuicklinksSettingsView()
         // The grouped-Form panes reclaim the toolbar band's safe area: the
@@ -74,7 +86,14 @@ struct SettingsView: View {
         // own top margin reads as a large blank strip. A fixed padding then
         // aligns their first header with the ScrollView panes (panel /
         // quicklinks), which already sit right and keep the inset.
-        case .clipboard: groupedFormPane { ClipboardSettingsView() }
+        case .clipboard:
+            groupedFormPane {
+                ClipboardSettingsView(
+                    module: clipboardHistoryModule,
+                    lifecycle: clipboardHistoryLifecycle,
+                    presentation: presentation
+                )
+            }
         case .capture: groupedFormPane { CaptureSettingsView() }
         case .translation: groupedFormPane { TranslationSettingsView() }
         case .plugins: groupedFormPane { PluginsSettingsView() }

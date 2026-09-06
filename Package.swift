@@ -29,6 +29,10 @@ let package = Package(
             url: "https://github.com/pointfreeco/swift-clocks",
             from: "1.1.0"
         ),
+        .package(
+            url: "https://github.com/sqlcipher/GRDB.swift.git",
+            exact: "7.11.1"
+        ),
     ],
     targets: [
         .plugin(
@@ -65,6 +69,15 @@ let package = Package(
         // encoding (bundled libwebp) is plugin-only and stays out.
         .target(
             name: "ImageCodec",
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .target(
+            name: "ClipboardHistory",
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+            ],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]
@@ -136,6 +149,7 @@ let package = Package(
             dependencies: [
                 .product(name: "AskForPermission", package: "AskForPermission"),
                 .product(name: "Sparkle", package: "Sparkle"),
+                "ClipboardHistory",
                 "HostsHelperShared",
                 "ImageCodec",
                 "PluginInterface",
@@ -175,8 +189,20 @@ let package = Package(
             dependencies: [
                 .product(name: "Clocks", package: "swift-clocks"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                "AnyDoor", "ImageCodec", "PluginInterface", "PluginSupport",
+                "AnyDoor", "ClipboardHistory", "ImageCodec",
+                "PluginInterface", "PluginSupport",
                 "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime",
+            ],
+            resources: [.process("Fixtures")],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
+        .testTarget(
+            name: "ClipboardHistoryTests",
+            dependencies: [
+                .product(name: "GRDB", package: "GRDB.swift"),
+                "ClipboardHistory",
             ],
             resources: [.process("Fixtures")],
             swiftSettings: [

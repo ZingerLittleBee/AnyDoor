@@ -85,6 +85,26 @@ final class InstalledAppsScannerTests: XCTestCase {
         XCTAssertFalse(apps.contains { $0.bundleID == "test.inner" }, "Must not walk into .app bundles")
     }
 
+    func testScanUsesLocalizedDisplayNameNotUnlocalizedInfoPlist() throws {
+        // Info.plist stores an internal bundle name; every InfoPlist.strings
+        // file stores a localized display name. Searching the localized name
+        // in the palette only works if the scanner surfaces it.
+        let root = try makeTempRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try makeAppBundle(
+            in: root,
+            named: "InternalName-macOS.app",
+            bundleID: "com.example.internal",
+            unlocalizedDisplayName: "InternalName-macOS",
+            localizedDisplayName: "示例应用"
+        )
+
+        let apps = InstalledAppsScanner.scan(roots: [root.path], extraAppPaths: [])
+        let app = apps.first { $0.bundleID == "com.example.internal" }
+        XCTAssertEqual(app?.displayName, "示例应用")
+        XCTAssertEqual(app?.searchAliases, ["InternalName-macOS"])
+    }
+
     // MARK: - Helpers
 
     private func makeTempRoot() throws -> URL {
@@ -95,18 +115,47 @@ final class InstalledAppsScannerTests: XCTestCase {
     }
 
     @discardableResult
-    private func makeAppBundle(in dir: URL, named name: String, bundleID: String) throws -> URL {
+    private func makeAppBundle(
+        in dir: URL,
+        named name: String,
+        bundleID: String,
+        unlocalizedDisplayName: String? = nil,
+        localizedDisplayName: String? = nil
+    ) throws -> URL {
         let appURL = dir.appendingPathComponent(name)
         let contents = appURL.appendingPathComponent("Contents")
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
-        let info: [String: Any] = [
+        let fallbackName = appURL.deletingPathExtension().lastPathComponent
+        var info: [String: Any] = [
             "CFBundleIdentifier": bundleID,
-            "CFBundleName": appURL.deletingPathExtension().lastPathComponent,
+            "CFBundleName": unlocalizedDisplayName ?? fallbackName,
+            "CFBundleDevelopmentRegion": "en",
         ]
+        if let unlocalizedDisplayName {
+            info["CFBundleDisplayName"] = unlocalizedDisplayName
+        }
         let data = try PropertyListSerialization.data(
             fromPropertyList: info, format: .xml, options: 0
         )
         try data.write(to: contents.appendingPathComponent("Info.plist"))
+
+        if let localizedDisplayName {
+            // Write the same localized name into every lproj so the assertion
+            // does not depend on the test process's preferred languages. Some
+            // shipped apps put that localized name in en/zh-Hans/Base alike.
+            let strings: [String: String] = [
+                "CFBundleDisplayName": localizedDisplayName,
+                "CFBundleName": localizedDisplayName,
+            ]
+            let stringsData = try PropertyListSerialization.data(
+                fromPropertyList: strings, format: .binary, options: 0
+            )
+            for lproj in ["Base.lproj", "en.lproj", "zh-Hans.lproj"] {
+                let dir = contents.appendingPathComponent("Resources/\(lproj)")
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try stringsData.write(to: dir.appendingPathComponent("InfoPlist.strings"))
+            }
+        }
         return appURL
     }
 }

@@ -32,6 +32,29 @@ final class ClipboardCategoryOrderTests: XCTestCase {
         XCTAssertEqual(merged, [.tag("t1"), .all, .favorites, .tag("t2"), .kind(.text), .kind(.image)])
     }
 
+    @MainActor
+    func testLinkAndEmailAppendAfterASavedPreUpgradeOrder() {
+        // An order saved before the Link/Email categories existed keeps the
+        // user's arrangement; the new categories append at the end, and their
+        // ids round-trip through the persisted form.
+        let available = ClipboardWallState.order(tags: [])
+        let preUpgradeIDs = available
+            .filter { $0 != .link && $0 != .email }
+            .map(\.persistentID)
+        let merged = ClipboardCategoryOrder.merge(
+            persistedIDs: preUpgradeIDs,
+            available: available
+        )
+        XCTAssertEqual(merged.suffix(2), [.link, .email])
+        XCTAssertEqual(
+            ClipboardCategoryOrder.merge(
+                persistedIDs: merged.map(\.persistentID),
+                available: available
+            ),
+            merged
+        )
+    }
+
     func testDuplicatePersistedIDsAreIgnored() {
         let merged = ClipboardCategoryOrder.merge(
             persistedIDs: ["favorites", "favorites", "all"],

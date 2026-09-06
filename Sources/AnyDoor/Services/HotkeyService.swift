@@ -26,11 +26,22 @@ final class HotkeyService {
     /// dispatcher decides what to do with it.
     fileprivate nonisolated(unsafe) var dispatcher: (@MainActor @Sendable (HotkeyAction) -> Void)?
 
-    /// When true, the CGEvent callback drops every key/flag event that doesn't match a
-    /// registered hotkey. Used by the "keyboard lock" feature so the user can wipe the
-    /// keyboard without producing input. Hotkeys still fire so the same shortcut can
-    /// toggle the lock back off.
+    /// When true, the CGEvent callback swallows keyboard-originated events
+    /// (keys, flags, and NX_SYSDEFINED aux control buttons) before any matching
+    /// branch. Used by the "keyboard lock" feature so the keyboard produces no
+    /// input. The bound keyboard-lock hotkey is the sole exception: that exact
+    /// combo is dispatched (toggling the lock off) and still swallowed so it
+    /// does not reach the frontmost app. Mouse-originated events pass through
+    /// so the lock can also be released from the menu-bar row.
     fileprivate nonisolated(unsafe) var keyboardLocked: Bool = false
+
+    /// Precomputed keyboard-lock escape hatch (keyCode + modifiers). `nil`
+    /// means no hatch is bound and unlock stays mouse-only.
+    fileprivate nonisolated(unsafe) var keyboardLockEscape: KeyboardLockEventPolicy.EscapeBinding?
+
+    /// Lock-scoped Hyper-held flag. Distinct from `hyperHeld` so unlocked
+    /// Hyper / Quick Press bookkeeping cannot leak into (or out of) the lock.
+    fileprivate nonisolated(unsafe) var lockHyperHeld: Bool = false
 
     // MARK: - Hyper Key support
 
@@ -107,13 +118,20 @@ final class HotkeyService {
         // would leave hyperHeld stuck and eat every keystroke after unlocking.
         hyperHeld = false
         hyperConsumedByOther = false
-        suppressedKeyCodes.removeAll()
+        lockHyperHeld = false
+        // Drop leftover companion-key suppression when entering the lock.
+        // Keep the set on unlock so the escape combo's keyUp is still
+        // swallowed after the async toggle has already cleared keyboardLocked.
+        if locked {
+            suppressedKeyCodes.removeAll()
+        }
     }
 
     var isKeyboardLocked: Bool { keyboardLocked }
 
     func updateSnapshots(_ newSnapshots: [HotkeySnapshot]) {
         snapshots = newSnapshots
+        keyboardLockEscape = KeyboardLockEventPolicy.escapeBinding(from: newSnapshots)
         if !isSuspended {
             if eventTap == nil {
                 start()
@@ -130,6 +148,11 @@ final class HotkeyService {
         let mask: CGEventMask = (1 << CGEventType.keyDown.rawValue)
             | (1 << CGEventType.keyUp.rawValue)
             | (1 << CGEventType.flagsChanged.rawValue)
+            // NX_SYSDEFINED — media / brightness / volume / Mission Control
+            // keys. CGEventType has no named case; NSEvent.EventType.systemDefined
+            // is raw 14. Mouse aux buttons also arrive as NX_SYSDEFINED
+            // (subtype 7), so the lock branch distinguishes them by subtype.
+            | (CGEventMask(1) << UInt64(NSEvent.EventType.systemDefined.rawValue))
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
@@ -229,6 +252,140 @@ final class HotkeyService {
     }
 }
 
+// MARK: - Keyboard lock decision
+
+/// Pure policy for the keyboard-lock swallow branch. Extracted so the C tap
+/// callback stays thin and the decision can be unit-tested without a live tap.
+enum KeyboardLockEventPolicy {
+    /// NX_SYSDEFINED (`NSEvent.EventType.systemDefined`). Media, brightness,
+    /// volume, mute, play/pause, and Mission Control keys arrive as this type
+    /// rather than `keyDown`. `CGEventType` has no named case. Subtype 8
+    /// identifies a keyboard media key; subtype 7 is a mouse aux button and
+    /// must pass through.
+    static let systemDefinedType = CGEventType(
+        rawValue: UInt32(NSEvent.EventType.systemDefined.rawValue)
+    )!
+
+    /// NX_SUBTYPE_AUX_CONTROL_BUTTONS — keyboard-originated special keys.
+    static let auxControlButtonsSubtype: Int16 = 8
+
+    /// NX_SUBTYPE_AUX_MOUSE_BUTTONS — mouse-originated special buttons.
+    /// Must never be swallowed: the lock is also released with the mouse.
+    static let auxMouseButtonsSubtype: Int16 = 7
+
+    /// The precomputed keyboard-lock hotkey, if one is bound.
+    struct EscapeBinding: Equatable, Sendable {
+        let keyCode: Int
+        let modifierFlags: Int
+    }
+
+    /// Lock-branch outcome. The callback is a thin adapter over this.
+    enum Decision: Equatable, Sendable {
+        /// Let the event through (mouse aux buttons, unlocked, unknown types).
+        case passThrough
+        /// Drop the event. `lockHyperHeld` replaces the lock-scoped Hyper flag.
+        case swallow(lockHyperHeld: Bool)
+        /// Drop the event, dispatch the keyboard-lock toggle, and remember
+        /// `suppressKeyCode` so its later keyUp is swallowed even after unlock.
+        case swallowAndDispatchEscape(lockHyperHeld: Bool, suppressKeyCode: Int)
+        /// Drop a previously marked keyUp and remove it from the suppression set.
+        case swallowAndConsumeKeyUp(lockHyperHeld: Bool, keyCode: Int)
+    }
+
+    /// Pick the keyboard-lock toggle snapshot out of a compiled list.
+    /// First match wins; other hotkeys are ignored while locked.
+    nonisolated static func escapeBinding(from snapshots: [HotkeySnapshot]) -> EscapeBinding? {
+        for snapshot in snapshots {
+            if case .toggleBuiltin(let itemKey) = snapshot.action,
+               itemKey == BuiltinItem.keyboardLock.rawValue {
+                return EscapeBinding(keyCode: snapshot.keyCode, modifierFlags: snapshot.modifierFlags)
+            }
+        }
+        return nil
+    }
+
+    /// Whether the keyboard-lock tap should drop this event.
+    ///
+    /// While locked, ordinary key / flag events and keyboard-originated
+    /// `NX_SYSDEFINED` aux control buttons (subtype 8) are swallowed. Mouse
+    /// aux buttons (subtype 7) and every other type pass through. While
+    /// unlocked, nothing is swallowed here — matching stays in the callback.
+    /// Escape matching is a separate `decide` step on top of this filter.
+    nonisolated static func shouldSwallow(
+        locked: Bool,
+        type: CGEventType,
+        systemDefinedSubtype: Int16?
+    ) -> Bool {
+        guard locked else { return false }
+        switch type {
+        case .keyDown, .keyUp, .flagsChanged:
+            return true
+        default:
+            return type == systemDefinedType
+                && systemDefinedSubtype == auxControlButtonsSubtype
+        }
+    }
+
+    /// Full lock-branch decision: swallow, swallow-and-dispatch the escape
+    /// hatch, or pass through.
+    ///
+    /// Escape matching runs only on `keyDown` (plus Hyper trigger
+    /// bookkeeping on the trigger's keyDown/keyUp). `event.flags` on that
+    /// keyDown still reflects physically held modifiers — HID composes them
+    /// at the source, the same assumption the unlocked matching branches
+    /// make — so swallowed `flagsChanged` events are not reconstructed.
+    nonisolated static func decide(
+        locked: Bool,
+        type: CGEventType,
+        keyCode: Int,
+        modifiers: Int,
+        systemDefinedSubtype: Int16?,
+        lockHyperHeld: Bool,
+        hyperVirtualKeyCode: Int,
+        hyperModifierFlags: Int,
+        escape: EscapeBinding?,
+        suppressedKeyCodes: Set<Int>
+    ) -> Decision {
+        guard locked else { return .passThrough }
+
+        if hyperVirtualKeyCode >= 0
+            && (type == .keyDown || type == .keyUp)
+            && keyCode == hyperVirtualKeyCode {
+            // Track the trigger so a Hyper-combo escape can fold flags on
+            // the companion keyDown. Never fire Quick Press from here.
+            return .swallow(lockHyperHeld: type == .keyDown)
+        }
+
+        if type == .keyDown {
+            // A held escape combo synthesizes extra keyDowns. Once the first
+            // one has been marked, swallow the rest so they cannot dispatch
+            // again before (or after) the async unlock lands.
+            if suppressedKeyCodes.contains(keyCode) {
+                return .swallow(lockHyperHeld: lockHyperHeld)
+            }
+            var effectiveModifiers = modifiers
+            if lockHyperHeld {
+                effectiveModifiers |= hyperModifierFlags
+            }
+            if let escape, escape.keyCode == keyCode, escape.modifierFlags == effectiveModifiers {
+                return .swallowAndDispatchEscape(
+                    lockHyperHeld: lockHyperHeld,
+                    suppressKeyCode: keyCode
+                )
+            }
+        }
+
+        if type == .keyUp, suppressedKeyCodes.contains(keyCode) {
+            return .swallowAndConsumeKeyUp(lockHyperHeld: lockHyperHeld, keyCode: keyCode)
+        }
+
+        if shouldSwallow(locked: true, type: type, systemDefinedSubtype: systemDefinedSubtype) {
+            return .swallow(lockHyperHeld: lockHyperHeld)
+        }
+        return .passThrough
+    }
+}
+
 // MARK: - CGEvent Callback
 
 private let modifierMask: UInt64 = CGEventFlags.maskCommand.rawValue
@@ -261,14 +418,62 @@ private func hotkeyCallback(
     }
 
     // Keyboard lock: the keyboard produces nothing at all — no characters, no
-    // modifier-state changes, no hotkeys, no Hyper combos, and no Quick Press
-    // (which would otherwise synthesize real key events). This has to come
+    // modifier-state changes, no other hotkeys, no Hyper combos, no Quick
+    // Press (which would otherwise synthesize real key events), and no media /
+    // function keys (NX_SYSDEFINED aux control buttons). This has to come
     // before every matching branch below, otherwise a match returns first and
-    // the lock never sees the event. Releasing the lock is mouse-only, and
-    // quitting AnyDoor drops it too, so the keyboard can't be bricked.
+    // the lock never sees the event. Unlock is the menu-bar row, or the bound
+    // keyboard-lock hotkey (matched inside this branch, still swallowed so
+    // it does not leak). Quitting AnyDoor drops the lock too.
     if service.keyboardLocked {
-        if type == .keyDown || type == .keyUp || type == .flagsChanged { return nil }
-        return Unmanaged.passUnretained(event)
+        // Construct NSEvent only on the locked + NX_SYSDEFINED path so the
+        // ordinary key hot path stays cheap (the tap has a ~1s budget).
+        // A nil NSEvent is a deliberate fail-open: the event passes through,
+        // because the one unacceptable failure mode is breaking the mouse.
+        let systemDefinedSubtype: Int16? = type == KeyboardLockEventPolicy.systemDefinedType
+            ? NSEvent(cgEvent: event)?.subtype.rawValue
+            : nil
+        let isKeyEvent = type == .keyDown || type == .keyUp
+        let keyCode = isKeyEvent
+            ? Int(event.getIntegerValueField(.keyboardEventKeycode))
+            : -1
+        // Escape matching reads event.flags on keyDown. flagsChanged is
+        // swallowed so other apps do not see modifier changes, but HID still
+        // composes the held modifiers onto the subsequent keyDown — the same
+        // assumption the unlocked matching branches make.
+        let modifiers = isKeyEvent
+            ? Int(event.flags.rawValue & modifierMask)
+            : 0
+        let decision = KeyboardLockEventPolicy.decide(
+            locked: true,
+            type: type,
+            keyCode: keyCode,
+            modifiers: modifiers,
+            systemDefinedSubtype: systemDefinedSubtype,
+            lockHyperHeld: service.lockHyperHeld,
+            hyperVirtualKeyCode: service.hyperVirtualKeyCode,
+            hyperModifierFlags: service.hyperModifierFlags,
+            escape: service.keyboardLockEscape,
+            suppressedKeyCodes: service.suppressedKeyCodes
+        )
+        switch decision {
+        case .passThrough:
+            return Unmanaged.passUnretained(event)
+        case .swallow(let nextHeld):
+            service.lockHyperHeld = nextHeld
+            return nil
+        case .swallowAndDispatchEscape(let nextHeld, let suppressKeyCode):
+            service.lockHyperHeld = nextHeld
+            service.suppressedKeyCodes.insert(suppressKeyCode)
+            let action = HotkeyAction.toggleBuiltin(itemKey: BuiltinItem.keyboardLock.rawValue)
+            let dispatcher = service.dispatcher
+            DispatchQueue.main.async { dispatcher?(action) }
+            return nil
+        case .swallowAndConsumeKeyUp(let nextHeld, let consumed):
+            service.lockHyperHeld = nextHeld
+            service.suppressedKeyCodes.remove(consumed)
+            return nil
+        }
     }
 
     let virtKey = service.hyperVirtualKeyCode
@@ -332,11 +537,17 @@ private func hotkeyCallback(
         return nil
     }
 
-    // 4. Companion keyUp whose keyDown we previously suppressed — consume.
-    //    Works regardless of current hyperHeld state (user may release Hyper first).
-    if type == .keyUp {
+    // 4. Companion / escape key whose keyDown we previously suppressed —
+    //    swallow keyDown repeats and consume keyUp. Works regardless of
+    //    current hyperHeld state (user may release Hyper first). Swallowing
+    //    the extra keyDowns stops a held escape combo from re-locking after
+    //    the async unlock has already landed.
+    if type == .keyDown || type == .keyUp {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
-        if service.suppressedKeyCodes.remove(keyCode) != nil {
+        if service.suppressedKeyCodes.contains(keyCode) {
+            if type == .keyUp {
+                service.suppressedKeyCodes.remove(keyCode)
+            }
             return nil
         }
     }

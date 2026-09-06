@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import SwiftData
 import SwiftUI
 
@@ -14,6 +15,7 @@ final class MenuBarController {
     private static let panelHeightFraction: CGFloat = 0.8
 
     private let modelContainer: ModelContainer
+    private let clipboardHistoryModule: ClipboardHistoryModule
 
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
@@ -23,8 +25,12 @@ final class MenuBarController {
     private var globalKeyMonitor: Any?
     private var localKeyMonitor: Any?
 
-    init(modelContainer: ModelContainer) {
+    init(
+        modelContainer: ModelContainer,
+        clipboardHistoryModule: ClipboardHistoryModule
+    ) {
         self.modelContainer = modelContainer
+        self.clipboardHistoryModule = clipboardHistoryModule
     }
 
     /// Create the status item. Call once, after launch.
@@ -122,7 +128,10 @@ final class MenuBarController {
         // re-render correctly.
         let hostingView = NSHostingView(
             rootView: AnyView(
-                MenuBarView(onRequestClose: { [weak self] in self?.hidePanel() })
+                MenuBarView(
+                    onRequestClose: { [weak self] in self?.hidePanel() },
+                    clipboardHistoryModule: clipboardHistoryModule
+                )
                     .modelContainer(modelContainer)
                     .environment(LocalizationManager.shared)
                     .environment(\.locale, LocalizationManager.shared.effectiveLocale)

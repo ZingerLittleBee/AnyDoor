@@ -19,6 +19,19 @@ final class LocalizationManager {
 
     static let defaultsKey = "dev.bybee.AnyDoor.language"
 
+    // A custom-installed macOS app keeps package resources in Contents/Resources.
+    // Resolve that conventional location before Bundle.module: the legacy
+    // SwiftPM accessor otherwise falls back to the build directory, which can
+    // block behind the Documents privacy boundary after installation.
+    private static let resourceBundle: Bundle = {
+        let bundleURL = Bundle.main.resourceURL?
+            .appendingPathComponent("AnyDoor_AnyDoor.bundle", isDirectory: true)
+        if let bundleURL, let bundle = Bundle(url: bundleURL) {
+            return bundle
+        }
+        return Bundle.module
+    }()
+
     private let preferredLanguagesProvider: @Sendable () -> [String]
     private let defaults: UserDefaults
 
@@ -66,11 +79,11 @@ final class LocalizationManager {
     /// preference change, bypassing the process-locked `Bundle.main` lookup.
     var bundle: Bundle {
         let id = resolvedLocaleIdentifier()
-        if let path = Bundle.module.path(forResource: id, ofType: "lproj"),
+        if let path = Self.resourceBundle.path(forResource: id, ofType: "lproj"),
            let lprojBundle = Bundle(path: path) {
             return lprojBundle
         }
-        return Bundle.module
+        return Self.resourceBundle
     }
 
     private func resolvedLocaleIdentifier() -> String {

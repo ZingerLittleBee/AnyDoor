@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ClipboardHistory
 import PluginInterface
 import PluginSupport
 
@@ -24,6 +25,7 @@ struct MenuBarView: View {
     /// Invoked when a row action needs the controller to dismiss the panel
     /// (e.g. before opening another window or completing a clipboard copy).
     let onRequestClose: () -> Void
+    var clipboardHistoryModule: ClipboardHistoryModule? = nil
 
     @State private var panel = PanelStore.shared
     @State private var updateService = UpdateService.shared
@@ -436,35 +438,29 @@ struct MenuBarView: View {
             // Content is keyed by the kind (several items share `.screenshot`);
             // the anchor is keyed by the item so each row anchors to itself.
             guard let kind = item.historyKind else { break }
-            let store = ClipboardHistoryStore.shared
-            Task { @MainActor in
-                await store.pruneExpiredAndOverflow(force: false)
-                await store.reload(kind: kind)
-
-                // Guard against the user moving off the row before reload finished.
-                // Setting `needsKeyFocus` is deferred until after this guard so we
-                // never briefly flip the flag for a popover we will not show.
-                guard activeHoverTarget == .history(item) else { return }
-                popover.needsKeyFocus = true
-
-                popover.updateContent {
-                    ClipboardHistoryPopoverView(
-                        store: store,
-                        kind: kind,
-                        onHoverChange: { gate.popoverHover($0) },
-                        onDismissPopover: {
-                            gate.reset()
-                            popover.hide()
-                        },
-                        onCopyAndClosePanel: {
-                            gate.reset()
-                            popover.hide()
-                            onRequestClose()
-                        }
-                    )
-                }
-                anchorPopover(popover, to: .history(item))
+            guard let clipboardHistoryModule else { break }
+            let presentation = ClipboardHistoryPresentationModel(
+                module: clipboardHistoryModule
+            )
+            popover.needsKeyFocus = true
+            popover.updateContent {
+                ClipboardHistoryPopoverView(
+                    presentation: presentation,
+                    facet: kind.historyFacet,
+                    titleKey: kind.titleKey,
+                    onHoverChange: { gate.popoverHover($0) },
+                    onDismissPopover: {
+                        gate.reset()
+                        popover.hide()
+                    },
+                    onCopyAndClosePanel: {
+                        gate.reset()
+                        popover.hide()
+                        onRequestClose()
+                    }
+                )
             }
+            anchorPopover(popover, to: .history(item))
         }
     }
 
@@ -498,6 +494,25 @@ struct MenuBarView: View {
     private func openPermissionsSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
             NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+private extension ClipboardHistoryKind {
+    var historyFacet: ClipboardHistoryFacet {
+        switch self {
+        case .text, .ocr:
+            .text
+        case .color:
+            .color
+        case .qrcode:
+            .qrCode
+        case .screenshot:
+            .screenshot
+        case .image:
+            .image
+        case .file:
+            .file
         }
     }
 }

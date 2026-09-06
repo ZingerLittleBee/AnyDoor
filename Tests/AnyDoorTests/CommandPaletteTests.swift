@@ -806,6 +806,180 @@ final class CommandPaletteTests: XCTestCase {
         XCTAssertFalse(state.isCurrencyContext)
     }
 
+    // MARK: - Prefix ranking
+
+    @MainActor
+    func testTitlePrefixOutranksLaterSubstringAcrossSections() {
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [keepAwake]),
+                CommandPaletteSection(titleKey: .commandPaletteSectionApplications, entries: [warp]),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "wa"
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Warp", "Keep Awake"])
+        XCTAssertEqual(
+            state.filteredSections.map(\.titleKey),
+            [
+                L10n.Key.commandPaletteSectionApplications.rawValue,
+                L10n.Key.commandPaletteSectionCommands.rawValue,
+            ]
+        )
+    }
+
+    @MainActor
+    func testPrefixRankingIsCaseInsensitiveAndNormalized() {
+        let keepAwake = titledEntry("keep awake", bundleID: "keep-awake")
+        let warp = titledEntry("WARP", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [keepAwake]),
+                CommandPaletteSection(titleKey: .commandPaletteSectionApplications, entries: [warp]),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "  Wa  "
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["WARP", "keep awake"])
+    }
+
+    @MainActor
+    func testEqualRankKeepsOriginalSectionAndEntryOrder() {
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let alwaysOn = titledEntry("Always On", bundleID: "always-on")
+        let watch = titledEntry("Watch", bundleID: "com.apple.watch")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionCommands,
+                    entries: [keepAwake, alwaysOn]
+                ),
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [watch, warp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "wa"
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Watch", "Warp", "Keep Awake", "Always On"])
+    }
+
+    @MainActor
+    func testPrefixOutranksLaterHitEvenWhenTheyShareASection() {
+        let watch = titledEntry("Watch", bundleID: "watch")
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionCommands,
+                    entries: [watch, keepAwake]
+                ),
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [warp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+        state.query = "wa"
+
+        // Watch (prefix) must not drag Keep Awake (other) above Warp (prefix).
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Watch", "Warp", "Keep Awake"])
+        XCTAssertEqual(
+            state.filteredSections.map(\.titleKey),
+            [
+                L10n.Key.commandPaletteSectionCommands.rawValue,
+                L10n.Key.commandPaletteSectionApplications.rawValue,
+                L10n.Key.commandPaletteSectionCommands.rawValue,
+            ]
+        )
+        XCTAssertEqual(
+            Set(state.filteredSections.map(\.id)).count,
+            state.filteredSections.count,
+            "split rank-tier slices of the same header need distinct identities"
+        )
+    }
+
+    @MainActor
+    func testPluginOtherMatchDoesNotOutrankCoreTitlePrefix() {
+        let keepAwake = HostProfile(name: "Keep Awake", isActive: false)
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [warp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: [hostsRowSourceRegistration(profiles: [keepAwake])]
+        )
+        state.query = "wa"
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Warp", "Keep Awake"])
+    }
+
+    @MainActor
+    func testEmptyQueryKeepsOriginalSectionOrder() {
+        let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
+        let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(titleKey: .commandPaletteSectionCommands, entries: [keepAwake]),
+                CommandPaletteSection(titleKey: .commandPaletteSectionApplications, entries: [warp]),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Keep Awake", "Warp"])
+    }
+
+    @MainActor
+    func testLocalizedAppNameAndUnlocalizedAliasBothMatch() {
+        // The palette title is the localized display name; the Info.plist name
+        // stays an alias so both queries hit.
+        let localizedApp = PanelEntry.paletteRow(
+            source: .installedApp(
+                bundleID: "com.example.internal",
+                path: "/Applications/InternalName-macOS.app"
+            ),
+            displayOrder: 0,
+            title: "示例应用",
+            searchAliases: ["InternalName-macOS"],
+            symbol: "app.fill",
+            kind: .submenu
+        )
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionApplications,
+                    entries: [localizedApp]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: []
+        )
+
+        state.query = "示"
+        XCTAssertEqual(state.flatEntries.map(\.title), ["示例应用"])
+
+        state.query = "InternalName"
+        XCTAssertEqual(state.flatEntries.map(\.title), ["示例应用"])
+    }
+
     private struct StubScanner: PortScanning {
         let records: [PortRecord]
 
@@ -854,6 +1028,15 @@ final class CommandPaletteTests: XCTestCase {
         keyword: String?
     ) -> QuicklinkTemplateCandidate {
         QuicklinkTemplateCandidate(id: id, title: title, keyword: keyword, link: link)
+    }
+
+    private func titledEntry(_ title: String, bundleID: String) -> PanelEntry {
+        .paletteRow(
+            source: .installedApp(bundleID: bundleID, path: "/Applications/\(bundleID).app"),
+            displayOrder: 0,
+            title: title,
+            symbol: "app.fill"
+        )
     }
 
     private func portRecord(port: UInt16, pid: pid_t, processName: String) -> PortRecord {

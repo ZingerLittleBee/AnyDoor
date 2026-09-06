@@ -1,5 +1,4 @@
 import AppKit
-import Foundation
 import PluginInterface
 
 /// Captures a screen region, decodes any QR codes inside it with Vision, copies
@@ -12,6 +11,11 @@ import PluginInterface
 /// Every error is absorbed and mapped to a toast — `run()` never propagates.
 actor QRCodeProvider: ActionProvider {
     let itemKey: BuiltinItem = .qrcode
+    private let clipboardProduction: ClipboardProductionAdapter
+
+    init(clipboardProduction: ClipboardProductionAdapter) {
+        self.clipboardProduction = clipboardProduction
+    }
 
     var permission: PermissionStatus { .notRequired }
 
@@ -27,10 +31,7 @@ actor QRCodeProvider: ActionProvider {
                 return
             }
             let text = payloads.joined(separator: "\n")
-            // Self-write so the watcher doesn't re-capture this QR payload as
-            // a generic text entry.
-            await ClipboardWatcher.selfWrite(string: text)
-            await ClipboardHistoryStore.shared.recordText(kind: .qrcode, text: text)
+            _ = try await clipboardProduction.produceQRCode(text)
             let successMsg = await MainActor.run { L(.toastCopiedToClipboard) }
             await ToastPresenter.shared.show(.success(successMsg))
         } catch OCRError.screenCapturePermissionDenied {

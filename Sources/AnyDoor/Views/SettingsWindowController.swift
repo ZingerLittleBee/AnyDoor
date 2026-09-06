@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import PluginInterface
 import PluginSupport
 import SwiftData
@@ -23,12 +24,24 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// SwiftUI's own delegate wrapper, and the cast to `AppDelegate` fails —
     /// which would leave the window mounting nothing (a bare empty shell).
     private static var modelContainer: ModelContainer?
+    private static var clipboardHistoryModule: ClipboardHistoryModule?
+    private static var clipboardHistoryLifecycle: ClipboardHistoryLifecycle?
 
-    static func bootstrap(modelContainer: ModelContainer) {
+    static func bootstrap(
+        modelContainer: ModelContainer,
+        clipboardHistoryModule: ClipboardHistoryModule,
+        clipboardHistoryLifecycle: ClipboardHistoryLifecycle
+    ) {
         self.modelContainer = modelContainer
+        self.clipboardHistoryModule = clipboardHistoryModule
+        self.clipboardHistoryLifecycle = clipboardHistoryLifecycle
     }
 
     private var keyMonitor: Any?
+    /// The hosted SwiftUI hierarchy outlives individual presentations. This
+    /// explicitly marks each `show()` so an already-selected pane can refresh
+    /// its visible, derived state without rebuilding the window or navigation.
+    private let presentation = SettingsPresentation()
 
     private init() {
         // Fixed-size utility window: the mask carries no .miniaturizable /
@@ -72,7 +85,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     func show() {
         guard let window else { return }
         window.title = L(.panelFooterSettings)
-        mountContentIfNeeded()
+        presentation.recordShow()
+        let didMountContent = mountContentIfNeeded()
         restorePosition()
         installKeyMonitor()
         // Normal-level window of an accessory app: adopt .regular policy while
@@ -80,9 +94,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         RegularWindowCoordinator.shared.track(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        // Drop the initial first responder so no control renders a focus ring
-        // when the window appears (keyboard focus returns on first Tab).
-        window.makeFirstResponder(nil)
+        if SettingsWindowFocusPolicy.shouldClearInitialFocus(
+            didMountContent: didMountContent
+        ) {
+            // Drop only the hosting view's initial responder. Reopening this
+            // reused window must preserve the user's control and navigation
+            // focus.
+            window.makeFirstResponder(nil)
+        }
     }
 
     override func close() {
@@ -92,14 +111,29 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window?.close()
     }
 
-    private func mountContentIfNeeded() {
+    @discardableResult
+    private func mountContentIfNeeded() -> Bool {
         guard let window,
-              window.contentView == nil || !(window.contentView is NSHostingView<SettingsRoot>) else { return }
-        guard let container = Self.modelContainer else {
-            assertionFailure("SettingsWindowController.bootstrap was not called before show()")
-            return
+              window.contentView == nil
+                || !(window.contentView is NSHostingView<SettingsRoot>)
+        else {
+            return false
         }
-        let host = NSHostingView(rootView: SettingsRoot(container: container))
+        guard let container = Self.modelContainer,
+            let module = Self.clipboardHistoryModule,
+            let lifecycle = Self.clipboardHistoryLifecycle
+        else {
+            assertionFailure("SettingsWindowController.bootstrap was not called before show()")
+            return false
+        }
+        let host = NSHostingView(
+            rootView: SettingsRoot(
+                container: container,
+                clipboardHistoryModule: module,
+                clipboardHistoryLifecycle: lifecycle,
+                presentation: presentation
+            )
+        )
         // Let SwiftUI install the (item-less) NavigationSplitView toolbar —
         // its presence is what grants the full-height sidebar treatment that
         // wraps the traffic lights, same as the Image Conversion window.
@@ -107,6 +141,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         host.frame = window.contentLayoutRect
         host.autoresizingMask = [.width, .height]
         window.contentView = host
+        return true
     }
 
     /// The window's size is fixed; only its position is remembered.
@@ -174,18 +209,54 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
+enum SettingsWindowFocusPolicy {
+    static func shouldClearInitialFocus(
+        didMountContent: Bool
+    ) -> Bool {
+        didMountContent
+    }
+}
+
 /// Root view for the hosted Settings window. Reading `effectiveLocale` inside
 /// `body` keeps the locale environment live when the user switches the app
 /// language (a static `NSHostingView` rootView would otherwise freeze the
 /// value captured at mount time).
 private struct SettingsRoot: View {
     let container: ModelContainer
+    let clipboardHistoryModule: ClipboardHistoryModule
+    let clipboardHistoryLifecycle: ClipboardHistoryLifecycle
+    let presentation: SettingsPresentation
 
     var body: some View {
         let localization = LocalizationManager.shared
-        SettingsView()
+        SettingsView(
+            clipboardHistoryModule: clipboardHistoryModule,
+            clipboardHistoryLifecycle: clipboardHistoryLifecycle,
+            presentation: presentation
+        )
             .modelContainer(container)
             .environment(localization)
             .environment(\.locale, localization.effectiveLocale)
+    }
+}
+
+/// Presentation-bound, observable state for the reusable Settings host.
+///
+/// `NSWindow.close()` leaves this controller and its `NSHostingView` alive, so
+/// SwiftUI's initial appearance hooks are not a reliable representation of a
+/// subsequent Settings presentation. The controller owns this value and passes
+/// it through the Settings hierarchy instead of broadcasting a global event.
+@MainActor
+@Observable
+final class SettingsPresentation {
+    private(set) var showGeneration: UInt64 = 0
+    var selectedTab: SettingsTab
+
+    init(selectedTab: SettingsTab = .panel) {
+        self.selectedTab = selectedTab
+    }
+
+    func recordShow() {
+        showGeneration &+= 1
     }
 }

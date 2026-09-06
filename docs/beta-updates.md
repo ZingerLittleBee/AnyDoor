@@ -66,6 +66,103 @@ candidate artifacts on success, failure, or interruption.
 Beta releases snapshot `[Unreleased]` into their release notes without cutting
 the changelog. Stable releases perform the normal changelog cut.
 
+## Beta release runbook
+
+CI is the test gate: the release commands build, sign, notarize, package, and
+publish, but they do not run the test suite. Do not publish until every required
+check on the change PR has passed. Run the dry run before every real release.
+
+### First Beta on a version line
+
+Create one release branch for the `X.Y` line from the latest Stable `main`. Do
+this only once; later Betas reuse the same branch.
+
+```bash
+git fetch origin --tags
+git switch -c release/4.2-beta origin/main
+git push -u origin release/4.2-beta
+```
+
+Open or retarget the feature PR to `release/4.2-beta`, wait for CI, and merge it.
+Then synchronize the local release branch:
+
+```bash
+git switch release/4.2-beta
+git pull --ff-only origin release/4.2-beta
+git status --short
+```
+
+The working tree must be clean, and local `HEAD` must equal
+`origin/release/4.2-beta`. Confirm that `[Unreleased]` contains the release
+notes intended for Beta users, then validate and publish:
+
+```bash
+make beta-release-dryrun 4.2.0-beta.1
+git status --short
+make beta-release 4.2.0-beta.1
+```
+
+The successful dry run leaves the working tree clean. The real command creates
+and pushes `chore: release v4.2.0-beta.1`, tags that commit, uploads the signed
+and notarized artifacts, and publishes a GitHub prerelease.
+
+### Later Betas on the same version line
+
+Merge fixes into the existing release branch. Never create
+`release/4.2-beta.2` or another branch per Beta. If a newer Stable hotfix has
+shipped since the previous Beta, merge the updated `main` into the release
+branch before publishing; the release preflight requires the latest Stable tag
+to be an ancestor.
+
+```bash
+git switch release/4.2-beta
+git pull --ff-only origin release/4.2-beta
+git status --short
+
+make beta-release-dryrun 4.2.0-beta.2
+git status --short
+make beta-release 4.2.0-beta.2
+```
+
+Each Beta snapshots the current `[Unreleased]` section without cutting it, so
+keep that section accurate for the release notes you intend to publish.
+
+### Post-release verification
+
+Publishing the GitHub prerelease automatically triggers `Update Feed`; do not
+manually dispatch the workflow during a normal release. Verify the Release,
+assets, workflow, canonical feed, and a real update from the previous Stable:
+
+```bash
+VERSION=4.2.0-beta.2
+
+gh release view "v$VERSION" \
+  --json isDraft,isPrerelease,assets,url
+
+gh run list \
+  --workflow deploy-feed.yml \
+  --event release \
+  --branch "v$VERSION" \
+  --limit 1
+
+curl --fail --silent --show-error \
+  -H 'Cache-Control: no-cache' \
+  "https://anydoor.dev/appcast.xml?verify=$VERSION" \
+  | grep -A 8 "${VERSION%-beta.*} Beta ${VERSION##*.}"
+```
+
+On a Mac running the previous Stable, enable **Receive Beta updates**, manually
+check for updates, and verify discovery, download, installation, relaunch, and
+the displayed version. A successful GitHub Release alone is not client
+acceptance.
+
+If publication fails after a commit or tag was created, inspect the local tag,
+remote tag, GitHub Release, and workflow state before retrying. Follow the
+release driver's recovery hint; do not blindly rerun the entire command against
+an identity that may already exist. If `Update Feed` fails only at deployed-byte
+verification, compare the live appcast with the Release asset after propagation
+and rerun the failed job only when the deployed bytes are correct.
+
 ## Appcast publication
 
 `https://anydoor.dev/appcast.xml` is the mutable canonical feed. GitHub Release
@@ -93,7 +190,10 @@ The canonical endpoint is the only automatic feed for bridge-and-later clients.
 There is no client-side fallback in this release. A feed outage delays update
 discovery but does not affect the installed application.
 
-## Release sequence
+## Initial Beta infrastructure rollout
+
+The following sequence records the one-time rollout that introduced the Beta
+channel. It is historical context, not the runbook for every Beta release.
 
 1. Merge `feat/beta-updates` into `main`.
 2. Bootstrap and verify the Stable-only canonical feed.

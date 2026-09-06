@@ -1,7 +1,7 @@
 import AppKit
-import SwiftData
 import XCTest
 @testable import AnyDoor
+@testable import ClipboardHistory
 
 @MainActor
 final class SelectedTextReaderTests: XCTestCase {
@@ -51,22 +51,24 @@ final class SelectedTextReaderTests: XCTestCase {
         XCTAssertEqual(pb.data(forType: .rtf), rtf)
     }
 
-    func testRestoreWriteIsSuppressedFromClipboardWatcher() async throws {
+    func testRestoreWriteIsSuppressedFromClipboardMonitor() async throws {
         let pb = makePasteboard()
         pb.clearContents()
         pb.setString("ORIGINAL", forType: .string)
 
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: ClipboardHistoryItem.self, configurations: config)
-        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
-        store.bootstrap(modelContainer: container)
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
-        let previousWatcher = ClipboardWatcher.shared
-        defer { ClipboardWatcher.shared = previousWatcher }
-        ClipboardWatcher.shared = watcher
+        let (module, storeRoot) = try makeModule()
+        defer { try? FileManager.default.removeItem(at: storeRoot) }
+        let funnel = module.pasteboardSelfWrites
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pb,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
 
         _ = await SelectedTextReader.readViaClipboard(
             pasteboard: pb,
+            selfWrites: funnel,
             copy: {
                 pb.clearContents()
                 pb.setString("SELECTED", forType: .string)
@@ -74,39 +76,108 @@ final class SelectedTextReaderTests: XCTestCase {
             settle: {}
         )
 
-        await watcher.poll()
-        await store.reload(kind: .text)
-        XCTAssertTrue(store.items(for: .text).isEmpty)
+        await monitor.observeForTesting()
+        let page = try await module.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
     }
 
-    func testIntermediateSelectionWriteIsSuppressedFromClipboardWatcher() async throws {
+    /// An app slow to service Cmd-C used to defeat the whole mechanism: the
+    /// fixed wait expired first, so nothing was read, the snapshot was never
+    /// restored (the user's clipboard silently became their selection), and the
+    /// late write landed outside the self-write window where history captured
+    /// it. The wait now polls until the copy actually lands.
+    func testASlowCopyIsStillReadRestoredAndKeptOutOfHistory() async throws {
         let pb = makePasteboard()
         pb.clearContents()
         pb.setString("ORIGINAL", forType: .string)
 
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(for: ClipboardHistoryItem.self, configurations: config)
-        let store = ClipboardHistoryStore(now: { Date(timeIntervalSinceReferenceDate: 100) })
-        store.bootstrap(modelContainer: container)
-        let watcher = ClipboardWatcher(store: store, pasteboard: pb, sourceProvider: { nil })
-        let previousWatcher = ClipboardWatcher.shared
-        defer { ClipboardWatcher.shared = previousWatcher }
-        ClipboardWatcher.shared = watcher
+        let (module, storeRoot) = try makeModule()
+        defer { try? FileManager.default.removeItem(at: storeRoot) }
+        let funnel = module.pasteboardSelfWrites
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pb,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
+
+        // The copy lands on the fifth poll, long after a single fixed wait.
+        var steps = 0
+        let text = await SelectedTextReader.readViaClipboard(
+            pasteboard: pb,
+            selfWrites: funnel,
+            copy: {},
+            settle: {
+                steps += 1
+                if steps == 5 {
+                    pb.clearContents()
+                    pb.setString("SELECTED", forType: .string)
+                }
+                await monitor.observeForTesting()
+            }
+        )
+
+        XCTAssertEqual(text, "SELECTED")
+        XCTAssertEqual(pb.string(forType: .string), "ORIGINAL")
+        await monitor.observeForTesting()
+        let page = try await module.page(.init())
+        XCTAssertTrue(
+            page.entries.isEmpty,
+            "a late selection write must not reach clipboard history"
+        )
+    }
+
+    /// The wait is bounded: with nothing copied it gives up instead of hanging.
+    func testTheWaitGivesUpWhenNothingIsEverCopied() async {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("ORIGINAL", forType: .string)
+
+        var steps = 0
+        let text = await SelectedTextReader.readViaClipboard(
+            pasteboard: pb,
+            copy: {},
+            settle: { steps += 1 },
+            settleStepBudget: 6
+        )
+
+        XCTAssertNil(text)
+        XCTAssertEqual(steps, 6)
+        XCTAssertEqual(pb.string(forType: .string), "ORIGINAL")
+    }
+
+    func testIntermediateSelectionWriteIsSuppressedFromClipboardMonitor()
+        async throws
+    {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("ORIGINAL", forType: .string)
+
+        let (module, storeRoot) = try makeModule()
+        defer { try? FileManager.default.removeItem(at: storeRoot) }
+        let funnel = module.pasteboardSelfWrites
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: pb,
+            installsSystemObservers: false
+        )
+        await monitor.setEnabled(true)
 
         _ = await SelectedTextReader.readViaClipboard(
             pasteboard: pb,
+            selfWrites: funnel,
             copy: {
                 pb.clearContents()
                 pb.setString("SELECTED", forType: .string)
             },
             settle: {
-                await watcher.poll()
+                await monitor.observeForTesting()
             }
         )
 
-        await watcher.poll()
-        await store.reload(kind: .text)
-        XCTAssertTrue(store.items(for: .text).isEmpty)
+        await monitor.observeForTesting()
+        let page = try await module.page(.init())
+        XCTAssertTrue(page.entries.isEmpty)
     }
 
     func testReturnsNilWhenSelectionUnchangedAndRestores() async {
@@ -159,5 +230,23 @@ final class SelectedTextReaderTests: XCTestCase {
         XCTAssertEqual(text, "SELECTED")
         // Nothing to restore: the pasteboard string is cleared back to nil.
         XCTAssertNil(pb.string(forType: .string))
+    }
+
+    private func makeModule() throws
+        -> (ClipboardHistoryModule, URL)
+    {
+        let storeRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-SelectedText-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        return (
+            try ClipboardHistoryModule(
+                testingDatabaseURL: storeRoot
+                    .appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x6B, count: 32)
+            ),
+            storeRoot
+        )
     }
 }

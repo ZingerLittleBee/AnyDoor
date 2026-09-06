@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import PluginInterface
 import PluginSupport
 import SwiftUI
@@ -22,11 +23,11 @@ final class ClipboardTextWindow {
     /// Set by the wall controller: how to open the editor for an item. The
     /// preview's "e" key / header button route through this so editing always
     /// goes down the same path as the card's context menu.
-    var onEditRequest: ((ClipboardHistoryItem) -> Void)?
+    var onEditRequest: ((ClipboardHistoryEntry) -> Void)?
     /// Set by the wall controller: how to copy an item to the pasteboard. The
     /// preview's "c" key / header button route through this so copying always
     /// goes down the same path as the card's context menu.
-    var onCopyRequest: ((ClipboardHistoryItem) -> Void)?
+    var onCopyRequest: ((ClipboardHistoryEntry) -> Void)?
 
     private init() {}
 
@@ -35,7 +36,9 @@ final class ClipboardTextWindow {
     var isPreviewVisible: Bool { isVisible && model?.isEditable == false }
 
     /// The item currently shown in the read-only preview, if any.
-    var previewedItem: ClipboardHistoryItem? { isPreviewVisible ? model?.item : nil }
+    var previewedEntry: ClipboardHistoryEntry? {
+        isPreviewVisible ? model?.entry : nil
+    }
 
     /// The text currently selected in the read-only preview, or nil when nothing
     /// is selected. Walks the hosting view to the backing NSTextView; the panel
@@ -55,19 +58,36 @@ final class ClipboardTextWindow {
         window != nil && window === panel
     }
 
-    func showPreview(item: ClipboardHistoryItem) {
+    func showPreview(entry: ClipboardHistoryEntry, text: String) {
         // Never clobber an active edit; the editor closes only explicitly.
         guard !isEditing else { return }
         // Already previewing: swap the content in place (arrow-key follow).
         if isPreviewVisible, let model {
-            model.replace(item: item)
+            model.replace(entry: entry, text: text)
             return
         }
-        present(item: item, editable: false, onClose: nil)
+        present(
+            entry: entry,
+            text: text,
+            editable: false,
+            onSave: { _ in },
+            onClose: nil
+        )
     }
 
-    func showEditor(item: ClipboardHistoryItem, onClose: (() -> Void)? = nil) {
-        present(item: item, editable: true, onClose: onClose)
+    func showEditor(
+        entry: ClipboardHistoryEntry,
+        text: String,
+        onSave: @escaping (String) -> Void,
+        onClose: (() -> Void)? = nil
+    ) {
+        present(
+            entry: entry,
+            text: text,
+            editable: true,
+            onSave: onSave,
+            onClose: onClose
+        )
     }
 
     /// Esc / Cancel: discard-confirm when dirty, straight close otherwise.
@@ -92,15 +112,15 @@ final class ClipboardTextWindow {
     /// Swap a read-only preview for the editor on the same item ("e" key or
     /// the header's edit button). No-op outside preview mode.
     func requestEditFromPreview() {
-        guard isPreviewVisible, let item = model?.item else { return }
-        onEditRequest?(item)
+        guard isPreviewVisible, let entry = model?.entry else { return }
+        onEditRequest?(entry)
     }
 
     /// Copy the previewed item to the pasteboard ("c" key or the header's copy
     /// button). Keeps the preview and wall open. No-op outside preview mode.
     func requestCopyFromPreview() {
-        guard isPreviewVisible, let item = model?.item else { return }
-        onCopyRequest?(item)
+        guard isPreviewVisible, let entry = model?.entry else { return }
+        onCopyRequest?(entry)
     }
 
     func close() {
@@ -114,7 +134,13 @@ final class ClipboardTextWindow {
         callback?()
     }
 
-    private func present(item: ClipboardHistoryItem, editable: Bool, onClose: (() -> Void)?) {
+    private func present(
+        entry: ClipboardHistoryEntry,
+        text: String,
+        editable: Bool,
+        onSave: @escaping (String) -> Void,
+        onClose: (() -> Void)?
+    ) {
         // An in-progress dirty edit is never silently replaced; surface the
         // discard confirmation instead and let the user decide.
         if isEditing, model?.isDirty == true {
@@ -146,10 +172,15 @@ final class ClipboardTextWindow {
         p.isReleasedWhenClosed = false
         p.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
 
-        let model = ClipboardTextPanelModel(item: item, isEditable: editable)
+        let model = ClipboardTextPanelModel(
+            entry: entry,
+            text: text,
+            isEditable: editable
+        )
         model.onDismiss = { [weak self] in self?.close() }
         model.onEditRequest = { [weak self] in self?.requestEditFromPreview() }
         model.onCopyRequest = { [weak self] in self?.requestCopyFromPreview() }
+        model.onSave = onSave
         self.model = model
         self.onClose = onClose
 
@@ -229,7 +260,7 @@ private final class KeyableTextPanel: NSPanel {
 @MainActor
 @Observable
 final class ClipboardTextPanelModel {
-    private(set) var item: ClipboardHistoryItem
+    private(set) var entry: ClipboardHistoryEntry
     let isEditable: Bool
     var text: String
     private var originalText: String
@@ -241,24 +272,30 @@ final class ClipboardTextPanelModel {
     /// Asks the host to copy this item to the pasteboard ("c" key / the
     /// header's copy button). Keeps the preview open.
     var onCopyRequest: () -> Void = {}
+    var onSave: (String) -> Void = { _ in }
 
-    init(item: ClipboardHistoryItem, isEditable: Bool) {
-        self.item = item
+    init(
+        entry: ClipboardHistoryEntry,
+        text: String,
+        isEditable: Bool
+    ) {
+        self.entry = entry
         self.isEditable = isEditable
-        let value = item.text ?? ""
-        self.text = value
-        self.originalText = value
+        self.text = text
+        originalText = text
     }
 
     var isDirty: Bool { isEditable && text != originalText }
-    var canSave: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// Only a zero-length edit is refused, matching the store, which accepts a
+    /// whitespace-only edit exactly as it accepts a whitespace-only copy.
+    /// Trimming here disabled Save for text the store would have kept.
+    var canSave: Bool { !text.isEmpty }
 
     /// Preview-follow: swap to another item without recreating the panel.
-    func replace(item: ClipboardHistoryItem) {
-        self.item = item
-        let value = item.text ?? ""
-        text = value
-        originalText = value
+    func replace(entry: ClipboardHistoryEntry, text: String) {
+        self.entry = entry
+        self.text = text
+        originalText = text
     }
 
     /// Esc / close button. A second request while the overlay is up means
@@ -283,9 +320,8 @@ final class ClipboardTextPanelModel {
             onDismiss()
             return
         }
-        let item = item
         let newText = text
-        Task { await ClipboardHistoryStore.shared.updateText(item, newText: newText) }
+        onSave(newText)
         onDismiss()
     }
 

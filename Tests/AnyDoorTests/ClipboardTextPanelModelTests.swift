@@ -1,14 +1,33 @@
 import XCTest
+import ClipboardHistory
 @testable import AnyDoor
 
 @MainActor
 final class ClipboardTextPanelModelTests: XCTestCase {
-    private func makeItem(text: String) -> ClipboardHistoryItem {
-        ClipboardHistoryItem(kind: .text, text: text, previewTitle: text)
+    private func makeEntry(text: String) -> ClipboardHistoryEntry {
+        ClipboardHistoryEntry(
+            id: ClipboardHistoryEntryID(UUID()),
+            capturedAt: Date(),
+            previewText: text,
+            facets: [.text],
+            isFavorite: false,
+            source: .unknown
+        )
+    }
+
+    private func makeModel(
+        text: String,
+        isEditable: Bool
+    ) -> ClipboardTextPanelModel {
+        ClipboardTextPanelModel(
+            entry: makeEntry(text: text),
+            text: text,
+            isEditable: isEditable
+        )
     }
 
     func testCleanCloseDismissesWithoutConfirmation() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: true)
+        let model = makeModel(text: "hello", isEditable: true)
         var dismissed = false
         model.onDismiss = { dismissed = true }
 
@@ -19,7 +38,7 @@ final class ClipboardTextPanelModelTests: XCTestCase {
     }
 
     func testDirtyCloseShowsConfirmationInsteadOfDismissing() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: true)
+        let model = makeModel(text: "hello", isEditable: true)
         var dismissed = false
         model.onDismiss = { dismissed = true }
         model.text = "hello edited"
@@ -31,7 +50,7 @@ final class ClipboardTextPanelModelTests: XCTestCase {
     }
 
     func testEscOnConfirmationKeepsEditing() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: true)
+        let model = makeModel(text: "hello", isEditable: true)
         var dismissed = false
         model.onDismiss = { dismissed = true }
         model.text = "hello edited"
@@ -45,7 +64,7 @@ final class ClipboardTextPanelModelTests: XCTestCase {
     }
 
     func testDiscardDismisses() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: true)
+        let model = makeModel(text: "hello", isEditable: true)
         var dismissed = false
         model.onDismiss = { dismissed = true }
         model.text = "hello edited"
@@ -56,16 +75,23 @@ final class ClipboardTextPanelModelTests: XCTestCase {
         XCTAssertTrue(dismissed)
     }
 
-    func testCanSaveRejectsWhitespaceOnlyText() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: true)
-        model.text = "   \n\t"
+    /// The store refuses a zero-length edit and keeps a whitespace-only one
+    /// (`ClipboardHistoryRetention.editText`, pinned by
+    /// `ClipboardHistoryRetentionTests`), exactly as it treats a whitespace-only
+    /// copy. Save has to draw the same line, or the panel refuses text the
+    /// store would have kept.
+    func testCanSaveRejectsOnlyZeroLengthText() {
+        let model = makeModel(text: "hello", isEditable: true)
+        model.text = ""
         XCTAssertFalse(model.canSave)
+        model.text = "   \n\t"
+        XCTAssertTrue(model.canSave)
         model.text = "ok"
         XCTAssertTrue(model.canSave)
     }
 
     func testPreviewModeIsNeverDirty() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: false)
+        let model = makeModel(text: "hello", isEditable: false)
         model.text = "mutated"
         XCTAssertFalse(model.isDirty)
         var dismissed = false
@@ -75,7 +101,7 @@ final class ClipboardTextPanelModelTests: XCTestCase {
     }
 
     func testRequestEditFiresInPreviewMode() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: false)
+        let model = makeModel(text: "hello", isEditable: false)
         var fired = false
         model.onEditRequest = { fired = true }
         model.requestEdit()
@@ -83,7 +109,7 @@ final class ClipboardTextPanelModelTests: XCTestCase {
     }
 
     func testRequestEditIgnoredWhileEditing() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "hello"), isEditable: true)
+        let model = makeModel(text: "hello", isEditable: true)
         var fired = false
         model.onEditRequest = { fired = true }
         model.requestEdit()
@@ -91,8 +117,8 @@ final class ClipboardTextPanelModelTests: XCTestCase {
     }
 
     func testReplaceSwapsContentAndResetsBaseline() {
-        let model = ClipboardTextPanelModel(item: makeItem(text: "first"), isEditable: false)
-        model.replace(item: makeItem(text: "second"))
+        let model = makeModel(text: "first", isEditable: false)
+        model.replace(entry: makeEntry(text: "second"), text: "second")
         XCTAssertEqual(model.text, "second")
         XCTAssertFalse(model.isDirty)
     }

@@ -22,7 +22,30 @@ final class SyncSettingsRegistryTests: XCTestCase {
         XCTAssertTrue(keys.contains("menuBar.iconVisible"))
         XCTAssertTrue(keys.contains("hyperKey.trigger"))
         XCTAssertTrue(keys.contains("dev.bybee.AnyDoor.language"))
+        XCTAssertTrue(keys.contains("clipboard.customTags"))
+        XCTAssertTrue(keys.contains("clipboard.categoryOrder"))
         XCTAssertTrue(keys.contains("clipboard.excludedBundleIDs"))
+        XCTAssertTrue(
+            keys.contains(
+                ClipboardPreferences.ignoresUniversalClipboardKey
+            )
+        )
+    }
+
+    func testClipboardHistoryDeviceLocalStateIsExcluded() {
+        let keys = Set(SyncSettingsRegistry.entries.map(\.key))
+        for key in [
+            ClipboardPreferences.monitoringKey,
+            ClipboardPreferences.copyOnlyKey,
+            ClipboardPreferences.retentionKey,
+            "clipboard.automaticImageTextIndexingEnabled",
+            "clipboard.historyRows",
+            "clipboard.encryptionKey",
+            "clipboard.migrationState",
+            "clipboard.membership",
+        ] {
+            XCTAssertFalse(keys.contains(key), key)
+        }
     }
 
     func testIncludesInstalledPluginSet() {
@@ -46,6 +69,9 @@ final class SyncSettingsRegistryTests: XCTestCase {
         d.set(48, forKey: "commandPalette.hotkey.keyCode")
         d.set("zh", forKey: "dev.bybee.AnyDoor.language")
         d.set(["com.apple.Safari", "com.apple.finder"], forKey: "clipboard.excludedBundleIDs")
+        d.set(true, forKey: ClipboardPreferences.monitoringKey)
+        d.set(false, forKey: ClipboardPreferences.copyOnlyKey)
+        d.set(1, forKey: ClipboardPreferences.retentionKey)
         // hyperKey.trigger deliberately not set → absent from result
 
         let result = SyncSettingsRegistry.read(from: d)
@@ -55,6 +81,9 @@ final class SyncSettingsRegistryTests: XCTestCase {
         XCTAssertEqual(result["dev.bybee.AnyDoor.language"], .string("zh"))
         XCTAssertEqual(result["clipboard.excludedBundleIDs"], .stringArray(["com.apple.Safari", "com.apple.finder"]))
         XCTAssertNil(result["hyperKey.trigger"])
+        XCTAssertNil(result[ClipboardPreferences.monitoringKey])
+        XCTAssertNil(result[ClipboardPreferences.copyOnlyKey])
+        XCTAssertNil(result[ClipboardPreferences.retentionKey])
     }
 
     func testWriteAppliesValuesWithCorrectTypes() {

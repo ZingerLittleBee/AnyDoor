@@ -1,5 +1,4 @@
 import AppKit
-import Foundation
 import PluginInterface
 
 /// Presents the macOS system color-sampling loupe, copies the picked color to
@@ -9,6 +8,11 @@ import PluginInterface
 /// Every error is absorbed and mapped to a toast — `run()` never propagates.
 actor PickColorProvider: ActionProvider {
     let itemKey: BuiltinItem = .pickColor
+    private let clipboardProduction: ClipboardProductionAdapter
+
+    init(clipboardProduction: ClipboardProductionAdapter) {
+        self.clipboardProduction = clipboardProduction
+    }
 
     var permission: PermissionStatus { .notRequired }
 
@@ -23,10 +27,16 @@ actor PickColorProvider: ActionProvider {
             // Copy in the user's preferred output format; history still stores the
             // raw hex (the color bucket is hex-based and renders the swatch).
             let formatted = ColorFormat.current.format(hex: hex) ?? hex
-            // Self-write so the watcher doesn't re-capture this picked color
-            // as a generic text entry.
-            await ClipboardWatcher.selfWrite(string: formatted)
-            await ClipboardHistoryStore.shared.recordColor(hex: hex)
+            do {
+                _ = try await clipboardProduction.produceColor(
+                    hex: hex,
+                    pasteboardValue: formatted
+                )
+            } catch {
+                let msg = await MainActor.run { L(.toastPickColorFailed) }
+                await ToastPresenter.shared.show(.failure(msg))
+                return
+            }
             let colorMsg = await MainActor.run { L(.toastColorCopied, formatted) }
             await ToastPresenter.shared.show(
                 .color(message: colorMsg, swatch: swatch)
