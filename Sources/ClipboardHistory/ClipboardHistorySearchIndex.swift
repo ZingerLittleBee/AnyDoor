@@ -130,7 +130,9 @@ extension ClipboardHistoryModule {
     }
 
     static func prepareSearchIndexState(in database: DatabasePool) throws {
-        let needsRebuild = try database.read { database in
+        // FTS integrity-check is an INSERT. A DatabasePool reader is opened
+        // SQLITE_OPEN_READONLY, so a healthy index would look corrupt.
+        let needsRebuild = try database.write { database in
             let version = try maintenanceInteger(
                 "searchIndexVersion",
                 in: database

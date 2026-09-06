@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Clipboard History search no longer rebuilds its index on every launch of a
+  healthy store. Opening a ready index ran the FTS integrity-check on a
+  read-only connection, treated that as corruption, and left text search
+  empty until a background rebuild finished.
+
 ## [4.2.0] - 2026-09-06
 
 ### Added
