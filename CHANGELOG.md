@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-09-06
+
 ### Added
 
 - Clipboard History is now encrypted at rest. Entries live in a dedicated
