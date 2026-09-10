@@ -320,15 +320,16 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             }
             return event
         }
-        // A global mouse-down fires only for clicks NOT delivered to our app —
-        // i.e. anywhere outside the wall — so any such click dismisses it.
+        // Global delivery does not establish that a click is outside a preview:
+        // Quick Look can host its content in another process.
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
+        ) { [weak self] event in
             MainThreadIsolation.run {
                 guard let self else { return }
                 // Don't throw away an in-progress edit on a stray outside click.
                 if ClipboardTextWindow.shared.isEditing { return }
+                if ClipboardQuickLookWindow.shared.containsMouseEvent(event) { return }
                 self.dismiss(restoreFocus: false)
             }
         }
