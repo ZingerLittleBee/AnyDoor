@@ -11,6 +11,8 @@ versioning.
 - Clipboard History now labels video files as Video and provides a Video
   filter. Existing file references gain the category on upgrade; videos
   remain available in File and preserve their original preview and paste behavior.
+- Video cards show an asynchronously generated first-frame cover, preserving
+  orientation and aspect ratio, with a video icon when the file cannot be decoded.
 
 ### Fixed
 
