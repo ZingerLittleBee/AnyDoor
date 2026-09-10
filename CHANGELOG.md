@@ -6,8 +6,26 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard History now labels video files as Video and provides a Video
+  filter. Existing file references gain the category on upgrade; videos
+  remain available in File and preserve their original preview and paste behavior.
+- Video cards show an asynchronously generated first-frame cover, preserving
+  orientation and aspect ratio, with a video icon when the file cannot be decoded.
+
+### Changed
+
+- Clipboard History's default category order is now Favorites, Screenshot,
+  Text, Link, Image, Video, File, Email, Color, Screen Text, and QR Code.
+  All stays first, custom tags keep their position after Favorites, and
+  previously saved manual ordering is preserved.
+
 ### Fixed
 
+- Clipboard video previews stay open while using playback controls, the
+  More menu, and nested menus such as Playback Speed. Interacting with these
+  controls no longer dismisses the preview or the Clipboard Wall.
 - Clipboard History search no longer rebuilds its index on every launch of a
   healthy store. Opening a ready index ran the FTS integrity-check on a
   read-only connection, treated that as corruption, and left text search

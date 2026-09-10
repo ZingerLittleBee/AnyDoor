@@ -260,6 +260,11 @@ struct ClipboardCardView: View {
                     .imageScale(.large)
                     .foregroundStyle(.secondary)
             }
+        case .video:
+            VideoThumbnail(
+                urls: hostMaterialization?.fileURLs ?? [],
+                title: entry.presentationTitle
+            )
         case .file:
             if let url = hostMaterialization?.fileURLs.first,
                 UTType(filenameExtension: url.pathExtension)?
@@ -268,7 +273,8 @@ struct ClipboardCardView: View {
                 FileThumbnail(url: url)
             } else {
                 VStack(spacing: 6) {
-                    Image(systemName: "doc.fill").imageScale(.large)
+                    Image(systemName: "doc.fill")
+                        .imageScale(.large)
                     Text(entry.presentationTitle)
                         .font(.caption2)
                         .lineLimit(2)
@@ -295,6 +301,59 @@ struct ClipboardCardView: View {
                     .scaledToFill()
             }
             .clipped()
+    }
+
+    private struct VideoThumbnail: View {
+        let urls: [URL]
+        let title: String
+        @Environment(\.displayScale) private var displayScale
+        @State private var image: CGImage?
+
+        private struct Request: Hashable {
+            let urls: [URL]
+            let maxPixel: Int
+        }
+
+        private var request: Request {
+            Request(urls: urls, maxPixel: Int(ceil(230 * displayScale / 64)) * 64)
+        }
+
+        var body: some View {
+            Group {
+                if let image {
+                    Color.clear.overlay {
+                        Image(decorative: image, scale: displayScale)
+                            .resizable()
+                            .interpolation(.high)
+                            .scaledToFit()
+                    }
+                    .clipped()
+                } else {
+                    VStack(spacing: 6) {
+                        Image(systemName: "video.fill")
+                            .imageScale(.large)
+                        Text(title)
+                            .font(.caption2)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(8)
+                }
+            }
+            .task(id: request) {
+                image = nil
+                // A clipboard file group may put a document before its video.
+                for url in request.urls {
+                    guard !Task.isCancelled else { return }
+                    let cover = await VideoThumbnailCache.thumbnail(at: url, maxPixel: request.maxPixel)
+                    guard !Task.isCancelled else { return }
+                    if let cover {
+                        image = cover
+                        return
+                    }
+                }
+            }
+        }
     }
 
     private struct FileThumbnail: View {

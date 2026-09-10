@@ -31,6 +31,19 @@ final class ClipboardQuickLookWindow {
 
     var isVisible: Bool { panel?.isVisible == true }
 
+    /// Shared by the preview and wall so neither closes the other while a
+    /// mouse event belongs to the preview.
+    func containsMouseEvent(_ event: NSEvent) -> Bool {
+        guard let panel, panel.isVisible else { return false }
+        return ClipboardPreviewClickPolicy.isInsidePreview(
+            eventWindowNumber: event.window?.windowNumber,
+            previewWindowNumber: panel.windowNumber,
+            previewFrame: panel.frame,
+            screenLocation: event.window?.convertPoint(toScreen: event.locationInWindow)
+                ?? event.locationInWindow
+        ) || ClipboardPreviewMenuHitTesting.contains(event)
+    }
+
     /// Shows `url`, or swaps the content of an open preview (arrow-key follow).
     /// The panel is resized to the new item so a portrait shot doesn't sit in a
     /// landscape box.
@@ -149,14 +162,17 @@ final class ClipboardQuickLookWindow {
         ) { [weak self] event in
             guard let self else { return event }
             MainThreadIsolation.run {
-                if event.window !== self.panel { self.close() }
+                if !self.containsMouseEvent(event) { self.close() }
             }
             return event
         }
         let global = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
-        ) { [weak self] _ in
-            MainThreadIsolation.run { self?.close() }
+        ) { [weak self] event in
+            MainThreadIsolation.run {
+                guard let self, !self.containsMouseEvent(event) else { return }
+                self.close()
+            }
         }
         mouseMonitors = [local, global].compactMap { $0 }
     }
@@ -336,6 +352,23 @@ final class ClipboardQuickLookWindow {
             NSColor.windowBackgroundColor.cgColor
         container.autoresizingMask = [.width, .height]
         return container
+    }
+}
+
+enum ClipboardPreviewClickPolicy {
+    static func isInsidePreview(
+        eventWindowNumber: Int?,
+        previewWindowNumber: Int,
+        previewFrame: NSRect,
+        screenLocation: NSPoint
+    ) -> Bool {
+        // Preserve explicit local window ownership, even when another window
+        // overlaps the preview. A remote renderer has no NSWindow in this
+        // process; AppKit supplies screen coordinates for those events.
+        if let eventWindowNumber {
+            return eventWindowNumber == previewWindowNumber
+        }
+        return previewFrame.contains(screenLocation)
     }
 }
 

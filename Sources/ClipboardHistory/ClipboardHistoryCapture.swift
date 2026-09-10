@@ -1040,12 +1040,10 @@ extension ClipboardHistoryModule {
                     facets.insert(.screenshot)
                 }
             case .file(let reference):
-                facets.insert(.file)
-                if let resourceType = reference.resourceType,
-                    UTType(resourceType)?.conforms(to: .image) == true
-                {
-                    facets.insert(.image)
-                }
+                facets.formUnion(ClipboardHistoryFileClassification.facets(
+                    resourceType: reference.resourceType,
+                    capturedPath: reference.capturedPath
+                ))
             case .color:
                 facets.insert(.color)
             }

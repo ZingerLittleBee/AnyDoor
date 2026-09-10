@@ -63,6 +63,26 @@ final class ClipboardCategoryOrderTests: XCTestCase {
         XCTAssertEqual(merged, [.favorites, .all])
     }
 
+    @MainActor
+    func testVideoAppendsAfterASavedPreUpgradeOrderAndPersists() throws {
+        let available = ClipboardWallState.order(tags: [])
+        let preUpgradeOrder = available.filter { $0 != .kind(.video) }.reversed()
+        let merged = ClipboardCategoryOrder.merge(
+            persistedIDs: preUpgradeOrder.map(\.persistentID),
+            available: available
+        )
+        XCTAssertEqual(merged, Array(preUpgradeOrder) + [.kind(.video)])
+
+        let suite = "ClipboardCategoryOrderTests.video"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.removePersistentDomain(forName: suite)
+        let videoFirst: [ClipboardWallCategory] = [.kind(.video)] + Array(preUpgradeOrder)
+        ClipboardCategoryOrder.save(videoFirst, to: defaults)
+        XCTAssertEqual(ClipboardCategoryOrder.load(from: defaults).first, "kind:video")
+        XCTAssertEqual(ClipboardCategoryOrder.apply(to: available, defaults: defaults), videoFirst)
+    }
+
     func testSaveLoadRoundTrip() throws {
         let suite = "ClipboardCategoryOrderTests"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

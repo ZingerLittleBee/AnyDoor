@@ -2840,6 +2840,23 @@
         }
       }
     },
+    "clipboard.kind.video": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "视频"
+          }
+        }
+      }
+    },
     "clipboard.paging.end": {
       "extractionState": "manual",
       "localizations": {

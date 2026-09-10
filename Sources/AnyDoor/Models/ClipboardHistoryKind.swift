@@ -7,6 +7,7 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
     case screenshot
     case text
     case image
+    case video
     case file
 
     var titleKey: L10n.Key {
@@ -17,6 +18,7 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
         case .screenshot: return .clipboardKindScreenshot
         case .text:       return .clipboardKindText
         case .image:      return .clipboardKindImage
+        case .video:      return .clipboardKindVideo
         case .file:       return .clipboardKindFile
         }
     }
@@ -26,7 +28,7 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
     var isTextBearing: Bool {
         switch self {
         case .text, .ocr, .qrcode: return true
-        case .color, .screenshot, .image, .file: return false
+        case .color, .screenshot, .image, .video, .file: return false
         }
     }
 }

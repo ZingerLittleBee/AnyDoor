@@ -7,6 +7,7 @@ extension ClipboardHistoryEntry {
         for facet in [
             ClipboardHistoryFacet.screenshot,
             .image,
+            .video,
             .file,
             .color,
             .qrCode,
@@ -29,6 +30,8 @@ extension ClipboardHistoryEntry {
             return .clipboardKindImage
         case .screenshot:
             return .clipboardKindScreenshot
+        case .video:
+            return .clipboardKindVideo
         case .file:
             return .clipboardKindFile
         case .qrCode:

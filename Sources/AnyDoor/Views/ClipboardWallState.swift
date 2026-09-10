@@ -49,6 +49,8 @@ enum ClipboardWallCategory: Hashable {
                 return .screenshot
             case .image:
                 return .image
+            case .video:
+                return .video
             case .file:
                 return .file
             }
@@ -379,12 +381,13 @@ final class ClipboardWallState {
         [.all, .favorites]
             + tags.map { .tag($0.id) }
             + [
+                .kind(.screenshot),
                 .kind(.text),
                 .link,
-                .email,
                 .kind(.image),
+                .kind(.video),
                 .kind(.file),
-                .kind(.screenshot),
+                .email,
                 .kind(.color),
                 .kind(.ocr),
                 .kind(.qrcode),

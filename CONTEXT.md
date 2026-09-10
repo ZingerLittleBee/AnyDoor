@@ -135,12 +135,12 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   _Avoid_: Plaintext Cache, Cross-filesystem Transaction, Payload Rollback.
 - **Content Facet** (内容特征) — A filterable, non-exclusive classification
   derived from Clipboard Item content. The closed set is Text, Link, Email,
-  Color, Image, Screenshot, File, and QR Code. A Clipboard Entry exposes the
-  union of its items' facets, so one entry can match several filters without
-  being duplicated: a PNG file is File and Image, a screenshot containing a QR
-  code is Image, Screenshot, and QR Code, and textual URLs, email addresses, or
-  colors also remain Text. OCR output is searchable derived data rather than a
-  facet or a separate entry.
+  Color, Image, Screenshot, Video, File, and QR Code. A Clipboard Entry exposes
+  the union of its items' facets, so one entry can match several filters without
+  being duplicated: a PNG file is File and Image, a movie file is File and Video,
+  a screenshot containing a QR code is Image, Screenshot, and QR Code, and
+  textual URLs, email addresses, or colors also remain Text. OCR output is
+  searchable derived data rather than a facet or a separate entry.
   _Avoid_: Clipboard Kind, Primary Category, OCR Entry.
 - **Facet Classification** (内容特征识别) — Deriving Content Facets first
   from explicit Standard Clipboard Representations and only then from an Exact

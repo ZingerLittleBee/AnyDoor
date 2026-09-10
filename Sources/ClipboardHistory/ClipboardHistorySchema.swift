@@ -134,6 +134,26 @@ extension ClipboardHistoryModule {
                     """
             )
         }
+        migrator.registerMigration("v12_video_facet") { database in
+            // Stream saved metadata so existing video entries gain the filter
+            // without reading their files, payloads, or bookmarks into memory.
+            let members = try Row.fetchCursor(database, sql: """
+                SELECT entry_id, resource_type, captured_path
+                FROM clipboard_file_members
+                """)
+            while let member = try members.next() {
+                let resourceType: String? = member["resource_type"]
+                let capturedPath: String = member["captured_path"]
+                guard ClipboardHistoryFileClassification.facets(
+                    resourceType: resourceType, capturedPath: capturedPath
+                ).contains(.video) else { continue }
+                let entryID: String = member["entry_id"]
+                try database.execute(sql: """
+                    INSERT OR IGNORE INTO clipboard_entry_facets(entry_id, facet)
+                    VALUES (?, 'video')
+                    """, arguments: [entryID])
+            }
+        }
         return migrator
     }
 

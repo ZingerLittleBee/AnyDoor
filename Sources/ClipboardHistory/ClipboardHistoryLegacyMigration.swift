@@ -796,11 +796,10 @@ extension ClipboardHistoryModule {
                     faultInjector: faultInjector
                 )
             }
-            if let resourceType = member.resourceType,
-                UTType(resourceType)?.conforms(to: .image) == true
-            {
-                facets.insert(.image)
-            }
+            facets.formUnion(ClipboardHistoryFileClassification.facets(
+                resourceType: member.resourceType,
+                capturedPath: member.capturedPath
+            ))
             snapshotItems.append(
                 PasteboardSnapshot.Item(
                     representations: [

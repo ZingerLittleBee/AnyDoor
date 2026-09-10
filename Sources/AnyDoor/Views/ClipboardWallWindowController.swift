@@ -32,6 +32,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     private var scrollMonitor: Any?
     private var flagsMonitor: Any?
     private var globalMouseMonitor: Any?
+    private var applicationActivationObserver: NSObjectProtocol?
     private var previewTask: Task<Void, Never>?
     /// The in-flight ⌘→ step. Held so a key repeat can be dropped instead of
     /// stacking page requests behind a held-down arrow.
@@ -152,6 +153,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         if let front = NSWorkspace.shared.frontmostApplication,
            front.processIdentifier != NSRunningApplication.current.processIdentifier {
             previousApp = front
+        } else {
+            previousApp = nil
         }
         // Anchor to the screen's physical bottom edge (not visibleFrame, which
         // sits above the Dock) so the panel is flush with no gap underneath.
@@ -320,21 +323,53 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             }
             return event
         }
-        // A global mouse-down fires only for clicks NOT delivered to our app —
-        // i.e. anywhere outside the wall — so any such click dismisses it.
+        // Global delivery does not establish that a click is outside a preview:
+        // Quick Look can host its content in another process.
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
+        ) { [weak self] event in
             MainThreadIsolation.run {
                 guard let self else { return }
                 // Don't throw away an in-progress edit on a stray outside click.
                 if ClipboardTextWindow.shared.isEditing { return }
+                if ClipboardQuickLookWindow.shared.containsMouseEvent(event) { return }
+                self.dismiss(restoreFocus: false)
+            }
+        }
+        // A Quick Look menu can take key status without leaving this workflow.
+        // Observe actual app switches separately so Cmd-Tab still dismisses the
+        // stack even when the wall has already resigned key to a preview menu.
+        applicationActivationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                as? NSRunningApplication else { return }
+            let processID = app.processIdentifier
+            let activationPolicy = app.activationPolicy
+            MainThreadIsolation.run {
+                guard let self, self.window?.isVisible == true,
+                      !ClipboardTextWindow.shared.isEditing,
+                      ClipboardWallDismissalPolicy.shouldDismissAfterActivatingApplication(
+                        hasQuickLook: ClipboardQuickLookWindow.shared.isVisible,
+                        isAnimating: self.isAnimating,
+                        activatedProcessID: processID,
+                        currentProcessID: NSRunningApplication.current.processIdentifier,
+                        originalProcessID: self.previousApp?.processIdentifier,
+                        activationPolicy: activationPolicy
+                      )
+                else { return }
                 self.dismiss(restoreFocus: false)
             }
         }
     }
 
     private func removeMonitors() {
+        if let applicationActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(applicationActivationObserver)
+            self.applicationActivationObserver = nil
+        }
         for monitor in [keyMonitor, scrollMonitor, flagsMonitor, globalMouseMonitor] {
             if let monitor { NSEvent.removeMonitor(monitor) }
         }
@@ -1114,14 +1149,41 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         removeMonitors()
     }
     func windowDidResignKey(_ notification: Notification) {
-        // Don't close while the floating text panel is up — the text editor takes
-        // key status while the wall stays open behind it. (The Quick Look panel
-        // never takes key, so it can't be the reason the wall resigned.)
-        if ClipboardTextWindow.shared.isVisible { return }
-        // Ignore the resign that the slide-out animation itself triggers.
-        guard !isAnimating else { return }
+        // The preview panel itself cannot become key, but its menus can move
+        // focus away from the wall. Outside clicks and application switches
+        // have their own dismissal paths; key loss alone is not enough here.
+        guard ClipboardWallDismissalPolicy.shouldDismissAfterResigningKey(
+            isAnimating: isAnimating,
+            hasTextWindow: ClipboardTextWindow.shared.isVisible,
+            hasQuickLook: ClipboardQuickLookWindow.shared.isVisible
+        ) else { return }
         // A click elsewhere already moved focus; don't yank it back.
         dismiss(restoreFocus: false)
+    }
+}
+
+enum ClipboardWallDismissalPolicy {
+    static func shouldDismissAfterResigningKey(
+        isAnimating: Bool,
+        hasTextWindow: Bool,
+        hasQuickLook: Bool
+    ) -> Bool {
+        !isAnimating && !hasTextWindow && !hasQuickLook
+    }
+
+    static func shouldDismissAfterActivatingApplication(
+        hasQuickLook: Bool,
+        isAnimating: Bool,
+        activatedProcessID: pid_t,
+        currentProcessID: pid_t,
+        originalProcessID: pid_t?,
+        activationPolicy: NSApplication.ActivationPolicy
+    ) -> Bool {
+        // Returning from a preview helper to the original foreground app is
+        // not a switch away from the clipboard workflow.
+        hasQuickLook && !isAnimating && activationPolicy == .regular
+            && activatedProcessID != currentProcessID
+            && activatedProcessID != originalProcessID
     }
 }
 
