@@ -3,6 +3,40 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>4.2.1</title>
+            <pubDate>Thu, 10 Sep 2026 21:50:23 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>4.2.199</sparkle:version>
+            <sparkle:shortVersionString>4.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[### Added
+
+- Clipboard History now labels video files as Video and provides a Video
+  filter. Existing file references gain the category on upgrade; videos
+  remain available in File and preserve their original preview and paste behavior.
+- Video cards show an asynchronously generated first-frame cover, preserving
+  orientation and aspect ratio, with a video icon when the file cannot be decoded.
+
+### Changed
+
+- Clipboard History's default category order is now Favorites, Screenshot,
+  Text, Link, Image, Video, File, Email, Color, Screen Text, and QR Code.
+  All stays first, custom tags keep their position after Favorites, and
+  previously saved manual ordering is preserved.
+
+### Fixed
+
+- Clipboard video previews stay open while using playback controls, the
+  More menu, and nested menus such as Playback Speed. Interacting with these
+  controls no longer dismisses the preview or the Clipboard Wall.
+- Clipboard History search no longer rebuilds its index on every launch of a
+  healthy store. Opening a ready index ran the FTS integrity-check on a
+  read-only connection, treated that as corruption, and left text search
+  empty until a background rebuild finished.
+]]></description>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.1/AnyDoor-4.2.1.zip" length="15378181" type="application/octet-stream" sparkle:edSignature="NMWd7TgR5Lc74fUytoTljG0BBCQC7DQDB6xuLBCObFVSLG+nC3fKgcwEzREAHc+sHz7lXXaqNcSsI3btYRdHCw=="/>
+        </item>
+        <item>
             <title>4.2.0</title>
             <pubDate>Sun, 06 Sep 2026 13:57:44 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -271,43 +305,6 @@
   feed without accepting Beta identities in the Stable release command.
 ]]></description>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.1.1/AnyDoor-4.1.1.zip" length="13729857" type="application/octet-stream" sparkle:edSignature="w00qZMVr99GWMnxfLdKrl49rE9JrxKaPqy+piwsLTPyPtskeVsQQhXkIHjslqrihstFnUrVQDd0jjXj7un23Aw=="/>
-        </item>
-        <item>
-            <title>4.1.0</title>
-            <pubDate>Tue, 28 Jul 2026 23:38:50 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>4.1.0</sparkle:version>
-            <sparkle:shortVersionString>4.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[
-### Added
-
-- Config sync across Macs (Settings → Sync): pick a folder inside
-  your cloud drive (Google Drive, Dropbox, iCloud Drive, NAS…) and every Mac
-  pointing at it keeps app shortcuts, builtin preferences, Quicklinks, and
-  portable settings in sync automatically. Each machine writes only its own
-  state file and merges the others (record-level last-writer-wins with
-  tombstoned deletions), so cloud clients never see conflicting writes.
-  Machine-local state (helper approval, Script Plugins, the sync folder
-  choice itself) stays local; the manual export/import backup remains for
-  one-shot migration.
-- Config sync over WebDAV: pick WebDAV as the sync transport and enter a
-  server URL (https; plain http is accepted for loopback test servers),
-  username, and app password to sync through Nextcloud, 坚果云, Synology,
-  or any other WebDAV server — no cloud-drive client needed. The password
-  lives in the Keychain, and the target directory is created automatically
-  on first sync.
-- Sync now has its own Settings tab (previously a section inside General),
-  including the manual backup export/import and a link to the setup guide
-  explaining how sync works.
-
-### Fixed
-
-- Settings → Sync: the WebDAV server-address placeholder no longer jiggles
-  when the field gains focus (it is now drawn as a static overlay instead of
-  the native prompt, which macOS re-renders on focus in grouped forms).
-]]></description>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.1.0/AnyDoor-4.1.0.zip" length="13728766" type="application/octet-stream" sparkle:edSignature="0S/yNbL8bLtxRLwycjHUaqMtBijA3VizI0vzscp4zBJJfNuMPU/slW8+xFtyw6AQW1gHRjtAxgDy3HV5LjjVDw=="/>
         </item>
         <item>
             <title>1.2.0</title>

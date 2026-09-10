@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.1] - 2026-09-10
+
 ### Added
 
 - Clipboard History now labels video files as Video and provides a Video
