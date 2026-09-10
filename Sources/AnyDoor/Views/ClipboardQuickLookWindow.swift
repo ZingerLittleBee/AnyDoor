@@ -41,7 +41,7 @@ final class ClipboardQuickLookWindow {
             previewFrame: panel.frame,
             screenLocation: event.window?.convertPoint(toScreen: event.locationInWindow)
                 ?? event.locationInWindow
-        )
+        ) || ClipboardPreviewMenuHitTesting.contains(event)
     }
 
     /// Shows `url`, or swaps the content of an open preview (arrow-key follow).
