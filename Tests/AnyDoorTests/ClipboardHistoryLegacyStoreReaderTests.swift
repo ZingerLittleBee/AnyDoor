@@ -12,6 +12,13 @@ import XCTest
 @MainActor
 final class ClipboardHistoryLegacyStoreReaderTests: XCTestCase {
     func testEveryLegacyKindSurvivesTheRawRead() throws {
+        // The v1 schema is frozen. New presentation kinds must not extend
+        // the set of values accepted by its migration reader.
+        let legacyKinds: [(ClipboardHistoryKind, ClipboardHistoryLegacyKind)] = [
+            (.text, .text), (.color, .color), (.qrcode, .qrCode),
+            (.ocr, .ocr), (.image, .image), (.screenshot, .screenshot),
+            (.file, .file),
+        ]
         let manifest = try JSONEncoder().encode([
             ClipboardFileEntry(
                 storedName: "stored",
@@ -21,11 +28,10 @@ final class ClipboardHistoryLegacyStoreReaderTests: XCTestCase {
         ])
         var expected: [UUID: ClipboardHistoryLegacyKind] = [:]
         let storeURL = try makeStore { context in
-            // CaseIterable keeps this exhaustive: a new v1 kind cannot be
-            // added without deciding how the reader maps it.
-            for (index, kind) in ClipboardHistoryKind.allCases.enumerated() {
+            for (index, pair) in legacyKinds.enumerated() {
+                let (kind, legacyKind) = pair
                 let id = UUID()
-                expected[id] = Self.expectedLegacyKind(for: kind)
+                expected[id] = legacyKind
                 context.insert(
                     ClipboardHistoryItem(
                         id: id,
@@ -44,7 +50,7 @@ final class ClipboardHistoryLegacyStoreReaderTests: XCTestCase {
             at: storeURL
         )
 
-        XCTAssertEqual(entries.count, ClipboardHistoryKind.allCases.count)
+        XCTAssertEqual(entries.count, legacyKinds.count)
         for entry in entries {
             XCTAssertEqual(entry.kind, expected[entry.id])
         }
@@ -202,20 +208,6 @@ final class ClipboardHistoryLegacyStoreReaderTests: XCTestCase {
                 .count,
             0
         )
-    }
-
-    private static func expectedLegacyKind(
-        for kind: ClipboardHistoryKind
-    ) -> ClipboardHistoryLegacyKind {
-        switch kind {
-        case .text: .text
-        case .color: .color
-        case .qrcode: .qrCode
-        case .ocr: .ocr
-        case .image: .image
-        case .screenshot: .screenshot
-        case .file: .file
-        }
     }
 
     private func makeStore(

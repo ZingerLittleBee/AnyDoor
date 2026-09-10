@@ -76,6 +76,10 @@ struct ClipboardHistoryRow: View {
             Image(systemName: "qrcode")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
+        case .video:
+            Image(systemName: "video")
+                .frame(width: 18, height: 18)
+                .foregroundStyle(.secondary)
         case .file:
             Image(systemName: "doc")
                 .frame(width: 18, height: 18)

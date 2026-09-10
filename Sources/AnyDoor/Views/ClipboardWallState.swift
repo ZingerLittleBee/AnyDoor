@@ -49,6 +49,8 @@ enum ClipboardWallCategory: Hashable {
                 return .screenshot
             case .image:
                 return .image
+            case .video:
+                return .video
             case .file:
                 return .file
             }
@@ -383,6 +385,7 @@ final class ClipboardWallState {
                 .link,
                 .email,
                 .kind(.image),
+                .kind(.video),
                 .kind(.file),
                 .kind(.screenshot),
                 .kind(.color),

@@ -372,6 +372,40 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     @MainActor
+    func testVideoFileCaptureSupportsBothFiltersAndPreservesPasteReferences() async throws {
+        let fixture = try TemporaryStore()
+        let files = try TemporaryFileReferences()
+        let video = try files.create(name: "clip.mp4", contents: "metadata only")
+        let text = try files.create(name: "notes.txt", contents: "notes")
+        let module = makeReadyModule(in: fixture)
+        let result = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: makeFilePasteboard([video, text])),
+            source: .unknown
+        )
+        guard case .captured(let capture) = result else {
+            return XCTFail("Expected the video file group to be captured")
+        }
+        for facet in [ClipboardHistoryFacet.video, .file] {
+            let page = try await module.page(ClipboardHistoryQuery(facet: facet))
+            XCTAssertEqual(page.entries.map(\.id), [capture.entryID])
+            XCTAssertEqual(page.entries.first?.facets, [.file, .video])
+        }
+        let images = try await module.page(ClipboardHistoryQuery(facet: .image))
+        XCTAssertTrue(images.entries.isEmpty)
+        XCTAssertEqual(try fixture.payloadFiles(), [])
+        let materialized = try await module.materialize(
+            ClipboardHistoryMaterializationRequest(entryID: capture.entryID, purpose: .normalPaste)
+        )
+        XCTAssertEqual(
+            materialized.items.compactMap { item -> URL? in
+                guard case .file(let reference) = item.representations.first else { return nil }
+                return reference.currentURL.resolvingSymlinksInPath()
+            },
+            [video, text].map { $0.resolvingSymlinksInPath() }
+        )
+    }
+
+    @MainActor
     func testFileCaptureUsesAtomicBookmarksWithoutCopyingOrPathFallback()
         async throws
     {
@@ -827,6 +861,66 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertEqual(stored, String(oversized.prefix(limit)))
     }
 
+    func testVideoFacetMigrationBackfillsUnavailableFilesAndIsIdempotent() async throws {
+        let fixture = try TemporaryDatabase()
+        let legacy = try ClipboardHistoryModule.openDatabase(
+            at: fixture.url, databaseKey: fixture.key,
+            migrationTarget: "v11_bounded_preview_text"
+        )
+        try await legacy.write { database in
+            for (id, path, type) in [
+                ("movie", "/missing/clip", "public.movie"),
+                ("fallback", "/missing/clip.MKV", "public.data"),
+                ("audio", "/missing/sound.mp3", "public.audio"),
+            ] {
+                try database.execute(
+                    sql: "INSERT INTO clipboard_entries(id, captured_at, last_captured_at, preview_text) VALUES (?, 0, 0, ?)",
+                    arguments: [id, path]
+                )
+                try database.execute(
+                    sql: "INSERT INTO clipboard_items(entry_id, item_index) VALUES (?, 0)",
+                    arguments: [id]
+                )
+                try database.execute(
+                    sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES (?, 'file')",
+                    arguments: [id]
+                )
+                // Multiple video members must still add exactly one facet per entry.
+                for member in 0..<2 {
+                    try database.execute(
+                        sql: """
+                            INSERT INTO clipboard_file_members(
+                                entry_id, item_index, member_index, captured_path,
+                                display_name, resource_type, availability
+                            ) VALUES (?, 0, ?, ?, 'clip', ?, 'missing')
+                            """,
+                        arguments: [id, member, path, type]
+                    )
+                }
+            }
+        }
+        try legacy.close()
+
+        for _ in 0..<2 {
+            let migrated = try ClipboardHistoryModule.openDatabase(
+                at: fixture.url, databaseKey: fixture.key
+            )
+            let videoIDs = try await migrated.read { database in
+                try String.fetchAll(database, sql: "SELECT entry_id FROM clipboard_entry_facets WHERE facet = 'video' ORDER BY entry_id")
+            }
+            XCTAssertEqual(videoIDs, ["fallback", "movie"])
+            let fileCount = try await migrated.read { database in
+                try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM clipboard_entry_facets WHERE facet = 'file'")
+            }
+            XCTAssertEqual(fileCount, 3)
+            let memberCount = try await migrated.read { database in
+                try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM clipboard_file_members WHERE availability = 'missing'")
+            }
+            XCTAssertEqual(memberCount, 6)
+            try migrated.close()
+        }
+    }
+
     func testEncryptedStoreAppliesVersionedMigrationsAndPassesIntegrityChecks()
         async throws
     {
@@ -852,6 +946,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v9_retention_delete_index",
                 "v10_recency_paging_index",
                 "v11_bounded_preview_text",
+                "v12_video_facet",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -892,6 +987,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v9_retention_delete_index",
                 "v10_recency_paging_index",
                 "v11_bounded_preview_text",
+                "v12_video_facet",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)

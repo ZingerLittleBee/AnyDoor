@@ -464,6 +464,19 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(order[text + 2], .email)
     }
 
+    func testVideoCategoryKeepsFileFilterIndependent() {
+        XCTAssertEqual(ClipboardWallCategory.kind(.video).facetFilter, .video)
+        XCTAssertEqual(ClipboardWallCategory.kind(.file).facetFilter, .file)
+        XCTAssertEqual(ClipboardWallCategory.kind(.video).titleKey, .clipboardKindVideo)
+        XCTAssertEqual(ClipboardWallCategory.kind(.video).persistentID, "kind:video")
+        let order = ClipboardWallState.order(tags: [])
+        guard let image = order.firstIndex(of: .kind(.image)) else {
+            return XCTFail("Image category missing from default order")
+        }
+        XCTAssertEqual(order[image + 1], .kind(.video))
+        XCTAssertEqual(order[image + 2], .kind(.file))
+    }
+
     func testEmptyItemsHasNilSelection() async {
         let state = await makeState()
         XCTAssertNil(state.selectedItem)

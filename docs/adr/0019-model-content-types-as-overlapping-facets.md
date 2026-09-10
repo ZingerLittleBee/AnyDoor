@@ -13,6 +13,7 @@ set:
 - Color
 - Image
 - Screenshot
+- Video
 - File
 - QR Code
 
@@ -30,8 +31,13 @@ Explicit standard URL, color, file-URL, and image representations establish
 their facets directly. Plain-text inference requires the complete text after
 derived surrounding-whitespace removal to be one valid Link, Email, or Color.
 Embedded values remain ordinary searchable Text rather than broadening facet
-filters. A referenced file gains Image from its declared resource type or
-filename type without opening file contents. Derived OCR and QR strings never
+filters. A referenced file gains Image or Video from its declared resource type or
+filename type without opening file contents. Video includes movie and video UTIs;
+unregistered MKV and WebM containers use their filename extensions. A declared
+non-video content type remains authoritative. Videos remain File references and
+appear in both filters; classification does not copy video payloads. Existing file
+references gain Video from stored metadata when the database is upgraded, even
+if the original file is currently unavailable. Derived OCR and QR strings never
 feed Link, Email, or Color inference; those facets describe stored clipboard
 representations rather than text discovered later.
 

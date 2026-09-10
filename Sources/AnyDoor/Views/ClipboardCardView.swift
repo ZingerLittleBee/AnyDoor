@@ -260,7 +260,7 @@ struct ClipboardCardView: View {
                     .imageScale(.large)
                     .foregroundStyle(.secondary)
             }
-        case .file:
+        case .video, .file:
             if let url = hostMaterialization?.fileURLs.first,
                 UTType(filenameExtension: url.pathExtension)?
                     .conforms(to: .image) == true
@@ -268,7 +268,8 @@ struct ClipboardCardView: View {
                 FileThumbnail(url: url)
             } else {
                 VStack(spacing: 6) {
-                    Image(systemName: "doc.fill").imageScale(.large)
+                    Image(systemName: entry.presentationFacet == .video ? "video.fill" : "doc.fill")
+                        .imageScale(.large)
                     Text(entry.presentationTitle)
                         .font(.caption2)
                         .lineLimit(2)

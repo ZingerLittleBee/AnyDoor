@@ -511,6 +511,8 @@ private extension ClipboardHistoryKind {
             .screenshot
         case .image:
             .image
+        case .video:
+            .video
         case .file:
             .file
         }

@@ -52,6 +52,7 @@ public enum ClipboardHistoryFacet: String, CaseIterable, Sendable {
     case color
     case image
     case screenshot
+    case video
     case file
     case qrCode
 }

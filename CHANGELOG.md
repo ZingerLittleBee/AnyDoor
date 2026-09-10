@@ -6,6 +6,12 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Clipboard History now labels video files as Video and provides a Video
+  filter. Existing file references gain the category on upgrade; videos
+  remain available in File and preserve their original preview and paste behavior.
+
 ### Fixed
 
 - Clipboard History search no longer rebuilds its index on every launch of a
