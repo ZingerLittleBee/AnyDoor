@@ -455,13 +455,15 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(ClipboardWallCategory.email.persistentID, "facet:email")
     }
 
-    func testDefaultOrderListsLinkAndEmailAfterText() {
-        let order = ClipboardWallState.order(tags: [])
-        guard let text = order.firstIndex(of: .kind(.text)) else {
-            return XCTFail("Text category missing from default order")
-        }
-        XCTAssertEqual(order[text + 1], .link)
-        XCTAssertEqual(order[text + 2], .email)
+    func testDefaultCategoryOrder() {
+        XCTAssertEqual(
+            ClipboardWallState.order(tags: []),
+            [
+                .all, .favorites, .kind(.screenshot), .kind(.text), .link,
+                .kind(.image), .kind(.video), .kind(.file), .email,
+                .kind(.color), .kind(.ocr), .kind(.qrcode),
+            ]
+        )
     }
 
     func testVideoCategoryKeepsFileFilterIndependent() {
