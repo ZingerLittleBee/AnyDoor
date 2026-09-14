@@ -8,13 +8,10 @@ versioning.
 
 ### Fixed
 
-- Apple Translation starts a new translation when Enter is pressed again with
-  the same language pair. Results from older requests no longer replace a
-  newer translation.
-- Bing's free translation service works again after an endpoint change caused
-  HTTP 404 errors.
-- Google's free translation service shows how long to wait when requests are
-  rate-limited, and pauses repeated requests during the cooldown.
+- Apple Translation restarts on Enter with the same language pair and ignores
+  outdated results.
+- Bing free translation works again after an endpoint change caused HTTP 404 errors.
+- Google free translation shows a retry time and pauses requests when rate-limited.
 
 ## [4.2.1] - 2026-09-10
 
