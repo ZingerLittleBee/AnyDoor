@@ -183,21 +183,39 @@ final class BingFreeTranslationProviderTests: XCTestCase {
         let provider = BingFreeTranslationProvider(id: "bingFree", session: session)
         let request = TranslationRequest(text: "Mythos", source: nil, target: .simplifiedChinese)
 
-        let consumer = Task {
-            for try await _ in provider.translate(request) {}
+        // Production contract: onTermination cancels the inner Task, which
+        // finish()es the stream without error. Cancelling an AsyncThrowingStream
+        // consumer may therefore complete iteration normally; a throw is not
+        // required. Consumer CancellationError would only prove the wrapping
+        // Task was cancelled, not that the provider finished silently.
+        let consumer = Task { () -> [TranslationChunk] in
+            var chunks: [TranslationChunk] = []
+            do {
+                for try await chunk in provider.translate(request) {
+                    chunks.append(chunk)
+                }
+            } catch is CancellationError {
+                // Cooperative cancel of the iterating task.
+            } catch let error as TranslationProviderError {
+                // If session.data(for:) wins with URLError.cancelled, the
+                // inherited catch maps it to .network (same ladder as Google).
+                // That is not a late translated result.
+                guard case .network = error else {
+                    XCTFail("unexpected provider error: \(error)")
+                    return chunks
+                }
+            } catch {
+                XCTFail("unexpected \(error)")
+            }
+            return chunks
         }
+
         let started = await BingTranslateHTTPStub.waitUntil { BingTranslateHTTPStub.recorded.count == 1 }
         XCTAssertTrue(started, "expected the translate request to start")
         consumer.cancel()
 
-        do {
-            try await consumer.value
-            XCTFail("expected CancellationError")
-        } catch is CancellationError {
-            // Consumer cancelled the stream.
-        } catch {
-            XCTFail("unexpected \(error)")
-        }
+        let chunks = await consumer.value
+        XCTAssertTrue(chunks.isEmpty, "cancelled stream must not yield a late result")
 
         let cancelled = await BingTranslateHTTPStub.waitUntil { BingTranslateHTTPStub.cancelledCount >= 1 }
         XCTAssertTrue(cancelled, "expected URLSession to cancel the in-flight request")
