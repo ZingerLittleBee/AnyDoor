@@ -40,6 +40,9 @@ enum TranslationProviderError: Error, Sendable, Equatable {
     case emptyResponse
     /// A transport-level failure; the associated value is a human-readable note.
     case network(String)
+    /// The backend refused the request because of rate limiting (HTTP 429).
+    /// `retryAfter` is the earliest instant a new request may contact the network.
+    case rateLimited(retryAfter: Date)
 }
 
 extension AsyncThrowingStream where Element == TranslationChunk, Failure == Error {

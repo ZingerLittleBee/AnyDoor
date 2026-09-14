@@ -28,5 +28,10 @@ func translationErrorMessage(_ error: Error) -> String {
         return L(.translationErrorEmptyResponse)
     case .network(let note):
         return note
+    case .rateLimited(let retryAfter):
+        return L(
+            .translationErrorRateLimited,
+            GoogleFreeRateLimitPolicy.remainingDisplaySeconds(until: retryAfter)
+        )
     }
 }

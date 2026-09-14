@@ -6,6 +6,16 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Apple Translation retriggers on a repeated Enter with the same language pair
+  instead of reusing an equal configuration that left the card stuck.
+- Bing's key-free translator uses the observed `translatetext` route instead of
+  the 404 auth hop.
+- Google's key-free translator reports HTTP 429 as a rate-limit with a retry
+  time, and a new Enter during a short cooldown fails immediately without
+  another request.
+
 ## [4.2.1] - 2026-09-10
 
 ### Added

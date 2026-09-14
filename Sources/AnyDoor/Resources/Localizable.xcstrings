@@ -13057,6 +13057,23 @@
         }
       }
     },
+    "translation.error.rateLimited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many requests. Try again in %d seconds."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请求过于频繁，请 %d 秒后再试。"
+          }
+        }
+      }
+    },
     "translation.expand": {
       "extractionState": "manual",
       "localizations": {

@@ -749,6 +749,7 @@ enum L10n {
         case translationErrorMissingConfig = "translation.error.missingConfig"
         case translationErrorDecode = "translation.error.decode"
         case translationErrorEmptyResponse = "translation.error.emptyResponse"
+        case translationErrorRateLimited = "translation.error.rateLimited"
         // Migration tasks append cases here. Keep alphabetical by raw value.
     }
 }
