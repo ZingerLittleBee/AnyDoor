@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Apple Translation restarts on Enter with the same language pair and ignores
+  outdated results.
+- Bing free translation works again after an endpoint change caused HTTP 404 errors.
+- Google free translation shows a retry time and pauses requests when rate-limited.
+
 ## [4.2.1] - 2026-09-10
 
 ### Added
