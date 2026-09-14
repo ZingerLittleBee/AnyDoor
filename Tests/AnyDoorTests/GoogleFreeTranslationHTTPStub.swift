@@ -25,13 +25,82 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
         }
     }
 
+    typealias Handler = @Sendable (URLRequest) async -> CannedResponse
+
     static let successBody = Data(#"[[["你好","hello",null,null,10]],null,"en"]"#.utf8)
 
-    private static let lock = NSLock()
-    private static var handler: (@Sendable (URLRequest) async -> CannedResponse)?
-    private static var requests: [URLRequest] = []
+    /// All mutable stub state lives in this lock box. A `static let` of a
+    /// lock-serialized class is concurrency-safe; the `@unchecked Sendable`
+    /// is sound because every field is read and written under `lock`.
+    private final class Storage: @unchecked Sendable {
+        private let lock = NSLock()
+        private var handler: Handler?
+        private var requests: [URLRequest] = []
+        private var loadTasks: [UUID: Task<Void, Never>] = []
+        private var cancelledIDs: Set<UUID> = []
 
-    private var loadTask: Task<Void, Never>?
+        func reset() -> [Task<Void, Never>] {
+            lock.lock()
+            handler = nil
+            requests = []
+            let tasks = Array(loadTasks.values)
+            loadTasks.removeAll()
+            cancelledIDs.removeAll()
+            lock.unlock()
+            return tasks
+        }
+
+        func setHandler(_ handler: @escaping Handler) {
+            lock.lock()
+            self.handler = handler
+            lock.unlock()
+        }
+
+        func record(_ request: URLRequest) -> Handler? {
+            lock.lock()
+            requests.append(request)
+            let handler = handler
+            lock.unlock()
+            return handler
+        }
+
+        var requestCount: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return requests.count
+        }
+
+        var recordedRequests: [URLRequest] {
+            lock.lock()
+            defer { lock.unlock() }
+            return requests
+        }
+
+        /// Returns `false` when `stopLoading` already ran for `id`, so the
+        /// caller must cancel the task it just created.
+        func storeTask(_ task: Task<Void, Never>, id: UUID) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if cancelledIDs.remove(id) != nil {
+                return false
+            }
+            loadTasks[id] = task
+            return true
+        }
+
+        func takeTask(id: UUID) -> Task<Void, Never>? {
+            lock.lock()
+            defer { lock.unlock() }
+            if let task = loadTasks.removeValue(forKey: id) {
+                return task
+            }
+            cancelledIDs.insert(id)
+            return nil
+        }
+    }
+
+    private static let storage = Storage()
+    private let loadID = UUID()
 
     static func session() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -42,43 +111,28 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
     }
 
     static func reset() {
-        lock.lock()
-        handler = nil
-        requests = []
-        lock.unlock()
+        for task in storage.reset() {
+            task.cancel()
+        }
     }
 
-    static func setHandler(
-        _ handler: @escaping @Sendable (URLRequest) async -> CannedResponse
-    ) {
-        lock.lock()
-        self.handler = handler
-        lock.unlock()
+    static func setHandler(_ handler: @escaping Handler) {
+        storage.setHandler(handler)
     }
 
-    static var requestCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return requests.count
-    }
+    static var requestCount: Int { storage.requestCount }
 
-    static var recordedRequests: [URLRequest] {
-        lock.lock()
-        defer { lock.unlock() }
-        return requests
-    }
+    static var recordedRequests: [URLRequest] { storage.recordedRequests }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let request = self.request
-        Self.lock.lock()
-        Self.requests.append(request)
-        let handler = Self.handler
-        Self.lock.unlock()
-
-        loadTask = Task {
+        let handler = Self.storage.record(request)
+        let loadID = self.loadID
+        let task = Task {
+            defer { _ = Self.storage.takeTask(id: loadID) }
             guard let handler else {
                 self.client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
                 return
@@ -96,9 +150,12 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
             self.client?.urlProtocol(self, didLoad: canned.body)
             self.client?.urlProtocolDidFinishLoading(self)
         }
+        if !Self.storage.storeTask(task, id: loadID) {
+            task.cancel()
+        }
     }
 
     override func stopLoading() {
-        loadTask?.cancel()
+        Self.storage.takeTask(id: loadID)?.cancel()
     }
 }

@@ -97,6 +97,20 @@ final class GoogleFreeRateLimitTests: XCTestCase {
         XCTAssertEqual(duration, 45, accuracy: 0.5)
     }
 
+    func testCooldownDurationRFC9110ExampleIMFFixdate() {
+        // RFC 9110 §5.6.7 example IMF-fixdate, not a round-trip of `imfDate`.
+        let retryAt = Date(timeIntervalSince1970: 784_111_777) // 1994-11-06 08:49:37 GMT
+        let now = retryAt.addingTimeInterval(-45)
+        XCTAssertEqual(
+            GoogleFreeRateLimitPolicy.cooldownDuration(
+                retryAfterHeader: "Sun, 06 Nov 1994 08:49:37 GMT",
+                now: now
+            ),
+            45,
+            accuracy: 0.5
+        )
+    }
+
     func testCooldownDurationPastHTTPDateUsesDefault() {
         let past = epoch.addingTimeInterval(-60)
         XCTAssertEqual(
@@ -304,22 +318,31 @@ final class GoogleFreeRateLimitTests: XCTestCase {
     func testCancellationDuringNetworkDoesNotPublishOrThrottle() async throws {
         let clock = GoogleFreeManualClock(epoch)
         let limiter = GoogleFreeRateLimiter(clock: clock)
+        let entered = ReleaseGate()
+        let hold = ReleaseGate()
+        defer { hold.release() }
         GoogleFreeTranslationHTTPStub.setHandler { _ in
-            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            entered.release()
+            await hold.wait()
             return .ok()
         }
+        let published = LockedValue<[TranslationChunk]>([])
+        let finished = ReleaseGate()
         let stream = provider(limiter).translate(makeRequest())
-        let task = Task { try await collect(stream) }
-        try await waitUntil { GoogleFreeTranslationHTTPStub.requestCount >= 1 }
-        task.cancel()
-        do {
-            _ = try await task.value
-            XCTFail("expected cancellation to finish the stream without success")
-        } catch is CancellationError {
-            // Provider maps URLSession cancel onto CancellationError.
-        } catch {
-            XCTFail("unexpected error \(error)")
+        let task = Task {
+            defer { finished.release() }
+            do {
+                for try await chunk in stream {
+                    published.withLock { $0.append(chunk) }
+                }
+            } catch {
+                // Consumer cancel may throw or finish the stream silently.
+            }
         }
+        try await waitUntil { entered.isReleased }
+        task.cancel()
+        try await waitUntil { finished.isReleased }
+        XCTAssertTrue(published.withLock { $0 }.isEmpty, "cancelled in-flight translate must not publish text")
         XCTAssertEqual(GoogleFreeTranslationHTTPStub.requestCount, 1)
 
         GoogleFreeTranslationHTTPStub.setHandler { _ in .ok() }
@@ -346,35 +369,34 @@ final class GoogleFreeRateLimitTests: XCTestCase {
         let clock = GoogleFreeManualClock(epoch)
         let limiter = GoogleFreeRateLimiter(clock: clock)
         let session = GoogleFreeTranslationHTTPStub.session()
-        let firstGate = ReleaseGate()
-        defer { firstGate.release() }
-        let indexLock = NSLock()
-        var index = 0
-        GoogleFreeTranslationHTTPStub.setHandler { _ in
-            let n: Int = {
-                indexLock.lock()
-                defer { indexLock.unlock() }
-                index += 1
-                return index
-            }()
-            if n == 1 {
-                await firstGate.wait()
+        let olderEntered = ReleaseGate()
+        let olderHold = ReleaseGate()
+        defer { olderHold.release() }
+        GoogleFreeTranslationHTTPStub.setHandler { request in
+            switch googleQueryValue(request, "q") {
+            case "one":
+                olderEntered.release()
+                await olderHold.wait()
                 return .ok()
+            case "two":
+                return .rateLimited(retryAfter: "30")
+            default:
+                XCTFail("unexpected Google query \(request.url as Any)")
+                return .status(500)
             }
-            return .rateLimited(retryAfter: "30")
         }
 
         let older = GoogleFreeTranslationProvider(id: "older", session: session, limiter: limiter)
         let newer = GoogleFreeTranslationProvider(id: "newer", session: session, limiter: limiter)
         let olderTask = Task { try await collect(older.translate(makeRequest("one"))) }
-        try await waitUntil { GoogleFreeTranslationHTTPStub.requestCount >= 1 }
+        try await waitUntil { olderEntered.isReleased }
 
         let newerError = await firstError(newer.translate(makeRequest("two")))
         guard case .rateLimited? = newerError as? TranslationProviderError else {
             return XCTFail("expected newer 429, got \(String(describing: newerError))")
         }
 
-        firstGate.release()
+        olderHold.release()
         let olderChunks = try await olderTask.value
         XCTAssertEqual(olderChunks.last, .final("你好"))
         let countAfterConcurrent = GoogleFreeTranslationHTTPStub.requestCount
@@ -385,6 +407,11 @@ final class GoogleFreeRateLimitTests: XCTestCase {
             return XCTFail("older success must not clear the newer cooldown")
         }
         XCTAssertEqual(GoogleFreeTranslationHTTPStub.requestCount, countAfterConcurrent)
+        XCTAssertFalse(
+            GoogleFreeTranslationHTTPStub.recordedRequests.contains {
+                googleQueryValue($0, "q") == "three"
+            }
+        )
     }
 
     func testEmptyInputDoesNotContactNetwork() async {
@@ -501,22 +528,59 @@ private func assertGoogleTranslateURL(_ request: URLRequest) {
     XCTAssertEqual(value("q"), "hello")
 }
 
-/// Holds the first in-flight stub response until the test releases it.
+private func googleQueryValue(_ request: URLRequest, _ name: String) -> String? {
+    guard let url = request.url else { return nil }
+    return URLComponents(url: url, resolvingAgainstBaseURL: false)?
+        .queryItems?
+        .first { $0.name == name }?
+        .value
+}
+
+/// Lock-serialized box so `@Sendable` handlers can share test state without
+/// capturing a `var`.
+private final class LockedValue<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) {
+        self.value = value
+    }
+
+    func withLock<R>(_ body: (inout Value) -> R) -> R {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
+    }
+}
+
+/// Holds an in-flight stub response until the test releases it. `wait()` is
+/// cancellation-aware so a cancelled URLProtocol task cannot hang the suite;
+/// `defer { release() }` is still the cleanup backstop.
 private final class ReleaseGate: @unchecked Sendable {
     private let lock = NSLock()
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
+    var isReleased: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isOpen
+    }
+
     func wait() async {
-        await withCheckedContinuation { continuation in
-            lock.lock()
-            if isOpen {
-                lock.unlock()
-                continuation.resume()
-            } else {
-                waiters.append(continuation)
-                lock.unlock()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if isOpen {
+                    lock.unlock()
+                    continuation.resume()
+                } else {
+                    waiters.append(continuation)
+                    lock.unlock()
+                }
             }
+        } onCancel: {
+            release()
         }
     }
 
