@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.2] - 2026-09-15
+
 ### Fixed
 
 - Apple Translation restarts on Enter with the same language pair and ignores

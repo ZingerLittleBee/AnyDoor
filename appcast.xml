@@ -3,6 +3,22 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>4.2.2</title>
+            <pubDate>Tue, 15 Sep 2026 01:25:57 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>4.2.299</sparkle:version>
+            <sparkle:shortVersionString>4.2.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[### Fixed
+
+- Apple Translation restarts on Enter with the same language pair and ignores
+  outdated results.
+- Bing free translation works again after an endpoint change caused HTTP 404 errors.
+- Google free translation shows a retry time and pauses requests when rate-limited.
+]]></description>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.2/AnyDoor-4.2.2.zip" length="15321743" type="application/octet-stream" sparkle:edSignature="KrKz9rivU1y707LhQPaA98ZVFu++Dqp2kAb1XabESyjZO06QMMJ/yTybTq8ubz4JnMPEcdqmcXkznwxODDfLBA=="/>
+        </item>
+        <item>
             <title>4.2.1</title>
             <pubDate>Thu, 10 Sep 2026 21:50:23 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -286,25 +302,6 @@
   opened as a small, slightly blurry window.
 ]]></description>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.0-beta.3/AnyDoor-4.2.0-beta.3.zip" length="15342132" type="application/octet-stream" sparkle:edSignature="a0c14TAXxAI0MkVhXxZeug0GiJA4FJfG7l6/6FMIrOBc6aCG1XIq+Kn32FNTsaOc6Cje/sLarqMp9AIeWGc8Cg=="/>
-        </item>
-        <item>
-            <title>4.1.1</title>
-            <pubDate>Wed, 12 Aug 2026 20:21:38 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>4.1.199</sparkle:version>
-            <sparkle:shortVersionString>4.1.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[### Added
-
-- Beta updates are now an explicit per-device opt-in under Settings → General.
-  Stable remains the default; turning Beta updates off affects future update
-  checks and does not downgrade the installed app.
-- The dedicated `make beta-release` pipeline now publishes signed Beta
-  prereleases through Sparkle channels, deterministic numeric build versions,
-  immutable release snapshots, and an independently deployed canonical update
-  feed without accepting Beta identities in the Stable release command.
-]]></description>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.1.1/AnyDoor-4.1.1.zip" length="13729857" type="application/octet-stream" sparkle:edSignature="w00qZMVr99GWMnxfLdKrl49rE9JrxKaPqy+piwsLTPyPtskeVsQQhXkIHjslqrihstFnUrVQDd0jjXj7un23Aw=="/>
         </item>
         <item>
             <title>1.2.0</title>
