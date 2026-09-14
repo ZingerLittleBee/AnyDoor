@@ -105,7 +105,7 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol {
     private let loadID = UUID()
 
     /// Test-local Sendable boundary for `URLProtocolClient` callbacks.
-    /// `startLoading`'s `Task` cannot capture `self` because the inherited
+    /// The load `Task` cannot capture `self` because the inherited
     /// `URLProtocol` Sendable conformance is unavailable. URLSession retains
     /// this protocol instance for the load; `Storage` serializes task
     /// bookkeeping and cancellation so each `loadID` delivers at most once.
@@ -154,8 +154,30 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol {
         let handler = Self.storage.record(request)
         let loadID = self.loadID
         let relay = ClientRelay(proto: self, client: client)
-        let task = Task {
-            defer { _ = Self.storage.takeTask(id: loadID) }
+        let task = Self.makeLoadTask(
+            request: request,
+            loadID: loadID,
+            handler: handler,
+            relay: relay
+        )
+        if !Self.storage.storeTask(task, id: loadID) {
+            task.cancel()
+        }
+    }
+
+    /// Form the load `Task` off the `URLProtocol` instance. `Task.init` takes a
+    /// `sending` closure (SE-0430/0431); Swift 6.3's region checker cannot
+    /// analyze that pattern when the closure is created in `startLoading`
+    /// beside non-Sendable `self`. The static entry only sees immutable
+    /// Sendable snapshots, so the task still cancels through `Storage`.
+    private static func makeLoadTask(
+        request: URLRequest,
+        loadID: UUID,
+        handler: Handler?,
+        relay: ClientRelay
+    ) -> Task<Void, Never> {
+        Task { @Sendable in
+            defer { _ = storage.takeTask(id: loadID) }
             guard let handler else {
                 relay.fail(URLError(.badServerResponse))
                 return
@@ -170,9 +192,6 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol {
                 headerFields: canned.headerFields
             )!
             relay.finish(response: response, body: canned.body)
-        }
-        if !Self.storage.storeTask(task, id: loadID) {
-            task.cancel()
         }
     }
 
