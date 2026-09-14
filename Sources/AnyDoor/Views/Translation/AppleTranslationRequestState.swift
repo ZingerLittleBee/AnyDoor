@@ -7,9 +7,10 @@ import Translation
 #if canImport(Translation)
 /// Owns one Apple translate run: the immutable text/language snapshot, the
 /// `TranslationSession.Configuration` that `.translationTask` observes, and the
-/// card render state. Only the generation that armed the request may publish
-/// success, failure, or a user-cancelled idle reset. A cancelled or superseded
-/// callback must not settle a newer run (or write history via the caller).
+/// card render state. Publication requires the scheduled request to still be
+/// armed *and* its `runToken` to match the live coordinator token, so a
+/// completion cannot flash after `translate()` advances and before `onChange`
+/// rearms. A cancelled or superseded callback must not settle a newer run.
 ///
 /// Same-pair reruns call `invalidate()` on the existing configuration — two
 /// freshly constructed same-language values are `Equatable` at `version == 0`,
@@ -78,8 +79,9 @@ final class AppleTranslationRequestState {
             runToken: runToken
         )
         beginLoading()
-        // Snapshot is stored before the configuration mutation so a newly
-        // scheduled `.translationTask` reads this generation, not a previous one.
+        // Snapshot is stored before the configuration mutation so the view
+        // body that observes the new configuration captures this same Request
+        // into the `.translationTask` closure (not a later `currentRequest` read).
         armConfiguration(
             sourceLocale: source.map { Locale.Language(identifier: $0.code) },
             targetLocale: Locale.Language(identifier: target.code)
@@ -112,10 +114,14 @@ final class AppleTranslationRequestState {
         }
     }
 
-    /// Publish only when `generation` is still the armed owner. Stale and
-    /// cancelled completions return `.ignored` without touching render state.
-    func apply(_ completion: Completion, generation: Int) -> ApplyOutcome {
-        guard generation == self.generation, currentRequest != nil else {
+    /// Publish only when `request` is still the armed snapshot and its
+    /// `runToken` still matches the live coordinator token. Stale, cancelled,
+    /// and pre-rearm completions return `.ignored` without touching render
+    /// state — including not resetting a newer loading run.
+    func apply(_ completion: Completion,
+               request: Request,
+               liveRunToken: Int) -> ApplyOutcome {
+        guard currentRequest == request, request.runToken == liveRunToken else {
             return .ignored
         }
         switch completion {

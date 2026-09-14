@@ -129,11 +129,11 @@ private struct AppleTranslationCardBody: View {
         // Once the pack becomes installed, fire any pending translate request
         // (covers both the post-download re-run and the run-while-checking race).
         .onChange(of: phase) { _, newValue in packPhaseChanged(newValue) }
-        .translationTask(state.configuration) { @Sendable [state, coordinator, config] session in
-            // @Sendable makes this closure nonisolated, so `session` lives outside
-            // the MainActor and can be passed straight to Apple's nonisolated
-            // translate(_:). State writes hop back via `await`.
-            await run(session, state: state, coordinator: coordinator, config: config)
+        .translationTask(state.configuration) { @Sendable [state, coordinator, config, request = state.currentRequest] session in
+            // Capture the request that was armed with this configuration. Do not
+            // re-read `state.currentRequest` after the hop — a newer beginRequest
+            // may have overwritten the slot.
+            await run(session, request: request, state: state, coordinator: coordinator, config: config)
         }
     }
 
@@ -389,15 +389,16 @@ private struct AppleTranslationCardBody: View {
 /// Drive one on-device translation from a `nonisolated` context. `session` stays
 /// in this nonisolated region so it can be passed to Apple's `nonisolated`
 /// `translate(_:)`; the MainActor-isolated `coordinator` and `state` are touched
-/// only via `await`, so nothing crosses isolation unsafely. Text and languages
-/// come from the request snapshot armed before configuration changed — not from
-/// live coordinator fields at callback time.
+/// only via `await`, so nothing crosses isolation unsafely. Text, languages, and
+/// generation come from the request captured when this configuration was
+/// scheduled — not from a later `currentRequest` lookup.
 @available(macOS 15, *)
 private nonisolated func run(_ session: TranslationSession,
+                             request: AppleTranslationRequestState.Request?,
                              state: AppleTranslationRequestState,
                              coordinator: TranslationCoordinator,
                              config: TranslationServiceConfig) async {
-    guard let request = await state.currentRequest, !request.text.isEmpty else { return }
+    guard let request, !request.text.isEmpty else { return }
 
     // A missing on-device language pack makes session.translate present a system
     // download sheet (from another process) that steals key focus and would
@@ -419,7 +420,12 @@ private nonisolated func run(_ session: TranslationSession,
     if guarded { await coordinator.endSystemSheet() }
 
     let completion = AppleTranslationRequestState.completion(for: result)
-    let outcome = await state.apply(completion, generation: request.generation)
+    let liveRunToken = await coordinator.runToken
+    let outcome = await state.apply(
+        completion,
+        request: request,
+        liveRunToken: liveRunToken
+    )
     guard outcome == .publishedSuccess, case .success(let translated) = result else { return }
 
     // Record to history through the same store the coordinator uses, so an

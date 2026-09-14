@@ -8,7 +8,8 @@ import Translation
 /// Production-seam tests for Apple translate request ownership and
 /// `TranslationSession.Configuration` scheduling. Assertions use the SDK type's
 /// own `==` and `version` — not a copied mock — so same-pair `invalidate()` is
-/// distinguished from a no-op reassignment of an equal pair.
+/// distinguished from a no-op reassignment of an equal pair. Publication also
+/// requires the scheduled `Request` and the live coordinator `runToken`.
 @available(macOS 15, *)
 @MainActor
 final class AppleTranslationRequestStateTests: XCTestCase {
@@ -37,6 +38,15 @@ final class AppleTranslationRequestStateTests: XCTestCase {
             runID: runID,
             runToken: runToken
         )
+    }
+
+    @discardableResult
+    private func apply(_ completion: AppleTranslationRequestState.Completion,
+                       on state: AppleTranslationRequestState,
+                       request: AppleTranslationRequestState.Request? = nil,
+                       liveRunToken: Int? = nil) throws -> AppleTranslationRequestState.ApplyOutcome {
+        let request = try XCTUnwrap(request ?? state.currentRequest)
+        return state.apply(completion, request: request, liveRunToken: liveRunToken ?? request.runToken)
     }
 
     func testFirstRequestAssignsFreshAutoDetectConfiguration() {
@@ -140,72 +150,72 @@ final class AppleTranslationRequestStateTests: XCTestCase {
         XCTAssertNotEqual(snapshot.generation, state.currentRequest?.generation)
     }
 
-    func testSupersededSuccessDoesNotPublishOrReplaceNewerLoading() {
+    func testSupersededSuccessDoesNotPublishOrReplaceNewerLoading() throws {
         let state = AppleTranslationRequestState()
         arm(state, text: "cool", runToken: 1)
-        let oldGeneration = state.generation
+        let old = try XCTUnwrap(state.currentRequest)
         arm(state, text: "cool", runToken: 2)
 
-        XCTAssertEqual(state.apply(.success("旧"), generation: oldGeneration), .ignored)
+        XCTAssertEqual(try apply(.success("旧"), on: state, request: old, liveRunToken: 2), .ignored)
         XCTAssertEqual(state.status, .loading)
         XCTAssertTrue(state.output.isEmpty)
         XCTAssertNil(state.errorMessage)
         XCTAssertEqual(state.currentRequest?.runToken, 2)
 
-        XCTAssertEqual(state.apply(.success("新"), generation: state.generation), .publishedSuccess)
+        XCTAssertEqual(try apply(.success("新"), on: state, liveRunToken: 2), .publishedSuccess)
         XCTAssertEqual(state.status, .success)
         XCTAssertEqual(state.output, "新")
     }
 
-    func testSupersededFailureDoesNotPublishIntoNewerRequest() {
+    func testSupersededFailureDoesNotPublishIntoNewerRequest() throws {
         let state = AppleTranslationRequestState()
         arm(state, text: "cool", runToken: 1)
-        let oldGeneration = state.generation
+        let old = try XCTUnwrap(state.currentRequest)
         arm(state, text: "cool", runToken: 2)
 
-        XCTAssertEqual(state.apply(.failureMessage("stale"), generation: oldGeneration), .ignored)
+        XCTAssertEqual(try apply(.failureMessage("stale"), on: state, request: old, liveRunToken: 2), .ignored)
         XCTAssertEqual(state.status, .loading)
         XCTAssertNil(state.errorMessage)
         XCTAssertTrue(state.output.isEmpty)
 
-        XCTAssertEqual(state.apply(.failureMessage("fresh"), generation: state.generation), .publishedFailure)
+        XCTAssertEqual(try apply(.failureMessage("fresh"), on: state, liveRunToken: 2), .publishedFailure)
         XCTAssertEqual(state.status, .failure)
         XCTAssertEqual(state.errorMessage, "fresh")
     }
 
-    func testCancellationNeverSettlesEvenForOwningGeneration() {
+    func testCancellationNeverSettlesEvenForOwningGeneration() throws {
         let state = AppleTranslationRequestState()
         arm(state, text: "cool", runToken: 1)
-        let owner = state.generation
+        let old = try XCTUnwrap(state.currentRequest)
         arm(state, text: "cool", runToken: 2)
 
-        XCTAssertEqual(state.apply(.cancelled, generation: owner), .ignored)
+        XCTAssertEqual(try apply(.cancelled, on: state, request: old, liveRunToken: 2), .ignored)
         XCTAssertEqual(state.status, .loading)
 
-        XCTAssertEqual(state.apply(.cancelled, generation: state.generation), .ignored)
+        XCTAssertEqual(try apply(.cancelled, on: state, liveRunToken: 2), .ignored)
         XCTAssertEqual(state.status, .loading)
         XCTAssertTrue(state.output.isEmpty)
         XCTAssertNil(state.errorMessage)
     }
 
-    func testOwningUserCancelledResetsOnlyThatGeneration() {
+    func testOwningUserCancelledResetsOnlyThatGeneration() throws {
         let state = AppleTranslationRequestState()
         arm(state, text: "cool", runToken: 1)
-        let oldGeneration = state.generation
+        let old = try XCTUnwrap(state.currentRequest)
         arm(state, text: "cool", runToken: 2)
 
-        XCTAssertEqual(state.apply(.userCancelled, generation: oldGeneration), .ignored)
+        XCTAssertEqual(try apply(.userCancelled, on: state, request: old, liveRunToken: 2), .ignored)
         XCTAssertEqual(state.status, .loading)
 
-        XCTAssertEqual(state.apply(.userCancelled, generation: state.generation), .resetToIdle)
+        XCTAssertEqual(try apply(.userCancelled, on: state, liveRunToken: 2), .resetToIdle)
         XCTAssertEqual(state.status, .idle)
         XCTAssertTrue(state.output.isEmpty)
     }
 
-    func testEmptyInputClearsConfigurationAndIgnoresStaleSuccess() {
+    func testEmptyInputClearsConfigurationAndIgnoresStaleSuccess() throws {
         let state = AppleTranslationRequestState()
         arm(state, text: "cool", runToken: 1)
-        let oldGeneration = state.generation
+        let old = try XCTUnwrap(state.currentRequest)
         XCTAssertNotNil(state.configuration)
 
         state.clearArmedTranslation()
@@ -213,23 +223,62 @@ final class AppleTranslationRequestStateTests: XCTestCase {
         XCTAssertNil(state.configuration)
         XCTAssertNil(state.currentRequest)
         XCTAssertEqual(state.status, .idle)
-        XCTAssertGreaterThan(state.generation, oldGeneration)
-        XCTAssertEqual(state.apply(.success("迟到"), generation: oldGeneration), .ignored)
+        XCTAssertGreaterThan(state.generation, old.generation)
+        XCTAssertEqual(try apply(.success("迟到"), on: state, request: old, liveRunToken: old.runToken), .ignored)
         XCTAssertEqual(state.status, .idle)
         XCTAssertTrue(state.output.isEmpty)
     }
 
-    func testWhitespaceBeginRequestClearsAnArmedTranslation() {
+    func testWhitespaceBeginRequestClearsAnArmedTranslation() throws {
         let state = AppleTranslationRequestState()
         arm(state, text: "cool", runToken: 1)
-        let oldGeneration = state.generation
+        let old = try XCTUnwrap(state.currentRequest)
 
         arm(state, text: "   \n", runToken: 2)
 
         XCTAssertNil(state.configuration)
         XCTAssertNil(state.currentRequest)
         XCTAssertEqual(state.status, .idle)
-        XCTAssertEqual(state.apply(.success("x"), generation: oldGeneration), .ignored)
+        XCTAssertEqual(try apply(.success("x"), on: state, request: old, liveRunToken: old.runToken), .ignored)
+    }
+
+    func testAdvancedCoordinatorRunTokenDoesNotPublishUnrearmedGeneration() throws {
+        let state = AppleTranslationRequestState()
+        arm(state, text: "cool", runToken: 1)
+        let armed = try XCTUnwrap(state.currentRequest)
+
+        // Coordinator translate() already bumped runToken; Apple onChange has
+        // not rearmed. The still-owning generation must not flash a result.
+        XCTAssertEqual(try apply(.success("旧"), on: state, request: armed, liveRunToken: 2), .ignored)
+        XCTAssertEqual(state.status, .loading)
+        XCTAssertTrue(state.output.isEmpty)
+        XCTAssertEqual(state.generation, armed.generation)
+        XCTAssertEqual(state.currentRequest, armed)
+
+        XCTAssertEqual(try apply(.success("ok"), on: state, request: armed, liveRunToken: 1), .publishedSuccess)
+        XCTAssertEqual(state.output, "ok")
+    }
+
+    func testScheduledRequestCaptureCannotImpersonateNewerRequest() throws {
+        let state = AppleTranslationRequestState()
+        arm(state, text: "cool", source: nil, target: .english, runID: "old", runToken: 1)
+        let scheduled = try XCTUnwrap(state.currentRequest)
+
+        arm(state, text: "hello", source: .english, target: .simplifiedChinese, runID: "new", runToken: 2)
+
+        XCTAssertEqual(scheduled.text, "cool")
+        XCTAssertNil(scheduled.source)
+        XCTAssertEqual(scheduled.target, .english)
+        XCTAssertEqual(scheduled.generation, 1)
+        XCTAssertNotEqual(scheduled, state.currentRequest)
+        XCTAssertEqual(state.currentRequest?.text, "hello")
+
+        XCTAssertEqual(try apply(.success("来自旧会话"), on: state, request: scheduled, liveRunToken: 2), .ignored)
+        XCTAssertEqual(state.status, .loading)
+        XCTAssertTrue(state.output.isEmpty)
+
+        XCTAssertEqual(try apply(.success("新"), on: state, liveRunToken: 2), .publishedSuccess)
+        XCTAssertEqual(state.output, "新")
     }
 
     func testCompletionMappingUsesOfficialCancelAndUserCancelled() {
