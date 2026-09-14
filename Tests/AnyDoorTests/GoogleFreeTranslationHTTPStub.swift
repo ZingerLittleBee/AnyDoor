@@ -36,7 +36,7 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
         private let lock = NSLock()
         private var handler: Handler?
         private var requests: [URLRequest] = []
-        private var loadTasks: [UUID: Task<Void, Never>] = []
+        private var loadTasks: [UUID: Task<Void, Never>] = [:]
         private var cancelledIDs: Set<UUID> = []
 
         func reset() -> [Task<Void, Never>] {

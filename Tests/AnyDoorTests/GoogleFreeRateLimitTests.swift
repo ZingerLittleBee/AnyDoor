@@ -327,6 +327,7 @@ final class GoogleFreeRateLimitTests: XCTestCase {
             return .ok()
         }
         let published = LockedValue<[TranslationChunk]>([])
+        let unexpected = LockedValue<Error?>(nil)
         let finished = ReleaseGate()
         let stream = provider(limiter).translate(makeRequest())
         let task = Task {
@@ -335,13 +336,16 @@ final class GoogleFreeRateLimitTests: XCTestCase {
                 for try await chunk in stream {
                     published.withLock { $0.append(chunk) }
                 }
-            } catch {
+            } catch is CancellationError {
                 // Consumer cancel may throw or finish the stream silently.
+            } catch {
+                unexpected.withLock { $0 = error }
             }
         }
         try await waitUntil { entered.isReleased }
         task.cancel()
         try await waitUntil { finished.isReleased }
+        XCTAssertNil(unexpected.withLock { $0 }, "non-cancellation stream errors must not be swallowed")
         XCTAssertTrue(published.withLock { $0 }.isEmpty, "cancelled in-flight translate must not publish text")
         XCTAssertEqual(GoogleFreeTranslationHTTPStub.requestCount, 1)
 
@@ -388,7 +392,14 @@ final class GoogleFreeRateLimitTests: XCTestCase {
 
         let older = GoogleFreeTranslationProvider(id: "older", session: session, limiter: limiter)
         let newer = GoogleFreeTranslationProvider(id: "newer", session: session, limiter: limiter)
-        let olderTask = Task { try await collect(older.translate(makeRequest("one"))) }
+        let olderRequest = makeRequest("one")
+        let olderTask = Task {
+            var chunks: [TranslationChunk] = []
+            for try await chunk in older.translate(olderRequest) {
+                chunks.append(chunk)
+            }
+            return chunks
+        }
         try await waitUntil { olderEntered.isReleased }
 
         let newerError = await firstError(newer.translate(makeRequest("two")))
