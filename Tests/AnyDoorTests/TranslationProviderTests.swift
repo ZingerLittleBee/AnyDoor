@@ -73,5 +73,14 @@ final class TranslationProviderTests: XCTestCase {
         XCTAssertNotEqual(TranslationProviderError.badResponse(503), .badResponse(500))
         XCTAssertEqual(TranslationProviderError.network("offline"), .network("offline"))
         XCTAssertNotEqual(TranslationProviderError.missingAPIKey, .decodeFailed)
+        let retry = Date(timeIntervalSince1970: 1_700_000_000)
+        XCTAssertEqual(
+            TranslationProviderError.rateLimited(retryAfter: retry),
+            .rateLimited(retryAfter: retry)
+        )
+        XCTAssertNotEqual(
+            TranslationProviderError.rateLimited(retryAfter: retry),
+            .badResponse(429)
+        )
     }
 }
