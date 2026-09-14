@@ -2,7 +2,9 @@ import Foundation
 
 /// Package-local `URLProtocol` for Google translate stream tests. Isolated from
 /// the shared `MockURLProtocol` helper so this package does not edit it.
-final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
+/// Do not redeclare `Sendable`: `URLProtocol` already inherits an unavailable
+/// conformance from the SDK.
+final class GoogleFreeTranslationHTTPStub: URLProtocol {
     struct CannedResponse: Sendable {
         var statusCode: Int
         var headerFields: [String: String]
@@ -102,6 +104,26 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
     private static let storage = Storage()
     private let loadID = UUID()
 
+    /// Test-local Sendable boundary for `URLProtocolClient` callbacks.
+    /// `startLoading`'s `Task` cannot capture `self` because the inherited
+    /// `URLProtocol` Sendable conformance is unavailable. URLSession retains
+    /// this protocol instance for the load; `Storage` serializes task
+    /// bookkeeping and cancellation so each `loadID` delivers at most once.
+    private struct ClientRelay: @unchecked Sendable {
+        let proto: URLProtocol
+        let client: URLProtocolClient?
+
+        func fail(_ error: Error) {
+            client?.urlProtocol(proto, didFailWithError: error)
+        }
+
+        func finish(response: URLResponse, body: Data) {
+            client?.urlProtocol(proto, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(proto, didLoad: body)
+            client?.urlProtocolDidFinishLoading(proto)
+        }
+    }
+
     static func session() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [GoogleFreeTranslationHTTPStub.self]
@@ -131,10 +153,11 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
         let request = self.request
         let handler = Self.storage.record(request)
         let loadID = self.loadID
+        let relay = ClientRelay(proto: self, client: client)
         let task = Task {
             defer { _ = Self.storage.takeTask(id: loadID) }
             guard let handler else {
-                self.client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+                relay.fail(URLError(.badServerResponse))
                 return
             }
             let canned = await handler(request)
@@ -146,9 +169,7 @@ final class GoogleFreeTranslationHTTPStub: URLProtocol, @unchecked Sendable {
                 httpVersion: "HTTP/1.1",
                 headerFields: canned.headerFields
             )!
-            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            self.client?.urlProtocol(self, didLoad: canned.body)
-            self.client?.urlProtocolDidFinishLoading(self)
+            relay.finish(response: response, body: canned.body)
         }
         if !Self.storage.storeTask(task, id: loadID) {
             task.cancel()
