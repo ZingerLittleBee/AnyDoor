@@ -40,41 +40,6 @@ struct AppleLanguagePackDriver: View {
 }
 
 #if canImport(Translation)
-/// Holds the card's mutable render state in a MainActor reference type so the
-/// `nonisolated` `.translationTask` closure can publish results via `await`
-/// without forcing `session` (Apple's main actor-isolated handle) to be "sent"
-/// into a nonisolated method — which Swift 6 strict concurrency rejects.
-@available(macOS 15, *)
-@MainActor
-@Observable
-private final class AppleCardState {
-    var output: String = ""
-    var status: TranslationResult.Status = .idle
-    var errorMessage: String?
-
-    func beginLoading() {
-        status = .loading
-        output = ""
-        errorMessage = nil
-    }
-
-    func reset() {
-        status = .idle
-        output = ""
-        errorMessage = nil
-    }
-
-    func succeed(_ text: String) {
-        output = text
-        status = .success
-    }
-
-    func fail(_ message: String) {
-        errorMessage = message
-        status = .failure
-    }
-}
-
 @available(macOS 15, *)
 private struct AppleLanguagePackDriverBody: View {
     @Bindable var coordinator: TranslationCoordinator
@@ -140,8 +105,7 @@ private struct AppleTranslationCardBody: View {
     let config: TranslationServiceConfig
     @Bindable var coordinator: TranslationCoordinator
 
-    @State private var configuration: TranslationSession.Configuration?
-    @State private var state = AppleCardState()
+    @State private var state = AppleTranslationRequestState()
     @State private var collapsed = false
     @State private var hovered = false
     /// Set when a translate run is requested (Enter) while the language pack isn't
@@ -165,11 +129,11 @@ private struct AppleTranslationCardBody: View {
         // Once the pack becomes installed, fire any pending translate request
         // (covers both the post-download re-run and the run-while-checking race).
         .onChange(of: phase) { _, newValue in packPhaseChanged(newValue) }
-        .translationTask(configuration) { @Sendable [state, coordinator, config] session in
-            // @Sendable makes this closure nonisolated, so `session` lives outside
-            // the MainActor and can be passed straight to Apple's nonisolated
-            // translate(_:). State writes hop back via `await`.
-            await run(session, state: state, coordinator: coordinator, config: config)
+        .translationTask(state.configuration) { @Sendable [state, coordinator, config, request = state.currentRequest] session in
+            // Capture the request that was armed with this configuration. Do not
+            // re-read `state.currentRequest` after the hop — a newer beginRequest
+            // may have overwritten the slot.
+            await run(session, request: request, state: state, coordinator: coordinator, config: config)
         }
     }
 
@@ -387,14 +351,12 @@ private struct AppleTranslationCardBody: View {
     private func refreshConfiguration() {
         let text = coordinator.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else {
-            state.reset()
-            configuration = nil
+            state.clearArmedTranslation()
             wantsTranslateWhenReady = false
             return
         }
         guard phase == .installed else {
-            state.reset()
-            configuration = nil
+            state.clearArmedTranslation()
             wantsTranslateWhenReady = true
             return
         }
@@ -402,14 +364,20 @@ private struct AppleTranslationCardBody: View {
         startTranslate()
     }
 
-    /// Build a fresh translate configuration so `.translationTask` re-runs. A nil
-    /// source lets Apple auto-detect.
+    /// Arm one immutable request and mutate `state.configuration` so
+    /// `.translationTask` actually re-runs: `invalidate()` for the same pair,
+    /// a real `source`/`target` write for a different pair. A nil source is
+    /// official auto-detect.
     private func startTranslate() {
-        let sourceLocale = (coordinator.source ?? coordinator.detectedSource)
-            .flatMap { Locale.Language(identifier: $0.code) }
-        let targetLocale = Locale.Language(identifier: coordinator.effectiveTarget().code)
-        state.beginLoading()
-        configuration = TranslationSession.Configuration(source: sourceLocale, target: targetLocale)
+        let text = coordinator.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        state.beginRequest(
+            text: text,
+            source: coordinator.source ?? coordinator.detectedSource,
+            target: coordinator.effectiveTarget(),
+            runID: coordinator.currentRunID,
+            runToken: coordinator.runToken
+        )
     }
 
     private func copy(_ text: String) {
@@ -421,74 +389,68 @@ private struct AppleTranslationCardBody: View {
 /// Drive one on-device translation from a `nonisolated` context. `session` stays
 /// in this nonisolated region so it can be passed to Apple's `nonisolated`
 /// `translate(_:)`; the MainActor-isolated `coordinator` and `state` are touched
-/// only via `await`, so nothing crosses isolation unsafely.
+/// only via `await`, so nothing crosses isolation unsafely. Text, languages, and
+/// generation come from the request captured when this configuration was
+/// scheduled — not from a later `currentRequest` lookup.
 @available(macOS 15, *)
 private nonisolated func run(_ session: TranslationSession,
-                             state: AppleCardState,
+                             request: AppleTranslationRequestState.Request?,
+                             state: AppleTranslationRequestState,
                              coordinator: TranslationCoordinator,
                              config: TranslationServiceConfig) async {
-    let (text, runID, runToken, source, target) = await MainActor.run {
-        (
-            coordinator.inputText.trimmingCharacters(in: .whitespacesAndNewlines),
-            coordinator.currentRunID,
-            coordinator.runToken,
-            coordinator.source ?? coordinator.detectedSource,
-            coordinator.effectiveTarget()
-        )
-    }
-    guard !text.isEmpty else { return }
+    guard let request, !request.text.isEmpty else { return }
 
     // A missing on-device language pack makes session.translate present a system
     // download sheet (from another process) that steals key focus and would
     // dismiss the floating panel. Guard auto-dismiss ONLY for that case, so an
     // installed (fast) translation doesn't hold focus for its whole duration.
-    let guarded = await mayDownloadLanguagePack(coordinator: coordinator)
+    // Nil source (auto-detect) still keeps the panel alive — Apple may identify
+    // or present a picker.
+    let guarded = await mayDownloadLanguagePack(
+        sourceCode: request.source?.code,
+        targetCode: request.target.code
+    )
     if guarded { await coordinator.beginSystemSheet() }
     let result: Result<String, Error>
     do {
-        result = .success(try await session.translate(text).targetText)
+        result = .success(try await session.translate(request.text).targetText)
     } catch {
         result = .failure(error)
     }
     if guarded { await coordinator.endSystemSheet() }
-    guard await coordinator.runToken == runToken else { return }
 
-    switch result {
-    case .success(let translated):
-        await state.succeed(translated)
-        // Record to history through the same store the coordinator uses, so an
-        // Apple-only success is not dropped (the coordinator's run() never sees it).
-        await coordinator.noteAppleSuccess(
-            serviceID: config.id,
-            serviceName: config.displayName,
-            sourceText: text,
-            translatedText: translated,
-            source: source,
-            target: target,
-            runID: runID,
-            runToken: runToken)
-    case .failure(let error):
-        if error is CancellationError {
-            // Superseded by a newer request; leave state for the new run.
-        } else if let cocoa = error as? CocoaError, cocoa.code == .userCancelled {
-            // The person declined or dismissed the language-pack download sheet —
-            // a choice, not a failure, so fall back to idle (the card hides)
-            // instead of flashing a red error.
-            await state.reset()
-        } else {
-            await state.fail(error.localizedDescription)
-        }
+    let completion = AppleTranslationRequestState.completion(for: result)
+    // Sample the live token and publish in one MainActor turn so translate()
+    // cannot advance runToken between the read and apply.
+    let outcome = await MainActor.run {
+        state.apply(
+            completion,
+            request: request,
+            liveRunToken: coordinator.runToken
+        )
     }
+    guard outcome == .publishedSuccess, case .success(let translated) = result else { return }
+
+    // Record to history through the same store the coordinator uses, so an
+    // Apple-only success is not dropped (the coordinator's run() never sees it).
+    // The snapshot's runToken is the identity; noteAppleSuccess also re-checks.
+    await coordinator.noteAppleSuccess(
+        serviceID: config.id,
+        serviceName: config.displayName,
+        sourceText: request.text,
+        translatedText: translated,
+        source: request.source,
+        target: request.target,
+        runID: request.runID,
+        runToken: request.runToken)
 }
 
-/// Whether the current source→target pair still needs an on-device language
+/// Whether this request's source→target pair still needs an on-device language
 /// pack — i.e. `session.translate` will present the system download sheet. Used
 /// to scope the panel's auto-dismiss guard to just the sheet-presenting case.
 @available(macOS 15, *)
-private nonisolated func mayDownloadLanguagePack(coordinator: TranslationCoordinator) async -> Bool {
-    let (sourceCode, targetCode) = await MainActor.run {
-        ((coordinator.source ?? coordinator.detectedSource)?.code, coordinator.effectiveTarget().code)
-    }
+private nonisolated func mayDownloadLanguagePack(sourceCode: String?,
+                                                 targetCode: String) async -> Bool {
     // Without a concrete source (auto-detect, nothing detected yet) we can't
     // check, so assume a sheet may appear and protect the panel.
     guard let sourceCode else { return true }
