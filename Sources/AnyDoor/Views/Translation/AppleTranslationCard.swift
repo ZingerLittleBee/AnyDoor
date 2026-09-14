@@ -420,12 +420,15 @@ private nonisolated func run(_ session: TranslationSession,
     if guarded { await coordinator.endSystemSheet() }
 
     let completion = AppleTranslationRequestState.completion(for: result)
-    let liveRunToken = await coordinator.runToken
-    let outcome = await state.apply(
-        completion,
-        request: request,
-        liveRunToken: liveRunToken
-    )
+    // Sample the live token and publish in one MainActor turn so translate()
+    // cannot advance runToken between the read and apply.
+    let outcome = await MainActor.run {
+        state.apply(
+            completion,
+            request: request,
+            liveRunToken: coordinator.runToken
+        )
+    }
     guard outcome == .publishedSuccess, case .success(let translated) = result else { return }
 
     // Record to history through the same store the coordinator uses, so an
