@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.3] - 2026-09-19
+
 ### Added
 
 - The menu-bar panel and Hyper Key settings explain when macOS Secure Input
