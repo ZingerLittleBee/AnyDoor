@@ -18,6 +18,8 @@ versioning.
 - App shortcuts using Hyper now follow changes to its Include Shift setting
   without being re-recorded, including retained hidden and disabled bindings.
   Conflicting shortcuts leave the entire change unapplied and show a warning.
+- The blank "AnyDoor Settings" window no longer opens on launch on macOS 15
+  and later.
 
 ## [4.2.2] - 2026-09-15
 
