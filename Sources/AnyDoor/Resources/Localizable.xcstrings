@@ -5680,6 +5680,40 @@
         }
       }
     },
+    "keyboard.secureInput.warning.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key and global shortcuts are temporarily unavailable. Finish or cancel password entry. If this persists, reopen the app using Secure Input."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key 和全局快捷键暂时不可用。请完成或退出密码输入；若仍未恢复，请重新打开占用安全输入的应用。"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Input is enabled"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全键盘输入已开启"
+          }
+        }
+      }
+    },
     "menubarIcon.appConnected": {
       "extractionState": "manual",
       "localizations": {

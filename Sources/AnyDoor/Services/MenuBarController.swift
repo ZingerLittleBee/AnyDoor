@@ -117,6 +117,7 @@ final class MenuBarController {
 
     private func showPanel() {
         guard let button = statusItem?.button else { return }
+        HyperKeyService.shared.refreshSecureInputStatus()
 
         // `\.locale` is captured at show time, not reactively rebound. That's
         // OK in practice because the panel auto-dismisses when the Settings
@@ -130,7 +131,8 @@ final class MenuBarController {
             rootView: AnyView(
                 MenuBarView(
                     onRequestClose: { [weak self] in self?.hidePanel() },
-                    clipboardHistoryModule: clipboardHistoryModule
+                    clipboardHistoryModule: clipboardHistoryModule,
+                    isSecureInputEnabled: HyperKeyService.shared.isSecureInputEnabled
                 )
                     .modelContainer(modelContainer)
                     .environment(LocalizationManager.shared)

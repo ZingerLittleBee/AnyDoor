@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import OSLog
 import Observation
+import Carbon
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hyperKey.service")
 
@@ -22,6 +23,7 @@ final class HyperKeyService {
     private(set) var isActive: Bool = false
     private(set) var isApplying: Bool = false
     private(set) var lastError: HyperKeyError?
+    private(set) var isSecureInputEnabled = IsSecureEventInputEnabled()
 
     private var mutationToken: UInt64 = 0
     private var watchdogTimer: Timer?
@@ -50,9 +52,16 @@ final class HyperKeyService {
     /// Called once from AppDelegate after HotkeyService is up. Runs Phase 2
     /// (gated apply) and starts the watchdog.
     func bootstrapAfterTap() async {
+        refreshSecureInputStatus()
         startWatchdog()
         guard trigger != .none else { return }
         await applyCurrent()
+    }
+
+    /// Secure Input blocks keyboard delivery even while the event tap is enabled.
+    /// Keep this separate from tap health: it must not clear the user's HID mapping.
+    func refreshSecureInputStatus() {
+        isSecureInputEnabled = IsSecureEventInputEnabled()
     }
 
     func setTrigger(_ new: HyperKeyTrigger) async {
@@ -164,6 +173,7 @@ final class HyperKeyService {
     }
 
     private func watchdogTick() {
+        refreshSecureInputStatus()
         let health = HotkeyService.shared.tapHealth
 
         switch health {
