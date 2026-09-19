@@ -282,6 +282,8 @@ enum L10n {
         case settingsGeneralHyperKeyIncludeShift = "settingsGeneral.hyperKey.includeShift"
         case settingsGeneralHyperKeyErrorTap = "settingsGeneral.hyperKey.error.tap"
         case settingsGeneralHyperKeyErrorHidutil = "settingsGeneral.hyperKey.error.hidutil"
+        case settingsGeneralHyperKeyShortcutConflict = "settingsGeneral.hyperKey.error.shortcutConflict"
+        case settingsGeneralHyperKeyShortcutUpdateFailed = "settingsGeneral.hyperKey.error.shortcutUpdate"
         case secureInputWarningTitle = "keyboard.secureInput.warning.title"
         case secureInputWarningHelp = "keyboard.secureInput.warning.help"
         case secureInputWarningOwner = "keyboard.secureInput.warning.owner"

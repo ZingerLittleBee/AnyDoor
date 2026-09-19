@@ -119,7 +119,7 @@ final class HyperKeyService {
 
 - Setters are `async` precisely because Swift's normal property setters cannot await, which makes the original "side-effects in setter" sketch a race factory. Views bind to `Picker`/`Toggle` through a computed `Binding` whose `set` wraps the async call in a `Task`.
 
-- `includeShift` change does **not** call `HyperKeyController` (the virtual key doesn't change); it only recomputes flags and pushes `HotkeyService.updateHyperConfig`.
+- `includeShift` changes do **not** call `HyperKeyController` (the virtual key does not change). Before committing the preference, `PanelStore.remapHyperAppShortcuts` migrates app bindings whose modifier set exactly matches the previous configured Hyper mask, including hidden and disabled bindings. It preserves their key codes, visibility, enabled state, and ordering. Active destination conflicts with apps, available builtins, Quicklinks, or the Command Palette reject the whole change with a localized toast. A successful save rebuilds panel rows and hotkey snapshots; only then does the service persist the new preference and push `HotkeyService.updateHyperConfig`. This also works while the event tap is unavailable. Physical trigger changes retain the same F19 destination and therefore need no binding rewrite. Backup import continues to restore its explicit hotkey descriptors without reinterpreting imported combinations.
 
 - `quickPress` change also skips the controller.
 

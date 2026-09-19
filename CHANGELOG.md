@@ -13,6 +13,12 @@ versioning.
   when identifiable. Settings refresh the warning live; the panel checks on each
   opening without changing keyboard mappings.
 
+### Fixed
+
+- App shortcuts using Hyper now follow changes to its Include Shift setting
+  without being re-recorded, including retained hidden and disabled bindings.
+  Conflicting shortcuts leave the entire change unapplied and show a warning.
+
 ## [4.2.2] - 2026-09-15
 
 ### Fixed
