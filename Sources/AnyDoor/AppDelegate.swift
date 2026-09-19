@@ -448,7 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             secondsSinceLaunch: elapsed
         )
         if decision.shouldOpenSettings {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            SettingsOpener.shared.tryOpen()
         }
         return decision.allowDefaultHandling
     }

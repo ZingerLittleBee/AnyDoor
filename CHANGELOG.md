@@ -20,6 +20,8 @@ versioning.
   Conflicting shortcuts leave the entire change unapplied and show a warning.
 - The blank "AnyDoor Settings" window no longer opens on launch on macOS 15
   and later.
+- Reopening AnyDoor when its menu-bar icon is hidden now opens the real
+  Settings window instead of the blank SwiftUI window.
 
 ## [4.2.2] - 2026-09-15
 
