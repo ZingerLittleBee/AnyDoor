@@ -1,23 +1,43 @@
 import SwiftUI
-import SwiftData
 
 @main
-struct AnyDoorApp: App {
+@MainActor
+enum AnyDoorMain {
+    static func main() {
+        if #available(macOS 15, *) {
+            AnyDoorApp.main()
+        } else {
+            LegacyAnyDoorApp.main()
+        }
+    }
+}
+
+@available(macOS 15, *)
+private struct AnyDoorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        // The menu bar item is owned by `MenuBarController` (see AppDelegate),
-        // not a SwiftUI `MenuBarExtra`. The Settings window is owned by
-        // `SettingsWindowController` (a manually managed NSWindow, the same
-        // window type as the Image Conversion workspace), NOT this scene.
-        //
-        // This stub only exists because a SwiftUI `App` must declare at least
-        // one scene, and every alternative misbehaves for a menu-bar utility:
-        // `WindowGroup` opens a window at launch, and `MenuBarExtra` with
-        // `isInserted: false` infinite-loops the scene graph on macOS 26. The
-        // stub is unreachable — the standard "Settings…" menu item (the only
-        // thing that could open it) is replaced below to route to the real
-        // window controller.
+        AnyDoorSettingsScene()
+            .defaultLaunchBehavior(.suppressed)
+            .restorationBehavior(.disabled)
+    }
+}
+
+// SceneBuilder cannot branch with an availability-check else clause. Keep the
+// macOS 14 entry point separate because scene launch control requires macOS 15.
+private struct LegacyAnyDoorApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    var body: some Scene {
+        AnyDoorSettingsScene()
+    }
+}
+
+private struct AnyDoorSettingsScene: Scene {
+    var body: some Scene {
+        // SwiftUI requires a scene, but AppKit owns every real window and the
+        // status item. An empty Settings scene can still be auto-presented by
+        // SwiftUI, so the modern entry point opts out at the scene level.
         Settings {
             EmptyView()
         }

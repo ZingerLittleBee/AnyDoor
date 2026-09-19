@@ -6,6 +6,23 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- The menu-bar panel and Hyper Key settings explain when macOS Secure Input
+  blocks Hyper Key and global shortcuts, including the system-reported application
+  when identifiable. Settings refresh the warning live; the panel checks on each
+  opening without changing keyboard mappings.
+
+### Fixed
+
+- App shortcuts using Hyper now follow changes to its Include Shift setting
+  without being re-recorded, including retained hidden and disabled bindings.
+  Conflicting shortcuts leave the entire change unapplied and show a warning.
+- The blank "AnyDoor Settings" window no longer opens on launch on macOS 15
+  and later.
+- Reopening AnyDoor when its menu-bar icon is hidden now opens the real
+  Settings window instead of the blank SwiftUI window.
+
 ## [4.2.2] - 2026-09-15
 
 ### Fixed

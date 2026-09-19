@@ -89,7 +89,7 @@ struct GeneralSettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             LocalizedText(.settingsGeneralHyperKeyLabel)
-                            if hyperKey.isActive {
+                            if hyperKey.isActive && !hyperKey.isSecureInputEnabled {
                                 Circle().fill(.green).frame(width: 6, height: 6)
                             }
                         }
@@ -121,6 +121,10 @@ struct GeneralSettingsView: View {
 
                 Toggle(isOn: includeShiftBinding) { LocalizedText(.settingsGeneralHyperKeyIncludeShift) }
                     .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
+
+                if hyperKey.isSecureInputEnabled {
+                    SecureInputWarningView(applicationName: hyperKey.secureInputApplicationName)
+                }
 
                 if let err = hyperKey.lastError {
                     Label {
@@ -237,6 +241,7 @@ struct GeneralSettingsView: View {
         // Poll while the tab is visible so the badges update live after the
         // user grants a permission in System Settings.
         .task {
+            hyperKey.refreshSecureInputStatus()
             // Read launch-at-login + permission status OFF the main thread. These
             // are nonisolated `static` calls but each blocks for tens-to-hundreds
             // of ms (SMAppService.status, the Apple Events automation probe,

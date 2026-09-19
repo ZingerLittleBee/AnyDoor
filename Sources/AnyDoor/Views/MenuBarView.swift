@@ -26,6 +26,9 @@ struct MenuBarView: View {
     /// (e.g. before opening another window or completing a clipboard copy).
     let onRequestClose: () -> Void
     var clipboardHistoryModule: ClipboardHistoryModule? = nil
+    /// Snapshot at panel opening: its AppKit host measures content only once.
+    var isSecureInputEnabled = false
+    var secureInputApplicationName: String? = nil
 
     @State private var panel = PanelStore.shared
     @State private var updateService = UpdateService.shared
@@ -43,6 +46,12 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            if isSecureInputEnabled {
+                SecureInputWarningView(applicationName: secureInputApplicationName)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+            }
+
             if let version = updateService.availableVersion {
                 UpdateBannerView(
                     version: version,

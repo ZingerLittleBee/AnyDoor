@@ -5680,6 +5680,74 @@
         }
       }
     },
+    "keyboard.secureInput.warning.help": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key and global shortcuts are temporarily unavailable. Finish or cancel password entry. If this persists, reopen the app using Secure Input."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key 和全局快捷键暂时不可用。请完成或退出密码输入；若仍未恢复，请重新打开占用安全输入的应用。"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.owner": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Application: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "占用应用：%@"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.ownerUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to identify the application"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法识别占用应用"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Secure Input is enabled"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "安全键盘输入已开启"
+          }
+        }
+      }
+    },
     "menubarIcon.appConnected": {
       "extractionState": "manual",
       "localizations": {
@@ -12153,6 +12221,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "启用失败：hidutil 调用失败。"
+          }
+        }
+      }
+    },
+    "settingsGeneral.hyperKey.error.shortcutConflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key was not changed because %@ is already in use. Change the conflicting shortcut first."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未更改 Hyper Key：快捷键 %@ 已被占用，请先修改冲突的快捷键。"
+          }
+        }
+      }
+    },
+    "settingsGeneral.hyperKey.error.shortcutUpdate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not update app shortcuts. Hyper Key was not changed. Please try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "应用快捷键更新失败，Hyper Key 未更改，请重试。"
           }
         }
       }

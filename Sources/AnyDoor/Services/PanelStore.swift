@@ -435,12 +435,16 @@ final class PanelStore {
 
     // MARK: - Mutations
 
-    /// Shared tail of every mutation: persist, rebuild view state, refresh
-    /// hotkey snapshots (skipped by display-order-only mutations), and nudge
-    /// the sync engine. All SwiftData writes must exit through here.
+    /// Standard mutation tail. Operations that must report save failures save
+    /// explicitly, then use the same publication path after success.
     private func persistMutation(refreshingHotkeys: Bool = true) {
         guard let container = modelContainer else { return }
         try? container.mainContext.save()
+        publishMutation(refreshingHotkeys: refreshingHotkeys)
+    }
+
+    /// Rebuild views, refresh hotkeys unless only ordering changed, and notify sync.
+    private func publishMutation(refreshingHotkeys: Bool = true) {
         rebuild()
         if refreshingHotkeys { refreshHotkeys() }
         NotificationCenter.default.post(name: .portableConfigDidChange, object: nil)
@@ -487,6 +491,46 @@ final class PanelStore {
             binding.isEnabled = true
         }
         persistMutation()
+    }
+
+    /// Migrate the exact modifier set rendered as Hyper, including retained disabled
+    /// bindings. Validate the whole batch before writing so no shortcut is stolen.
+    func remapHyperAppShortcuts(
+        from oldFlags: Int,
+        to newFlags: Int,
+        paletteHotkey: HotkeyDescriptor?
+    ) throws {
+        guard oldFlags != newFlags, oldFlags != 0, newFlags != 0 else { return }
+        guard let container = modelContainer else {
+            throw HyperAppShortcutMigrationError.storeUnavailable
+        }
+        let context = container.mainContext
+        let bindings = try context.fetch(FetchDescriptor<KeyBinding>())
+        let migrating = bindings.filter { $0.keyCode >= 0 && $0.modifierFlags == oldFlags }
+        guard !migrating.isEmpty else { return }
+        let prefs = try context.fetch(FetchDescriptor<BuiltinPreference>())
+        let quicklinks = try context.fetch(FetchDescriptor<Quicklink>())
+        let occupied = Set(HotkeyCoordinator.compile(
+            bindings: bindings.filter { $0.isEnabled && $0.modifierFlags != oldFlags },
+            prefs: prefs,
+            quicklinks: quicklinks,
+            paletteHotkey: paletteHotkey,
+            availableCommands: Set(BuiltinItem.allCases.filter { commandAvailability($0) })
+        ).map { HotkeyDescriptor(keyCode: $0.keyCode, modifierFlags: $0.modifierFlags) })
+        for binding in migrating where binding.isEnabled {
+            let replacement = HotkeyDescriptor(keyCode: binding.keyCode, modifierFlags: newFlags)
+            if occupied.contains(replacement) {
+                throw HyperAppShortcutMigrationError.conflict(replacement)
+            }
+        }
+        for binding in migrating { binding.modifierFlags = newFlags }
+        do {
+            try context.save()
+        } catch {
+            for binding in migrating { binding.modifierFlags = oldFlags }
+            throw error
+        }
+        publishMutation()
     }
 
     /// Reorder the top-level entries as one flat list. Reassigns a global
@@ -612,4 +656,9 @@ final class PanelStore {
         container.mainContext.delete(binding)
         persistMutation()
     }
+}
+
+enum HyperAppShortcutMigrationError: Error {
+    case storeUnavailable
+    case conflict(HotkeyDescriptor)
 }

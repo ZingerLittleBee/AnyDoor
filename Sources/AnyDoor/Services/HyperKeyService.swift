@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import OSLog
 import Observation
+import Carbon
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hyperKey.service")
 
@@ -10,7 +11,9 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hyperKey.
 final class HyperKeyService {
     static let shared = HyperKeyService()
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let remapAppShortcuts: @MainActor (Int, Int) throws -> Void
+    private let reportShortcutError: @MainActor (String) -> Void
     private let triggerKey = "hyperKey.trigger"
     private let quickPressKey = "hyperKey.quickPress"
     private let includeShiftKey = "hyperKey.includeShift"
@@ -22,24 +25,42 @@ final class HyperKeyService {
     private(set) var isActive: Bool = false
     private(set) var isApplying: Bool = false
     private(set) var lastError: HyperKeyError?
+    private(set) var isSecureInputEnabled = IsSecureEventInputEnabled()
+    private(set) var secureInputApplicationName: String?
 
     private var mutationToken: UInt64 = 0
     private var watchdogTimer: Timer?
 
     var hyperModifierFlags: Int {
         guard trigger != .none, isActive else { return 0 }
-        let base = Int(NSEvent.ModifierFlags.control.rawValue
-                       | NSEvent.ModifierFlags.option.rawValue
-                       | NSEvent.ModifierFlags.command.rawValue)
-        let shift = Int(NSEvent.ModifierFlags.shift.rawValue)
-        return base | (includeShift ? shift : 0)
+        return Self.modifierFlags(includeShift: includeShift)
+    }
+
+    private static func modifierFlags(includeShift: Bool) -> Int {
+        let base = CGEventFlags.maskControl.rawValue
+            | CGEventFlags.maskAlternate.rawValue
+            | CGEventFlags.maskCommand.rawValue
+        return Int(base | (includeShift ? CGEventFlags.maskShift.rawValue : 0))
     }
 
     var virtualKeyCode: Int {
         isActive ? HyperKeyVirtualKey.f19.keyCode : -1
     }
 
-    init() {
+    init(
+        defaults: UserDefaults = .standard,
+        remapAppShortcuts: @escaping @MainActor (Int, Int) throws -> Void = {
+            try PanelStore.shared.remapHyperAppShortcuts(
+                from: $0, to: $1, paletteHotkey: CommandPaletteService.shared.hotkey
+            )
+        },
+        reportShortcutError: @escaping @MainActor (String) -> Void = {
+            ToastPresenter.shared.show(.failure($0))
+        }
+    ) {
+        self.defaults = defaults
+        self.remapAppShortcuts = remapAppShortcuts
+        self.reportShortcutError = reportShortcutError
         let raw = defaults.string(forKey: triggerKey) ?? HyperKeyTrigger.none.rawValue
         self.trigger = HyperKeyTrigger(rawValue: raw) ?? .none
         let qpRaw = defaults.string(forKey: quickPressKey) ?? HyperKeyQuickPress.doesNothing.rawValue
@@ -50,9 +71,19 @@ final class HyperKeyService {
     /// Called once from AppDelegate after HotkeyService is up. Runs Phase 2
     /// (gated apply) and starts the watchdog.
     func bootstrapAfterTap() async {
+        refreshSecureInputStatus()
         startWatchdog()
         guard trigger != .none else { return }
         await applyCurrent()
+    }
+
+    /// Secure Input blocks keyboard delivery even while the event tap is enabled.
+    /// Keep this separate from tap health: it must not clear the user's HID mapping.
+    func refreshSecureInputStatus() {
+        isSecureInputEnabled = IsSecureEventInputEnabled()
+        secureInputApplicationName = isSecureInputEnabled
+            ? SecureInputOwner.currentApplicationName()
+            : nil
     }
 
     func setTrigger(_ new: HyperKeyTrigger) async {
@@ -70,6 +101,19 @@ final class HyperKeyService {
     }
 
     func setIncludeShift(_ new: Bool) async {
+        guard includeShift != new else { return }
+        do {
+            try remapAppShortcuts(
+                Self.modifierFlags(includeShift: includeShift),
+                Self.modifierFlags(includeShift: new)
+            )
+        } catch HyperAppShortcutMigrationError.conflict(let hotkey) {
+            reportShortcutError(L(.settingsGeneralHyperKeyShortcutConflict, hotkey.displayString))
+            return
+        } catch {
+            reportShortcutError(L(.settingsGeneralHyperKeyShortcutUpdateFailed))
+            return
+        }
         includeShift = new
         defaults.set(new, forKey: includeShiftKey)
         pushConfig()
@@ -164,6 +208,7 @@ final class HyperKeyService {
     }
 
     private func watchdogTick() {
+        refreshSecureInputStatus()
         let health = HotkeyService.shared.tapHealth
 
         switch health {
