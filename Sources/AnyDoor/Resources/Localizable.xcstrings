@@ -5697,6 +5697,40 @@
         }
       }
     },
+    "keyboard.secureInput.warning.owner": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Application: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "占用应用：%@"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.ownerUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to identify the application"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法识别占用应用"
+          }
+        }
+      }
+    },
     "keyboard.secureInput.warning.title": {
       "extractionState": "manual",
       "localizations": {

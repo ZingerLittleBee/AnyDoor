@@ -24,6 +24,7 @@ final class HyperKeyService {
     private(set) var isApplying: Bool = false
     private(set) var lastError: HyperKeyError?
     private(set) var isSecureInputEnabled = IsSecureEventInputEnabled()
+    private(set) var secureInputApplicationName: String?
 
     private var mutationToken: UInt64 = 0
     private var watchdogTimer: Timer?
@@ -62,6 +63,9 @@ final class HyperKeyService {
     /// Keep this separate from tap health: it must not clear the user's HID mapping.
     func refreshSecureInputStatus() {
         isSecureInputEnabled = IsSecureEventInputEnabled()
+        secureInputApplicationName = isSecureInputEnabled
+            ? SecureInputOwner.currentApplicationName()
+            : nil
     }
 
     func setTrigger(_ new: HyperKeyTrigger) async {

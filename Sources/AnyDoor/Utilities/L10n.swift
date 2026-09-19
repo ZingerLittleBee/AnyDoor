@@ -284,6 +284,8 @@ enum L10n {
         case settingsGeneralHyperKeyErrorHidutil = "settingsGeneral.hyperKey.error.hidutil"
         case secureInputWarningTitle = "keyboard.secureInput.warning.title"
         case secureInputWarningHelp = "keyboard.secureInput.warning.help"
+        case secureInputWarningOwner = "keyboard.secureInput.warning.owner"
+        case secureInputWarningOwnerUnknown = "keyboard.secureInput.warning.ownerUnknown"
         case settingsGeneralPermissionAccessibility = "settings.general.permission.accessibility"
         case settingsGeneralPermissionAutomation = "settings.general.permission.automation"
         case settingsGeneralPermissionGranted = "settings.general.permission.granted"

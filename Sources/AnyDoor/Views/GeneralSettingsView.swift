@@ -123,7 +123,7 @@ struct GeneralSettingsView: View {
                     .disabled(hyperKey.trigger == .none || hyperKey.isApplying)
 
                 if hyperKey.isSecureInputEnabled {
-                    SecureInputWarningView()
+                    SecureInputWarningView(applicationName: hyperKey.secureInputApplicationName)
                 }
 
                 if let err = hyperKey.lastError {
