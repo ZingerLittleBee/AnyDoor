@@ -3,6 +3,24 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>4.2.4</title>
+            <pubDate>Wed, 23 Sep 2026 01:20:39 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>4.2.499</sparkle:version>
+            <sparkle:shortVersionString>4.2.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[### Fixed
+
+- The clipboard history 屏幕取词 filter now shows only screen-text captures
+  instead of repeating 文本. Some older screen-text entries remain under 文本.
+- The command palette no longer leaves two rows highlighted at once when a
+  result moves between sections as you keep typing.
+- Clipboard history migration no longer gives up when the old store is still
+  briefly locked, which could drop the entire pre-v2 history on that launch.
+]]></description>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.4/AnyDoor-4.2.4.zip" length="15256718" type="application/octet-stream" sparkle:edSignature="KVKo1LNFz2neZlrZvkG1dtPzRqlwUvZOd8rXVu2gEe+4oFXNjgGkboPffG1RSvH/CZZUTj2yLfMx3bXRe3f+Cg=="/>
+        </item>
+        <item>
             <title>4.2.3</title>
             <pubDate>Sat, 19 Sep 2026 21:10:40 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -43,40 +61,6 @@
 - Google free translation shows a retry time and pauses requests when rate-limited.
 ]]></description>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.2/AnyDoor-4.2.2.zip" length="15321743" type="application/octet-stream" sparkle:edSignature="KrKz9rivU1y707LhQPaA98ZVFu++Dqp2kAb1XabESyjZO06QMMJ/yTybTq8ubz4JnMPEcdqmcXkznwxODDfLBA=="/>
-        </item>
-        <item>
-            <title>4.2.1</title>
-            <pubDate>Thu, 10 Sep 2026 21:50:23 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>4.2.199</sparkle:version>
-            <sparkle:shortVersionString>4.2.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[### Added
-
-- Clipboard History now labels video files as Video and provides a Video
-  filter. Existing file references gain the category on upgrade; videos
-  remain available in File and preserve their original preview and paste behavior.
-- Video cards show an asynchronously generated first-frame cover, preserving
-  orientation and aspect ratio, with a video icon when the file cannot be decoded.
-
-### Changed
-
-- Clipboard History's default category order is now Favorites, Screenshot,
-  Text, Link, Image, Video, File, Email, Color, Screen Text, and QR Code.
-  All stays first, custom tags keep their position after Favorites, and
-  previously saved manual ordering is preserved.
-
-### Fixed
-
-- Clipboard video previews stay open while using playback controls, the
-  More menu, and nested menus such as Playback Speed. Interacting with these
-  controls no longer dismisses the preview or the Clipboard Wall.
-- Clipboard History search no longer rebuilds its index on every launch of a
-  healthy store. Opening a ready index ran the FTS integrity-check on a
-  read-only connection, treated that as corruption, and left text search
-  empty until a background rebuild finished.
-]]></description>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.1/AnyDoor-4.2.1.zip" length="15378181" type="application/octet-stream" sparkle:edSignature="NMWd7TgR5Lc74fUytoTljG0BBCQC7DQDB6xuLBCObFVSLG+nC3fKgcwEzREAHc+sHz7lXXaqNcSsI3btYRdHCw=="/>
         </item>
         <item>
             <title>4.2.0 Beta 3</title>
