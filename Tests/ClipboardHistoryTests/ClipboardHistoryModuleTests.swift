@@ -986,6 +986,102 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         }
     }
 
+    func testOCRFacetMigrationBackfillsExplicitCapturesAndIsIdempotent() async throws {
+        let fixture = try TemporaryDatabase()
+        let legacy = try ClipboardHistoryModule.openDatabase(
+            at: fixture.url, databaseKey: fixture.key,
+            migrationTarget: "v12_video_facet"
+        )
+        try await legacy.write { database in
+            for id in ["recognized", "image", "plain"] {
+                try database.execute(
+                    sql: "INSERT INTO clipboard_entries(id, captured_at, last_captured_at, preview_text) VALUES (?, 0, 0, ?)",
+                    arguments: [id, id]
+                )
+                try database.execute(
+                    sql: "INSERT INTO clipboard_items(entry_id, item_index) VALUES (?, 0)",
+                    arguments: [id]
+                )
+            }
+            // An explicit screen text recognition capture: text-only, stamped
+            // `ocr` by the capture path, never given a derived job. Two fields
+            // must still add exactly one facet.
+            try database.execute(
+                sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES ('recognized', 'text')"
+            )
+            for index in 0..<2 {
+                try database.execute(
+                    sql: """
+                        INSERT INTO clipboard_search_fields(
+                            entry_id, field_kind, field_index, value,
+                            normalized_value, ranking_group
+                        ) VALUES ('recognized', 'ocr', ?, 'line', 'line', 1)
+                        """,
+                    arguments: [index]
+                )
+            }
+            // A bitmap whose Automatic Image Text Indexing pass found text
+            // carries the same field kind, but owns the derived OCR job that
+            // only a bitmap capture ever gets. Recognized text inside an image
+            // is not OCR Facet Provenance, so it must stay out.
+            try database.execute(
+                sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES ('image', 'image')"
+            )
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_derived_jobs(
+                        entry_id, kind, state, attempt_count,
+                        eligible_generation, next_attempt_at
+                    ) VALUES ('image', 'ocr', 'succeeded', 1, 1, NULL)
+                    """
+            )
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_search_fields(
+                        entry_id, field_kind, field_index, value,
+                        normalized_value, ranking_group
+                    ) VALUES ('image', 'ocr', 0, 'inside image', 'inside image', 1)
+                    """
+            )
+            // Plain text is never inferred to be OCR output.
+            try database.execute(
+                sql: "INSERT INTO clipboard_entry_facets(entry_id, facet) VALUES ('plain', 'text')"
+            )
+            try database.execute(
+                sql: """
+                    INSERT INTO clipboard_search_fields(
+                        entry_id, field_kind, field_index, value,
+                        normalized_value, ranking_group
+                    ) VALUES ('plain', 'exactText', 0, 'copied', 'copied', 0)
+                    """
+            )
+        }
+        try legacy.close()
+
+        for _ in 0..<2 {
+            let migrated = try ClipboardHistoryModule.openDatabase(
+                at: fixture.url, databaseKey: fixture.key
+            )
+            let ocrIDs = try await migrated.read { database in
+                try String.fetchAll(database, sql: "SELECT entry_id FROM clipboard_entry_facets WHERE facet = 'ocr' ORDER BY entry_id")
+            }
+            XCTAssertEqual(ocrIDs, ["recognized"])
+            let imageFacets = try await migrated.read { database in
+                try String.fetchAll(database, sql: "SELECT facet FROM clipboard_entry_facets WHERE entry_id = 'image' ORDER BY facet")
+            }
+            XCTAssertEqual(imageFacets, ["image"])
+            let facetCount = try await migrated.read { database in
+                try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM clipboard_entry_facets")
+            }
+            XCTAssertEqual(facetCount, 4)
+            let searchFieldCount = try await migrated.read { database in
+                try Int.fetchOne(database, sql: "SELECT COUNT(*) FROM clipboard_search_fields")
+            }
+            XCTAssertEqual(searchFieldCount, 4)
+            try migrated.close()
+        }
+    }
+
     func testEncryptedStoreAppliesVersionedMigrationsAndPassesIntegrityChecks()
         async throws
     {
@@ -1012,6 +1108,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v10_recency_paging_index",
                 "v11_bounded_preview_text",
                 "v12_video_facet",
+                "v13_ocr_facet",
             ]
         )
         XCTAssertEqual(diagnostics.journalMode, "wal")
@@ -1053,6 +1150,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 "v10_recency_paging_index",
                 "v11_bounded_preview_text",
                 "v12_video_facet",
+                "v13_ocr_facet",
             ]
         )
         XCTAssertTrue(diagnostics.databaseIntegrityOK)
