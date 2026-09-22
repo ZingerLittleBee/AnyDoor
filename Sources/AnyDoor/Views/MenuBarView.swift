@@ -455,7 +455,7 @@ struct MenuBarView: View {
             popover.updateContent {
                 ClipboardHistoryPopoverView(
                     presentation: presentation,
-                    facet: kind.historyFacet,
+                    facet: kind.contentFacet,
                     titleKey: kind.titleKey,
                     onHoverChange: { gate.popoverHover($0) },
                     onDismissPopover: {
@@ -503,27 +503,6 @@ struct MenuBarView: View {
     private func openPermissionsSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
             NSWorkspace.shared.open(url)
-        }
-    }
-}
-
-private extension ClipboardHistoryKind {
-    var historyFacet: ClipboardHistoryFacet {
-        switch self {
-        case .text, .ocr:
-            .text
-        case .color:
-            .color
-        case .qrcode:
-            .qrCode
-        case .screenshot:
-            .screenshot
-        case .image:
-            .image
-        case .video:
-            .video
-        case .file:
-            .file
         }
     }
 }

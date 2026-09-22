@@ -1,3 +1,4 @@
+import ClipboardHistory
 import Foundation
 
 enum ClipboardHistoryKind: String, CaseIterable, Sendable {
@@ -20,6 +21,22 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
         case .image:      return .clipboardKindImage
         case .video:      return .clipboardKindVideo
         case .file:       return .clipboardKindFile
+        }
+    }
+
+    /// The Content Facet a Facet Filter for this display kind matches. The
+    /// clipboard wall chips and the menu-bar history popover both resolve
+    /// through this one mapping, so the two surfaces cannot drift apart.
+    var contentFacet: ClipboardHistoryFacet {
+        switch self {
+        case .ocr:        return .ocr
+        case .color:      return .color
+        case .qrcode:     return .qrCode
+        case .screenshot: return .screenshot
+        case .text:       return .text
+        case .image:      return .image
+        case .video:      return .video
+        case .file:       return .file
         }
     }
 

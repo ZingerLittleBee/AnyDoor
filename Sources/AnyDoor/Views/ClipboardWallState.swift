@@ -38,22 +38,7 @@ enum ClipboardWallCategory: Hashable {
         case .email:
             return .email
         case .kind(let kind):
-            switch kind {
-            case .text, .ocr:
-                return .text
-            case .color:
-                return .color
-            case .qrcode:
-                return .qrCode
-            case .screenshot:
-                return .screenshot
-            case .image:
-                return .image
-            case .video:
-                return .video
-            case .file:
-                return .file
-            }
+            return kind.contentFacet
         }
     }
 
