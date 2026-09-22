@@ -225,7 +225,7 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 - **Facet Filter** (内容特征过滤) — A single-select Clipboard History browsing
   constraint with an All state and the default order Screenshot, Text, Link,
   Image, Video, File, Email, Color, OCR, and QR Code. The user may reorder
-  the chips by dragging, and the order persists in UserDefaults under
+  the chips by ⌥-dragging them, and the order persists in UserDefaults under
   `clipboard.categoryOrder`. It matches any entry carrying the
   selected Content Facet; overlap makes screenshots and image files visible
   through Image without requiring a Boolean query builder. It combines with

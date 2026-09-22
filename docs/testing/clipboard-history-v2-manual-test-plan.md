@@ -758,7 +758,7 @@ large trigram index is the thing to watch.
 | # | Case | Pass |
 | --- | --- | --- |
 | 11.1 | Wall keyboard nav | Arrows, Home/End, Return to paste, Esc to dismiss. |
-| 11.2 | Facet filter | All ten facets (Text, Link, Email, Color, Image, Screenshot, Video, File, QR Code, and OCR) plus All; single-select; fixed order. |
+| 11.2 | Facet filter | All ten facets (Text, Link, Email, Color, Image, Screenshot, Video, File, QR Code, and OCR) plus All; single-select; default order, user-reorderable. |
 | 11.3 | Source filter | ⌘K opens the menu; counts match; a removed source clears the filter. |
 | 11.4 | Tags | Create, rename, delete, assign, unassign; order persists across relaunch. |
 | 11.5 | Category reordering | Reorder categories; persists. |
