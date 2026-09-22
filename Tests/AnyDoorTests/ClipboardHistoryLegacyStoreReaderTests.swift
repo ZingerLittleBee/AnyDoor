@@ -1,5 +1,6 @@
 import ClipboardHistory
 import Foundation
+import GRDB
 import SwiftData
 import XCTest
 
@@ -182,26 +183,97 @@ final class ClipboardHistoryLegacyStoreReaderTests: XCTestCase {
         )
     }
 
+    func testATransientLockIsWaitedOutInsteadOfFailingTheTransfer() throws {
+        let id = UUID()
+        let storeURL = try makeStore { context in
+            context.insert(
+                ClipboardHistoryItem(
+                    id: id,
+                    kind: .text,
+                    text: "survives the lock",
+                    previewTitle: "Locked",
+                    createdAt: Date(timeIntervalSince1970: 42)
+                )
+            )
+        }
+
+        // SQLITE_BUSY is transient by definition: the snapshot is copied with
+        // its -wal/-shm sidecars, and whoever last wrote it may still be
+        // checkpointing. Failing on the first busy reply would cost the user
+        // every row in their history, so the reader has to wait.
+        let locked = DispatchSemaphore(value: 0)
+        let mayRelease = DispatchSemaphore(value: 0)
+        let released = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            var configuration = Configuration()
+            configuration.busyMode = .timeout(5)
+            guard
+                let holder = try? DatabaseQueue(
+                    path: storeURL.path,
+                    configuration: configuration
+                )
+            else {
+                locked.signal()
+                released.signal()
+                return
+            }
+            try? holder.writeWithoutTransaction { database in
+                // An exclusive locking mode blocks readers too, which a WAL
+                // write transaction on its own would not.
+                try database.execute(sql: "PRAGMA locking_mode = EXCLUSIVE")
+                try database.execute(sql: "BEGIN IMMEDIATE")
+                locked.signal()
+                mayRelease.wait()
+                try database.execute(sql: "COMMIT")
+                try database.execute(sql: "PRAGMA locking_mode = NORMAL")
+                // SQLite keeps the excess locking until the connection next
+                // touches the file, so drop it here rather than leaving the
+                // reader waiting on this connection's deallocation.
+                _ = try Int.fetchOne(
+                    database,
+                    sql: "SELECT count(*) FROM sqlite_master"
+                )
+            }
+            released.signal()
+        }
+        locked.wait()
+        // Release on a timer rather than after the read: the read is what
+        // blocks, so it cannot be the thing that lets go.
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+            mayRelease.signal()
+        }
+
+        let entries = try ClipboardHistoryLegacyStoreReader.readEntries(
+            at: storeURL
+        )
+
+        XCTAssertEqual(entries.map(\.id), [id])
+        mayRelease.signal()
+        released.wait()
+    }
+
     func testAStoreWithoutTheLegacyEntityReadsAsEmpty() throws {
         // An install that predates clipboard history entirely: the file is a
         // valid store, it just has no such table. That is nothing to migrate,
         // not a failure that would block every launch.
         let directory = try makeDirectory()
         let storeURL = directory.appendingPathComponent("AnyDoor.store")
-        let container = try ModelContainer(
-            for: KeyBinding.self,
-            configurations: ModelConfiguration(url: storeURL)
-        )
-        container.mainContext.insert(
-            KeyBinding(
-                keyCode: 122,
-                modifierFlags: 0,
-                appBundleID: "com.apple.finder",
-                appName: "Finder",
-                appPath: "/System/Library/CoreServices/Finder.app"
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: KeyBinding.self,
+                configurations: ModelConfiguration(url: storeURL)
             )
-        )
-        try container.mainContext.save()
+            container.mainContext.insert(
+                KeyBinding(
+                    keyCode: 122,
+                    modifierFlags: 0,
+                    appBundleID: "com.apple.finder",
+                    appName: "Finder",
+                    appPath: "/System/Library/CoreServices/Finder.app"
+                )
+            )
+            try container.mainContext.save()
+        }
 
         XCTAssertEqual(
             try ClipboardHistoryLegacyStoreReader.readEntries(at: storeURL)
@@ -215,12 +287,19 @@ final class ClipboardHistoryLegacyStoreReaderTests: XCTestCase {
     ) throws -> URL {
         let storeURL = try makeDirectory()
             .appendingPathComponent("AnyDoor.store")
-        let container = try ModelContainer(
-            for: ClipboardHistoryItem.self,
-            configurations: ModelConfiguration(url: storeURL)
-        )
-        try populate(container.mainContext)
-        try container.mainContext.save()
+        // Drain the pool so Core Data closes the store before the reader opens
+        // the same file. Releasing the container alone is not enough: its
+        // connection survives in the autorelease pool, keeping a lock on the
+        // store and its -wal sidecar that the reader then meets as
+        // SQLITE_BUSY.
+        try autoreleasepool {
+            let container = try ModelContainer(
+                for: ClipboardHistoryItem.self,
+                configurations: ModelConfiguration(url: storeURL)
+            )
+            try populate(container.mainContext)
+            try container.mainContext.save()
+        }
         return storeURL
     }
 

@@ -608,16 +608,17 @@ struct CommandPalettePicker: View {
                     Color.clear
                         .frame(height: 0)
                         .id("top-sentinel")
-                    ForEach(state.filteredSections) { section in
-                        sectionHeader(titleKey: section.titleKey)
-                        ForEach(section.entries) { entry in
+                    ForEach(CommandPaletteListItem.flatten(state.filteredSections)) { item in
+                        switch item {
+                        case .header(_, let titleKey):
+                            sectionHeader(titleKey: titleKey)
+                        case .row(let entry):
                             CommandPaletteRow(
                                 entry: entry,
                                 hyperFlags: state.hyperFlags,
                                 isSelected: entry.id == selectedID,
                                 onSelect: { onSelect(entry) }
                             )
-                            .id(entry.id)
                         }
                     }
                 }
@@ -634,6 +635,35 @@ struct CommandPalettePicker: View {
                 } else {
                     proxy.scrollTo(entries[newIndex].id)
                 }
+            }
+        }
+    }
+
+    /// One row of the flattened root list: a section header or an entry. The
+    /// list is deliberately built as a single `ForEach` over these instead of a
+    /// `ForEach` of sections each holding a nested `ForEach` of rows. A section
+    /// header can repeat once per rank tier, so an entry moves between sections
+    /// as the query changes (e.g. "MuseDAM" leaves the prefix tier for a new
+    /// exact tier on the final keystroke). Across that move SwiftUI kept the
+    /// entry's old rendering alive in the section it left, so the next
+    /// selection change repainted only the new instance and the stale one stayed
+    /// visibly selected — two highlighted rows. Flattening keeps every row in
+    /// one identity space, where the move is an ordinary reorder.
+    enum CommandPaletteListItem: Identifiable {
+        case header(sectionID: String, titleKey: String)
+        case row(PanelEntry)
+
+        var id: String {
+            switch self {
+            case .header(let sectionID, _): return "header:\(sectionID)"
+            case .row(let entry): return entry.id
+            }
+        }
+
+        static func flatten(_ sections: [CommandPaletteSection]) -> [CommandPaletteListItem] {
+            sections.flatMap { section in
+                [.header(sectionID: section.id, titleKey: section.titleKey)]
+                    + section.entries.map(CommandPaletteListItem.row)
             }
         }
     }
