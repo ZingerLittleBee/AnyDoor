@@ -135,12 +135,15 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   _Avoid_: Plaintext Cache, Cross-filesystem Transaction, Payload Rollback.
 - **Content Facet** (内容特征) — A filterable, non-exclusive classification
   derived from Clipboard Item content. The closed set is Text, Link, Email,
-  Color, Image, Screenshot, Video, File, and QR Code. A Clipboard Entry exposes
-  the union of its items' facets, so one entry can match several filters without
-  being duplicated: a PNG file is File and Image, a movie file is File and Video,
-  a screenshot containing a QR code is Image, Screenshot, and QR Code, and
-  textual URLs, email addresses, or colors also remain Text. OCR output is
-  searchable derived data rather than a facet or a separate entry.
+  Color, Image, Screenshot, Video, File, QR Code, and OCR. A Clipboard Entry
+  exposes the union of its items' facets, so one entry can match several
+  filters without being duplicated: a PNG file is File and Image, a movie file
+  is File and Video, a screenshot containing a QR code is Image, Screenshot,
+  and QR Code, and textual URLs, email addresses, or colors also remain Text.
+  Text produced by AnyDoor's own screen text recognition is both Text and OCR.
+  The facet comes from first-party provenance and is never inferred from
+  content. OCR still never creates a separate entry: the facet lands on the
+  same entry.
   _Avoid_: Clipboard Kind, Primary Category, OCR Entry.
 - **Facet Classification** (内容特征识别) — Deriving Content Facets first
   from explicit Standard Clipboard Representations and only then from an Exact
@@ -192,6 +195,14 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   treated as proof; a Finder file named like a screenshot is File and Image,
   not Screenshot.
   _Avoid_: Screenshot Heuristic, Screenshot Filename, Screenshot App Allowlist.
+- **OCR Facet Provenance** (OCR 特征来源) — Proof that text was produced by
+  AnyDoor's own screen text recognition. That text is Text, but only text
+  carrying this first-party provenance is also OCR. Text copied from another
+  application remains Text, because the pasteboard exposes no recognized-text
+  type that would establish the facet. Wording, line structure, and
+  source-application names are never treated as proof; pasted text that
+  merely reads like a screen capture is Text, not OCR.
+  _Avoid_: OCR Heuristic, Recognized-Text Guess, OCR App Allowlist.
 - **Automatic QR Indexing** (二维码自动索引) — Always-on, asynchronous,
   on-device QR recognition for bitmap payloads already saved in Clipboard
   History. It never blocks capture and has no user setting. Successful
@@ -212,8 +223,10 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   pass that finds no QR code is successful and receives no retry.
   _Avoid_: QR History Entry, Cloud QR Scan, File QR Scan.
 - **Facet Filter** (内容特征过滤) — A single-select Clipboard History browsing
-  constraint with an All state and the fixed order Text, Link, Email, Color,
-  Image, Screenshot, File, and QR Code. It matches any entry carrying the
+  constraint with an All state and the default order Screenshot, Text, Link,
+  Image, Video, File, Email, Color, OCR, and QR Code. The user may reorder
+  the chips by ⌥-dragging them, and the order persists in UserDefaults under
+  `clipboard.categoryOrder`. It matches any entry carrying the
   selected Content Facet; overlap makes screenshots and image files visible
   through Image without requiring a Boolean query builder. It combines with
   text query, one optional source, one optional tag, and an independent
