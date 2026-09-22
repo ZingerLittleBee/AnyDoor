@@ -188,6 +188,7 @@ let package = Package(
             name: "AnyDoorTests",
             dependencies: [
                 .product(name: "Clocks", package: "swift-clocks"),
+                .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 "AnyDoor", "ClipboardHistory", "ImageCodec",
                 "PluginInterface", "PluginSupport",

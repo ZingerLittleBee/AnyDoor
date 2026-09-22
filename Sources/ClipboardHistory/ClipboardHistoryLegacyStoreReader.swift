@@ -25,6 +25,11 @@ import GRDB
 /// toolchain that changed them would fail the suite rather than silently drop
 /// the user's history.
 public enum ClipboardHistoryLegacyStoreReader {
+    /// How long to wait out a lock on the snapshot before giving up. The read
+    /// runs on the main actor during launch, so the wait is bounded; in
+    /// practice nothing else has the copy open and it is never spent.
+    private static let busyTimeout: TimeInterval = 5
+
     /// Why a row could not be mapped. The caller decides how loudly to report
     /// it; migration drops the row rather than failing the whole transfer.
     public struct SkippedRow: Equatable, Sendable {
@@ -88,7 +93,18 @@ public enum ClipboardHistoryLegacyStoreReader {
         // Opened read-write on purpose: the snapshot is copied with its -wal
         // sidecar, and SQLite needs write access to replay that journal. The
         // snapshot is a throwaway copy, so recovering it in place is harmless.
-        let queue = try DatabaseQueue(path: storeURL.path)
+        //
+        // The default busy mode fails instantly on SQLITE_BUSY, and GRDB
+        // probes sqlite_master while opening the connection — so a lock still
+        // held on the copied -wal/-shm sidecars aborts the whole transfer
+        // before a single row is read. Waiting out a transient lock costs a
+        // bounded pause; not waiting costs the user their history.
+        var configuration = Configuration()
+        configuration.busyMode = .timeout(busyTimeout)
+        let queue = try DatabaseQueue(
+            path: storeURL.path,
+            configuration: configuration
+        )
         return try queue.read { database in
             guard try database.tableExists(Column.table) else {
                 return []
