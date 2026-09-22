@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The command palette no longer leaves two rows highlighted at once when a
+  result moves between sections as you keep typing.
+- Clipboard history migration no longer gives up when the old store is still
+  briefly locked, which could drop the entire pre-v2 history on that launch.
+
 ## [4.2.3] - 2026-09-19
 
 ### Added
