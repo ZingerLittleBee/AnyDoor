@@ -84,7 +84,7 @@ struct ClipboardHistoryRow: View {
             Image(systemName: "doc")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)
-        case .text, .link, .email:
+        case .text, .link, .email, .ocr:
             Image(systemName: "text.viewfinder")
                 .frame(width: 18, height: 18)
                 .foregroundStyle(.secondary)

@@ -112,7 +112,7 @@ History tier or entitlement path.
 ### Content facets and filtering
 
 - Content facets are overlapping, not a primary enum: Text, Link, Email, Color,
-  Image, Screenshot, File, and QR Code.
+  Image, Screenshot, Video, File, QR Code, and OCR.
 - The Facet Filter is single-select with All and a fixed order. One source, one
   tag, and favorite-only are separate optional AND constraints.
 - Link, Email, and Color inference requires the complete trimmed derived text

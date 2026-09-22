@@ -8,6 +8,8 @@ versioning.
 
 ### Fixed
 
+- The clipboard history 屏幕取词 filter now shows only screen-text captures
+  instead of repeating 文本. Some older screen-text entries remain under 文本.
 - The command palette no longer leaves two rows highlighted at once when a
   result moves between sections as you keep typing.
 - Clipboard history migration no longer gives up when the old store is still

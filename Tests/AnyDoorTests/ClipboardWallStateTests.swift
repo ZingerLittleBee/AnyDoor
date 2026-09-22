@@ -455,6 +455,18 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(ClipboardWallCategory.email.persistentID, "facet:email")
     }
 
+    func testKindCategoriesFilterThroughTheSharedContentFacetMapping() {
+        XCTAssertEqual(ClipboardWallCategory.kind(.ocr).facetFilter, .ocr)
+        XCTAssertEqual(ClipboardWallCategory.kind(.text).facetFilter, .text)
+        for kind in ClipboardHistoryKind.allCases {
+            XCTAssertEqual(
+                ClipboardWallCategory.kind(kind).facetFilter,
+                kind.contentFacet,
+                "\(kind) chip must resolve through ClipboardHistoryKind.contentFacet"
+            )
+        }
+    }
+
     func testDefaultCategoryOrder() {
         XCTAssertEqual(
             ClipboardWallState.order(tags: []),

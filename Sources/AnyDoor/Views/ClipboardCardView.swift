@@ -229,7 +229,7 @@ struct ClipboardCardView: View {
     @ViewBuilder
     private var preview: some View {
         switch entry.presentationFacet {
-        case .text, .link, .email, .qrCode:
+        case .text, .link, .email, .qrCode, .ocr:
             Text(entry.previewText ?? "")
                 .font(.system(size: 13))
                 .lineLimit(6)

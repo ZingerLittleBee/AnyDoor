@@ -154,6 +154,35 @@ extension ClipboardHistoryModule {
                     """, arguments: [entryID])
             }
         }
+        migrator.registerMigration("v13_ocr_facet") { database in
+            // OCR Facet Provenance backfill: the search index already records
+            // which text came from AnyDoor's own screen text recognition, so
+            // existing entries gain the filter without reading any payload.
+            // Automatic Image Text Indexing stamps the same field kind on
+            // bitmap entries; those own a derived OCR job row, which only a
+            // bitmap capture ever gets, and stay out because recognized text
+            // inside an image is not OCR Facet Provenance. The backfill is
+            // knowingly partial: duplicate reuse, text edits, and the legacy
+            // migration leave no `ocr` field behind. Stream ids so the index
+            // is never held in memory; repeated fields collapse on insert.
+            let entryIDs = try String.fetchCursor(database, sql: """
+                SELECT search.entry_id
+                FROM clipboard_search_fields AS search
+                WHERE search.field_kind = 'ocr'
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM clipboard_derived_jobs AS job
+                    WHERE job.entry_id = search.entry_id
+                      AND job.kind = 'ocr'
+                  )
+                """)
+            while let entryID = try entryIDs.next() {
+                try database.execute(sql: """
+                    INSERT OR IGNORE INTO clipboard_entry_facets(entry_id, facet)
+                    VALUES (?, 'ocr')
+                    """, arguments: [entryID])
+            }
+        }
         return migrator
     }
 

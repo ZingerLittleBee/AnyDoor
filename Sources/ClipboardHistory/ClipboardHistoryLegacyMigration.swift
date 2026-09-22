@@ -1123,7 +1123,9 @@ extension ClipboardHistoryModule {
             snapshotRepresentations.append(
                 .text(typeIdentifier: plainTextType, value: text)
             )
-            facets = [.text]
+            // A legacy OCR row is first-party screen text recognition output,
+            // so it keeps its OCR Facet Provenance across the migration.
+            facets = [.text, .ocr]
         case .image, .screenshot:
             guard let fileName = entry.fileName else {
                 throw ClipboardHistoryModuleError.legacyMigrationFailed
