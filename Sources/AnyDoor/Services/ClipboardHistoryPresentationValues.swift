@@ -13,6 +13,7 @@ extension ClipboardHistoryEntry {
             .qrCode,
             .email,
             .link,
+            .ocr,
             .text,
         ] where facets.contains(facet) {
             return facet
@@ -36,6 +37,8 @@ extension ClipboardHistoryEntry {
             return .clipboardKindFile
         case .qrCode:
             return .clipboardKindQrcode
+        case .ocr:
+            return .clipboardKindOcr
         }
     }
 

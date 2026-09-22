@@ -142,7 +142,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         let byID = Dictionary(uniqueKeysWithValues: page.entries.map {
             ($0.id, $0.facets)
         })
-        XCTAssertEqual(byID[ocr.entryID], [.text])
+        XCTAssertEqual(byID[ocr.entryID], [.text, .ocr])
         XCTAssertEqual(byID[qr.entryID], [.text, .qrCode])
         XCTAssertEqual(byID[color.entryID], [.text, .color])
 
@@ -161,6 +161,71 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 )
             ]
         )
+    }
+
+    func testOCRCapturesEarnTheOCRFacetWithoutInferringLinkEmailOrColor()
+        async throws
+    {
+        let fixture = try TemporaryStore()
+        let module = makeReadyModule(in: fixture)
+        let source = ClipboardHistoryCaptureSource(
+            bundleIdentifier: "dev.bybee.AnyDoor",
+            displayName: "AnyDoor"
+        )
+
+        // Each value would classify as Link, Email, or Color as a plain text
+        // capture; OCR Facet Provenance grants OCR alone on top of Text.
+        let url = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: source,
+                content: .ocr("https://example.com/recognized")
+            )
+        )
+        let mailbox = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: source,
+                content: .ocr("person@example.com")
+            )
+        )
+        let color = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: source,
+                content: .ocr("#FF00FF")
+            )
+        )
+        // Plain text is never inferred to be OCR output.
+        let plainURL = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: source,
+                content: .text("https://example.com/copied")
+            )
+        )
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        let byID = Dictionary(uniqueKeysWithValues: page.entries.map {
+            ($0.id, $0.facets)
+        })
+        XCTAssertEqual(byID[url.entryID], [.text, .ocr])
+        XCTAssertEqual(byID[mailbox.entryID], [.text, .ocr])
+        XCTAssertEqual(byID[color.entryID], [.text, .ocr])
+        XCTAssertEqual(byID[plainURL.entryID], [.text, .link])
+
+        let ocrPage = try await module.page(ClipboardHistoryQuery(facet: .ocr))
+        XCTAssertEqual(
+            Set(ocrPage.entries.map(\.id)),
+            [url.entryID, mailbox.entryID, color.entryID]
+        )
+        let textPage = try await module.page(ClipboardHistoryQuery(facet: .text))
+        XCTAssertEqual(textPage.entries.count, 4)
+        for facet in [ClipboardHistoryFacet.link, .email, .color] {
+            let filtered = try await module.page(
+                ClipboardHistoryQuery(facet: facet)
+            )
+            XCTAssertFalse(
+                filtered.entries.contains { $0.facets.contains(.ocr) },
+                "OCR text must never surface under the \(facet) filter"
+            )
+        }
     }
 
     @MainActor
