@@ -45,7 +45,7 @@ letting encrypted payload paths escape.
 - [ ] Private types are ignored only when the same item has supported content; an unsupported-only item rejects the complete entry
 - [ ] Pre/post `changeCount` mismatch, aggregate-byte overflow, and pixel overflow commit no row or payload subset
 - [ ] Canonical PNG generation applies orientation and preserves alpha, component depth, and applicable color profile through ImageIO
-- [ ] Text, Link, Email, Color, Image, Screenshot, File, and QR Code facet fixtures match ADR-0019 without duplicate entries
+- [ ] Text, Link, Email, Color, Image, Screenshot, Video, File, QR Code, and OCR facet fixtures match ADR-0019 without duplicate entries
 - [ ] Every file member must create a bookmark before the collection commits; one failure commits none, and no capture copies referenced content
 - [ ] Unavailable bookmarks never fall back to a different file later created at the capture-time path
 - [ ] Explicit first-party captures produce the required provenance while normal external bitmaps never infer Screenshot

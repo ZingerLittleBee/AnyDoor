@@ -118,3 +118,41 @@ Consequences:
 - Legacy OCR-only records migrate as Text because their source image
   relationship was never stored and cannot be reconstructed.
 - Tests must cover overlapping classification and deduplicated filter results.
+
+## Addendum (2026-09-22): OCR joins the closed facet set
+
+Reversed after an owner decision on issue #97: OCR is the tenth Content
+Facet. Text produced by AnyDoor's own screen text recognition is both Text
+and OCR. The facet is granted only by that first-party provenance, never
+inferred from the text, consistent with the Screenshot and QR Code
+precedents above. Plain text that happens to look like recognized screen
+text stays Text. OCR still never creates a sibling history record; the
+facet lands on the same entry. Text recognized later from a saved image
+stays searchable derived data on that image entry. Only screen text
+recognition grants this facet.
+
+Backfill of an existing store is knowingly partial. The migration can attach
+OCR only where a search field still records the OCR kind. Three populations
+are unrecoverable, and the backfill does not infer the facet from payload
+text:
+
+- entries whose identical text was later plain-copied, because duplicate
+  reuse overwrites the search field kind;
+- entries whose text was edited, because the edit deletes the old search
+  fields;
+- every entry already migrated from a pre-v2 store, because the legacy
+  migration stamps `exactText` and the v2 schema keeps no record of the
+  original capture kind.
+
+A pre-v2 store that migrates after this decision records the OCR facet from
+the legacy OCR kind at migration time. Rows already published into a v2
+store stay in the third population above.
+
+Duplicate reuse and a text edit may drop the facet afterwards. A later plain
+copy recomputes the entry's facets and drops OCR, and editing the text loses
+it. This round leaves those semantics unchanged. Making OCR sticky would
+change duplicate reuse for every facet.
+
+The Facet Filter stays single-select with an All state. Its chip order is a
+persisted default the user may reorder. The default order is Screenshot,
+Text, Link, Image, Video, File, Email, Color, OCR, QR Code.
