@@ -53,6 +53,9 @@ extension ClipboardHistoryModule {
             guard !value.isEmpty else {
                 throw ClipboardHistoryModuleError.operationUnavailable
             }
+            // OCR Facet Provenance: the facet comes from this first-party
+            // capture path alone. Text inference stays off so a recognized
+            // URL, mailbox, or color literal never gains Link, Email, or Color.
             snapshot = PasteboardSnapshot(
                 items: [
                     PasteboardSnapshot.Item(
@@ -61,7 +64,7 @@ extension ClipboardHistoryModule {
                         ]
                     )
                 ],
-                extraFacets: [],
+                extraFacets: [.ocr],
                 allowsTextInference: false
             )
             explicitSearchKind = "ocr"

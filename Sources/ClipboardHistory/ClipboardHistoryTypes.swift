@@ -55,6 +55,10 @@ public enum ClipboardHistoryFacet: String, CaseIterable, Sendable {
     case video
     case file
     case qrCode
+    /// OCR Facet Provenance: granted only to text produced by AnyDoor's own
+    /// screen text recognition. Plain text is never inferred to be OCR output,
+    /// mirroring the Screenshot Facet Provenance and Automatic QR Indexing rules.
+    case ocr
 }
 
 public struct ClipboardHistoryQuery: Equatable, Sendable {

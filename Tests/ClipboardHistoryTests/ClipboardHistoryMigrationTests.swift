@@ -149,7 +149,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
         XCTAssertEqual(byID[entries[0].id]?.tagIDs, ["work"])
         XCTAssertEqual(byID[entries[1].id]?.facets, [.text, .color])
         XCTAssertEqual(byID[entries[2].id]?.facets, [.text, .qrCode])
-        XCTAssertEqual(byID[entries[3].id]?.facets, [.text])
+        XCTAssertEqual(byID[entries[3].id]?.facets, [.text, .ocr])
         XCTAssertEqual(byID[entries[4].id]?.facets, [.image])
         XCTAssertEqual(byID[entries[5].id]?.facets, [.image, .screenshot])
         let migratedTags = try await module.tagDefinitions()

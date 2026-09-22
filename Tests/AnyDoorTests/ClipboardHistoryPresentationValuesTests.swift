@@ -21,6 +21,28 @@ final class ClipboardHistoryPresentationValuesTests: XCTestCase {
         )
     }
 
+    func testOCREntryPresentsAsOCRWhilePlainTextStillPresentsAsText() {
+        let ocr = makeEntry(facets: [.text, .ocr])
+        XCTAssertEqual(ocr.presentationFacet, .ocr)
+        XCTAssertEqual(ocr.presentationTitleKey, .clipboardKindOcr)
+        XCTAssertTrue(ocr.facets.contains(.text))
+        XCTAssertTrue(ClipboardHistoryKind.ocr.isTextBearing)
+
+        let text = makeEntry(facets: [.text])
+        XCTAssertEqual(text.presentationFacet, .text)
+        XCTAssertEqual(text.presentationTitleKey, .clipboardKindText)
+
+        // Link and Email entries keep the Text label exactly as before.
+        XCTAssertEqual(
+            makeEntry(facets: [.text, .link]).presentationTitleKey,
+            .clipboardKindText
+        )
+        XCTAssertEqual(
+            makeEntry(facets: [.text, .email, .link]).presentationTitleKey,
+            .clipboardKindText
+        )
+    }
+
     func testVideoMaterializationRetainsOriginalFileURLForPreviewAndPaste() {
         let url = URL(fileURLWithPath: "/Users/example/Movies/Clip.mov")
         let materialization = ClipboardHistoryMaterialization(items: [
