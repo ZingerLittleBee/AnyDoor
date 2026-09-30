@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Stable and Beta release publication retries GitHub draft creation, individual
+  asset uploads, and publishing up to four times with exponential backoff.
+  Lost responses are reconciled against remote state, completed uploads are
+  retained, and exhausted retries preserve the release for manual recovery.
+
 ## [4.2.5] - 2026-09-30
 
 ### Added

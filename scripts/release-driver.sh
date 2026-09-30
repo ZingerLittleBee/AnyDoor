@@ -9,6 +9,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 source "$REPO_ROOT/scripts/release-dryrun-state.sh"
+source "$REPO_ROOT/scripts/release-github.sh"
 
 DRYRUN="${DRYRUN:-0}"
 REQUESTED_VERSION="${1:-}"
@@ -514,17 +515,22 @@ git push origin "v$VER"
 
 # --- 13. Create draft release, upload assets, publish ------------------
 LAST_STEP=13
-RECOVERY_HINT="gh release delete v$VER --yes  # the release was a draft, so no clients ever saw it"
+RECOVERY_HINT="inspect 'gh release view v$VER --json isDraft,assets'; keep the existing tag, draft and dist/; complete missing uploads before publishing (do not rerun the entire release)"
 log "gh release create v$VER (draft $CHANNEL)"
 RELEASE_ARGS=(--draft --title "AnyDoor $DISPLAY_VERSION" --notes-file "$DIST/release-notes.md")
 if [[ "$CHANNEL" == "beta" ]]; then
   RELEASE_ARGS+=(--prerelease)
 fi
-gh release create "v$VER" \
-  "${RELEASE_ARGS[@]}" \
-  "$DMG" "$ZIP" "$APPCAST" "${PLUGIN_ZIPS[@]}"
+release_github_retry "Create draft v$VER" \
+  release_github_create_draft "v$VER" "${RELEASE_ARGS[@]}"
+for asset in "$DMG" "$ZIP" "$APPCAST" "${PLUGIN_ZIPS[@]}"; do
+  log "Upload ${asset##*/}"
+  release_github_retry "Upload ${asset##*/}" \
+    release_github_upload_asset "v$VER" "$asset"
+done
 
 log "Publish release"
-gh release edit "v$VER" --draft=false
+RECOVERY_HINT="gh release view v$VER --json isDraft,publishedAt; if still a draft, run 'gh release edit v$VER --draft=false' (all assets are uploaded; do not delete the release)"
+release_github_retry "Publish v$VER" release_github_publish "v$VER"
 
 log "Done. v$VER published at $REPO_URL/releases/tag/v$VER"
