@@ -34,11 +34,7 @@ struct SettingsView: View {
             // toggle and title both removed the bridged toolbar would install
             // nothing, and without a toolbar the sidebar surface stops below
             // the titlebar instead of running up to wrap the traffic lights.
-            .toolbar {
-                ToolbarItem(placement: .automatic) {
-                    Color.clear.frame(width: 1, height: 1)
-                }
-            }
+            .toolbar { SidebarToolbarPlaceholder() }
         } detail: {
             detailView
                 .modifier(
@@ -106,6 +102,25 @@ struct SettingsView: View {
         pane()
             .padding(.top, 20)
             .ignoresSafeArea(.container, edges: .top)
+    }
+}
+
+/// The invisible toolbar item that keeps the bridged toolbar installed. Its
+/// Liquid Glass platter must be hidden: the platter is sized to the item, so
+/// on macOS 27 a 1pt-wide item draws as a stray vertical hairline next to the
+/// traffic lights.
+private struct SidebarToolbarPlaceholder: ToolbarContent {
+    var body: some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            ToolbarItem(placement: .automatic) { placeholder }
+                .sharedBackgroundVisibility(.hidden)
+        } else {
+            ToolbarItem(placement: .automatic) { placeholder }
+        }
+    }
+
+    private var placeholder: some View {
+        Color.clear.frame(width: 1, height: 1)
     }
 }
 

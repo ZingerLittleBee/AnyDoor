@@ -1,14 +1,24 @@
 .DEFAULT_GOAL := dev
 .PHONY: dev build swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun beta-release beta-release-dryrun
 
+# The `swiftbuild` backend (the default since Swift 6.4) stamps the deployment
+# target into LC_BUILD_VERSION's `sdk` field instead of the real SDK version,
+# and macOS 26+ gates the modern window appearance on that field: an unpatched
+# local build renders the legacy chrome (compact toolbar, opaque sidebar, dark
+# split divider) and no longer looks like a release. Record the real SDK
+# version, mirroring the override in scripts/release-driver.sh.
+MIN_MACOS := $(shell /usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.plist)
+MACOS_SDK_VERSION := $(shell xcrun --show-sdk-version --sdk macosx)
+SDK_STAMP_FLAGS := -Xlinker -platform_version -Xlinker macos -Xlinker $(MIN_MACOS) -Xlinker $(MACOS_SDK_VERSION)
+
 dev:
-	watchexec -r -e swift -- swift run AnyDoor
+	watchexec -r -e swift -- swift run $(SDK_STAMP_FLAGS) AnyDoor
 
 build:
-	swift build
+	swift build $(SDK_STAMP_FLAGS)
 
 swift-release:
-	swift build -c release
+	swift build -c release $(SDK_STAMP_FLAGS)
 
 APP_NAME := AnyDoor
 APP_BUNDLE := $(APP_NAME).app

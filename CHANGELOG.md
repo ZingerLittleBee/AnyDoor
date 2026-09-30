@@ -12,6 +12,8 @@ versioning.
   asset uploads, and publishing up to four times with exponential backoff.
   Lost responses are reconciled against remote state, completed uploads are
   retained, and exhausted retries preserve the release for manual recovery.
+- The Settings sidebar no longer shows a stray vertical hairline next to the
+  traffic lights on macOS 27.
 
 ## [4.2.5] - 2026-09-30
 
