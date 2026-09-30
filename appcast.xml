@@ -3,6 +3,33 @@
     <channel>
         <title>AnyDoor</title>
         <item>
+            <title>4.2.5</title>
+            <pubDate>Wed, 30 Sep 2026 17:19:28 +0800</pubDate>
+            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
+            <sparkle:version>4.2.599</sparkle:version>
+            <sparkle:shortVersionString>4.2.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[### Added
+
+- Screenshot selection now highlights accessible controls and nested panels on
+  hover. Tab / Shift-Tab cycles through their hierarchy to the whole window;
+  clicking captures the target and dragging starts a free-region selection.
+  Missing Accessibility access or unusable element geometry shows an explicit
+  window/manual-selection fallback hint.
+
+### Fixed
+
+- Pinned screenshots can be dragged by their image and resized from their edges
+  and corners. Small or narrow captures keep their controls reachable, and the
+  image retains its aspect ratio while resizing. Edge/corner cursors show resize
+  targets, resizing enforces a 180 x 100 minimum, and click-through keeps an
+  interactive toolbar with a distinct toggle state and tooltip.
+- The menu-bar history popovers for 屏幕取词, 识别二维码 and 屏幕取色 no longer
+  spin forever when reopened or when moving between them.
+]]></description>
+            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.5/AnyDoor-4.2.5.zip" length="15267254" type="application/octet-stream" sparkle:edSignature="nQBOR5GrrYvUOZElghZgoUDvLcI9B0CeLwcT/93pC+xHEstx82ojPAHPrx+i+bePlJJh8yJrTcC7NFFQ7ZViCQ=="/>
+        </item>
+        <item>
             <title>4.2.4</title>
             <pubDate>Wed, 23 Sep 2026 01:20:39 +0800</pubDate>
             <link>https://github.com/ZingerLittleBee/AnyDoor</link>
@@ -45,22 +72,6 @@
   Settings window instead of the blank SwiftUI window.
 ]]></description>
             <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.3/AnyDoor-4.2.3.zip" length="15174447" type="application/octet-stream" sparkle:edSignature="EqDZsrT4tGWgmStxFu9brXSJllDRG/S1rUsHitn9NZKC9WXq3W70SkGy3uLCVUWEnfMtCoR/W/wCgSN97sPbBA=="/>
-        </item>
-        <item>
-            <title>4.2.2</title>
-            <pubDate>Tue, 15 Sep 2026 01:25:57 +0800</pubDate>
-            <link>https://github.com/ZingerLittleBee/AnyDoor</link>
-            <sparkle:version>4.2.299</sparkle:version>
-            <sparkle:shortVersionString>4.2.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <description sparkle:format="markdown"><![CDATA[### Fixed
-
-- Apple Translation restarts on Enter with the same language pair and ignores
-  outdated results.
-- Bing free translation works again after an endpoint change caused HTTP 404 errors.
-- Google free translation shows a retry time and pauses requests when rate-limited.
-]]></description>
-            <enclosure url="https://github.com/ZingerLittleBee/AnyDoor/releases/download/v4.2.2/AnyDoor-4.2.2.zip" length="15321743" type="application/octet-stream" sparkle:edSignature="KrKz9rivU1y707LhQPaA98ZVFu++Dqp2kAb1XabESyjZO06QMMJ/yTybTq8ubz4JnMPEcdqmcXkznwxODDfLBA=="/>
         </item>
         <item>
             <title>4.2.0 Beta 3</title>

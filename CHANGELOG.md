@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.5] - 2026-09-30
+
 ### Added
 
 - Screenshot selection now highlights accessible controls and nested panels on
