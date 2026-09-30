@@ -448,8 +448,11 @@ struct MenuBarView: View {
             // the anchor is keyed by the item so each row anchors to itself.
             guard let kind = item.historyKind else { break }
             guard let clipboardHistoryModule else { break }
+            // The popover shows no total, sources or tags, so its first page
+            // skips the history-wide scans behind them.
             let presentation = ClipboardHistoryPresentationModel(
-                module: clipboardHistoryModule
+                module: clipboardHistoryModule,
+                loadsAggregates: false
             )
             popover.needsKeyFocus = true
             popover.updateContent {
