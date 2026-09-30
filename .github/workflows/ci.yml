@@ -2,10 +2,32 @@ name: CI
 
 # The one gate every pull request has to pass. scripts/release.sh never runs
 # the test suite, so nothing else stands between a red suite and a release.
+#
+# Changes that cannot affect the Swift build or the tooling workspace skip the
+# whole workflow (a run happens only when some changed file falls outside this
+# list). Root-level `*.md` only: tooling READMEs ship in the scaffold template.
+# None of these jobs is a required check; if one becomes required, move this
+# filtering into the jobs so a skipped job reports success instead of leaving
+# the required check pending forever.
 on:
   push:
     branches: [main]
+    paths-ignore: &docs-and-meta
+      - '*.md'
+      - 'docs/**'
+      - 'landing/**'
+      - 'feed/**'
+      - 'video/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/PULL_REQUEST_TEMPLATE.md'
+      - '.github/dependabot.yml'
+      - '.github/scripts/**'
+      - '.github/workflows/check-commit-attribution.yml'
+      - '.github/workflows/deploy-*.yml'
+      - '.gitignore'
+      - 'lefthook.yml'
   pull_request:
+    paths-ignore: *docs-and-meta
   workflow_dispatch:
 
 concurrency:

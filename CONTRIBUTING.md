@@ -117,6 +117,10 @@ Every pull request runs two jobs:
   get compiled.
 - **Script Plugin tooling** — `pnpm verify` in `tooling/`.
 
+Both are skipped when a pull request only touches files that cannot affect
+them (root-level Markdown, `docs/`, `landing/`, `feed/`, and CI or
+repository metadata; see `paths-ignore` in `.github/workflows/ci.yml`).
+
 A separate **Check commit attribution** workflow rejects attribution trailers
 and email addresses in commits and the PR title/description (see above).
 
