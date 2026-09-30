@@ -20,10 +20,11 @@ The image is drawn directly by its AppKit interaction surface, without an
 enclosing SwiftUI image host competing for cursor updates. A separate
 `activeInActiveApp` tracking area handles `cursorUpdate`; the `activeAlways`
 area handles hover/movement. These cannot be combined: AppKit does not send
-`cursorUpdate` for `activeAlways`. The image panel also refreshes its cursor
-after event dispatch for inactive-app feedback, guarded by current frontmost
-window, visibility, and click-through state. No timer, global pointer monitor,
-or application activation is used.
+`cursorUpdate` for `activeAlways`. The image panel also refreshes its requested
+cursor after event dispatch, guarded by current frontmost window, visibility,
+and click-through state. This changes the application's cursor stack; it does
+not grant an inactive application ownership of the displayed pointer. No timer,
+global pointer monitor, or application activation is used.
 
 - `PinnedImageLayoutTests` covers initial sizes, all eight resize zones,
   anchored minimum clamping, repeated original-frame deltas, negative screen
@@ -43,6 +44,26 @@ or application activation is used.
 - Run `swift build --build-tests` and `swift test` on macOS. Linux cannot compile
   AppKit or perform native UI validation. PR CI supplies macOS compilation and
   automated tests; complete the manual checks before release.
+
+## Known native cursor limitation
+
+Native testing on macOS 27 found that the visible pointer stays an arrow while
+AnyDoor is inactive. The diagnostic log showed correct edge/corner selection,
+the image panel owning the hit location, and the exact non-arrow `NSCursor.set`
+request succeeding in the application's cursor stack. After pinning first,
+clicking the AnyDoor Settings title bar, and hovering the same pin edge without
+clicking another app, the user confirmed that the visible cursor changed.
+
+This isolates the remaining failure to activation-dependent cursor display;
+it is not evidence of a missed resize zone or failed mouse-event delivery.
+Apple documents that [NSCursor.current](https://developer.apple.com/documentation/appkit/nscursor/current)
+may differ from the visible pointer when another application is active. The
+unbundled development launch alone does not establish a packaging defect.
+
+Inactive-app cursor feedback is still unresolved. Do not describe the checklist
+below as passed, or add hover activation, private cursor APIs, or new permissions
+as an implicit fix. A product decision is needed if visible resize affordances
+or explicit click-to-activate editing will replace inactive custom cursors.
 
 ## Manual checks on macOS 14 and a current macOS version
 

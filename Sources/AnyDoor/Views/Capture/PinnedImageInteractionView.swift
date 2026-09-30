@@ -1,8 +1,8 @@
 import AppKit
 
-/// Cursor updates must win after AppKit finishes dispatching the event. Inactive
-/// nonactivating panels do not receive active-app cursorUpdate callbacks, and
-/// mouseMoved alone can be followed by AppKit resetting the cursor to an arrow.
+/// Refreshes the requested cursor after AppKit finishes dispatching the event.
+/// This updates the app's cursor stack, not Window Server cursor ownership:
+/// an inactive nonactivating panel cannot assume that this cursor is displayed.
 @MainActor
 final class PinnedImagePanel: NSPanel {
     var refreshImageCursor: (@MainActor () -> Void)?
