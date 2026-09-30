@@ -156,12 +156,34 @@ check for updates, and verify discovery, download, installation, relaunch, and
 the displayed version. A successful GitHub Release alone is not client
 acceptance.
 
-If publication fails after a commit or tag was created, inspect the local tag,
-remote tag, GitHub Release, and workflow state before retrying. Follow the
-release driver's recovery hint; do not blindly rerun the entire command against
-an identity that may already exist. If `Update Feed` fails only at deployed-byte
-verification, compare the live appcast with the Release asset after propagation
-and rerun the failed job only when the deployed bytes are correct.
+Stable and Beta publication retry GitHub draft creation, each asset upload, and
+publishing up to four times, waiting 2, 4, and 8 seconds between attempts. A
+failed request is reconciled against remote state: an already-created draft is
+reused, an uploaded asset with the expected size is retained, and an already
+published release is not published again. Incomplete uploads are replaced only
+while the release is a draft.
+
+If publication still fails after a commit or tag was created, inspect the remote
+state before retrying:
+
+```bash
+gh release view "v$VERSION" --json isDraft,publishedAt,assets
+```
+
+Keep the existing tag, Release, and local `dist/` artifacts. If any assets are
+missing or incomplete, upload them to the draft before publishing; never replace
+assets on a published release. Once all assets are uploaded, resume only the
+publication step:
+
+```bash
+gh release edit "v$VERSION" --draft=false
+```
+
+Do not delete a Release just because the publish command timed out, or blindly
+rerun the entire release against an identity that already exists. If `Update
+Feed` fails only at deployed-byte verification, compare the live appcast with
+the Release asset after propagation and rerun the failed job only when the
+deployed bytes are correct.
 
 ## Appcast publication
 
