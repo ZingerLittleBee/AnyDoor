@@ -1,6 +1,57 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "capture.pinned.moveResize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag the image to move · Drag edges or corners to resize"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拖动图片移动 · 拖动边缘或角落调整大小"
+          }
+        }
+      }
+    },
+    "capture.pinned.opacity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opacity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不透明度"
+          }
+        }
+      }
+    },
+    "capture.pinned.clickThrough": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable click-through · Press Esc to interact again"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启鼠标穿透 · 按 Esc 恢复操作"
+          }
+        }
+      }
+    },
     "capture.window.hint": {
       "extractionState": "manual",
       "localizations": {
