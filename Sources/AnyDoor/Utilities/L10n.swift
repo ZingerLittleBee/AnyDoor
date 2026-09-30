@@ -8,6 +8,7 @@ enum L10n {
         case capturePinnedMoveResize = "capture.pinned.moveResize"
         case capturePinnedOpacity = "capture.pinned.opacity"
         case capturePinnedClickThrough = "capture.pinned.clickThrough"
+        case capturePinnedDisableClickThrough = "capture.pinned.disableClickThrough"
         case captureSmartHint = "capture.smart.hint"
         case captureSmartPermissionHint = "capture.smart.permissionHint"
         case captureSmartFallbackHint = "capture.smart.fallbackHint"

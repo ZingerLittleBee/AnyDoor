@@ -1,6 +1,23 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "capture.pinned.disableClickThrough": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable image click-through"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭图片鼠标穿透"
+          }
+        }
+      }
+    },
     "capture.pinned.moveResize": {
       "extractionState": "manual",
       "localizations": {
@@ -41,13 +58,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Enable click-through · Press Esc to interact again"
+            "value": "Enable image click-through (toolbar stays interactive)"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "开启鼠标穿透 · 按 Esc 恢复操作"
+            "value": "开启图片鼠标穿透（工具栏仍可操作）"
           }
         }
       }
