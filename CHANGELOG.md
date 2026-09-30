@@ -6,6 +6,11 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- The menu-bar history popovers for 屏幕取词, 识别二维码 and 屏幕取色 no longer
+  spin forever when reopened or when moving between them.
+
 ## [4.2.4] - 2026-09-23
 
 ### Fixed

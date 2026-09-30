@@ -45,7 +45,10 @@ struct ClipboardHistoryPopoverView: View {
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onHoverSafe(perform: onHoverChange)
-        .task {
+        // The menu bar reuses one hosting view and swaps its root for every
+        // history row, so this view keeps its identity across mounts. Keying
+        // the load to the model re-runs it for each freshly created one.
+        .task(id: ObjectIdentifier(presentation)) {
             await presentation.setQuery(
                 ClipboardHistoryQuery(facet: facet)
             )
