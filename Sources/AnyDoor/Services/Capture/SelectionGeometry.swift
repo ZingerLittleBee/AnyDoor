@@ -33,6 +33,33 @@ enum SelectionGeometry {
         return primary?.maxY ?? fallback
     }
 
+    /// AX and CGWindow geometry is in global top-left-origin points. AppKit's
+    /// global space is bottom-left-origin, anchored to the same primary display.
+    static func appKitGlobalRect(fromCG rect: CGRect, flipHeight: CGFloat) -> CGRect {
+        CGRect(x: rect.minX, y: flipHeight - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    static func cgGlobalRect(fromAppKit rect: CGRect, flipHeight: CGFloat) -> CGRect {
+        // Flipping a rectangle is its own inverse.
+        appKitGlobalRect(fromCG: rect, flipHeight: flipHeight)
+    }
+
+    static func localRect(fromCG rect: CGRect, screenFrame: CGRect, flipHeight: CGFloat) -> CGRect {
+        appKitGlobalRect(fromCG: rect, flipHeight: flipHeight)
+            .offsetBy(dx: -screenFrame.minX, dy: -screenFrame.minY)
+    }
+
+    /// Frozen display images use top-left-origin pixels. Apply backing scale
+    /// only here; AX geometry and selection chrome always remain in points.
+    static func pixelRect(fromLocal rect: CGRect, bounds: CGRect, backingScale: CGFloat) -> CGRect {
+        CGRect(
+            x: (rect.minX - bounds.minX) * backingScale,
+            y: (bounds.maxY - rect.maxY) * backingScale,
+            width: rect.width * backingScale,
+            height: rect.height * backingScale
+        )
+    }
+
     /// "W × H" using rounded integer points.
     static func formatDimensions(_ size: CGSize) -> String {
         "\(Int(size.width.rounded())) \u{00D7} \(Int(size.height.rounded()))"

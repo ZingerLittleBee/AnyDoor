@@ -6,6 +6,14 @@ import Foundation
 struct CapturableWindow: Sendable, Equatable {
     let id: CGWindowID
     let frame: CGRect
+    /// Used for application-scoped AX hit testing underneath capture overlays.
+    let ownerPID: pid_t?
+
+    init(id: CGWindowID, frame: CGRect, ownerPID: pid_t? = nil) {
+        self.id = id
+        self.frame = frame
+        self.ownerPID = ownerPID
+    }
 }
 
 enum WindowEnumerator {
@@ -29,7 +37,8 @@ enum WindowEnumerator {
                 let boundsDict = info[kCGWindowBounds as String] as? [String: Any],
                 let bounds = CGRect(dictionaryRepresentation: boundsDict as CFDictionary)
             else { return nil }
-            return CapturableWindow(id: CGWindowID(number), frame: bounds)
+            let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+            return CapturableWindow(id: CGWindowID(number), frame: bounds, ownerPID: ownerPID)
         }
     }
 }

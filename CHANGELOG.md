@@ -6,6 +6,14 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Screenshot selection now highlights accessible controls and nested panels on
+  hover. Tab / Shift-Tab cycles through their hierarchy to the whole window;
+  clicking captures the target and dragging starts a free-region selection.
+  Missing Accessibility access or unusable element geometry shows an explicit
+  window/manual-selection fallback hint.
+
 ### Fixed
 
 - The menu-bar history popovers for 屏幕取词, 识别二维码 and 屏幕取色 no longer

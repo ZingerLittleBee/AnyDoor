@@ -77,19 +77,11 @@ final class CaptureCoordinator {
     private func captureRegion(delay: Int) {
         let (targets, frozen) = Self.resolveAllDisplays()
         guard !targets.isEmpty else { finish(); return }
-        let initialRect = Self.initialSelectionRect(targets: targets, settings: settings)
-        selectionOverlay.present(targets: targets, mode: .region, frozen: frozen, initialRect: initialRect) { [weak self] result in
+        // Unified screenshots start with intelligent hover. Scrolling capture
+        // still restores its viewport through SelectionGeometry independently.
+        selectionOverlay.present(targets: targets, mode: .region, frozen: frozen, allowsElementSelection: true) { [weak self] result in
             self?.handle(result, delay: delay)
         }
-    }
-
-    /// The pre-shown selection rect (global AppKit coords): the persisted last
-    /// rect when its center lies on a connected display, else a default rect
-    /// centered on the display under the cursor (or the first display).
-    @MainActor private static func initialSelectionRect(targets: [TargetDisplay], settings: CaptureSettings) -> CGRect {
-        SelectionGeometry.initialSelectionRect(
-            last: settings.lastRegionRect, displays: targets.map(\.frame), mouse: NSEvent.mouseLocation
-        )
     }
 
     private func captureWindow(delay: Int) {

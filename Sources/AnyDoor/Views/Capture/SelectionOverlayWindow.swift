@@ -7,30 +7,39 @@ import SwiftUI
 /// the supplied frozen still) or a window (highlight + click). Calls `completion`
 /// exactly once with a `SelectionResult`, then tears the panel down.
 ///
-/// `present` is deliberately **synchronous** and takes the frozen still as a
-/// parameter: the ScreenCaptureKit grab is performed by `CaptureCoordinator` in a
-/// nonisolated frame *before* this runs, so no `@MainActor` frame ever awaits the
-/// SCK call (which would corrupt the main thread's executor tracking on Swift 6.3
-/// — see `CaptureCoordinator.capture(_:)` and swiftlang/swift#89214).
+/// `present` stays synchronous and takes the frozen still captured by
+/// `CaptureCoordinator` before any overlay appears. Only target resolution is
+/// asynchronous; image capture continues through `LegacyScreenCapture`.
 @MainActor
 final class SelectionOverlayWindow {
     private var panels: [NSPanel] = []
     private var completion: ((SelectionResult) -> Void)?
+    private let targetResolver: any SmartCaptureTargetResolving
+
+    init(targetResolver: any SmartCaptureTargetResolving = AccessibilityCaptureTargetResolver()) {
+        self.targetResolver = targetResolver
+    }
 
     /// Presents a selection overlay on every supplied display (each backed by its
     /// own frozen still), so the user can select on any screen — not just the one
     /// under the cursor at trigger time. The first view to commit/cancel tears the
     /// whole set down. A cross-display rectangle is not supported: each overlay
-    /// clamps its selection to its own screen.
+    /// clamps its selection to its own screen. Only the unified screenshot
+    /// entry opts into element hover; explicit viewport callers keep free-region
+    /// selection even on displays without an initial rectangle.
     func present(
         targets: [TargetDisplay],
         mode: CaptureMode,
         frozen: [CGDirectDisplayID: CGImage],
         initialRect: CGRect = .zero,
+        allowsElementSelection: Bool = false,
         completion: @escaping (SelectionResult) -> Void
     ) {
         self.completion = completion
         let mouse = NSEvent.mouseLocation
+        // Snapshot before showing any overlay; every display uses the same
+        // foreground ordering and the resolver never queries our frozen panels.
+        let windows = WindowEnumerator.onScreenWindows()
 
         for target in targets {
             guard let frozenImage = frozen[target.id] else { continue }
@@ -64,7 +73,10 @@ final class SelectionOverlayWindow {
                 screenFrame: target.frame,
                 backingScale: target.backingScale,
                 frozen: frozenImage,
-                initialRect: localInitial
+                initialRect: localInitial,
+                allowsElementSelection: allowsElementSelection,
+                windows: windows,
+                targetResolver: targetResolver
             )
             view.onRegion = { [weak self] image, rect in self?.finish(.region(image: image, rect: rect)) }
             view.onWindow = { [weak self] id, frame in self?.finish(.window(id: id, frame: frame)) }
@@ -84,15 +96,22 @@ final class SelectionOverlayWindow {
             }
             panels.append(p)
         }
+        guard !panels.isEmpty else { finish(.cancelled); return }
         // Fall back to keying the first panel if the anchor was off all displays.
         if !panels.contains(where: { $0.isKeyWindow }), let first = panels.first {
             first.makeKeyAndOrderFront(nil)
             first.makeFirstResponder(first.contentView)
         }
+        for panel in panels {
+            (panel.contentView as? SelectionOverlayView)?.resolveInitialHover()
+        }
     }
 
     private func finish(_ result: SelectionResult) {
-        for p in panels { p.orderOut(nil) }
+        for p in panels {
+            (p.contentView as? SelectionOverlayView)?.stopResolving()
+            p.orderOut(nil)
+        }
         panels.removeAll()
         let c = completion
         completion = nil
@@ -120,12 +139,24 @@ private final class SelectionOverlayView: NSView {
     private let screenFrame: CGRect
     private let backingScale: CGFloat
     private let frozen: CGImage
-    private var windows: [CapturableWindow]
+    private let windows: [CapturableWindow]
+    private let allowsElementSelection: Bool
 
     private var dragStart: CGPoint?
     private var currentRect: CGRect = .zero
-    private var hoveredWindow: CapturableWindow?
+    private let hoverController: SmartCaptureHoverController
+    private var smartSelection = SmartCaptureSelection()
+    private var fallbackReason: SmartCaptureResolution.FallbackReason?
+    private var lastHoverPoint: CGPoint?
     private var mouseLocation: CGPoint
+
+    private var hoverMode: SmartCaptureSelection.HoverMode? {
+        SmartCaptureSelection.hoverMode(
+            mode: mode, allowsElementSelection: allowsElementSelection,
+            hasRegion: !currentRect.isEmpty, isDragging: dragMode != .none
+        )
+    }
+    private var isSmartHover: Bool { hoverMode != nil }
 
     /// The attached toolbar (region/window/fullscreen), hosted as a subview and
     /// repositioned below the selection on every change. Only built for an overlay
@@ -158,22 +189,39 @@ private final class SelectionOverlayView: NSView {
     private static let loupeSize: CGFloat = 120
     private static let loupeSourcePoints: CGFloat = 24
 
-    init(mode: CaptureMode, screenFrame: CGRect, backingScale: CGFloat, frozen: CGImage, initialRect: CGRect = .zero) {
+    init(
+        mode: CaptureMode,
+        screenFrame: CGRect,
+        backingScale: CGFloat,
+        frozen: CGImage,
+        initialRect: CGRect = .zero,
+        allowsElementSelection: Bool,
+        windows: [CapturableWindow],
+        targetResolver: any SmartCaptureTargetResolving
+    ) {
         self.mode = mode
         self.initialMode = mode
         self.screenFrame = screenFrame
         self.backingScale = backingScale
         self.frozen = frozen
-        self.windows = mode == .window ? WindowEnumerator.onScreenWindows() : []
+        self.allowsElementSelection = allowsElementSelection
+        self.windows = windows
+        self.hoverController = SmartCaptureHoverController(resolver: targetResolver)
         self.currentRect = (mode == .region) ? initialRect : .zero
         self.mouseLocation = CGPoint(x: screenFrame.width / 2, y: screenFrame.height / 2)
         super.init(frame: NSRect(origin: .zero, size: screenFrame.size))
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.activeAlways, .mouseMoved, .inVisibleRect],
+            options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect],
             owner: self
         )
         addTrackingArea(area)
+        hoverController.onResolution = { [weak self] resolution in
+            guard let self, self.isSmartHover, self.smartSelection.pressOrigin == nil else { return }
+            self.smartSelection.update(targets: resolution.targets)
+            self.fallbackReason = resolution.fallbackReason
+            self.needsDisplay = true
+        }
         NSCursor.crosshair.set()
         // Build the attached toolbar only for the unified region entry; the
         // standalone window overlay has no toolbar.
@@ -189,6 +237,60 @@ private final class SelectionOverlayView: NSView {
     }
     required init?(coder: NSCoder) { fatalError() }
     override var acceptsFirstResponder: Bool { true }
+
+    func resolveInitialHover() {
+        let point = NSEvent.mouseLocation
+        guard screenFrame.contains(point) else { return }
+        requestHover(at: CGPoint(x: point.x - screenFrame.minX, y: point.y - screenFrame.minY))
+    }
+
+    func stopResolving() {
+        hoverController.cancel()
+        smartSelection.reset()
+        fallbackReason = nil
+        lastHoverPoint = nil
+    }
+
+    private func requestHover(at local: CGPoint) {
+        guard isSmartHover, smartSelection.pressOrigin == nil else { return }
+        if local != lastHoverPoint {
+            // Never let a click capture the candidate from an older pointer
+            // location while the next AX query is still in flight.
+            smartSelection.update(targets: [])
+            fallbackReason = nil
+            lastHoverPoint = local
+        }
+        mouseLocation = local
+        if hoverMode == .window {
+            // An explicit Window toolbar/action request retains whole-window
+            // capture. Element-level selection belongs to the unified entry.
+            let window = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
+            smartSelection.update(targets: window.map {
+                [SmartCaptureTarget(kind: .window(id: $0.id), globalFrame: $0.frame)]
+            } ?? [])
+            needsDisplay = true
+            return
+        }
+        hoverController.request(
+            at: cgGlobalPoint(globalPoint(local)),
+            screenFrame: SelectionGeometry.cgGlobalRect(fromAppKit: screenFrame, flipHeight: totalHeightFlip()),
+            windows: windows
+        )
+        needsDisplay = true
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        // Keyboard hierarchy navigation must follow the pointer across displays.
+        window?.makeKey()
+        window?.makeFirstResponder(self)
+        requestHover(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard smartSelection.pressOrigin == nil else { return }
+        stopResolving()
+        needsDisplay = true
+    }
 
     // Keep the crosshair cursor while the pointer is over the overlay; AppKit
     // otherwise resets it to the arrow as the mouse moves.
@@ -224,21 +326,13 @@ private final class SelectionOverlayView: NSView {
     /// CGWindow global frame (top-left origin) -> this view's local rect
     /// (bottom-left origin). Used to highlight a hovered window.
     private func localRect(forCGWindow frame: CGRect) -> CGRect {
-        let flip = totalHeightFlip()
-        let globalBottomLeftY = flip - frame.maxY
-        return CGRect(
-            x: frame.minX - screenFrame.minX,
-            y: globalBottomLeftY - screenFrame.minY,
-            width: frame.width,
-            height: frame.height
-        )
+        SelectionGeometry.localRect(fromCG: frame, screenFrame: screenFrame, flipHeight: totalHeightFlip())
     }
 
     /// CGWindow global frame (top-left origin) -> global AppKit screen frame
     /// (bottom-left origin) returned to the coordinator for overlay placement.
     private func globalScreenFrame(forCGWindow frame: CGRect) -> CGRect {
-        let flip = totalHeightFlip()
-        return CGRect(x: frame.minX, y: flip - frame.maxY, width: frame.width, height: frame.height)
+        SelectionGeometry.appKitGlobalRect(fromCG: frame, flipHeight: totalHeightFlip())
     }
 
     // MARK: - Drawing
@@ -252,6 +346,19 @@ private final class SelectionOverlayView: NSView {
         // Dim everything.
         ctx.setFillColor(NSColor.black.withAlphaComponent(0.35).cgColor)
         ctx.fill(bounds)
+
+        if isSmartHover {
+            if let target = smartSelection.selectedTarget {
+                let local = localRect(forCGWindow: target.globalFrame).intersection(bounds)
+                ctx.saveGState()
+                ctx.clip(to: local)
+                ctx.draw(frozen, in: bounds)
+                ctx.restoreGState()
+                drawSelectionChrome(local, ctx: ctx)
+            }
+            drawSmartHint(ctx: ctx)
+            return
+        }
 
         switch mode {
         case .region:
@@ -270,17 +377,42 @@ private final class SelectionOverlayView: NSView {
             if isCreatingDrag { drawCrosshair(at: mouseLocation, ctx: ctx) }
             if showsLoupe { drawLoupe(at: mouseLocation, ctx: ctx) }
         case .window:
-            if let win = hoveredWindow {
-                let local = localRect(forCGWindow: win.frame)
-                ctx.saveGState()
-                ctx.clip(to: local)
-                ctx.draw(frozen, in: bounds)
-                ctx.restoreGState()
-                drawSelectionChrome(local, ctx: ctx)
-            }
+            break
         case .fullscreen:
             break
         }
+    }
+
+    private func drawSmartHint(ctx: CGContext) {
+        let key: L10n.Key
+        if mode == .window {
+            key = .captureWindowHint
+        } else {
+            switch fallbackReason {
+            case .accessibilityPermissionRequired: key = .captureSmartPermissionHint
+            case .noUsefulAccessibilityGeometry: key = .captureSmartFallbackHint
+            case nil: key = .captureSmartHint
+            }
+        }
+        let label = L(key) as NSString
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byWordWrapping
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraph,
+        ]
+        let width = max(1, min(700, bounds.width - 48))
+        let size = label.boundingRect(
+            with: CGSize(width: width, height: 100), options: [.usesLineFragmentOrigin], attributes: attrs
+        ).size
+        let frame = CGRect(x: bounds.midX - size.width / 2 - 12, y: bounds.minY + 24,
+                           width: size.width + 24, height: ceil(size.height) + 16)
+        ctx.setFillColor(NSColor.black.withAlphaComponent(0.8).cgColor)
+        ctx.addPath(CGPath(roundedRect: frame, cornerWidth: 8, cornerHeight: 8, transform: nil))
+        ctx.fillPath()
+        label.draw(in: frame.insetBy(dx: 12, dy: 8), withAttributes: attrs)
     }
 
     private func drawHandles(_ rect: CGRect, ctx: CGContext) {
@@ -384,11 +516,21 @@ private final class SelectionOverlayView: NSView {
     // MARK: - Mouse / keyboard
 
     override func mouseDown(with event: NSEvent) {
-        guard mode == .region else { return }
         let p = convert(event.locationInWindow, from: nil)
         mouseLocation = p
         dragOrigin = p
         rectAtDragStart = currentRect
+
+        if isSmartHover {
+            // A coalesced final mouseMoved must not leave a stale hit under a
+            // click at a different point. Window-only picking refreshes here
+            // synchronously; element picking waits for the new resolution.
+            if p != lastHoverPoint { requestHover(at: p) }
+            smartSelection.beginPress(at: p)
+            hoverController.cancel()
+            return
+        }
+        guard mode == .region else { return }
 
         if currentRect.isEmpty {
             beginCreating(at: p)
@@ -410,9 +552,17 @@ private final class SelectionOverlayView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard mode == .region else { return }
         let p = convert(event.locationInWindow, from: nil)
         mouseLocation = p
+        if let origin = smartSelection.pressOrigin {
+            guard smartSelection.drag(to: p) else { return }
+            if dragMode == .none {
+                mode = .region
+                beginCreating(at: origin)
+                fallbackReason = nil
+            }
+        }
+        guard mode == .region else { return }
         switch dragMode {
         case .creating:
             guard let start = dragStart else { return }
@@ -433,6 +583,24 @@ private final class SelectionOverlayView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        // Coalesced mouse events may omit the final drag point. Evaluate the
+        // release location too, before deciding between a click and a region.
+        if smartSelection.pressOrigin != nil || dragMode != .none {
+            mouseDragged(with: event)
+        }
+        if smartSelection.pressOrigin != nil {
+            switch smartSelection.release(at: convert(event.locationInWindow, from: nil)) {
+            case .target(let target):
+                commitTarget(target)
+                return
+            case .none:
+                lastHoverPoint = nil
+                requestHover(at: convert(event.locationInWindow, from: nil))
+                return
+            case .region:
+                break // Finish the free-region gesture below, never snap back.
+            }
+        }
         switch mode {
         case .region:
             let wasCreating = isCreatingDrag
@@ -442,9 +610,12 @@ private final class SelectionOverlayView: NSView {
             if wasCreating, SelectionGeometry.isTooSmall(currentRect) { currentRect = .zero }
             needsDisplay = true
             layoutToolbar()
+            if currentRect.isEmpty {
+                lastHoverPoint = nil
+                requestHover(at: convert(event.locationInWindow, from: nil))
+            }
         case .window:
-            guard let win = hoveredWindow else { onCancel?(); return }
-            onWindow?(win.id, globalScreenFrame(forCGWindow: win.frame))
+            break
         case .fullscreen:
             onCancel?()
         }
@@ -458,8 +629,9 @@ private final class SelectionOverlayView: NSView {
         // crosshair over the buttons. Show a pointer cursor over the toolbar.
         if let host = toolbarHost, !host.isHidden, host.frame.contains(local) {
             NSCursor.pointingHand.set()
-        } else if mode == .window {
-            hoveredWindow = WindowEnumerator.window(under: cgGlobalPoint(globalPoint(local)), in: windows)
+        } else if isSmartHover {
+            NSCursor.crosshair.set()
+            requestHover(at: local)
         } else if mode == .region, !currentRect.isEmpty {
             updateCursor(for: SelectionGeometry.hitTest(local, in: currentRect, handleSize: Self.handleHitSize))
         }
@@ -566,8 +738,16 @@ private final class SelectionOverlayView: NSView {
                 onCancel?()
             }
         case 36, 76: // Return / keypad Enter — commit a reused or nudged selection
+            if isSmartHover, let target = smartSelection.selectedTarget {
+                commitTarget(target)
+                return
+            }
             guard mode == .region, !SelectionGeometry.isTooSmall(currentRect) else { return }
             commitRegion(currentRect)
+        case 48: // Tab / Shift-Tab cycle out to parents or back toward the hit.
+            guard isSmartHover else { return }
+            smartSelection.cycle(backwards: event.modifierFlags.contains(.shift))
+            needsDisplay = true
         case 123, 124, 125, 126: // arrow keys nudge/resize an existing selection
             handleArrowKey(event)
         default:
@@ -600,16 +780,24 @@ private final class SelectionOverlayView: NSView {
 
     // MARK: - Commit
 
+    private func commitTarget(_ target: SmartCaptureTarget) {
+        hoverController.cancel()
+        switch target.kind {
+        case .accessibility:
+            // Element captures must use the clean frozen image, not a fresh
+            // whole-window grab containing pixels outside the highlighted UI.
+            let rect = localRect(forCGWindow: target.globalFrame).intersection(bounds)
+            guard !SelectionGeometry.isTooSmall(rect) else { return }
+            commitRegion(rect)
+        case .window(let id):
+            onWindow?(id, globalScreenFrame(forCGWindow: target.globalFrame))
+        }
+    }
+
     private func commitRegion(_ rect: CGRect) {
         // Convert the selection from view points (bottom-left) into the frozen
         // image's pixel space (top-left) using the display's backing scale.
-        let scale = backingScale
-        let pixelRect = CGRect(
-            x: rect.minX * scale,
-            y: (bounds.height - rect.maxY) * scale,
-            width: rect.width * scale,
-            height: rect.height * scale
-        )
+        let pixelRect = SelectionGeometry.pixelRect(fromLocal: rect, bounds: bounds, backingScale: backingScale)
         guard let cropped = frozen.cropping(to: pixelRect) else { onCancel?(); return }
         onRegion?(cropped, CGRect(origin: globalPoint(rect.origin), size: rect.size))
     }
@@ -654,22 +842,23 @@ private final class SelectionOverlayView: NSView {
         }
     }
 
-    /// Toolbar "window" → switch the live overlay into window-pick: hide the rect +
-    /// toolbar, enumerate windows, highlight on hover, commit on click.
+    /// Toolbar "window" → hide the rect/toolbar and pick a whole window from the
+    /// pre-overlay snapshot, highlighting on hover and committing on click.
     private func enterWindowSubMode() {
-        windows = WindowEnumerator.onScreenWindows()
+        stopResolving()
         mode = .window
-        hoveredWindow = nil
         layoutToolbar()     // hides the toolbar (mode != .region)
         NSCursor.crosshair.set()
+        resolveInitialHover()
         needsDisplay = true
     }
 
     /// Esc from a toolbar-entered window sub-mode returns to region selection.
     private func exitToRegionMode() {
+        stopResolving()
         mode = .region
-        hoveredWindow = nil
         layoutToolbar()     // re-shows the toolbar
+        resolveInitialHover()
         needsDisplay = true
     }
 

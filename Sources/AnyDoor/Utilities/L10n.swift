@@ -5,6 +5,10 @@ import SwiftUI
 /// migration tasks; the catalog must contain a matching entry for each case.
 enum L10n {
     enum Key: String, CaseIterable, Sendable {
+        case captureSmartHint = "capture.smart.hint"
+        case captureSmartPermissionHint = "capture.smart.permissionHint"
+        case captureSmartFallbackHint = "capture.smart.fallbackHint"
+        case captureWindowHint = "capture.window.hint"
         case bluetoothBatteryCase = "bluetooth.battery.case"
         case bluetoothBatteryEmpty = "bluetooth.battery.empty"
         case bluetoothBatteryError = "bluetooth.battery.error"
