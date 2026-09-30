@@ -21,3 +21,6 @@ DerivedData/
 # testloop scratch artifacts
 .testloop/*
 !.testloop/reports/
+
+# Local Lefthook overrides
+lefthook-local.yml
