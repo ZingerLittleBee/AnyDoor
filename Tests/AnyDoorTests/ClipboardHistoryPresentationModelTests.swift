@@ -505,6 +505,36 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         }
     }
 
+    /// Only a newer load cancels the one in flight, and that one publishes
+    /// itself. A cancellation that arrives at the current revision came from
+    /// below, so the load has to settle rather than stay on a spinner.
+    func testCancellationAtTheCurrentRevisionStillSettlesTheLoad() async {
+        let model = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: {
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: true,
+                        searchIndex: .ready
+                    )
+                },
+                page: { _, _ in throw CancellationError() },
+                apply: { _ in .notFound },
+                materialize: { _ in
+                    ClipboardHistoryMaterialization(items: [])
+                },
+                tagDefinitions: { [] }
+            )
+        )
+
+        await model.load()
+
+        XCTAssertEqual(model.contentState, .unavailable(nil))
+        XCTAssertEqual(model.pagingState, .complete)
+        XCTAssertEqual(model.entries, [])
+        XCTAssertEqual(model.actionFailure, .unknown)
+    }
+
     func testQueryChangeCancelsSingleFlightPrefetchAndCleansItUp()
         async
     {

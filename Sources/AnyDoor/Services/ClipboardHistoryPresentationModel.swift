@@ -1071,11 +1071,11 @@ final class ClipboardHistoryPresentationModel {
                 actionFailure = .searchIndexFailed(failure)
             }
         } catch {
-            guard requestRevision == revision,
-                !(error is CancellationError)
-            else {
-                return
-            }
+            // Only a newer load cancels this one, and it bumps the revision
+            // first and publishes itself. A cancellation that still arrives at
+            // the current revision came from below, and nothing else would
+            // settle this load.
+            guard requestRevision == revision else { return }
             entries = []
             selectedID = nil
             nextCursor = nil
