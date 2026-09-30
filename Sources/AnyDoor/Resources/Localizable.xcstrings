@@ -1,6 +1,74 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "capture.window.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click to capture window · Drag: select region · Esc: cancel"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击截取窗口 · 拖动框选 · Esc 取消"
+          }
+        }
+      }
+    },
+    "capture.smart.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Click to capture · Tab / Shift-Tab: change level · Drag: select region · Esc: cancel"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "点击截图 · Tab / Shift-Tab 切换层级 · 拖动框选 · Esc 取消"
+          }
+        }
+      }
+    },
+    "capture.smart.permissionHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Element detection needs Accessibility access. Select a window or drag a region."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "识别界面元素需要辅助功能权限。可选择整个窗口或拖动框选。"
+          }
+        }
+      }
+    },
+    "capture.smart.fallbackHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No useful element geometry. Select a window or drag a region."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未获取到可用的界面元素。可选择整个窗口或拖动框选。"
+          }
+        }
+      }
+    },
     "bluetooth.battery.case": {
       "extractionState": "manual",
       "localizations": {
