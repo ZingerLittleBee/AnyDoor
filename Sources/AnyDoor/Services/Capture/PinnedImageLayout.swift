@@ -43,6 +43,28 @@ enum PinnedImageLayout {
         resizeRegions(in: bounds).first { $0.1.contains(point) }?.0
     }
 
+    /// Small visual grips stay inside the existing resize hit regions. Corner
+    /// grips sit toward the interior so the rounded image clip keeps them visible.
+    static func resizeGripFrames(in bounds: CGRect) -> [(SelectionHandle, CGRect)] {
+        resizeRegions(in: bounds).map { handle, region in
+            let size: CGSize
+            switch handle {
+            case .top, .bottom: size = CGSize(width: min(24, region.width), height: min(4, region.height))
+            case .left, .right: size = CGSize(width: min(4, region.width), height: min(24, region.height))
+            default: size = CGSize(width: min(5, region.width), height: min(5, region.height))
+            }
+            var origin = CGPoint(x: region.midX - size.width / 2, y: region.midY - size.height / 2)
+            switch handle {
+            case .topLeft: origin = CGPoint(x: region.maxX - size.width, y: region.minY)
+            case .topRight: origin = region.origin
+            case .bottomRight: origin = CGPoint(x: region.minX, y: region.maxY - size.height)
+            case .bottomLeft: origin = CGPoint(x: region.maxX - size.width, y: region.maxY - size.height)
+            default: break
+            }
+            return (handle, CGRect(origin: origin, size: size))
+        }
+    }
+
     /// Apply the total global mouse delta to the frame captured at mouse-down,
     /// never to the previous drag result. Opposite edges stay anchored, including
     /// when the moving edge crosses them or reaches the hard minimum (y-up).

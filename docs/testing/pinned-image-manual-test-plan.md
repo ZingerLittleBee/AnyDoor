@@ -26,6 +26,14 @@ and click-through state. This changes the application's cursor stack; it does
 not grant an inactive application ownership of the displayed pointer. No timer,
 global pointer monitor, or application activation is used.
 
+Hovering an interactive image shows eight small, high-contrast resize grips:
+four edge pills and four corner grips. The current resize zone and its grip use
+an accent highlight, which remains on the original handle throughout a resize.
+The grips stay within the existing 8-point resize border and disappear when
+the pointer leaves the pin. Crossing the toolbar keeps the grips visible but
+clears the resize highlight. Click-through hides all resize feedback immediately;
+it never advertises a resize action on the pass-through image.
+
 - `PinnedImageLayoutTests` covers initial sizes, all eight resize zones,
   anchored minimum clamping, repeated original-frame deltas, negative screen
   coordinates, and toolbar layout at the minimum size.
@@ -38,6 +46,10 @@ global pointer monitor, or application activation is used.
   injected cursor sink to check cursor-update/after-dispatch routing, all handle
   decisions, tracking-area rebuilds, stationary pointers, and ownership release.
   Recording a cursor choice is not proof of the pointer rendered on screen.
+- `PinnedImageResizeAffordanceTests` checks grip geometry against actual hit
+  regions and toolbar bounds, production hover/resize/teardown transitions,
+  click-through suppression, and nonactivation. Offscreen AppKit drawing checks
+  cover the visible grips without treating them as a Window Server cursor test.
 - These tests do not reproduce Window Server hit-testing across applications,
   actual cursor rendering, or real SwiftUI button interaction. Physical checks
   below remain necessary even when the tests pass.
@@ -45,7 +57,7 @@ global pointer monitor, or application activation is used.
   AppKit or perform native UI validation. PR CI supplies macOS compilation and
   automated tests; complete the manual checks before release.
 
-## Known native cursor limitation
+## Passive feedback and the native cursor boundary
 
 Native testing on macOS 27 found that the visible pointer stays an arrow while
 AnyDoor is inactive. The diagnostic log showed correct edge/corner selection,
@@ -60,22 +72,26 @@ Apple documents that [NSCursor.current](https://developer.apple.com/documentatio
 may differ from the visible pointer when another application is active. The
 unbundled development launch alone does not establish a packaging defect.
 
-Inactive-app cursor feedback is still unresolved. Do not describe the checklist
-below as passed, or add hover activation, private cursor APIs, or new permissions
-as an implicit fix. A product decision is needed if visible resize affordances
-or explicit click-to-activate editing will replace inactive custom cursors.
+The chosen behavior preserves passive pins: visible resize grips/highlights
+provide feedback while AnyDoor is inactive, and normal custom cursor feedback
+remains available when AnyDoor is active. Hovering or dragging a pin must not
+activate the application. No private cursor APIs or new permissions are used.
+An unchanged arrow while AnyDoor is inactive is an accepted platform boundary,
+not a claim that background custom cursors have been fixed.
 
 ## Manual checks on macOS 14 and a current macOS version
 
 1. Leave another application active. Pin a screenshot and move over its body,
-   each of the four edges, and each of the four corners. The pointer must change
-   to a grab hand, horizontal/vertical resize arrow, or matching diagonal arrow.
-   Check the same feedback while AnyDoor is active.
-   Stop moving on each handle long enough to catch a cursor being reset to an
-   arrow after the hover event. Cross rapidly between the image, toolbar, another
-   pin, and another application's text/button controls; the image must not
-   overwrite the destination's cursor. Repeat immediately after resizing and
-   after switching click-through off while the pointer is stationary.
+   each of the four edges, and each of the four corners. All eight grips must
+   become visible; each edge/corner must highlight its own resize zone and grip.
+   The inactive pointer may remain an arrow. The prior app must retain focus,
+   including while dragging/resizing the pin. Move off the pin: grips must hide.
+   Cross the toolbar: grips remain visible, with no resize highlight underneath
+   controls. Repeat immediately after resizing and after switching click-through
+   off while the pointer is stationary. Separately activate AnyDoor Settings,
+   leave it open, and hover the pin: verify the grab hand and matching resize
+   arrows still work. Cross between pins and another application's text/button
+   controls; the image must not overwrite the destination's cursor.
 2. Drag from all eight resize zones, using the visible areas inside the rounded
    corners. Fully transparent outer-corner pixels belong to the window underneath.
    Shrink past the opposite edge and verify width never falls below 180 points
@@ -87,7 +103,9 @@ or explicit click-to-activate editing will replace inactive custom cursors.
    top/left resize and while moving between displays.
 4. Try portrait, tiny, extremely wide/tall, and transparent images. The image
    must retain its aspect ratio; letterboxed areas must still support movement.
-   The toolbar must fit at the 180 x 100 minimum.
+   The toolbar and grips must fit at the 180 x 100 minimum without overlap.
+   Check light, dark, and busy images, including reduced opacity: the grips must
+   be discoverable without covering image content away from the resize border.
 5. Hover the click-through button while another application remains active.
    Verify the tooltip appears. Enable click-through: the icon must change to a
    slashed cursor with an accent highlight, and the tooltip must offer disabling.
@@ -95,7 +113,8 @@ or explicit click-to-activate editing will replace inactive custom cursors.
    scroll, and drag the underlying app. Return to the still-visible toolbar and
    disable click-through without using Esc. Repeat several times. Use the opacity
    slider and close button while click-through is enabled; both must remain usable.
-   Changing image opacity must not dim the toolbar.
+   Changing image opacity must not dim the toolbar. No resize grips or highlight
+   may remain on the click-through image, including under a stationary pointer.
 7. Enable click-through on two pins, then press Esc with AnyDoor active and with
    another application active. Where global keyboard monitoring is available,
    both pins must return to normal state and update their icons/tooltips. Even

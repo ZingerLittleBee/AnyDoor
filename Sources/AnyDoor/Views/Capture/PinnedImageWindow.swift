@@ -113,7 +113,6 @@ final class PinnedImageWindow: NSObject, NSWindowDelegate {
 
     private func updateHover() {
         state.hovering = panel.frame.contains(NSEvent.mouseLocation)
-        (panel.contentView as? PinnedImageDragView)?.isHovered = state.hovering
         updateToolbarVisibility()
         (panel.contentView as? PinnedImageDragView)?.refreshCursorForCurrentLocation()
     }

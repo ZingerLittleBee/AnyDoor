@@ -34,13 +34,20 @@ enum PinnedImagePointerStyle: Equatable {
     case resize(SelectionHandle)
 }
 
+enum PinnedImageResizeAffordance: Equatable {
+    case hidden
+    case visible(highlighted: SelectionHandle?)
+}
+
 /// Owns inside-edge resizing instead of relying on borderless native resizing.
 /// Original screen coordinates prevent frame feedback from compounding a drag.
 @MainActor
 final class PinnedImageDragView: NSView {
     var onHoverChanged: (@MainActor () -> Void)?
     var image: NSImage? { didSet { needsDisplay = true } }
-    var isHovered = false { didSet { needsDisplay = true } }
+    private(set) var resizeAffordance: PinnedImageResizeAffordance = .hidden {
+        didSet { if oldValue != resizeAffordance { needsDisplay = true } }
+    }
     // A narrow injection seam records actual cursor decisions in tests without
     // pretending that NSCursor.current proves Window Server pointer rendering.
     var applyPointerStyle: (PinnedImagePointerStyle) -> Void = { style in
@@ -79,10 +86,33 @@ final class PinnedImageDragView: NSView {
             NSGraphicsContext.current?.imageInterpolation = .high
             image.draw(in: destination, from: .zero, operation: .sourceOver, fraction: 1)
         }
-        NSColor.white.withAlphaComponent(isHovered ? 0.6 : 0.2).setStroke()
+        NSColor.white.withAlphaComponent(resizeAffordance == .hidden ? 0.2 : 0.6).setStroke()
         let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5)
         border.lineWidth = 1
         border.stroke()
+        drawResizeAffordance()
+    }
+
+    private func drawResizeAffordance() {
+        guard case .visible(let highlighted) = resizeAffordance else { return }
+        if let highlighted,
+           let region = PinnedImageLayout.resizeRegions(in: bounds).first(where: { $0.0 == highlighted })?.1 {
+            NSColor.controlAccentColor.withAlphaComponent(0.3).setFill()
+            region.fill()
+        }
+        for (handle, frame) in PinnedImageLayout.resizeGripFrames(in: bounds) {
+            let grip = NSBezierPath(roundedRect: frame, xRadius: 2, yRadius: 2)
+            // Dark outer contrast and a light inner rim stay legible over both
+            // light and dark images; the selected grip adds an accent fill.
+            NSColor.black.withAlphaComponent(0.9).setStroke()
+            grip.lineWidth = 2
+            grip.stroke()
+            (handle == highlighted ? NSColor.controlAccentColor : NSColor.white).setFill()
+            grip.fill()
+            NSColor.white.setStroke()
+            grip.lineWidth = 0.75
+            grip.stroke()
+        }
     }
 
     override func updateTrackingAreas() {
@@ -125,11 +155,13 @@ final class PinnedImageDragView: NSView {
         // The incoming window/view owns its cursor. Do not reset it to arrow
         // from a late exit event belonging to this image or another pin.
         onHoverChanged?()
+        refreshCursorForCurrentLocation(source: "mouseExited")
     }
 
     @discardableResult
     func refreshCursorForCurrentLocation(source: String = "refresh") -> Bool {
         guard window?.isVisible == true else {
+            resizeAffordance = .hidden
             PinnedImageCursorDiagnostics.shared.context(source: source, decision: "not-visible-or-detached", view: self)
             return false
         }
@@ -143,24 +175,41 @@ final class PinnedImageDragView: NSView {
             PinnedImageCursorDiagnostics.shared.context(source: source, decision: decision, view: self,
                                                        point: point, frontmost: frontmostWindowNumber, style: style)
         }
-        guard let window else { record("detached"); return false }
-        guard window.isVisible else { record("not-visible"); return false }
-        guard !window.ignoresMouseEvents else { record("click-through"); return false }
-        guard !isHiddenOrHasHiddenAncestor else { record("hidden-view"); return false }
+        guard let window else { resizeAffordance = .hidden; record("detached"); return false }
+        guard window.isVisible else { resizeAffordance = .hidden; record("not-visible"); return false }
+        guard !window.ignoresMouseEvents else {
+            resizeGesture = nil
+            resizeAffordance = .hidden
+            record("click-through")
+            return false
+        }
+        guard !isHiddenOrHasHiddenAncestor else { resizeAffordance = .hidden; record("hidden-view"); return false }
         if let gesture = resizeGesture {
+            resizeAffordance = .visible(highlighted: gesture.handle)
             record("apply-resize-session", style: .resize(gesture.handle))
             applyPointerStyle(.resize(gesture.handle))
             return true
         }
         // A child toolbar or another application's window must keep its own
         // cursor, even if a queued event still targets the image underneath.
-        guard frontmostWindowNumber == window.windowNumber else { record("different-frontmost-window"); return false }
+        guard frontmostWindowNumber == window.windowNumber else {
+            // Keep the small grips visible while crossing our toolbar, but do
+            // not advertise a resize target under its independently hit window.
+            let overToolbar = window.childWindows?.contains {
+                $0.windowNumber == frontmostWindowNumber && $0.isVisible && !$0.ignoresMouseEvents && $0.frame.contains(point)
+            } ?? false
+            resizeAffordance = overToolbar ? .visible(highlighted: nil) : .hidden
+            record("different-frontmost-window")
+            return false
+        }
         let local = convert(window.convertPoint(fromScreen: point), from: nil)
-        guard bounds.contains(local) else { record("outside-bounds"); return false }
+        guard bounds.contains(local) else { resizeAffordance = .hidden; record("outside-bounds"); return false }
         if let handle = PinnedImageLayout.resizeHandle(at: local, in: bounds) {
+            resizeAffordance = .visible(highlighted: handle)
             record("apply-handle", style: .resize(handle))
             applyPointerStyle(.resize(handle))
         } else {
+            resizeAffordance = .visible(highlighted: nil)
             record("apply-body", style: .move)
             applyPointerStyle(.move)
         }
@@ -196,6 +245,7 @@ final class PinnedImageDragView: NSView {
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         resizeGesture = nil
+        resizeAffordance = .hidden
         if let panel = window as? PinnedImagePanel, panel.imageCursorOwner === self {
             panel.refreshImageCursor = nil
             panel.imageCursorOwner = nil
