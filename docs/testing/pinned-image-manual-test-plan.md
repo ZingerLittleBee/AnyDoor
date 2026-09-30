@@ -16,6 +16,15 @@ is disabled. Its icon, accent highlight, accessibility label, and tooltip reflec
 the same state. Escape is optional recovery, since global keyboard monitoring may
 be unavailable without Accessibility permission.
 
+The image is drawn directly by its AppKit interaction surface, without an
+enclosing SwiftUI image host competing for cursor updates. A separate
+`activeInActiveApp` tracking area handles `cursorUpdate`; the `activeAlways`
+area handles hover/movement. These cannot be combined: AppKit does not send
+`cursorUpdate` for `activeAlways`. The image panel also refreshes its cursor
+after event dispatch for inactive-app feedback, guarded by current frontmost
+window, visibility, and click-through state. No timer, global pointer monitor,
+or application activation is used.
+
 - `PinnedImageLayoutTests` covers initial sizes, all eight resize zones,
   anchored minimum clamping, repeated original-frame deltas, negative screen
   coordinates, and toolbar layout at the minimum size.
@@ -24,6 +33,10 @@ be unavailable without Accessibility permission.
   re-expansion, mouse-up cleanup, and separation from body dragging. It also
   checks click-through routing/state, child-panel positioning/teardown,
   first-click handling, and inactive-application tooltip tracking.
+- `PinnedImageCursorTests` uses the production AppKit panel/surface and an
+  injected cursor sink to check cursor-update/after-dispatch routing, all handle
+  decisions, tracking-area rebuilds, stationary pointers, and ownership release.
+  Recording a cursor choice is not proof of the pointer rendered on screen.
 - These tests do not reproduce Window Server hit-testing across applications,
   actual cursor rendering, or real SwiftUI button interaction. Physical checks
   below remain necessary even when the tests pass.
@@ -37,7 +50,13 @@ be unavailable without Accessibility permission.
    each of the four edges, and each of the four corners. The pointer must change
    to a grab hand, horizontal/vertical resize arrow, or matching diagonal arrow.
    Check the same feedback while AnyDoor is active.
-2. Drag from all eight resize zones, including the transparent rounded corners.
+   Stop moving on each handle long enough to catch a cursor being reset to an
+   arrow after the hover event. Cross rapidly between the image, toolbar, another
+   pin, and another application's text/button controls; the image must not
+   overwrite the destination's cursor. Repeat immediately after resizing and
+   after switching click-through off while the pointer is stationary.
+2. Drag from all eight resize zones, using the visible areas inside the rounded
+   corners. Fully transparent outer-corner pixels belong to the window underneath.
    Shrink past the opposite edge and verify width never falls below 180 points
    and height never falls below 100 points. Drag back outward without releasing:
    it must expand smoothly from the original anchor, without jumping or drifting.

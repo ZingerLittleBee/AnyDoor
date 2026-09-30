@@ -1,20 +1,31 @@
 import AppKit
-import SwiftUI
 
-struct PinnedImageInteractionSurface: NSViewRepresentable {
-    let onHoverChanged: @MainActor () -> Void
+/// Cursor updates must win after AppKit finishes dispatching the event. Inactive
+/// nonactivating panels do not receive active-app cursorUpdate callbacks, and
+/// mouseMoved alone can be followed by AppKit resetting the cursor to an arrow.
+@MainActor
+final class PinnedImagePanel: NSPanel {
+    var refreshImageCursor: (@MainActor () -> Void)?
+    weak var imageCursorOwner: PinnedImageDragView?
 
-    func makeNSView(context: Context) -> PinnedImageDragView {
-        let view = PinnedImageDragView()
-        view.onHoverChanged = onHoverChanged
-        view.toolTip = L(.capturePinnedMoveResize)
-        return view
+    override func sendEvent(_ event: NSEvent) {
+        super.sendEvent(event)
+        refreshCursorAfterDispatch(event)
     }
 
-    func updateNSView(_ nsView: PinnedImageDragView, context: Context) {
-        nsView.onHoverChanged = onHoverChanged
-        nsView.toolTip = L(.capturePinnedMoveResize)
+    func refreshCursorAfterDispatch(_ event: NSEvent) {
+        switch event.type {
+        case .mouseMoved, .mouseEntered, .cursorUpdate, .leftMouseDragged, .leftMouseUp:
+            refreshImageCursor?()
+        default:
+            break
+        }
     }
+}
+
+enum PinnedImagePointerStyle: Equatable {
+    case move
+    case resize(SelectionHandle)
 }
 
 /// Owns inside-edge resizing instead of relying on borderless native resizing.
@@ -22,50 +33,117 @@ struct PinnedImageInteractionSurface: NSViewRepresentable {
 @MainActor
 final class PinnedImageDragView: NSView {
     var onHoverChanged: (@MainActor () -> Void)?
+    var image: NSImage? { didSet { needsDisplay = true } }
+    var isHovered = false { didSet { needsDisplay = true } }
+    // A narrow injection seam records actual cursor decisions in tests without
+    // pretending that NSCursor.current proves Window Server pointer rendering.
+    var applyPointerStyle: (PinnedImagePointerStyle) -> Void = { style in
+        switch style {
+        case .move: NSCursor.openHand.set()
+        case .resize(let handle): PinnedImageResizeCursor.cursor(for: handle).set()
+        }
+    }
+    var cursorContext: () -> (point: CGPoint, frontmostWindowNumber: Int) = {
+        let point = NSEvent.mouseLocation
+        return (point, NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0))
+    }
+    private var hoverTrackingArea: NSTrackingArea?
+    private var cursorTrackingArea: NSTrackingArea?
     private var resizeGesture: (handle: SelectionHandle, frame: CGRect, start: CGPoint)?
 
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    override func draw(_ dirtyRect: NSRect) {
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current?.cgContext.clear(bounds)
+        let outline = NSBezierPath(roundedRect: bounds, xRadius: 10, yRadius: 10)
+        outline.addClip()
+        NSColor.black.withAlphaComponent(0.12).setFill()
+        bounds.fill()
+        if let image, image.size.width.isFinite, image.size.height.isFinite,
+           image.size.width > 0, image.size.height > 0 {
+            let scale = min(bounds.width / image.size.width, bounds.height / image.size.height)
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            let destination = CGRect(x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+                                     width: size.width, height: size.height)
+            NSGraphicsContext.current?.imageInterpolation = .high
+            image.draw(in: destination, from: .zero, operation: .sourceOver, fraction: 1)
+        }
+        NSColor.white.withAlphaComponent(isHovered ? 0.6 : 0.2).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 9.5, yRadius: 9.5)
+        border.lineWidth = 1
+        border.stroke()
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(
-            rect: bounds, options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect],
-            owner: self
-        ))
+        // Remove only our areas. NSView may also own tooltip tracking areas.
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        if let cursorTrackingArea { removeTrackingArea(cursorTrackingArea) }
+        let hover = NSTrackingArea(
+            rect: bounds, options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .inVisibleRect], owner: self
+        )
+        let cursor = NSTrackingArea(
+            rect: bounds, options: [.activeInActiveApp, .cursorUpdate, .inVisibleRect], owner: self
+        )
+        addTrackingArea(hover)
+        addTrackingArea(cursor)
+        hoverTrackingArea = hover
+        cursorTrackingArea = cursor
+        refreshCursorForCurrentLocation()
     }
 
     override func resetCursorRects() {
-        addCursorRect(bounds.insetBy(dx: PinnedImageLayout.resizeBorderWidth, dy: PinnedImageLayout.resizeBorderWidth), cursor: .openHand)
-        for (handle, rect) in PinnedImageLayout.resizeRegions(in: bounds) {
-            addCursorRect(rect, cursor: PinnedImageResizeCursor.cursor(for: handle))
-        }
+        // Use cursorUpdate plus the panel's after-dispatch fallback, rather than
+        // key-window-dependent legacy rectangles competing with tracking areas.
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        // This root owns the entire image. A rejected update is stale or belongs
+        // to another window; bubbling it up could reset that window's cursor.
+        refreshCursorForCurrentLocation()
     }
 
     override func mouseEntered(with event: NSEvent) {
-        updateCursor(with: event)
         onHoverChanged?()
+        refreshCursorForCurrentLocation()
     }
 
-    override func mouseMoved(with event: NSEvent) { updateCursor(with: event) }
+    override func mouseMoved(with event: NSEvent) { refreshCursorForCurrentLocation() }
 
     override func mouseExited(with event: NSEvent) {
-        if resizeGesture == nil { NSCursor.arrow.set() }
+        // The incoming window/view owns its cursor. Do not reset it to arrow
+        // from a late exit event belonging to this image or another pin.
         onHoverChanged?()
     }
 
-    private func updateCursor(with event: NSEvent) {
-        guard window?.ignoresMouseEvents == false else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        let handle = resizeGesture?.handle ?? PinnedImageLayout.resizeHandle(at: point, in: bounds)
-        if let handle {
-            PinnedImageResizeCursor.cursor(for: handle).set()
-        } else if bounds.contains(point) {
-            NSCursor.openHand.set()
-        } else {
-            NSCursor.arrow.set()
+    @discardableResult
+    func refreshCursorForCurrentLocation() -> Bool {
+        guard window?.isVisible == true else { return false }
+        let context = cursorContext()
+        return refreshCursor(atScreenPoint: context.point, frontmostWindowNumber: context.frontmostWindowNumber)
+    }
+
+    @discardableResult
+    func refreshCursor(atScreenPoint point: CGPoint, frontmostWindowNumber: Int) -> Bool {
+        guard let window, window.isVisible, !window.ignoresMouseEvents, !isHiddenOrHasHiddenAncestor else { return false }
+        if let gesture = resizeGesture {
+            applyPointerStyle(.resize(gesture.handle))
+            return true
         }
+        // A child toolbar or another application's window must keep its own
+        // cursor, even if a queued event still targets the image underneath.
+        guard frontmostWindowNumber == window.windowNumber else { return false }
+        let local = convert(window.convertPoint(fromScreen: point), from: nil)
+        guard bounds.contains(local) else { return false }
+        if let handle = PinnedImageLayout.resizeHandle(at: local, in: bounds) {
+            applyPointerStyle(.resize(handle))
+        } else {
+            applyPointerStyle(.move)
+        }
+        return true
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -74,7 +152,7 @@ final class PinnedImageDragView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         if let handle = PinnedImageLayout.resizeHandle(at: point, in: bounds) {
             resizeGesture = (handle, window.frame, window.convertPoint(toScreen: event.locationInWindow))
-            PinnedImageResizeCursor.cursor(for: handle).set()
+            refreshCursorForCurrentLocation()
         } else {
             window.performDrag(with: event)
         }
@@ -86,18 +164,37 @@ final class PinnedImageDragView: NSView {
         let point = window.convertPoint(toScreen: event.locationInWindow)
         let delta = CGSize(width: point.x - gesture.start.x, height: point.y - gesture.start.y)
         window.setFrame(PinnedImageLayout.resizedFrame(gesture.frame, handle: gesture.handle, delta: delta), display: true)
-        PinnedImageResizeCursor.cursor(for: gesture.handle).set()
+        refreshCursorForCurrentLocation()
     }
 
     override func mouseUp(with event: NSEvent) {
         resizeGesture = nil
-        updateCursor(with: event)
         onHoverChanged?()
+        refreshCursorForCurrentLocation()
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         resizeGesture = nil
+        if let panel = window as? PinnedImagePanel, panel.imageCursorOwner === self {
+            panel.refreshImageCursor = nil
+            panel.imageCursorOwner = nil
+        }
         super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let panel = window as? PinnedImagePanel {
+            panel.imageCursorOwner = self
+            panel.refreshImageCursor = { [weak self] in self?.refreshCursorForCurrentLocation() }
+        }
+        updateTrackingAreas()
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        needsDisplay = true
+        refreshCursorForCurrentLocation()
     }
 }
 

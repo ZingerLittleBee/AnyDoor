@@ -36,14 +36,15 @@ final class PinnedImageWindow: NSObject, NSWindowDelegate {
         super.init()
         panel.delegate = self
 
-        let imageHost = NSHostingView(rootView: PinnedImageView(
-            image: image, state: state,
-            onHoverChanged: { [weak self] in self?.updateHover() }
-        ))
-        imageHost.sizingOptions = []
-        imageHost.frame = CGRect(origin: .zero, size: size)
-        imageHost.autoresizingMask = [.width, .height]
-        panel.contentView = imageHost
+        // The image's AppKit surface owns drawing, mouse events, and cursor
+        // arbitration. An enclosing NSHostingView also handles cursorUpdate,
+        // which can replace a cursor set by an embedded representable.
+        let imageSurface = PinnedImageDragView(frame: CGRect(origin: .zero, size: size))
+        imageSurface.image = image
+        imageSurface.toolTip = L(.capturePinnedMoveResize)
+        imageSurface.onHoverChanged = { [weak self] in self?.updateHover() }
+        imageSurface.autoresizingMask = [.width, .height]
+        panel.contentView = imageSurface
 
         let toolbarHost = PinnedImageToolbarHostingView(rootView: PinnedImageToolbar(
             state: state,
@@ -59,7 +60,7 @@ final class PinnedImageWindow: NSObject, NSWindowDelegate {
     }
 
     static func makePanel(frame: CGRect) -> NSPanel {
-        let panel = NSPanel(
+        let panel = PinnedImagePanel(
             contentRect: frame,
             // Native borderless resizing bypassed the desired minimum on
             // supported systems. Our inside-edge handler owns every resize.
@@ -112,7 +113,9 @@ final class PinnedImageWindow: NSObject, NSWindowDelegate {
 
     private func updateHover() {
         state.hovering = panel.frame.contains(NSEvent.mouseLocation)
+        (panel.contentView as? PinnedImageDragView)?.isHovered = state.hovering
         updateToolbarVisibility()
+        (panel.contentView as? PinnedImageDragView)?.refreshCursorForCurrentLocation()
     }
 
     private func updateToolbarVisibility() {
@@ -129,6 +132,7 @@ final class PinnedImageWindow: NSObject, NSWindowDelegate {
 
     private func layoutToolbar() {
         toolbarPanel.setFrame(PinnedImageLayout.toolbarFrame(for: panel.frame), display: true)
+        (panel.contentView as? PinnedImageDragView)?.refreshCursorForCurrentLocation()
     }
 
     func windowDidResize(_ notification: Notification) { layoutToolbar() }
@@ -194,33 +198,6 @@ private final class PinnedImageToolbarPanel: NSPanel {
 
 private final class PinnedImageToolbarHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-}
-
-private struct PinnedImageView: View {
-    let image: NSImage
-    let state: PinnedImageState
-    let onHoverChanged: @MainActor () -> Void
-
-    var body: some View {
-        ZStack {
-            Image(nsImage: image)
-                .resizable()
-                .interpolation(.high)
-                .aspectRatio(contentMode: .fit)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(.black.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .allowsHitTesting(false)
-            PinnedImageInteractionSurface(onHoverChanged: onHoverChanged)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(.white.opacity(state.hovering ? 0.6 : 0.2), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
-    }
 }
 
 private struct PinnedImageToolbar: View {
