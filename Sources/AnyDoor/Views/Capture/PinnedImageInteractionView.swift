@@ -16,6 +16,12 @@ final class PinnedImagePanel: NSPanel {
     func refreshCursorAfterDispatch(_ event: NSEvent) {
         switch event.type {
         case .mouseMoved, .mouseEntered, .cursorUpdate, .leftMouseDragged, .leftMouseUp:
+            if let imageCursorOwner {
+                PinnedImageCursorDiagnostics.shared.context(
+                    source: "panel.event.\(event.type.rawValue)", decision: "dispatch", view: imageCursorOwner,
+                    eventWindow: event.windowNumber
+                )
+            }
             refreshImageCursor?()
         default:
             break
@@ -38,10 +44,12 @@ final class PinnedImageDragView: NSView {
     // A narrow injection seam records actual cursor decisions in tests without
     // pretending that NSCursor.current proves Window Server pointer rendering.
     var applyPointerStyle: (PinnedImagePointerStyle) -> Void = { style in
+        let cursor: NSCursor
         switch style {
-        case .move: NSCursor.openHand.set()
-        case .resize(let handle): PinnedImageResizeCursor.cursor(for: handle).set()
+        case .move: cursor = .openHand
+        case .resize(let handle): cursor = PinnedImageResizeCursor.cursor(for: handle)
         }
+        PinnedImageCursorDiagnostics.shared.set(cursor, style: style)
     }
     var cursorContext: () -> (point: CGPoint, frontmostWindowNumber: Int) = {
         let point = NSEvent.mouseLocation
@@ -92,7 +100,7 @@ final class PinnedImageDragView: NSView {
         addTrackingArea(cursor)
         hoverTrackingArea = hover
         cursorTrackingArea = cursor
-        refreshCursorForCurrentLocation()
+        refreshCursorForCurrentLocation(source: "tracking.rebuild")
     }
 
     override func resetCursorRects() {
@@ -103,15 +111,15 @@ final class PinnedImageDragView: NSView {
     override func cursorUpdate(with event: NSEvent) {
         // This root owns the entire image. A rejected update is stale or belongs
         // to another window; bubbling it up could reset that window's cursor.
-        refreshCursorForCurrentLocation()
+        refreshCursorForCurrentLocation(source: "cursorUpdate")
     }
 
     override func mouseEntered(with event: NSEvent) {
         onHoverChanged?()
-        refreshCursorForCurrentLocation()
+        refreshCursorForCurrentLocation(source: "mouseEntered")
     }
 
-    override func mouseMoved(with event: NSEvent) { refreshCursorForCurrentLocation() }
+    override func mouseMoved(with event: NSEvent) { refreshCursorForCurrentLocation(source: "mouseMoved") }
 
     override func mouseExited(with event: NSEvent) {
         // The incoming window/view owns its cursor. Do not reset it to arrow
@@ -120,27 +128,40 @@ final class PinnedImageDragView: NSView {
     }
 
     @discardableResult
-    func refreshCursorForCurrentLocation() -> Bool {
-        guard window?.isVisible == true else { return false }
+    func refreshCursorForCurrentLocation(source: String = "refresh") -> Bool {
+        guard window?.isVisible == true else {
+            PinnedImageCursorDiagnostics.shared.context(source: source, decision: "not-visible-or-detached", view: self)
+            return false
+        }
         let context = cursorContext()
-        return refreshCursor(atScreenPoint: context.point, frontmostWindowNumber: context.frontmostWindowNumber)
+        return refreshCursor(atScreenPoint: context.point, frontmostWindowNumber: context.frontmostWindowNumber, source: source)
     }
 
     @discardableResult
-    func refreshCursor(atScreenPoint point: CGPoint, frontmostWindowNumber: Int) -> Bool {
-        guard let window, window.isVisible, !window.ignoresMouseEvents, !isHiddenOrHasHiddenAncestor else { return false }
+    func refreshCursor(atScreenPoint point: CGPoint, frontmostWindowNumber: Int, source: String = "refresh") -> Bool {
+        func record(_ decision: String, style: PinnedImagePointerStyle? = nil) {
+            PinnedImageCursorDiagnostics.shared.context(source: source, decision: decision, view: self,
+                                                       point: point, frontmost: frontmostWindowNumber, style: style)
+        }
+        guard let window else { record("detached"); return false }
+        guard window.isVisible else { record("not-visible"); return false }
+        guard !window.ignoresMouseEvents else { record("click-through"); return false }
+        guard !isHiddenOrHasHiddenAncestor else { record("hidden-view"); return false }
         if let gesture = resizeGesture {
+            record("apply-resize-session", style: .resize(gesture.handle))
             applyPointerStyle(.resize(gesture.handle))
             return true
         }
         // A child toolbar or another application's window must keep its own
         // cursor, even if a queued event still targets the image underneath.
-        guard frontmostWindowNumber == window.windowNumber else { return false }
+        guard frontmostWindowNumber == window.windowNumber else { record("different-frontmost-window"); return false }
         let local = convert(window.convertPoint(fromScreen: point), from: nil)
-        guard bounds.contains(local) else { return false }
+        guard bounds.contains(local) else { record("outside-bounds"); return false }
         if let handle = PinnedImageLayout.resizeHandle(at: local, in: bounds) {
+            record("apply-handle", style: .resize(handle))
             applyPointerStyle(.resize(handle))
         } else {
+            record("apply-body", style: .move)
             applyPointerStyle(.move)
         }
         return true
@@ -152,7 +173,7 @@ final class PinnedImageDragView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         if let handle = PinnedImageLayout.resizeHandle(at: point, in: bounds) {
             resizeGesture = (handle, window.frame, window.convertPoint(toScreen: event.locationInWindow))
-            refreshCursorForCurrentLocation()
+            refreshCursorForCurrentLocation(source: "mouseDown.resize")
         } else {
             window.performDrag(with: event)
         }
@@ -164,13 +185,13 @@ final class PinnedImageDragView: NSView {
         let point = window.convertPoint(toScreen: event.locationInWindow)
         let delta = CGSize(width: point.x - gesture.start.x, height: point.y - gesture.start.y)
         window.setFrame(PinnedImageLayout.resizedFrame(gesture.frame, handle: gesture.handle, delta: delta), display: true)
-        refreshCursorForCurrentLocation()
+        refreshCursorForCurrentLocation(source: "mouseDragged")
     }
 
     override func mouseUp(with event: NSEvent) {
         resizeGesture = nil
         onHoverChanged?()
-        refreshCursorForCurrentLocation()
+        refreshCursorForCurrentLocation(source: "mouseUp")
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
@@ -186,7 +207,7 @@ final class PinnedImageDragView: NSView {
         super.viewDidMoveToWindow()
         if let panel = window as? PinnedImagePanel {
             panel.imageCursorOwner = self
-            panel.refreshImageCursor = { [weak self] in self?.refreshCursorForCurrentLocation() }
+            panel.refreshImageCursor = { [weak self] in self?.refreshCursorForCurrentLocation(source: "panel.afterDispatch") }
         }
         updateTrackingAreas()
     }
@@ -194,7 +215,7 @@ final class PinnedImageDragView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         needsDisplay = true
-        refreshCursorForCurrentLocation()
+        refreshCursorForCurrentLocation(source: "frame.changed")
     }
 }
 

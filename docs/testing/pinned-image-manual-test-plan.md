@@ -83,3 +83,43 @@ or application activation is used.
    image, toolbar, and tooltip must disappear; the remaining pin must stay usable.
 9. Where available, repeat on differently scaled displays, including one to the
    left/above the primary, and alongside a full-screen application/Space.
+
+## Opt-in cursor diagnostics
+
+If the pointer still does not change, collect evidence before changing cursor
+behavior again. `ANYDOOR_PIN_CURSOR_DEBUG=1` enables transition-only stderr records
+prefixed `[PinnedCursor v1]`, capped at 300 records. It does not activate the app,
+change hit-testing, add a timer, or change which cursor is requested. Without the
+environment variable it is disabled.
+
+Preserve the failing launch identity: `swift run` and the installed app have
+separate Accessibility identities. After installing the diagnostic build, quit
+any running AnyDoor instance. If the failure is in `/Applications/AnyDoor.app`,
+launch that same executable from Terminal:
+
+```sh
+ANYDOOR_PIN_CURSOR_DEBUG=1 /Applications/AnyDoor.app/Contents/MacOS/AnyDoor 2>&1 \
+  | awk '/^\[PinnedCursor v1\]/ { print; fflush() }' \
+  | tee /tmp/anydoor-pin-cursor.log
+```
+
+If the failure is specifically in the development launch, use
+`ANYDOOR_PIN_CURSOR_DEBUG=1 swift run AnyDoor` as the command before the first pipe
+instead. The filter keeps unrelated build/application output out of the shared
+log. The first diagnostic line records the process, OS, and bundle identity.
+
+Pin one image, then move once from the image center to the middle of its right
+edge, one corner, the toolbar, and outside. Do one sweep with AnyDoor Settings
+active and one after activating another application. Quit AnyDoor to end capture,
+and share `/tmp/anydoor-pin-cursor.log` together with whether the visible pointer
+changed. A screenshot/recording must include the actual pointer; the arrow icon
+inside the toolbar is the click-through button, not the pointer.
+
+The log distinguishes callback delivery, hidden/click-through/frontmost-window
+rejection, selected handle/body cursor, and the exact `NSCursor.set` call. It
+contains local/screen coordinates and transient window IDs, but no captured
+image, clipboard content, window title, or other application's identity.
+`appCurrentMatchesAfter=true` confirms only AnyDoor's cursor stack. It does not
+prove what macOS displayed; an applied request with an unchanged visible pointer
+requires investigating rendering/overwrite, rather than treating the log as a
+successful cursor fix.
