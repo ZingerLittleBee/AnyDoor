@@ -10,8 +10,8 @@ extension View {
     /// panel positioned in screen space above the control — overflowing the host
     /// window freely, flipping below and clamping horizontally when the screen
     /// edge is in the way. Appears after a short hover delay.
-    func hoverTooltip(_ text: String) -> some View {
-        overlay(TooltipAnchor(text: text))
+    func hoverTooltip(_ text: String, activeAlways: Bool = false) -> some View {
+        overlay(TooltipAnchor(text: text, activeAlways: activeAlways))
     }
 }
 
@@ -19,22 +19,31 @@ extension View {
 /// the shared `TooltipPresenter` with the control's on-screen frame.
 private struct TooltipAnchor: NSViewRepresentable {
     let text: String
+    let activeAlways: Bool
 
     func makeNSView(context: Context) -> TooltipAnchorView {
         let view = TooltipAnchorView()
         view.text = text
+        view.activeAlways = activeAlways
         return view
     }
 
     func updateNSView(_ nsView: TooltipAnchorView, context: Context) {
         nsView.text = text
+        nsView.activeAlways = activeAlways
     }
 }
 
 final class TooltipAnchorView: NSView {
-    var text: String = ""
+    var text: String = "" {
+        didSet {
+            if isPresenting, text != oldValue { present() }
+        }
+    }
+    var activeAlways = false
     private var trackingArea: NSTrackingArea?
     private var showTask: Task<Void, Never>?
+    private var isPresenting = false
 
     // Tooltip display is driven by the tracking area, not hit-testing, so passing
     // every click through keeps the control beneath fully interactive.
@@ -45,7 +54,7 @@ final class TooltipAnchorView: NSView {
         if let trackingArea { removeTrackingArea(trackingArea) }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            options: [.mouseEnteredAndExited, activeAlways ? .activeAlways : .activeInActiveApp, .inVisibleRect],
             owner: self
         )
         addTrackingArea(area)
@@ -64,6 +73,7 @@ final class TooltipAnchorView: NSView {
     override func mouseExited(with event: NSEvent) {
         showTask?.cancel()
         showTask = nil
+        isPresenting = false
         TooltipPresenter.shared.hide()
     }
 
@@ -74,14 +84,17 @@ final class TooltipAnchorView: NSView {
         if window == nil {
             showTask?.cancel()
             showTask = nil
+            isPresenting = false
             TooltipPresenter.shared.hide()
         }
     }
 
     private func present() {
-        guard let window, !text.isEmpty else { return }
+        guard let window, window.isVisible, !isHiddenOrHasHiddenAncestor, !text.isEmpty,
+              bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil)) else { return }
         let inWindow = convert(bounds, to: nil)
         let onScreen = window.convertToScreen(inWindow)
+        isPresenting = true
         TooltipPresenter.shared.show(text: text, anchorScreenRect: onScreen)
     }
 }

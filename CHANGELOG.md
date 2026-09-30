@@ -16,6 +16,11 @@ versioning.
 
 ### Fixed
 
+- Pinned screenshots can be dragged by their image and resized from their edges
+  and corners. Small or narrow captures keep their controls reachable, and the
+  image retains its aspect ratio while resizing. Edge/corner cursors show resize
+  targets, resizing enforces a 180 x 100 minimum, and click-through keeps an
+  interactive toolbar with a distinct toggle state and tooltip.
 - The menu-bar history popovers for 屏幕取词, 识别二维码 and 屏幕取色 no longer
   spin forever when reopened or when moving between them.
 

@@ -1,6 +1,74 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "capture.pinned.disableClickThrough": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Disable image click-through"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "关闭图片鼠标穿透"
+          }
+        }
+      }
+    },
+    "capture.pinned.moveResize": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag the image to move · Drag edges or corners to resize"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "拖动图片移动 · 拖动边缘或角落调整大小"
+          }
+        }
+      }
+    },
+    "capture.pinned.opacity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opacity"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "不透明度"
+          }
+        }
+      }
+    },
+    "capture.pinned.clickThrough": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable image click-through (toolbar stays interactive)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "开启图片鼠标穿透（工具栏仍可操作）"
+          }
+        }
+      }
+    },
     "capture.window.hint": {
       "extractionState": "manual",
       "localizations": {
