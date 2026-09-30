@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- A new Clear Notifications (清除通知) action in the menu-bar panel and command
+  palette dismisses the notification banners, alerts, and grouped stacks on
+  screen without opening Notification Center. It can be bound to a hotkey and
+  needs Accessibility access.
+
 ### Fixed
 
 - Stable and Beta release publication retries GitHub draft creation, individual
