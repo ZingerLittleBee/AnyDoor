@@ -10,7 +10,8 @@ extension ClipboardHistoryModule {
 
     public func capture(
         _ request: ClipboardHistoryCaptureRequest
-    ) throws -> ClipboardHistoryCaptureOutcome {
+    ) async throws -> ClipboardHistoryCaptureOutcome {
+        try await waitForWriteTurn()
         let outcome = try captureExplicit(request)
         publishMutation()
         return outcome
@@ -32,7 +33,7 @@ extension ClipboardHistoryModule {
     public func apply(
         _ mutation: ClipboardHistoryMutation
     ) async throws -> ClipboardHistoryMutationOutcome {
-        let database = try requiredDatabase()
+        let database = try await writableDatabase()
         let result: MutationApplyResult
         switch mutation {
         case .delete(let entryID):
@@ -60,8 +61,20 @@ extension ClipboardHistoryModule {
 
     public func materialize(
         _ request: ClipboardHistoryMaterializationRequest
+    ) async throws -> ClipboardHistoryMaterialization {
+        // Resolving file references refreshes their stored bookmarks, which
+        // is a write, so a request that gets that far waits for a write turn.
+        // Everything else only reads and is served right away.
+        if mustWaitForWriteTurn, try resolvesFileReferences(request) {
+            try await waitForWriteTurn()
+        }
+        return try materialize(request, in: requiredDatabase())
+    }
+
+    private func materialize(
+        _ request: ClipboardHistoryMaterializationRequest,
+        in database: DatabasePool
     ) throws -> ClipboardHistoryMaterialization {
-        let database = try requiredDatabase()
         let id = request.entryID.value.uuidString.lowercased()
         guard try database.read({
             try isLiveEntry(id, at: now(), in: $0)
@@ -217,6 +230,46 @@ extension ClipboardHistoryModule {
             )
         }
         return ClipboardHistoryMaterialization(items: materializedItems)
+    }
+
+    /// Whether materializing `request` reaches `materializeFileReferences`:
+    /// the entry has file members, and neither a plain-text paste nor a
+    /// preview answered by the stored thumbnail returns before that.
+    private func resolvesFileReferences(
+        _ request: ClipboardHistoryMaterializationRequest
+    ) throws -> Bool {
+        guard request.purpose != .plainTextPaste else { return false }
+        let storedID = request.entryID.value.uuidString.lowercased()
+        return try requiredDatabase().read { database in
+            let hasFileMembers = try Bool.fetchOne(
+                database,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM clipboard_file_members
+                        WHERE entry_id = ?
+                    )
+                    """,
+                arguments: [storedID]
+            ) ?? false
+            guard hasFileMembers, request.purpose == .preview else {
+                return hasFileMembers
+            }
+            let hasThumbnail = try Bool.fetchOne(
+                database,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM clipboard_entries AS entry
+                        JOIN clipboard_payloads AS payload
+                          ON payload.id = entry.thumbnail_payload_id
+                        WHERE entry.id = ?
+                    )
+                    """,
+                arguments: [storedID]
+            ) ?? false
+            return !hasThumbnail
+        }
     }
 
     private func materializeFileReferences(
@@ -382,8 +435,20 @@ extension ClipboardHistoryModule {
 
     public func performMaintenance(
         orphanGracePeriod: TimeInterval = 3_600
+    ) async throws -> ClipboardHistoryMaintenanceReport {
+        try await performMaintenance(
+            orphanGracePeriod: orphanGracePeriod,
+            in: writableDatabase()
+        )
+    }
+
+    private func performMaintenance(
+        orphanGracePeriod: TimeInterval,
+        in database: DatabasePool
     ) throws -> ClipboardHistoryMaintenanceReport {
-        let database = try requiredDatabase()
+        // A maintenance loop stopped while it waited for this turn must not
+        // start a pass (see `maintenanceDeadline`).
+        try Task.checkCancellation()
         let maintenanceDate = now()
         let maintenanceState = try database.write { database in
             let expiredIDs = try expiredEntryIDs(
@@ -514,6 +579,9 @@ extension ClipboardHistoryModule {
         searchIndexRebuildTask = nil
         try database?.close()
         database = nil
+        // Writers still waiting for a write turn were issued against the
+        // store deleted below, and none of them may land in its replacement.
+        storeEpoch += 1
         derivedKeys = nil
         do {
             if FileManager.default.fileExists(atPath: storeRoot.path) {
