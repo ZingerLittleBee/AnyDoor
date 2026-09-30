@@ -34,6 +34,7 @@ final class ClipboardHistoryCaptureMonitor {
         @MainActor (NSPasteboard, Int) ->
             ClipboardHistoryPasteboardCaptureRequest
     private let isKeychainUnlocked: @Sendable () -> Bool?
+    private let reportNotice: ClipboardHistoryCaptureNoticeHandler
     private let policy = ClipboardHistoryObservationPolicy()
 
     private var configuration: ClipboardHistoryMonitoringConfiguration
@@ -48,15 +49,14 @@ final class ClipboardHistoryCaptureMonitor {
     private var workspaceObservers: [NSObjectProtocol] = []
     private var eventHintSource: ClipboardHistoryCopyEventHintSource?
     private var scheduledTimerIsIdle = true
-    private var lastOperationFailureReportAt: Duration?
-
-    private static let operationFailureReportInterval: Duration = .seconds(30)
+    private var noticeLimiter = ClipboardHistoryCaptureNoticeLimiter()
 
     init(
         module: ClipboardHistoryModule,
         pasteboard: NSPasteboard = .general,
         suppression: ClipboardHistorySelfWriteSuppression? = nil,
         instrumentation: ClipboardHistoryMonitorInstrumentation? = nil,
+        reportNotice: ClipboardHistoryCaptureNoticeHandler? = nil,
         configuration: ClipboardHistoryMonitoringConfiguration = .init(),
         sourceProvider: @escaping @MainActor
             () -> ClipboardHistoryApplicationSource? =
@@ -80,6 +80,8 @@ final class ClipboardHistoryCaptureMonitor {
         self.suppression = suppression ?? module.selfWriteSuppression
         self.instrumentation =
             instrumentation ?? module.monitorInstrumentation
+        self.reportNotice =
+            reportNotice ?? module.captureNoticeHandler ?? { _ in }
         self.configuration = configuration
         self.sourceProvider = sourceProvider
         nowProvider = now
@@ -283,13 +285,18 @@ final class ClipboardHistoryCaptureMonitor {
                         snapshotRequest(pasteboard, generation),
                         source: source
                     )
-                    if outcome == .skipped(.generationChanged) {
-                        observationRequested = true
-                    } else if case .captured = outcome {
+                    switch outcome {
+                    case .captured:
                         instrumentation.recordCapture()
+                    case .skipped(.generationChanged):
+                        observationRequested = true
+                    case .skipped(let rejection):
+                        if let notice = rejection.captureNotice {
+                            reportNoticeIfNeeded(notice)
+                        }
                     }
                 } catch {
-                    reportOperationFailureIfNeeded(at: now())
+                    reportNoticeIfNeeded(.captureFailed)
                 }
             }
 
@@ -302,18 +309,11 @@ final class ClipboardHistoryCaptureMonitor {
         } while observationRequested
     }
 
-    private func reportOperationFailureIfNeeded(at instant: Duration) {
-        if let lastOperationFailureReportAt,
-            instant - lastOperationFailureReportAt
-                < Self.operationFailureReportInterval
-        {
-            return
-        }
-        lastOperationFailureReportAt = instant
-        NotificationCenter.default.post(
-            name: .clipboardHistoryV2OperationDidFail,
-            object: nil
-        )
+    private func reportNoticeIfNeeded(
+        _ notice: ClipboardHistoryCaptureNotice
+    ) {
+        guard noticeLimiter.admit(notice, at: now()) else { return }
+        reportNotice(notice)
     }
 
     private func readMetadata(

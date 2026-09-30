@@ -23,6 +23,7 @@ public actor ClipboardHistoryModule {
     var isFinalizingClear = false
     let selfWriteSuppression: ClipboardHistorySelfWriteSuppression
     let monitorInstrumentation: ClipboardHistoryMonitorInstrumentation
+    let captureNoticeHandler: ClipboardHistoryCaptureNoticeHandler?
     let notificationCenter: NotificationCenter
     public nonisolated let pasteboardSelfWrites:
         ClipboardHistoryPasteboardSelfWriteFunnel
@@ -54,10 +55,15 @@ public actor ClipboardHistoryModule {
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
 
-    public init() {
+    /// `captureNotices` receives passive capture notices. It is fixed at
+    /// construction so no observed change can precede it.
+    public init(
+        captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil
+    ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        captureNoticeHandler = captureNotices
         notificationCenter = .default
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
@@ -124,6 +130,7 @@ public actor ClipboardHistoryModule {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        captureNoticeHandler = nil
         self.notificationCenter = notificationCenter
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
@@ -180,11 +187,13 @@ public actor ClipboardHistoryModule {
         duplicateReuseEnabled: Bool = true,
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
             ClipboardHistoryVisionRecognizer(),
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        captureNoticeHandler = captureNotices
         self.notificationCenter = notificationCenter
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression

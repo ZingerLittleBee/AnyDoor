@@ -4,9 +4,6 @@ public extension Notification.Name {
     static let clipboardHistoryV2DidMutate = Notification.Name(
         "dev.bybee.AnyDoor.clipboardHistoryV2DidMutate"
     )
-    static let clipboardHistoryV2OperationDidFail = Notification.Name(
-        "dev.bybee.AnyDoor.clipboardHistoryV2OperationDidFail"
-    )
 }
 
 public struct ClipboardHistoryEntryID: Hashable, Sendable {

@@ -369,10 +369,10 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   limit, both aggregated across the complete Clipboard Entry. Referenced file
   contents do not count because AnyDoor never reads or stores them. Exceeding
   either limit rejects the entire history entry, leaves the system pasteboard
-  unchanged, and shows one non-modal “content too large” notice for that
-  observed change. It never silently stores a partial representation set. This
-  is a memory and denial-of-service guard, not retention, disk-pressure
-  management, or a total storage quota.
+  unchanged, and shows a non-modal “content too large” notice, rate-limited so
+  repeated rejections raise one notice rather than a stream. It never silently
+  stores a partial representation set. This is a memory and denial-of-service
+  guard, not retention, disk-pressure management, or a total storage quota.
   _Avoid_: History Size Limit, Disk Quota, Partial Large Entry.
 - **Retention Period** (保留期限) — The user-selected age window for Clipboard
   History entries that are not Protected Entries, chosen from fixed presets
