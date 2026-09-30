@@ -25,6 +25,13 @@ versioning.
   never show, and background work no longer stalls Clipboard History while its
   search index is being rebuilt, which could keep a popover on a spinner for
   close to a minute.
+- Running an AnyDoor release older than 4.2.0 no longer deletes Clipboard
+  History. Releases 1.8.0 through 4.1.1 remove files they don't recognize from
+  the `ClipboardHistory` folder, where the encrypted history was stored; on
+  first launch it now moves to its own `ClipboardHistoryV2` folder by renaming,
+  with no copying or re-encryption. If you then run 4.2.0 through 4.2.5,
+  history appears empty until you update again; anything captured meanwhile is
+  kept aside rather than merged, unless the moved history is empty.
 
 ## [4.2.5] - 2026-09-30
 

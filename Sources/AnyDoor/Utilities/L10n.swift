@@ -117,6 +117,8 @@ enum L10n {
         case clipboardUnavailable = "clipboard.unavailable"
         case clipboardUnavailableKeychainLocked =
             "clipboard.unavailable.keychainLocked"
+        case clipboardUnavailableRelocationFailed =
+            "clipboard.unavailable.relocationFailed"
         case clipboardHeaderCountSuffix = "clipboard.header.countSuffix"
         case clipboardHintCategory = "clipboard.hint.category"
         case clipboardHintClose = "clipboard.hint.close"
@@ -326,6 +328,8 @@ enum L10n {
         case settingsClipboardMigrationFailed = "settings.clipboard.state.migrationFailed"
         case settingsClipboardStoreUnavailable = "settings.clipboard.state.storeUnavailable"
         case settingsClipboardStorePaused = "settings.clipboard.state.paused"
+        case settingsClipboardRelocationFailed =
+            "settings.clipboard.state.relocationFailed"
         case settingsClipboardResetFailed =
             "settings.clipboard.state.resetFailed"
         case settingsClipboardReset = "settings.clipboard.reset"

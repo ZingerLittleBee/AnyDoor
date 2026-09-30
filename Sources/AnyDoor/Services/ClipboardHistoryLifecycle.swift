@@ -221,6 +221,11 @@ final class ClipboardHistoryLifecycle {
 
     func resetConfirmed() {
         switch state {
+        case .storeUnavailable(.storeRelocationFailed):
+            // The history is intact, in the pre-v2 folder or a stopped move's
+            // staging folder; a reset would only destroy it. Retry finishes
+            // the move instead.
+            return
         case .storeUnavailable, .resetFailed:
             break
         case .preparing, .migrating, .ready, .paused, .migrationFailed:
@@ -544,6 +549,62 @@ final class ClipboardHistoryLifecycle {
     }
 }
 
+extension ClipboardHistoryLifecycle {
+    /// The lifecycle the app runs. The one-time pre-v2 migration keeps its
+    /// SwiftData snapshot and cutover marker in `applicationDataDirectory`
+    /// (`Application Support/dev.bybee.AnyDoor` in production) and reads
+    /// pre-v2 payloads from `ClipboardHistoryModule.legacyPayloadDirectory`,
+    /// never from the v2 store root: reading them from the store would carry
+    /// every legacy image over without its content.
+    static func production(
+        module: ClipboardHistoryModule,
+        applicationDataDirectory: URL,
+        defaults: UserDefaults = .standard,
+        migrationPreparation:
+            @escaping @MainActor () async throws
+                -> ClipboardHistoryMigrationPreparation
+    ) -> ClipboardHistoryLifecycle {
+        let productionStoreURL = applicationDataDirectory
+            .appendingPathComponent("AnyDoor.store")
+        let legacyPayloadDirectory = ClipboardHistoryModule
+            .legacyPayloadDirectory(in: applicationDataDirectory)
+        return ClipboardHistoryLifecycle(
+            module: module,
+            defaults: defaults,
+            migrationPreparation: migrationPreparation,
+            legacyCleanupState: {
+                ClipboardHistoryLegacySource.cleanupState(
+                    in: applicationDataDirectory
+                )
+            },
+            legacyPayloadDirectory: {
+                ClipboardHistoryLegacySource.snapshotPayloadDirectory(
+                    in: applicationDataDirectory
+                )
+            },
+            migrationRequest: {
+                let source =
+                    try ClipboardHistoryLegacySource.openForMigration(
+                        applicationSupportDirectory: applicationDataDirectory,
+                        productionStoreURL: productionStoreURL,
+                        payloadDirectory: legacyPayloadDirectory
+                    )
+                return try source.makeMigrationRequest(defaults: defaults)
+            },
+            finishMigration: {
+                try ClipboardHistoryLegacySource.finishMigration(
+                    in: applicationDataDirectory
+                )
+            },
+            retrySnapshotDeletion: {
+                try ClipboardHistoryLegacySource.retrySnapshotDeletion(
+                    in: applicationDataDirectory
+                )
+            }
+        )
+    }
+}
+
 /// The recovery affordance a stalled lifecycle state offers in Settings: the
 /// line that explains it, and whether the destructive reset is one of the ways
 /// out. Kept out of the `@ViewBuilder` so the mapping can be pinned by a test —
@@ -558,6 +619,14 @@ struct ClipboardLifecycleRecovery: Equatable {
         case .migrationFailed:
             self.init(
                 message: .settingsClipboardMigrationFailed,
+                includesReset: false
+            )
+        case .storeUnavailable(.storeRelocationFailed):
+            // The store could not be moved to its new folder but is intact;
+            // a reset would destroy it, and a retry finishes the move once
+            // the cause is gone.
+            self.init(
+                message: .settingsClipboardRelocationFailed,
                 includesReset: false
             )
         case .storeUnavailable:

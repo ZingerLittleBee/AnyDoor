@@ -3605,6 +3605,23 @@
         }
       }
     },
+    "clipboard.unavailable.relocationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History is temporarily unavailable. Retry it in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史暂时不可用，请在设置中重试。"
+          }
+        }
+      }
+    },
     "clipboard.restore.chooseAnother": {
       "extractionState": "manual",
       "localizations": {
@@ -9212,6 +9229,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "剪贴板历史已暂停，等待本设备密钥可用。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.relocationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History couldn't move its storage to a new folder. Your history is unchanged. Quit any other copy of AnyDoor and check the permissions of AnyDoor's Application Support folder, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史无法将存储移动到新文件夹，历史记录未受影响。请退出其他正在运行的 AnyDoor，并检查 AnyDoor 的“应用程序支持”文件夹权限，然后重试。"
           }
         }
       }

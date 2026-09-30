@@ -50,6 +50,13 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case legacyRestoreFileDurability
     case legacyRestoreDirectoryDurability
     case legacyRestoreBeforeFinalValidation
+    case storeRelocationAfterDetach
+    case storeRelocationAfterLeftoverReturned
+    case storeRelocationBeforePublication
+    case storeRelocationAfterPublication
+    case storeRelocationAfterDisplacement
+    case storeRelocationBeforeAdoption
+    case storeRelocationAfterAdoption
 }
 
 struct ClipboardHistoryFaultInjector: Sendable {
