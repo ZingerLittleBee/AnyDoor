@@ -718,11 +718,16 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         )
         XCTAssertEqual(preview.affectedCount, 520)
         let queued = expectation(description: "clear queued behind the rebuild")
+        // Named rather than `Self`: a `Self` reference makes the closure
+        // capture the test case's dynamic type, which Swift 6.3's region
+        // checker cannot analyze in the `sending` closure `Task.init` takes.
+        // The other tasks in this file's nonisolated tests do the same.
         let whileHeld = Task {
-            let confirmation = await Self.startConfirmation(
-                preview.token,
-                on: during
-            )
+            let confirmation =
+                await ClipboardHistorySearchBoundTests.startConfirmation(
+                    preview.token,
+                    on: during
+                )
             let recent = try await during.page(ClipboardHistoryQuery())
             queued.fulfill()
             return (confirmation, recent)
@@ -776,7 +781,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         // instead of hanging it.
         let served = expectation(description: "browsing served while held")
         let whileHeld = Task {
-            let capture = await Self.startCapture(
+            let capture = await ClipboardHistorySearchBoundTests.startCapture(
                 "captured during the upgrade",
                 on: module
             )
