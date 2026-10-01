@@ -175,7 +175,7 @@ struct OnboardingAppShortcutsStep: View {
             VStack(spacing: 5) {
                 HStack(spacing: 4) {
                     Image(systemName: "lock.fill").font(.system(size: 7)).foregroundStyle(.secondary)
-                    Text(verbatim: "anydoor.app")
+                    Text(verbatim: "anydoor.dev")
                         .font(.system(size: 8))
                         .foregroundStyle(.secondary)
                 }
