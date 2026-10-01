@@ -1050,17 +1050,14 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
         )
         pasteboard.clearContents()
         let clock = MonitorTestClock()
+        let recorder = MonitorNoticeRecorder()
         let monitor = ClipboardHistoryCaptureMonitor(
             module: module,
             pasteboard: pasteboard,
+            reportNotice: { recorder.notices.append($0) },
             now: { clock.now },
             installsSystemObservers: false
         )
-        let firstNotice = expectation(
-            forNotification: .clipboardHistoryV2OperationDidFail,
-            object: nil
-        )
-        firstNotice.expectedFulfillmentCount = 1
         await monitor.setEnabled(true)
 
         pasteboard.clearContents()
@@ -1069,7 +1066,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
         pasteboard.clearContents()
         pasteboard.setString("rejected two", forType: .string)
         await monitor.observeForTesting()
-        await fulfillment(of: [firstNotice], timeout: 1)
+        XCTAssertEqual(recorder.notices, [.captureFailed])
 
         let pageAfterFailures = try await module.page(.init())
         XCTAssertEqual(
@@ -1078,14 +1075,10 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
         )
 
         clock.now = .seconds(30)
-        let secondNotice = expectation(
-            forNotification: .clipboardHistoryV2OperationDidFail,
-            object: nil
-        )
         pasteboard.clearContents()
         pasteboard.setString("rejected three", forType: .string)
         await monitor.observeForTesting()
-        await fulfillment(of: [secondNotice], timeout: 1)
+        XCTAssertEqual(recorder.notices, [.captureFailed, .captureFailed])
     }
 
     @MainActor
@@ -1154,6 +1147,11 @@ private final class MonitorTemporaryStore {
 @MainActor
 private final class MonitorTestClock {
     var now = Duration.zero
+}
+
+@MainActor
+private final class MonitorNoticeRecorder {
+    var notices: [ClipboardHistoryCaptureNotice] = []
 }
 
 private struct MonitorMemoryKeyStore: ClipboardHistoryMasterKeyStoring {

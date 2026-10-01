@@ -3435,6 +3435,40 @@
         }
       }
     },
+    "clipboard.toast.captureFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t save to Clipboard History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能保存到剪贴板历史"
+          }
+        }
+      }
+    },
+    "clipboard.toast.captureTooLarge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too large to save to Clipboard History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容过大，未保存到剪贴板历史"
+          }
+        }
+      }
+    },
     "clipboard.toast.copyFailed": {
       "extractionState": "manual",
       "localizations": {

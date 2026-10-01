@@ -67,7 +67,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
-    private var clipboardHistoryFailureObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
 
@@ -91,7 +90,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // scrollbar entirely, and the one-frame flash that any after-the-fact
         // restyling causes on a Settings tab switch. See OverlayScrollers.swift.
         UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
-        let clipboardHistoryModule = ClipboardHistoryModule()
+        let clipboardHistoryModule = ClipboardHistoryModule(
+            captureNotices: { notice in
+                ClipboardHistoryCaptureNoticePresenter.present(notice)
+            }
+        )
         self.clipboardHistoryModule = clipboardHistoryModule
         clipboardProduction = ClipboardProductionAdapter(
             module: clipboardHistoryModule,
@@ -182,18 +185,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // starts the monitor before the encrypted store and migration are
         // ready, and it leaves failures explicit for Settings to recover.
         clipboardHistoryLifecycle.start()
-        clipboardHistoryFailureObserver =
-            NotificationCenter.default.addObserver(
-                forName: .clipboardHistoryV2OperationDidFail,
-                object: nil,
-                queue: .main
-            ) { _ in
-                MainThreadIsolation.run {
-                    ToastPresenter.shared.show(
-                        .failure(L(.settingsClipboardOperationFailed))
-                    )
-                }
-            }
         // Native Plugins: the registry loads the installed set, activates the
         // installed plugins, and owns surface composition for launch and
         // later lifecycle changes. Core control flow names no plugin beyond
@@ -382,11 +373,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let clipboardHistoryFailureObserver {
-            NotificationCenter.default.removeObserver(
-                clipboardHistoryFailureObserver
-            )
-        }
         HotkeyService.shared.stop()
     }
 

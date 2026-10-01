@@ -163,6 +163,8 @@ enum L10n {
         case clipboardTagNew = "clipboard.tag.new"
         case clipboardTagRename = "clipboard.tag.rename"
         case clipboardTagRenameTitle = "clipboard.tag.renameTitle"
+        case clipboardToastCaptureFailed = "clipboard.toast.captureFailed"
+        case clipboardToastCaptureTooLarge = "clipboard.toast.captureTooLarge"
         case clipboardToastCopyFailed = "clipboard.toast.copyFailed"
         case clipboardToastFileMissing = "clipboard.toast.fileMissing"
         case clipboardToastLegacyOwnedCount = "clipboard.toast.legacyOwnedCount"

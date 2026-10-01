@@ -17,6 +17,10 @@ versioning.
 - With Automatic Image Text Indexing on, the QR code in a newly copied image is
   now indexed before that image's text recognition instead of after it. The
   first text recognition after a macOS update can take about half a minute.
+- Clipboard History now shows a notice when a copy is too large to keep,
+  instead of dropping it silently. Repeated refusals within 30 seconds show a
+  single notice, and a failed history write now says the copy wasn't saved
+  instead of showing a generic error.
 
 ## [4.2.5] - 2026-09-30
 
