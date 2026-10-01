@@ -1,3 +1,4 @@
+import AppKit
 @testable import ClipboardHistory
 import Foundation
 import os
@@ -230,6 +231,88 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
             ),
             outsideFolder.path
         )
+        await lifecycle.stop()
+        try await module.closeStoreForTesting()
+    }
+
+    /// A 4.2 release recorded explicit captures in its store while the
+    /// migration had not run, and the migration refuses a store with
+    /// entries. The next launch reports the migration blocked by those
+    /// entries; confirming their discard migrates the pre-v2 history with
+    /// every image's content and completes the cutover under the same key.
+    func testConfirmedDiscardFinishesAnUpgradeBlockedByEarlyCaptures()
+        async throws
+    {
+        let root = try makeApplicationDataDirectory()
+        let png = try XCTUnwrap(Data(base64Encoded: Self.pngBase64))
+        let imageName = "\(UUID().uuidString).png"
+        try writeLegacyStore(in: root, imageName: imageName)
+        try writePreV2Payload(png, named: imageName, in: root)
+        let key = Data(repeating: 0x5A, count: 32)
+        let keyStore = RelocationLifecycleKeyStore(key: key)
+        let olderRelease = ClipboardHistoryModule(
+            testingStoreRoot: ClipboardHistoryModule.legacyPayloadDirectory(
+                in: root
+            ),
+            keyStore: keyStore
+        )
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name(
+                "AnyDoor-BlockedUpgrade-\(UUID().uuidString)"
+            )
+        )
+        defer { pasteboard.releaseGlobally() }
+        // 4.2 wrote every explicit capture to history, whatever the state of
+        // the migration.
+        let olderCaptures = ClipboardProductionAdapter(
+            module: olderRelease,
+            selfWrites: olderRelease.pasteboardSelfWrites,
+            admitsHistoryWrite: { true },
+            pasteboard: pasteboard
+        )
+        let recognized = try await olderCaptures.produceOCR(
+            "recognized during the upgrade"
+        )
+        let screenshot = try await olderCaptures.produceScreenshot(
+            image: try XCTUnwrap(NSImage(data: png)),
+            png: png,
+            copyToPasteboard: false
+        )
+        let captureIDs = [recognized, screenshot].compactMap {
+            $0.capture?.entryID.value
+        }
+        XCTAssertEqual(captureIDs.count, 2)
+        try await olderRelease.closeStoreForTesting()
+
+        let module = makeModule(in: root, keyStore: keyStore)
+        let lifecycle = try await runProductionLifecycle(
+            module: module,
+            in: root
+        )
+
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 2))
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+        let blocked = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(Set(blocked.entries.map(\.id.value)), Set(captureIDs))
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: root),
+            .incomplete
+        )
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 2)
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        try await assertLegacyHistoryMigrated(
+            into: module,
+            in: root,
+            png: png
+        )
+        let migrated = try await module.page(ClipboardHistoryQuery())
+        XCTAssertTrue(
+            Set(migrated.entries.map(\.id.value)).isDisjoint(with: captureIDs)
+        )
+        XCTAssertEqual(keyStore.load(), .key(key))
         await lifecycle.stop()
         try await module.closeStoreForTesting()
     }

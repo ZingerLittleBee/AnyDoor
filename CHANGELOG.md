@@ -46,6 +46,11 @@ versioning.
   has failed, screenshots, recognized text, QR codes and picked colors are
   still copied and saved as usual but are not added to history, where they
   used to block the upgrade for good.
+- An upgrade that a 4.2 release left on "migration failed" because
+  screenshots, recognized text, QR codes or picked colors were added to
+  Clipboard History in the meantime can now finish. Settings → Clipboard names
+  the cause and offers to discard those entries, after a confirmation that
+  says how many, and then migrates the pre-4.2 history.
 
 ## [4.2.5] - 2026-09-30
 

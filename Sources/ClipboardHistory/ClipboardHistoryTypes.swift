@@ -577,6 +577,10 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case invalidConfirmation
     case unsupportedLegacyTransferVersion(Int)
     case legacyMigrationFailed
+    /// The pre-v2 migration replaces only a store without entries, and this
+    /// one holds `entryCount`. Passing that count back to
+    /// `migrateLegacy(_:discardingEntries:)` discards them.
+    case legacyMigrationStoreNotEmpty(entryCount: Int)
     case invalidLegacyFileRestore
     case legacyFileRestoreCollision(URL)
     case legacyFileRestoreFailed

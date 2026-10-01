@@ -171,6 +171,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
             ClipboardHistoryLifecycleState.preparing,
             .migrating,
             .migrationFailed,
+            .migrationBlocked(entryCount: 1),
         ] {
             let fixture = try Fixture(
                 admitsHistoryWrite: state.leavesExplicitCapturesToTheStore

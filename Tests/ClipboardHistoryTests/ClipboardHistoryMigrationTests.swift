@@ -1593,6 +1593,265 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
         }
     }
 
+    /// A store that already holds entries, as a 4.2 release left it after
+    /// recording explicit captures while its migration was pending, refuses
+    /// the migration with its entry count, and nothing in it changes.
+    func testAStoreWithEntriesRefusesTheMigrationWithItsCount()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let module = fixture.makeModule()
+        let captured = try await fixture.captureBlockingEntries(into: module)
+        let payloads = try fixture.storePayloadNames()
+        XCTAssertFalse(payloads.isEmpty)
+
+        do {
+            _ = try await module.migrateLegacy(
+                fixture.request(
+                    entries: [
+                        legacyEntry(
+                            kind: .text,
+                            text: "legacy",
+                            capturedAt: fixture.now
+                        )
+                    ],
+                    retentionPeriod: .unlimited
+                )
+            )
+            XCTFail("Expected a store with entries to refuse the migration")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyMigrationStoreNotEmpty(entryCount: captured.count)
+            )
+        }
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(Set(page.entries.map(\.id.value)), Set(captured))
+        XCTAssertEqual(try fixture.storePayloadNames(), payloads)
+        let state = try await module.legacyMigrationPublicationState()
+        XCTAssertEqual(state, .notPublished)
+    }
+
+    /// Confirming that count discards the entries and their payloads in
+    /// favor of the verified migration.
+    func testAConfirmedDiscardReplacesTheEntriesWithTheMigratedHistory()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let module = fixture.makeModule()
+        let captured = try await fixture.captureBlockingEntries(into: module)
+        let legacyID = UUID()
+        let request = fixture.request(
+            entries: [
+                legacyEntry(
+                    id: legacyID,
+                    kind: .text,
+                    text: "legacy",
+                    capturedAt: fixture.now
+                )
+            ],
+            retentionPeriod: .unlimited
+        )
+
+        let outcome = try await module.migrateLegacy(
+            request,
+            discardingEntries: captured.count
+        )
+
+        guard case .published(let report) = outcome else {
+            return XCTFail("Expected the confirmed discard to publish")
+        }
+        XCTAssertEqual(report.retainedEntryCount, 1)
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id.value), [legacyID])
+        XCTAssertEqual(try fixture.storePayloadNames(), [])
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: fixture.stagingRoot.path)
+        )
+        try await module.closeStoreForTesting()
+        let reopened = fixture.makeModule()
+        let state = try await reopened.legacyMigrationPublicationState()
+        XCTAssertEqual(state, .published(report))
+    }
+
+    /// A confirmation names the entries the user was shown, so a count that
+    /// no longer matches discards nothing.
+    func testAStaleDiscardCountIsRefusedWithoutTouchingTheStore()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let module = fixture.makeModule()
+        let captured = try await fixture.captureBlockingEntries(into: module)
+        let payloads = try fixture.storePayloadNames()
+        let request = fixture.request(entries: [], retentionPeriod: .unlimited)
+
+        for staleCount in [captured.count - 1, captured.count + 1] {
+            do {
+                _ = try await module.migrateLegacy(
+                    request,
+                    discardingEntries: staleCount
+                )
+                XCTFail("Expected the stale count \(staleCount) to be refused")
+            } catch {
+                XCTAssertEqual(
+                    error as? ClipboardHistoryModuleError,
+                    .legacyMigrationStoreNotEmpty(entryCount: captured.count)
+                )
+            }
+        }
+
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(Set(page.entries.map(\.id.value)), Set(captured))
+        XCTAssertEqual(try fixture.storePayloadNames(), payloads)
+    }
+
+    /// The discard waits for the verified staging store: a failure before
+    /// publication keeps every entry with its content, and the next
+    /// confirmation still finishes.
+    func testADiscardThatFailsBeforePublicationKeepsTheEntries()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let capturing = fixture.makeModule()
+        let captured = try await fixture.captureBlockingEntries(
+            into: capturing
+        )
+        let payloads = try fixture.storePayloadNames()
+        try await capturing.closeStoreForTesting()
+        let legacyID = UUID()
+        let request = fixture.request(
+            entries: [
+                legacyEntry(
+                    id: legacyID,
+                    kind: .text,
+                    text: "legacy",
+                    capturedAt: fixture.now
+                )
+            ],
+            retentionPeriod: .unlimited
+        )
+        let failing = fixture.makeModule(
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.legacyMigrationBeforePublication]
+            )
+        )
+
+        do {
+            _ = try await failing.migrateLegacy(
+                request,
+                discardingEntries: captured.count
+            )
+            XCTFail("Expected the publication fault")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyMigrationFailed
+            )
+        }
+
+        let kept = try await failing.page(ClipboardHistoryQuery())
+        XCTAssertEqual(Set(kept.entries.map(\.id.value)), Set(captured))
+        XCTAssertEqual(try fixture.storePayloadNames(), payloads)
+        let screenshot = try XCTUnwrap(
+            kept.entries.first { $0.facets.contains(.image) }
+        )
+        let materialized = try await failing.materialize(
+            ClipboardHistoryMaterializationRequest(
+                entryID: screenshot.id,
+                purpose: .normalPaste
+            )
+        )
+        XCTAssertFalse(materialized.items.isEmpty)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: fixture.stagingRoot.path)
+        )
+        try await failing.closeStoreForTesting()
+
+        let retrying = fixture.makeModule()
+        let outcome = try await retrying.migrateLegacy(
+            request,
+            discardingEntries: captured.count
+        )
+        guard case .published = outcome else {
+            return XCTFail("Expected the confirmed retry to publish")
+        }
+        let page = try await retrying.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id.value), [legacyID])
+    }
+
+    /// A discard removes payloads before the database, so one that stops
+    /// partway leaves a store that still lists its entries: the next attempt
+    /// is refused with the same count, and confirming it again finishes.
+    func testADiscardInterruptedPartwayIsRefusedAndConfirmedAgain()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let capturing = fixture.makeModule()
+        let captured = try await fixture.captureBlockingEntries(
+            into: capturing
+        )
+        try await capturing.closeStoreForTesting()
+        let legacyID = UUID()
+        let request = fixture.request(
+            entries: [
+                legacyEntry(
+                    id: legacyID,
+                    kind: .text,
+                    text: "legacy",
+                    capturedAt: fixture.now
+                )
+            ],
+            retentionPeriod: .unlimited
+        )
+        let failing = fixture.makeModule(
+            faultInjector: ClipboardHistoryFaultInjector(
+                points: [.legacyMigrationDuringDiscard]
+            )
+        )
+
+        do {
+            _ = try await failing.migrateLegacy(
+                request,
+                discardingEntries: captured.count
+            )
+            XCTFail("Expected the discard fault")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyMigrationFailed
+            )
+        }
+        try await failing.closeStoreForTesting()
+        XCTAssertEqual(try fixture.storePayloadNames(), [])
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: fixture.storeRoot
+                    .appendingPathComponent("history.sqlite").path
+            )
+        )
+
+        let relaunched = fixture.makeModule()
+        do {
+            _ = try await relaunched.migrateLegacy(request)
+            XCTFail("Expected the remaining entries to refuse the migration")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .legacyMigrationStoreNotEmpty(entryCount: captured.count)
+            )
+        }
+        let outcome = try await relaunched.migrateLegacy(
+            request,
+            discardingEntries: captured.count
+        )
+        guard case .published = outcome else {
+            return XCTFail("Expected the second confirmation to publish")
+        }
+        let page = try await relaunched.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries.map(\.id.value), [legacyID])
+    }
+
     func testLegacyCleanupRequiresProofAndRecoversAcrossDeleteFaults()
         async throws
     {
@@ -1824,6 +2083,50 @@ private final class LegacyMigrationFixture {
 
     func legacyPayloadURL(_ name: String) -> URL {
         legacyPayloadRoot.appendingPathComponent(name)
+    }
+
+    var stagingRoot: URL {
+        root.appendingPathComponent("ClipboardHistory.legacy-staging-v1")
+    }
+
+    /// Records what a 4.2 release recorded while its migration was pending:
+    /// recognized text, and a screenshot whose image is a payload file.
+    func captureBlockingEntries(
+        into module: ClipboardHistoryModule
+    ) async throws -> [UUID] {
+        let png = try XCTUnwrap(
+            Data(
+                base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+            )
+        )
+        var entryIDs: [UUID] = []
+        for content in [
+            ClipboardHistoryCaptureContent.ocr("recognized during the upgrade"),
+            .bitmap(png, provenance: .anyDoorScreenshot),
+        ] {
+            let outcome = try await module.capture(
+                ClipboardHistoryCaptureRequest(
+                    source: ClipboardHistoryCaptureSource(
+                        bundleIdentifier: "dev.bybee.AnyDoor",
+                        displayName: "AnyDoor"
+                    ),
+                    content: content
+                )
+            )
+            entryIDs.append(outcome.entryID.value)
+        }
+        return entryIDs
+    }
+
+    func storePayloadNames() throws -> Set<String> {
+        let directory = storeRoot.appendingPathComponent("payloads")
+        guard FileManager.default.fileExists(atPath: directory.path) else {
+            return []
+        }
+        return Set(
+            try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        )
     }
 }
 

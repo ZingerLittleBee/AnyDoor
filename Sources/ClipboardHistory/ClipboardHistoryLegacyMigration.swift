@@ -30,8 +30,18 @@ extension ClipboardHistoryModule {
         let duplicateFingerprint: Data?
     }
 
+    /// Migrates the pre-v2 history through a staging store that replaces the
+    /// current store once it is verified.
+    ///
+    /// The current store has to hold no entries. One that does is refused
+    /// with `legacyMigrationStoreNotEmpty`, which carries the entry count.
+    /// Passing that count back as `confirmedEntryCount` discards those
+    /// entries with the rest of the store, but only after the staging store
+    /// is verified. A count that no longer matches is refused the same way,
+    /// so a confirmation never discards entries it did not name.
     public func migrateLegacy(
-        _ request: ClipboardHistoryLegacyMigrationRequest
+        _ request: ClipboardHistoryLegacyMigrationRequest,
+        discardingEntries confirmedEntryCount: Int? = nil
     ) async throws -> ClipboardHistoryLegacyMigrationOutcome {
         guard
             request.transfer.version
@@ -53,8 +63,14 @@ extension ClipboardHistoryModule {
                 sql: "SELECT COUNT(*) FROM clipboard_entries"
             ) ?? 0
         }
-        guard existingEntryCount == 0 else {
-            throw ClipboardHistoryModuleError.legacyMigrationFailed
+        let discardsExistingEntries = existingEntryCount > 0
+        guard
+            !discardsExistingEntries
+                || confirmedEntryCount == existingEntryCount
+        else {
+            throw ClipboardHistoryModuleError.legacyMigrationStoreNotEmpty(
+                entryCount: existingEntryCount
+            )
         }
 
         monitoringEnabled = false
@@ -69,7 +85,12 @@ extension ClipboardHistoryModule {
         let stagingRoot = legacyMigrationStagingRoot
         var stagingDatabase: DatabasePool?
         do {
-            try removeEmptyInitialStore()
+            if discardsExistingEntries {
+                // Deleted only once the staging store is verified, below.
+                try requireOnlyStoreFiles()
+            } else {
+                try removeEmptyInitialStore()
+            }
             if FileManager.default.fileExists(atPath: stagingRoot.path) {
                 try FileManager.default.removeItem(at: stagingRoot)
             }
@@ -96,6 +117,13 @@ extension ClipboardHistoryModule {
             try staged.close()
             stagingDatabase = nil
             try faultInjector.check(.legacyMigrationBeforePublication)
+            if discardsExistingEntries {
+                try discardStore()
+                // Writers still waiting for a write turn were issued against
+                // the discarded store, and none of them may land in the
+                // migrated one.
+                storeEpoch += 1
+            }
             try publishLegacyStagingStore(from: stagingRoot)
             try faultInjector.check(.legacyMigrationAfterPublication)
 
@@ -243,7 +271,9 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private func removeEmptyInitialStore() throws {
+    /// Refuses a store root that holds anything a store does not create, so
+    /// replacing the store never deletes a file it does not own.
+    private func requireOnlyStoreFiles() throws {
         guard FileManager.default.fileExists(atPath: storeRoot.path) else {
             return
         }
@@ -265,6 +295,13 @@ extension ClipboardHistoryModule {
         else {
             throw ClipboardHistoryModuleError.legacyMigrationFailed
         }
+    }
+
+    private func removeEmptyInitialStore() throws {
+        guard FileManager.default.fileExists(atPath: storeRoot.path) else {
+            return
+        }
+        try requireOnlyStoreFiles()
         for directoryName in ["payloads", "staging"] {
             let directory = storeRoot.appendingPathComponent(directoryName)
             if FileManager.default.fileExists(atPath: directory.path),
@@ -277,6 +314,39 @@ extension ClipboardHistoryModule {
             }
         }
         try FileManager.default.removeItem(at: storeRoot)
+    }
+
+    /// Deletes a store whose entries the caller confirmed discarding, the
+    /// payload and staging folders before the database. A discard that stops
+    /// partway therefore leaves either a database that still lists its
+    /// entries, refused and discarded again on the next confirmation, or no
+    /// database and no payloads: payloads left beside a fresh database would
+    /// make the empty-store migration refuse it for good. The write-ahead log
+    /// goes before the database it belongs to, so it is never replayed into
+    /// a new one. Each child is removed by name and the root only once it is
+    /// empty.
+    private func discardStore() throws {
+        let fileManager = FileManager.default
+        for name in ["payloads", "staging"] {
+            let directory = storeRoot.appendingPathComponent(name)
+            if fileManager.fileExists(atPath: directory.path) {
+                try fileManager.removeItem(at: directory)
+            }
+        }
+        try faultInjector.check(.legacyMigrationDuringDiscard)
+        for name in [
+            "history.sqlite-wal",
+            "history.sqlite-shm",
+            "history.sqlite",
+        ] {
+            let file = storeRoot.appendingPathComponent(name)
+            if fileManager.fileExists(atPath: file.path) {
+                try fileManager.removeItem(at: file)
+            }
+        }
+        guard Darwin.rmdir(storeRoot.path) == 0 else {
+            throw ClipboardHistoryStorageError.fileOperationFailed(errno)
+        }
     }
 
     private func publishLegacyStagingStore(from stagingRoot: URL) throws {

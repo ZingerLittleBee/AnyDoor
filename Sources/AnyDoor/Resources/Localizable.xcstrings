@@ -8825,6 +8825,74 @@
         }
       }
     },
+    "settings.clipboard.discardAndMigrate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard Added Entries and Migrate…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "丢弃新增记录并迁移…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.discardAndMigrate.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard and Migrate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "丢弃并迁移"
+          }
+        }
+      }
+    },
+    "settings.clipboard.discardAndMigrate.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This permanently deletes the %lld entries added during the upgrade (screenshots, recognized text, QR codes and picked colors), then migrates the previous history. It cannot be undone."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会永久删除升级期间新增的 %lld 条记录（截图、识别的文字、二维码和取色），然后迁移原历史，无法撤销。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.discardAndMigrate.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard Added Entries and Migrate?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "丢弃新增记录并迁移？"
+          }
+        }
+      }
+    },
     "settings.clipboard.excludedApps": {
       "extractionState": "manual",
       "localizations": {
@@ -9195,6 +9263,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "正在迁移剪贴板历史…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.migrationBlocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History migration can't finish because entries were added during the upgrade. The previous history is unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史迁移无法完成，因为升级期间新增了记录。原历史保持不变。"
           }
         }
       }

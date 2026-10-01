@@ -15,6 +15,11 @@ enum ClipboardHistoryLifecycleState: Equatable {
     case paused(ClipboardHistoryStatus.AvailabilityReason?)
     case storeUnavailable(ClipboardHistoryStatus.AvailabilityReason?)
     case migrationFailed
+    /// The pre-v2 migration refused the store because it already holds
+    /// `entryCount` entries, which a 4.2 release recorded while its
+    /// migration was pending or had failed. It waits for the user to retry
+    /// or to confirm discarding them.
+    case migrationBlocked(entryCount: Int)
     case resetFailed
 }
 
@@ -24,11 +29,13 @@ extension ClipboardHistoryLifecycleState {
     /// prepares, migrates or has failed to migrate, the store can already be
     /// open but has to stay empty: the pre-v2 migration refuses a store that
     /// already holds entries, so one early capture would block it for good.
-    /// Every other state leaves the decision to the store, which refuses a
-    /// capture itself while it is not open.
+    /// A blocked migration holds captures back too, because a discard is
+    /// confirmed for the entries the user was shown. Every other state leaves
+    /// the decision to the store, which refuses a capture itself while it is
+    /// not open.
     var leavesExplicitCapturesToTheStore: Bool {
         switch self {
-        case .preparing, .migrating, .migrationFailed:
+        case .preparing, .migrating, .migrationFailed, .migrationBlocked:
             return false
         case .ready, .paused, .storeUnavailable, .resetFailed:
             return true
@@ -51,9 +58,13 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
     let legacyMigrationPublicationState:
         @Sendable () async throws
             -> ClipboardHistoryLegacyMigrationPublicationState
+    /// Migrates `request`. A count confirms discarding that many entries
+    /// already in the store; see
+    /// `ClipboardHistoryModule.migrateLegacy(_:discardingEntries:)`.
     let migrate:
         @Sendable (
-            ClipboardHistoryLegacyMigrationRequest
+            ClipboardHistoryLegacyMigrationRequest,
+            Int?
         ) async throws -> ClipboardHistoryLegacyMigrationOutcome
     let cleanupLegacyPayloads:
         @Sendable (URL) async throws
@@ -74,8 +85,11 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
         legacyMigrationPublicationState = {
             try await module.legacyMigrationPublicationState()
         }
-        migrate = { request in
-            try await module.migrateLegacy(request)
+        migrate = { request, confirmedEntryCount in
+            try await module.migrateLegacy(
+                request,
+                discardingEntries: confirmedEntryCount
+            )
         }
         cleanupLegacyPayloads = { payloadDirectory in
             try await module.cleanupLegacyPayloads(in: payloadDirectory)
@@ -100,7 +114,8 @@ struct ClipboardHistoryLifecycleOperations: Sendable {
                 -> ClipboardHistoryLegacyMigrationPublicationState,
         migrate:
             @escaping @Sendable (
-                ClipboardHistoryLegacyMigrationRequest
+                ClipboardHistoryLegacyMigrationRequest,
+                Int?
             ) async throws -> ClipboardHistoryLegacyMigrationOutcome,
         cleanupLegacyPayloads:
             @escaping @Sendable (URL) async throws
@@ -242,7 +257,7 @@ final class ClipboardHistoryLifecycle {
         switch state {
         case .storeUnavailable, .paused, .resetFailed:
             retriesStore = true
-        case .migrationFailed:
+        case .migrationFailed, .migrationBlocked:
             retriesStore = false
         case .preparing, .migrating, .ready:
             return
@@ -262,10 +277,26 @@ final class ClipboardHistoryLifecycle {
             return
         case .storeUnavailable, .resetFailed:
             break
-        case .preparing, .migrating, .ready, .paused, .migrationFailed:
+        case .preparing, .migrating, .ready, .paused, .migrationFailed,
+            .migrationBlocked:
             return
         }
         launch(retryStoreFirst: false, resetStoreFirst: true)
+    }
+
+    /// Discards the entries that block the pre-v2 migration, then migrates.
+    /// `entryCount` is the count the user confirmed; the store refuses the
+    /// discard unless it still holds exactly that many entries, and the
+    /// lifecycle then reports the blocked state again with the new count.
+    /// Unlike a reset, this keeps the pre-upgrade history, the key and any
+    /// displaced store.
+    func discardBlockingEntriesConfirmed(entryCount: Int) {
+        guard case .migrationBlocked = state else { return }
+        launch(
+            retryStoreFirst: false,
+            resetStoreFirst: false,
+            discardingEntries: entryCount
+        )
     }
 
     func setMonitoringEnabled(_ enabled: Bool) async {
@@ -397,7 +428,8 @@ final class ClipboardHistoryLifecycle {
                     retry()
                     return
                 case .preparing, .migrating, .storeUnavailable,
-                    .migrationFailed, .resetFailed, .paused:
+                    .migrationFailed, .migrationBlocked, .resetFailed,
+                    .paused:
                     return
                 }
             }
@@ -406,7 +438,8 @@ final class ClipboardHistoryLifecycle {
 
     private func launch(
         retryStoreFirst: Bool,
-        resetStoreFirst: Bool
+        resetStoreFirst: Bool,
+        discardingEntries confirmedEntryCount: Int? = nil
     ) {
         guard operationTask == nil else { return }
         generation += 1
@@ -417,7 +450,8 @@ final class ClipboardHistoryLifecycle {
             await self?.run(
                 generation: requestGeneration,
                 retryStoreFirst: retryStoreFirst,
-                resetStoreFirst: resetStoreFirst
+                resetStoreFirst: resetStoreFirst,
+                discardingEntries: confirmedEntryCount
             )
         }
     }
@@ -425,7 +459,8 @@ final class ClipboardHistoryLifecycle {
     private func run(
         generation requestGeneration: Int,
         retryStoreFirst: Bool,
-        resetStoreFirst: Bool
+        resetStoreFirst: Bool,
+        discardingEntries confirmedEntryCount: Int?
     ) async {
         defer {
             if generation == requestGeneration {
@@ -547,7 +582,10 @@ final class ClipboardHistoryLifecycle {
                     } else {
                         request = migrationSource
                     }
-                    let outcome = try await operations.migrate(request)
+                    let outcome = try await operations.migrate(
+                        request,
+                        confirmedEntryCount
+                    )
                     guard !Task.isCancelled,
                         generation == requestGeneration
                     else {
@@ -587,6 +625,14 @@ final class ClipboardHistoryLifecycle {
             if ClipboardPreferences.monitoringEnabled(from: defaults) {
                 _ = await operations.setMonitoring(.start, configuration)
             }
+        } catch ClipboardHistoryModuleError.legacyMigrationStoreNotEmpty(
+            let entryCount
+        ) {
+            guard generation == requestGeneration else { return }
+            logger.error(
+                "The Clipboard History migration is blocked by \(entryCount, privacy: .public) entries already in the store"
+            )
+            state = .migrationBlocked(entryCount: entryCount)
         } catch {
             guard generation == requestGeneration else { return }
             logger.error(
@@ -673,13 +719,16 @@ extension ClipboardHistoryLifecycle {
 }
 
 /// The recovery affordance a stalled lifecycle state offers in Settings: the
-/// line that explains it, and whether the destructive reset is one of the ways
+/// line that explains it, and which destructive actions are among the ways
 /// out. Kept out of the `@ViewBuilder` so the mapping can be pinned by a test —
 /// a state that silently borrows another state's line reads to the user as
 /// nothing having happened at all.
 struct ClipboardLifecycleRecovery: Equatable {
     let message: L10n.Key
     let includesReset: Bool
+    /// The entries a confirmed discard removes before migrating, when
+    /// discarding them is a way out; nil otherwise.
+    let discardableEntryCount: Int?
 
     init?(state: ClipboardHistoryLifecycleState) {
         switch state {
@@ -687,6 +736,14 @@ struct ClipboardLifecycleRecovery: Equatable {
             self.init(
                 message: .settingsClipboardMigrationFailed,
                 includesReset: false
+            )
+        case .migrationBlocked(let entryCount):
+            // A reset would discard the pre-upgrade history too; discarding
+            // only the entries that block the migration keeps it.
+            self.init(
+                message: .settingsClipboardMigrationBlocked,
+                includesReset: false,
+                discardableEntryCount: entryCount
             )
         case .storeUnavailable(.storeRelocationFailed):
             // The store could not be moved to its new folder but is intact;
@@ -720,8 +777,13 @@ struct ClipboardLifecycleRecovery: Equatable {
         }
     }
 
-    private init(message: L10n.Key, includesReset: Bool) {
+    private init(
+        message: L10n.Key,
+        includesReset: Bool,
+        discardableEntryCount: Int? = nil
+    ) {
         self.message = message
         self.includesReset = includesReset
+        self.discardableEntryCount = discardableEntryCount
     }
 }
