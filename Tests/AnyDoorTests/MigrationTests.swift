@@ -98,12 +98,6 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertEqual(BuiltinItem.appShortcuts.kind, .submenu)
     }
 
-    func testAutomationItemsAreFlagged() {
-        XCTAssertTrue(BuiltinItem.darkMode.requiresAutomation)
-        XCTAssertTrue(BuiltinItem.emptyTrash.requiresAutomation)
-        XCTAssertFalse(BuiltinItem.keepAwake.requiresAutomation)
-    }
-
     func testOCRIsAnActionItem() {
         XCTAssertEqual(BuiltinItem.ocr.kind, .action)
     }
@@ -112,7 +106,6 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertEqual(BuiltinItem.ocr.titleKey, .builtinOCR)
         XCTAssertEqual(BuiltinItem.ocr.symbol, "text.viewfinder")
         XCTAssertEqual(BuiltinItem.ocr.defaultOrder, 950)
-        XCTAssertFalse(BuiltinItem.ocr.requiresAutomation)
         XCTAssertNil(BuiltinItem.ocr.feedbackSound)
     }
 
@@ -124,7 +117,6 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertEqual(BuiltinItem.pickColor.titleKey, .builtinPickColor)
         XCTAssertEqual(BuiltinItem.pickColor.symbol, "eyedropper")
         XCTAssertEqual(BuiltinItem.pickColor.defaultOrder, 975)
-        XCTAssertFalse(BuiltinItem.pickColor.requiresAutomation)
         XCTAssertNil(BuiltinItem.pickColor.feedbackSound)
     }
 
@@ -133,7 +125,6 @@ final class BuiltinItemTests: XCTestCase {
         XCTAssertEqual(BuiltinItem.qrcode.titleKey, .builtinQRCode)
         XCTAssertEqual(BuiltinItem.qrcode.symbol, "qrcode.viewfinder")
         XCTAssertEqual(BuiltinItem.qrcode.defaultOrder, 960)
-        XCTAssertFalse(BuiltinItem.qrcode.requiresAutomation)
         XCTAssertNil(BuiltinItem.qrcode.feedbackSound)
     }
 

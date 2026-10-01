@@ -33,12 +33,6 @@ final class BuiltinItemTranslateTests: XCTestCase {
         XCTAssertEqual(BuiltinItem.translateSelection.defaultOrder, 984)
     }
 
-    func testTranslateDoesNotRequireAutomation() {
-        XCTAssertFalse(BuiltinItem.translate.requiresAutomation)
-        XCTAssertFalse(BuiltinItem.screenshotTranslate.requiresAutomation)
-        XCTAssertFalse(BuiltinItem.translateSelection.requiresAutomation)
-    }
-
     func testTranslateDefaultVisibilityTrue() {
         XCTAssertTrue(BuiltinItem.translate.defaultVisibility)
         XCTAssertTrue(BuiltinItem.screenshotTranslate.defaultVisibility)

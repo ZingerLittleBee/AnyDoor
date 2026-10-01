@@ -151,7 +151,7 @@ final class PanelStore {
                     symbol: item.symbol,
                     kind: item.kind,
                     toggleState: item.kind == .toggle ? toggleStates[item] : nil,
-                    permission: permissionStates[item] ?? (item.requiresAutomation ? .undetermined : .notRequired)
+                    permission: permissionStates[item] ?? .notRequired
                 )
                 if isWindowChild {
                     windowChildren.append(entry)

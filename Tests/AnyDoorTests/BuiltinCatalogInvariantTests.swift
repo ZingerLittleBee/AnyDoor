@@ -59,6 +59,10 @@ struct BuiltinCatalogInvariantTests {
                 selfWrites: module.pasteboardSelfWrites,
                 admitsHistoryWrite: { true }
             ),
+            clipboardHistoryLifecycle: ClipboardHistoryLifecycle(
+                module: module,
+                migrationRequest: nil
+            ),
             onKeepAwakeChange: { _ in }
         )
             + (try makeProductionPlugins()).flatMap(\.providers)

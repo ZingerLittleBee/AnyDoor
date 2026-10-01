@@ -377,7 +377,7 @@ named test, which is the point of them.
 
 1. **Claim a command.** Add the `BuiltinItem` case(s) in
    `Sources/PluginInterface/BuiltinItem.swift`: `kind`, `symbol`, unique
-   `defaultOrder`, `requiresAutomation` if needed. Add the panel title key in
+   `defaultOrder`. Add the panel title key in
    Core's `BuiltinItem+Core.swift` (`titleKey`) + catalog entries.
    *Missed → `BuiltinCatalogInvariantTests` (provider/order invariants),
    `BuiltinItemLocalizationTests` (title key resolves), non-exhaustive-switch

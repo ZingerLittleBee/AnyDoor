@@ -234,14 +234,6 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
         }
     }
 
-    /// True if the item requires macOS Automation permission (NSAppleEventsUsage).
-    public var requiresAutomation: Bool {
-        switch self {
-        case .darkMode, .emptyTrash: return true
-        default: return false
-        }
-    }
-
     /// Whether this item should default to being shown in the menu bar panel when first seeded.
     /// False only for hidden-hotkey items (brightness ± live on the brightness row only).
     public var defaultVisibility: Bool {

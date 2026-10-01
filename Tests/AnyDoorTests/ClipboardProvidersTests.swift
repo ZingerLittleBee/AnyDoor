@@ -1,4 +1,5 @@
 import AppKit
+import ClipboardHistory
 import XCTest
 
 @testable import AnyDoor
@@ -23,7 +24,32 @@ final class ClipboardProvidersTests: XCTestCase {
 
     @MainActor
     func testMonitoringProviderReflectsAndTogglesClipboardPreference() async throws {
-        let provider = ClipboardMonitoringProvider(defaults: defaults)
+        // The provider reads the preference from the same suite the
+        // lifecycle writes it to.
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: ClipboardHistoryLifecycleOperations(
+                status: {
+                    ClipboardHistoryStatus(availability: .ready, isMonitoring: false)
+                },
+                setMonitoring: { command, _ in
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: command == .start
+                    )
+                },
+                legacyMigrationPublicationState: { .notPublished },
+                migrate: { _, _ in throw CancellationError() },
+                cleanupLegacyPayloads: { _ in throw CancellationError() },
+                retryStore: {},
+                resetStore: {}
+            ),
+            defaults: defaults,
+            migrationRequest: nil
+        )
+        let provider = ClipboardMonitoringProvider(
+            defaults: defaults,
+            lifecycle: lifecycle
+        )
 
         let initial = try await provider.readState()
         XCTAssertTrue(initial)
