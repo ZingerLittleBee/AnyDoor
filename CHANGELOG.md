@@ -42,6 +42,10 @@ versioning.
   history folder contains a copied symbolic link. The entry is carried over as
   a file reference without a stored copy instead of blocking the upgrade, and
   the link's target is never read or deleted.
+- While Clipboard History is still upgrading a pre-4.2 history, or that upgrade
+  has failed, screenshots, recognized text, QR codes and picked colors are
+  still copied and saved as usual but are not added to history, where they
+  used to block the upgrade for good.
 
 ## [4.2.5] - 2026-09-30
 

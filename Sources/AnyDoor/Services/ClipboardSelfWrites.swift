@@ -36,7 +36,9 @@ enum ClipboardSelfWrites {
 }
 
 struct ClipboardProductionOutcome: Equatable, Sendable {
-    let capture: ClipboardHistoryCaptureOutcome
+    /// Nil when the lifecycle did not admit the history write yet (see
+    /// `ClipboardHistoryLifecycle.admitsExplicitCaptures`).
+    let capture: ClipboardHistoryCaptureOutcome?
     let pasteboardChangeCount: Int?
 }
 
@@ -48,20 +50,25 @@ enum ClipboardProductionError: Error, Equatable {
 ///
 /// Every production first suppresses its optional pasteboard write, then records
 /// the corresponding semantic Clipboard History capture. A successful result is
-/// returned only after both required mutations complete.
+/// returned only after both required mutations complete. Until the lifecycle
+/// admits explicit captures, a production still writes the pasteboard but
+/// skips the history write.
 @MainActor
 final class ClipboardProductionAdapter {
     private let module: ClipboardHistoryModule
     private let selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel
+    private let admitsHistoryWrite: @MainActor () -> Bool
     private let pasteboard: NSPasteboard
 
     init(
         module: ClipboardHistoryModule,
         selfWrites: ClipboardHistoryPasteboardSelfWriteFunnel,
+        admitsHistoryWrite: @escaping @MainActor () -> Bool,
         pasteboard: NSPasteboard = .general
     ) {
         self.module = module
         self.selfWrites = selfWrites
+        self.admitsHistoryWrite = admitsHistoryWrite
         self.pasteboard = pasteboard
     }
 
@@ -134,6 +141,12 @@ final class ClipboardProductionAdapter {
             changeCount = try write(pasteboardWrite)
         } else {
             changeCount = nil
+        }
+        guard admitsHistoryWrite() else {
+            return ClipboardProductionOutcome(
+                capture: nil,
+                pasteboardChangeCount: changeCount
+            )
         }
         let capture = try await module.capture(
             ClipboardHistoryCaptureRequest(

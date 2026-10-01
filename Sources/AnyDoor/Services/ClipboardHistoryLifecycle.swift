@@ -12,6 +12,24 @@ enum ClipboardHistoryLifecycleState: Equatable {
     case resetFailed
 }
 
+extension ClipboardHistoryLifecycleState {
+    /// Whether this state leaves an explicit capture (a screenshot, recognized
+    /// text, a QR code or a picked color) to the store. While the lifecycle
+    /// prepares, migrates or has failed to migrate, the store can already be
+    /// open but has to stay empty: the pre-v2 migration refuses a store that
+    /// already holds entries, so one early capture would block it for good.
+    /// Every other state leaves the decision to the store, which refuses a
+    /// capture itself while it is not open.
+    var leavesExplicitCapturesToTheStore: Bool {
+        switch self {
+        case .preparing, .migrating, .migrationFailed:
+            return false
+        case .ready, .paused, .storeUnavailable, .resetFailed:
+            return true
+        }
+    }
+}
+
 enum ClipboardHistoryMigrationPreparation: Equatable {
     case proceed
     case suspendForRelaunch
@@ -121,6 +139,16 @@ final class ClipboardHistoryLifecycle {
     private(set) var state: ClipboardHistoryLifecycleState = .preparing
     private(set) var migrationReport:
         ClipboardHistoryLegacyMigrationReport?
+    /// Set once this process has seen the pre-v2 cutover complete. A cutover
+    /// never comes undone, so the `.preparing` pass of a later retry does not
+    /// hold explicit captures back.
+    @ObservationIgnored private var hasConfirmedLegacyCutover = false
+
+    /// Whether an explicit capture may be written to history now. See
+    /// `ClipboardHistoryLifecycleState.leavesExplicitCapturesToTheStore`.
+    var admitsExplicitCaptures: Bool {
+        hasConfirmedLegacyCutover || state.leavesExplicitCapturesToTheStore
+    }
 
     init(
         module: ClipboardHistoryModule,
@@ -452,6 +480,7 @@ final class ClipboardHistoryLifecycle {
             return
         }
         guard cleanupState != .completed else {
+            hasConfirmedLegacyCutover = true
             state = .ready
             if ClipboardPreferences.monitoringEnabled(from: defaults) {
                 _ = await operations.setMonitoring(.start, configuration)
@@ -531,6 +560,7 @@ final class ClipboardHistoryLifecycle {
                 }
                 try finishMigration()
             }
+            hasConfirmedLegacyCutover = true
             _ = await operations.setMonitoring(
                 .migrationCompleted,
                 configuration

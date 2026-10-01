@@ -65,10 +65,10 @@ final class ClipboardProductionAdapterTests: XCTestCase {
         let page = try await fixture.module.page(.init())
         XCTAssertEqual(page.entries.count, 4)
         XCTAssertEqual(page.entries.map(\.id), [
-            screenshot.capture.entryID,
-            color.capture.entryID,
-            qr.capture.entryID,
-            ocr.capture.entryID,
+            try XCTUnwrap(screenshot.capture).entryID,
+            try XCTUnwrap(color.capture).entryID,
+            try XCTUnwrap(qr.capture).entryID,
+            try XCTUnwrap(ocr.capture).entryID,
         ])
         XCTAssertEqual(page.entries[0].facets, [.image, .screenshot])
         XCTAssertTrue(page.entries[1].facets.contains(.color))
@@ -102,7 +102,10 @@ final class ClipboardProductionAdapterTests: XCTestCase {
             "keep me"
         )
         let page = try await fixture.module.page(.init())
-        XCTAssertEqual(page.entries.map(\.id), [outcome.capture.entryID])
+        XCTAssertEqual(
+            page.entries.map(\.id),
+            [try XCTUnwrap(outcome.capture).entryID]
+        )
         XCTAssertEqual(page.entries.first?.facets, [.image, .screenshot])
     }
 
@@ -158,6 +161,231 @@ final class ClipboardProductionAdapterTests: XCTestCase {
         XCTAssertTrue(page.entries.isEmpty)
     }
 
+    /// Until the lifecycle confirms the pre-v2 migration, the store has to
+    /// stay empty, even though it is already open. Every production still
+    /// writes the pasteboard; only its history write is skipped.
+    func testExplicitCapturesSkipHistoryUntilTheMigrationIsConfirmed()
+        async throws
+    {
+        for state in [
+            ClipboardHistoryLifecycleState.preparing,
+            .migrating,
+            .migrationFailed,
+        ] {
+            let fixture = try Fixture(
+                admitsHistoryWrite: state.leavesExplicitCapturesToTheStore
+            )
+            defer { fixture.removeStore() }
+
+            let ocr = try await fixture.adapter.produceOCR("recognized text")
+            XCTAssertEqual(
+                fixture.pasteboard.string(forType: .string),
+                "recognized text",
+                "\(state)"
+            )
+            let qr = try await fixture.adapter.produceQRCode(
+                "https://example.com"
+            )
+            XCTAssertEqual(
+                fixture.pasteboard.string(forType: .string),
+                "https://example.com",
+                "\(state)"
+            )
+            let color = try await fixture.adapter.produceColor(
+                hex: "#AABBCC",
+                pasteboardValue: "rgb(170 187 204)"
+            )
+            XCTAssertEqual(
+                fixture.pasteboard.string(forType: .string),
+                "rgb(170 187 204)",
+                "\(state)"
+            )
+            let (image, png) = try Self.makeImage()
+            let screenshot = try await fixture.adapter.produceScreenshot(
+                image: image,
+                png: png,
+                copyToPasteboard: true
+            )
+            XCTAssertNotNil(
+                fixture.pasteboard.data(forType: .tiff),
+                "\(state)"
+            )
+            XCTAssertEqual(
+                screenshot.pasteboardChangeCount,
+                fixture.pasteboard.changeCount,
+                "\(state)"
+            )
+
+            for outcome in [ocr, qr, color, screenshot] {
+                XCTAssertNil(outcome.capture, "\(state)")
+            }
+            let page = try await fixture.module.page(.init())
+            XCTAssertTrue(page.entries.isEmpty, "\(state)")
+        }
+    }
+
+    /// After the migration the store decides, as before: one that is not
+    /// open refuses the capture, and the pasteboard write stands.
+    func testLaterStatesLeaveTheCaptureToTheStore() async throws {
+        for (state, keyResult) in [
+            (
+                ClipboardHistoryLifecycleState.paused(.keychainLocked),
+                ClipboardHistoryMasterKeyResult.locked
+            ),
+            (.storeUnavailable(.keyAccessDenied), .accessDenied),
+            (.resetFailed, .failure(-1)),
+        ] {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "AnyDoor-ClipboardProductionClosed-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let module = ClipboardHistoryModule(
+                testingStoreRoot: directory,
+                keyStore: FixedKeyStore(result: keyResult)
+            )
+            let pasteboard = NSPasteboard(
+                name: NSPasteboard.Name(
+                    "AnyDoor-ClipboardProductionClosed-\(UUID().uuidString)"
+                )
+            )
+            let adapter = ClipboardProductionAdapter(
+                module: module,
+                selfWrites: module.pasteboardSelfWrites,
+                admitsHistoryWrite: { state.leavesExplicitCapturesToTheStore },
+                pasteboard: pasteboard
+            )
+
+            do {
+                _ = try await adapter.produceOCR("recognized text")
+                XCTFail("Expected the store to refuse the capture in \(state)")
+            } catch {
+                XCTAssertEqual(
+                    error as? ClipboardHistoryModuleError,
+                    .storeUnavailable,
+                    "\(state)"
+                )
+            }
+            XCTAssertEqual(
+                pasteboard.string(forType: .string),
+                "recognized text",
+                "\(state)"
+            )
+        }
+    }
+
+    /// The stop-loss end to end: a capture taken while the migration is
+    /// failed reaches only the pasteboard, so the retry still finds the empty
+    /// store the migration needs. Once ready, captures are recorded again,
+    /// with passive monitoring off.
+    func testCaptureWhileTheMigrationFailedDoesNotBlockTheRetry()
+        async throws
+    {
+        let fixture = try Fixture()
+        defer { fixture.removeStore() }
+        let legacyPayloads = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-ClipboardProductionLegacy-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: legacyPayloads,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: legacyPayloads) }
+        let defaults = try makeDefaults()
+        ClipboardPreferences.setMonitoringEnabled(false, in: defaults)
+        let legacyID = UUID()
+        var preparationCount = 0
+        var migrationFinished = false
+        let lifecycle = ClipboardHistoryLifecycle(
+            module: fixture.module,
+            defaults: defaults,
+            migrationPreparation: {
+                preparationCount += 1
+                // The app's recovery mode: the store is open, but the
+                // snapshot could not be prepared on the first attempt.
+                guard preparationCount > 1 else {
+                    throw ClipboardHistoryLegacySourceError.incompleteSnapshot
+                }
+                return .proceed
+            },
+            legacyCleanupState: {
+                migrationFinished ? .completed : .incomplete
+            },
+            legacyPayloadDirectory: { legacyPayloads },
+            migrationRequest: {
+                ClipboardHistoryLegacyMigrationRequest(
+                    transfer: ClipboardHistoryLegacyTransfer(
+                        entries: [
+                            ClipboardHistoryLegacyEntry(
+                                id: legacyID,
+                                kind: .text,
+                                text: "legacy text",
+                                fileName: nil,
+                                colorHex: nil,
+                                previewText: "legacy text",
+                                capturedAt: Date(timeIntervalSince1970: 1_000),
+                                richData: nil,
+                                richType: nil,
+                                source: .unknown,
+                                isFavorite: false,
+                                tagIDs: [],
+                                files: []
+                            )
+                        ],
+                        tags: [],
+                        categoryOrder: [],
+                        retentionPeriod: .unlimited
+                    ),
+                    payloadDirectory: legacyPayloads
+                )
+            },
+            finishMigration: {
+                migrationFinished = true
+            }
+        )
+        let adapter = ClipboardProductionAdapter(
+            module: fixture.module,
+            selfWrites: fixture.module.pasteboardSelfWrites,
+            admitsHistoryWrite: { lifecycle.admitsExplicitCaptures },
+            pasteboard: fixture.pasteboard
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+        let early = try await adapter.produceOCR("captured while failed")
+        XCTAssertNil(early.capture)
+        XCTAssertEqual(
+            fixture.pasteboard.string(forType: .string),
+            "captured while failed"
+        )
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+        let migrated = try await fixture.module.page(.init())
+        XCTAssertEqual(migrated.entries.map(\.id.value), [legacyID])
+
+        let late = try await adapter.produceOCR("captured when ready")
+        let recorded = try XCTUnwrap(late.capture)
+        let page = try await fixture.module.page(.init())
+        XCTAssertEqual(
+            page.entries.map(\.id.value),
+            [recorded.entryID.value, legacyID]
+        )
+        await lifecycle.stop()
+    }
+
+    private func makeDefaults() throws -> UserDefaults {
+        let suiteName = "ClipboardProductionAdapterTests-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        return defaults
+    }
+
     private static func makeImage() throws -> (NSImage, Data) {
         let image = NSImage(size: NSSize(width: 2, height: 2))
         image.lockFocus()
@@ -175,7 +403,10 @@ private final class Fixture {
     let pasteboard: NSPasteboard
     let adapter: ClipboardProductionAdapter
 
-    init(faults: Set<ClipboardHistoryFaultPoint> = []) throws {
+    init(
+        faults: Set<ClipboardHistoryFaultPoint> = [],
+        admitsHistoryWrite: Bool = true
+    ) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-ClipboardProduction-\(UUID().uuidString)",
@@ -199,6 +430,7 @@ private final class Fixture {
         adapter = ClipboardProductionAdapter(
             module: module,
             selfWrites: module.pasteboardSelfWrites,
+            admitsHistoryWrite: { admitsHistoryWrite },
             pasteboard: pasteboard
         )
     }
@@ -206,4 +438,15 @@ private final class Fixture {
     func removeStore() {
         try? FileManager.default.removeItem(at: directory)
     }
+}
+
+/// A Keychain item that always answers `result`, so the store never opens.
+private struct FixedKeyStore: ClipboardHistoryMasterKeyStoring {
+    let result: ClipboardHistoryMasterKeyResult
+
+    func load() -> ClipboardHistoryMasterKeyResult { result }
+
+    func create() -> ClipboardHistoryMasterKeyResult { result }
+
+    func delete() -> ClipboardHistoryMasterKeyResult { result }
 }

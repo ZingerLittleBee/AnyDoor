@@ -375,6 +375,63 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         )
     }
 
+    /// An explicit capture taken before the cutover would leave the store
+    /// non-empty, and the pre-v2 migration refuses such a store for good, so
+    /// captures wait while the lifecycle prepares, migrates or has failed.
+    /// A confirmed cutover never comes undone: a later retry that passes
+    /// through `.preparing` again keeps admitting them.
+    func testExplicitCapturesWaitOnlyForTheFirstConfirmedCutover()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe(migrationFailuresRemaining: 1)
+        let unlockState = KeychainUnlockFlag(unlocked: true)
+        var migrationFinished = false
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            legacyCleanupState: {
+                migrationFinished ? .completed : .incomplete
+            },
+            migrationRequest: Self.emptyMigrationRequest,
+            finishMigration: {
+                migrationFinished = true
+            },
+            isKeychainUnlocked: { unlockState.read() },
+            keychainUnlockPollInterval: .milliseconds(10),
+            unlockNotifications: NotificationCenter()
+        )
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+
+        lifecycle.start()
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+
+        lifecycle.retry()
+        XCTAssertEqual(lifecycle.state, .preparing)
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertTrue(lifecycle.admitsExplicitCaptures)
+
+        unlockState.set(false)
+        let paused = await Self.wait(untilTrue: {
+            lifecycle.state == .paused(.keychainLocked)
+        })
+        XCTAssertTrue(paused)
+        // An undeterminable lock state never retries on its own.
+        unlockState.set(nil)
+        lifecycle.retry()
+        XCTAssertEqual(lifecycle.state, .preparing)
+        XCTAssertTrue(lifecycle.admitsExplicitCaptures)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+        let migrationCount = await probe.recordedMigrationCount()
+        XCTAssertEqual(migrationCount, 2)
+        await lifecycle.stop()
+    }
+
     func testCleanupFailureRetainsLegacySourceUntilRetrySucceeds()
         async throws
     {
