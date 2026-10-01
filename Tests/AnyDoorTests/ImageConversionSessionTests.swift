@@ -63,8 +63,10 @@ final class ImageConversionSessionTests: XCTestCase {
         let original = try Data(contentsOf: image)
 
         let summary = await ImageConversionSession().convertAll(
-            fileURLs: [image, garbage],
-            target: .jpeg
+            inputs: [.file(image), .file(garbage)],
+            target: .jpeg,
+            quality: 0.85,
+            downloadsDirectory: dir
         )
 
         let output = dir.appendingPathComponent("Photo.jpg")
@@ -85,6 +87,7 @@ final class ImageConversionSessionTests: XCTestCase {
         let summary = await ImageConversionSession().convertAll(
             inputs: [.file(image), .bitmap(try pngData())],
             target: .jpeg,
+            quality: 0.85,
             outputDirectory: outputDir,
             downloadsDirectory: sourceDir
         )
@@ -105,8 +108,18 @@ final class ImageConversionSessionTests: XCTestCase {
         let image = dir.appendingPathComponent("Photo.png")
         try writePNG(to: image)
 
-        _ = await ImageConversionSession().convertAll(fileURLs: [image], target: .jpeg)
-        let second = await ImageConversionSession().convertAll(fileURLs: [image], target: .jpeg)
+        _ = await ImageConversionSession().convertAll(
+            inputs: [.file(image)],
+            target: .jpeg,
+            quality: 0.85,
+            downloadsDirectory: dir
+        )
+        let second = await ImageConversionSession().convertAll(
+            inputs: [.file(image)],
+            target: .jpeg,
+            quality: 0.85,
+            downloadsDirectory: dir
+        )
 
         XCTAssertEqual(second.converted, 1)
         XCTAssertEqual(second.skipped, 0)
@@ -123,7 +136,12 @@ final class ImageConversionSessionTests: XCTestCase {
         let originalOutput = Data("preexisting output".utf8)
         try originalOutput.write(to: occupied)
 
-        let summary = await ImageConversionSession().convertAll(fileURLs: [image], target: .jpeg)
+        let summary = await ImageConversionSession().convertAll(
+            inputs: [.file(image)],
+            target: .jpeg,
+            quality: 0.85,
+            downloadsDirectory: dir
+        )
 
         XCTAssertEqual(summary.outputURLs.map(\.lastPathComponent), ["Photo 2.jpg"])
         XCTAssertEqual(try Data(contentsOf: occupied), originalOutput)
@@ -134,7 +152,12 @@ final class ImageConversionSessionTests: XCTestCase {
         let source = dir.appendingPathComponent("animated.gif")
         try writeAnimatedGIF(to: source)
 
-        let summary = await ImageConversionSession().convertAll(fileURLs: [source], target: .png)
+        let summary = await ImageConversionSession().convertAll(
+            inputs: [.file(source)],
+            target: .png,
+            quality: 0.85,
+            downloadsDirectory: dir
+        )
 
         XCTAssertEqual(summary.converted, 1)
         XCTAssertTrue(try XCTUnwrap(summary.outputs.first).firstFrameOnly)
@@ -150,6 +173,7 @@ final class ImageConversionSessionTests: XCTestCase {
         let summary = await ImageConversionSession().convertAll(
             inputs: [.bitmap(bitmap), .bitmap(bitmap)],
             target: .jpeg,
+            quality: 0.85,
             downloadsDirectory: downloads,
             calendar: calendar,
             now: date
@@ -174,6 +198,7 @@ final class ImageConversionSessionTests: XCTestCase {
         let summary = await ImageConversionSession().convertAll(
             inputs: [.bitmap(Data("not an image".utf8))],
             target: .png,
+            quality: 0.85,
             downloadsDirectory: downloads
         )
 
@@ -189,6 +214,7 @@ final class ImageConversionSessionTests: XCTestCase {
         let summary = await ImageConversionSession().convertAll(
             inputs: [.bitmap(Data("not an image".utf8)), .bitmap(bitmap)],
             target: .jpeg,
+            quality: 0.85,
             downloadsDirectory: downloads
         )
 
@@ -206,6 +232,7 @@ final class ImageConversionSessionTests: XCTestCase {
             await ImageConversionSession().convertAll(
                 inputs: inputs,
                 target: .jpeg,
+                quality: 0.85,
                 downloadsDirectory: downloads
             )
         }
@@ -284,6 +311,7 @@ final class ImageConversionSessionTests: XCTestCase {
         let summary = await ImageConversionSession().convertAll(
             inputs: [.file(image), .bitmap(bitmap)],
             target: .jpeg,
+            quality: 0.85,
             downloadsDirectory: downloads
         )
 

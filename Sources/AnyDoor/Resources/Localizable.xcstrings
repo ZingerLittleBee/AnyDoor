@@ -5102,23 +5102,6 @@
         }
       }
     },
-    "imageConversion.convert": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Convert"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "转换"
-          }
-        }
-      }
-    },
     "imageConversion.convertAll": {
       "extractionState": "manual",
       "localizations": {

@@ -23,12 +23,11 @@ enum ImageConversionPreferences {
     static let defaultTargetSizeUnit: TargetSizeUnit = .mb
     static let defaultTransparencyBackgroundHex = "#FFFFFF"
 
-    /// Slider range and default, expressed as a whole percentage (1–100).
+    /// Slider range, expressed as a whole percentage (1–100).
     /// Sourced from the shared codec setting so Core's screenshot Save As and
     /// the plugin's slider stay one knob.
     static let minQualityPercent = ImageEncodingQuality.minPercent
     static let maxQualityPercent = ImageEncodingQuality.maxPercent
-    static let defaultQualityPercent = ImageEncodingQuality.defaultPercent
 
     static func targetFormat(availableFormats: [ImageConversionFormat], defaults: UserDefaults = .standard) -> ImageConversionFormat {
         if let raw = defaults.string(forKey: targetFormatKey),
@@ -120,7 +119,7 @@ enum ImageConversionPreferences {
     }
 
     /// The flat background composited under transparent pixels when the target
-    /// format has no alpha (e.g. JPEG). Stored normalized as uppercase `#RRGGBB`.
+    /// format has no alpha (e.g. JPEG). Returned normalized as uppercase `#RRGGBB`.
     /// Any value that isn't exactly a leading `#` plus six hex digits falls back to
     /// white.
     static func transparencyBackgroundHex(defaults: UserDefaults = .standard) -> String {
@@ -129,11 +128,6 @@ enum ImageConversionPreferences {
             return defaultTransparencyBackgroundHex
         }
         return normalized
-    }
-
-    static func setTransparencyBackgroundHex(_ hex: String, defaults: UserDefaults = .standard) {
-        let normalized = normalizeHexColor(hex) ?? defaultTransparencyBackgroundHex
-        defaults.set(normalized, forKey: transparencyBackgroundHexKey)
     }
 
     /// Validate a `#RRGGBB` color and return it normalized to uppercase, or nil if

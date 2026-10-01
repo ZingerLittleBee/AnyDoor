@@ -17,7 +17,6 @@ enum L10n {
         case imageConversionCompareOriginal = "imageConversion.compare.original"
         case imageConversionCompareResult = "imageConversion.compare.result"
         case imageConversionCompareUpdating = "imageConversion.compare.updating"
-        case imageConversionConvert = "imageConversion.convert"
         case imageConversionConvertAll = "imageConversion.convertAll"
         case imageConversionConverting = "imageConversion.converting"
         case imageConversionCopyAsFile = "imageConversion.copyAsFile"
