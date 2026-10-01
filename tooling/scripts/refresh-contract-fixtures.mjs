@@ -24,10 +24,12 @@ export const contractFixturePath = path.join(
 export async function generateContractJSON() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "anydoor-contract-fixture-"));
   try {
-    // Passing the file on the CLI ignores tsconfig.json, so restate the flags
+    // Compile just this file: --ignoreConfig skips tsconfig.json (TypeScript 7
+    // refuses a CLI file list beside one without it), so restate the flags
     // that matter; tsc pulls the imported src/ modules into the same outDir.
     execFileSync("pnpm", [
       "exec", "tsc",
+      "--ignoreConfig",
       path.join("type-tests", "contract-fixtures.ts"),
       "--outDir", tmp,
       "--module", "esnext",
