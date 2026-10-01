@@ -60,7 +60,6 @@ enum TimeZoneConversion {
         let display = "\(timeString) \(abbr)\(dayMarker)"
         return ConversionResult(
             kind: .timeZone,
-            value: 0,
             display: display,
             copyText: timeString,
             detail: "\(sourceLabel) → \(target.name)",

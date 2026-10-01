@@ -98,7 +98,10 @@ final class BluetoothBatteryParserTests: XCTestCase {
 
         let airpods = merged.first { $0.name == "AirPods" }
         XCTAssertTrue(airpods?.isEarbuds ?? false)
-        XCTAssertEqual(airpods?.lowestLevel, 80)
+        XCTAssertEqual(airpods?.left, 95)
+        XCTAssertEqual(airpods?.right, 90)
+        XCTAssertEqual(airpods?.caseLevel, 80)
+        XCTAssertNil(airpods?.main)
     }
 
     func test_merge_dropsDevicesWithNoBatteryFromEitherSource() {

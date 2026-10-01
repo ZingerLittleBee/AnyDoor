@@ -16,7 +16,7 @@ struct QuicklinkTemplateCatalogTests {
                 "\(template.id) link is not a {query} search template"
             )
             #expect(
-                QuicklinkDestination.classify(link: template.link).isSearchTemplate,
+                QuicklinkDestination.classify(link: template.link) == .searchTemplate(template.link),
                 "\(template.id) link does not classify as a search template"
             )
         }

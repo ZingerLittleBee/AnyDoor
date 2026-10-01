@@ -4,7 +4,7 @@ import HostsHelperShared
 /// Sends a forced-shutdown request to the root helper over XPC. Reused approval:
 /// requires the same enabled LaunchDaemon as the hosts writer.
 struct PrivilegedShutdownClient: Sendable {
-    enum ClientError: Error { case noProxy, failed(String) }
+    enum ClientError: Error { case failed(String) }
 
     func shutDown() async throws {
         try await PrivilegedHelperCall.run(

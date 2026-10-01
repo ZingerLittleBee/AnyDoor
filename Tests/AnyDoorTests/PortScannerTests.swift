@@ -13,7 +13,7 @@ final class PortScannerTests: XCTestCase {
 
     func testParseSingleIPv4Listener() throws {
         let raw = try fixture("lsof-single-ipv4")
-        let records = try parseLsofOutput(raw)
+        let records = parseLsofOutput(raw)
         XCTAssertEqual(records.count, 1)
         let r = records[0]
         XCTAssertEqual(r.pid, 67035)
@@ -24,7 +24,7 @@ final class PortScannerTests: XCTestCase {
 
     func testParseMultiPort() throws {
         let raw = try fixture("lsof-multi-port")
-        let records = try parseLsofOutput(raw)
+        let records = parseLsofOutput(raw)
         XCTAssertEqual(records.count, 3)
         XCTAssertEqual(records.map(\.port), [80, 443, 5432])
         for r in records { XCTAssertEqual(r.pid, 898); XCTAssertEqual(r.processName, "OrbStack Helper") }
@@ -32,7 +32,7 @@ final class PortScannerTests: XCTestCase {
 
     func testParseDualStackMergesBinds() throws {
         let raw = try fixture("lsof-dual-stack")
-        let records = try parseLsofOutput(raw)
+        let records = parseLsofOutput(raw)
         XCTAssertEqual(records.count, 1)
         let r = records[0]
         XCTAssertEqual(r.pid, 75837)
@@ -45,7 +45,7 @@ final class PortScannerTests: XCTestCase {
 
     func testParseMultiBindSamePort() throws {
         let raw = try fixture("lsof-multi-bind")
-        let records = try parseLsofOutput(raw)
+        let records = parseLsofOutput(raw)
         XCTAssertEqual(records.count, 1)
         let r = records[0]
         XCTAssertEqual(r.binds.count, 2)
@@ -54,7 +54,7 @@ final class PortScannerTests: XCTestCase {
 
     func testParseIPv6ZoneId() throws {
         let raw = try fixture("lsof-ipv6-zone")
-        let records = try parseLsofOutput(raw)
+        let records = parseLsofOutput(raw)
         XCTAssertEqual(records.count, 1)
         let r = records[0]
         XCTAssertEqual(r.port, 1234)
@@ -63,14 +63,14 @@ final class PortScannerTests: XCTestCase {
 
     func testParseCommandWithSpaces() throws {
         let raw = try fixture("lsof-command-spaces")
-        let records = try parseLsofOutput(raw)
+        let records = parseLsofOutput(raw)
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records[0].processName, "Google Chrome Helper")
     }
 
     func testParseEscapeSequence() throws {
         let raw = try fixture("lsof-escape")
-        let records = try parseLsofOutput(raw)
+        let records = parseLsofOutput(raw)
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records[0].processName, "weird name")
     }

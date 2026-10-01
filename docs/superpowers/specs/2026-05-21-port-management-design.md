@@ -157,7 +157,6 @@ actor PortScanner: PortScanning {
 enum PortScanError: Error, Equatable {
     case lsofTimeout
     case lsofFailed(exitCode: Int32, stderr: String)
-    case parseFailed(line: String)
 }
 ```
 
@@ -258,7 +257,7 @@ struct LsofRunner: SubprocessRunning {
 5. Enrich with `sysctl(KERN_PROCARGS2)` once per unique pid (deduplicated across multi-port processes) to obtain `executablePath` and `commandLine`. Failures (permission denied, process gone) are silent — the record keeps lsof's short command name.
 6. Return `[PortRecord]` unsorted; the inventory sorts at the view layer.
 
-The parser is exposed as a free function `parseLsofOutput(_ raw: String) throws -> [PortRecord]` to enable fixture-based unit tests without spawning lsof.
+The parser is exposed as a free function `parseLsofOutput(_ raw: String) -> [PortRecord]` to enable fixture-based unit tests without spawning lsof.
 
 #### Kill
 
@@ -624,7 +623,6 @@ Fixtures live under `Tests/AnyDoorTests/Fixtures/`. Tests load them with `Bundle
 - Command name containing a space (e.g. `Google Chrome Helper`) preserved verbatim with `+c 0`.
 - Command name containing lsof's `\xHH` escape sequences (lsof escapes non-printable bytes); spec'd behaviour: decode escapes back to the original byte before constructing the string.
 - `exit == 1, stdout.isEmpty, stderr.isEmpty` → parser returns `[]` (this is tested at the scanner-runner layer with a stubbed runner).
-- Malformed input (truncated record, missing required field) → throws `PortScanError.parseFailed`.
 
 `parseProcArgs` fixture: simulated `KERN_PROCARGS2` byte buffer; verify executable path and argv extraction.
 

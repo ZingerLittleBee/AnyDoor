@@ -36,7 +36,7 @@ the network/cache lives entirely outside the pure core.
 
 ```
 Services/Conversion/
-├── ConversionResult.swift     # value type: {kind, value, display, copyText, detail, symbol}
+├── ConversionResult.swift     # value type: {kind, display, copyText, detail, symbol}
 ├── UnitConversion.swift       # pure: detect(_:) -> [ConversionResult]
 ├── TimeZoneConversion.swift   # pure: detect(_:now:localZone:) -> [ConversionResult]
 ├── CurrencyConversion.swift   # pure: detect(_:rates:) -> [ConversionResult]
@@ -52,7 +52,6 @@ Services/Conversion/
 struct ConversionResult: Hashable, Sendable {
     enum Kind: String, Sendable { case unit, timeZone, currency }
     let kind: Kind
-    let value: Double      // raw numeric answer (currency/unit); 0 for time-zone rows
     let display: String    // row title, e.g. "0.9144 m", "11:00 PM CST", "92.50 EUR"
     let copyText: String   // clipboard text — locale-independent ("." decimal, no grouping)
     let detail: String     // subtitle, e.g. "3 ft", "Tokyo · GMT+9", "as of 2026-06-13"

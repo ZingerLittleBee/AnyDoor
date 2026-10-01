@@ -9,7 +9,7 @@ final class UpdateServiceTests: XCTestCase {
         let service = makeService(adapter: fake)
 
         XCTAssertFalse(service.betaUpdatesEnabled)
-        XCTAssertEqual(service.allowedChannels, [])
+        XCTAssertEqual(UpdateService.allowedChannels(betaUpdatesEnabled: service.betaUpdatesEnabled), [])
     }
 
     func testBetaTogglePersistsClearsBannerAndResetsUpdateCycleOnce() {
@@ -26,7 +26,7 @@ final class UpdateServiceTests: XCTestCase {
         service.betaUpdatesEnabled = true
 
         XCTAssertTrue(persisted)
-        XCTAssertEqual(service.allowedChannels, ["beta"])
+        XCTAssertEqual(UpdateService.allowedChannels(betaUpdatesEnabled: persisted), ["beta"])
         XCTAssertNil(service.availableVersion)
         XCTAssertEqual(fake.resetUpdateCycleCallCount, 1)
         XCTAssertEqual(fake.checkForUpdatesInBackgroundCallCount, 0)

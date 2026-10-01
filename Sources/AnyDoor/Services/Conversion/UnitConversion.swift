@@ -21,7 +21,6 @@ enum UnitConversion {
         let number = Self.format(value)
         return [ConversionResult(
             kind: .unit,
-            value: value,
             display: "\(number) \(target.symbol)",
             copyText: number,
             detail: "\(Self.format(amount)) \(source.symbol)",

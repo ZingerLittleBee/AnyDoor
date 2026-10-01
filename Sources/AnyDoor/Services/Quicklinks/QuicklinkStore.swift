@@ -124,12 +124,6 @@ final class QuicklinkStore {
         try saveRebuildRefresh()
     }
 
-    func setVisibility(id: UUID, isVisible: Bool) {
-        guard let row = quicklink(id: id), row.isVisible != isVisible else { return }
-        row.isVisible = isVisible
-        try? saveRebuildRefresh()
-    }
-
     func delete(id: UUID) {
         guard let row = quicklink(id: id), let modelContext else { return }
         modelContext.delete(row)
