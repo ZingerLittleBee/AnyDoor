@@ -1,6 +1,12 @@
 import ClipboardHistory
 import Foundation
 import Observation
+import os
+
+private let logger = Logger(
+    subsystem: "dev.bybee.AnyDoor",
+    category: "clipboardHistory.lifecycle"
+)
 
 enum ClipboardHistoryLifecycleState: Equatable {
     case preparing
@@ -433,6 +439,9 @@ final class ClipboardHistoryLifecycle {
             }
         } catch {
             guard generation == requestGeneration else { return }
+            logger.error(
+                "Preparing the Clipboard History migration failed: \(Self.logName(of: error), privacy: .public)"
+            )
             state = .migrationFailed
             return
         }
@@ -444,6 +453,9 @@ final class ClipboardHistoryLifecycle {
                 try await operations.resetStore()
             } catch {
                 guard generation == requestGeneration else { return }
+                logger.error(
+                    "Resetting Clipboard History failed: \(Self.logName(of: error), privacy: .public)"
+                )
                 state = .resetFailed
                 return
             }
@@ -476,6 +488,9 @@ final class ClipboardHistoryLifecycle {
         do {
             cleanupState = try legacyCleanupState()
         } catch {
+            logger.error(
+                "Reading the Clipboard History cutover state failed: \(Self.logName(of: error), privacy: .public)"
+            )
             state = .migrationFailed
             return
         }
@@ -574,7 +589,29 @@ final class ClipboardHistoryLifecycle {
             }
         } catch {
             guard generation == requestGeneration else { return }
+            logger.error(
+                "The Clipboard History migration failed: \(Self.logName(of: error), privacy: .public)"
+            )
             state = .migrationFailed
+        }
+    }
+
+    /// Names `error` for the log by what failed, never by what it carries:
+    /// a payload or a Foundation error's description can include a file
+    /// path. The app's own errors are named by type and case, every other
+    /// error by its domain and code.
+    nonisolated static func logName(of error: any Error) -> String {
+        switch error {
+        case let error as ClipboardHistoryLegacySourceError:
+            // Its only payload is an errno.
+            return "ClipboardHistoryLegacySourceError.\(error)"
+        case let error as ClipboardHistoryModuleError:
+            // Some cases carry a URL or entry identifiers.
+            let caseName = String(describing: error).prefix { $0 != "(" }
+            return "ClipboardHistoryModuleError.\(caseName)"
+        default:
+            let error = error as NSError
+            return "\(error.domain) \(error.code)"
         }
     }
 }

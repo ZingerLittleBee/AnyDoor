@@ -432,6 +432,42 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         await lifecycle.stop()
     }
 
+    /// Failures are logged publicly, so a name must say what failed without
+    /// a path from an error's payload or a Foundation description.
+    func testFailureLogNamesCarryNoPaths() {
+        let path = "/Users/someone/Library/ClipboardHistory/secret.png"
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: ClipboardHistoryLegacySourceError.incompleteSnapshot
+            ),
+            "ClipboardHistoryLegacySourceError.incompleteSnapshot"
+        )
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: ClipboardHistoryLegacySourceError
+                    .cutoverMarkerPersistenceFailed(EACCES)
+            ),
+            "ClipboardHistoryLegacySourceError.cutoverMarkerPersistenceFailed(13)"
+        )
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: ClipboardHistoryModuleError.legacyFileRestoreCollision(
+                    URL(fileURLWithPath: path)
+                )
+            ),
+            "ClipboardHistoryModuleError.legacyFileRestoreCollision"
+        )
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: CocoaError(
+                    .fileWriteNoPermission,
+                    userInfo: [NSFilePathErrorKey: path]
+                )
+            ),
+            "\(NSCocoaErrorDomain) \(CocoaError.fileWriteNoPermission.rawValue)"
+        )
+    }
+
     func testCleanupFailureRetainsLegacySourceUntilRetrySucceeds()
         async throws
     {
