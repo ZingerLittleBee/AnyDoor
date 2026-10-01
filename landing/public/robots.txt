@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://anydoor.app/sitemap.xml
+Sitemap: https://anydoor.dev/sitemap.xml

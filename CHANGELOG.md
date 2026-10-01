@@ -58,6 +58,8 @@ versioning.
   Clipboard History in the meantime can now finish. Settings → Clipboard names
   the cause and offers to discard those entries, after a confirmation that
   says how many, and then migrates the pre-4.2 history.
+- The onboarding illustrations now show AnyDoor's website as anydoor.dev
+  instead of anydoor.app, a domain AnyDoor doesn't own.
 
 ## [4.2.5] - 2026-09-30
 

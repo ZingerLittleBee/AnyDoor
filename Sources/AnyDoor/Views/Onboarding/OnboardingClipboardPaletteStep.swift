@@ -87,7 +87,7 @@ struct OnboardingClipboardPaletteStep: View {
             }
 
             HStack(spacing: 8) {
-                clipboardCard(symbol: "link", tint: .blue, kindKey: .clipboardKindText, sample: "anydoor.app", favorite: true)
+                clipboardCard(symbol: "link", tint: .blue, kindKey: .clipboardKindText, sample: "anydoor.dev", favorite: true)
                 clipboardCard(symbol: "photo", tint: .pink, kindKey: .clipboardKindImage, sample: nil, favorite: false)
                 clipboardCard(symbol: "eyedropper", tint: .purple, kindKey: .clipboardKindColor, sample: "#3B82F6", favorite: false)
                 clipboardCard(symbol: "text.viewfinder", tint: .orange, kindKey: .clipboardKindOcr, sample: "Invoice #42", favorite: false)

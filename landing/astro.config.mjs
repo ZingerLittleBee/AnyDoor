@@ -5,7 +5,7 @@ import cloudflare from "@astrojs/cloudflare";
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://anydoor.app',
+  site: 'https://anydoor.dev',
 
   // Astro 7 defaults to 'jsx', which drops the whitespace between inline
   // elements, so a heading split across spans reads "Ready whenyou are.".
