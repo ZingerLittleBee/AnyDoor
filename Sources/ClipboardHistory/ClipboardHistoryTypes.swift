@@ -545,6 +545,13 @@ public struct ClipboardHistoryStatus: Equatable, Sendable {
         case databaseIntegrityFailed
         case searchIndexUnavailable
         case storeIOFailure
+        /// The store could not be moved out of the pre-v2 `ClipboardHistory`
+        /// folder. Never paired with a reset: the data is intact (in that
+        /// folder, or in the `.relocating` folder of a move that stopped
+        /// part way), no Keychain item was read or created, and a retry
+        /// finishes the move once the cause (another running copy, folder
+        /// permissions) is gone.
+        case storeRelocationFailed
     }
 }
 

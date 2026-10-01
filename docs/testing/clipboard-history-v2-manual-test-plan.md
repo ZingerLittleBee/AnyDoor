@@ -51,13 +51,22 @@ Coverage matrix — the PRD requires the feature to stay interactive on the
 ```
 ~/Library/Application Support/dev.bybee.AnyDoor/
   AnyDoor.store                            # SwiftData — must contain no clipboard rows in v2
-  ClipboardHistory/
+  ClipboardHistoryV2/
     history.sqlite, -wal, -shm             # SQLCipher
     payloads/                              # AES-GCM envelopes
     staging/
+  ClipboardHistoryV2.relocating/           # exists only while a store is being moved
+  ClipboardHistoryV2.displaced/            # kept aside until Reset: stores found in
+                                           #   ClipboardHistory/, and anything unexpected
+                                           #   moved out of the store root (*-target)
+  ClipboardHistory/                        # pre-v2 payloads only
   ClipboardHistoryLegacyMigration/         # exists only mid-migration
   ClipboardHistoryLegacyCutover-v1.complete
 ```
+
+No v2 file may ever appear in `ClipboardHistory/`: releases 1.8.0 through
+4.1.1 delete every file there that no legacy row names, and 4.2.0 through
+4.2.5 kept the store there (ADR-0011 amendment, case 1.6).
 
 Keychain: one device-only generic-password item, never synced, never backed up.
 
@@ -96,8 +105,9 @@ CLIPBOARD_HISTORY_GUI_FIXTURE=1 CFFIXED_USER_HOME=/tmp/anydoor-fixture \
   Section 8.11 depends on this.
 - **Who is stalling** — `sample AnyDoor 3 -file /tmp/sample.txt` while
   reproducing tells you whether it is AnyDoor or the target app.
-- **Disk** — `du -sh` the store root; compare against Settings → Clipboard's
-  reported usage. They must agree.
+- **Disk** — `du -sh` the store root plus `ClipboardHistoryV2.displaced/`
+  when it exists; compare against Settings → Clipboard's reported usage. They
+  must agree.
 
 ### 0.5 Before each destructive case
 
@@ -172,6 +182,43 @@ The contract decides per member whether the legacy copy can be retired.
 | 1.5.2 | Force-quit **after publish, before cleanup** | Relaunch: no re-migration, no duplicates, snapshot removed. |
 | 1.5.3 | Pre-publication failure | Legacy data left fully intact. |
 | 1.5.4 | Plaintext cleanup | After success, no plaintext payloads remain; `grep -r` a canary across the store root returns nothing. |
+
+### 1.6 Store relocation out of `ClipboardHistory/` (ADR-0011 amendment)
+
+Run these **only on a disposable profile**: a fixed home and a throwaway
+keychain, so the live history and the live Keychain key are never read, moved,
+or reset. A disposable home alone is not enough, because the Keychain item is
+shared, and a Reset there would delete the live key. Quit the live AnyDoor
+first. Every 4.2.x release honours the same two variables.
+
+```bash
+export CFFIXED_USER_HOME=/tmp/anydoor-relocation
+export ANYDOOR_CLIPBOARD_HISTORY_ACCEPTANCE_KEYCHAIN_PATH=/tmp/anydoor-relocation/relocation.keychain-db
+KEYCHAIN="$ANYDOOR_CLIPBOARD_HISTORY_ACCEPTANCE_KEYCHAIN_PATH"
+mkdir -p "$CFFIXED_USER_HOME"
+security create-keychain -p relocation "$KEYCHAIN"
+# A new keychain locks on sleep and after a few idle minutes, and these builds
+# never prompt for it, so a locked one reads as Store Unavailable. With no
+# options, this turns both automatic locks off.
+security set-keychain-settings "$KEYCHAIN"
+# Launch each build from this shell, so it inherits both variables:
+#   <path to AnyDoor.app>/Contents/MacOS/AnyDoor
+STORE="$CFFIXED_USER_HOME/Library/Application Support/dev.bybee.AnyDoor"
+```
+
+The history key is the generic-password item with service
+`dev.bybee.AnyDoor.ClipboardHistory` and account `device-master-key-v1`.
+Afterwards: `security delete-keychain "$KEYCHAIN"` and
+`rm -rf /tmp/anydoor-relocation`.
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 1.6.1 | Run 4.2.5, copy text and an image, quit. Add a stand-in pre-v2 payload: `touch "$STORE/ClipboardHistory/$(uuidgen).png"`. Note the key's creation date: `security find-generic-password -s dev.bybee.AnyDoor.ClipboardHistory "$KEYCHAIN" \| grep cdat`. Launch the fixed build. | History intact, images preview, and Settings → Clipboard shows no recovery message. `ClipboardHistoryV2/` holds `history.sqlite` and `payloads/`; `ClipboardHistory/` holds only the stand-in file; no `ClipboardHistoryV2.relocating/`. The same command prints the same creation date (no new key). |
+| 1.6.2 | After 1.6.1, run 4.1.1 (a pre-v2 release), copy something, quit, then launch the fixed build. | History from 1.6.1 intact. 4.1.1's sweep of `ClipboardHistory/` **(must not)** reach `ClipboardHistoryV2/`. |
+| 1.6.3 | After 1.6.1, run 4.2.5 again: its history looks empty. Copy one value, quit, launch the fixed build. Then Clear History with favorites and tags included. | The 1.6.1 history is shown, **not merged** with the 4.2.5 value. `ClipboardHistoryV2.displaced/` holds one folder named `<UTC timestamp>-<8 hex>` (no `.pending` suffix once weighed). Settings usage includes it (0.4 Disk). Clear History empties the history but leaves that folder in place: kept-aside stores are exempt. |
+| 1.6.4 | After 1.6.3, quit. Reset is offered only for Store Unavailable, so delete the key from the disposable keychain: `security delete-generic-password -s dev.bybee.AnyDoor.ClipboardHistory -a device-master-key-v1 "$KEYCHAIN"`. Launch the fixed build, then Settings → Clipboard → Reset Clipboard History, confirm. | Before the reset, Settings shows the Store Unavailable message with Retry and Reset. Afterwards the history is empty and ready, `ClipboardHistoryV2.displaced/` is gone, and a new key exists. |
+| 1.6.5 | Fresh disposable profile: run 4.2.5, copy, and keep it running. Launch the fixed build alongside it. | Clipboard Settings shows the "couldn't move its storage" message with Retry and **no** Reset; the wall shows "temporarily unavailable". Nothing is created at `ClipboardHistoryV2/`. Quit 4.2.5, press Retry: history appears. |
+| 1.6.6 | Fresh disposable profile: run 4.2.5, copy, quit. `chflags uchg "$STORE/ClipboardHistory"` (it can no longer be renamed), launch the fixed build. | Same message as 1.6.5, no Reset, and `ClipboardHistory/` unchanged. `chflags nouchg "$STORE/ClipboardHistory"`, press Retry: history appears. |
 
 ---
 

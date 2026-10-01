@@ -248,6 +248,50 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         )
     }
 
+    /// A store that could not move to its new folder is intact, so a
+    /// confirmed reset is ignored rather than destroying it, and a retry
+    /// finishes the move.
+    func testRelocationFailureNeverResetsAndRetryRecovers() async throws {
+        let probe = ClipboardLifecycleProbe(
+            availability: .unavailable,
+            reason: .storeRelocationFailed,
+            becomesReadyOnRetry: true
+        )
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            migrationRequest: nil,
+            isKeychainUnlocked: { true }
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(
+            lifecycle.state,
+            .storeUnavailable(.storeRelocationFailed)
+        )
+
+        lifecycle.resetConfirmed()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(
+            lifecycle.state,
+            .storeUnavailable(.storeRelocationFailed)
+        )
+        let afterReset = await probe.recordedEvents()
+        XCTAssertEqual(afterReset, [.status])
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(
+            events,
+            [.status, .retryStore, .status, .monitoring(.start)]
+        )
+        await lifecycle.stop()
+    }
+
     func testFailedResetCanBeConfirmedAgain() async throws {
         let probe = ClipboardLifecycleProbe(
             availability: .unavailable,
@@ -976,6 +1020,7 @@ final class ClipboardLifecycleRecoveryTests: XCTestCase {
         let states: [ClipboardHistoryLifecycleState] = [
             .migrationFailed,
             .storeUnavailable(nil),
+            .storeUnavailable(.storeRelocationFailed),
             .resetFailed,
             .paused(.keychainLocked),
         ]
@@ -1007,6 +1052,17 @@ final class ClipboardLifecycleRecoveryTests: XCTestCase {
             ClipboardLifecycleRecovery(state: .migrationFailed)?.includesReset,
             false
         )
+    }
+
+    /// A store that could not move out of the pre-v2 folder is intact, and
+    /// the key was never touched: Reset would only destroy it, so the line
+    /// points at Retry alone.
+    func testRelocationFailureOffersRetryWithoutReset() {
+        let recovery = ClipboardLifecycleRecovery(
+            state: .storeUnavailable(.storeRelocationFailed)
+        )
+        XCTAssertEqual(recovery?.message, .settingsClipboardRelocationFailed)
+        XCTAssertEqual(recovery?.includesReset, false)
     }
 
     func testHealthyAndTransientStatesOfferNoRecoverySection() {

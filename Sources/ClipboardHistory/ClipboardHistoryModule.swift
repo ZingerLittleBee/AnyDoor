@@ -2,7 +2,31 @@ import Foundation
 import GRDB
 
 public actor ClipboardHistoryModule {
+    /// The encrypted store's own folder, beside `legacyPayloadDirectory`.
+    /// A store still found in the legacy folder is moved here on launch.
     public static var defaultStoreRoot: URL {
+        applicationDataDirectory.appendingPathComponent("ClipboardHistoryV2")
+    }
+
+    /// Where pre-v2 releases keep clipboard payloads, and where the legacy
+    /// migration reads them from. It was also the store root for 4.2.0
+    /// through 4.2.5, which is how running a pre-v2 release could delete the
+    /// store: those releases remove files they do not recognize from this
+    /// folder. No v2 file may be created here.
+    public static var legacyPayloadDirectory: URL {
+        legacyPayloadDirectory(in: applicationDataDirectory)
+    }
+
+    /// `legacyPayloadDirectory` inside `applicationDataDirectory` (the
+    /// app's `Application Support/dev.bybee.AnyDoor` folder in production),
+    /// so the app's migration wiring can run against a temporary folder.
+    public static func legacyPayloadDirectory(
+        in applicationDataDirectory: URL
+    ) -> URL {
+        applicationDataDirectory.appendingPathComponent("ClipboardHistory")
+    }
+
+    private static var applicationDataDirectory: URL {
         let applicationSupport =
             FileManager.default.urls(
                 for: .applicationSupportDirectory,
@@ -10,9 +34,7 @@ public actor ClipboardHistoryModule {
             ).first
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support")
-        return applicationSupport
-            .appendingPathComponent("dev.bybee.AnyDoor")
-            .appendingPathComponent("ClipboardHistory")
+        return applicationSupport.appendingPathComponent("dev.bybee.AnyDoor")
     }
 
     var database: DatabasePool?
@@ -38,6 +60,9 @@ public actor ClipboardHistoryModule {
     public nonisolated let pasteboardSelfWrites:
         ClipboardHistoryPasteboardSelfWriteFunnel
     let storeRoot: URL
+    /// Moves a store out of the pre-v2 folder before every open. Nil only
+    /// for test modules that do not model the legacy folder.
+    let relocation: ClipboardHistoryStoreRelocation?
     let keyStore: (any ClipboardHistoryMasterKeyStoring)?
     let faultInjector: ClipboardHistoryFaultInjector
     let payloadReclaimer = ClipboardHistoryPayloadReclaimer()
@@ -95,14 +120,22 @@ public actor ClipboardHistoryModule {
         } else {
             ClipboardHistoryKeychainStore()
         }
-        let resolution = Self.resolveStore(
+        let faultInjector = ClipboardHistoryFaultInjector()
+        let relocation = ClipboardHistoryStoreRelocation(
+            legacyRoot: Self.legacyPayloadDirectory,
+            storeRoot: root,
+            faultInjector: faultInjector
+        )
+        let resolution = Self.relocateAndResolveStore(
+            relocation: relocation,
             at: root,
             keyStore: keyStore,
             maintenanceDate: Date()
         )
         storeRoot = root
+        self.relocation = relocation
         self.keyStore = keyStore
-        faultInjector = ClipboardHistoryFaultInjector()
+        self.faultInjector = faultInjector
         now = Date.init
         maintenanceScheduler = SystemClipboardHistoryMaintenanceScheduler()
         storageTraversalHook = nil
@@ -149,6 +182,7 @@ public actor ClipboardHistoryModule {
             suppression: suppression
         )
         storeRoot = testingDatabaseURL.deletingLastPathComponent()
+        relocation = nil
         keyStore = nil
         self.faultInjector = faultInjector
         now = Date.init
@@ -185,8 +219,12 @@ public actor ClipboardHistoryModule {
         )
     }
 
+    /// `legacyStoreRoot` models the pre-v2 folder beside `testingStoreRoot`;
+    /// when given, every open first moves a store out of it, as in
+    /// production.
     init(
         testingStoreRoot: URL,
+        legacyStoreRoot: URL? = nil,
         keyStore: any ClipboardHistoryMasterKeyStoring,
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector(),
@@ -211,12 +249,21 @@ public actor ClipboardHistoryModule {
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )
-        let resolution = Self.resolveStore(
+        let relocation = legacyStoreRoot.map {
+            ClipboardHistoryStoreRelocation(
+                legacyRoot: $0,
+                storeRoot: testingStoreRoot,
+                faultInjector: faultInjector
+            )
+        }
+        let resolution = Self.relocateAndResolveStore(
+            relocation: relocation,
             at: testingStoreRoot,
             keyStore: keyStore,
             maintenanceDate: now()
         )
         storeRoot = testingStoreRoot
+        self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector
         self.now = now
@@ -306,7 +353,8 @@ public actor ClipboardHistoryModule {
         if let database {
             try? database.close()
         }
-        let resolution = Self.resolveStore(
+        let resolution = Self.relocateAndResolveStore(
+            relocation: relocation,
             at: storeRoot,
             keyStore: keyStore,
             maintenanceDate: now()
@@ -659,12 +707,24 @@ extension ClipboardHistoryModule {
             return unavailable(.keychainFailure)
         }
 
+        return openStore(
+            at: root,
+            keys: ClipboardHistoryKeyDerivation.deriveV1(from: masterKey),
+            maintenanceDate: maintenanceDate
+        )
+    }
+
+    /// Opens (or creates) the store at `root` with keys already loaded.
+    static func openStore(
+        at root: URL,
+        keys: ClipboardHistoryDerivedKeys,
+        maintenanceDate: Date
+    ) -> StoreResolution {
         do {
             try prepareStoreDirectories(at: root)
 
-            let keys = ClipboardHistoryKeyDerivation.deriveV1(from: masterKey)
             let database = try openDatabase(
-                at: databaseURL,
+                at: databaseURL(in: root),
                 databaseKey: keys.databaseKey
             )
             try database.write { database in

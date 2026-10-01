@@ -25,43 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "dev.bybee.AnyDoor",
             isDirectory: true
         )
-        let storeURL = storeDirectory.appendingPathComponent(
-            "AnyDoor.store"
-        )
-        return ClipboardHistoryLifecycle(
+        return ClipboardHistoryLifecycle.production(
             module: clipboardHistoryModule,
+            applicationDataDirectory: storeDirectory,
             migrationPreparation:
-                persistenceBootstrap.migrationPreparation,
-            legacyCleanupState: {
-                ClipboardHistoryLegacySource.cleanupState(
-                    in: storeDirectory
-                )
-            },
-            legacyPayloadDirectory: {
-                ClipboardHistoryLegacySource.snapshotPayloadDirectory(
-                    in: storeDirectory
-                )
-            },
-            migrationRequest: {
-                let source =
-                    try ClipboardHistoryLegacySource.openForMigration(
-                        applicationSupportDirectory: storeDirectory,
-                        productionStoreURL: storeURL,
-                        payloadDirectory:
-                            ClipboardHistoryModule.defaultStoreRoot
-                    )
-                return try source.makeMigrationRequest()
-            },
-            finishMigration: {
-                try ClipboardHistoryLegacySource.finishMigration(
-                    in: storeDirectory
-                )
-            },
-            retrySnapshotDeletion: {
-                try ClipboardHistoryLegacySource.retrySnapshotDeletion(
-                    in: storeDirectory
-                )
-            }
+                persistenceBootstrap.migrationPreparation
         )
     }()
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }

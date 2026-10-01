@@ -29,7 +29,7 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
             ClipboardHistoryLegacySource.openIfNeeded(
                 applicationSupportDirectory: storeDirectory,
                 productionStoreURL: storeURL,
-                payloadDirectory: ClipboardHistoryModule.defaultStoreRoot
+                payloadDirectory: ClipboardHistoryModule.legacyPayloadDirectory
             )
         )
         let request = try legacySource.makeMigrationRequest()
@@ -71,6 +71,11 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
             ClipboardHistoryModule.defaultStoreRoot.standardizedFileURL.path
                 .hasPrefix(expectedRoot.path),
             "The v2 store must use the disposable application support root"
+        )
+        XCTAssertTrue(
+            ClipboardHistoryModule.legacyPayloadDirectory.standardizedFileURL
+                .path.hasPrefix(expectedRoot.path),
+            "Legacy payloads must use the disposable application support root"
         )
 
         let storeDirectory = applicationSupport.appendingPathComponent(
@@ -142,14 +147,14 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
         }
         let legacyPayloadName = "owned-restore-fixture.txt"
         try FileManager.default.createDirectory(
-            at: ClipboardHistoryModule.defaultStoreRoot,
+            at: ClipboardHistoryModule.legacyPayloadDirectory,
             withIntermediateDirectories: true
         )
         let legacyPayload = Data(
             "AnyDoor owned-file restore acceptance\n".utf8
         )
         try legacyPayload.write(
-            to: ClipboardHistoryModule.defaultStoreRoot
+            to: ClipboardHistoryModule.legacyPayloadDirectory
                 .appendingPathComponent(legacyPayloadName)
         )
         let missingOriginalURL = expectedRoot

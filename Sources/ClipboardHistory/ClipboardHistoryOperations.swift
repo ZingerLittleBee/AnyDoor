@@ -536,9 +536,28 @@ extension ClipboardHistoryModule {
         )
     }
 
+    /// The allocated size of the store plus any displaced stores kept aside
+    /// (they are removed only by Reset). Displaced stores are counted best
+    /// effort: a failure to measure them counts as zero, so it can never fail
+    /// maintenance.
     public func storageUsage() throws -> UInt64 {
+        let storeBytes = try allocatedSize(ofTreeAt: storeRoot)
+        let displacedRoot = ClipboardHistoryStoreRelocation.displacedRoot(
+            forStoreRoot: storeRoot
+        )
+        guard let displacedBytes = try? allocatedSize(ofTreeAt: displacedRoot)
+        else {
+            return storeBytes
+        }
+        let (total, overflow) = storeBytes.addingReportingOverflow(
+            displacedBytes
+        )
+        return overflow ? storeBytes : total
+    }
+
+    private func allocatedSize(ofTreeAt root: URL) throws -> UInt64 {
         let descriptor = Darwin.open(
-            storeRoot.path,
+            root.path,
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
         )
         guard descriptor >= 0 else {
@@ -550,7 +569,7 @@ extension ClipboardHistoryModule {
         defer { Darwin.close(descriptor) }
         return try allocatedSize(
             ofDirectoryDescriptor: descriptor,
-            representedBy: storeRoot
+            representedBy: root
         )
     }
 
@@ -570,6 +589,14 @@ extension ClipboardHistoryModule {
         guard let keyStore else {
             throw ClipboardHistoryModuleError.resetFailed
         }
+        // Every store shares the one key. Deleting it while a store may still
+        // sit in the pre-v2 folder or mid-move would leave that store
+        // unreadable, so Reset waits until a retry has finished the move.
+        guard availabilityReason != .storeRelocationFailed,
+            relocation?.hasUnfinishedRelocation != true
+        else {
+            throw ClipboardHistoryModuleError.resetFailed
+        }
         monitoringRequested = false
         monitoringEnabled = false
         await captureMonitor?.setEnabled(false)
@@ -586,6 +613,13 @@ extension ClipboardHistoryModule {
         do {
             if FileManager.default.fileExists(atPath: storeRoot.path) {
                 try FileManager.default.removeItem(at: storeRoot)
+            }
+            // Displaced stores are encrypted with the key deleted below.
+            let displacedRoot = ClipboardHistoryStoreRelocation.displacedRoot(
+                forStoreRoot: storeRoot
+            )
+            if FileManager.default.fileExists(atPath: displacedRoot.path) {
+                try FileManager.default.removeItem(at: displacedRoot)
             }
         } catch {
             availability = .unavailable

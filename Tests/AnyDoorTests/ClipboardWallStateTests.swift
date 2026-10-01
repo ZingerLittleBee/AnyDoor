@@ -351,6 +351,17 @@ final class ClipboardWallStateTests: XCTestCase {
             .clipboardUnavailableKeychainLocked
         )
 
+        // A store that could not move to its new folder is intact, so the
+        // wall must not point at the reset that would destroy it.
+        let relocationFailed = await makeState(
+            availability: .unavailable,
+            reason: .storeRelocationFailed
+        )
+        XCTAssertEqual(
+            relocationFailed.unavailableStateKey,
+            .clipboardUnavailableRelocationFailed
+        )
+
         // A store that is fine never renders the branch, but the key must still
         // be a safe generic rather than the locked-keychain claim.
         let ready = await makeState()
