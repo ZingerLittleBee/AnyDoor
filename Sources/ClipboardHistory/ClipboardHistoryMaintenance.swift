@@ -78,7 +78,9 @@ extension ClipboardHistoryModule {
         while !Task.isCancelled {
             let deadline: Date
             do {
-                deadline = try maintenanceDeadline()
+                deadline = try await maintenanceDeadline(
+                    in: writableDatabase()
+                )
             } catch {
                 failureCount += 1
                 let target = now().addingTimeInterval(
@@ -106,13 +108,15 @@ extension ClipboardHistoryModule {
             guard !Task.isCancelled else { return }
 
             do {
-                let currentDeadline = try maintenanceDeadline()
+                let currentDeadline = try await maintenanceDeadline(
+                    in: writableDatabase()
+                )
                 guard currentDeadline <= now() else {
                     failureCount = 0
                     retryAt = nil
                     continue
                 }
-                _ = try performMaintenance()
+                _ = try await performMaintenance()
                 failureCount = 0
                 retryAt = nil
             } catch {
@@ -124,8 +128,12 @@ extension ClipboardHistoryModule {
         }
     }
 
-    private func maintenanceDeadline() throws -> Date {
-        let database = try requiredDatabase()
+    private func maintenanceDeadline(
+        in database: DatabasePool
+    ) throws -> Date {
+        // `stopMaintenanceTask()` cancels the loop and then waits for it, so a
+        // write turn that only comes up after that must not write anything.
+        try Task.checkCancellation()
         let date = now()
         return try database.write { database in
             try Self.ensureMaintenanceDeadline(in: database, at: date)

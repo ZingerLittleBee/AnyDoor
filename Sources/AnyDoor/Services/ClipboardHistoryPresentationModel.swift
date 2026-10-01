@@ -52,25 +52,38 @@ struct ClipboardHistoryPresentationOperations: Sendable {
             ClipboardHistoryLegacyFileRestoreRequest
         ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome
 
-    init(module: ClipboardHistoryModule) {
+    /// - Parameter loadsAggregates: Whether to fetch what only the wall
+    ///   shows: the total for the query, the source summaries, and the tag
+    ///   definitions. Without them the total stays unknown and the other two
+    ///   are empty, so a first page never waits on a history-wide scan whose
+    ///   result it would not display.
+    init(module: ClipboardHistoryModule, loadsAggregates: Bool = true) {
         status = { await module.status() }
         page = { query, cursor in
             try await module.page(query, after: cursor)
         }
-        count = { query in
-            try await module.count(query)
+        if loadsAggregates {
+            count = { query in
+                try await module.count(query)
+            }
+            tagDefinitions = {
+                try await module.tagDefinitions()
+            }
+            sourceSummaries = {
+                try await module.sourceSummaries()
+            }
+        } else {
+            count = { _ in
+                throw ClipboardHistoryModuleError.operationUnavailable
+            }
+            tagDefinitions = { [] }
+            sourceSummaries = { [] }
         }
         apply = { mutation in
             try await module.apply(mutation)
         }
         materialize = { request in
             try await module.materialize(request)
-        }
-        tagDefinitions = {
-            try await module.tagDefinitions()
-        }
-        sourceSummaries = {
-            try await module.sourceSummaries()
         }
         createTagDefinition = { name, entryID in
             let assignment = try await module.createTagDefinition(
@@ -282,6 +295,7 @@ enum ClipboardHistoryActionFailure: Equatable {
              .invalidConfirmation,
              .unsupportedLegacyTransferVersion,
              .legacyMigrationFailed,
+             .legacyMigrationStoreNotEmpty,
              .invalidLegacyFileRestore,
              .legacyFileRestoreCollision,
              .legacyFileRestoreFailed,
@@ -341,8 +355,13 @@ final class ClipboardHistoryPresentationModel {
         return entries.first { $0.id == selectedID }
     }
 
-    init(module: ClipboardHistoryModule) {
-        operations = ClipboardHistoryPresentationOperations(module: module)
+    /// `loadsAggregates` is forwarded to
+    /// `ClipboardHistoryPresentationOperations.init(module:loadsAggregates:)`.
+    init(module: ClipboardHistoryModule, loadsAggregates: Bool = true) {
+        operations = ClipboardHistoryPresentationOperations(
+            module: module,
+            loadsAggregates: loadsAggregates
+        )
     }
 
     init(operations: ClipboardHistoryPresentationOperations) {
@@ -1053,11 +1072,11 @@ final class ClipboardHistoryPresentationModel {
                 actionFailure = .searchIndexFailed(failure)
             }
         } catch {
-            guard requestRevision == revision,
-                !(error is CancellationError)
-            else {
-                return
-            }
+            // Only a newer load cancels this one, and it bumps the revision
+            // first and publishes itself. A cancellation that still arrives at
+            // the current revision came from below, and nothing else would
+            // settle this load.
+            guard requestRevision == revision else { return }
             entries = []
             selectedID = nil
             nextCursor = nil

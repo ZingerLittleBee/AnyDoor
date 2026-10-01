@@ -318,6 +318,10 @@ final class ClipboardHistorySettingsModel {
         lifecycle.resetConfirmed()
     }
 
+    func discardBlockingEntriesConfirmed(entryCount: Int) {
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: entryCount)
+    }
+
     private func refreshClearPreview() async {
         let scope: ClipboardHistoryClearScope =
             clearIncludesProtected ? .includingProtected : .unprotectedOnly

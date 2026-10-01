@@ -109,6 +109,10 @@ final class ClipboardHistoryLegacySource {
         }
     }
 
+    /// Moves every pre-v2 entry into the snapshot as it is. v1 copied a
+    /// symbolic link as the link itself, so the folder can hold links and
+    /// other entries that are not regular files: each one is renamed, never
+    /// followed, and the import decides what it holds.
     private static func moveLegacyPayloadsIntoSnapshot(
         from sourceDirectory: URL,
         to snapshotPayloadDirectory: URL
@@ -123,11 +127,7 @@ final class ClipboardHistoryLegacySource {
         }
         let children = try fileManager.contentsOfDirectory(
             at: sourceDirectory,
-            includingPropertiesForKeys: [
-                .isDirectoryKey,
-                .isRegularFileKey,
-                .isSymbolicLinkKey,
-            ]
+            includingPropertiesForKeys: nil
         )
         let hasV2Store = children.contains {
             $0.lastPathComponent == "history.sqlite"
@@ -143,26 +143,25 @@ final class ClipboardHistoryLegacySource {
             if hasV2Store, v2Names.contains(child.lastPathComponent) {
                 continue
             }
-            let values = try child.resourceValues(
-                forKeys: [
-                    .isDirectoryKey,
-                    .isRegularFileKey,
-                    .isSymbolicLinkKey,
-                ]
-            )
-            guard values.isRegularFile == true,
-                values.isDirectory != true,
-                values.isSymbolicLink != true
-            else {
-                throw ClipboardHistoryLegacySourceError.incompleteSnapshot
-            }
             let destination = snapshotPayloadDirectory
                 .appendingPathComponent(child.lastPathComponent)
-            guard !fileManager.fileExists(atPath: destination.path) else {
+            guard !entryExists(at: destination) else {
                 throw ClipboardHistoryLegacySourceError.incompleteSnapshot
             }
             try fileManager.moveItem(at: child, to: destination)
         }
+    }
+
+    /// Whether anything is at `url`, without following a symbolic link: a
+    /// link whose target is gone still counts. A lookup that fails for any
+    /// reason but absence counts too, so the move never replaces an entry it
+    /// cannot see.
+    private static func entryExists(at url: URL) -> Bool {
+        var info = stat()
+        if Darwin.lstat(url.path, &info) == 0 {
+            return true
+        }
+        return errno != ENOENT
     }
 
     @MainActor

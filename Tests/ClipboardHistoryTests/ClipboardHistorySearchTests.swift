@@ -1148,6 +1148,413 @@ final class ClipboardHistorySearchTests: XCTestCase {
         try await Self.assertSearchIntegrity(reopened)
     }
 
+    /// A rebuild holds the writer for one long transaction. Writes issued on
+    /// the module meanwhile must wait for it without parking the actor, or
+    /// every history read queued behind them stalls until the rebuild
+    /// commits. The derived-job scheduler's startup write is pending here
+    /// too, since every open starts the scheduler.
+    func testHistoryReadsStayServedWhileWritesWaitForAHeldRebuild()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let existing = try await Self.capture("existing entry", in: original)
+        let hold = SearchRebuildHold()
+        defer { hold.release() }
+        let module = try await Self.reopenWithHeldRebuild(
+            original,
+            fixture: fixture,
+            hold: hold
+        )
+
+        // Bounded, so a module stuck behind the rebuild fails the test
+        // instead of hanging it.
+        let served = expectation(description: "served during the rebuild")
+        // Named rather than `Self`: a `Self` reference makes the closure
+        // capture the test case's dynamic type, which Swift 6.3's region
+        // checker cannot analyze in the `sending` closure `Task.init` takes.
+        // The other tasks in this file's nonisolated tests do the same.
+        let whileHeld = Task {
+            let capture = await ClipboardHistorySearchTests.startCapture(
+                "captured during rebuild",
+                on: module
+            )
+            let recent = try await module.page(ClipboardHistoryQuery())
+            let textFacet = try await module.page(
+                ClipboardHistoryQuery(facet: .text)
+            )
+            let search = try await module.page(
+                ClipboardHistoryQuery(text: "existing")
+            )
+            served.fulfill()
+            return (capture, recent, textFacet, search)
+        }
+        await fulfillment(of: [served], timeout: 10)
+        hold.release()
+
+        let (capture, recent, textFacet, search) = try await whileHeld.value
+        XCTAssertEqual(recent.entries.map(\.id), [existing])
+        XCTAssertEqual(textFacet.entries.map(\.id), [existing])
+        XCTAssertEqual(search.state, .indexing)
+        let captured = try await capture.value.entryID
+        let afterRelease = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(afterRelease.entries.map(\.id), [captured, existing])
+        let searched = try await module.page(
+            ClipboardHistoryQuery(text: "during rebuild")
+        )
+        XCTAssertEqual(searched.state, .ready)
+        XCTAssertEqual(searched.entries.map(\.id), [captured])
+        try await Self.assertSearchIntegrity(module)
+    }
+
+    /// Everything waiting on a task resumes in no particular order once it
+    /// finishes, so writes that queue up behind a rebuild need an explicit
+    /// order to still commit in the order they were issued. The favorite and
+    /// tag writes whose order is checked here write synchronously within
+    /// their turn; the edit's asynchronous write may still be overtaken by
+    /// the writes after it, which the independent text column tolerates.
+    func testWritesQueuedBehindAHeldRebuildCommitInArrivalOrder()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let entry = try await Self.capture("original text", in: original)
+        _ = try await original.replaceTagDefinitions(with: ["first", "second"])
+        let hold = SearchRebuildHold()
+        defer { hold.release() }
+        let module = try await Self.reopenWithHeldRebuild(
+            original,
+            fixture: fixture,
+            hold: hold
+        )
+
+        let queued = expectation(description: "queued during the rebuild")
+        let whileHeld = Task {
+            let mutations = await ClipboardHistorySearchTests.startMutations(
+                [
+                    .editText(entry, "edited text"),
+                    .setFavorite(entry, true),
+                    .setTags(entry, ["first"]),
+                    .setFavorite(entry, false),
+                    .setTags(entry, ["second"]),
+                    .setFavorite(entry, true),
+                    .setTags(entry, ["first", "second"]),
+                    .setFavorite(entry, false),
+                ],
+                on: module
+            )
+            // Served after the mutations reached the module, so all of
+            // them are waiting behind the rebuild when it is released.
+            let page = try await module.page(ClipboardHistoryQuery())
+            queued.fulfill()
+            return (mutations, page)
+        }
+        await fulfillment(of: [queued], timeout: 10)
+        hold.release()
+
+        let (mutations, page) = try await whileHeld.value
+        XCTAssertEqual(page.entries.map(\.previewText), ["original text"])
+        for mutation in mutations {
+            _ = try await mutation.value
+        }
+        let settled = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(settled.entries.map(\.id), [entry])
+        XCTAssertEqual(settled.entries.map(\.previewText), ["edited text"])
+        XCTAssertEqual(settled.entries.map(\.isFavorite), [false])
+        XCTAssertEqual(settled.entries.map(\.tagIDs), [["first", "second"]])
+    }
+
+    /// A passive capture that passed its entry check before a clear began,
+    /// but only gets its write turn once the clear is under way, holds
+    /// pasteboard content the clear is discarding, so it must not land
+    /// afterwards.
+    @MainActor
+    func testPassiveCaptureQueuedBehindAClearDuringARebuildIsDropped()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        _ = try await Self.capture("cleared entry", in: original)
+        let hold = SearchRebuildHold()
+        defer { hold.release() }
+        let module = try await Self.reopenWithHeldRebuild(
+            original,
+            fixture: fixture,
+            hold: hold
+        )
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name(
+                "dev.bybee.AnyDoor.search-tests.\(UUID().uuidString)"
+            )
+        )
+        pasteboard.clearContents()
+        XCTAssertTrue(
+            pasteboard.setString("copied before the clear", forType: .string)
+        )
+        let request = ClipboardHistoryPasteboardCaptureRequest(
+            pasteboard: pasteboard
+        )
+
+        let queued = expectation(description: "queued during the rebuild")
+        let whileHeld = Task {
+            let preview = try await module.previewClearHistory(
+                scope: .includingProtected
+            )
+            let started = await Self.startClearThenCapture(
+                preview.token,
+                request,
+                on: module
+            )
+            // Served after both reached the module, so the capture already
+            // passed its entry check when the rebuild is released.
+            _ = try await module.page(ClipboardHistoryQuery())
+            queued.fulfill()
+            return (preview.affectedCount, started)
+        }
+        await fulfillment(of: [queued], timeout: 10)
+        hold.release()
+
+        let (affectedCount, (confirmation, capture)) = try await whileHeld
+            .value
+        XCTAssertEqual(affectedCount, 1)
+        let cleared = try await confirmation.value
+        XCTAssertEqual(cleared, .applied(deletedCount: 1))
+        let captured = try await capture.value
+        XCTAssertEqual(captured, .skipped(.generationChanged))
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries, [])
+    }
+
+    /// A reset deletes the store and opens a new one, so a write still
+    /// waiting for its turn behind a rebuild when the reset began belongs to
+    /// the discarded history and must stay out of the new store. Whether the
+    /// reset or the capture resumes first once the rebuild finishes is up to
+    /// the runtime: the capture either lands in the old store just before it
+    /// is deleted, or is refused once the new store is open.
+    func testExplicitCaptureQueuedBeforeAResetStaysOutOfTheNewStore()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let hold = SearchRebuildHold()
+        defer { hold.release() }
+        let module = try await Self.makeResettableModuleWithHeldRebuild(
+            fixture: fixture,
+            hold: hold
+        )
+
+        let queued = expectation(description: "queued during the rebuild")
+        let whileHeld = Task {
+            let started =
+                await ClipboardHistorySearchTests.startCaptureThenReset(
+                    "captured before the reset",
+                    on: module
+                )
+            // Served after both reached the module, so the capture is
+            // already waiting for its turn when the rebuild is released.
+            _ = try await module.page(ClipboardHistoryQuery())
+            queued.fulfill()
+            return started
+        }
+        await fulfillment(of: [queued], timeout: 10)
+        hold.release()
+
+        let (capture, reset) = try await whileHeld.value
+        try await reset.value
+        do {
+            _ = try await capture.value
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .storeUnavailable
+            )
+        }
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries, [])
+    }
+
+    /// A passive capture that arrives while a reset waits for the rebuild
+    /// read the pasteboard before the reset discarded the history, so it
+    /// must stay out of the new store too, whichever of the two resumes
+    /// first.
+    @MainActor
+    func testPassiveCaptureArrivingDuringAResetStaysOutOfTheNewStore()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let hold = SearchRebuildHold()
+        defer { hold.release() }
+        let module = try await Self.makeResettableModuleWithHeldRebuild(
+            fixture: fixture,
+            hold: hold
+        )
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name(
+                "dev.bybee.AnyDoor.search-tests.\(UUID().uuidString)"
+            )
+        )
+        pasteboard.clearContents()
+        XCTAssertTrue(
+            pasteboard.setString("copied before the reset", forType: .string)
+        )
+        let request = ClipboardHistoryPasteboardCaptureRequest(
+            pasteboard: pasteboard
+        )
+
+        let queued = expectation(description: "queued during the rebuild")
+        let whileHeld = Task {
+            let started = await Self.startResetThenCapture(
+                request,
+                on: module
+            )
+            // Served after both reached the module, so the capture is
+            // already waiting for its turn when the rebuild is released.
+            _ = try await module.page(ClipboardHistoryQuery())
+            queued.fulfill()
+            return started
+        }
+        await fulfillment(of: [queued], timeout: 10)
+        hold.release()
+
+        let (reset, capture) = try await whileHeld.value
+        try await reset.value
+        let outcome = try await capture.value
+        switch outcome {
+        case .captured, .skipped(.generationChanged):
+            break
+        case .skipped:
+            XCTFail("Unexpected capture outcome \(outcome)")
+        }
+        let page = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(page.entries, [])
+    }
+
+    /// Previewing a file entry that also stored an image answers with the
+    /// stored thumbnail and writes nothing, so unlike resolving the entry's
+    /// file references it is served while a rebuild holds the writer.
+    @MainActor
+    func testThumbnailPreviewOfAFileEntryIsServedDuringAHeldRebuild()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let png = try Self.makePNG()
+        let fileURL = fixture.directory.appendingPathComponent("image.png")
+        try png.write(to: fileURL)
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name(
+                "dev.bybee.AnyDoor.search-tests.\(UUID().uuidString)"
+            )
+        )
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(fileURL.absoluteString, forType: .fileURL)
+        item.setData(png, forType: .png)
+        XCTAssertTrue(pasteboard.writeObjects([item]))
+        let outcome = try await original.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: .unknown
+        )
+        guard case .captured(let captured) = outcome else {
+            return XCTFail("Expected the file and its image to be captured")
+        }
+        let stored = try await original.page(ClipboardHistoryQuery())
+        XCTAssertEqual(
+            stored.entries.first?.facets.isSuperset(of: [.file, .image]),
+            true
+        )
+        let hold = SearchRebuildHold()
+        defer { hold.release() }
+        let module = try await Self.reopenWithHeldRebuild(
+            original,
+            fixture: fixture,
+            hold: hold
+        )
+
+        let served = expectation(description: "served during the rebuild")
+        let whileHeld = Task {
+            let preview = try await module.materialize(
+                ClipboardHistoryMaterializationRequest(
+                    entryID: captured.entryID,
+                    purpose: .preview
+                )
+            )
+            served.fulfill()
+            return preview
+        }
+        await fulfillment(of: [served], timeout: 10)
+        hold.release()
+
+        let preview = try await whileHeld.value
+        XCTAssertEqual(preview.items.count, 1)
+        guard
+            case .data(let typeIdentifier, let thumbnail) =
+                preview.items.first?.representations.first
+        else {
+            return XCTFail("Expected the stored thumbnail")
+        }
+        XCTAssertEqual(typeIdentifier, "public.png")
+        XCTAssertFalse(thumbnail.isEmpty)
+        await module.awaitDerivedJobsForTesting()
+    }
+
+    /// Stopping the maintenance loop cancels it and then waits for it, so a
+    /// pass cancelled while it waits for its write turn behind a rebuild must
+    /// not start once the rebuild finishes.
+    func testMaintenanceCancelledBehindAHeldRebuildDoesNotRun()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let original = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        _ = try await Self.capture("existing entry", in: original)
+        let hold = SearchRebuildHold()
+        defer { hold.release() }
+        let module = try await Self.reopenWithHeldRebuild(
+            original,
+            fixture: fixture,
+            hold: hold
+        )
+        let before = try await Self.lastMaintenanceSuccess(in: module)
+
+        let queued = expectation(description: "queued during the rebuild")
+        let whileHeld = Task {
+            let maintenance =
+                await ClipboardHistorySearchTests.startMaintenance(on: module)
+            // Served after the pass reached the module, so it is already
+            // waiting for its turn when it is cancelled.
+            _ = try await module.page(ClipboardHistoryQuery())
+            queued.fulfill()
+            return maintenance
+        }
+        await fulfillment(of: [queued], timeout: 10)
+        let maintenance = try await whileHeld.value
+        maintenance.cancel()
+        hold.release()
+
+        do {
+            _ = try await maintenance.value
+            XCTFail("A cancelled maintenance pass must not run")
+        } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        let after = try await Self.lastMaintenanceSuccess(in: module)
+        XCTAssertEqual(after, before)
+    }
+
     func testMissingFTS5OrTrigramIsAnInvalidRuntime() throws {
         XCTAssertThrowsError(
             try ClipboardHistoryModule.requireSearchRuntimeCapabilities(
@@ -1370,6 +1777,176 @@ final class ClipboardHistorySearchTests: XCTestCase {
         return captured.entryID
     }
 
+    /// Closes `original` with its search index marked stale and reopens the
+    /// store, returning once the rebuild that triggers is held open.
+    private static func reopenWithHeldRebuild(
+        _ original: ClipboardHistoryModule,
+        fixture: SearchTemporaryDatabase,
+        hold: SearchRebuildHold
+    ) async throws -> ClipboardHistoryModule {
+        let database = try await original.requiredDatabase()
+        try await database.write { database in
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_maintenance_metadata
+                    SET integer_value = 0
+                    WHERE key = 'searchIndexVersion'
+                    """
+            )
+        }
+        try await original.closeStoreForTesting()
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key,
+            faultInjector: hold.faultInjector
+        )
+        await hold.waitUntilReached()
+        return module
+    }
+
+    /// A module over a store it can reset, holding one entry, returned once
+    /// a search index rebuild it started is held open.
+    private static func makeResettableModuleWithHeldRebuild(
+        fixture: SearchTemporaryDatabase,
+        hold: SearchRebuildHold
+    ) async throws -> ClipboardHistoryModule {
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.directory,
+            keyStore: SearchMasterKeyStore(),
+            faultInjector: hold.faultInjector
+        )
+        _ = try await capture("entry before the reset", in: module)
+        // The scheduler that capture started must be done. One still waiting
+        // for a write turn would make the reset wait for it too, and a
+        // capture queued behind it would then always go before the reset.
+        await module.awaitDerivedJobsForTesting()
+        let database = try await module.requiredDatabase()
+        try await database.write { database in
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_maintenance_metadata
+                    SET text_value = 'failed'
+                    WHERE key = 'searchIndexState'
+                    """
+            )
+        }
+        let state = try await module.retrySearchIndex()
+        XCTAssertEqual(state, .indexing)
+        await hold.waitUntilReached()
+        return module
+    }
+
+    private static func lastMaintenanceSuccess(
+        in module: ClipboardHistoryModule
+    ) async throws -> Double? {
+        let database = try await module.requiredDatabase()
+        return try await database.read { database in
+            try Double.fetchOne(
+                database,
+                sql: """
+                    SELECT real_value
+                    FROM clipboard_maintenance_metadata
+                    WHERE key = 'lastMaintenanceSucceededAt'
+                    """
+            )
+        }
+    }
+
+    private static func makePNG() throws -> Data {
+        guard
+            let bitmap = NSBitmapImageRep(
+                bitmapDataPlanes: nil,
+                pixelsWide: 16,
+                pixelsHigh: 16,
+                bitsPerSample: 8,
+                samplesPerPixel: 4,
+                hasAlpha: true,
+                isPlanar: false,
+                colorSpaceName: .deviceRGB,
+                bytesPerRow: 0,
+                bitsPerPixel: 0
+            ),
+            let png = bitmap.representation(using: .png, properties: [:])
+        else {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
+        return png
+    }
+
+    // A task created on an actor is enqueued there as it is created, so the
+    // operations started below reach the module in order, and ahead of
+    // anything the caller asks the module afterwards.
+
+    private static func startCapture(
+        _ value: String,
+        on module: isolated ClipboardHistoryModule
+    ) -> Task<ClipboardHistoryCaptureOutcome, Error> {
+        Task {
+            try await module.capture(
+                ClipboardHistoryCaptureRequest(
+                    source: .unknown,
+                    content: .text(value)
+                )
+            )
+        }
+    }
+
+    private static func startMutations(
+        _ mutations: [ClipboardHistoryMutation],
+        on module: isolated ClipboardHistoryModule
+    ) -> [Task<ClipboardHistoryMutationOutcome, Error>] {
+        mutations.map { mutation in
+            Task { try await module.apply(mutation) }
+        }
+    }
+
+    private static func startMaintenance(
+        on module: isolated ClipboardHistoryModule
+    ) -> Task<ClipboardHistoryMaintenanceReport, Error> {
+        Task { try await module.performMaintenance() }
+    }
+
+    private static func startClearThenCapture(
+        _ token: ClipboardHistoryConfirmationToken,
+        _ request: ClipboardHistoryPasteboardCaptureRequest,
+        on module: isolated ClipboardHistoryModule
+    ) -> (
+        confirmation: Task<ClipboardHistoryDestructiveApplyOutcome, Error>,
+        capture: Task<ClipboardHistoryPasteboardCaptureOutcome, Error>
+    ) {
+        let confirmation = Task { try await module.confirm(token) }
+        let capture = Task {
+            try await module.capture(request, source: .unknown)
+        }
+        return (confirmation, capture)
+    }
+
+    private static func startCaptureThenReset(
+        _ value: String,
+        on module: isolated ClipboardHistoryModule
+    ) -> (
+        capture: Task<ClipboardHistoryCaptureOutcome, Error>,
+        reset: Task<Void, Error>
+    ) {
+        let capture = startCapture(value, on: module)
+        let reset = Task { try await module.reset(confirmation: .confirmed) }
+        return (capture, reset)
+    }
+
+    private static func startResetThenCapture(
+        _ request: ClipboardHistoryPasteboardCaptureRequest,
+        on module: isolated ClipboardHistoryModule
+    ) -> (
+        reset: Task<Void, Error>,
+        capture: Task<ClipboardHistoryPasteboardCaptureOutcome, Error>
+    ) {
+        let reset = Task { try await module.reset(confirmation: .confirmed) }
+        let capture = Task {
+            try await module.capture(request, source: .unknown)
+        }
+        return (reset, capture)
+    }
+
     /// `count` and `page` answer the same question through two separate
     /// statements, so they can drift apart silently. Every existing count test
     /// passes an empty query, which never reaches the search path at all.
@@ -1460,6 +2037,57 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 kind
             )
         }
+    }
+}
+
+/// Holds a search index rebuild open inside its write transaction, just
+/// before it publishes, until the test releases it.
+private final class SearchRebuildHold: Sendable {
+    private let reached: AsyncStream<Void>
+    private let reachedContinuation: AsyncStream<Void>.Continuation
+    private let gate = DispatchSemaphore(value: 0)
+
+    init() {
+        (reached, reachedContinuation) = AsyncStream.makeStream()
+    }
+
+    /// Runs on the rebuild's thread, which it blocks until `release()`.
+    var faultInjector: ClipboardHistoryFaultInjector {
+        ClipboardHistoryFaultInjector { [self] point in
+            if point == .searchRebuildBeforePublish {
+                reachedContinuation.yield()
+                gate.wait()
+            }
+            return false
+        }
+    }
+
+    func waitUntilReached() async {
+        for await _ in reached {
+            return
+        }
+    }
+
+    func release() {
+        gate.signal()
+    }
+}
+
+/// An in-memory master key: a reset's delete reports it gone, and the store
+/// the reset opens next reuses it.
+private struct SearchMasterKeyStore: ClipboardHistoryMasterKeyStoring {
+    let key = Data(repeating: 0x85, count: 32)
+
+    func load() -> ClipboardHistoryMasterKeyResult {
+        .key(key)
+    }
+
+    func create() -> ClipboardHistoryMasterKeyResult {
+        .key(key)
+    }
+
+    func delete() -> ClipboardHistoryMasterKeyResult {
+        .missing
     }
 }
 

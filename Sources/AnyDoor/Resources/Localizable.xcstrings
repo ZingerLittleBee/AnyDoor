@@ -426,6 +426,23 @@
         }
       }
     },
+    "builtin.clearNotifications": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Notifications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除通知"
+          }
+        }
+      }
+    },
     "builtin.clipboardMonitoring": {
       "extractionState": "manual",
       "localizations": {
@@ -3435,6 +3452,40 @@
         }
       }
     },
+    "clipboard.toast.captureFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t save to Clipboard History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能保存到剪贴板历史"
+          }
+        }
+      }
+    },
+    "clipboard.toast.captureTooLarge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too large to save to Clipboard History"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "内容过大，未保存到剪贴板历史"
+          }
+        }
+      }
+    },
     "clipboard.toast.copyFailed": {
       "extractionState": "manual",
       "localizations": {
@@ -3567,6 +3618,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "钥匙串已锁定，解锁后剪贴板历史会自动恢复。"
+          }
+        }
+      }
+    },
+    "clipboard.unavailable.relocationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History is temporarily unavailable. Retry it in Settings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史暂时不可用，请在设置中重试。"
           }
         }
       }
@@ -8774,6 +8842,74 @@
         }
       }
     },
+    "settings.clipboard.discardAndMigrate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard Added Entries and Migrate…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "丢弃新增记录并迁移…"
+          }
+        }
+      }
+    },
+    "settings.clipboard.discardAndMigrate.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard and Migrate"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "丢弃并迁移"
+          }
+        }
+      }
+    },
+    "settings.clipboard.discardAndMigrate.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This permanently deletes the %lld entries added during the upgrade (screenshots, recognized text, QR codes and picked colors), then migrates the previous history. It cannot be undone."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "这会永久删除升级期间新增的 %lld 条记录（截图、识别的文字、二维码和取色），然后迁移原历史，无法撤销。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.discardAndMigrate.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discard Added Entries and Migrate?"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "丢弃新增记录并迁移？"
+          }
+        }
+      }
+    },
     "settings.clipboard.excludedApps": {
       "extractionState": "manual",
       "localizations": {
@@ -9148,6 +9284,23 @@
         }
       }
     },
+    "settings.clipboard.state.migrationBlocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History migration can't finish because entries were added during the upgrade. The previous history is unchanged."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史迁移无法完成，因为升级期间新增了记录。原历史保持不变。"
+          }
+        }
+      }
+    },
     "settings.clipboard.state.migrationFailed": {
       "extractionState": "manual",
       "localizations": {
@@ -9178,6 +9331,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "剪贴板历史已暂停，等待本设备密钥可用。"
+          }
+        }
+      }
+    },
+    "settings.clipboard.state.relocationFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clipboard History couldn't move its storage to a new folder. Your history is unchanged. Quit any other copy of AnyDoor and check the permissions of AnyDoor's Application Support folder, then try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "剪贴板历史无法将存储移动到新文件夹，历史记录未受影响。请退出其他正在运行的 AnyDoor，并检查 AnyDoor 的“应用程序支持”文件夹权限，然后重试。"
           }
         }
       }
@@ -12646,6 +12816,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "已复制 %@"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't clear notifications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除通知失败"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.needsAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Accessibility to clear notifications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请开启辅助功能权限以清除通知"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No notifications on screen to clear"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "屏幕上没有可清除的通知"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.partial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some notifications couldn't be cleared"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分通知未能清除"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.success": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications cleared"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已清除通知"
           }
         }
       }

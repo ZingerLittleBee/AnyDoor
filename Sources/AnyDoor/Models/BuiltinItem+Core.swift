@@ -39,6 +39,7 @@ extension BuiltinItem {
         case .restartDock:       return .builtinRestartDock
         case .restartMenuBar:    return .builtinRestartMenuBar
         case .flushDNS:          return .builtinFlushDNS
+        case .clearNotifications: return .builtinClearNotifications
         case .keyboardLock:      return .builtinKeyboardLock
         case .portManager:       return .builtinPortManager
         case .qrcode:            return .builtinQRCode

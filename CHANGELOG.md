@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- A new Clear Notifications (清除通知) action in the menu-bar panel and command
+  palette dismisses the notification banners, alerts, and grouped stacks on
+  screen without opening Notification Center. It can be bound to a hotkey and
+  needs Accessibility access.
+
 ### Fixed
 
 - Stable and Beta release publication retries GitHub draft creation, individual
@@ -14,6 +21,43 @@ versioning.
   retained, and exhausted retries preserve the release for manual recovery.
 - The Settings sidebar no longer shows a stray vertical hairline next to the
   traffic lights on macOS 27.
+- With Automatic Image Text Indexing on, the QR code in a newly copied image is
+  now indexed before that image's text recognition instead of after it. The
+  first text recognition after a macOS update can take about half a minute.
+- Clipboard History now shows a notice when a copy is too large to keep,
+  instead of dropping it silently. Repeated refusals within 30 seconds show a
+  single notice, and a failed history write now says the copy wasn't saved
+  instead of showing a generic error.
+- The menu-bar history popovers no longer wait for history-wide totals they
+  never show, and background work no longer stalls Clipboard History while its
+  search index is being rebuilt, which could keep a popover on a spinner for
+  close to a minute.
+- Running an AnyDoor release older than 4.2.0 no longer deletes Clipboard
+  History. Releases 1.8.0 through 4.1.1 remove files they don't recognize from
+  the `ClipboardHistory` folder, where the encrypted history was stored; on
+  first launch it now moves to its own `ClipboardHistoryV2` folder by renaming,
+  with no copying or re-encryption. If you then run 4.2.0 through 4.2.5,
+  history appears empty until you update again; anything captured meanwhile is
+  kept aside rather than merged, unless the moved history is empty.
+- A very large copied text no longer multiplies the size of Clipboard History
+  on disk or slows search and launch. Search now covers roughly the first 64 KB
+  of each searchable text; entries are still kept, previewed and pasted in
+  full. A history that already holds a longer text rebuilds its search index
+  once after updating (search shows its indexing state briefly) and gives back
+  the space.
+- Clipboard History no longer stays on "migration failed" when the pre-4.2
+  history folder contains a copied symbolic link. The entry is carried over as
+  a file reference without a stored copy instead of blocking the upgrade, and
+  the link's target is never read or deleted.
+- While Clipboard History is still upgrading a pre-4.2 history, or that upgrade
+  has failed, screenshots, recognized text, QR codes and picked colors are
+  still copied and saved as usual but are not added to history, where they
+  used to block the upgrade for good.
+- An upgrade that a 4.2 release left on "migration failed" because
+  screenshots, recognized text, QR codes or picked colors were added to
+  Clipboard History in the meantime can now finish. Settings → Clipboard names
+  the cause and offers to discard those entries, after a confirmation that
+  says how many, and then migrates the pre-4.2 history.
 
 ## [4.2.5] - 2026-09-30
 

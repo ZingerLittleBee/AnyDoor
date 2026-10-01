@@ -51,13 +51,22 @@ Coverage matrix — the PRD requires the feature to stay interactive on the
 ```
 ~/Library/Application Support/dev.bybee.AnyDoor/
   AnyDoor.store                            # SwiftData — must contain no clipboard rows in v2
-  ClipboardHistory/
+  ClipboardHistoryV2/
     history.sqlite, -wal, -shm             # SQLCipher
     payloads/                              # AES-GCM envelopes
     staging/
+  ClipboardHistoryV2.relocating/           # exists only while a store is being moved
+  ClipboardHistoryV2.displaced/            # kept aside until Reset: stores found in
+                                           #   ClipboardHistory/, and anything unexpected
+                                           #   moved out of the store root (*-target)
+  ClipboardHistory/                        # pre-v2 payloads only
   ClipboardHistoryLegacyMigration/         # exists only mid-migration
   ClipboardHistoryLegacyCutover-v1.complete
 ```
+
+No v2 file may ever appear in `ClipboardHistory/`: releases 1.8.0 through
+4.1.1 delete every file there that no legacy row names, and 4.2.0 through
+4.2.5 kept the store there (ADR-0011 amendment, case 1.6).
 
 Keychain: one device-only generic-password item, never synced, never backed up.
 
@@ -96,8 +105,9 @@ CLIPBOARD_HISTORY_GUI_FIXTURE=1 CFFIXED_USER_HOME=/tmp/anydoor-fixture \
   Section 8.11 depends on this.
 - **Who is stalling** — `sample AnyDoor 3 -file /tmp/sample.txt` while
   reproducing tells you whether it is AnyDoor or the target app.
-- **Disk** — `du -sh` the store root; compare against Settings → Clipboard's
-  reported usage. They must agree.
+- **Disk** — `du -sh` the store root plus `ClipboardHistoryV2.displaced/`
+  when it exists; compare against Settings → Clipboard's reported usage. They
+  must agree.
 
 ### 0.5 Before each destructive case
 
@@ -154,6 +164,7 @@ The contract decides per member whether the legacy copy can be retired.
 | 1.3.8 | **(must not) auto-bind** | For 1.3.7, later create a file at that exact path. The entry **(must not)** bind to it. |
 | 1.3.9 | Mixed collection | One entry mixing ordinary, legacy-unverified, unavailable, and owned members renders and lists all members in order. |
 | 1.3.10 | No discard confirmation | Migration keeps unresolvable records without prompting. |
+| 1.3.11 | Copied **symbolic link**: a file row whose named copy in `ClipboardHistory/` is a link (v1 copied links as links) | Migration completes; the member is legacy-unverified while its original path resolves, unavailable otherwise. The link's target **(must not)** be read, moved or deleted; it is intact after the snapshot is removed. |
 
 ### 1.4 Restore File… / Restore Files…
 
@@ -172,6 +183,45 @@ The contract decides per member whether the legacy copy can be retired.
 | 1.5.2 | Force-quit **after publish, before cleanup** | Relaunch: no re-migration, no duplicates, snapshot removed. |
 | 1.5.3 | Pre-publication failure | Legacy data left fully intact. |
 | 1.5.4 | Plaintext cleanup | After success, no plaintext payloads remain; `grep -r` a canary across the store root returns nothing. |
+| 1.5.5 | Explicit capture while the migration is pending or failed | Make the migration fail (for example, remove read permission from the snapshot store, and restore it before retrying). While Settings shows the failure, take a screenshot, an OCR, a QR scan and a picked color: the pasteboard and saved files work as usual, and **(must not)** add history entries. Retry then migrates every legacy row, and captures after that are recorded. |
+
+### 1.6 Store relocation out of `ClipboardHistory/` (ADR-0011 amendment)
+
+Run these **only on a disposable profile**: a fixed home and a throwaway
+keychain, so the live history and the live Keychain key are never read, moved,
+or reset. A disposable home alone is not enough, because the Keychain item is
+shared, and a Reset there would delete the live key. Quit the live AnyDoor
+first. Every 4.2.x release honours the same two variables.
+
+```bash
+export CFFIXED_USER_HOME=/tmp/anydoor-relocation
+export ANYDOOR_CLIPBOARD_HISTORY_ACCEPTANCE_KEYCHAIN_PATH=/tmp/anydoor-relocation/relocation.keychain-db
+KEYCHAIN="$ANYDOOR_CLIPBOARD_HISTORY_ACCEPTANCE_KEYCHAIN_PATH"
+mkdir -p "$CFFIXED_USER_HOME"
+security create-keychain -p relocation "$KEYCHAIN"
+# A new keychain locks on sleep and after a few idle minutes, and these builds
+# never prompt for it, so a locked one reads as Store Unavailable. With no
+# options, this turns both automatic locks off.
+security set-keychain-settings "$KEYCHAIN"
+# Launch each build from this shell, so it inherits both variables:
+#   <path to AnyDoor.app>/Contents/MacOS/AnyDoor
+STORE="$CFFIXED_USER_HOME/Library/Application Support/dev.bybee.AnyDoor"
+```
+
+The history key is the generic-password item with service
+`dev.bybee.AnyDoor.ClipboardHistory` and account `device-master-key-v1`.
+Afterwards: `security delete-keychain "$KEYCHAIN"` and
+`rm -rf /tmp/anydoor-relocation`.
+
+| # | Case | Pass |
+| --- | --- | --- |
+| 1.6.1 | Run 4.2.5, copy text and an image, quit. Add a stand-in pre-v2 payload: `touch "$STORE/ClipboardHistory/$(uuidgen).png"`. Note the key's creation date: `security find-generic-password -s dev.bybee.AnyDoor.ClipboardHistory "$KEYCHAIN" \| grep cdat`. Launch the fixed build. | History intact, images preview, and Settings → Clipboard shows no recovery message. `ClipboardHistoryV2/` holds `history.sqlite` and `payloads/`; `ClipboardHistory/` holds only the stand-in file; no `ClipboardHistoryV2.relocating/`. The same command prints the same creation date (no new key). |
+| 1.6.2 | After 1.6.1, run 4.1.1 (a pre-v2 release), copy something, quit, then launch the fixed build. | History from 1.6.1 intact. 4.1.1's sweep of `ClipboardHistory/` **(must not)** reach `ClipboardHistoryV2/`. |
+| 1.6.3 | After 1.6.1, run 4.2.5 again: its history looks empty. Copy one value, quit, launch the fixed build. Then Clear History with favorites and tags included. | The 1.6.1 history is shown, **not merged** with the 4.2.5 value. `ClipboardHistoryV2.displaced/` holds one folder named `<UTC timestamp>-<8 hex>` (no `.pending` suffix once weighed). Settings usage includes it (0.4 Disk). Clear History empties the history but leaves that folder in place: kept-aside stores are exempt. |
+| 1.6.4 | After 1.6.3, quit. Reset is offered only for Store Unavailable, so delete the key from the disposable keychain: `security delete-generic-password -s dev.bybee.AnyDoor.ClipboardHistory -a device-master-key-v1 "$KEYCHAIN"`. Launch the fixed build, then Settings → Clipboard → Reset Clipboard History, confirm. | Before the reset, Settings shows the Store Unavailable message with Retry and Reset. Afterwards the history is empty and ready, `ClipboardHistoryV2.displaced/` is gone, and a new key exists. |
+| 1.6.5 | Fresh disposable profile: run 4.2.5, copy, and keep it running. Launch the fixed build alongside it. | Clipboard Settings shows the "couldn't move its storage" message with Retry and **no** Reset; the wall shows "temporarily unavailable". Nothing is created at `ClipboardHistoryV2/`. Quit 4.2.5, press Retry: history appears. |
+| 1.6.6 | Fresh disposable profile: run 4.2.5, copy, quit. `chflags uchg "$STORE/ClipboardHistory"` (it can no longer be renamed), launch the fixed build. | Same message as 1.6.5, no Reset, and `ClipboardHistory/` unchanged. `chflags nouchg "$STORE/ClipboardHistory"`, press Retry: history appears. |
+| 1.6.7 | Fresh disposable profile: run 4.1.1, copy text and an image, quit. `chmod 000 "$STORE/AnyDoor.store"` so 4.2.5 cannot take its migration snapshot, then run 4.2.5: Settings shows the migration failure. Take a screenshot and an OCR (4.2.5 records both), quit, `chmod 644 "$STORE/AnyDoor.store"`, and launch the fixed build. | Settings → Clipboard says the migration can't finish because entries were added during the upgrade, with Retry and Discard Added Entries and Migrate… and **no** Reset; the wall shows only the two captures. Retry keeps the message. The confirmation names 2 entries, and Cancel changes nothing. After confirming, the 4.1.1 text and image appear (the image previews) without the two captures, the message is gone, `ClipboardHistoryLegacyMigration/` is removed, and the key's creation date is unchanged. |
 
 ---
 
@@ -670,6 +720,19 @@ regression here is invisible in every other case in this plan.
 **Budget.** Browsing is available immediately. Rebuild completes within **120s**
 and does not block the UI. CPU stays under one core.
 
+**Upgrade.** With the previous release and the 50000-entry history, copy the
+long text from 8.16 and note Settings → Clipboard's usage, then update. The
+first launch rebuilds the search index once, so search shows its indexing state
+for a while. Copy something and browse during the upgrade rebuild; browsing
+must stay available, and the new copy appears in the history no later than the
+end of the rebuild. Same 120s budget.
+
+**Pass.** After the rebuild the long text still previews and pastes in full,
+`zebrahead` finds it and `quokkatail` does not, and the reported usage has
+dropped by more than the text's own size. Relaunching does not rebuild again.
+A history with no text that long upgrades without a rebuild: search is ready
+at once.
+
 ### 8.14 Retention cleanup with secure delete
 
 **Steps.** At 50000 entries, shorten retention from Unlimited to 7 days.
@@ -696,6 +759,19 @@ upward.
 reported usage matches `du -sh` within a few percent, and **includes**
 encrypted orphans. WAL does not grow without bound across a long session —
 check it after 8.10.
+
+**Long text.** Note Settings → Clipboard's usage, then copy a plain text of
+about 2 MB that starts and ends with a marker word:
+
+```bash
+{ printf 'zebrahead '; yes 'lorem ipsum dolor sit amet' | head -n 80000; printf 'quokkatail'; } | pbcopy
+```
+
+**Pass.** The reported usage, which counts the WAL, grows by little more than
+the text's own size and well under twice it; before search fields were bounded
+the same copy grew it by more than four times. Pasting the entry returns the
+whole text, ending in `quokkatail`. Searching `zebrahead` finds the entry;
+`quokkatail` does not, because search covers only the first 64 KB of a text.
 
 ### 8.17 Launch impact
 
@@ -813,8 +889,8 @@ short-circuit, so each needs its own case.
 
 ### 12.12 Every lifecycle state — P0
 
-`ClipboardHistoryLifecycleState` has seven cases. Each renders somewhere in
-Settings → Clipboard and in the wall, and three of them are dead ends if the
+`ClipboardHistoryLifecycleState` has eight cases. Each renders somewhere in
+Settings → Clipboard and in the wall, and four of them are dead ends if the
 recovery affordance is wrong.
 
 | # | State | How to reach it | Pass |
@@ -826,6 +902,7 @@ recovery affordance is wrong.
 | 12.12.5 | **`storeUnavailable`** | Corrupt the database, or delete the Keychain item | Requires action: retry **and** a confirmed reset. Never self-heals by wiping. |
 | 12.12.6 | **`migrationFailed`** | Make the migration fail (unwritable target directory) | Legacy data intact, a retry path exists, and the app is still usable for everything else. |
 | 12.12.7 | **`resetFailed`** | Make the confirmed reset itself fail (read-only store directory) | **Not a dead end**: the state is reported, retry is possible, and the app does not loop the reset dialog. |
+| 12.12.8 | **`migrationBlocked`** | Row 1.6.7 | **Not a dead end**: Settings names the cause and offers Retry and the confirmed discard, never Reset. The confirmation names the entry count, and confirming migrates the pre-v2 history without those entries. |
 
 The `paused` ⇄ `storeUnavailable` distinction is the one to get right — a
 temporary keychain lock presented as "your history is unavailable, reset?" will

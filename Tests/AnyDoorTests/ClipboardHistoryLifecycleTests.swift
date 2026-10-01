@@ -248,6 +248,50 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         )
     }
 
+    /// A store that could not move to its new folder is intact, so a
+    /// confirmed reset is ignored rather than destroying it, and a retry
+    /// finishes the move.
+    func testRelocationFailureNeverResetsAndRetryRecovers() async throws {
+        let probe = ClipboardLifecycleProbe(
+            availability: .unavailable,
+            reason: .storeRelocationFailed,
+            becomesReadyOnRetry: true
+        )
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            migrationRequest: nil,
+            isKeychainUnlocked: { true }
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(
+            lifecycle.state,
+            .storeUnavailable(.storeRelocationFailed)
+        )
+
+        lifecycle.resetConfirmed()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(
+            lifecycle.state,
+            .storeUnavailable(.storeRelocationFailed)
+        )
+        let afterReset = await probe.recordedEvents()
+        XCTAssertEqual(afterReset, [.status])
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(
+            events,
+            [.status, .retryStore, .status, .monitoring(.start)]
+        )
+        await lifecycle.stop()
+    }
+
     func testFailedResetCanBeConfirmedAgain() async throws {
         let probe = ClipboardLifecycleProbe(
             availability: .unavailable,
@@ -328,6 +372,293 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
         XCTAssertEqual(
             retriedEvents.filter { $0 == .monitoring(.start) }.count,
             1
+        )
+    }
+
+    /// An explicit capture taken before the cutover would leave the store
+    /// non-empty, and the pre-v2 migration refuses such a store for good, so
+    /// captures wait while the lifecycle prepares, migrates or has failed.
+    /// A confirmed cutover never comes undone: a later retry that passes
+    /// through `.preparing` again keeps admitting them.
+    func testExplicitCapturesWaitOnlyForTheFirstConfirmedCutover()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe(migrationFailuresRemaining: 1)
+        let unlockState = KeychainUnlockFlag(unlocked: true)
+        var migrationFinished = false
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            legacyCleanupState: {
+                migrationFinished ? .completed : .incomplete
+            },
+            migrationRequest: Self.emptyMigrationRequest,
+            finishMigration: {
+                migrationFinished = true
+            },
+            isKeychainUnlocked: { unlockState.read() },
+            keychainUnlockPollInterval: .milliseconds(10),
+            unlockNotifications: NotificationCenter()
+        )
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+
+        lifecycle.start()
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+
+        lifecycle.retry()
+        XCTAssertEqual(lifecycle.state, .preparing)
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertTrue(lifecycle.admitsExplicitCaptures)
+
+        unlockState.set(false)
+        let paused = await Self.wait(untilTrue: {
+            lifecycle.state == .paused(.keychainLocked)
+        })
+        XCTAssertTrue(paused)
+        // An undeterminable lock state never retries on its own.
+        unlockState.set(nil)
+        lifecycle.retry()
+        XCTAssertEqual(lifecycle.state, .preparing)
+        XCTAssertTrue(lifecycle.admitsExplicitCaptures)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+        let migrationCount = await probe.recordedMigrationCount()
+        XCTAssertEqual(migrationCount, 2)
+        await lifecycle.stop()
+    }
+
+    /// A 4.2 release recorded explicit captures while its migration was
+    /// pending or had failed, and the migration refuses a store that holds
+    /// entries. The lifecycle names the count and waits: a retry asks the
+    /// store again, a reset is ignored, captures stay held back, and passive
+    /// monitoring never starts.
+    func testAStoreWithEntriesBlocksTheMigrationWithItsCount() async throws {
+        let probe = ClipboardLifecycleProbe(storeEntryCount: 3)
+        let defaults = makeDefaults()
+        ClipboardPreferences.setMonitoringEnabled(true, in: defaults)
+        var finishCount = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            migrationRequest: Self.emptyMigrationRequest,
+            finishMigration: {
+                finishCount += 1
+            }
+        )
+
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 3))
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+
+        lifecycle.resetConfirmed()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 3))
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 3))
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+
+        XCTAssertEqual(finishCount, 0)
+        let confirmations = await probe.recordedMigrationConfirmations()
+        XCTAssertEqual(confirmations, [nil, nil])
+        let remaining = await probe.recordedStoreEntryCount()
+        XCTAssertEqual(remaining, 3)
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(
+            events,
+            [
+                .status,
+                .monitoring(.migrationStarted),
+                .publicationState,
+                .migration,
+                .status,
+                .monitoring(.migrationStarted),
+                .publicationState,
+                .migration,
+            ]
+        )
+    }
+
+    /// Confirming the discard migrates in the same pass, so the cutover
+    /// completes and passive monitoring starts as after any migration.
+    func testAConfirmedDiscardMigratesAndCompletesTheCutover() async throws {
+        let probe = ClipboardLifecycleProbe(storeEntryCount: 2)
+        let defaults = makeDefaults()
+        ClipboardPreferences.setMonitoringEnabled(true, in: defaults)
+        var finishCount = 0
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: defaults,
+            migrationRequest: Self.emptyMigrationRequest,
+            finishMigration: {
+                finishCount += 1
+            }
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 2))
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 2)
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        XCTAssertTrue(lifecycle.admitsExplicitCaptures)
+        XCTAssertEqual(finishCount, 1)
+        let confirmations = await probe.recordedMigrationConfirmations()
+        XCTAssertEqual(confirmations, [nil, 2])
+        let events = await probe.recordedEvents()
+        XCTAssertEqual(
+            events,
+            [
+                .status,
+                .monitoring(.migrationStarted),
+                .publicationState,
+                .migration,
+                .status,
+                .monitoring(.migrationStarted),
+                .publicationState,
+                .migration,
+                .cleanup,
+                .monitoring(.migrationCompleted),
+                .monitoring(.start),
+            ]
+        )
+    }
+
+    /// The confirmation carries the count the user was shown. A store that
+    /// no longer holds exactly that many discards nothing, and the lifecycle
+    /// asks again with the new count.
+    func testAStaleDiscardConfirmationAsksAgainWithTheNewCount()
+        async throws
+    {
+        let probe = ClipboardLifecycleProbe(storeEntryCount: 3)
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            migrationRequest: Self.emptyMigrationRequest
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 3))
+        await probe.setStoreEntryCount(2)
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 3)
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 2))
+        let remaining = await probe.recordedStoreEntryCount()
+        XCTAssertEqual(remaining, 2)
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 2)
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        let confirmations = await probe.recordedMigrationConfirmations()
+        XCTAssertEqual(confirmations, [nil, 3, 2])
+    }
+
+    /// A discard that fails keeps the entries, so the failure retries like
+    /// any other and comes back to the same confirmation.
+    func testAFailedDiscardComesBackToTheSameConfirmation() async throws {
+        let probe = ClipboardLifecycleProbe(
+            storeEntryCount: 2,
+            migrationFailuresRemaining: 1
+        )
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            migrationRequest: Self.emptyMigrationRequest
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 2))
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 2)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+        let remaining = await probe.recordedStoreEntryCount()
+        XCTAssertEqual(remaining, 2)
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 2))
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 2)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+        let confirmations = await probe.recordedMigrationConfirmations()
+        XCTAssertEqual(confirmations, [nil, 2, nil, 2])
+    }
+
+    /// Only a blocked migration discards: a failed one has nothing to
+    /// discard, and a ready store holds history the user kept.
+    func testADiscardOutsideTheBlockedStateIsIgnored() async throws {
+        let probe = ClipboardLifecycleProbe(migrationFailuresRemaining: 1)
+        let lifecycle = ClipboardHistoryLifecycle(
+            operations: probe.operations,
+            defaults: makeDefaults(),
+            migrationRequest: Self.emptyMigrationRequest
+        )
+        lifecycle.start()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 1)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .migrationFailed)
+
+        lifecycle.retry()
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 1)
+        await lifecycle.awaitCurrentOperationForTesting()
+        XCTAssertEqual(lifecycle.state, .ready)
+        let confirmations = await probe.recordedMigrationConfirmations()
+        XCTAssertEqual(confirmations, [nil, nil])
+    }
+
+    /// Failures are logged publicly, so a name must say what failed without
+    /// a path from an error's payload or a Foundation description.
+    func testFailureLogNamesCarryNoPaths() {
+        let path = "/Users/someone/Library/ClipboardHistory/secret.png"
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: ClipboardHistoryLegacySourceError.incompleteSnapshot
+            ),
+            "ClipboardHistoryLegacySourceError.incompleteSnapshot"
+        )
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: ClipboardHistoryLegacySourceError
+                    .cutoverMarkerPersistenceFailed(EACCES)
+            ),
+            "ClipboardHistoryLegacySourceError.cutoverMarkerPersistenceFailed(13)"
+        )
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: ClipboardHistoryModuleError.legacyFileRestoreCollision(
+                    URL(fileURLWithPath: path)
+                )
+            ),
+            "ClipboardHistoryModuleError.legacyFileRestoreCollision"
+        )
+        XCTAssertEqual(
+            ClipboardHistoryLifecycle.logName(
+                of: CocoaError(
+                    .fileWriteNoPermission,
+                    userInfo: [NSFilePathErrorKey: path]
+                )
+            ),
+            "\(NSCocoaErrorDomain) \(CocoaError.fileWriteNoPermission.rawValue)"
         )
     }
 
@@ -794,8 +1125,12 @@ private actor ClipboardLifecycleProbe {
     private(set) var events: [ClipboardLifecycleEvent] = []
     private(set) var migrationCount = 0
     private(set) var migrationEntryCounts: [Int] = []
+    private(set) var migrationConfirmations: [Int?] = []
     private var availability: ClipboardHistoryStatus.Availability
     private var reason: ClipboardHistoryStatus.AvailabilityReason?
+    /// Entries already in the store, which the migration refuses unless a
+    /// discard of exactly that many is confirmed.
+    private var storeEntryCount: Int
     private var migrationFailuresRemaining: Int
     private var cleanupFailuresRemaining: Int
     private var resetFailuresRemaining: Int
@@ -808,6 +1143,7 @@ private actor ClipboardLifecycleProbe {
     init(
         availability: ClipboardHistoryStatus.Availability = .ready,
         reason: ClipboardHistoryStatus.AvailabilityReason? = nil,
+        storeEntryCount: Int = 0,
         migrationFailuresRemaining: Int = 0,
         cleanupFailuresRemaining: Int = 0,
         resetFailuresRemaining: Int = 0,
@@ -817,6 +1153,7 @@ private actor ClipboardLifecycleProbe {
     ) {
         self.availability = availability
         self.reason = reason
+        self.storeEntryCount = storeEntryCount
         self.migrationFailuresRemaining = migrationFailuresRemaining
         self.cleanupFailuresRemaining = cleanupFailuresRemaining
         self.resetFailuresRemaining = resetFailuresRemaining
@@ -835,8 +1172,11 @@ private actor ClipboardLifecycleProbe {
             legacyMigrationPublicationState: {
                 try await self.recordPublicationState()
             },
-            migrate: { request in
-                try await self.migrate(request)
+            migrate: { request, confirmedEntryCount in
+                try await self.migrate(
+                    request,
+                    confirmedEntryCount: confirmedEntryCount
+                )
             },
             cleanupLegacyPayloads: { _ in
                 try await self.cleanupLegacyPayloads()
@@ -864,6 +1204,18 @@ private actor ClipboardLifecycleProbe {
 
     func recordedMigrationEntryCounts() -> [Int] {
         migrationEntryCounts
+    }
+
+    func recordedMigrationConfirmations() -> [Int?] {
+        migrationConfirmations
+    }
+
+    func recordedStoreEntryCount() -> Int {
+        storeEntryCount
+    }
+
+    func setStoreEntryCount(_ count: Int) {
+        storeEntryCount = count
     }
 
     func resumeMigration() {
@@ -905,23 +1257,34 @@ private actor ClipboardLifecycleProbe {
     }
 
     private func migrate(
-        _ request: ClipboardHistoryLegacyMigrationRequest
+        _ request: ClipboardHistoryLegacyMigrationRequest,
+        confirmedEntryCount: Int?
     ) async throws
         -> ClipboardHistoryLegacyMigrationOutcome
     {
         events.append(.migration)
         migrationCount += 1
         migrationEntryCounts.append(request.transfer.entries.count)
+        migrationConfirmations.append(confirmedEntryCount)
         if shouldSuspendNextMigration {
             shouldSuspendNextMigration = false
             await withCheckedContinuation { continuation in
                 migrationContinuation = continuation
             }
         }
+        // As the module does: entries in the store refuse the migration
+        // unless the confirmed count still matches, and a failure after that
+        // check leaves them in place.
+        if storeEntryCount > 0, confirmedEntryCount != storeEntryCount {
+            throw ClipboardHistoryModuleError.legacyMigrationStoreNotEmpty(
+                entryCount: storeEntryCount
+            )
+        }
         if migrationFailuresRemaining > 0 {
             migrationFailuresRemaining -= 1
             throw ClipboardHistoryModuleError.legacyMigrationFailed
         }
+        storeEntryCount = 0
         return .published(
             ClipboardHistoryLegacyMigrationReport(
                 retainedEntryCount: 0,
@@ -975,7 +1338,9 @@ final class ClipboardLifecycleRecoveryTests: XCTestCase {
     func testEveryStalledStateHasItsOwnLine() {
         let states: [ClipboardHistoryLifecycleState] = [
             .migrationFailed,
+            .migrationBlocked(entryCount: 2),
             .storeUnavailable(nil),
+            .storeUnavailable(.storeRelocationFailed),
             .resetFailed,
             .paused(.keychainLocked),
         ]
@@ -1007,6 +1372,41 @@ final class ClipboardLifecycleRecoveryTests: XCTestCase {
             ClipboardLifecycleRecovery(state: .migrationFailed)?.includesReset,
             false
         )
+    }
+
+    /// A store that could not move out of the pre-v2 folder is intact, and
+    /// the key was never touched: Reset would only destroy it, so the line
+    /// points at Retry alone.
+    func testRelocationFailureOffersRetryWithoutReset() {
+        let recovery = ClipboardLifecycleRecovery(
+            state: .storeUnavailable(.storeRelocationFailed)
+        )
+        XCTAssertEqual(recovery?.message, .settingsClipboardRelocationFailed)
+        XCTAssertEqual(recovery?.includesReset, false)
+    }
+
+    /// Discarding is offered only for a blocked migration, with the count the
+    /// confirmation shows. A reset there would discard the pre-upgrade history
+    /// too, so it is not offered.
+    func testOnlyABlockedMigrationOffersTheDiscard() {
+        let blocked = ClipboardLifecycleRecovery(
+            state: .migrationBlocked(entryCount: 4)
+        )
+        XCTAssertEqual(blocked?.message, .settingsClipboardMigrationBlocked)
+        XCTAssertEqual(blocked?.discardableEntryCount, 4)
+        XCTAssertEqual(blocked?.includesReset, false)
+        let others: [ClipboardHistoryLifecycleState] = [
+            .migrationFailed,
+            .storeUnavailable(nil),
+            .storeUnavailable(.storeRelocationFailed),
+            .resetFailed,
+            .paused(.keychainLocked),
+        ]
+        for state in others {
+            let recovery = ClipboardLifecycleRecovery(state: state)
+            XCTAssertNotNil(recovery, "\(state)")
+            XCTAssertNil(recovery?.discardableEntryCount, "\(state)")
+        }
     }
 
     func testHealthyAndTransientStatesOfferNoRecoverySection() {

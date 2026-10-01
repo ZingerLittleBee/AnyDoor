@@ -2403,6 +2403,8 @@ extension ClipboardHistoryStatus.AvailabilityReason {
             "searchIndexUnavailable"
         case .storeIOFailure:
             "storeIOFailure"
+        case .storeRelocationFailed:
+            "storeRelocationFailed"
         }
     }
 }

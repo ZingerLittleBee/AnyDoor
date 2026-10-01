@@ -108,3 +108,68 @@ Consequences:
 
 References: [SQLite FTS5 trigram tokenizer](https://www.sqlite.org/fts5.html#the_trigram_tokenizer),
 [External content and contentless tables](https://www.sqlite.org/fts5.html#external_content_and_contentless_tables)
+
+## Amendment: bounded search fields (2026-10-01)
+
+Search fields are bounded. A field row used to store a copied text whole,
+twice (as its value and as its normalized value), and the trigram index added
+an entry for nearly every code point of it, so one large copy grew the
+database by several times its own size. Candidate verification reads a
+field's whole normalized value, and the integrity check at open re-reads every
+field, so the same copy also slowed search and launch. Each search field now
+keeps at most 65,536 bytes of UTF-8 of its value and, separately, of its
+normalized value, which is all that either index sees. The bound counts bytes
+because index size and verification cost grow with bytes, whatever the script.
+The value is cut on a Unicode scalar boundary before it is normalized.
+Normalization can expand text (compatibility decomposition turns one Hangul
+syllable into three jamo), so the normalized value is cut again and need not
+equal the normalization of the stored value. Nothing recomputes it: candidate
+verification and every index deletion use the stored normalized value. Cuts
+fall between scalars rather than grapheme clusters, because a run of combining
+marks is one cluster of any length. A long text is therefore searchable by
+roughly its first 64 KB. Its representations are untouched, so preview, paste,
+and materialization still return it whole.
+
+Search index version 2 carries the bound, and no schema migration is added. At
+open, a ready version 1 index none of whose fields exceeds the bound is already
+a version 2 index: it is stamped in place, keeps its generation because its
+content is unchanged, and then gets the usual integrity check. A version 1
+index with an oversized field, or one left indexing, is rebuilt in the
+background; a failed one stays failed until it is retried. Inside the
+rebuild's single transaction, after both FTS tables are dropped and before
+they are created again, the rebuild rewrites every oversized field row to its
+bounded form. Payloads are still never rewritten. This is an explicit
+exception to the rule that field rows change only through the one
+transactional mutation path. That rule exists because a field and its index
+entries must change together. Once both tables are dropped, no index entry
+describes the old values, and both indexes are rebuilt from the rewritten rows
+before the same commit, so no reader ever sees the three representations
+disagree. A failed rebuild rolls the rewrite back with everything else and
+leaves the version 1 store intact for a retry. The rewrite fetches only a
+prefix of each oversized value, as many code points as the bound has bytes,
+which always covers the bound, so no huge text is copied into the app whole;
+SQLite still reads each such value once to cut the prefix. When any row was
+rewritten, the rebuild then returns the freed pages and truncates the WAL,
+outside the transaction and on a best-effort basis, so History Storage Usage
+drops at once instead of at the next maintenance pass. As during any rebuild,
+browsing by recency stays available, writes wait for the rebuild without
+blocking the module, and search shows its indexing state.
+
+The bound is one-way. Field rows keep only the bounded prefix, so a larger
+bound cannot be served from them: raising it requires re-deriving every field
+from the stored representations. Text recognized from an image entry, its OCR
+and QR values, exists only as field rows, so whatever lay past the bound comes
+back only by recognizing the image again.
+
+The bound limits what one field contributes to a search, not the cost of a
+search. Verification still reads the stored normalized value of every
+candidate, so search latency scales with the total bytes of the candidate
+fields: a term common to many long entries costs in proportion to their
+bounded sizes, and no fixed latency is promised.
+
+Downgrading needs no special handling. Without a schema change an older build
+opens the store, finds an index version other than its own, and rebuilds both
+indexes once from the stored normalized values, so existing fields stay
+bounded and their entries stay searchable by their first 64 KB. Texts that the
+older build captures or edits are stored whole again; updating back bounds
+them with one more rebuild, or stamps the index in place when there are none.

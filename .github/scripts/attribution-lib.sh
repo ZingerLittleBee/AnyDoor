@@ -9,14 +9,21 @@ ATTRIBUTION_AGENT_RE='Claude|Copilot|Cursor|Codex|OpenAI|Devin|Gemini|Jules|Wind
 # are not treated as addresses.
 ATTRIBUTION_EMAIL_RE='[A-Za-z0-9._%+-]+@[A-Za-z][A-Za-z0-9.-]*\.[A-Za-z]{2,}'
 
+# The sign-off trailer GitHub's bots (Dependabot among them) add to their own
+# commits: a whole line naming a "[bot]" account and its address.
+ATTRIBUTION_BOT_SIGNOFF_RE='^[[:space:]]*Signed-off-by:[[:space:]]+[^<]*\[bot\][[:space:]]+<[^>]*>[[:space:]]*$'
+
 # Print Co-authored-by lines from stdin. Always exits 0.
 attribution_co_author_lines() {
   grep -iE '^[[:space:]]*Co-authored-by:' || true
 }
 
-# Print lines from stdin that contain an email address. Always exits 0.
+# Print lines from stdin that contain an email address, except a bot's
+# sign-off trailer. Always exits 0.
 attribution_email_lines() {
-  grep -iE "${ATTRIBUTION_EMAIL_RE}" || true
+  grep -viE "${ATTRIBUTION_BOT_SIGNOFF_RE}" \
+    | grep -iE "${ATTRIBUTION_EMAIL_RE}" \
+    || true
 }
 
 # Print generated-by / made-with / assisted-by / robot-generated lines from
