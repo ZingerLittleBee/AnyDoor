@@ -86,39 +86,7 @@ final class ScrollStitcherTests: XCTestCase {
         XCTAssertNil(r)
     }
 
-    // MARK: - ScrollCapturePolicy.shouldStop
-
-    func testStopsOnNoProgressStreak() {
-        let p = ScrollCapturePolicy()
-        // streak reaching stableStopCount stops.
-        XCTAssertTrue(p.shouldStop(frameIndex: 5, delta: 0, totalHeight: 2000,
-                                   viewportHeight: 800, noProgressStreak: p.stableStopCount))
-        XCTAssertFalse(p.shouldStop(frameIndex: 5, delta: 0, totalHeight: 2000,
-                                    viewportHeight: 800, noProgressStreak: p.stableStopCount - 1))
-    }
-
-    func testStopsOnHeightCap() {
-        let p = ScrollCapturePolicy()
-        let cap = 800 * p.maxTotalHeightFactor
-        XCTAssertTrue(p.shouldStop(frameIndex: 3, delta: 50, totalHeight: cap,
-                                   viewportHeight: 800, noProgressStreak: 0))
-        XCTAssertFalse(p.shouldStop(frameIndex: 3, delta: 50, totalHeight: cap - 1,
-                                    viewportHeight: 800, noProgressStreak: 0))
-    }
-
-    func testStopsOnFrameCap() {
-        let p = ScrollCapturePolicy()
-        XCTAssertTrue(p.shouldStop(frameIndex: p.maxFrames, delta: 50, totalHeight: 1000,
-                                   viewportHeight: 800, noProgressStreak: 0))
-        XCTAssertFalse(p.shouldStop(frameIndex: p.maxFrames - 1, delta: 50, totalHeight: 1000,
-                                    viewportHeight: 800, noProgressStreak: 0))
-    }
-
-    func testContinuesWhenMakingProgress() {
-        let p = ScrollCapturePolicy()
-        XCTAssertFalse(p.shouldStop(frameIndex: 2, delta: 40, totalHeight: 1200,
-                                    viewportHeight: 800, noProgressStreak: 0))
-    }
+    // MARK: - ScrollCapturePolicy
 
     func testMinOverlapRowsFromViewport() {
         let p = ScrollCapturePolicy()

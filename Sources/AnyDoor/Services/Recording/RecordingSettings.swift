@@ -45,13 +45,4 @@ final class RecordingSettings {
     func setIncludeCamera(_ value: Bool) { includeCamera = value; defaults.set(value, forKey: Self.includeCameraKey) }
     func setShowKeystrokes(_ value: Bool) { showKeystrokes = value; defaults.set(value, forKey: Self.showKeystrokesKey) }
     func setFormat(_ value: RecordingFormat) { format = value; defaults.set(value.rawValue, forKey: Self.formatKey) }
-
-    func reloadFromDefaults() {
-        frameRate = RecordingPolicy.clampFrameRate(defaults.object(forKey: Self.frameRateKey) as? Int ?? 30)
-        showCursor = defaults.object(forKey: Self.showCursorKey) as? Bool ?? true
-        includeMicrophone = defaults.object(forKey: Self.includeMicrophoneKey) as? Bool ?? false
-        includeCamera = defaults.object(forKey: Self.includeCameraKey) as? Bool ?? false
-        showKeystrokes = defaults.object(forKey: Self.showKeystrokesKey) as? Bool ?? false
-        format = RecordingFormat(rawValue: defaults.string(forKey: Self.formatKey) ?? "") ?? .mp4
-    }
 }

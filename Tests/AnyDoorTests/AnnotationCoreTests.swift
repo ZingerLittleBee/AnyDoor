@@ -16,14 +16,6 @@ final class AnnotationCoreTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(RGBAColor.palette.count, 5)
     }
 
-    func testToolClassification() {
-        XCTAssertTrue(AnnotationTool.rectangle.isRectDrag)
-        XCTAssertFalse(AnnotationTool.crop.isRectDrag)
-        XCTAssertTrue(AnnotationTool.arrow.isTwoPoint)
-        XCTAssertTrue(AnnotationTool.freehand.isPath)
-        XCTAssertFalse(AnnotationTool.text.isPath)
-    }
-
     // MARK: - Geometry
 
     func testArrowHeadForHorizontalArrow() {

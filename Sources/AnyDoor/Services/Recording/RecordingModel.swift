@@ -7,9 +7,6 @@ enum RecordingFormat: String, Sendable, CaseIterable {
     case gif
 
     var fileExtension: String { rawValue }
-
-    /// Whether the format is produced by transcoding the captured `.mov`.
-    var needsTranscode: Bool { self != .mov }
 }
 
 /// The recorder's lifecycle. `paused` keeps the session alive but stops writing.

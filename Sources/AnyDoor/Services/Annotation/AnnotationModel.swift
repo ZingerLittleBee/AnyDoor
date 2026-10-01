@@ -17,20 +17,6 @@ enum AnnotationTool: String, CaseIterable, Sendable {
     case redaction
     case counter
     case crop
-
-    /// Whether the tool creates a rectangular element by dragging a bounding box.
-    var isRectDrag: Bool {
-        switch self {
-        case .rectangle, .ellipse, .blur, .pixelate, .redaction: return true
-        default: return false
-        }
-    }
-
-    /// Whether the tool creates a two-point element (drag from a to b).
-    var isTwoPoint: Bool { self == .arrow || self == .line }
-
-    /// Whether the tool accumulates a freehand point path while dragging.
-    var isPath: Bool { self == .freehand || self == .highlighter }
 }
 
 /// An RGBA color as pure 0...1 components, so styling stays Codable and testable
