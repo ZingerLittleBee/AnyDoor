@@ -717,6 +717,19 @@ regression here is invisible in every other case in this plan.
 **Budget.** Browsing is available immediately. Rebuild completes within **120s**
 and does not block the UI. CPU stays under one core.
 
+**Upgrade.** With the previous release and the 50000-entry history, copy the
+long text from 8.16 and note Settings → Clipboard's usage, then update. The
+first launch rebuilds the search index once, so search shows its indexing state
+for a while. Copy something and browse during the upgrade rebuild; browsing
+must stay available, and the new copy appears in the history no later than the
+end of the rebuild. Same 120s budget.
+
+**Pass.** After the rebuild the long text still previews and pastes in full,
+`zebrahead` finds it and `quokkatail` does not, and the reported usage has
+dropped by more than the text's own size. Relaunching does not rebuild again.
+A history with no text that long upgrades without a rebuild: search is ready
+at once.
+
 ### 8.14 Retention cleanup with secure delete
 
 **Steps.** At 50000 entries, shorten retention from Unlimited to 7 days.
@@ -743,6 +756,19 @@ upward.
 reported usage matches `du -sh` within a few percent, and **includes**
 encrypted orphans. WAL does not grow without bound across a long session —
 check it after 8.10.
+
+**Long text.** Note Settings → Clipboard's usage, then copy a plain text of
+about 2 MB that starts and ends with a marker word:
+
+```bash
+{ printf 'zebrahead '; yes 'lorem ipsum dolor sit amet' | head -n 80000; printf 'quokkatail'; } | pbcopy
+```
+
+**Pass.** The reported usage, which counts the WAL, grows by little more than
+the text's own size and well under twice it; before search fields were bounded
+the same copy grew it by more than four times. Pasting the entry returns the
+whole text, ending in `quokkatail`. Searching `zebrahead` finds the entry;
+`quokkatail` does not, because search covers only the first 64 KB of a text.
 
 ### 8.17 Launch impact
 
