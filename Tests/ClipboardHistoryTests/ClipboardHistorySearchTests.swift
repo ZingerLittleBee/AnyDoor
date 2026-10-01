@@ -1173,8 +1173,12 @@ final class ClipboardHistorySearchTests: XCTestCase {
         // Bounded, so a module stuck behind the rebuild fails the test
         // instead of hanging it.
         let served = expectation(description: "served during the rebuild")
+        // Named rather than `Self`: a `Self` reference makes the closure
+        // capture the test case's dynamic type, which Swift 6.3's region
+        // checker cannot analyze in the `sending` closure `Task.init` takes.
+        // The other tasks in this file's nonisolated tests do the same.
         let whileHeld = Task {
-            let capture = await Self.startCapture(
+            let capture = await ClipboardHistorySearchTests.startCapture(
                 "captured during rebuild",
                 on: module
             )
@@ -1232,7 +1236,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
         let queued = expectation(description: "queued during the rebuild")
         let whileHeld = Task {
-            let mutations = await Self.startMutations(
+            let mutations = await ClipboardHistorySearchTests.startMutations(
                 [
                     .editText(entry, "edited text"),
                     .setFavorite(entry, true),
@@ -1349,10 +1353,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
         let queued = expectation(description: "queued during the rebuild")
         let whileHeld = Task {
-            let started = await Self.startCaptureThenReset(
-                "captured before the reset",
-                on: module
-            )
+            let started =
+                await ClipboardHistorySearchTests.startCaptureThenReset(
+                    "captured before the reset",
+                    on: module
+                )
             // Served after both reached the module, so the capture is
             // already waiting for its turn when the rebuild is released.
             _ = try await module.page(ClipboardHistoryQuery())
@@ -1527,7 +1532,8 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
         let queued = expectation(description: "queued during the rebuild")
         let whileHeld = Task {
-            let maintenance = await Self.startMaintenance(on: module)
+            let maintenance =
+                await ClipboardHistorySearchTests.startMaintenance(on: module)
             // Served after the pass reached the module, so it is already
             // waiting for its turn when it is cancelled.
             _ = try await module.page(ClipboardHistoryQuery())
