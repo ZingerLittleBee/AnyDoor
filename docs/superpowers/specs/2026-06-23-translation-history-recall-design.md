@@ -71,8 +71,7 @@ unless noted.
   favorite-star / delete controls.
 - The row's primary `Button` action changes from `select(record)` to
   `toggle(record.id)`.
-- The favorite-star and delete controls keep calling
-  `store.toggleFavorite` / `store.delete` unchanged.
+- The favorite-star and delete controls keep their existing store calls.
 
 ### 3. Row (expanded) — recall detail
 

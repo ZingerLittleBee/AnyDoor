@@ -64,8 +64,11 @@ final class TranslationProviderFactoryTests: XCTestCase {
         ])
         let providers = TranslationProviderFactory.makeStreamProviders(
             settings: settings, keychain: keychain)
-        XCTAssertEqual(providers.map(\.kind), [.googleFree, .bingFree, .openAICompatible])
         XCTAssertEqual(providers.map(\.id), ["google", "bing", "llm-keyed"])
+        guard providers.count == 3 else { return }
+        XCTAssertTrue(providers[0] is GoogleFreeTranslationProvider)
+        XCTAssertTrue(providers[1] is BingFreeTranslationProvider)
+        XCTAssertTrue(providers[2] is OpenAICompatibleProvider)
     }
 
     @MainActor
@@ -126,7 +129,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         let config = makeConfig(id: "deepl", kind: .deepl, order: 0)
         let provider = TranslationProviderFactory.makeStreamProvider(
             for: config, keychain: keychain, session: .shared)
-        XCTAssertEqual(provider?.kind, .deepl)
+        XCTAssertTrue(provider is DeepLProvider)
     }
 
     @MainActor
@@ -143,7 +146,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
         let config = makeConfig(id: "deeplx", kind: .deepl, order: 0, baseURL: "http://localhost:1188")
         let provider = TranslationProviderFactory.makeStreamProvider(
             for: config, keychain: keychain, session: .shared)
-        XCTAssertEqual(provider?.kind, .deepl)
+        XCTAssertTrue(provider is DeepLProvider)
     }
 
     @MainActor

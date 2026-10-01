@@ -103,14 +103,14 @@ final class TranslationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(store.favorites().map(\.sourceText), ["fav-new", "fav-old"])
     }
 
-    func testToggleFavoriteFlips() throws {
+    func testSetFavoriteOnSingleRecordRun() throws {
         let (store, container) = try makeStore()
         try insert(container, text: "a", at: 100)
         let row = try XCTUnwrap(store.recent(limit: 1).first)
         XCTAssertFalse(row.isFavorite)
-        store.toggleFavorite(row)
+        store.setFavorite([row], to: true)
         XCTAssertTrue(try XCTUnwrap(store.recent(limit: 1).first).isFavorite)
-        store.toggleFavorite(row)
+        store.setFavorite([row], to: false)
         XCTAssertFalse(try XCTUnwrap(store.recent(limit: 1).first).isFavorite)
     }
 
@@ -118,7 +118,7 @@ final class TranslationHistoryStoreTests: XCTestCase {
         let (store, container) = try makeStore()
         try insert(container, text: "a", at: 100)
         let row = try XCTUnwrap(store.recent(limit: 1).first)
-        store.delete(row)
+        store.delete([row])
         XCTAssertTrue(store.recent(limit: 10).isEmpty)
         XCTAssertTrue(try container.mainContext.fetch(FetchDescriptor<TranslationRecord>()).isEmpty)
     }
@@ -230,11 +230,11 @@ final class TranslationHistoryStoreTests: XCTestCase {
         let afterRecord = store.revision
         let row = try XCTUnwrap(store.recent(limit: 1).first)
 
-        store.toggleFavorite(row)
+        store.setFavorite([row], to: !row.isFavorite)
         XCTAssertGreaterThan(store.revision, afterRecord)
 
         let afterFavorite = store.revision
-        store.delete(row)
+        store.delete([row])
         XCTAssertGreaterThan(store.revision, afterFavorite)
 
         let afterDelete = store.revision

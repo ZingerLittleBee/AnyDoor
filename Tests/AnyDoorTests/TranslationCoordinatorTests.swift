@@ -6,16 +6,13 @@ final class TranslationCoordinatorTests: XCTestCase {
     // A fake provider that replays a fixed chunk script (optionally throwing).
     private struct ScriptedProvider: TranslationProvider {
         let id: String
-        let kind: TranslationServiceKind
         let chunks: [TranslationChunk]
         let error: Error?
 
         init(id: String,
-             kind: TranslationServiceKind = .googleFree,
              chunks: [TranslationChunk],
              error: Error? = nil) {
             self.id = id
-            self.kind = kind
             self.chunks = chunks
             self.error = error
         }
@@ -48,7 +45,6 @@ final class TranslationCoordinatorTests: XCTestCase {
 
     private struct NeverFinishingProvider: TranslationProvider {
         let id: String
-        let kind: TranslationServiceKind = .googleFree
         let probe: CancellationProbe
 
         func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationChunk, Error> {
@@ -243,7 +239,7 @@ final class TranslationCoordinatorTests: XCTestCase {
     }
 
     func testManualServiceGetsDeferredResultAndStartsNoTask() async {
-        let scripted = ScriptedProvider(id: "llm", kind: .openAICompatible, chunks: [.final("你好")])
+        let scripted = ScriptedProvider(id: "llm", chunks: [.final("你好")])
         let coordinator = makeManualCoordinator(scripted: scripted)
         coordinator.inputText = "Hello"
         coordinator.target = TranslationLanguage.simplifiedChinese
@@ -257,7 +253,7 @@ final class TranslationCoordinatorTests: XCTestCase {
     }
 
     func testTranslateOneRunsADeferredService() async {
-        let scripted = ScriptedProvider(id: "llm", kind: .openAICompatible, chunks: [.final("你好")])
+        let scripted = ScriptedProvider(id: "llm", chunks: [.final("你好")])
         let coordinator = makeManualCoordinator(scripted: scripted)
         coordinator.inputText = "Hello"
         coordinator.target = TranslationLanguage.simplifiedChinese

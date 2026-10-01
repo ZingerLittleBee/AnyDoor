@@ -8,7 +8,6 @@ import Foundation
 /// auth key (official, required) or the optional DeepLX access token.
 struct DeepLProvider: TranslationProvider {
     let id: String
-    var kind: TranslationServiceKind { .deepl }
 
     private let config: TranslationServiceConfig
     private let apiKey: String

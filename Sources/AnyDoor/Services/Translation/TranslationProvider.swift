@@ -8,8 +8,6 @@ import Foundation
 protocol TranslationProvider: Sendable {
     /// Stable identifier matching the owning `TranslationServiceConfig.id`.
     var id: String { get }
-    /// The backend family this provider implements.
-    var kind: TranslationServiceKind { get }
     /// Translates `request`, streaming chunks until completion. The stream
     /// finishes normally on success or finishes throwing on failure.
     func translate(_ request: TranslationRequest) -> AsyncThrowingStream<TranslationChunk, Error>
@@ -43,30 +41,4 @@ enum TranslationProviderError: Error, Sendable, Equatable {
     /// The backend refused the request because of rate limiting (HTTP 429).
     /// `retryAfter` is the earliest instant a new request may contact the network.
     case rateLimited(retryAfter: Date)
-}
-
-extension AsyncThrowingStream where Element == TranslationChunk, Failure == Error {
-    /// Builds a stream that emits a single `.final` chunk and finishes. Used by
-    /// one-shot (non-streaming) providers so they share the streaming contract.
-    /// When `detected` is non-nil a `.detected` chunk precedes the `.final`.
-    static func single(
-        _ text: String,
-        detected: TranslationLanguage? = nil
-    ) -> AsyncThrowingStream<TranslationChunk, Error> {
-        AsyncThrowingStream { continuation in
-            if let detected {
-                continuation.yield(.detected(detected))
-            }
-            continuation.yield(.final(text))
-            continuation.finish()
-        }
-    }
-
-    /// Builds a stream that immediately finishes by throwing `error`. Used by
-    /// providers that fail before producing any output.
-    static func failing(_ error: Error) -> AsyncThrowingStream<TranslationChunk, Error> {
-        AsyncThrowingStream { continuation in
-            continuation.finish(throwing: error)
-        }
-    }
 }

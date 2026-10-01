@@ -6,7 +6,6 @@ import Foundation
 /// Yields a `.detected` chunk (when reported) plus one `.final` chunk.
 struct BingFreeTranslationProvider: TranslationProvider {
     let id: String
-    var kind: TranslationServiceKind { .bingFree }
 
     private let session: URLSession
 

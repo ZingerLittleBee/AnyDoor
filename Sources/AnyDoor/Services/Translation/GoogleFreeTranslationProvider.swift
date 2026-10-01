@@ -9,7 +9,6 @@ import Foundation
 /// rather than `Codable`.
 struct GoogleFreeTranslationProvider: TranslationProvider {
     let id: String
-    var kind: TranslationServiceKind { .googleFree }
 
     private let session: URLSession
     private let limiter: GoogleFreeRateLimiter

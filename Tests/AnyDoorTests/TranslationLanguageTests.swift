@@ -76,9 +76,9 @@ final class TranslationLanguageTests: XCTestCase {
         XCTAssertNil(TranslationLanguage.fromServiceCode("zz-Unknown", for: .googleFree))
     }
 
-    func testNLLanguageRoundTrip() {
-        XCTAssertEqual(TranslationLanguage.english.nlLanguage?.rawValue, "en")
-        XCTAssertNotNil(TranslationLanguage.simplifiedChinese.nlLanguage)
+    func testNLLanguageRawValues() {
+        XCTAssertEqual(TranslationLanguage.english.nlLanguageRaw, "en")
+        XCTAssertNotNil(TranslationLanguage.simplifiedChinese.nlLanguageRaw)
     }
 
     func testDisplayNameFallsBackToEnglishName() {

@@ -138,11 +138,10 @@ unaffected.
 ### 1. `deepl` provider kind
 
 - Add `case deepl` to `TranslationServiceKind`.
-- New `DeepLProvider: TranslationProvider` (`kind == .deepl`). Like Google/Bing
+- New `DeepLProvider: TranslationProvider` (`.deepl` configs). Like Google/Bing
   it is one-shot: it performs one async `POST`, then yields a `.detected` chunk
   (mapped source language) followed by a single `.final` chunk, or finishes
-  throwing. It does not stream deltas. It builds its own `AsyncThrowingStream`
-  (the static `.single` helper can't run the network call).
+  throwing. It does not stream deltas.
 - Mode selected by `config.baseURL`:
   - empty/nil → **official**: pick host by `:fx` suffix on the keychain key;
     `Authorization: DeepL-Auth-Key`; array `text` body; parse `translations[0]`.

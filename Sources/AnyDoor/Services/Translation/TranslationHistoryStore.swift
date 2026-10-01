@@ -20,7 +20,7 @@ final class TranslationHistoryStore {
 
     @ObservationIgnored private var modelContext: ModelContext?
 
-    /// Bumped on every write (record / toggleFavorite / delete / clear / trim).
+    /// Bumped on every write (record / setFavorite / delete / clear / trim).
     /// SwiftUI views read this in `body` so `@Observable` tracks them as
     /// dependents and re-renders when history mutates; the fetch methods are not
     /// stored properties, so observing this token is what drives the refresh.
@@ -88,20 +88,6 @@ final class TranslationHistoryStore {
             sortBy: [SortDescriptor(\.createdAt, order: .reverse)]
         )
         return (try? modelContext.fetch(descriptor)) ?? []
-    }
-
-    func toggleFavorite(_ record: TranslationRecord) {
-        guard let modelContext else { return }
-        record.isFavorite.toggle()
-        try? modelContext.save()
-        revision &+= 1
-    }
-
-    func delete(_ record: TranslationRecord) {
-        guard let modelContext else { return }
-        modelContext.delete(record)
-        try? modelContext.save()
-        revision &+= 1
     }
 
     /// Set the favorite state of an entire run together (the history card toggles
