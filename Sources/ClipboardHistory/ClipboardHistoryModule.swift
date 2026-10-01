@@ -21,6 +21,16 @@ public actor ClipboardHistoryModule {
     var monitoringConfiguration = ClipboardHistoryMonitoringConfiguration()
     var captureMonitor: ClipboardHistoryCaptureMonitor?
     var isFinalizingClear = false
+    /// Advances when a clear applies, so a passive capture that waited for its
+    /// write turn can tell that the history it read the pasteboard for has
+    /// been cleared since. `isFinalizingClear` already turns away a capture
+    /// served while the clear is in flight; this also covers one that actor
+    /// scheduling only resumes once the clear has finished.
+    var clearEpoch = 0
+    /// Advances when a reset replaces the store, so a writer still waiting
+    /// for its write turn cannot land in the new store (see
+    /// `waitForWriteTurn()`).
+    var storeEpoch = 0
     let selfWriteSuppression: ClipboardHistorySelfWriteSuppression
     let monitorInstrumentation: ClipboardHistoryMonitorInstrumentation
     let captureNoticeHandler: ClipboardHistoryCaptureNoticeHandler?
@@ -47,6 +57,9 @@ public actor ClipboardHistoryModule {
     nonisolated let derivedJobBootstrap =
         ClipboardHistoryDerivedJobBootstrap()
     var searchIndexRebuildTask: Task<SearchIndexRebuildOutcome, Never>?
+    private var nextWriteTurn = 0
+    private var currentWriteTurn = 0
+    private var writeTurnWaiters: [CheckedContinuation<Void, Never>] = []
     var maintenanceTask: Task<Void, Never>?
     nonisolated let maintenanceBootstrap =
         ClipboardHistoryMaintenanceBootstrap()
@@ -438,11 +451,81 @@ extension ClipboardHistoryModule {
         }
     }
 
+    /// The live pool, for reads and for code that has already had its write
+    /// turn. A synchronous write issued from this actor resolves the pool
+    /// through `writableDatabase()` instead, or it parks the actor behind a
+    /// search index rebuild.
     func requiredDatabase() throws -> DatabasePool {
         guard availability == .ready, let database else {
             throw ClipboardHistoryModuleError.storeUnavailable
         }
         return database
+    }
+
+    /// The live pool for a write issued from this actor, resolved once the
+    /// caller's write turn comes up (see `waitForWriteTurn()`).
+    ///
+    /// Retry and close can replace or remove the pool while the caller
+    /// waits, so it is only looked up afterwards, and any other actor state
+    /// read before this call must be read again. A reset meanwhile fails the
+    /// call instead.
+    func writableDatabase() async throws -> DatabasePool {
+        try await waitForWriteTurn()
+        return try requiredDatabase()
+    }
+
+    /// Whether `waitForWriteTurn()` would suspend right now.
+    var mustWaitForWriteTurn: Bool {
+        searchIndexRebuildTask != nil || nextWriteTurn != currentWriteTurn
+    }
+
+    /// Suspends until no search index rebuild is in flight and every writer
+    /// that arrived earlier has had its turn; returns at once otherwise.
+    ///
+    /// A rebuild holds the pool's writer for one long transaction, about a
+    /// minute on a large store. A synchronous `write` issued on this actor
+    /// meanwhile parks the actor's thread on the writer queue, and every read
+    /// queued behind it (history pages, counts, status) stalls with it.
+    /// Waiting here suspends the actor instead, so it keeps serving reads
+    /// from the WAL. Turns are served in arrival order, because a finished
+    /// task resumes everything awaiting it in no particular order and the
+    /// writes queued behind a rebuild would otherwise commit out of order.
+    /// A turn covers the caller's code up to its next suspension point; it
+    /// does not hold later writers back while an asynchronous write is in
+    /// flight.
+    ///
+    /// Throws `storeUnavailable` when a reset replaced the store while the
+    /// caller waited: what it was about to write belongs to the history the
+    /// reset discarded, so it must not land in the store that replaced it.
+    func waitForWriteTurn() async throws {
+        guard mustWaitForWriteTurn else { return }
+        let epoch = storeEpoch
+        let turn = nextWriteTurn
+        nextWriteTurn += 1
+        while true {
+            if let rebuild = searchIndexRebuildTask {
+                _ = await rebuild.value
+                // A retry or reset may have started another one meanwhile.
+                if searchIndexRebuildTask == rebuild {
+                    searchIndexRebuildTask = nil
+                }
+            } else if currentWriteTurn != turn {
+                await withCheckedContinuation { waiter in
+                    writeTurnWaiters.append(waiter)
+                }
+            } else {
+                break
+            }
+        }
+        currentWriteTurn += 1
+        let waiters = writeTurnWaiters
+        writeTurnWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        guard storeEpoch == epoch else {
+            throw ClipboardHistoryModuleError.storeUnavailable
+        }
     }
 
     func closeStoreForTesting() async throws {

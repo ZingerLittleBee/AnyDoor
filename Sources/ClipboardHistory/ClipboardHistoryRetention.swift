@@ -39,14 +39,14 @@ extension ClipboardHistoryModule {
     public func createTagDefinition(
         named name: String,
         assigningTo entryID: ClipboardHistoryEntryID
-    ) throws -> ClipboardHistoryTagAssignment {
+    ) async throws -> ClipboardHistoryTagAssignment {
         let displayName = name.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
         guard !displayName.isEmpty else {
             throw ClipboardHistoryModuleError.invalidTagName
         }
-        let database = try requiredDatabase()
+        let database = try await writableDatabase()
         let storedEntryID = entryID.value.uuidString.lowercased()
         let timestamp = now()
         let result: TagAssignmentMutationResult = try mapMutationStorageFailure {
@@ -154,14 +154,14 @@ extension ClipboardHistoryModule {
     public func renameTagDefinition(
         id: String,
         to name: String
-    ) throws -> ClipboardHistoryTagDefinition {
+    ) async throws -> ClipboardHistoryTagDefinition {
         let displayName = name.trimmingCharacters(
             in: .whitespacesAndNewlines
         )
         guard !displayName.isEmpty else {
             throw ClipboardHistoryModuleError.invalidTagName
         }
-        let database = try requiredDatabase()
+        let database = try await writableDatabase()
         let result: TagDefinitionMutationResult = try mapMutationStorageFailure {
             try database.write { database in
                 guard
@@ -222,8 +222,8 @@ extension ClipboardHistoryModule {
 
     public func deleteTagDefinition(
         id: String
-    ) throws -> ClipboardHistoryTagDefinitionUpdate {
-        let database = try requiredDatabase()
+    ) async throws -> ClipboardHistoryTagDefinitionUpdate {
+        let database = try await writableDatabase()
         let timestamp = now().timeIntervalSince1970
         let result: TagDefinitionUpdateMutationResult = try mapMutationStorageFailure {
             try database.write { database in
@@ -340,8 +340,8 @@ extension ClipboardHistoryModule {
 
     public func replaceTagDefinitions(
         with tagIDs: Set<String>
-    ) throws -> ClipboardHistoryTagDefinitionUpdate {
-        try replaceTagDefinitions(
+    ) async throws -> ClipboardHistoryTagDefinitionUpdate {
+        try await replaceTagDefinitions(
             with: tagIDs.sorted().map {
                 ClipboardHistoryTagDefinition(
                     id: $0,
@@ -353,7 +353,7 @@ extension ClipboardHistoryModule {
 
     public func replaceTagDefinitions(
         with definitions: [ClipboardHistoryTagDefinition]
-    ) throws -> ClipboardHistoryTagDefinitionUpdate {
+    ) async throws -> ClipboardHistoryTagDefinitionUpdate {
         let invalidTagIDs = Set(
             definitions.map(\.id).filter(\.isEmpty)
         )
@@ -376,7 +376,7 @@ extension ClipboardHistoryModule {
         else {
             throw ClipboardHistoryModuleError.invalidTagName
         }
-        let database = try requiredDatabase()
+        let database = try await writableDatabase()
         let timestamp = now().timeIntervalSince1970
         let normalizedDefinitions = zip(definitions, names).map {
             ClipboardHistoryTagDefinition(
@@ -538,7 +538,7 @@ extension ClipboardHistoryModule {
     public func prepareRetentionChange(
         to period: ClipboardHistoryRetentionPeriod
     ) async throws -> ClipboardHistoryRetentionChangePreparation {
-        let database = try requiredDatabase()
+        let database = try await writableDatabase()
         let date = now()
         let preparation: RetentionPreparationResult
         do {
@@ -631,7 +631,7 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.invalidConfirmation
         }
-        let database = try requiredDatabase()
+        let database = try await writableDatabase()
         let date = now()
         let finalizesClear: Bool
         if case .clear = payload.operation {
@@ -717,6 +717,7 @@ extension ClipboardHistoryModule {
         if case .clear = payload.operation,
             case .applied = result.outcome
         {
+            clearEpoch += 1
             await captureMonitor?.establishBaseline()
             isFinalizingClear = false
         }

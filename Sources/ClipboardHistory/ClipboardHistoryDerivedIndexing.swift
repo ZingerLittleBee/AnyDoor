@@ -112,8 +112,17 @@ extension ClipboardHistoryModule {
 
     public func setAutomaticImageTextIndexingEnabled(
         _ enabled: Bool
+    ) async throws {
+        try await setAutomaticImageTextIndexingEnabled(
+            enabled,
+            in: writableDatabase()
+        )
+    }
+
+    private func setAutomaticImageTextIndexingEnabled(
+        _ enabled: Bool,
+        in database: DatabasePool
     ) throws {
-        let database = try requiredDatabase()
         try database.write { database in
             try database.execute(
                 sql: """
@@ -252,7 +261,7 @@ extension ClipboardHistoryModule {
 
     private func runDerivedJobScheduler(token: UUID) async {
         do {
-            try recoverInterruptedDerivedJobs()
+            try await recoverInterruptedDerivedJobs(in: writableDatabase())
         } catch {
             finishDerivedJobScheduler(token: token)
             return
@@ -261,7 +270,11 @@ extension ClipboardHistoryModule {
         while !Task.isCancelled {
             let claim: DerivedJobClaim
             do {
-                guard let next = try claimNextDerivedJob() else {
+                guard
+                    let next = try await claimNextDerivedJob(
+                        in: writableDatabase()
+                    )
+                else {
                     break
                 }
                 claim = next
@@ -277,14 +290,24 @@ extension ClipboardHistoryModule {
                     in: bitmaps
                 )
                 try Task.checkCancellation()
-                try publishDerivedValues(values, for: claim)
+                try await publishDerivedValues(
+                    values,
+                    for: claim,
+                    in: writableDatabase()
+                )
             } catch is CancellationError {
-                try? restoreCancelledDerivedJob(claim)
+                try? await restoreCancelledDerivedJob(
+                    claim,
+                    in: writableDatabase()
+                )
                 activeDerivedJob = nil
                 break
             } catch {
                 do {
-                    try recordDerivedJobFailure(claim)
+                    try await recordDerivedJobFailure(
+                        claim,
+                        in: writableDatabase()
+                    )
                 } catch {
                     activeDerivedJob = nil
                     break
@@ -302,8 +325,12 @@ extension ClipboardHistoryModule {
         activeDerivedJob = nil
     }
 
-    private func recoverInterruptedDerivedJobs() throws {
-        let database = try requiredDatabase()
+    private func recoverInterruptedDerivedJobs(
+        in database: DatabasePool
+    ) throws {
+        // A scheduler cancelled while it waited for its write turn may already
+        // have a successor, whose running claims this must not hand back.
+        try Task.checkCancellation()
         try database.write { database in
             try database.execute(
                 sql: """
@@ -329,8 +356,10 @@ extension ClipboardHistoryModule {
     /// capture's QR code from queueing behind its own OCR job. The scheduler
     /// is serial, so an OCR job that is already running still delays the QR
     /// jobs queued behind it.
-    private func claimNextDerivedJob() throws -> DerivedJobClaim? {
-        let database = try requiredDatabase()
+    private func claimNextDerivedJob(
+        in database: DatabasePool
+    ) throws -> DerivedJobClaim? {
+        try Task.checkCancellation()
         let timestamp = now().timeIntervalSince1970
         return try database.write { database in
             guard let row = try Row.fetchOne(
@@ -431,9 +460,10 @@ extension ClipboardHistoryModule {
 
     private func publishDerivedValues(
         _ values: [String],
-        for claim: DerivedJobClaim
+        for claim: DerivedJobClaim,
+        in database: DatabasePool
     ) throws {
-        let database = try requiredDatabase()
+        try Task.checkCancellation()
         try database.write { database in
             guard try derivedJobMatches(
                 claim,
@@ -511,9 +541,9 @@ extension ClipboardHistoryModule {
     }
 
     private func recordDerivedJobFailure(
-        _ claim: DerivedJobClaim
+        _ claim: DerivedJobClaim,
+        in database: DatabasePool
     ) throws {
-        let database = try requiredDatabase()
         try database.write { database in
             guard try derivedJobMatches(
                 claim,
@@ -546,9 +576,9 @@ extension ClipboardHistoryModule {
     }
 
     private func restoreCancelledDerivedJob(
-        _ claim: DerivedJobClaim
+        _ claim: DerivedJobClaim,
+        in database: DatabasePool
     ) throws {
-        let database = try requiredDatabase()
         try database.write { database in
             try database.execute(
                 sql: """

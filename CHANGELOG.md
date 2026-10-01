@@ -21,6 +21,10 @@ versioning.
   instead of dropping it silently. Repeated refusals within 30 seconds show a
   single notice, and a failed history write now says the copy wasn't saved
   instead of showing a generic error.
+- The menu-bar history popovers no longer wait for history-wide totals they
+  never show, and background work no longer stalls Clipboard History while its
+  search index is being rebuilt, which could keep a popover on a spinner for
+  close to a minute.
 
 ## [4.2.5] - 2026-09-30
 
