@@ -149,7 +149,7 @@ Sources/AnyDoor/
     │                manual backup, links to docs/config-sync.md) / GeneralSettingsView
     ├── Translation  TranslationWindowController / TranslationView / AppleTranslationCard /
     │                TranslationHistoryView / LanguageBar / TranslationServiceCard
-    └── Common       Toast* / UpdateBannerView / LiquidGlassCompatibility / ScreenshotPreviewWindow
+    └── Common       Toast* / UpdateBannerView / LiquidGlassCompatibility
 ```
 
 ## Architecture Notes
