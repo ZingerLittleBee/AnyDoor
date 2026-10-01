@@ -889,8 +889,8 @@ short-circuit, so each needs its own case.
 
 ### 12.12 Every lifecycle state — P0
 
-`ClipboardHistoryLifecycleState` has seven cases. Each renders somewhere in
-Settings → Clipboard and in the wall, and three of them are dead ends if the
+`ClipboardHistoryLifecycleState` has eight cases. Each renders somewhere in
+Settings → Clipboard and in the wall, and four of them are dead ends if the
 recovery affordance is wrong.
 
 | # | State | How to reach it | Pass |
@@ -902,6 +902,7 @@ recovery affordance is wrong.
 | 12.12.5 | **`storeUnavailable`** | Corrupt the database, or delete the Keychain item | Requires action: retry **and** a confirmed reset. Never self-heals by wiping. |
 | 12.12.6 | **`migrationFailed`** | Make the migration fail (unwritable target directory) | Legacy data intact, a retry path exists, and the app is still usable for everything else. |
 | 12.12.7 | **`resetFailed`** | Make the confirmed reset itself fail (read-only store directory) | **Not a dead end**: the state is reported, retry is possible, and the app does not loop the reset dialog. |
+| 12.12.8 | **`migrationBlocked`** | Row 1.6.7 | **Not a dead end**: Settings names the cause and offers Retry and the confirmed discard, never Reset. The confirmation names the entry count, and confirming migrates the pre-v2 history without those entries. |
 
 The `paused` ⇄ `storeUnavailable` distinction is the one to get right — a
 temporary keychain lock presented as "your history is unavailable, reset?" will
