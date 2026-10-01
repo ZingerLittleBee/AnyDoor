@@ -23,13 +23,4 @@ final class HostsBackupStoreTests: XCTestCase {
         XCTAssertTrue(store.hasBackup)
         XCTAssertEqual(store.originalContents(), "127.0.0.1 localhost\n")
     }
-
-    func test_restoreFirstRunBackup_writesSnapshotThroughWriter() async throws {
-        let dir = tempDir()
-        let store = HostsBackupStore(backupDirectory: dir, readLiveHosts: { "ORIGINAL\n" })
-        try store.ensureOriginalBackup()
-        let mock = MockHostsWriter()
-        try await store.restoreFirstRunBackup(using: mock)
-        XCTAssertEqual(mock.lastWritten, "ORIGINAL\n")
-    }
 }

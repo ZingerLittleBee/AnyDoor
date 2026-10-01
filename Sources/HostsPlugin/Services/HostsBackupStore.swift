@@ -1,7 +1,8 @@
 import Foundation
 
-/// One-time snapshot of the user's original `/etc/hosts`, plus restore.
-/// Snapshot is stored in App Support; restore writes back through a HostsWriter.
+/// One-time snapshot of the user's original `/etc/hosts`, stored in App Support.
+/// `HostsManager.restoreFirstRunBackup()` reads it via `originalContents()` and
+/// writes it back through the current `HostsWriter`.
 struct HostsBackupStore {
     private let backupURL: URL
     private let readLiveHosts: () throws -> String
@@ -38,14 +39,5 @@ struct HostsBackupStore {
         guard !hasBackup else { return }
         let live = try readLiveHosts()
         try live.data(using: .utf8)?.write(to: backupURL)
-    }
-
-    /// Overwrite `/etc/hosts` with the first-run snapshot (destructive; the UI
-    /// must confirm before calling this).
-    func restoreFirstRunBackup(using writer: HostsWriter) async throws {
-        guard let original = originalContents() else {
-            throw HostsWriterError.writeFailed("no backup available")
-        }
-        try await writer.write(original)
     }
 }

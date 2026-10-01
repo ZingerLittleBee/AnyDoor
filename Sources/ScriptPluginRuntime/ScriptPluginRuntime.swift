@@ -87,10 +87,6 @@ public final class ScriptPluginRuntime {
         packages.removeValue(forKey: id)
     }
 
-    public var loadedIDs: [ScriptPluginID] {
-        packages.keys.sorted()
-    }
-
     public func isLoaded(_ id: ScriptPluginID) -> Bool {
         packages[id] != nil
     }
@@ -226,16 +222,6 @@ public final class ScriptPluginRuntime {
         var arguments: [ScriptValue] = [.string(rowID), .string(actionID)]
         if let argument { arguments.append(.string(argument)) }
         return try await context(for: pluginID).invoke("action", arguments: arguments)
-    }
-
-    /// Generic entry-point invocation, for entry points beyond the three the
-    /// palette uses today.
-    public func invoke(
-        pluginID: ScriptPluginID,
-        entryPoint: String,
-        arguments: [ScriptValue] = []
-    ) async throws -> ScriptValue {
-        try await context(for: pluginID).invoke(entryPoint, arguments: arguments)
     }
 
     // MARK: - Internals

@@ -50,12 +50,6 @@ final class PluginRegistry {
 
     private(set) var plugins: [any NativePlugin] = []
 
-    /// The installed Native Plugin ids. Backed by the kind-agnostic
-    /// `PluginLifecycleCore` install-state set, mapped into the typed identity.
-    var installedIDs: Set<NativePluginID> {
-        Set(core.installedIDStrings.map(NativePluginID.init(rawValue:)))
-    }
-
     @ObservationIgnored private let panelStore: PanelStore
     @ObservationIgnored private let paletteExtensions: CommandPaletteExtensions
     @ObservationIgnored private let hotkeyCoordinator: HotkeyCoordinator

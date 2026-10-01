@@ -772,7 +772,8 @@ final class PluginRegistryTests: XCTestCase {
         try await harness.registry.reconcileAfterImport()
 
         XCTAssertEqual(lifecycle, ["deactivate.old", "activate.new"])
-        XCTAssertEqual(harness.registry.installedIDs, Set([newID]))
+        XCTAssertTrue(harness.registry.isInstalled(newID))
+        XCTAssertFalse(harness.registry.isInstalled(oldID))
         XCTAssertEqual(harness.snapshotRecorder.updateCount, 2,
                        "each async lifecycle transition must publish immediately")
         XCTAssertEqual(harness.paletteRefreshRecorder.refreshCount, 2)

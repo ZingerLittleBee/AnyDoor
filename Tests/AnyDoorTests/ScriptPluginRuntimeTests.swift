@@ -709,13 +709,13 @@ final class ScriptPluginRuntimeTests: XCTestCase {
         )
         let runtime = makeRuntime()
         let id = try runtime.load(fromDirectory: directory)
-        XCTAssertEqual(runtime.loadedIDs, [id])
+        XCTAssertTrue(runtime.isLoaded(id))
 
         XCTAssertThrowsError(try runtime.load(fromDirectory: other)) { error in
             XCTAssertEqual(error as? ScriptPluginError, .duplicateID(id))
         }
         // The already-loaded plugin is untouched.
-        XCTAssertEqual(runtime.loadedIDs, [id])
+        XCTAssertTrue(runtime.isLoaded(id))
     }
 
     func testInvokingUnloadedPluginThrows() async {

@@ -332,12 +332,12 @@ All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
   snapshots are still published later in normal app startup so bootstrap
   cannot start the event tap early.
 - **Install** (`PluginRegistry.install(id)`, idempotent): `activate()` →
-  insert into `installedIDs` → persist → register providers and palette
-  contributions → `PanelStore.rebuild()` → `HotkeyCoordinator.refresh()`.
-  Everything appears without relaunch.
+  insert into `PluginLifecycleCore.installedIDStrings` → persist → register
+  providers and palette contributions → `PanelStore.rebuild()` →
+  `HotkeyCoordinator.refresh()`. Everything appears without relaunch.
 - **Uninstall** (`uninstall(id) async throws`, idempotent, re-entrancy
   guarded by `transitioningIDs`): `try await plugin.deactivate()` **first**;
-  only on success remove from `installedIDs`, persist,
+  only on success remove from `installedIDStrings`, persist,
   unregister its providers and palette contributions, then rebuild the panel
   and refresh hotkeys plus any visible palette. A deactivate failure propagates
   to the UI and nothing changed; a concurrent transition for the same plugin
