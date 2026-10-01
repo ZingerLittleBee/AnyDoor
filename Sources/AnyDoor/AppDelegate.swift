@@ -14,7 +14,15 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule: ClipboardHistoryModule
-    let clipboardProduction: ClipboardProductionAdapter
+    /// Writes to history only once the lifecycle admits explicit captures.
+    @MainActor lazy var clipboardProduction = {
+        let lifecycle = clipboardHistoryLifecycle
+        return ClipboardProductionAdapter(
+            module: clipboardHistoryModule,
+            selfWrites: clipboardHistoryModule.pasteboardSelfWrites,
+            admitsHistoryWrite: { lifecycle.admitsExplicitCaptures }
+        )
+    }()
     private let persistenceBootstrap: AppPersistenceBootstrap
     @MainActor lazy var clipboardHistoryLifecycle = {
         let appSupport = FileManager.default.urls(
@@ -64,10 +72,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         )
         self.clipboardHistoryModule = clipboardHistoryModule
-        clipboardProduction = ClipboardProductionAdapter(
-            module: clipboardHistoryModule,
-            selfWrites: clipboardHistoryModule.pasteboardSelfWrites
-        )
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)

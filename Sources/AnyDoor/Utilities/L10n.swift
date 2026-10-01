@@ -326,6 +326,16 @@ enum L10n {
         case settingsClipboardRetentionAffected = "settings.clipboard.retention.affected"
         case settingsClipboardMigrating = "settings.clipboard.state.migrating"
         case settingsClipboardMigrationFailed = "settings.clipboard.state.migrationFailed"
+        case settingsClipboardMigrationBlocked =
+            "settings.clipboard.state.migrationBlocked"
+        case settingsClipboardDiscardAndMigrate =
+            "settings.clipboard.discardAndMigrate"
+        case settingsClipboardDiscardAndMigrateTitle =
+            "settings.clipboard.discardAndMigrate.title"
+        case settingsClipboardDiscardAndMigrateMessage =
+            "settings.clipboard.discardAndMigrate.message"
+        case settingsClipboardDiscardAndMigrateConfirm =
+            "settings.clipboard.discardAndMigrate.confirm"
         case settingsClipboardStoreUnavailable = "settings.clipboard.state.storeUnavailable"
         case settingsClipboardStorePaused = "settings.clipboard.state.paused"
         case settingsClipboardRelocationFailed =

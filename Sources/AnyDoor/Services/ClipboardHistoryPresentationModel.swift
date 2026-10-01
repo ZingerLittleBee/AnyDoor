@@ -295,6 +295,7 @@ enum ClipboardHistoryActionFailure: Equatable {
              .invalidConfirmation,
              .unsupportedLegacyTransferVersion,
              .legacyMigrationFailed,
+             .legacyMigrationStoreNotEmpty,
              .invalidLegacyFileRestore,
              .legacyFileRestoreCollision,
              .legacyFileRestoreFailed,

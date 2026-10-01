@@ -43,6 +43,7 @@ enum ClipboardHistoryFaultPoint: Hashable, Sendable {
     case payloadDeletion
     case orphanReconciliation
     case legacyMigrationBeforePublication
+    case legacyMigrationDuringDiscard
     case legacyMigrationAfterPublication
     case legacyCleanupBeforeDelete
     case legacyCleanupAfterDelete

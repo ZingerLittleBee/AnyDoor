@@ -582,6 +582,151 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         )
     }
 
+    /// v1 copied a symbolic link as the link itself, so the pre-v2 folder can
+    /// hold links, and entries that are not regular files at all. The snapshot
+    /// takes each one as it is, never replaces an entry it already holds, and
+    /// deleting the snapshot removes the links, never what they point at.
+    func testSnapshotCarriesSymbolicLinksWithoutFollowingThem() throws {
+        let fileManager = FileManager.default
+        let root = fileManager.temporaryDirectory.appendingPathComponent(
+            "AnyDoor-LegacyLinks-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        defer {
+            try? fileManager.removeItem(at: root)
+        }
+        // Opening the snapshot copies the store file but never reads it here.
+        let storeURL = root.appendingPathComponent("AnyDoor.store")
+        try Data("legacy store".utf8).write(to: storeURL)
+        let outside = root.appendingPathComponent("Outside", isDirectory: true)
+        let outsideFile = outside.appendingPathComponent("target.txt")
+        let outsideFolder = outside.appendingPathComponent(
+            "folder",
+            isDirectory: true
+        )
+        let fileInOutsideFolder = outsideFolder.appendingPathComponent(
+            "inner.txt"
+        )
+        try fileManager.createDirectory(
+            at: outsideFolder,
+            withIntermediateDirectories: true
+        )
+        try Data("outside".utf8).write(to: outsideFile)
+        try Data("inside".utf8).write(to: fileInOutsideFolder)
+        let legacyFolder = root.appendingPathComponent(
+            "ClipboardHistory",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: legacyFolder.appendingPathComponent(
+                "folder-copy",
+                isDirectory: true
+            ),
+            withIntermediateDirectories: true
+        )
+        try Data("legacy payload".utf8).write(
+            to: legacyFolder.appendingPathComponent("owned-copy")
+        )
+        try fileManager.createSymbolicLink(
+            at: legacyFolder.appendingPathComponent("file-link"),
+            withDestinationURL: outsideFile
+        )
+        try fileManager.createSymbolicLink(
+            at: legacyFolder.appendingPathComponent("folder-link"),
+            withDestinationURL: outsideFolder
+        )
+        try fileManager.createSymbolicLink(
+            atPath: legacyFolder.appendingPathComponent("dangling-link").path,
+            withDestinationPath: "missing"
+        )
+        try ClipboardHistoryLegacySource.prepareSnapshotIfNeeded(
+            applicationSupportDirectory: root,
+            productionStoreURL: storeURL
+        )
+
+        let source = try ClipboardHistoryLegacySource.openForMigration(
+            applicationSupportDirectory: root,
+            productionStoreURL: storeURL,
+            payloadDirectory: legacyFolder
+        )
+
+        let snapshotPayloads = ClipboardHistoryLegacySource
+            .snapshotPayloadDirectory(in: root)
+        XCTAssertEqual(
+            try fileManager.contentsOfDirectory(atPath: legacyFolder.path),
+            []
+        )
+        XCTAssertEqual(
+            Set(
+                try fileManager.contentsOfDirectory(
+                    atPath: snapshotPayloads.path
+                )
+            ),
+            [
+                "owned-copy", "folder-copy", "file-link", "folder-link",
+                "dangling-link",
+            ]
+        )
+        for (name, destination) in [
+            ("file-link", outsideFile.path),
+            ("folder-link", outsideFolder.path),
+            ("dangling-link", "missing"),
+        ] {
+            XCTAssertEqual(
+                try fileManager.destinationOfSymbolicLink(
+                    atPath: snapshotPayloads.appendingPathComponent(name).path
+                ),
+                destination
+            )
+        }
+
+        // A link whose target is gone still holds its name in the snapshot.
+        let collision = legacyFolder.appendingPathComponent("dangling-link")
+        try Data("newer".utf8).write(to: collision)
+        XCTAssertThrowsError(
+            try ClipboardHistoryLegacySource.openForMigration(
+                applicationSupportDirectory: root,
+                productionStoreURL: storeURL,
+                payloadDirectory: legacyFolder
+            )
+        ) { error in
+            guard
+                case .incompleteSnapshot? =
+                    error as? ClipboardHistoryLegacySourceError
+            else {
+                return XCTFail("Expected an incomplete snapshot, got \(error)")
+            }
+        }
+        XCTAssertEqual(
+            try fileManager.destinationOfSymbolicLink(
+                atPath: snapshotPayloads.appendingPathComponent(
+                    "dangling-link"
+                ).path
+            ),
+            "missing"
+        )
+        XCTAssertEqual(try Data(contentsOf: collision), Data("newer".utf8))
+        try fileManager.removeItem(at: collision)
+
+        try source.finishMigration()
+        XCTAssertFalse(
+            fileManager.fileExists(
+                atPath: ClipboardHistoryLegacySource.snapshotDirectory(
+                    in: root
+                ).path
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: outsideFile), Data("outside".utf8))
+        XCTAssertEqual(
+            try Data(contentsOf: fileInOutsideFolder),
+            Data("inside".utf8)
+        )
+    }
+
     func testAdapterReadsVersionedTransferWithoutMutatingLegacyState()
         throws
     {

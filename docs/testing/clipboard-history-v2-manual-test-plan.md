@@ -164,6 +164,7 @@ The contract decides per member whether the legacy copy can be retired.
 | 1.3.8 | **(must not) auto-bind** | For 1.3.7, later create a file at that exact path. The entry **(must not)** bind to it. |
 | 1.3.9 | Mixed collection | One entry mixing ordinary, legacy-unverified, unavailable, and owned members renders and lists all members in order. |
 | 1.3.10 | No discard confirmation | Migration keeps unresolvable records without prompting. |
+| 1.3.11 | Copied **symbolic link**: a file row whose named copy in `ClipboardHistory/` is a link (v1 copied links as links) | Migration completes; the member is legacy-unverified while its original path resolves, unavailable otherwise. The link's target **(must not)** be read, moved or deleted; it is intact after the snapshot is removed. |
 
 ### 1.4 Restore File… / Restore Files…
 
@@ -182,6 +183,7 @@ The contract decides per member whether the legacy copy can be retired.
 | 1.5.2 | Force-quit **after publish, before cleanup** | Relaunch: no re-migration, no duplicates, snapshot removed. |
 | 1.5.3 | Pre-publication failure | Legacy data left fully intact. |
 | 1.5.4 | Plaintext cleanup | After success, no plaintext payloads remain; `grep -r` a canary across the store root returns nothing. |
+| 1.5.5 | Explicit capture while the migration is pending or failed | Make the migration fail (for example, remove read permission from the snapshot store, and restore it before retrying). While Settings shows the failure, take a screenshot, an OCR, a QR scan and a picked color: the pasteboard and saved files work as usual, and **(must not)** add history entries. Retry then migrates every legacy row, and captures after that are recorded. |
 
 ### 1.6 Store relocation out of `ClipboardHistory/` (ADR-0011 amendment)
 
@@ -219,6 +221,7 @@ Afterwards: `security delete-keychain "$KEYCHAIN"` and
 | 1.6.4 | After 1.6.3, quit. Reset is offered only for Store Unavailable, so delete the key from the disposable keychain: `security delete-generic-password -s dev.bybee.AnyDoor.ClipboardHistory -a device-master-key-v1 "$KEYCHAIN"`. Launch the fixed build, then Settings → Clipboard → Reset Clipboard History, confirm. | Before the reset, Settings shows the Store Unavailable message with Retry and Reset. Afterwards the history is empty and ready, `ClipboardHistoryV2.displaced/` is gone, and a new key exists. |
 | 1.6.5 | Fresh disposable profile: run 4.2.5, copy, and keep it running. Launch the fixed build alongside it. | Clipboard Settings shows the "couldn't move its storage" message with Retry and **no** Reset; the wall shows "temporarily unavailable". Nothing is created at `ClipboardHistoryV2/`. Quit 4.2.5, press Retry: history appears. |
 | 1.6.6 | Fresh disposable profile: run 4.2.5, copy, quit. `chflags uchg "$STORE/ClipboardHistory"` (it can no longer be renamed), launch the fixed build. | Same message as 1.6.5, no Reset, and `ClipboardHistory/` unchanged. `chflags nouchg "$STORE/ClipboardHistory"`, press Retry: history appears. |
+| 1.6.7 | Fresh disposable profile: run 4.1.1, copy text and an image, quit. `chmod 000 "$STORE/AnyDoor.store"` so 4.2.5 cannot take its migration snapshot, then run 4.2.5: Settings shows the migration failure. Take a screenshot and an OCR (4.2.5 records both), quit, `chmod 644 "$STORE/AnyDoor.store"`, and launch the fixed build. | Settings → Clipboard says the migration can't finish because entries were added during the upgrade, with Retry and Discard Added Entries and Migrate… and **no** Reset; the wall shows only the two captures. Retry keeps the message. The confirmation names 2 entries, and Cancel changes nothing. After confirming, the 4.1.1 text and image appear (the image previews) without the two captures, the message is gone, `ClipboardHistoryLegacyMigration/` is removed, and the key's creation date is unchanged. |
 
 ---
 
@@ -886,8 +889,8 @@ short-circuit, so each needs its own case.
 
 ### 12.12 Every lifecycle state — P0
 
-`ClipboardHistoryLifecycleState` has seven cases. Each renders somewhere in
-Settings → Clipboard and in the wall, and three of them are dead ends if the
+`ClipboardHistoryLifecycleState` has eight cases. Each renders somewhere in
+Settings → Clipboard and in the wall, and four of them are dead ends if the
 recovery affordance is wrong.
 
 | # | State | How to reach it | Pass |
@@ -899,6 +902,7 @@ recovery affordance is wrong.
 | 12.12.5 | **`storeUnavailable`** | Corrupt the database, or delete the Keychain item | Requires action: retry **and** a confirmed reset. Never self-heals by wiping. |
 | 12.12.6 | **`migrationFailed`** | Make the migration fail (unwritable target directory) | Legacy data intact, a retry path exists, and the app is still usable for everything else. |
 | 12.12.7 | **`resetFailed`** | Make the confirmed reset itself fail (read-only store directory) | **Not a dead end**: the state is reported, retry is possible, and the app does not loop the reset dialog. |
+| 12.12.8 | **`migrationBlocked`** | Row 1.6.7 | **Not a dead end**: Settings names the cause and offers Retry and the confirmed discard, never Reset. The confirmation names the entry count, and confirming migrates the pre-v2 history without those entries. |
 
 The `paused` ⇄ `storeUnavailable` distinction is the one to get right — a
 temporary keychain lock presented as "your history is unavailable, reset?" will

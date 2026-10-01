@@ -326,12 +326,15 @@ final class CaptureCoordinator {
             let recordedID = HistoryIDBox()
             if let clipboardProduction = self.clipboardProduction {
                 do {
+                    // No entry while Clipboard History has not finished its
+                    // migration; the overlay's delete then removes only the
+                    // saved file.
                     recordedID.value = try await clipboardProduction
                         .produceScreenshot(
                             image: image,
                             png: png,
                             copyToPasteboard: autoCopy
-                        ).capture.entryID
+                        ).capture?.entryID
                 } catch {
                     ToastPresenter.shared.show(
                         .failure(L(.captureToastFailed))

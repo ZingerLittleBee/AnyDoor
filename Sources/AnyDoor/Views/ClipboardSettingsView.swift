@@ -8,6 +8,8 @@ struct ClipboardSettingsView: View {
     let presentation: SettingsPresentation
     @State private var installedApps: [InstalledApp] = []
     @State private var showsResetConfirmation = false
+    /// The entry count the discard confirmation shows, and confirms.
+    @State private var discardConfirmationCount: Int?
 
     init(
         module: ClipboardHistoryModule,
@@ -204,6 +206,24 @@ struct ClipboardSettingsView: View {
         } message: {
             LocalizedText(.settingsClipboardResetMessage)
         }
+        .alert(
+            L(.settingsClipboardDiscardAndMigrateTitle),
+            isPresented: Binding(
+                get: { discardConfirmationCount != nil },
+                set: { if !$0 { discardConfirmationCount = nil } }
+            ),
+            presenting: discardConfirmationCount
+        ) { entryCount in
+            Button(L(.settingsPanelCancel), role: .cancel) {}
+            Button(
+                L(.settingsClipboardDiscardAndMigrateConfirm),
+                role: .destructive
+            ) {
+                model.discardBlockingEntriesConfirmed(entryCount: entryCount)
+            }
+        } message: { entryCount in
+            Text(L(.settingsClipboardDiscardAndMigrateMessage, entryCount))
+        }
     }
 
     @ViewBuilder
@@ -217,14 +237,12 @@ struct ClipboardSettingsView: View {
                     LocalizedText(.settingsClipboardMigrating)
                 }
             }
-        case .migrationFailed, .storeUnavailable, .resetFailed, .paused:
+        case .migrationFailed, .migrationBlocked, .storeUnavailable,
+            .resetFailed, .paused:
             if let recovery = ClipboardLifecycleRecovery(
                 state: model.lifecycle.state
             ) {
-                recoverySection(
-                    message: recovery.message,
-                    includesReset: recovery.includesReset
-                )
+                recoverySection(recovery)
             }
         case .ready:
             EmptyView()
@@ -232,22 +250,29 @@ struct ClipboardSettingsView: View {
     }
 
     private func recoverySection(
-        message: L10n.Key,
-        includesReset: Bool
+        _ recovery: ClipboardLifecycleRecovery
     ) -> some View {
         Section {
-            LocalizedText(message)
+            LocalizedText(recovery.message)
                 .foregroundStyle(.secondary)
             HStack {
                 Button(L(.commandPaletteRetry)) {
                     model.retryLifecycle()
                 }
-                if includesReset {
+                if recovery.includesReset {
                     Button(
                         L(.settingsClipboardReset),
                         role: .destructive
                     ) {
                         showsResetConfirmation = true
+                    }
+                }
+                if let entryCount = recovery.discardableEntryCount {
+                    Button(
+                        L(.settingsClipboardDiscardAndMigrate),
+                        role: .destructive
+                    ) {
+                        discardConfirmationCount = entryCount
                     }
                 }
             }

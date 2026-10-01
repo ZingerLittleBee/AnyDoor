@@ -1,3 +1,4 @@
+import AppKit
 @testable import ClipboardHistory
 import Foundation
 import os
@@ -108,7 +109,221 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
         try await module.closeStoreForTesting()
     }
 
+    /// v1 copied a symbolic link as the link itself, so the pre-v2 folder can
+    /// hold links beside regular payloads. Such a copy holds no captured
+    /// bytes: the upgrade still finishes, the file migrates as unavailable,
+    /// and nothing a link points at is read, moved or deleted.
+    func testPreV2UpgradeCarriesCopiedSymbolicLinksAsUnavailableFiles()
+        async throws
+    {
+        let fileManager = FileManager.default
+        let root = try makeApplicationDataDirectory()
+        let png = try XCTUnwrap(Data(base64Encoded: Self.pngBase64))
+        let imageName = "\(UUID().uuidString).png"
+        let outside = root.deletingLastPathComponent().appendingPathComponent(
+            "Outside",
+            isDirectory: true
+        )
+        let outsideFile = outside.appendingPathComponent("target.txt")
+        let outsideFolder = outside.appendingPathComponent(
+            "folder",
+            isDirectory: true
+        )
+        let fileInOutsideFolder = outsideFolder.appendingPathComponent(
+            "inner.txt"
+        )
+        try fileManager.createDirectory(
+            at: outsideFolder,
+            withIntermediateDirectories: true
+        )
+        try Data("outside".utf8).write(to: outsideFile)
+        try Data("inside".utf8).write(to: fileInOutsideFolder)
+        // The links the user copied, and v1's copies of them.
+        let fileShortcut = outside.appendingPathComponent("file-shortcut")
+        let folderShortcut = outside.appendingPathComponent("folder-shortcut")
+        try fileManager.createSymbolicLink(
+            at: fileShortcut,
+            withDestinationURL: outsideFile
+        )
+        try fileManager.createSymbolicLink(
+            at: folderShortcut,
+            withDestinationURL: outsideFolder
+        )
+        let fileLinkCopy = UUID().uuidString
+        let folderLinkCopy = UUID().uuidString
+        let fileRowID = UUID()
+        try writeLegacyStore(
+            in: root,
+            imageName: imageName,
+            fileRow: LegacyFileRow(
+                id: fileRowID,
+                members: [
+                    ClipboardFileEntry(
+                        storedName: fileLinkCopy,
+                        originalName: fileShortcut.lastPathComponent,
+                        originalPath: fileShortcut.path
+                    ),
+                    ClipboardFileEntry(
+                        storedName: folderLinkCopy,
+                        originalName: folderShortcut.lastPathComponent,
+                        originalPath: folderShortcut.path
+                    ),
+                ]
+            )
+        )
+        try writePreV2Payload(png, named: imageName, in: root)
+        let legacyFolder = ClipboardHistoryModule.legacyPayloadDirectory(
+            in: root
+        )
+        try fileManager.createSymbolicLink(
+            at: legacyFolder.appendingPathComponent(fileLinkCopy),
+            withDestinationURL: outsideFile
+        )
+        try fileManager.createSymbolicLink(
+            at: legacyFolder.appendingPathComponent(folderLinkCopy),
+            withDestinationURL: outsideFolder
+        )
+        let module = makeModule(
+            in: root,
+            keyStore: RelocationLifecycleKeyStore(key: nil)
+        )
+
+        let lifecycle = try await runProductionLifecycle(
+            module: module,
+            in: root
+        )
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        try await assertLegacyHistoryMigrated(
+            into: module,
+            in: root,
+            png: png,
+            entryCount: 3
+        )
+        let files = try await module.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(fileRowID)
+        )
+        XCTAssertEqual(
+            files.members.map(\.state),
+            [.unavailable, .unavailable]
+        )
+        XCTAssertFalse(
+            fileManager.fileExists(
+                atPath: ClipboardHistoryLegacySource.snapshotDirectory(
+                    in: root
+                ).path
+            )
+        )
+        XCTAssertEqual(try Data(contentsOf: outsideFile), Data("outside".utf8))
+        XCTAssertEqual(
+            try Data(contentsOf: fileInOutsideFolder),
+            Data("inside".utf8)
+        )
+        XCTAssertEqual(
+            try fileManager.destinationOfSymbolicLink(
+                atPath: fileShortcut.path
+            ),
+            outsideFile.path
+        )
+        XCTAssertEqual(
+            try fileManager.destinationOfSymbolicLink(
+                atPath: folderShortcut.path
+            ),
+            outsideFolder.path
+        )
+        await lifecycle.stop()
+        try await module.closeStoreForTesting()
+    }
+
+    /// A 4.2 release recorded explicit captures in its store while the
+    /// migration had not run, and the migration refuses a store with
+    /// entries. The next launch reports the migration blocked by those
+    /// entries; confirming their discard migrates the pre-v2 history with
+    /// every image's content and completes the cutover under the same key.
+    func testConfirmedDiscardFinishesAnUpgradeBlockedByEarlyCaptures()
+        async throws
+    {
+        let root = try makeApplicationDataDirectory()
+        let png = try XCTUnwrap(Data(base64Encoded: Self.pngBase64))
+        let imageName = "\(UUID().uuidString).png"
+        try writeLegacyStore(in: root, imageName: imageName)
+        try writePreV2Payload(png, named: imageName, in: root)
+        let key = Data(repeating: 0x5A, count: 32)
+        let keyStore = RelocationLifecycleKeyStore(key: key)
+        let olderRelease = ClipboardHistoryModule(
+            testingStoreRoot: ClipboardHistoryModule.legacyPayloadDirectory(
+                in: root
+            ),
+            keyStore: keyStore
+        )
+        let pasteboard = NSPasteboard(
+            name: NSPasteboard.Name(
+                "AnyDoor-BlockedUpgrade-\(UUID().uuidString)"
+            )
+        )
+        defer { pasteboard.releaseGlobally() }
+        // 4.2 wrote every explicit capture to history, whatever the state of
+        // the migration.
+        let olderCaptures = ClipboardProductionAdapter(
+            module: olderRelease,
+            selfWrites: olderRelease.pasteboardSelfWrites,
+            admitsHistoryWrite: { true },
+            pasteboard: pasteboard
+        )
+        let recognized = try await olderCaptures.produceOCR(
+            "recognized during the upgrade"
+        )
+        let screenshot = try await olderCaptures.produceScreenshot(
+            image: try XCTUnwrap(NSImage(data: png)),
+            png: png,
+            copyToPasteboard: false
+        )
+        let captureIDs = [recognized, screenshot].compactMap {
+            $0.capture?.entryID.value
+        }
+        XCTAssertEqual(captureIDs.count, 2)
+        try await olderRelease.closeStoreForTesting()
+
+        let module = makeModule(in: root, keyStore: keyStore)
+        let lifecycle = try await runProductionLifecycle(
+            module: module,
+            in: root
+        )
+
+        XCTAssertEqual(lifecycle.state, .migrationBlocked(entryCount: 2))
+        XCTAssertFalse(lifecycle.admitsExplicitCaptures)
+        let blocked = try await module.page(ClipboardHistoryQuery())
+        XCTAssertEqual(Set(blocked.entries.map(\.id.value)), Set(captureIDs))
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: root),
+            .incomplete
+        )
+
+        lifecycle.discardBlockingEntriesConfirmed(entryCount: 2)
+        await lifecycle.awaitCurrentOperationForTesting()
+
+        XCTAssertEqual(lifecycle.state, .ready)
+        try await assertLegacyHistoryMigrated(
+            into: module,
+            in: root,
+            png: png
+        )
+        let migrated = try await module.page(ClipboardHistoryQuery())
+        XCTAssertTrue(
+            Set(migrated.entries.map(\.id.value)).isDisjoint(with: captureIDs)
+        )
+        XCTAssertEqual(keyStore.load(), .key(key))
+        await lifecycle.stop()
+        try await module.closeStoreForTesting()
+    }
+
     // MARK: - Fixtures
+
+    /// A pre-v2 `.file` row and the files its manifest names.
+    private struct LegacyFileRow {
+        let id: UUID
+        let members: [ClipboardFileEntry]
+    }
 
     private func makeApplicationDataDirectory() throws -> URL {
         let top = FileManager.default.temporaryDirectory
@@ -148,8 +363,13 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
         )
     }
 
-    /// A pre-v2 `AnyDoor.store` holding one text and one image row.
-    private func writeLegacyStore(in root: URL, imageName: String) throws {
+    /// A pre-v2 `AnyDoor.store` holding one text and one image row, plus
+    /// `fileRow` when given.
+    private func writeLegacyStore(
+        in root: URL,
+        imageName: String,
+        fileRow: LegacyFileRow? = nil
+    ) throws {
         let productionTypes: [any PersistentModel.Type] = [
             KeyBinding.self,
             BuiltinPreference.self,
@@ -177,6 +397,17 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
                 createdAt: Date().addingTimeInterval(-1)
             )
         )
+        if let fileRow {
+            container.mainContext.insert(
+                ClipboardHistoryItem(
+                    id: fileRow.id,
+                    kind: .file,
+                    previewTitle: "Files",
+                    createdAt: Date().addingTimeInterval(-2),
+                    filesManifest: try JSONEncoder().encode(fileRow.members)
+                )
+            )
+        }
         try container.mainContext.save()
     }
 
@@ -216,11 +447,12 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
         into module: ClipboardHistoryModule,
         in root: URL,
         png: Data,
+        entryCount: Int = 2,
         file: StaticString = #filePath,
         line: UInt = #line
     ) async throws {
         let page = try await module.page(ClipboardHistoryQuery())
-        XCTAssertEqual(page.entries.count, 2, file: file, line: line)
+        XCTAssertEqual(page.entries.count, entryCount, file: file, line: line)
         XCTAssertTrue(
             page.entries.contains { $0.previewText == Self.legacyText },
             file: file,
