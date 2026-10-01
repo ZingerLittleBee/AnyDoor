@@ -108,3 +108,30 @@ Consequences:
   retention, single- and multi-member restore failures, payload corruption,
   duplicate rows, crashes at every publication boundary, and retry after
   failure.
+
+## Amendment: copies that are not files, and captures before the cutover (2026-10-01)
+
+v1 copied a symbolic link as the link itself, so a pre-v2 payload folder can
+hold links, and in principle other entries that are not regular files. The
+snapshot takes every entry as it is: each one is renamed into the snapshot
+without following a link, and a name the snapshot already holds stops the move
+instead of being replaced. A named copy that is not itself a regular file
+(checked with `lstat`) holds no readable captured bytes, so its member migrates
+by the rule for a missing copy above: legacy-unverified while its original
+path resolves, unavailable otherwise. Image payloads keep strict validation,
+because v1 wrote them itself. Deleting the snapshot removes links, never their
+targets. Before this, one such link failed the migration on every launch.
+
+Passive monitoring was already paused until publication, but explicit captures
+(screenshots, recognized text, QR codes and picked colors) still reached the
+store, which opens at launch. The migration replaces only an empty initial
+store, so one capture taken while it was pending or had failed made the failure
+permanent. Explicit captures are now held back from history until the process
+has confirmed the cutover; their pasteboard writes and saved files are
+unaffected. A store that a 4.2 release already filled this way still refuses
+the migration; this amendment does not recover it.
+
+Every failure that leaves the lifecycle in the migration-failed or reset-failed
+state is now logged, by error type and case or by domain and code, never with a
+path. That log is the diagnostic the consequences above call for; Settings
+still offers only Retry.

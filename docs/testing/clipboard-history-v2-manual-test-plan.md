@@ -164,6 +164,7 @@ The contract decides per member whether the legacy copy can be retired.
 | 1.3.8 | **(must not) auto-bind** | For 1.3.7, later create a file at that exact path. The entry **(must not)** bind to it. |
 | 1.3.9 | Mixed collection | One entry mixing ordinary, legacy-unverified, unavailable, and owned members renders and lists all members in order. |
 | 1.3.10 | No discard confirmation | Migration keeps unresolvable records without prompting. |
+| 1.3.11 | Copied **symbolic link**: a file row whose named copy in `ClipboardHistory/` is a link (v1 copied links as links) | Migration completes; the member is legacy-unverified while its original path resolves, unavailable otherwise. The link's target **(must not)** be read, moved or deleted; it is intact after the snapshot is removed. |
 
 ### 1.4 Restore File… / Restore Files…
 
@@ -182,6 +183,7 @@ The contract decides per member whether the legacy copy can be retired.
 | 1.5.2 | Force-quit **after publish, before cleanup** | Relaunch: no re-migration, no duplicates, snapshot removed. |
 | 1.5.3 | Pre-publication failure | Legacy data left fully intact. |
 | 1.5.4 | Plaintext cleanup | After success, no plaintext payloads remain; `grep -r` a canary across the store root returns nothing. |
+| 1.5.5 | Explicit capture while the migration is pending or failed | Make the migration fail (for example, remove read permission from the snapshot store, and restore it before retrying). While Settings shows the failure, take a screenshot, an OCR, a QR scan and a picked color: the pasteboard and saved files work as usual, and **(must not)** add history entries. Retry then migrates every legacy row, and captures after that are recorded. |
 
 ### 1.6 Store relocation out of `ClipboardHistory/` (ADR-0011 amendment)
 
