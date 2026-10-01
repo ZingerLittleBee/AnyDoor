@@ -426,6 +426,23 @@
         }
       }
     },
+    "builtin.clearNotifications": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear Notifications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除通知"
+          }
+        }
+      }
+    },
     "builtin.clipboardMonitoring": {
       "extractionState": "manual",
       "localizations": {
@@ -12799,6 +12816,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "已复制 %@"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't clear notifications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "清除通知失败"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.needsAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enable Accessibility to clear notifications"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请开启辅助功能权限以清除通知"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No notifications on screen to clear"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "屏幕上没有可清除的通知"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.partial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some notifications couldn't be cleared"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "部分通知未能清除"
+          }
+        }
+      }
+    },
+    "toast.clearNotifications.success": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications cleared"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已清除通知"
           }
         }
       }

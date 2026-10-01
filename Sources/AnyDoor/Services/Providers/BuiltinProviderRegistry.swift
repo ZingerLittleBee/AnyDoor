@@ -44,6 +44,7 @@ enum BuiltinProviderRegistry {
             RestartDockProvider(),
             RestartMenuBarProvider(),
             FlushDNSProvider(),
+            ClearNotificationsProvider(),
             KeyboardLockProvider(),
             OCRProvider(clipboardProduction: clipboardProduction),
             QRCodeProvider(clipboardProduction: clipboardProduction),
