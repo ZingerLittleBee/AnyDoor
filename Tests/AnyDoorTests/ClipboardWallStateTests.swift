@@ -56,7 +56,7 @@ final class ClipboardWallStateTests: XCTestCase {
                 tagDefinitions: { [] }
             )
         )
-        await presentation.load()
+        await presentation.reload()
         return ClipboardWallState(presentation: presentation, clock: clock)
     }
 
@@ -445,22 +445,13 @@ final class ClipboardWallStateTests: XCTestCase {
 
     func testTagFilterAccessors() {
         XCTAssertEqual(ClipboardWallCategory.tag("t1").tagFilter, "t1")
-        XCTAssertNil(ClipboardWallCategory.tag("t1").kindFilter)
         XCTAssertNil(ClipboardWallCategory.all.tagFilter)
         XCTAssertNil(ClipboardWallCategory.tag("t1").titleKey)
-    }
-
-    func testCategoryKindFilter() {
-        XCTAssertNil(ClipboardWallCategory.all.kindFilter)
-        XCTAssertNil(ClipboardWallCategory.favorites.kindFilter)
-        XCTAssertEqual(ClipboardWallCategory.kind(.text).kindFilter, .text)
     }
 
     func testLinkAndEmailCategoriesFilterByFacet() {
         XCTAssertEqual(ClipboardWallCategory.link.facetFilter, .link)
         XCTAssertEqual(ClipboardWallCategory.email.facetFilter, .email)
-        XCTAssertNil(ClipboardWallCategory.link.kindFilter)
-        XCTAssertNil(ClipboardWallCategory.email.kindFilter)
         XCTAssertNil(ClipboardWallCategory.link.tagFilter)
         XCTAssertEqual(ClipboardWallCategory.link.persistentID, "facet:link")
         XCTAssertEqual(ClipboardWallCategory.email.persistentID, "facet:email")
@@ -516,7 +507,7 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertNil(state.sourceFilterID)
     }
 
-    func testRefreshQuerySendsEveryFilterToModule() async {
+    func testAFilterChangeSendsEveryFilterToModule() async {
         let recorder = ClipboardWallQueryRecorder()
         let presentation = ClipboardHistoryPresentationModel(
             operations: ClipboardHistoryPresentationOperations(
@@ -547,7 +538,8 @@ final class ClipboardWallStateTests: XCTestCase {
         state.category = .kind(.image)
         state.sourceFilterID = .application("com.example.Source")
 
-        await state.refreshQuery()
+        state.filtersDidChange()
+        await state.awaitPendingSearchForTesting()
 
         let query = await recorder.lastQuery
         XCTAssertEqual(query?.text, "needle")

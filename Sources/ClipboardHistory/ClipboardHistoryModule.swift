@@ -443,62 +443,6 @@ public actor ClipboardHistoryModule {
 }
 
 extension ClipboardHistoryModule {
-    struct FoundationRuntimeCapabilities: Equatable, Sendable {
-        let sqlCipherVersion: String
-        let hasFTS5: Bool
-        let hasTrigramTokenizer: Bool
-    }
-
-    func foundationRuntimeCapabilities() throws -> FoundationRuntimeCapabilities {
-        let database = try requiredDatabase()
-        return try database.write { database in
-            let sqlCipherVersion = try database.cipherVersion
-            let hasFTS5 =
-                try Bool.fetchOne(
-                    database,
-                    sql: "SELECT sqlite_compileoption_used('ENABLE_FTS5')"
-                ) ?? false
-
-            var hasTrigramTokenizer = false
-            if hasFTS5 {
-                do {
-                    try database.execute(
-                        sql: """
-                            CREATE VIRTUAL TABLE temp.foundation_trigram_probe
-                            USING fts5(value, tokenize = 'trigram')
-                            """
-                    )
-                    try database.execute(
-                        sql: """
-                            INSERT INTO temp.foundation_trigram_probe(value)
-                            VALUES ('clipboard')
-                            """
-                    )
-                    hasTrigramTokenizer =
-                        try Int.fetchOne(
-                            database,
-                            sql: """
-                                SELECT COUNT(*)
-                                FROM temp.foundation_trigram_probe
-                                WHERE value MATCH 'board'
-                                """
-                        ) == 1
-                    try database.execute(
-                        sql: "DROP TABLE temp.foundation_trigram_probe"
-                    )
-                } catch {
-                    hasTrigramTokenizer = false
-                }
-            }
-
-            return FoundationRuntimeCapabilities(
-                sqlCipherVersion: sqlCipherVersion,
-                hasFTS5: hasFTS5,
-                hasTrigramTokenizer: hasTrigramTokenizer
-            )
-        }
-    }
-
     /// The live pool, for reads and for code that has already had its write
     /// turn. A synchronous write issued from this actor resolves the pool
     /// through `writableDatabase()` instead, or it parks the actor behind a

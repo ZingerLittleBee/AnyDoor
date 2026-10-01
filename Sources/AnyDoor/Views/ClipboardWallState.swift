@@ -42,11 +42,6 @@ enum ClipboardWallCategory: Hashable {
         }
     }
 
-    var kindFilter: ClipboardHistoryKind? {
-        if case .kind(let kind) = self { return kind }
-        return nil
-    }
-
     var tagFilter: String? {
         if case .tag(let id) = self { return id }
         return nil
@@ -309,12 +304,6 @@ final class ClipboardWallState {
         }
     }
 
-    func refreshQuery() async {
-        searchTask?.cancel()
-        searchTask = nil
-        await presentation.setQuery(moduleQuery)
-    }
-
     /// A keystroke. Each search costs tens of milliseconds on the module actor
     /// that also serves capture, and a run of keystrokes only ever wants the
     /// last one, so typing coalesces into a single search.
@@ -351,10 +340,6 @@ final class ClipboardWallState {
 
     func awaitPendingSearchForTesting() async {
         await searchTask?.value
-    }
-
-    func prefetchIfNeeded(visibleID: ClipboardHistoryEntryID) async {
-        await presentation.prefetchIfNeeded(visibleID: visibleID)
     }
 
     func presentTagDialog(

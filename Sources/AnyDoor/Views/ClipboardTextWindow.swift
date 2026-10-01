@@ -52,12 +52,6 @@ final class ClipboardTextWindow {
         return (textView.string as NSString).substring(with: range)
     }
 
-    /// Whether `window` is the floating text panel (the wall's scroll monitor
-    /// uses this to leave scroll events over the panel alone).
-    func owns(_ window: NSWindow?) -> Bool {
-        window != nil && window === panel
-    }
-
     func showPreview(entry: ClipboardHistoryEntry, text: String) {
         // Never clobber an active edit; the editor closes only explicitly.
         guard !isEditing else { return }

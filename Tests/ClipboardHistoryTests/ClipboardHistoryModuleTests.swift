@@ -861,16 +861,21 @@ final class ClipboardHistoryModuleTests: XCTestCase {
 
     func testRuntimeProvidesPinnedSQLCipherAndRequiredFTSFeatures() async throws {
         let fixture = try TemporaryDatabase()
+        // Opening the store runs validateSearchRuntimeCapabilities, which
+        // throws unless FTS5 and the trigram tokenizer work, so a ready
+        // module proves both.
         let module = try ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
         )
 
-        let capabilities = try await module.foundationRuntimeCapabilities()
-
-        XCTAssertEqual(capabilities.sqlCipherVersion, "4.17.0 community")
-        XCTAssertTrue(capabilities.hasFTS5)
-        XCTAssertTrue(capabilities.hasTrigramTokenizer)
+        let status = await module.status()
+        XCTAssertEqual(status.availability, .ready)
+        let database = try await module.requiredDatabase()
+        let sqlCipherVersion = try await database.read { database in
+            try database.cipherVersion
+        }
+        XCTAssertEqual(sqlCipherVersion, "4.17.0 community")
     }
 
     /// A store written before the preview bound existed can hold an entry

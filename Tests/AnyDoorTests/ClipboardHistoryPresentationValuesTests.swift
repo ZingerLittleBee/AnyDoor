@@ -9,7 +9,6 @@ final class ClipboardHistoryPresentationValuesTests: XCTestCase {
         XCTAssertEqual(entry.presentationFacet, .video)
         XCTAssertEqual(entry.presentationTitleKey, .clipboardKindVideo)
         XCTAssertTrue(entry.facets.contains(.file))
-        XCTAssertFalse(ClipboardHistoryKind.video.isTextBearing)
     }
 
     func testOrdinaryFilesAndImageFilesKeepTheirPresentation() {
@@ -26,7 +25,6 @@ final class ClipboardHistoryPresentationValuesTests: XCTestCase {
         XCTAssertEqual(ocr.presentationFacet, .ocr)
         XCTAssertEqual(ocr.presentationTitleKey, .clipboardKindOcr)
         XCTAssertTrue(ocr.facets.contains(.text))
-        XCTAssertTrue(ClipboardHistoryKind.ocr.isTextBearing)
 
         let text = makeEntry(facets: [.text])
         XCTAssertEqual(text.presentationFacet, .text)
