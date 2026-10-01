@@ -29,7 +29,8 @@ that:
   APIs;
 - preserves the complete supported multi-item pasteboard state;
 - searches all retained entries with exact, prefix, and substring relevance,
-  including complete one- and two-character CJK results;
+  including complete one- and two-character CJK results, within roughly the
+  first 64 KB of each searchable text;
 - offers finite time presets or explicit Unlimited Retention with no hidden
   count cap;
 - protects favorites and tagged entries from age expiry;
@@ -156,6 +157,14 @@ History tier or entitlement path.
 - Searchable data includes exact and rich-derived text, OCR, QR values,
   normalized colors, file names, and both capture-time and current paths.
   Sources, tags, facets, dates, and display metadata remain filters.
+  *Amendment (2026-10-01, bounded search fields): each searchable value is
+  searched by at most 64 KB (65,536 bytes) of its UTF-8 text, both as stored
+  and once normalized, so a term that occurs only past that point does not
+  match. Indexing whole texts let one large copy grow the database by several
+  times its size and slowed search and launch. The entry, its preview, and its
+  paste stay whole. Search index version 2 bounds existing fields once, in a
+  background rebuild during which browsing stays available (ADR-0021,
+  amendment of the same date).*
 - Encrypted FTS5 trigram candidates serve terms of three or more normalized
   Unicode code points. Encoded unigram and bigram FTS5 candidates serve shorter
   terms. Both tables are queried only with MATCH; candidate values are always

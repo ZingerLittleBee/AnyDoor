@@ -546,7 +546,9 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   images, QR-code content, color values, file names, and file paths. Both
   capture-time and bookmark-resolved current paths are included.
   Source apps, tags, content kinds, dates, and display-only metadata remain
-  explicit filters rather than searchable text.
+  explicit filters rather than searchable text. Each searchable text counts
+  only up to its first 64 KB (65,536 bytes of UTF-8, both as stored and once
+  normalized); the entry, its preview, and its paste keep the whole text.
   _Avoid_: Search Metadata, Search Everything.
 - **Automatic Image Text Indexing** (图片文字自动索引) — An opt-in Clipboard
   History setting, disabled by default. Only images and screenshots captured
@@ -582,8 +584,11 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   search fields use encrypted FTS5 trigram candidates for terms of three or
   more Unicode code points and a second encoded unigram/bigram FTS5 index for
   shorter terms; candidates are always verified by a real continuous-substring
-  comparison. Missing FTS5 support is an invalid build, never a reason to fall
-  back to a linear scan.
+  comparison against the stored, bounded field. A term that occurs only past
+  the first 64 KB of a Searchable Content text therefore does not match, and
+  verification time grows with the total bytes of the candidate fields.
+  Missing FTS5 support is an invalid build, never a reason to fall back to a
+  linear scan.
   _Avoid_: Fuzzy Match, Semantic Match.
 
 ## Image Conversion
