@@ -60,6 +60,11 @@ versioning.
   says how many, and then migrates the pre-4.2 history.
 - The onboarding illustrations now show AnyDoor's website as anydoor.dev
   instead of anydoor.app, a domain AnyDoor doesn't own.
+- The Secure Input warning no longer tells you to reopen an app that has
+  already quit. When the app that turned Secure Input on has exited but macOS
+  still keeps it on, the warning says so and suggests locking and unlocking
+  the Mac, or logging out and back in. The other cases now also mention
+  locking and unlocking as the fallback.
 
 ## [4.2.5] - 2026-09-30
 

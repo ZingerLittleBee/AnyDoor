@@ -5884,19 +5884,53 @@
         }
       }
     },
-    "keyboard.secureInput.warning.help": {
+    "keyboard.secureInput.warning.help.application": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hyper Key and global shortcuts are temporarily unavailable. Finish or cancel password entry. If this persists, reopen the app using Secure Input."
+            "value": "Hyper Key and global shortcuts are temporarily unavailable. Finish or cancel password entry in that app. If this persists, quit the app, or lock your Mac and unlock it."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Hyper Key 和全局快捷键暂时不可用。请完成或退出密码输入；若仍未恢复，请重新打开占用安全输入的应用。"
+            "value": "Hyper Key 和全局快捷键暂时不可用。请完成或取消该应用中的密码输入；仍未恢复时，退出该应用，或锁屏后再解锁。"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.help.exited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key and global shortcuts are temporarily unavailable. Lock your Mac (⌃⌘Q) and unlock it to recover. If that doesn't help, log out and log back in."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key 和全局快捷键暂时不可用。锁屏（⌃⌘Q）后再解锁即可恢复；仍无效时，请注销后重新登录。"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.help.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key and global shortcuts are temporarily unavailable. Finish or cancel any password entry. If this persists, lock your Mac and unlock it."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hyper Key 和全局快捷键暂时不可用。请完成或取消正在进行的密码输入；仍未恢复时，锁屏后再解锁。"
           }
         }
       }
@@ -5914,6 +5948,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "占用应用：%@"
+          }
+        }
+      }
+    },
+    "keyboard.secureInput.warning.ownerExited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The app that turned it on has quit, but macOS did not turn it off"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "占用进程已退出，但系统未解除安全输入"
           }
         }
       }

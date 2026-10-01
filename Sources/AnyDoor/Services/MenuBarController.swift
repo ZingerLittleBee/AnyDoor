@@ -133,7 +133,7 @@ final class MenuBarController {
                     onRequestClose: { [weak self] in self?.hidePanel() },
                     clipboardHistoryModule: clipboardHistoryModule,
                     isSecureInputEnabled: HyperKeyService.shared.isSecureInputEnabled,
-                    secureInputApplicationName: HyperKeyService.shared.secureInputApplicationName
+                    secureInputHolder: HyperKeyService.shared.secureInputHolder
                 )
                     .modelContainer(modelContainer)
                     .environment(LocalizationManager.shared)
