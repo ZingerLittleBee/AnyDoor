@@ -14,6 +14,9 @@ versioning.
   retained, and exhausted retries preserve the release for manual recovery.
 - The Settings sidebar no longer shows a stray vertical hairline next to the
   traffic lights on macOS 27.
+- With Automatic Image Text Indexing on, the QR code in a newly copied image is
+  now indexed before that image's text recognition instead of after it. The
+  first text recognition after a macOS update can take about half a minute.
 
 ## [4.2.5] - 2026-09-30
 

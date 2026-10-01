@@ -323,6 +323,12 @@ extension ClipboardHistoryModule {
         }
     }
 
+    /// QR decoding is always on and cheap, but text recognition compiles its
+    /// on-device model the first time it runs after a macOS update (about
+    /// half a minute on the test machine). Claiming QR jobs first keeps a
+    /// capture's QR code from queueing behind its own OCR job. The scheduler
+    /// is serial, so an OCR job that is already running still delays the QR
+    /// jobs queued behind it.
     private func claimNextDerivedJob() throws -> DerivedJobClaim? {
         let database = try requiredDatabase()
         let timestamp = now().timeIntervalSince1970
@@ -339,8 +345,9 @@ extension ClipboardHistoryModule {
                           next_attempt_at IS NULL
                           OR next_attempt_at <= ?
                       )
-                    ORDER BY COALESCE(next_attempt_at, 0),
-                             entry_id, kind
+                    ORDER BY CASE kind WHEN 'qr' THEN 0 ELSE 1 END,
+                             COALESCE(next_attempt_at, 0),
+                             entry_id
                     LIMIT 1
                     """,
                 arguments: [timestamp]
