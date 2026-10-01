@@ -32,6 +32,12 @@ versioning.
   with no copying or re-encryption. If you then run 4.2.0 through 4.2.5,
   history appears empty until you update again; anything captured meanwhile is
   kept aside rather than merged, unless the moved history is empty.
+- A very large copied text no longer multiplies the size of Clipboard History
+  on disk or slows search and launch. Search now covers roughly the first 64 KB
+  of each searchable text; entries are still kept, previewed and pasted in
+  full. A history that already holds a longer text rebuilds its search index
+  once after updating (search shows its indexing state briefly) and gives back
+  the space.
 
 ## [4.2.5] - 2026-09-30
 

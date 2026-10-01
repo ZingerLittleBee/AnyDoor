@@ -522,10 +522,7 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
-        try database.writeWithoutTransaction { database in
-            try database.execute(sql: "PRAGMA incremental_vacuum")
-            try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
-        }
+        try Self.reclaimFreePages(in: database)
         let storageBytes = try storageUsage()
         try database.write { database in
             try Self.recordMaintenanceSuccess(in: database, at: now())
@@ -534,6 +531,16 @@ extension ClipboardHistoryModule {
             reclaimedPayloadCount: reclaimed,
             storageBytes: storageBytes
         )
+    }
+
+    /// Returns the store's free pages to the file system and folds the WAL
+    /// back into the database file, so that History Storage Usage, which
+    /// counts both files, reflects what the history still holds.
+    static func reclaimFreePages(in database: DatabasePool) throws {
+        try database.writeWithoutTransaction { database in
+            try database.execute(sql: "PRAGMA incremental_vacuum")
+            try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
     }
 
     /// The allocated size of the store plus any displaced stores kept aside
