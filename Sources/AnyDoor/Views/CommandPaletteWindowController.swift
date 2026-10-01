@@ -468,11 +468,10 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
             if case .builtin(let item) = entry.source { return item }
             return nil
         }
-        // Source the themed sub-groups from the shared BuiltinGroup catalog so
-        // the palette and the Panel settings page never drift. Order and titles
-        // are unchanged: themedDefaultOrder is [toggles, power, capture, translation].
+        // Source the themed sub-groups from the BuiltinGroup catalog;
+        // themedDefaultOrder is [toggles, power, capture, translation].
         let groups: [(L10n.Key, Set<BuiltinItem>)] = BuiltinGroup.themedDefaultOrder.map { group in
-            (group.titleKey!, group.members)
+            (group.titleKey, group.members)
         }
         let grouped = groups.reduce(into: Set<BuiltinItem>()) { $0.formUnion($1.1) }
         let generalCommands = commands.filter { entry in

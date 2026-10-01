@@ -106,14 +106,6 @@ enum HyperKeyError: Error, Sendable, Equatable {
     case hidutilFailed(stderr: String)
     case tapNotRunning
     case timeout
-
-    var userFacingMessage: String {
-        switch self {
-        case .hidutilFailed: return "hidutil 调用失败"
-        case .tapNotRunning: return "辅助功能权限未授予"
-        case .timeout:       return "操作超时"
-        }
-    }
 }
 
 /// Tag written to `CGEventField.eventSourceUserData` on every CGEvent we

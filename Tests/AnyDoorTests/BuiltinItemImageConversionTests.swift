@@ -18,6 +18,6 @@ final class BuiltinItemImageConversionTests: XCTestCase {
     }
 
     func testImageConversionStaysInGeneralCommandGroup() {
-        XCTAssertEqual(BuiltinGroup.group(for: .imageConversion), .general)
+        XCTAssertFalse(BuiltinGroup.themedDefaultOrder.contains(where: { $0.members.contains(.imageConversion) }))
     }
 }
