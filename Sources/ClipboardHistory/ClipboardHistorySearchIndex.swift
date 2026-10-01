@@ -2,7 +2,16 @@ import Foundation
 import GRDB
 
 extension ClipboardHistoryModule {
-    static let searchIndexVersion = 1
+    /// Version 2 bounds every search field to `searchFieldByteLimit`.
+    /// Version 1 stored and indexed fields whole.
+    static let searchIndexVersion = 2
+    /// Every search field keeps at most this many UTF-8 bytes of its value,
+    /// and of its normalized value, which is what both search indexes see.
+    /// Search cost and index size grow with the bytes indexed, and a copied
+    /// text is otherwise unbounded, so a long text is searchable by its
+    /// first 64 KB only. Its representations, and so its preview and paste,
+    /// stay whole.
+    static let searchFieldByteLimit = 65_536
     private static let searchIndexReadyState = "ready"
     private static let searchIndexIndexingState = "indexing"
     private static let searchIndexFailedState = "failed"
@@ -141,11 +150,27 @@ extension ClipboardHistoryModule {
             if state == searchIndexFailedState {
                 return false
             }
-            guard
-                version == searchIndexVersion,
-                state == searchIndexReadyState
-            else {
+            guard state == searchIndexReadyState else {
                 return true
+            }
+            if version != searchIndexVersion {
+                // Version 2 only bounds search fields, so a version 1 index
+                // none of whose fields exceed the bound already is a version
+                // 2 index: it is stamped in place, and keeps its generation
+                // because its content is unchanged. Any other version still
+                // rebuilds.
+                guard
+                    version == 1,
+                    searchIndexVersion == 2,
+                    try !hasOversizedSearchFields(in: database)
+                else {
+                    return true
+                }
+                try setSearchMetadataInteger(
+                    "searchIndexVersion",
+                    searchIndexVersion,
+                    in: database
+                )
             }
             return !(try searchIndexesPassIntegrityCheck(in: database))
         }
@@ -194,12 +219,12 @@ extension ClipboardHistoryModule {
         faultInjector: ClipboardHistoryFaultInjector
     ) -> Task<SearchIndexRebuildOutcome, Never> {
         return Task.detached(priority: .utility) {
+            let boundedFieldCount: Int
             do {
-                try rebuildSearchIndexes(
+                boundedFieldCount = try rebuildSearchIndexes(
                     in: database,
                     faultInjector: faultInjector
                 )
-                return .ready
             } catch {
                 do {
                     try persistSearchIndexRebuildFailure(in: database)
@@ -208,20 +233,37 @@ extension ClipboardHistoryModule {
                     return .failureStateUnavailable
                 }
             }
+            if boundedFieldCount > 0 {
+                // Bounding shrank rows the history kept whole until now, so
+                // their pages go back at once rather than at the next
+                // maintenance pass. The index is published already, so a
+                // failure here only leaves the space for that pass.
+                try? reclaimFreePages(in: database)
+            }
+            return .ready
         }
     }
 
+    /// Rebuilds both search indexes from the stored fields in one
+    /// transaction, and returns how many fields it had to bound first.
+    @discardableResult
     static func rebuildSearchIndexes(
         in database: DatabasePool,
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector()
-    ) throws {
+    ) throws -> Int {
         try database.write { database in
             try database.execute(
                 sql: "DROP TABLE IF EXISTS clipboard_search_trigram"
             )
             try database.execute(
                 sql: "DROP TABLE IF EXISTS clipboard_search_short_grams"
+            )
+            // Fields stored by version 1 can exceed the bound. With both
+            // indexes gone, rewriting those rows leaves nothing describing
+            // their old values; the indexes are rebuilt from the new ones.
+            let boundedFieldCount = try boundOversizedSearchFields(
+                in: database
             )
             try createSearchVirtualTables(in: database)
             let fields = try Row.fetchAll(
@@ -251,7 +293,74 @@ extension ClipboardHistoryModule {
                 state: searchIndexReadyState,
                 in: database
             )
+            return boundedFieldCount
         }
+    }
+
+    /// Whether any stored search field exceeds `searchFieldByteLimit`, as
+    /// fields written before version 2 can.
+    static func hasOversizedSearchFields(in database: Database) throws -> Bool {
+        try Bool.fetchOne(
+            database,
+            sql: """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM clipboard_search_fields
+                    WHERE octet_length(value) > ?
+                       OR octet_length(normalized_value) > ?
+                )
+                """,
+            arguments: [searchFieldByteLimit, searchFieldByteLimit]
+        ) ?? false
+    }
+
+    /// Rewrites every stored search field that exceeds `searchFieldByteLimit`
+    /// to what `insertSearchField` stores for its value now, and returns how
+    /// many it rewrote.
+    ///
+    /// This writes field rows outside the single write path ADR-0021 allows,
+    /// so it may only run inside the transaction of a rebuild, after both
+    /// search indexes were dropped and before they are created again. The
+    /// external-content trigram index would otherwise still describe the old
+    /// values, and deleting its entries later would no longer match them.
+    @discardableResult
+    static func boundOversizedSearchFields(in database: Database) throws -> Int {
+        let fieldIDs = try Int64.fetchAll(
+            database,
+            sql: """
+                SELECT id
+                FROM clipboard_search_fields
+                WHERE octet_length(value) > ?
+                   OR octet_length(normalized_value) > ?
+                ORDER BY id
+                """,
+            arguments: [searchFieldByteLimit, searchFieldByteLimit]
+        )
+        for fieldID in fieldIDs {
+            // As many code points as the limit has bytes always cover the
+            // bounded value, so a huge text never reaches Swift whole.
+            guard let prefix = try String.fetchOne(
+                database,
+                sql: """
+                    SELECT substr(value, 1, ?)
+                    FROM clipboard_search_fields
+                    WHERE id = ?
+                    """,
+                arguments: [searchFieldByteLimit, fieldID]
+            ) else {
+                continue
+            }
+            let bounded = boundedSearchField(prefix)
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_search_fields
+                    SET value = ?, normalized_value = ?
+                    WHERE id = ?
+                    """,
+                arguments: [bounded.value, bounded.normalizedValue, fieldID]
+            )
+        }
+        return fieldIDs.count
     }
 
     static func retrySearchIndexes(
@@ -355,7 +464,7 @@ extension ClipboardHistoryModule {
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector()
     ) throws {
-        let normalizedValue = normalizeSearchText(value)
+        let field = boundedSearchField(value)
         try database.execute(
             sql: """
                 INSERT INTO clipboard_search_fields(
@@ -367,15 +476,15 @@ extension ClipboardHistoryModule {
                 entryID,
                 kind,
                 index,
-                value,
-                normalizedValue,
+                field.value,
+                field.normalizedValue,
                 rankingGroup,
             ]
         )
         try faultInjector.check(.searchInsertAfterField)
         try insertSearchIndexEntries(
             fieldID: database.lastInsertedRowID,
-            normalizedValue: normalizedValue,
+            normalizedValue: field.normalizedValue,
             into: database,
             faultInjector: faultInjector,
             afterTrigram: .searchInsertAfterTrigram,
@@ -423,19 +532,24 @@ extension ClipboardHistoryModule {
             afterTrigram: .searchUpdateAfterOldTrigram,
             afterShortGrams: .searchUpdateAfterOldShortGrams
         )
-        let newNormalizedValue = normalizeSearchText(value)
+        let newField = boundedSearchField(value)
         try database.execute(
             sql: """
                 UPDATE clipboard_search_fields
                 SET value = ?, normalized_value = ?, ranking_group = ?
                 WHERE id = ?
                 """,
-            arguments: [value, newNormalizedValue, rankingGroup, fieldID]
+            arguments: [
+                newField.value,
+                newField.normalizedValue,
+                rankingGroup,
+                fieldID,
+            ]
         )
         try faultInjector.check(.searchUpdateAfterField)
         try insertSearchIndexEntries(
             fieldID: fieldID,
-            normalizedValue: newNormalizedValue,
+            normalizedValue: newField.normalizedValue,
             into: database,
             faultInjector: faultInjector,
             afterTrigram: .searchUpdateAfterNewTrigram,
@@ -640,6 +754,56 @@ extension ClipboardHistoryModule {
         )
     }
 
+    /// The value and normalized value a search field stores for `value`,
+    /// each at most `searchFieldByteLimit` UTF-8 bytes.
+    ///
+    /// The value is bounded before it is normalized, so a huge text is never
+    /// normalized whole. Normalization can expand it again (a Hangul syllable
+    /// decomposes into three jamo), so the normalized value is bounded too,
+    /// and need not equal `normalizeSearchText(value)` afterwards. Nothing
+    /// recomputes it from the stored value: search reads only the stored
+    /// normalized value.
+    static func boundedSearchField(
+        _ value: String
+    ) -> (value: String, normalizedValue: String) {
+        let boundedValue = utf8Prefix(
+            of: value,
+            byteLimit: searchFieldByteLimit
+        )
+        return (
+            boundedValue,
+            utf8Prefix(
+                of: normalizeSearchText(boundedValue),
+                byteLimit: searchFieldByteLimit
+            )
+        )
+    }
+
+    /// The longest prefix of `value` that ends on a Unicode scalar boundary
+    /// and fits in `byteLimit` UTF-8 bytes; `value` itself when it fits.
+    ///
+    /// It cuts on scalars rather than characters: one grapheme cluster can
+    /// carry any number of combining marks, so a character boundary may not
+    /// exist anywhere near the limit.
+    static func utf8Prefix(of value: String, byteLimit: Int) -> String {
+        let utf8 = value.utf8
+        guard
+            let limit = utf8.index(
+                utf8.startIndex,
+                offsetBy: byteLimit,
+                limitedBy: utf8.endIndex
+            ),
+            limit != utf8.endIndex
+        else {
+            return value
+        }
+        var end = limit
+        while end > utf8.startIndex, UTF8.isContinuation(utf8[end]) {
+            utf8.formIndex(before: &end)
+        }
+        return String(value.unicodeScalars[..<end])
+    }
+
     /// Search ranking packs `matchClass * radix + rankingGroup` into one
     /// integer so SQL's `MIN` picks a single winning field. Every value
     /// `searchRankingGroup` can return must stay below this, or the packing
@@ -702,26 +866,38 @@ extension ClipboardHistoryModule {
         state: String,
         in database: Database
     ) throws {
-        for (key, value) in [
-            ("searchIndexVersion", version),
-            ("searchIndexGeneration", generation),
-        ] {
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_maintenance_metadata(
-                        key,
-                        integer_value
-                    ) VALUES (?, ?)
-                    ON CONFLICT(key) DO UPDATE SET
-                        integer_value = excluded.integer_value,
-                        real_value = NULL,
-                        text_value = NULL,
-                        data_value = NULL
-                    """,
-                arguments: [key, value]
-            )
-        }
+        try setSearchMetadataInteger(
+            "searchIndexVersion",
+            version,
+            in: database
+        )
+        try setSearchMetadataInteger(
+            "searchIndexGeneration",
+            generation,
+            in: database
+        )
         try setSearchIndexState(state, failureReason: nil, in: database)
+    }
+
+    private static func setSearchMetadataInteger(
+        _ key: String,
+        _ value: Int,
+        in database: Database
+    ) throws {
+        try database.execute(
+            sql: """
+                INSERT INTO clipboard_maintenance_metadata(
+                    key,
+                    integer_value
+                ) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    integer_value = excluded.integer_value,
+                    real_value = NULL,
+                    text_value = NULL,
+                    data_value = NULL
+                """,
+            arguments: [key, value]
+        )
     }
 
     private static func setSearchIndexState(

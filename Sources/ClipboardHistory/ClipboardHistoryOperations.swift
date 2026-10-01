@@ -10,7 +10,8 @@ extension ClipboardHistoryModule {
 
     public func capture(
         _ request: ClipboardHistoryCaptureRequest
-    ) throws -> ClipboardHistoryCaptureOutcome {
+    ) async throws -> ClipboardHistoryCaptureOutcome {
+        try await waitForWriteTurn()
         let outcome = try captureExplicit(request)
         publishMutation()
         return outcome
@@ -32,7 +33,7 @@ extension ClipboardHistoryModule {
     public func apply(
         _ mutation: ClipboardHistoryMutation
     ) async throws -> ClipboardHistoryMutationOutcome {
-        let database = try requiredDatabase()
+        let database = try await writableDatabase()
         let result: MutationApplyResult
         switch mutation {
         case .delete(let entryID):
@@ -60,8 +61,20 @@ extension ClipboardHistoryModule {
 
     public func materialize(
         _ request: ClipboardHistoryMaterializationRequest
+    ) async throws -> ClipboardHistoryMaterialization {
+        // Resolving file references refreshes their stored bookmarks, which
+        // is a write, so a request that gets that far waits for a write turn.
+        // Everything else only reads and is served right away.
+        if mustWaitForWriteTurn, try resolvesFileReferences(request) {
+            try await waitForWriteTurn()
+        }
+        return try materialize(request, in: requiredDatabase())
+    }
+
+    private func materialize(
+        _ request: ClipboardHistoryMaterializationRequest,
+        in database: DatabasePool
     ) throws -> ClipboardHistoryMaterialization {
-        let database = try requiredDatabase()
         let id = request.entryID.value.uuidString.lowercased()
         guard try database.read({
             try isLiveEntry(id, at: now(), in: $0)
@@ -217,6 +230,46 @@ extension ClipboardHistoryModule {
             )
         }
         return ClipboardHistoryMaterialization(items: materializedItems)
+    }
+
+    /// Whether materializing `request` reaches `materializeFileReferences`:
+    /// the entry has file members, and neither a plain-text paste nor a
+    /// preview answered by the stored thumbnail returns before that.
+    private func resolvesFileReferences(
+        _ request: ClipboardHistoryMaterializationRequest
+    ) throws -> Bool {
+        guard request.purpose != .plainTextPaste else { return false }
+        let storedID = request.entryID.value.uuidString.lowercased()
+        return try requiredDatabase().read { database in
+            let hasFileMembers = try Bool.fetchOne(
+                database,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM clipboard_file_members
+                        WHERE entry_id = ?
+                    )
+                    """,
+                arguments: [storedID]
+            ) ?? false
+            guard hasFileMembers, request.purpose == .preview else {
+                return hasFileMembers
+            }
+            let hasThumbnail = try Bool.fetchOne(
+                database,
+                sql: """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM clipboard_entries AS entry
+                        JOIN clipboard_payloads AS payload
+                          ON payload.id = entry.thumbnail_payload_id
+                        WHERE entry.id = ?
+                    )
+                    """,
+                arguments: [storedID]
+            ) ?? false
+            return !hasThumbnail
+        }
     }
 
     private func materializeFileReferences(
@@ -382,8 +435,20 @@ extension ClipboardHistoryModule {
 
     public func performMaintenance(
         orphanGracePeriod: TimeInterval = 3_600
+    ) async throws -> ClipboardHistoryMaintenanceReport {
+        try await performMaintenance(
+            orphanGracePeriod: orphanGracePeriod,
+            in: writableDatabase()
+        )
+    }
+
+    private func performMaintenance(
+        orphanGracePeriod: TimeInterval,
+        in database: DatabasePool
     ) throws -> ClipboardHistoryMaintenanceReport {
-        let database = try requiredDatabase()
+        // A maintenance loop stopped while it waited for this turn must not
+        // start a pass (see `maintenanceDeadline`).
+        try Task.checkCancellation()
         let maintenanceDate = now()
         let maintenanceState = try database.write { database in
             let expiredIDs = try expiredEntryIDs(
@@ -457,10 +522,7 @@ extension ClipboardHistoryModule {
         } catch {
             throw ClipboardHistoryModuleError.storageFailure
         }
-        try database.writeWithoutTransaction { database in
-            try database.execute(sql: "PRAGMA incremental_vacuum")
-            try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
-        }
+        try Self.reclaimFreePages(in: database)
         let storageBytes = try storageUsage()
         try database.write { database in
             try Self.recordMaintenanceSuccess(in: database, at: now())
@@ -471,9 +533,38 @@ extension ClipboardHistoryModule {
         )
     }
 
+    /// Returns the store's free pages to the file system and folds the WAL
+    /// back into the database file, so that History Storage Usage, which
+    /// counts both files, reflects what the history still holds.
+    static func reclaimFreePages(in database: DatabasePool) throws {
+        try database.writeWithoutTransaction { database in
+            try database.execute(sql: "PRAGMA incremental_vacuum")
+            try database.execute(sql: "PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+    }
+
+    /// The allocated size of the store plus any displaced stores kept aside
+    /// (they are removed only by Reset). Displaced stores are counted best
+    /// effort: a failure to measure them counts as zero, so it can never fail
+    /// maintenance.
     public func storageUsage() throws -> UInt64 {
+        let storeBytes = try allocatedSize(ofTreeAt: storeRoot)
+        let displacedRoot = ClipboardHistoryStoreRelocation.displacedRoot(
+            forStoreRoot: storeRoot
+        )
+        guard let displacedBytes = try? allocatedSize(ofTreeAt: displacedRoot)
+        else {
+            return storeBytes
+        }
+        let (total, overflow) = storeBytes.addingReportingOverflow(
+            displacedBytes
+        )
+        return overflow ? storeBytes : total
+    }
+
+    private func allocatedSize(ofTreeAt root: URL) throws -> UInt64 {
         let descriptor = Darwin.open(
-            storeRoot.path,
+            root.path,
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW
         )
         guard descriptor >= 0 else {
@@ -485,7 +576,7 @@ extension ClipboardHistoryModule {
         defer { Darwin.close(descriptor) }
         return try allocatedSize(
             ofDirectoryDescriptor: descriptor,
-            representedBy: storeRoot
+            representedBy: root
         )
     }
 
@@ -505,6 +596,14 @@ extension ClipboardHistoryModule {
         guard let keyStore else {
             throw ClipboardHistoryModuleError.resetFailed
         }
+        // Every store shares the one key. Deleting it while a store may still
+        // sit in the pre-v2 folder or mid-move would leave that store
+        // unreadable, so Reset waits until a retry has finished the move.
+        guard availabilityReason != .storeRelocationFailed,
+            relocation?.hasUnfinishedRelocation != true
+        else {
+            throw ClipboardHistoryModuleError.resetFailed
+        }
         monitoringRequested = false
         monitoringEnabled = false
         await captureMonitor?.setEnabled(false)
@@ -514,10 +613,20 @@ extension ClipboardHistoryModule {
         searchIndexRebuildTask = nil
         try database?.close()
         database = nil
+        // Writers still waiting for a write turn were issued against the
+        // store deleted below, and none of them may land in its replacement.
+        storeEpoch += 1
         derivedKeys = nil
         do {
             if FileManager.default.fileExists(atPath: storeRoot.path) {
                 try FileManager.default.removeItem(at: storeRoot)
+            }
+            // Displaced stores are encrypted with the key deleted below.
+            let displacedRoot = ClipboardHistoryStoreRelocation.displacedRoot(
+                forStoreRoot: storeRoot
+            )
+            if FileManager.default.fileExists(atPath: displacedRoot.path) {
+                try FileManager.default.removeItem(at: displacedRoot)
             }
         } catch {
             availability = .unavailable

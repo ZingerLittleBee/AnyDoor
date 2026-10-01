@@ -37,6 +37,7 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
     case restartDock
     case restartMenuBar
     case flushDNS
+    case clearNotifications
     case keyboardLock
     case portManager
     case qrcode
@@ -83,7 +84,7 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
              .hideDock, .autoHideMenuBar, .keyboardLock, .scheduledShutdown: return .toggle
         case .clipboardMonitoring: return .toggle
         case .lockScreen, .emptyTrash, .screenshot, .clearClipboard, .ocr, .qrcode, .pickColor, .displaySleep, .systemSleep,
-             .restartFinder, .restartDock, .restartMenuBar, .flushDNS, .clipboardWall,
+             .restartFinder, .restartDock, .restartMenuBar, .flushDNS, .clearNotifications, .clipboardWall,
              .windowLeftHalf, .windowRightHalf, .windowMaximize, .windowCenter,
              .windowTopHalf, .windowBottomHalf,
              .windowTopLeftQuarter, .windowTopRightQuarter,
@@ -132,6 +133,7 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
         case .restartDock: return "dock.arrow.down.rectangle"
         case .restartMenuBar: return "menubar.arrow.up.rectangle"
         case .flushDNS: return "network"
+        case .clearNotifications: return "bell.badge.slash"
         case .keyboardLock: return "keyboard.fill"
         case .portManager: return "network"
         case .qrcode: return "qrcode.viewfinder"
@@ -198,6 +200,7 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
         case .restartDock: return 1500
         case .restartMenuBar: return 1600
         case .flushDNS: return 1700
+        case .clearNotifications: return 1750
         case .keyboardLock: return 1800
         case .portManager: return 1900
         case .qrcode: return 960

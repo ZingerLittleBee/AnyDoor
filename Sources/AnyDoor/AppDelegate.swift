@@ -14,7 +14,15 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persisten
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let modelContainer: ModelContainer
     let clipboardHistoryModule: ClipboardHistoryModule
-    let clipboardProduction: ClipboardProductionAdapter
+    /// Writes to history only once the lifecycle admits explicit captures.
+    @MainActor lazy var clipboardProduction = {
+        let lifecycle = clipboardHistoryLifecycle
+        return ClipboardProductionAdapter(
+            module: clipboardHistoryModule,
+            selfWrites: clipboardHistoryModule.pasteboardSelfWrites,
+            admitsHistoryWrite: { lifecycle.admitsExplicitCaptures }
+        )
+    }()
     private let persistenceBootstrap: AppPersistenceBootstrap
     @MainActor lazy var clipboardHistoryLifecycle = {
         let appSupport = FileManager.default.urls(
@@ -25,49 +33,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "dev.bybee.AnyDoor",
             isDirectory: true
         )
-        let storeURL = storeDirectory.appendingPathComponent(
-            "AnyDoor.store"
-        )
-        return ClipboardHistoryLifecycle(
+        return ClipboardHistoryLifecycle.production(
             module: clipboardHistoryModule,
+            applicationDataDirectory: storeDirectory,
             migrationPreparation:
-                persistenceBootstrap.migrationPreparation,
-            legacyCleanupState: {
-                ClipboardHistoryLegacySource.cleanupState(
-                    in: storeDirectory
-                )
-            },
-            legacyPayloadDirectory: {
-                ClipboardHistoryLegacySource.snapshotPayloadDirectory(
-                    in: storeDirectory
-                )
-            },
-            migrationRequest: {
-                let source =
-                    try ClipboardHistoryLegacySource.openForMigration(
-                        applicationSupportDirectory: storeDirectory,
-                        productionStoreURL: storeURL,
-                        payloadDirectory:
-                            ClipboardHistoryModule.defaultStoreRoot
-                    )
-                return try source.makeMigrationRequest()
-            },
-            finishMigration: {
-                try ClipboardHistoryLegacySource.finishMigration(
-                    in: storeDirectory
-                )
-            },
-            retrySnapshotDeletion: {
-                try ClipboardHistoryLegacySource.retrySnapshotDeletion(
-                    in: storeDirectory
-                )
-            }
+                persistenceBootstrap.migrationPreparation
         )
     }()
     @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
-    private var clipboardHistoryFailureObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
     private var updaterBridge: SparkleUpdaterBridge?
 
@@ -91,12 +66,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // scrollbar entirely, and the one-frame flash that any after-the-fact
         // restyling causes on a Settings tab switch. See OverlayScrollers.swift.
         UserDefaults.standard.set("WhenScrolling", forKey: "AppleShowScrollBars")
-        let clipboardHistoryModule = ClipboardHistoryModule()
-        self.clipboardHistoryModule = clipboardHistoryModule
-        clipboardProduction = ClipboardProductionAdapter(
-            module: clipboardHistoryModule,
-            selfWrites: clipboardHistoryModule.pasteboardSelfWrites
+        let clipboardHistoryModule = ClipboardHistoryModule(
+            captureNotices: { notice in
+                ClipboardHistoryCaptureNoticePresenter.present(notice)
+            }
         )
+        self.clipboardHistoryModule = clipboardHistoryModule
         do {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let storeDir = appSupport.appendingPathComponent("dev.bybee.AnyDoor", isDirectory: true)
@@ -182,18 +157,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // starts the monitor before the encrypted store and migration are
         // ready, and it leaves failures explicit for Settings to recover.
         clipboardHistoryLifecycle.start()
-        clipboardHistoryFailureObserver =
-            NotificationCenter.default.addObserver(
-                forName: .clipboardHistoryV2OperationDidFail,
-                object: nil,
-                queue: .main
-            ) { _ in
-                MainThreadIsolation.run {
-                    ToastPresenter.shared.show(
-                        .failure(L(.settingsClipboardOperationFailed))
-                    )
-                }
-            }
         // Native Plugins: the registry loads the installed set, activates the
         // installed plugins, and owns surface composition for launch and
         // later lifecycle changes. Core control flow names no plugin beyond
@@ -382,11 +345,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if let clipboardHistoryFailureObserver {
-            NotificationCenter.default.removeObserver(
-                clipboardHistoryFailureObserver
-            )
-        }
         HotkeyService.shared.stop()
     }
 

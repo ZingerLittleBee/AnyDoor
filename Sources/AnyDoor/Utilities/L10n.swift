@@ -25,6 +25,7 @@ enum L10n {
         case builtinBrightnessDown = "builtin.brightnessDown"
         case builtinBrightnessUp = "builtin.brightnessUp"
         case builtinClearClipboard = "builtin.clearClipboard"
+        case builtinClearNotifications = "builtin.clearNotifications"
         case builtinClipboardMonitoring = "builtin.clipboardMonitoring"
         case builtinClipboardWall = "builtin.clipboardWall"
         case builtinDarkMode = "builtin.darkMode"
@@ -117,6 +118,8 @@ enum L10n {
         case clipboardUnavailable = "clipboard.unavailable"
         case clipboardUnavailableKeychainLocked =
             "clipboard.unavailable.keychainLocked"
+        case clipboardUnavailableRelocationFailed =
+            "clipboard.unavailable.relocationFailed"
         case clipboardHeaderCountSuffix = "clipboard.header.countSuffix"
         case clipboardHintCategory = "clipboard.hint.category"
         case clipboardHintClose = "clipboard.hint.close"
@@ -163,6 +166,8 @@ enum L10n {
         case clipboardTagNew = "clipboard.tag.new"
         case clipboardTagRename = "clipboard.tag.rename"
         case clipboardTagRenameTitle = "clipboard.tag.renameTitle"
+        case clipboardToastCaptureFailed = "clipboard.toast.captureFailed"
+        case clipboardToastCaptureTooLarge = "clipboard.toast.captureTooLarge"
         case clipboardToastCopyFailed = "clipboard.toast.copyFailed"
         case clipboardToastFileMissing = "clipboard.toast.fileMissing"
         case clipboardToastLegacyOwnedCount = "clipboard.toast.legacyOwnedCount"
@@ -322,8 +327,20 @@ enum L10n {
         case settingsClipboardRetentionAffected = "settings.clipboard.retention.affected"
         case settingsClipboardMigrating = "settings.clipboard.state.migrating"
         case settingsClipboardMigrationFailed = "settings.clipboard.state.migrationFailed"
+        case settingsClipboardMigrationBlocked =
+            "settings.clipboard.state.migrationBlocked"
+        case settingsClipboardDiscardAndMigrate =
+            "settings.clipboard.discardAndMigrate"
+        case settingsClipboardDiscardAndMigrateTitle =
+            "settings.clipboard.discardAndMigrate.title"
+        case settingsClipboardDiscardAndMigrateMessage =
+            "settings.clipboard.discardAndMigrate.message"
+        case settingsClipboardDiscardAndMigrateConfirm =
+            "settings.clipboard.discardAndMigrate.confirm"
         case settingsClipboardStoreUnavailable = "settings.clipboard.state.storeUnavailable"
         case settingsClipboardStorePaused = "settings.clipboard.state.paused"
+        case settingsClipboardRelocationFailed =
+            "settings.clipboard.state.relocationFailed"
         case settingsClipboardResetFailed =
             "settings.clipboard.state.resetFailed"
         case settingsClipboardReset = "settings.clipboard.reset"
@@ -515,6 +532,11 @@ enum L10n {
         case panelSubtitleKeepAwakeIndefinite = "panel.subtitle.keepAwakeIndefinite"
         case panelSubtitleKeepAwakeUntil = "panel.subtitle.keepAwakeUntil"
         case toastCalcCopied = "toast.calc.copied"
+        case toastClearNotificationsFailed = "toast.clearNotifications.failed"
+        case toastClearNotificationsNeedsAccessibility = "toast.clearNotifications.needsAccessibility"
+        case toastClearNotificationsNone = "toast.clearNotifications.none"
+        case toastClearNotificationsPartial = "toast.clearNotifications.partial"
+        case toastClearNotificationsSuccess = "toast.clearNotifications.success"
         case toastClipboardCleared = "toast.clipboardCleared"
         case toastColorCopied = "toast.color.copied"
         case toastCopiedToClipboard = "toast.copiedToClipboard"

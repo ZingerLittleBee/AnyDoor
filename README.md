@@ -50,7 +50,7 @@ when you need them.
 ### Built-in actions
 
 - Lock Screen, Display Sleep, System Sleep
-- Empty Trash, Flush DNS cache
+- Empty Trash, Flush DNS cache, Clear Notifications (dismisses on-screen banners and alerts)
 - Restart Finder / Dock / SystemUIServer + ControlCenter
 - OCR a screen region — Vision framework recognizes text and copies it
 - Scan QR / barcode — decode a code on screen and copy its payload

@@ -108,3 +108,58 @@ Consequences:
   retention, single- and multi-member restore failures, payload corruption,
   duplicate rows, crashes at every publication boundary, and retry after
   failure.
+
+## Amendment: copies that are not files, and captures before the cutover (2026-10-01)
+
+v1 copied a symbolic link as the link itself, so a pre-v2 payload folder can
+hold links, and in principle other entries that are not regular files. The
+snapshot takes every entry as it is: each one is renamed into the snapshot
+without following a link, and a name the snapshot already holds stops the move
+instead of being replaced. A named copy that is not itself a regular file
+(checked with `lstat`) holds no readable captured bytes, so its member migrates
+by the rule for a missing copy above: legacy-unverified while its original
+path resolves, unavailable otherwise. Image payloads keep strict validation,
+because v1 wrote them itself. Deleting the snapshot removes links, never their
+targets. Before this, one such link failed the migration on every launch.
+
+Passive monitoring was already paused until publication, but explicit captures
+(screenshots, recognized text, QR codes and picked colors) still reached the
+store, which opens at launch. The migration replaces only an empty initial
+store, so one capture taken while it was pending or had failed made the failure
+permanent. Explicit captures are now held back from history until the process
+has confirmed the cutover; their pasteboard writes and saved files are
+unaffected. A store that a 4.2 release already filled this way still refuses
+the migration; the next amendment recovers it.
+
+Every failure that leaves the lifecycle in the migration-failed or reset-failed
+state is now logged, by error type and case or by domain and code, never with a
+path. That log is the diagnostic the consequences above call for; a failed
+migration still offers only Retry.
+
+## Amendment: discarding the entries that block the migration (2026-10-01)
+
+Publication still replaces only a store without entries. A store that holds
+entries and no published migration is refused with its entry count, and the
+lifecycle reports the migration as blocked rather than failed. Before the
+cutover, passive monitoring never runs and current releases hold explicit
+captures back, so every entry in such a store is an explicit capture a 4.2
+release recorded while its migration was pending or had failed. Clipboard
+Settings offers Retry and a confirmed discard that names the entry count and
+those capture kinds. Reset is not offered there, because it would discard the
+pre-v2 history as well.
+
+The confirmation carries the count it showed, and the migration discards only
+while the store holds exactly that many entries; otherwise it refuses again
+with the current count. The discard runs inside the migration, after the
+staging store has been built and verified and immediately before publication.
+It removes the payload and staging folders first, then the write-ahead log
+and the database, each by name, and the store folder only once it is empty. A
+failure before the discard leaves the store as it was. A discard that stops
+partway leaves either a database that still lists its entries, which the next
+confirmation discards again, or no database and no payloads, which the next
+launch replaces with an empty store and migrates as usual. The legacy snapshot
+stays authoritative until publication and cleanup, as before. Unlike Reset,
+the discard keeps the Keychain key and any store kept aside under
+`ClipboardHistoryV2.displaced/`, and a write that was still waiting for its
+turn against the discarded store is refused rather than landing in the
+migrated one.

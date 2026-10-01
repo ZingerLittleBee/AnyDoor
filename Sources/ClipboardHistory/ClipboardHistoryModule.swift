@@ -2,7 +2,31 @@ import Foundation
 import GRDB
 
 public actor ClipboardHistoryModule {
+    /// The encrypted store's own folder, beside `legacyPayloadDirectory`.
+    /// A store still found in the legacy folder is moved here on launch.
     public static var defaultStoreRoot: URL {
+        applicationDataDirectory.appendingPathComponent("ClipboardHistoryV2")
+    }
+
+    /// Where pre-v2 releases keep clipboard payloads, and where the legacy
+    /// migration reads them from. It was also the store root for 4.2.0
+    /// through 4.2.5, which is how running a pre-v2 release could delete the
+    /// store: those releases remove files they do not recognize from this
+    /// folder. No v2 file may be created here.
+    public static var legacyPayloadDirectory: URL {
+        legacyPayloadDirectory(in: applicationDataDirectory)
+    }
+
+    /// `legacyPayloadDirectory` inside `applicationDataDirectory` (the
+    /// app's `Application Support/dev.bybee.AnyDoor` folder in production),
+    /// so the app's migration wiring can run against a temporary folder.
+    public static func legacyPayloadDirectory(
+        in applicationDataDirectory: URL
+    ) -> URL {
+        applicationDataDirectory.appendingPathComponent("ClipboardHistory")
+    }
+
+    private static var applicationDataDirectory: URL {
         let applicationSupport =
             FileManager.default.urls(
                 for: .applicationSupportDirectory,
@@ -10,9 +34,7 @@ public actor ClipboardHistoryModule {
             ).first
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support")
-        return applicationSupport
-            .appendingPathComponent("dev.bybee.AnyDoor")
-            .appendingPathComponent("ClipboardHistory")
+        return applicationSupport.appendingPathComponent("dev.bybee.AnyDoor")
     }
 
     var database: DatabasePool?
@@ -21,12 +43,26 @@ public actor ClipboardHistoryModule {
     var monitoringConfiguration = ClipboardHistoryMonitoringConfiguration()
     var captureMonitor: ClipboardHistoryCaptureMonitor?
     var isFinalizingClear = false
+    /// Advances when a clear applies, so a passive capture that waited for its
+    /// write turn can tell that the history it read the pasteboard for has
+    /// been cleared since. `isFinalizingClear` already turns away a capture
+    /// served while the clear is in flight; this also covers one that actor
+    /// scheduling only resumes once the clear has finished.
+    var clearEpoch = 0
+    /// Advances when a reset replaces the store, so a writer still waiting
+    /// for its write turn cannot land in the new store (see
+    /// `waitForWriteTurn()`).
+    var storeEpoch = 0
     let selfWriteSuppression: ClipboardHistorySelfWriteSuppression
     let monitorInstrumentation: ClipboardHistoryMonitorInstrumentation
+    let captureNoticeHandler: ClipboardHistoryCaptureNoticeHandler?
     let notificationCenter: NotificationCenter
     public nonisolated let pasteboardSelfWrites:
         ClipboardHistoryPasteboardSelfWriteFunnel
     let storeRoot: URL
+    /// Moves a store out of the pre-v2 folder before every open. Nil only
+    /// for test modules that do not model the legacy folder.
+    let relocation: ClipboardHistoryStoreRelocation?
     let keyStore: (any ClipboardHistoryMasterKeyStoring)?
     let faultInjector: ClipboardHistoryFaultInjector
     let payloadReclaimer = ClipboardHistoryPayloadReclaimer()
@@ -46,6 +82,9 @@ public actor ClipboardHistoryModule {
     nonisolated let derivedJobBootstrap =
         ClipboardHistoryDerivedJobBootstrap()
     var searchIndexRebuildTask: Task<SearchIndexRebuildOutcome, Never>?
+    private var nextWriteTurn = 0
+    private var currentWriteTurn = 0
+    private var writeTurnWaiters: [CheckedContinuation<Void, Never>] = []
     var maintenanceTask: Task<Void, Never>?
     nonisolated let maintenanceBootstrap =
         ClipboardHistoryMaintenanceBootstrap()
@@ -54,10 +93,15 @@ public actor ClipboardHistoryModule {
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
 
-    public init() {
+    /// `captureNotices` receives passive capture notices. It is fixed at
+    /// construction so no observed change can precede it.
+    public init(
+        captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil
+    ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        captureNoticeHandler = captureNotices
         notificationCenter = .default
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
@@ -76,14 +120,22 @@ public actor ClipboardHistoryModule {
         } else {
             ClipboardHistoryKeychainStore()
         }
-        let resolution = Self.resolveStore(
+        let faultInjector = ClipboardHistoryFaultInjector()
+        let relocation = ClipboardHistoryStoreRelocation(
+            legacyRoot: Self.legacyPayloadDirectory,
+            storeRoot: root,
+            faultInjector: faultInjector
+        )
+        let resolution = Self.relocateAndResolveStore(
+            relocation: relocation,
             at: root,
             keyStore: keyStore,
             maintenanceDate: Date()
         )
         storeRoot = root
+        self.relocation = relocation
         self.keyStore = keyStore
-        faultInjector = ClipboardHistoryFaultInjector()
+        self.faultInjector = faultInjector
         now = Date.init
         maintenanceScheduler = SystemClipboardHistoryMaintenanceScheduler()
         storageTraversalHook = nil
@@ -124,11 +176,13 @@ public actor ClipboardHistoryModule {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        captureNoticeHandler = nil
         self.notificationCenter = notificationCenter
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )
         storeRoot = testingDatabaseURL.deletingLastPathComponent()
+        relocation = nil
         keyStore = nil
         self.faultInjector = faultInjector
         now = Date.init
@@ -165,8 +219,12 @@ public actor ClipboardHistoryModule {
         )
     }
 
+    /// `legacyStoreRoot` models the pre-v2 folder beside `testingStoreRoot`;
+    /// when given, every open first moves a store out of it, as in
+    /// production.
     init(
         testingStoreRoot: URL,
+        legacyStoreRoot: URL? = nil,
         keyStore: any ClipboardHistoryMasterKeyStoring,
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector(),
@@ -180,21 +238,32 @@ public actor ClipboardHistoryModule {
         duplicateReuseEnabled: Bool = true,
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
             ClipboardHistoryVisionRecognizer(),
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
         monitorInstrumentation = ClipboardHistoryMonitorInstrumentation()
+        captureNoticeHandler = captureNotices
         self.notificationCenter = notificationCenter
         pasteboardSelfWrites = ClipboardHistoryPasteboardSelfWriteFunnel(
             suppression: suppression
         )
-        let resolution = Self.resolveStore(
+        let relocation = legacyStoreRoot.map {
+            ClipboardHistoryStoreRelocation(
+                legacyRoot: $0,
+                storeRoot: testingStoreRoot,
+                faultInjector: faultInjector
+            )
+        }
+        let resolution = Self.relocateAndResolveStore(
+            relocation: relocation,
             at: testingStoreRoot,
             keyStore: keyStore,
             maintenanceDate: now()
         )
         storeRoot = testingStoreRoot
+        self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector
         self.now = now
@@ -284,7 +353,8 @@ public actor ClipboardHistoryModule {
         if let database {
             try? database.close()
         }
-        let resolution = Self.resolveStore(
+        let resolution = Self.relocateAndResolveStore(
+            relocation: relocation,
             at: storeRoot,
             keyStore: keyStore,
             maintenanceDate: now()
@@ -429,11 +499,81 @@ extension ClipboardHistoryModule {
         }
     }
 
+    /// The live pool, for reads and for code that has already had its write
+    /// turn. A synchronous write issued from this actor resolves the pool
+    /// through `writableDatabase()` instead, or it parks the actor behind a
+    /// search index rebuild.
     func requiredDatabase() throws -> DatabasePool {
         guard availability == .ready, let database else {
             throw ClipboardHistoryModuleError.storeUnavailable
         }
         return database
+    }
+
+    /// The live pool for a write issued from this actor, resolved once the
+    /// caller's write turn comes up (see `waitForWriteTurn()`).
+    ///
+    /// Retry and close can replace or remove the pool while the caller
+    /// waits, so it is only looked up afterwards, and any other actor state
+    /// read before this call must be read again. A reset meanwhile fails the
+    /// call instead.
+    func writableDatabase() async throws -> DatabasePool {
+        try await waitForWriteTurn()
+        return try requiredDatabase()
+    }
+
+    /// Whether `waitForWriteTurn()` would suspend right now.
+    var mustWaitForWriteTurn: Bool {
+        searchIndexRebuildTask != nil || nextWriteTurn != currentWriteTurn
+    }
+
+    /// Suspends until no search index rebuild is in flight and every writer
+    /// that arrived earlier has had its turn; returns at once otherwise.
+    ///
+    /// A rebuild holds the pool's writer for one long transaction, about a
+    /// minute on a large store. A synchronous `write` issued on this actor
+    /// meanwhile parks the actor's thread on the writer queue, and every read
+    /// queued behind it (history pages, counts, status) stalls with it.
+    /// Waiting here suspends the actor instead, so it keeps serving reads
+    /// from the WAL. Turns are served in arrival order, because a finished
+    /// task resumes everything awaiting it in no particular order and the
+    /// writes queued behind a rebuild would otherwise commit out of order.
+    /// A turn covers the caller's code up to its next suspension point; it
+    /// does not hold later writers back while an asynchronous write is in
+    /// flight.
+    ///
+    /// Throws `storeUnavailable` when a reset replaced the store while the
+    /// caller waited: what it was about to write belongs to the history the
+    /// reset discarded, so it must not land in the store that replaced it.
+    func waitForWriteTurn() async throws {
+        guard mustWaitForWriteTurn else { return }
+        let epoch = storeEpoch
+        let turn = nextWriteTurn
+        nextWriteTurn += 1
+        while true {
+            if let rebuild = searchIndexRebuildTask {
+                _ = await rebuild.value
+                // A retry or reset may have started another one meanwhile.
+                if searchIndexRebuildTask == rebuild {
+                    searchIndexRebuildTask = nil
+                }
+            } else if currentWriteTurn != turn {
+                await withCheckedContinuation { waiter in
+                    writeTurnWaiters.append(waiter)
+                }
+            } else {
+                break
+            }
+        }
+        currentWriteTurn += 1
+        let waiters = writeTurnWaiters
+        writeTurnWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        guard storeEpoch == epoch else {
+            throw ClipboardHistoryModuleError.storeUnavailable
+        }
     }
 
     func closeStoreForTesting() async throws {
@@ -567,12 +707,24 @@ extension ClipboardHistoryModule {
             return unavailable(.keychainFailure)
         }
 
+        return openStore(
+            at: root,
+            keys: ClipboardHistoryKeyDerivation.deriveV1(from: masterKey),
+            maintenanceDate: maintenanceDate
+        )
+    }
+
+    /// Opens (or creates) the store at `root` with keys already loaded.
+    static func openStore(
+        at root: URL,
+        keys: ClipboardHistoryDerivedKeys,
+        maintenanceDate: Date
+    ) -> StoreResolution {
         do {
             try prepareStoreDirectories(at: root)
 
-            let keys = ClipboardHistoryKeyDerivation.deriveV1(from: masterKey)
             let database = try openDatabase(
-                at: databaseURL,
+                at: databaseURL(in: root),
                 databaseKey: keys.databaseKey
             )
             try database.write { database in

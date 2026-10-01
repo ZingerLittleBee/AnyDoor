@@ -505,6 +505,36 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         }
     }
 
+    /// Only a newer load cancels the one in flight, and that one publishes
+    /// itself. A cancellation that arrives at the current revision came from
+    /// below, so the load has to settle rather than stay on a spinner.
+    func testCancellationAtTheCurrentRevisionStillSettlesTheLoad() async {
+        let model = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: {
+                    ClipboardHistoryStatus(
+                        availability: .ready,
+                        isMonitoring: true,
+                        searchIndex: .ready
+                    )
+                },
+                page: { _, _ in throw CancellationError() },
+                apply: { _ in .notFound },
+                materialize: { _ in
+                    ClipboardHistoryMaterialization(items: [])
+                },
+                tagDefinitions: { [] }
+            )
+        )
+
+        await model.load()
+
+        XCTAssertEqual(model.contentState, .unavailable(nil))
+        XCTAssertEqual(model.pagingState, .complete)
+        XCTAssertEqual(model.entries, [])
+        XCTAssertEqual(model.actionFailure, .unknown)
+    }
+
     func testQueryChangeCancelsSingleFlightPrefetchAndCleansItUp()
         async
     {
@@ -1046,6 +1076,86 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             uncountedModel.actionFailure,
             "a failed count may not surface as a destructive action failure"
         )
+    }
+
+    /// The menu-bar popovers show no total, sources or tags, so their first
+    /// page must not wait on the history-wide scans behind them. The wall
+    /// shows all three and still loads them.
+    func testPopoverFirstPageSkipsTheAggregatesTheWallLoads() async throws {
+        let store = try TemporaryHistoryStore()
+        defer { store.removeStore() }
+        let module = store.module
+        let notes = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: "com.example.notes",
+                    displayName: "Notes"
+                ),
+                content: .text("from notes")
+            )
+        ).entryID
+        let mail = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: "com.example.mail",
+                    displayName: "Mail"
+                ),
+                content: .text("from mail")
+            )
+        ).entryID
+        let tag = try await module.createTagDefinition(
+            named: "Work",
+            assigningTo: notes
+        ).definition
+
+        let popover = ClipboardHistoryPresentationModel(
+            module: module,
+            loadsAggregates: false
+        )
+        await popover.load()
+
+        XCTAssertEqual(Set(popover.entries.map(\.id)), [notes, mail])
+        XCTAssertEqual(popover.contentState, .content)
+        XCTAssertNil(popover.actionFailure)
+        XCTAssertNil(popover.totalCount)
+        XCTAssertEqual(popover.sources, [])
+        XCTAssertEqual(popover.tags, [])
+
+        let wall = ClipboardHistoryPresentationModel(module: module)
+        await wall.load()
+
+        XCTAssertEqual(
+            wall.entries.map(\.id),
+            popover.entries.map(\.id),
+            "both surfaces draw the same first page"
+        )
+        XCTAssertEqual(wall.totalCount, 2)
+        XCTAssertEqual(
+            Set(wall.sources.map(\.id)),
+            [.application("com.example.notes"), .application("com.example.mail")]
+        )
+        XCTAssertEqual(wall.tags, [tag])
+
+        // The popover's aggregates never reach the module: once its store is
+        // closed, any history-wide read there would throw instead.
+        let popoverOperations = ClipboardHistoryPresentationOperations(
+            module: module,
+            loadsAggregates: false
+        )
+        try await module.closeStoreForTesting()
+        let noSources = try await popoverOperations.sourceSummaries()
+        XCTAssertEqual(noSources, [])
+        let noTags = try await popoverOperations.tagDefinitions()
+        XCTAssertEqual(noTags, [])
+        do {
+            _ = try await popoverOperations.count(ClipboardHistoryQuery())
+            XCTFail("The popover has no total to count")
+        } catch {
+            XCTAssertEqual(
+                error as? ClipboardHistoryModuleError,
+                .operationUnavailable
+            )
+        }
     }
 
     func testRestartedPageRebasesThePrefixInsteadOfAppendingIt() async {
@@ -2209,5 +2319,32 @@ private actor PresentationClientStub {
             throw applyError
         }
         return .deleted
+    }
+}
+
+/// A real module over an encrypted store in a throwaway directory.
+private struct TemporaryHistoryStore {
+    let directory: URL
+    let module: ClipboardHistoryModule
+
+    init() throws {
+        directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-ClipboardPresentation-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        module = try ClipboardHistoryModule(
+            testingDatabaseURL: directory
+                .appendingPathComponent("history.sqlite"),
+            databaseKey: Data(repeating: 0x42, count: 32)
+        )
+    }
+
+    func removeStore() {
+        try? FileManager.default.removeItem(at: directory)
     }
 }

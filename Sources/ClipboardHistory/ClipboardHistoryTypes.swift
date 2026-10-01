@@ -4,9 +4,6 @@ public extension Notification.Name {
     static let clipboardHistoryV2DidMutate = Notification.Name(
         "dev.bybee.AnyDoor.clipboardHistoryV2DidMutate"
     )
-    static let clipboardHistoryV2OperationDidFail = Notification.Name(
-        "dev.bybee.AnyDoor.clipboardHistoryV2OperationDidFail"
-    )
 }
 
 public struct ClipboardHistoryEntryID: Hashable, Sendable {
@@ -548,6 +545,13 @@ public struct ClipboardHistoryStatus: Equatable, Sendable {
         case databaseIntegrityFailed
         case searchIndexUnavailable
         case storeIOFailure
+        /// The store could not be moved out of the pre-v2 `ClipboardHistory`
+        /// folder. Never paired with a reset: the data is intact (in that
+        /// folder, or in the `.relocating` folder of a move that stopped
+        /// part way), no Keychain item was read or created, and a retry
+        /// finishes the move once the cause (another running copy, folder
+        /// permissions) is gone.
+        case storeRelocationFailed
     }
 }
 
@@ -573,6 +577,10 @@ public enum ClipboardHistoryModuleError: Error, Equatable {
     case invalidConfirmation
     case unsupportedLegacyTransferVersion(Int)
     case legacyMigrationFailed
+    /// The pre-v2 migration replaces only a store without entries, and this
+    /// one holds `entryCount`. Passing that count back to
+    /// `migrateLegacy(_:discardingEntries:)` discards them.
+    case legacyMigrationStoreNotEmpty(entryCount: Int)
     case invalidLegacyFileRestore
     case legacyFileRestoreCollision(URL)
     case legacyFileRestoreFailed

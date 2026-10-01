@@ -274,14 +274,21 @@ final class ClipboardWallState {
     /// rather than a whole history sitting behind a key the app cannot reach —
     /// and says nothing about where the retry and reset actions live. A locked
     /// keychain stays its own line because it is the one case the user fixes
-    /// outside AnyDoor, and it resolves on its own once unlocked.
+    /// outside AnyDoor, and it resolves on its own once unlocked. A store that
+    /// could not move to its new folder gets its own line too: Settings offers
+    /// only a retry there, never a reset.
     var unavailableStateKey: L10n.Key {
-        guard case .unavailable(let reason) = presentation.contentState,
-            reason == .keychainLocked
-        else {
+        guard case .unavailable(let reason) = presentation.contentState else {
             return .clipboardUnavailable
         }
-        return .clipboardUnavailableKeychainLocked
+        switch reason {
+        case .keychainLocked:
+            return .clipboardUnavailableKeychainLocked
+        case .storeRelocationFailed:
+            return .clipboardUnavailableRelocationFailed
+        default:
+            return .clipboardUnavailable
+        }
     }
 
     var moduleQuery: ClipboardHistoryQuery {

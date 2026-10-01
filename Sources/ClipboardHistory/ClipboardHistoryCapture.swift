@@ -138,7 +138,7 @@ extension ClipboardHistoryModule {
     public func capture(
         _ request: ClipboardHistoryPasteboardCaptureRequest,
         source: ClipboardHistoryCaptureSource
-    ) throws -> ClipboardHistoryPasteboardCaptureOutcome {
+    ) async throws -> ClipboardHistoryPasteboardCaptureOutcome {
         guard !isFinalizingClear else {
             return .skipped(.generationChanged)
         }
@@ -152,6 +152,18 @@ extension ClipboardHistoryModule {
                 return .skipped(rejection)
             case .snapshot(let value):
                 snapshot = value
+            }
+            let epoch = clearEpoch
+            do {
+                try await waitForWriteTurn()
+            } catch ClipboardHistoryModuleError.storeUnavailable {
+                // A reset replaced the store while this waited.
+                return .skipped(.generationChanged)
+            }
+            // A clear that got in while this waited has already discarded
+            // what the pasteboard held when it was read.
+            guard !isFinalizingClear, clearEpoch == epoch else {
+                return .skipped(.generationChanged)
             }
             let outcome = try persist(snapshot, source: source)
             publishMutation()

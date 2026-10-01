@@ -87,8 +87,12 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 - **Clipboard History Store** (剪贴板历史存储) — The device-local persistence
   boundary formed by one dedicated SQLite database and its sibling payload
   directory at
-  `~/Library/Application Support/dev.bybee.AnyDoor/ClipboardHistory/`, accessed
-  through GRDB with SQLCipher. SQLCipher encrypts the database, search index,
+  `~/Library/Application Support/dev.bybee.AnyDoor/ClipboardHistoryV2/`,
+  accessed through GRDB with SQLCipher. The neighbouring `ClipboardHistory/`
+  folder belongs to pre-v2 releases, which delete files they do not recognize
+  there, so it holds only pre-v2 payloads awaiting migration; a store 4.2.0
+  through 4.2.5 left in it is moved out by rename on launch (ADR-0011
+  amendment). SQLCipher encrypts the database, search index,
   and write-ahead log; CryptoKit AES-GCM encrypts owned payload and thumbnail
   files. A device-only master key lives in Keychain, with no user password or
   encryption toggle. The store is the sole source of truth for history entries
@@ -107,7 +111,24 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   is an explicitly confirmed Reset Clipboard History action, which removes the
   old store and key before generating a new one. A merely locked Keychain is a
   transient pause that resumes after unlock without showing a permanent error.
+  A store that could not be moved out of the pre-v2 folder (Store Relocation
+  Failed) is intact, in that folder or in the staging folder of a move that
+  stopped part way, so that reason offers Retry and never Reset (ADR-0011
+  amendment).
   _Avoid_: Empty History, Automatic Reset, Encryption Disabled.
+- **Displaced Store** (搁置存储) — A Clipboard History Store found in the
+  pre-v2 `ClipboardHistory/` folder, where a 4.2.x release wrote it, and kept
+  under `ClipboardHistoryV2.displaced/` because the store root already held a
+  store. It is not necessarily older than the current store: a 4.2.x release
+  run during a downgrade captures into it. Stores are never merged: a
+  displaced store replaces the current one only while the current store is
+  empty, the displaced store opens with the current key, and no other process
+  has either store open. One kept aside is not current history, is exempt from
+  Retention Period and Clear History, counts toward History Storage Usage, and
+  is removed only by Reset Clipboard History. Reset is offered only while the
+  store is unavailable, so one kept aside beside a working store stays on disk
+  indefinitely (ADR-0011 amendment).
+  _Avoid_: Backup Store, Merged History, Older Store.
 - **Clipboard Entry** (剪贴板记录) — The one history record produced by one
   eligible observed general-pasteboard state or one explicit AnyDoor
   clipboard-producing action. It owns an ordered collection of one or more
@@ -369,10 +390,10 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   limit, both aggregated across the complete Clipboard Entry. Referenced file
   contents do not count because AnyDoor never reads or stores them. Exceeding
   either limit rejects the entire history entry, leaves the system pasteboard
-  unchanged, and shows one non-modal “content too large” notice for that
-  observed change. It never silently stores a partial representation set. This
-  is a memory and denial-of-service guard, not retention, disk-pressure
-  management, or a total storage quota.
+  unchanged, and shows a non-modal “content too large” notice, rate-limited so
+  repeated rejections raise one notice rather than a stream. It never silently
+  stores a partial representation set. This is a memory and denial-of-service
+  guard, not retention, disk-pressure management, or a total storage quota.
   _Avoid_: History Size Limit, Disk Quota, Partial Large Entry.
 - **Retention Period** (保留期限) — The user-selected age window for Clipboard
   History entries that are not Protected Entries, chosen from fixed presets
@@ -446,7 +467,10 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
 - **History Storage Usage** (历史占用) — The total size of Clipboard History
   storage currently allocated by the file system under its dedicated boundary.
   It includes the database, WAL, shared-memory file, encrypted payloads and
-  thumbnails, migration staging, and encrypted orphans awaiting cleanup. It is
+  thumbnails, migration staging, encrypted orphans awaiting cleanup, and
+  everything kept under `ClipboardHistoryV2.displaced/` until Reset: any
+  Displaced Store, and anything unexpected moved out of the store root
+  (ADR-0011 amendment). It is
   reported as one exact allocated-size total, refreshed after mutations and
   when Settings appears, not attributed approximately by content kind. It does
   not follow symlinks and excludes referenced source files, the current system
@@ -522,7 +546,9 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   images, QR-code content, color values, file names, and file paths. Both
   capture-time and bookmark-resolved current paths are included.
   Source apps, tags, content kinds, dates, and display-only metadata remain
-  explicit filters rather than searchable text.
+  explicit filters rather than searchable text. Each searchable text counts
+  only up to its first 64 KB (65,536 bytes of UTF-8, both as stored and once
+  normalized); the entry, its preview, and its paste keep the whole text.
   _Avoid_: Search Metadata, Search Everything.
 - **Automatic Image Text Indexing** (图片文字自动索引) — An opt-in Clipboard
   History setting, disabled by default. Only images and screenshots captured
@@ -558,8 +584,11 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   search fields use encrypted FTS5 trigram candidates for terms of three or
   more Unicode code points and a second encoded unigram/bigram FTS5 index for
   shorter terms; candidates are always verified by a real continuous-substring
-  comparison. Missing FTS5 support is an invalid build, never a reason to fall
-  back to a linear scan.
+  comparison against the stored, bounded field. A term that occurs only past
+  the first 64 KB of a Searchable Content text therefore does not match, and
+  verification time grows with the total bytes of the candidate fields.
+  Missing FTS5 support is an invalid build, never a reason to fall back to a
+  linear scan.
   _Avoid_: Fuzzy Match, Semantic Match.
 
 ## Image Conversion

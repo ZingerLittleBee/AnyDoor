@@ -56,7 +56,8 @@ struct BuiltinCatalogInvariantTests {
         return BuiltinProviderRegistry.makeAll(
             clipboardProduction: ClipboardProductionAdapter(
                 module: module,
-                selfWrites: module.pasteboardSelfWrites
+                selfWrites: module.pasteboardSelfWrites,
+                admitsHistoryWrite: { true }
             ),
             onKeepAwakeChange: { _ in }
         )

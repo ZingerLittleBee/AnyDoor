@@ -369,6 +369,48 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         XCTAssertFalse(setting)
     }
 
+    func testQRCodeIsIndexedBeforeItsOwnOCRJobStarts() async throws {
+        let fixture = try DerivedIndexingTemporaryStore()
+        let recognizer = GatedVisionRecognizer(
+            blockedKind: .ocr,
+            results: [
+                .ocr: ["text recognized after the QR code"],
+                .qr: ["anydoor://derived/qr/first"],
+            ]
+        )
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.databaseURL,
+            databaseKey: fixture.databaseKey,
+            visionRecognizer: recognizer
+        )
+        try await module.setAutomaticImageTextIndexingEnabled(true)
+        let capture = try await module.capture(
+            bitmapRequest(try makeBitmap(color: .systemRed))
+        )
+        await recognizer.waitUntilStarted(.ocr)
+
+        let qrPage = try await module.page(
+            ClipboardHistoryQuery(facet: .qrCode)
+        )
+        XCTAssertEqual(
+            qrPage.entries.map(\.id),
+            [capture.entryID],
+            "The QR job must publish before the same capture's OCR job starts"
+        )
+        let qrSearch = try await module.page(
+            ClipboardHistoryQuery(text: "derived/qr/first")
+        )
+        XCTAssertEqual(qrSearch.entries.map(\.id), [capture.entryID])
+
+        await recognizer.release(.ocr)
+        await module.awaitDerivedJobsForTesting()
+
+        let ocrSearch = try await module.page(
+            ClipboardHistoryQuery(text: "recognized after")
+        )
+        XCTAssertEqual(ocrSearch.entries.map(\.id), [capture.entryID])
+    }
+
     func testPendingJobResumesAfterStoreReopen() async throws {
         let fixture = try DerivedIndexingTemporaryStore()
         let blocking = GatedVisionRecognizer(
@@ -407,6 +449,81 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             ClipboardHistoryQuery(text: "resumed QR")
         )
         XCTAssertEqual(page.entries.map(\.id), [capture.entryID])
+    }
+
+    func testPendingQRJobsAreClaimedBeforePendingOCRJobsAfterReopen()
+        async throws
+    {
+        let fixture = try DerivedIndexingTemporaryStore()
+        let blocking = FirstCallGatedVisionRecognizer()
+        let first = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.databaseURL,
+            databaseKey: fixture.databaseKey,
+            visionRecognizer: blocking
+        )
+        try await first.setAutomaticImageTextIndexingEnabled(true)
+        _ = try await first.capture(
+            bitmapRequest(try makeBitmap(color: .systemRed))
+        )
+        _ = try await first.capture(
+            bitmapRequest(try makeBitmap(color: .systemBlue))
+        )
+        await blocking.waitUntilFirstCallStarts()
+        let close = Task {
+            try await first.closeStoreForTesting()
+        }
+        await blocking.waitUntilFirstCallCancelled()
+        await blocking.releaseFirstCall()
+        try await close.value
+
+        let resumedRecognizer = CountingVisionRecognizer(results: [:])
+        let reopened = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.databaseURL,
+            databaseKey: fixture.databaseKey,
+            visionRecognizer: resumedRecognizer
+        )
+        await reopened.awaitDerivedJobsForTesting()
+
+        let claimOrder = await resumedRecognizer.callOrder()
+        XCTAssertEqual(
+            claimOrder,
+            [.qr, .qr, .ocr, .ocr],
+            "Every pending QR job must be claimed before any OCR job"
+        )
+    }
+
+    func testRetriedQRJobIsClaimedBeforeFreshOCRJob() async throws {
+        let fixture = try DerivedIndexingTemporaryStore()
+        // A fixed clock makes the failed QR job due again at the exact
+        // time it failed, independent of wall-clock adjustments.
+        let clock = DerivedIndexingClock(
+            Date(timeIntervalSince1970: 10_000)
+        )
+        let recognizer = FirstQRFailureVisionRecognizer()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.directory,
+            keyStore: DerivedIndexingMasterKeyStore(),
+            now: { clock.now },
+            visionRecognizer: recognizer
+        )
+        try await module.setAutomaticImageTextIndexingEnabled(true)
+        let capture = try await module.capture(
+            bitmapRequest(try makeBitmap(color: .systemRed))
+        )
+        await module.awaitDerivedJobsForTesting()
+
+        let claimOrder = await recognizer.callOrder()
+        XCTAssertEqual(
+            claimOrder,
+            [.qr, .qr, .ocr],
+            "A due QR retry must be claimed before a fresh OCR job"
+        )
+        let qrJob = try await module.derivedJobForTesting(
+            capture.entryID,
+            kind: .qr
+        )
+        XCTAssertEqual(qrJob?.state, .succeeded)
+        XCTAssertEqual(qrJob?.attemptCount, 2)
     }
 
     func testDeletionCancelsRecognitionAndLateResultCannotResurrectData()
@@ -755,7 +872,7 @@ private actor DeterministicVisionRecognizer:
 
 private actor CountingVisionRecognizer: ClipboardHistoryVisionRecognizing {
     private let results: [ClipboardHistoryDerivedJobKind: [String]]
-    private var counts: [ClipboardHistoryDerivedJobKind: Int] = [:]
+    private var calls: [ClipboardHistoryDerivedJobKind] = []
 
     init(results: [ClipboardHistoryDerivedJobKind: [String]]) {
         self.results = results
@@ -766,16 +883,20 @@ private actor CountingVisionRecognizer: ClipboardHistoryVisionRecognizing {
         in bitmaps: [Data]
     ) async throws -> [String] {
         XCTAssertFalse(bitmaps.isEmpty)
-        counts[kind, default: 0] += 1
+        calls.append(kind)
         return results[kind] ?? []
     }
 
     func callCount(for kind: ClipboardHistoryDerivedJobKind) -> Int {
-        counts[kind, default: 0]
+        calls.filter { $0 == kind }.count
     }
 
     func totalCallCount() -> Int {
-        counts.values.reduce(0, +)
+        calls.count
+    }
+
+    func callOrder() -> [ClipboardHistoryDerivedJobKind] {
+        calls
     }
 }
 
@@ -793,6 +914,32 @@ private actor FailingVisionRecognizer: ClipboardHistoryVisionRecognizing {
 
     func callCount(for kind: ClipboardHistoryDerivedJobKind) -> Int {
         counts[kind, default: 0]
+    }
+}
+
+/// Fails the first QR recognition with a non-cancellation error, so the
+/// retried job waits with a stored next attempt time instead of NULL, and
+/// records the kind of every call in claim order.
+private actor FirstQRFailureVisionRecognizer:
+    ClipboardHistoryVisionRecognizing
+{
+    private var calls: [ClipboardHistoryDerivedJobKind] = []
+
+    func recognize(
+        _ kind: ClipboardHistoryDerivedJobKind,
+        in bitmaps: [Data]
+    ) async throws -> [String] {
+        XCTAssertFalse(bitmaps.isEmpty)
+        let isFirstQRCall = kind == .qr && !calls.contains(.qr)
+        calls.append(kind)
+        if isFirstQRCall {
+            throw DerivedIndexingTestError.recognitionFailed
+        }
+        return []
+    }
+
+    func callOrder() -> [ClipboardHistoryDerivedJobKind] {
+        calls
     }
 }
 
@@ -908,6 +1055,71 @@ private actor RecaptureVisionRecognizer:
     func releaseFirstCall() {
         firstCallRelease?.resume()
         firstCallRelease = nil
+    }
+}
+
+/// Holds the first recognition call, whichever kind the scheduler claims
+/// first, so a test can close the store before any job has finished.
+private actor FirstCallGatedVisionRecognizer:
+    ClipboardHistoryVisionRecognizing
+{
+    private var callCount = 0
+    private var firstCallStarted = false
+    private var firstCallStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var firstCallRelease: CheckedContinuation<Void, Never>?
+    private var firstCallCancelled = false
+    private var firstCallCancellationWaiters:
+        [CheckedContinuation<Void, Never>] = []
+
+    func recognize(
+        _ kind: ClipboardHistoryDerivedJobKind,
+        in bitmaps: [Data]
+    ) async throws -> [String] {
+        XCTAssertFalse(bitmaps.isEmpty)
+        callCount += 1
+        guard callCount == 1 else { return [] }
+        firstCallStarted = true
+        for waiter in firstCallStartWaiters {
+            waiter.resume()
+        }
+        firstCallStartWaiters = []
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                firstCallRelease = continuation
+            }
+        } onCancel: {
+            Task {
+                await self.recordFirstCallCancellation()
+            }
+        }
+        return []
+    }
+
+    func waitUntilFirstCallStarts() async {
+        guard !firstCallStarted else { return }
+        await withCheckedContinuation { continuation in
+            firstCallStartWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilFirstCallCancelled() async {
+        guard !firstCallCancelled else { return }
+        await withCheckedContinuation { continuation in
+            firstCallCancellationWaiters.append(continuation)
+        }
+    }
+
+    func releaseFirstCall() {
+        firstCallRelease?.resume()
+        firstCallRelease = nil
+    }
+
+    private func recordFirstCallCancellation() {
+        firstCallCancelled = true
+        for waiter in firstCallCancellationWaiters {
+            waiter.resume()
+        }
+        firstCallCancellationWaiters = []
     }
 }
 
