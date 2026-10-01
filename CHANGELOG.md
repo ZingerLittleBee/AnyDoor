@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.6] - 2026-10-02
+
 ### Added
 
 - A new Clear Notifications (清除通知) action in the menu-bar panel and command
