@@ -32,4 +32,34 @@ final class SecureInputOwnerTests: XCTestCase {
             XCTAssertNil(SecureInputOwner.processID(in: sessions, userID: 501))
         }
     }
+
+    func testRunningApplicationIsNamed() {
+        let holder = SecureInputOwner.holder(
+            pid: 300, isRunning: { _ in true }, applicationName: { _ in "Ghostty" }
+        )
+        XCTAssertEqual(holder, .application("Ghostty"))
+    }
+
+    func testExitedProcessIsReportedInsteadOfUnknown() {
+        let holder = SecureInputOwner.holder(
+            pid: 300, isRunning: { _ in false }, applicationName: { _ in "Ghostty" }
+        )
+        XCTAssertEqual(holder, .exitedProcess)
+    }
+
+    func testRunningProcessWithoutApplicationNameIsUnknown() {
+        for name: String? in [nil, "  "] {
+            let holder = SecureInputOwner.holder(
+                pid: 300, isRunning: { _ in true }, applicationName: { _ in name }
+            )
+            XCTAssertEqual(holder, .unknown)
+        }
+    }
+
+    func testMissingRecordIsUnknown() {
+        let holder = SecureInputOwner.holder(
+            pid: nil, isRunning: { _ in false }, applicationName: { _ in nil }
+        )
+        XCTAssertEqual(holder, .unknown)
+    }
 }

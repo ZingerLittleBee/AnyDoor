@@ -28,7 +28,7 @@ struct MenuBarView: View {
     var clipboardHistoryModule: ClipboardHistoryModule? = nil
     /// Snapshot at panel opening: its AppKit host measures content only once.
     var isSecureInputEnabled = false
-    var secureInputApplicationName: String? = nil
+    var secureInputHolder: SecureInputHolder? = nil
 
     @State private var panel = PanelStore.shared
     @State private var updateService = UpdateService.shared
@@ -47,7 +47,7 @@ struct MenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if isSecureInputEnabled {
-                SecureInputWarningView(applicationName: secureInputApplicationName)
+                SecureInputWarningView(holder: secureInputHolder ?? .unknown)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
             }
