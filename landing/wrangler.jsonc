@@ -5,7 +5,7 @@
   "observability": {
     "enabled": true
   },
-  "main": "dist/_worker.js/index.js",
+  "main": "@astrojs/cloudflare/entrypoints/server",
   "compatibility_flags": [
     "global_fetch_strictly_public",
     "nodejs_compat"
