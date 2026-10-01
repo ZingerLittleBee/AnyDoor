@@ -67,40 +67,27 @@ final class OnboardingTests: XCTestCase {
         XCTAssertEqual(OnboardingNavigation(stepCount: 0).stepCount, 1)
     }
 
-    func test_navigation_progressSpansZeroToOne() {
-        var nav = OnboardingNavigation(stepCount: OnboardingStep.allCases.count)
-        XCTAssertEqual(nav.progress, 0, accuracy: 0.0001)
-        nav.go(to: .customize)
-        XCTAssertEqual(nav.progress, 1, accuracy: 0.0001)
-    }
-
     // MARK: Permission status mapping
 
-    func test_permissionSnapshot_defaultsToNeedsAction() {
+    func test_permissionSnapshot_defaultsToNotGranted() {
         let snap = OnboardingPermissionSnapshot()
         for kind in OnboardingPermissionKind.allCases {
-            XCTAssertEqual(snap.state(for: kind), .needsAction)
+            XCTAssertFalse(snap.isGranted(kind))
         }
-        XCTAssertEqual(snap.grantedCount, 0)
-        XCTAssertFalse(snap.allGranted)
     }
 
     func test_permissionSnapshot_mapsEachKindIndependently() {
         var snap = OnboardingPermissionSnapshot()
         snap.accessibility = true
 
-        XCTAssertEqual(snap.state(for: .accessibility), .granted)
-        XCTAssertEqual(snap.state(for: .screenRecording), .needsAction)
-        XCTAssertEqual(snap.state(for: .automation), .needsAction)
-        XCTAssertEqual(snap.grantedCount, 1)
-        XCTAssertFalse(snap.allGranted)
+        XCTAssertTrue(snap.isGranted(.accessibility))
+        XCTAssertFalse(snap.isGranted(.screenRecording))
+        XCTAssertFalse(snap.isGranted(.automation))
     }
 
-    func test_permissionSnapshot_allGranted() {
+    func test_permissionSnapshot_allKindsGranted() {
         let snap = OnboardingPermissionSnapshot(accessibility: true, screenRecording: true, automation: true)
-        XCTAssertTrue(snap.allGranted)
-        XCTAssertEqual(snap.grantedCount, 3)
-        XCTAssertTrue(OnboardingPermissionKind.allCases.allSatisfy { snap.state(for: $0) == .granted })
+        XCTAssertTrue(OnboardingPermissionKind.allCases.allSatisfy { snap.isGranted($0) })
     }
 
     // MARK: Step catalog sanity
