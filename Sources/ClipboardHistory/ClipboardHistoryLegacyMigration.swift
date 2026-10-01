@@ -879,12 +879,12 @@ extension ClipboardHistoryModule {
         if let storedName = member.storedName {
             try validateLegacyPayloadName(storedName)
             let candidate = payloadDirectory.appendingPathComponent(storedName)
+            // v1 copied a symbolic link as the link itself. A link, a folder
+            // or any other entry that is not a regular file holds no captured
+            // bytes, so the member migrates as if its copy were missing.
             capturedCopyURL =
-                FileManager.default.fileExists(atPath: candidate.path)
-                ? try safeLegacyPayloadURL(
-                    named: storedName,
-                    in: payloadDirectory
-                )
+                isRegularFileWithoutFollowingLinks(candidate)
+                ? candidate
                 : nil
         } else {
             capturedCopyURL = nil
@@ -1221,6 +1221,14 @@ extension ClipboardHistoryModule {
             throw ClipboardHistoryModuleError.legacyMigrationFailed
         }
         return url
+    }
+
+    /// Whether `url` is itself a regular file. `lstat` never follows a
+    /// symbolic link, so a link is not one, whatever it points at.
+    func isRegularFileWithoutFollowingLinks(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0
+            && (info.st_mode & S_IFMT) == S_IFREG
     }
 
     func validateLegacyPayloadName(_ name: String) throws {

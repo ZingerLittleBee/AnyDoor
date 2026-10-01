@@ -595,6 +595,123 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
         )
     }
 
+    /// v1 copied a symbolic link as the link itself, so a named copy can be a
+    /// link, or an entry that is not a regular file at all. None of them holds
+    /// captured bytes: each member migrates as if its copy were missing, and
+    /// neither the migration nor the cleanup follows a link.
+    func testCopiesThatAreNotRegularFilesMigrateWithoutCapturedBytes()
+        async throws
+    {
+        let fixture = try LegacyMigrationFixture()
+        let fileManager = FileManager.default
+        let outside = fixture.root.appendingPathComponent(
+            "Outside",
+            isDirectory: true
+        )
+        let outsideFile = outside.appendingPathComponent("target.txt")
+        let outsideFolder = outside.appendingPathComponent(
+            "folder",
+            isDirectory: true
+        )
+        let fileInOutsideFolder = outsideFolder.appendingPathComponent(
+            "inner.txt"
+        )
+        try fileManager.createDirectory(
+            at: outsideFolder,
+            withIntermediateDirectories: true
+        )
+        try Data("outside".utf8).write(to: outsideFile)
+        try Data("inside".utf8).write(to: fileInOutsideFolder)
+        try fileManager.createSymbolicLink(
+            at: fixture.legacyPayloadURL("file-link"),
+            withDestinationURL: outsideFile
+        )
+        try fileManager.createSymbolicLink(
+            at: fixture.legacyPayloadURL("folder-link"),
+            withDestinationURL: outsideFolder
+        )
+        try fileManager.createDirectory(
+            at: fixture.legacyPayloadURL("folder-copy"),
+            withIntermediateDirectories: true
+        )
+        try fixture.writeLegacyPayload(
+            named: "regular-copy",
+            data: Data("captured bytes".utf8)
+        )
+        let currentOriginal = fixture.root.appendingPathComponent(
+            "current.txt"
+        )
+        try Data("current bytes".utf8).write(to: currentOriginal)
+        let entryID = UUID()
+        let module = fixture.makeModule()
+
+        let outcome = try await module.migrateLegacy(
+            fixture.request(
+                entries: [
+                    legacyEntry(
+                        id: entryID,
+                        kind: .file,
+                        capturedAt: fixture.now,
+                        files: [
+                            legacyFile(
+                                storedName: "file-link",
+                                originalURL: fixture.root
+                                    .appendingPathComponent("gone-a.txt")
+                            ),
+                            legacyFile(
+                                storedName: "folder-link",
+                                originalURL: currentOriginal
+                            ),
+                            legacyFile(
+                                storedName: "folder-copy",
+                                originalURL: fixture.root
+                                    .appendingPathComponent("gone-b.txt")
+                            ),
+                            legacyFile(
+                                storedName: "regular-copy",
+                                originalURL: fixture.root
+                                    .appendingPathComponent("gone-c.txt")
+                            ),
+                        ]
+                    )
+                ],
+                retentionPeriod: .unlimited
+            )
+        )
+
+        guard case .published(let report) = outcome else {
+            return XCTFail("expected the migration to publish, got \(outcome)")
+        }
+        XCTAssertEqual(report.retainedEntryCount, 1)
+        XCTAssertEqual(report.ownedPayloadCount, 1)
+        let diagnostics = try await module.legacyFileDiagnostics(
+            for: ClipboardHistoryEntryID(entryID)
+        )
+        XCTAssertEqual(
+            diagnostics.members.map(\.state),
+            [.unavailable, .legacyUnverified, .unavailable, .legacyOwned]
+        )
+
+        let cleanup = try await module.cleanupLegacyPayloads(
+            in: fixture.legacyPayloadRoot
+        )
+        XCTAssertEqual(cleanup.removedPayloadCount, 1)
+        XCTAssertTrue(cleanup.canDeleteLegacyRows)
+        // The links stay for the snapshot deletion to remove; what they point
+        // at is never read, moved or deleted.
+        XCTAssertEqual(
+            try fileManager.destinationOfSymbolicLink(
+                atPath: fixture.legacyPayloadURL("file-link").path
+            ),
+            outsideFile.path
+        )
+        XCTAssertEqual(try Data(contentsOf: outsideFile), Data("outside".utf8))
+        XCTAssertEqual(
+            try Data(contentsOf: fileInOutsideFolder),
+            Data("inside".utf8)
+        )
+    }
+
     func testUnreadableFileSidesFollowContractAndSingleOwnedRestore()
         async throws
     {

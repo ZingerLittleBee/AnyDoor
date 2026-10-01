@@ -38,6 +38,10 @@ versioning.
   full. A history that already holds a longer text rebuilds its search index
   once after updating (search shows its indexing state briefly) and gives back
   the space.
+- Clipboard History no longer stays on "migration failed" when the pre-4.2
+  history folder contains a copied symbolic link. The entry is carried over as
+  a file reference without a stored copy instead of blocking the upgrade, and
+  the link's target is never read or deleted.
 
 ## [4.2.5] - 2026-09-30
 
