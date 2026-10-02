@@ -6,6 +6,7 @@ import LocalAuthentication
 import Security
 import UniformTypeIdentifiers
 import XCTest
+import ClipboardHistoryTestSupport
 import os
 
 @testable import ClipboardHistory
@@ -15,7 +16,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testWhitespaceOnlyTextIsCapturedWhileZeroLengthTextIsAbsent()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
@@ -71,7 +72,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testPlainTextMaterializationRejectsMixedEntryWithoutExactTextOnEveryItem()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
@@ -112,7 +113,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testExplicitFirstPartyCapturesKeepProvenanceWithoutRecursiveFacetInference()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let source = ClipboardHistoryCaptureSource(
             bundleIdentifier: "dev.bybee.AnyDoor",
@@ -166,7 +167,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testOCRCapturesEarnTheOCRFacetWithoutInferringLinkEmailOrColor()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let source = ClipboardHistoryCaptureSource(
             bundleIdentifier: "dev.bybee.AnyDoor",
@@ -232,7 +233,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testAggregateByteAndPixelSafetyLimitsCommitNoEntryOrPayload()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
 
         do {
@@ -295,7 +296,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testStandardColorPreservesRawRepresentationAndOverlapsExactTextFacet()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
@@ -353,7 +354,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testSnapshotRejectsMarkersUnsupportedItemsAndGenerationChangesAtomically()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let privateType = NSPasteboard.PasteboardType("dev.bybee.tests.private")
         let markerType = NSPasteboard.PasteboardType(
@@ -438,7 +439,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
 
     @MainActor
     func testVideoFileCaptureSupportsBothFiltersAndPreservesPasteReferences() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let files = try TemporaryFileReferences()
         let video = try files.create(name: "clip.mp4", contents: "metadata only")
         let text = try files.create(name: "notes.txt", contents: "notes")
@@ -474,7 +475,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testFileCaptureUsesAtomicBookmarksWithoutCopyingOrPathFallback()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let files = try TemporaryFileReferences()
         let first = try files.create(name: "first.png", contents: "not image data")
         let second = try files.create(name: "second.txt", contents: "second")
@@ -553,7 +554,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         async throws
     {
         let sourcePNG = try makeOrientedWideGamutPNG()
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
@@ -680,7 +681,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         ]
 
         for (text, expectedFacets) in cases {
-            let fixture = try TemporaryStore()
+            let fixture = try TemporaryStore(in: self)
             let module = makeReadyModule(in: fixture)
             let pasteboard = NSPasteboard(
                 name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
@@ -725,7 +726,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testNamedPasteboardCapturePreservesItemOrderAndEveryStandardTextRepresentation()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name("dev.bybee.AnyDoor.tests.\(UUID().uuidString)")
@@ -828,11 +829,11 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testEncryptedStoreReturnsEmptyFirstPage() async throws {
-        let fixture = try TemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try TemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
 
         let page = try await module.page(ClipboardHistoryQuery())
 
@@ -841,33 +842,33 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testEncryptedStoreRejectsWrongKeyAndHidesSQLiteHeader() async throws {
-        let fixture = try TemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try TemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await module.page(ClipboardHistoryQuery())
 
         let header = try Data(contentsOf: fixture.url).prefix(16)
         XCTAssertNotEqual(String(data: header, encoding: .utf8), "SQLite format 3\u{0}")
 
         XCTAssertThrowsError(
-            try ClipboardHistoryModule(
+            try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: Data(repeating: 0x5A, count: 32)
-            )
+            ))
         )
     }
 
     func testRuntimeProvidesPinnedSQLCipherAndRequiredFTSFeatures() async throws {
-        let fixture = try TemporaryDatabase()
+        let fixture = try TemporaryDatabase(in: self)
         // Opening the store runs validateSearchRuntimeCapabilities, which
         // throws unless FTS5 and the trigram tokenizer work, so a ready
         // module proves both.
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -883,7 +884,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     /// rows down, otherwise the wall stays unusable on exactly the history
     /// that needs pruning.
     func testOpeningAPreBoundStoreCutsAnOversizedStoredPreview() async throws {
-        let fixture = try TemporaryDatabase()
+        let fixture = try TemporaryDatabase(in: self)
         let limit = ClipboardHistoryModule.previewTextCharacterLimit
         let oversized = String(repeating: "a", count: limit * 2)
         let legacy = try ClipboardHistoryModule.openDatabase(
@@ -891,6 +892,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
             databaseKey: fixture.key,
             migrationTarget: "v10_recency_paging_index"
         )
+        addTeardownBlock { try legacy.close() }
         try await legacy.write { database in
             try database.execute(
                 sql: """
@@ -912,15 +914,16 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         }
         try legacy.close()
 
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await module.storageDiagnostics()
         let reopened = try ClipboardHistoryModule.openDatabase(
             at: fixture.url,
             databaseKey: fixture.key
         )
+        addTeardownBlock { try reopened.close() }
         let stored = try await reopened.read { database in
             try String.fetchOne(
                 database,
@@ -932,11 +935,12 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testVideoFacetMigrationBackfillsUnavailableFilesAndIsIdempotent() async throws {
-        let fixture = try TemporaryDatabase()
+        let fixture = try TemporaryDatabase(in: self)
         let legacy = try ClipboardHistoryModule.openDatabase(
             at: fixture.url, databaseKey: fixture.key,
             migrationTarget: "v11_bounded_preview_text"
         )
+        addTeardownBlock { try legacy.close() }
         try await legacy.write { database in
             for (id, path, type) in [
                 ("movie", "/missing/clip", "public.movie"),
@@ -975,6 +979,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
             let migrated = try ClipboardHistoryModule.openDatabase(
                 at: fixture.url, databaseKey: fixture.key
             )
+            addTeardownBlock { try migrated.close() }
             let videoIDs = try await migrated.read { database in
                 try String.fetchAll(database, sql: "SELECT entry_id FROM clipboard_entry_facets WHERE facet = 'video' ORDER BY entry_id")
             }
@@ -992,11 +997,12 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testOCRFacetMigrationBackfillsExplicitCapturesAndIsIdempotent() async throws {
-        let fixture = try TemporaryDatabase()
+        let fixture = try TemporaryDatabase(in: self)
         let legacy = try ClipboardHistoryModule.openDatabase(
             at: fixture.url, databaseKey: fixture.key,
             migrationTarget: "v12_video_facet"
         )
+        addTeardownBlock { try legacy.close() }
         try await legacy.write { database in
             for id in ["recognized", "image", "plain"] {
                 try database.execute(
@@ -1067,6 +1073,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
             let migrated = try ClipboardHistoryModule.openDatabase(
                 at: fixture.url, databaseKey: fixture.key
             )
+            addTeardownBlock { try migrated.close() }
             let ocrIDs = try await migrated.read { database in
                 try String.fetchAll(database, sql: "SELECT entry_id FROM clipboard_entry_facets WHERE facet = 'ocr' ORDER BY entry_id")
             }
@@ -1090,11 +1097,11 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testEncryptedStoreAppliesVersionedMigrationsAndPassesIntegrityChecks()
         async throws
     {
-        let fixture = try TemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try TemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
 
         let diagnostics = try await module.storageDiagnostics()
 
@@ -1126,18 +1133,18 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testExistingFoundationStoreMigratesThroughEveryVersion() async throws {
-        let fixture = try TemporaryDatabase()
+        let fixture = try TemporaryDatabase(in: self)
         try ClipboardHistoryModule.createFoundationStoreForTesting(
             at: fixture.url,
             databaseKey: fixture.key
         )
 
         let recognizer = MigrationVisionRecognizer()
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key,
             visionRecognizer: recognizer
-        )
+        ))
 
         let diagnostics = try await module.storageDiagnostics()
         XCTAssertEqual(
@@ -1296,12 +1303,12 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testKeyAccessDeniedSurfacesAsStoreUnavailableNotPaused() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let keyStore = TestMasterKeyStore(loadResult: .accessDenied)
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
 
         let status = await module.status()
         XCTAssertEqual(
@@ -1316,13 +1323,13 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testLockedKeychainPausesWithoutCreatingStoreAndRetryResumes() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let masterKey = Data(repeating: 0x31, count: 32)
         let keyStore = TestMasterKeyStore(loadResult: .locked)
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
 
         let lockedStatus = await module.status()
         XCTAssertEqual(
@@ -1350,16 +1357,16 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testMissingKeyNeverCreatesReplacementForExistingStore() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let masterKey = Data(repeating: 0x42, count: 32)
         let keyStore = TestMasterKeyStore(
             loadResult: .missing,
             keyToCreate: masterKey
         )
-        let original = ClipboardHistoryModule(
+        let original = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
         let originalStatus = await original.status()
         XCTAssertEqual(originalStatus.availability, .ready)
         try await original.closeStoreForTesting()
@@ -1368,10 +1375,10 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         let bytesBefore = try Data(contentsOf: databaseURL)
         keyStore.loadResult = .missing
 
-        let reopened = ClipboardHistoryModule(
+        let reopened = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
 
         let reopenedStatus = await reopened.status()
         XCTAssertEqual(
@@ -1387,15 +1394,15 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testWrongExistingKeyReportsAuthenticationFailureWithoutReset() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let keyStore = TestMasterKeyStore(
             loadResult: .missing,
             keyToCreate: Data(repeating: 0x53, count: 32)
         )
-        let original = ClipboardHistoryModule(
+        let original = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
         try await original.closeStoreForTesting()
         let databaseURL = fixture.url.appendingPathComponent("history.sqlite")
         let resourceBefore = try databaseURL.resourceValues(
@@ -1403,10 +1410,10 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         ).fileResourceIdentifier
 
         keyStore.loadResult = .key(Data(repeating: 0xA9, count: 32))
-        let reopened = ClipboardHistoryModule(
+        let reopened = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
 
         let reopenedStatus = await reopened.status()
         XCTAssertEqual(reopenedStatus.reason, .databaseAuthenticationFailed)
@@ -1421,22 +1428,22 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testIntegrityFailureReportsPersistentUnavailableWithoutReset() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let keyStore = TestMasterKeyStore(
             loadResult: .missing,
             keyToCreate: Data(repeating: 0xB6, count: 32)
         )
-        let original = ClipboardHistoryModule(
+        let original = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
         try await original.damageSchemaForIntegrityTesting()
         try await original.closeStoreForTesting()
 
-        let reopened = ClipboardHistoryModule(
+        let reopened = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
 
         let status = await reopened.status()
         XCTAssertEqual(status.availability, .unavailable)
@@ -1446,22 +1453,22 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testFailedForeignKeyIntegrityCheckReportsTypedUnavailable() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let keyStore = TestMasterKeyStore(
             loadResult: .missing,
             keyToCreate: Data(repeating: 0xD8, count: 32)
         )
-        let original = ClipboardHistoryModule(
+        let original = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
         try await original.damageForeignKeysForIntegrityTesting()
         try await original.closeStoreForTesting()
 
-        let reopened = ClipboardHistoryModule(
+        let reopened = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
 
         let status = await reopened.status()
         XCTAssertEqual(status.availability, .unavailable)
@@ -1576,10 +1583,10 @@ final class ClipboardHistoryModuleTests: XCTestCase {
                 KeychainCrossIdentityHarness.interactionEnvironment
             ] == "1"
         )
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: URL(fileURLWithPath: storePath),
             keyStore: keyStore
-        )
+        ))
         if mode == .create {
             _ = try await module.capture(
                 ClipboardHistoryCaptureRequest(
@@ -1616,7 +1623,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
 
     func testBitmapAndThumbnailPublishEncryptedBeforeReferenceAndMaterializeInMemory() async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let plaintext = Data("private bitmap payload".utf8)
 
@@ -1665,7 +1672,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     func testPreviewMaterializesThumbnailWhileFullPreviewKeepsOriginalPixels()
         async throws
     {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let outcome = try await module.capture(
             bitmapRequest(try makeGrayPNG(width: 1_244, height: 1_466))
@@ -1696,26 +1703,26 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testPayloadAuthenticationFaultDisablesOnlyThatPayloadAction() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let keyStore = TestMasterKeyStore(
             loadResult: .missing,
             keyToCreate: Data(repeating: 0x62, count: 32)
         )
-        let writer = ClipboardHistoryModule(
+        let writer = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
         let plaintext = Data("authenticated bitmap".utf8)
         let outcome = try await writer.capture(bitmapRequest(plaintext))
         try await writer.closeStoreForTesting()
 
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore,
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.payloadAuthentication]
             )
-        )
+        ))
 
         do {
             _ = try await module.materialize(
@@ -1739,7 +1746,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testCorruptBitmapDisablesOnlyThatPayloadAction() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let plaintext = Data("authenticated bitmap".utf8)
         let outcome = try await module.capture(bitmapRequest(plaintext))
@@ -1791,7 +1798,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
             .payloadDurability,
             .payloadPublication,
         ] {
-            let fixture = try TemporaryStore()
+            let fixture = try TemporaryStore(in: self)
             let module = makeReadyModule(in: fixture, faults: [point])
 
             do {
@@ -1814,7 +1821,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testDatabaseFailureLeavesOnlyEncryptedOrphansForReconciliation() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture, faults: [.databaseTransaction])
         let plaintext = Data("transaction orphan plaintext".utf8)
 
@@ -1839,7 +1846,7 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testDeletionCommitsBeforeFailedPhysicalReclamation() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture, faults: [.payloadDeletion])
         let outcome = try await module.capture(
             bitmapRequest(Data("deletion ordering".utf8))
@@ -1863,31 +1870,31 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testOrphanReconciliationFailureIsRetryable() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let keyStore = TestMasterKeyStore(
             loadResult: .missing,
             keyToCreate: Data(repeating: 0x73, count: 32)
         )
-        let transactionFailure = ClipboardHistoryModule(
+        let transactionFailure = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore,
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.databaseTransaction]
             )
-        )
+        ))
         _ = try? await transactionFailure.capture(
             bitmapRequest(Data("reconcile retry".utf8))
         )
         try await transactionFailure.closeStoreForTesting()
         XCTAssertEqual(try fixture.payloadFiles().count, 2)
 
-        let failedReconciliation = ClipboardHistoryModule(
+        let failedReconciliation = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore,
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.orphanReconciliation]
             )
-        )
+        ))
         do {
             _ = try await failedReconciliation.performMaintenance(
                 orphanGracePeriod: 0
@@ -1899,17 +1906,17 @@ final class ClipboardHistoryModuleTests: XCTestCase {
         XCTAssertEqual(try fixture.payloadFiles().count, 2)
         try await failedReconciliation.closeStoreForTesting()
 
-        let retry = ClipboardHistoryModule(
+        let retry = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
         let report = try await retry.performMaintenance(orphanGracePeriod: 0)
         XCTAssertEqual(report.reclaimedPayloadCount, 2)
         XCTAssertEqual(try fixture.payloadFiles().count, 0)
     }
 
     func testMaintenanceCheckpointsEncryptedWALBeforeRecordingSuccess() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let module = makeReadyModule(in: fixture)
         let plaintext = "wal plaintext sentinel"
         _ = try await module.capture(
@@ -1939,17 +1946,17 @@ final class ClipboardHistoryModuleTests: XCTestCase {
     }
 
     func testConfirmedResetDeletesUnreadableStoreAndOldKeyBeforeRecreating() async throws {
-        let fixture = try TemporaryStore()
+        let fixture = try TemporaryStore(in: self)
         let firstKey = Data(repeating: 0x84, count: 32)
         let secondKey = Data(repeating: 0x95, count: 32)
         let keyStore = TestMasterKeyStore(
             loadResult: .missing,
             keysToCreate: [firstKey, secondKey]
         )
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore
-        )
+        ))
         _ = try await module.capture(
             bitmapRequest(Data("history to reset".utf8))
         )
@@ -1969,18 +1976,18 @@ final class ClipboardHistoryModuleTests: XCTestCase {
             ClipboardHistoryKeyDerivation
             .deriveV1(from: firstKey).databaseKey
         XCTAssertThrowsError(
-            try ClipboardHistoryModule(
+            try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: databaseURL,
                 databaseKey: oldDatabaseKey
-            )
+            ))
         )
         let newDatabaseKey =
             ClipboardHistoryKeyDerivation
             .deriveV1(from: secondKey).databaseKey
-        _ = try ClipboardHistoryModule(
+        _ = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: databaseURL,
             databaseKey: newDatabaseKey
-        )
+        ))
     }
 }
 
@@ -1989,7 +1996,7 @@ private final class TemporaryDatabase {
     let url: URL
     let key = Data(repeating: 0xA5, count: 32)
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("AnyDoor-ClipboardHistoryTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
@@ -1997,25 +2004,19 @@ private final class TemporaryDatabase {
             withIntermediateDirectories: true
         )
         url = directory.appendingPathComponent("history.sqlite")
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: directory)
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
     }
 }
 
 private final class TemporaryStore {
     let url: URL
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
         url = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-ClipboardHistoryModuleTests-\(UUID().uuidString)"
             )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: url)
+        testCase.removeClipboardHistoryDirectoryAfterTest(url)
     }
 
     func payloadFiles() throws -> [URL] {
@@ -2616,14 +2617,14 @@ extension ClipboardHistoryModuleTests {
         in fixture: TemporaryStore,
         faults: Set<ClipboardHistoryFaultPoint> = []
     ) -> ClipboardHistoryModule {
-        ClipboardHistoryModule(
+        trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: TestMasterKeyStore(
                 loadResult: .missing,
                 keyToCreate: Data(repeating: 0x62, count: 32)
             ),
             faultInjector: ClipboardHistoryFaultInjector(points: faults)
-        )
+        ))
     }
 
     fileprivate func bitmapRequest(_ data: Data) -> ClipboardHistoryCaptureRequest {

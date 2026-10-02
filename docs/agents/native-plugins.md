@@ -1,14 +1,15 @@
 # Native Plugin Playbook
 
 Audience: an agent (or developer) adding or modifying a Native Plugin without
-re-deriving the architecture. Everything here is verified against the source
-on branch `feat/native-plugins` (2026-07-20). Rationale lives in the linked
-docs; this file is the operational map.
+re-deriving the architecture. This is the current operational map; the linked
+PRD and ADRs record the rationale. Target ownership comes from
+[`Package.swift`](../../Package.swift), and the implementation entry points
+below describe the PluginSupport split and Clipboard History v2 integration.
 
 Scope: **Native Plugins only.** Script Plugins are a separate kind (sideloaded
 pure-JavaScript packages on JavaScriptCore) sharing only the kind-agnostic
 `PluginLifecycleCore` — see ADR-0008/0009, tickets `docs/issues/018`–`024`, and
-the Script Plugin notes in `AGENTS.md`; do not apply this playbook to them.
+the [Script Plugin reference](architecture.md#script-plugins); do not apply this playbook to them.
 
 Background: [PRD](../prds/2026-07-16-native-plugin-architecture.md) ·
 [ADR-0005 logical install (+ 2026-07-17 addendum)](../adr/0005-native-plugins-logical-install.md) ·
@@ -56,13 +57,14 @@ Background: [PRD](../prds/2026-07-16-native-plugin-architecture.md) ·
 
 SPM targets (see `Package.swift`), all `.swiftLanguageMode(.v6)`:
 
-```
-PluginInterface  ←─ HostsPlugin ────────┐
-      ↑          ←─ ImageConversionPlugin (+ ImageCodec, libwebp)
-      │                                 │
-      └──────────── AnyDoor (host) ─────┘   AnyDoorTests depends on all four
-ImageCodec       ←─ AnyDoor, ImageConversionPlugin
-```
+| Target | Role / dependencies relevant to Native Plugins |
+|---|---|
+| `PluginInterface` | Shared contracts; no package-target dependencies. |
+| `PluginSupport` | Shared implementation utilities; no package-target dependencies. |
+| `ImageCodec` | Pure image-codec utilities; no package-target dependencies. |
+| `HostsPlugin` | `PluginInterface` + `PluginSupport`. |
+| `ImageConversionPlugin` | `PluginInterface` + `PluginSupport` + `ImageCodec` + `libwebp`. |
+| `AnyDoor` / `AnyDoorTests` | Depend on the shared targets and both plugin modules for composition and verification. |
 
 - **`PluginInterface`** (`Sources/PluginInterface/`) — the lean shared
   interface: `BuiltinItem` (closed catalog), `BuiltinProvider` /
@@ -74,15 +76,17 @@ ImageCodec       ←─ AnyDoor, ImageConversionPlugin
   `PluginClipboardAction` + `PluginClipboardPayload` +
   `PluginClipboardActionContext`,
   `PrivilegedHelperAccess` + `PrivilegedHelperReadiness` +
-  `PrivilegedHelperCallError`, plus a few shared utilities/views
-  (`MainThreadIsolation`, `CaptureFilename`, `FileThumbnailCache`,
-  `FocusedControlKeyPolicy`, `PlainTextEditor`, `HoverReader`,
-  `AdaptiveGlassEffectContainer`). It must never depend on Core palette/UI
+  `PrivilegedHelperCallError`. It must never depend on Core palette/UI
   types such as `PanelEntry` — `Source` cases drag their payloads with them
   and would balloon the interface target (ADR-0007).
+- **`PluginSupport`** (`Sources/PluginSupport/`) — shared implementation
+  utilities/views (`MainThreadIsolation`, `CaptureFilename`, `FileThumbnailCache`,
+  `FocusedControlKeyPolicy`, `PlainTextEditor`, `HoverReader`,
+  `AdaptiveGlassEffectContainer`). This is a sibling of `PluginInterface`,
+  keeping implementation conveniences out of the contract target.
 - **Plugin modules** (`Sources/HostsPlugin/`,
-  `Sources/ImageConversionPlugin/`) — depend **only** on `PluginInterface`
-  (Image Conversion also on `ImageCodec` + `libwebp`). This is the
+  `Sources/ImageConversionPlugin/`) — depend on `PluginInterface` and
+  `PluginSupport` (Image Conversion also on `ImageCodec` + `libwebp`). This is the
   compiler-enforced boundary: a plugin module cannot import the host, so any
   host facility it needs must be a `PluginHostServices` capability.
 - **`ImageCodec`** — pure codec utilities shared by Core and the Image
@@ -159,8 +163,10 @@ Implemented by `CorePluginHost`
 (`Sources/AnyDoor/Services/Plugins/CorePluginHost.swift`); one instance built
 in `AppDelegate` and handed to every plugin's `init`. Capabilities:
 
-- `modelContainer: ModelContainer` — the shared container; wire plugin stores
-  in `activate()`.
+- `modelContainer: ModelContainer` — the shared container captured by the
+  plugin instance. Construct or configure its owned stores from that container
+  before they are used; Image Conversion constructs its history store in
+  `init(host:)`, while Hosts configures its manager in `activate()`.
 - `effectiveLocale: Locale` — routed through the `@Observable`
   `LocalizationManager`, so reading it in a SwiftUI `body` re-renders on a
   language switch (pinned by `PluginLocalizationTests`).
@@ -171,9 +177,15 @@ in `AppDelegate` and handed to every plugin's `init`. Capabilities:
   `ToastPresenter.shared`.
 - `trackRegularWindow(_ NSWindow)` — `RegularWindowCoordinator` flips the
   accessory app to `.regular` while the window is open.
-- `pasteboardSelfWrite(_ body:)` — the `ClipboardWatcher.selfWrite` funnel;
-  any plugin pasteboard write must go through it so the 0.5 s history poll
-  never captures it.
+- `pasteboardSelfWrite(_ body:)` — delegates to the injected
+  `ClipboardHistoryPasteboardSelfWriteFunnel.perform`. `AppDelegate` supplies
+  its Clipboard History module's `pasteboardSelfWrites` to `CorePluginHost`;
+  the module's capture monitor shares that suppression state. Every plugin
+  pasteboard write goes through this capability so its resulting pasteboard
+  generation is excluded from passive capture. The funnel lives in
+  [`Sources/ClipboardHistory/ClipboardHistoryPasteboardSelfWriteFunnel.swift`](../../Sources/ClipboardHistory/ClipboardHistoryPasteboardSelfWriteFunnel.swift),
+  and the host adapter is
+  [`CorePluginHost.swift`](../../Sources/AnyDoor/Services/Plugins/CorePluginHost.swift).
 - `runAppleScript(_ source:) async throws -> String` — `AppleScriptRunner`
   with Automation-permission handling.
 - `privilegedHelper: any PrivilegedHelperAccess` — the shared root daemon
@@ -318,8 +330,10 @@ claims.
 
 All of this is composed in `AppDelegate` (`Sources/AnyDoor/AppDelegate.swift`).
 
-- **Launch.** `init()`: schema = 5 Core `@Model` types plus
-  `NativePluginCatalog.modelSchemaTypes` (unconditional).
+- **Launch.** `init()`: schema = the four Core `@Model` types
+  (`KeyBinding`, `BuiltinPreference`, `TranslationRecord`, `Quicklink`) plus
+  `NativePluginCatalog.modelSchemaTypes` (unconditional). Clipboard History v2
+  owns a separate encrypted store and adds no SwiftData model to this schema.
   `applicationDidFinishLaunching`: build one `CorePluginHost`, ask the same
   catalog to construct the plugin list, then —
   **order matters** — `PluginUsageMigration.runIfNeeded(plugins:in:)` first,
@@ -383,7 +397,8 @@ named test, which is the point of them.
    `BuiltinItemLocalizationTests` (title key resolves), non-exhaustive-switch
    compile errors in `kind`/`symbol`/`defaultOrder`.*
 2. **New SPM target** in `Package.swift`: `Sources/<Name>Plugin/`, depends
-   only on `PluginInterface` (+ pure shared targets like `ImageCodec` if
+   on `PluginInterface`, plus `PluginSupport` when shared implementation
+   utilities are needed (+ pure shared targets like `ImageCodec` if
    justified), `.swiftLanguageMode(.v6)`. Add it to the `AnyDoor` and
    `AnyDoorTests` dependency lists.
 3. **Plugin type**: `@MainActor public final class <Name>NativePlugin:
@@ -438,8 +453,9 @@ named test, which is the point of them.
    has already run for existing users, so a *later* plugin extracted from an
    existing Core feature needs a **new** versioned migration pass (v2) if its
    users must be auto-installed; a genuinely new feature needs none.
-8. **Docs**: `CHANGELOG.md` under `## [Unreleased]`; the SPM target list and
-   Native Plugins note in `AGENTS.md`; glossary additions in `CONTEXT.md` if
+8. **Docs**: `CHANGELOG.md` under `## [Unreleased]`; the
+   [target navigation](navigation.md#package-boundaries) and
+   [Native Plugin reference](architecture.md#native-plugins); glossary additions in `CONTEXT.md` if
    the feature brings new terms.
 
 ## 8. Testing rules

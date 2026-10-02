@@ -1,5 +1,10 @@
 # Scrolling Capture (Phase 3) Design
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Goal:** Capture content taller than the screen by auto-scrolling a selected
 region and losslessly stitching the frames into one tall image.
 

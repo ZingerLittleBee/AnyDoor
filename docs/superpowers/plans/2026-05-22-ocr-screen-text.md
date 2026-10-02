@@ -1,5 +1,10 @@
 # OCR Screen Text Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add an OCR action to AnyDoor that captures a screen region, recognizes its text with the macOS Vision framework, copies the text to the clipboard, and shows a transient bottom-center toast reporting success or failure.

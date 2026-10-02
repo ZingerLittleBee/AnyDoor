@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := dev
-.PHONY: dev build swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun beta-release beta-release-dryrun
+.PHONY: dev build check docs-check swift-release install uninstall sparkle-tools notary-profile notary-check release release-dryrun beta-release beta-release-dryrun
 
 # The `swiftbuild` backend (the default since Swift 6.4) stamps the deployment
 # target into LC_BUILD_VERSION's `sdk` field instead of the real SDK version,
@@ -16,6 +16,13 @@ dev:
 
 build:
 	swift build $(SDK_STAMP_FLAGS)
+
+check:
+	@bash scripts/check-swift.sh $(CHECK_SWIFT_FLAGS)
+
+docs-check:
+	@python3 scripts/check-docs.py
+	@python3 -m unittest discover -s scripts/tests -p 'test_*.py'
 
 swift-release:
 	swift build -c release $(SDK_STAMP_FLAGS)

@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import AppKit
 import XCTest
 
@@ -257,11 +258,13 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
                 "AnyDoor-CopyEntry-\(UUID().uuidString)",
                 isDirectory: true
             )
-        defer { try? FileManager.default.removeItem(at: storeRoot) }
-        let module = try ClipboardHistoryModule(
-            testingDatabaseURL: storeRoot
-                .appendingPathComponent("history.sqlite"),
-            databaseKey: Data(repeating: 0x43, count: 32)
+        removeClipboardHistoryDirectoryAfterTest(storeRoot)
+        let module = try trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL: storeRoot
+                    .appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x43, count: 32)
+            )
         )
         // copyEntry writes through the process-wide funnel, which AppDelegate
         // points at the live module; point it at this one instead.

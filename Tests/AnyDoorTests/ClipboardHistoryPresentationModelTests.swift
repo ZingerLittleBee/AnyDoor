@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import XCTest
 
 @testable import AnyDoor
@@ -1120,8 +1121,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
     /// page must not wait on the history-wide scans behind them. The wall
     /// shows all three and still loads them.
     func testPopoverFirstPageSkipsTheAggregatesTheWallLoads() async throws {
-        let store = try TemporaryHistoryStore()
-        defer { store.removeStore() }
+        let store = try TemporaryHistoryStore(testCase: self)
         let module = store.module
         let notes = try await module.capture(
             ClipboardHistoryCaptureRequest(
@@ -2365,7 +2365,7 @@ private struct TemporaryHistoryStore {
     let directory: URL
     let module: ClipboardHistoryModule
 
-    init() throws {
+    init(testCase: XCTestCase) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-ClipboardPresentation-\(UUID().uuidString)",
@@ -2375,14 +2375,13 @@ private struct TemporaryHistoryStore {
             at: directory,
             withIntermediateDirectories: true
         )
-        module = try ClipboardHistoryModule(
-            testingDatabaseURL: directory
-                .appendingPathComponent("history.sqlite"),
-            databaseKey: Data(repeating: 0x42, count: 32)
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
+        module = try testCase.trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL: directory
+                    .appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x42, count: 32)
+            )
         )
-    }
-
-    func removeStore() {
-        try? FileManager.default.removeItem(at: directory)
     }
 }

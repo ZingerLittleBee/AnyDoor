@@ -4,6 +4,7 @@ import ImageIO
 import os
 import UniformTypeIdentifiers
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
@@ -39,7 +40,7 @@ final class ClipboardHistoryCaptureNoticeLimiterTests: XCTestCase {
 final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
     @MainActor
     func testOversizedImageRaisesOneTooLargeNoticePerWindow() async throws {
-        let harness = try await CaptureNoticeHarness()
+        let harness = try await CaptureNoticeHarness(in: self)
         let png = try XCTUnwrap(overPixelLimitPNG)
 
         harness.writeImage(png)
@@ -71,7 +72,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
 
     @MainActor
     func testOversizedContentSharesTheTooLargeNoticeAndWindow() async throws {
-        let harness = try await CaptureNoticeHarness()
+        let harness = try await CaptureNoticeHarness(in: self)
         // The only large write in this file: 128 MiB + 1 byte of HTML, which
         // the module refuses as `contentTooLarge`.
         let html = NSPasteboardItem()
@@ -97,7 +98,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
     func testTooLargeAndCaptureFailedNoticesAreRateLimitedSeparately()
         async throws
     {
-        let harness = try await CaptureNoticeHarness(faults: [.diskFull])
+        let harness = try await CaptureNoticeHarness(in: self, faults: [.diskFull])
         let png = try XCTUnwrap(overPixelLimitPNG)
 
         harness.writeImage(png)
@@ -115,7 +116,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
 
     @MainActor
     func testAnyDoorSelfWriteRaisesNoNotice() async throws {
-        let harness = try await CaptureNoticeHarness()
+        let harness = try await CaptureNoticeHarness(in: self)
         let png = try XCTUnwrap(overPixelLimitPNG)
 
         let wrote = harness.module.pasteboardSelfWrites.perform(
@@ -144,6 +145,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
             displayName: "Passwords"
         )
         let harness = try await CaptureNoticeHarness(
+            in: self,
             sourceProvider: { passwords }
         )
         let png = try XCTUnwrap(overPixelLimitPNG)
@@ -166,7 +168,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
 
     @MainActor
     func testExclusionMarkerRaisesNoNotice() async throws {
-        let harness = try await CaptureNoticeHarness()
+        let harness = try await CaptureNoticeHarness(in: self)
         let png = try XCTUnwrap(overPixelLimitPNG)
 
         harness.writeImage(
@@ -191,6 +193,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
         let racingWrite = makeNoticePasteboard()
         defer { racingWrite.releaseGlobally() }
         let harness = try await CaptureNoticeHarness(
+            in: self,
             snapshotRequest: { _, _ in
                 ClipboardHistoryPasteboardCaptureRequest(
                     pasteboard: racingWrite
@@ -235,6 +238,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
     @MainActor
     func testIgnoredUniversalClipboardRaisesNoNotice() async throws {
         let harness = try await CaptureNoticeHarness(
+            in: self,
             configuration: .init(ignoresUniversalClipboard: true)
         )
         let png = try XCTUnwrap(overPixelLimitPNG)
@@ -258,6 +262,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
     func testLockedKeychainRaisesNoNotice() async throws {
         let unlocked = OSAllocatedUnfairLock(initialState: false)
         let harness = try await CaptureNoticeHarness(
+            in: self,
             isKeychainUnlocked: { unlocked.withLock { $0 } }
         )
         let png = try XCTUnwrap(overPixelLimitPNG)
@@ -274,7 +279,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
 
     @MainActor
     func testRoutineRejectionsRaiseNoNotice() async throws {
-        let harness = try await CaptureNoticeHarness()
+        let harness = try await CaptureNoticeHarness(in: self)
 
         harness.pasteboard.clearContents()
         await harness.observe()
@@ -314,13 +319,13 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
     /// handler, so notices must reach the one the module was constructed with.
     @MainActor
     func testMonitorFallsBackToTheModuleNoticeHandler() async throws {
-        let store = try CaptureNoticeTemporaryStore()
+        let store = try CaptureNoticeTemporaryStore(in: self)
         let recorder = CaptureNoticeRecorder()
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: store.url,
             keyStore: CaptureNoticeMemoryKeyStore(),
             captureNotices: { recorder.notices.append($0) }
-        )
+        ))
         let pasteboard = makeNoticePasteboard()
         defer { pasteboard.releaseGlobally() }
         let monitor = ClipboardHistoryCaptureMonitor(
@@ -329,6 +334,7 @@ final class ClipboardHistoryCaptureNoticeTests: XCTestCase {
             sourceProvider: { nil },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         pasteboard.clearContents()
@@ -388,6 +394,7 @@ private final class CaptureNoticeHarness {
     }
 
     init(
+        in testCase: XCTestCase,
         configuration: ClipboardHistoryMonitoringConfiguration = .init(),
         sourceProvider: @escaping @MainActor
             () -> ClipboardHistoryApplicationSource? = { nil },
@@ -401,12 +408,12 @@ private final class CaptureNoticeHarness {
         isKeychainUnlocked: @escaping @Sendable () -> Bool? = { true },
         faults: Set<ClipboardHistoryFaultPoint> = []
     ) async throws {
-        let store = try CaptureNoticeTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let store = try CaptureNoticeTemporaryStore(in: testCase)
+        let module = testCase.trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: store.url,
             keyStore: CaptureNoticeMemoryKeyStore(),
             faultInjector: ClipboardHistoryFaultInjector(points: faults)
-        )
+        ))
         let pasteboard = makeNoticePasteboard()
         let clock = CaptureNoticeClock()
         let recorder = CaptureNoticeRecorder()
@@ -421,6 +428,7 @@ private final class CaptureNoticeHarness {
             isKeychainUnlocked: isKeychainUnlocked,
             installsSystemObservers: false
         )
+        testCase.addTeardownBlock { await monitor.setEnabled(false) }
         self.store = store
         self.module = module
         self.pasteboard = pasteboard
@@ -501,7 +509,7 @@ private final class CaptureNoticeClock {
 private final class CaptureNoticeTemporaryStore {
     let url: URL
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
         url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "AnyDoor-CaptureNotice-\(UUID().uuidString)",
             isDirectory: true
@@ -510,10 +518,7 @@ private final class CaptureNoticeTemporaryStore {
             at: url,
             withIntermediateDirectories: true
         )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: url)
+        testCase.removeClipboardHistoryDirectoryAfterTest(url)
     }
 }
 

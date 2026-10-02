@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import Foundation
 import XCTest
 
@@ -7,7 +8,7 @@ import XCTest
 @MainActor
 final class ClipboardHistoryPortableSettingsTests: XCTestCase {
     func testPersistsDefinitionsWithoutMembership() async throws {
-        let fixture = try Fixture()
+        let fixture = try Fixture(testCase: self)
         let module = fixture.module
         let entry = try await module.capture(
             ClipboardHistoryCaptureRequest(
@@ -39,7 +40,7 @@ final class ClipboardHistoryPortableSettingsTests: XCTestCase {
     func testImportedDefinitionsReplaceOrderAndDropOnlyRemovedMembership()
         async throws
     {
-        let fixture = try Fixture()
+        let fixture = try Fixture(testCase: self)
         let module = fixture.module
         let entry = try await module.capture(
             ClipboardHistoryCaptureRequest(
@@ -90,20 +91,23 @@ private struct Fixture {
     let defaults: UserDefaults
     let module: ClipboardHistoryModule
 
-    init() throws {
+    init(testCase: XCTestCase) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true
         )
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
         let suite = "ClipboardHistoryPortableSettingsTests-\(UUID())"
         defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defaults.removePersistentDomain(forName: suite)
-        module = try ClipboardHistoryModule(
-            testingDatabaseURL:
-                directory.appendingPathComponent("history.sqlite"),
-            databaseKey: Data(repeating: 0x42, count: 32)
+        module = try testCase.trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL:
+                    directory.appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x42, count: 32)
+            )
         )
     }
 }

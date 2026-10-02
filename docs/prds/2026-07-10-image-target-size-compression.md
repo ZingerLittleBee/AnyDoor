@@ -3,7 +3,7 @@
 - **Status:** approved — unified review passed 2026-07-10
 - **Date:** 2026-07-10
 - **Extends:** [Image Conversion](2026-07-06-image-conversion.md)
-- **Technical design:** [Target Size Compression Technical Design](../superpowers/specs/2026-07-10-image-target-size-compression-design.md)
+- **Technical design:** [Target Size Compression Technical Design](../designs/2026-07-10-image-target-size-compression.md)
 - **Research:** [Target-size compression market research](../research/2026-07-10-image-target-size-compression-market-research.md)
 - **Architecture decisions:** [Image I/O backend](../adr/0002-imageio-for-target-size-compression.md), [metadata policy](../adr/0003-target-size-metadata-policy.md), [exact preview reuse](../adr/0004-exact-preview-reuses-final-candidate.md)
 - **Glossary:** [Ubiquitous Language](../../CONTEXT.md#image-conversion)

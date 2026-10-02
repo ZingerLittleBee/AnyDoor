@@ -29,6 +29,11 @@ ones: this feature's contract is mostly about what it refuses to do.
 
 ### 0.1 Builds and hardware
 
+Complete [native UI preflight](native-ui.md#preflight) first. Run historical
+versions and destructive cases in its independent disposable macOS account;
+use the daily account only for smoke cases that preserve existing data and
+configuration.
+
 Test the **installed** app, not `swift run`. They are separate process
 identities with separate Accessibility grants, and only the installed one has
 the production Bundle ID that the Keychain item and the URL scheme key off.
@@ -84,13 +89,24 @@ done
 Vary it: CJK, emoji, URLs, long code blocks, periodic images
 (`screencapture -c`).
 
-**B. Disposable-home legacy fixture** (for migration cases, does not touch
-your real history):
+**B. Disposable-home legacy fixture** (for migration cases, in the disposable
+account). The fixture verifies its Application Support paths; the home
+variable alone does not isolate preferences, Keychain, or TCC:
 
 ```bash
-CLIPBOARD_HISTORY_GUI_FIXTURE=1 CFFIXED_USER_HOME=/tmp/anydoor-fixture \
+ANYDOOR_FIXTURE_HOME="$(mktemp -d /tmp/anydoor-fixture.XXXXXX)"
+printf 'Fixture home: %s\n' "$ANYDOOR_FIXTURE_HOME"
+CLIPBOARD_HISTORY_GUI_FIXTURE=1 CFFIXED_USER_HOME="$ANYDOOR_FIXTURE_HOME" \
   swift test --filter ClipboardHistoryGUIFixtureTests/testCreateDisposableLegacyMigrationFixture
 ```
+
+The newly created empty directory satisfies the fixture's requirement that
+`AnyDoor.store` does not exist. `CFFIXED_USER_HOME` applies only to this test
+command. Record the generated home and printed
+`CLIPBOARD_HISTORY_GUI_FIXTURE_ROOT`, and keep that profile until acceptance
+and reporting are complete. Cleanup removes only the recorded temporary
+profile; never delete the daily account's Application Support directory to
+rerun a fixture.
 
 ### 0.4 Measuring
 
@@ -105,11 +121,15 @@ CLIPBOARD_HISTORY_GUI_FIXTURE=1 CFFIXED_USER_HOME=/tmp/anydoor-fixture \
   Section 8.11 depends on this.
 - **Who is stalling** — `sample AnyDoor 3 -file /tmp/sample.txt` while
   reproducing tells you whether it is AnyDoor or the target app.
-- **Disk** — `du -sh` the store root plus `ClipboardHistoryV2.displaced/`
-  when it exists; compare against Settings → Clipboard's reported usage. They
-  must agree.
+- **Disk** — compare exact allocated bytes with History Storage Usage, including
+  the database, WAL, shared memory, payloads, and displaced stores. Section 8.16
+  separates the immediate sample from the maintenance-after sample.
 
 ### 0.5 Before each destructive case
+
+Confirm the logged-in user is the disposable test account and the target path
+is its test data. Preserve that fixture before injecting a failure. A file
+backup does not isolate preferences, Keychain, or permission grants.
 
 ```bash
 cp -R ~/Library/Application\ Support/dev.bybee.AnyDoor /tmp/anydoor-backup-$(date +%s)
@@ -119,8 +139,9 @@ cp -R ~/Library/Application\ Support/dev.bybee.AnyDoor /tmp/anydoor-backup-$(dat
 
 ## 1. Migration from pre-v2 — P0
 
-Runs exactly once per user and has never been exercised on a real install.
-Highest-risk area in the branch.
+Runs once per store cutover. Record the source/destination versions and the
+fixture identity for each run; results from another version pair do not
+establish this migration's behavior.
 
 ### 1.1 Basic paths
 
@@ -141,7 +162,7 @@ Highest-risk area in the branch.
 | 1.2.1 | Text | Text entry, searchable. |
 | 1.2.2 | Color | Color facet, normalized value searchable. |
 | 1.2.3 | QR | Decoded value retained and searchable. |
-| 1.2.4 | **Standalone OCR** | Becomes **Text**, not an image-derived entry — its image relation cannot be reconstructed. |
+| 1.2.4 | **Standalone OCR**, migrated from a pre-v2 store by the current build | Becomes **Text + OCR** from the legacy capture kind's first-party provenance, on one entry. It is not image-derived; its source-image relationship cannot be reconstructed. Rows already migrated into v2 before this change may remain Text where provenance was lost; see the ADR-0019 OCR addendum. |
 | 1.2.5 | Image | Encrypted payload, Image facet. |
 | 1.2.6 | Screenshot | Screenshot facet retained. |
 | 1.2.7 | File | See 1.3. |
@@ -187,11 +208,19 @@ The contract decides per member whether the legacy copy can be retired.
 
 ### 1.6 Store relocation out of `ClipboardHistory/` (ADR-0011 amendment)
 
-Run these **only on a disposable profile**: a fixed home and a throwaway
-keychain, so the live history and the live Keychain key are never read, moved,
-or reset. A disposable home alone is not enough, because the Keychain item is
-shared, and a Reset there would delete the live key. Quit the live AnyDoor
-first. Every 4.2.x release honours the same two variables.
+Run these **only while logged into an independent disposable macOS user
+account**, using a fixed home and a throwaway Keychain inside that account.
+`CFFIXED_USER_HOME` redirects Application Support, but UserDefaults still uses
+the logged-in user's preference domain. The home variable does not redirect
+Keychain or TCC; see [isolation boundaries](native-ui.md#isolation-boundaries).
+Running an old release in the daily account can change real preferences even
+when its history directory is redirected.
+
+Quit AnyDoor in the test account before changing versions, except for the
+explicit simultaneous-launch case 1.6.5. Keep historical bundles in the test
+account rather than replacing the daily `/Applications/AnyDoor.app`. The 4.2.x
+artifacts used below support the two environment variables; record the chosen
+artifact and verify the redirected store before injecting a failure.
 
 ```bash
 export CFFIXED_USER_HOME=/tmp/anydoor-relocation
@@ -430,10 +459,17 @@ kind that drift; test the negatives.
 
 ### 4.6 Filter behaviour
 
+Use the [current facet decision](../adr/0019-model-content-types-as-overlapping-facets.md#current-decision),
+not the original fixed-order decision. Run order-changing cases in the test
+account, since the order persists in UserDefaults.
+
 | # | Case | Pass |
 | --- | --- | --- |
-| 4.6.1 | Facet filter is single-select with All, fixed order | Confirmed. |
+| 4.6.1 | Single-select facet filter with All | Selecting one facet replaces the prior facet selection. All remains available and clears the facet constraint. All is a stable filter state, not a chip pinned to a fixed position. |
 | 4.6.2 | Source, tag, favorites-only are separate AND constraints | Combining them narrows, never widens. |
+| 4.6.3 | Default chip order in a fresh profile with no custom tags or saved order | All and Favorites precede the facets. The facet order is Screenshot, Text, Link, Image, Video, File, Email, Color, OCR, QR Code. |
+| 4.6.4 | Reorder a chip by starting its drag while Option is held; repeat without Option | The Option-initiated drag previews the new order and commits it on release. Releasing Option during an already-started reorder does not cancel that drag. A drag started without Option leaves the order unchanged. |
+| 4.6.5 | Reorder facets and All, close/reopen the wall, then relaunch | The committed order persists, including All's chosen position. All remains selectable. Reordering preserves the currently selected category. |
 
 ---
 
@@ -754,6 +790,10 @@ dropped by more than the text's own size. Relaunching does not rebuild again.
 A history with no text that long upgrades without a rebuild: search is ready
 at once.
 
+Use the allocated-byte snapshots from 8.16 before the upgrade, immediately
+after the rebuild, and after maintenance. Record all three; a later reduction
+does not replace the immediate result against this existing acceptance.
+
 ### 8.14 Retention cleanup with secure delete
 
 **Steps.** At 50000 entries, shorten retention from Unlimited to 7 days.
@@ -777,22 +817,98 @@ upward.
 ### 8.16 Disk growth
 
 **Pass.** Growth is proportional to what was stored. Settings → Clipboard's
-reported usage matches `du -sh` within a few percent, and **includes**
-encrypted orphans. WAL does not grow without bound across a long session —
-check it after 8.10.
+reported usage represents the exact allocated file-system bytes required by
+the PRD, including the database, WAL, shared memory, encrypted orphans, and
+displaced stores. Compare the underlying byte total before UI rounding;
+`du -sh` is only a rounded cross-check. WAL does not grow without bound across
+a long session; check it after 8.10.
 
-**Long text.** Note Settings → Clipboard's usage, then copy a plain text of
-about 2 MB that starts and ends with a marker word:
+**Measurement.** Record the database and WAL separately, then the complete
+store total. Production sums `st_blocks * 512` for regular files, skips
+symbolic links, and does not add directory metadata. Logical file length
+(`stat`'s size or `wc -c`) is not allocated storage. In the test account, set
+the parent below to the verified profile's Application Support directory:
 
 ```bash
-{ printf 'zebrahead '; yes 'lorem ipsum dolor sit amet' | head -n 80000; printf 'quokkatail'; } | pbcopy
+CLIPBOARD_TEST_STORE_PARENT="$HOME/Library/Application Support/dev.bybee.AnyDoor"
+export CLIPBOARD_TEST_STORE_PARENT
+python3 - <<'PY'
+from datetime import datetime, timezone
+import os
+from pathlib import Path
+import stat
+
+parent = Path(os.environ["CLIPBOARD_TEST_STORE_PARENT"])
+store = parent / "ClipboardHistoryV2"
+if store.is_symlink() or not store.is_dir():
+    raise SystemExit("Select the verified ClipboardHistoryV2 test store")
+
+def allocated(path):
+    if not path.exists() or path.is_symlink():
+        return 0
+    metadata = path.lstat()
+    if stat.S_ISREG(metadata.st_mode):
+        return metadata.st_blocks * 512
+    if stat.S_ISDIR(metadata.st_mode):
+        return sum(allocated(child) for child in path.iterdir())
+    return 0
+
+print("sample_utc", datetime.now(timezone.utc).isoformat())
+for name in ("history.sqlite", "history.sqlite-wal", "history.sqlite-shm"):
+    print(name, allocated(store / name), "allocated_bytes")
+print("total", allocated(store) + allocated(parent / "ClipboardHistoryV2.displaced"), "allocated_bytes")
+PY
 ```
 
-**Pass.** The reported usage, which counts the WAL, grows by little more than
-the text's own size and well under twice it; before search fields were bounded
-the same copy grew it by more than four times. Pasting the entry returns the
-whole text, ending in `quokkatail`. Searching `zebrahead` finds the entry;
-`quokkatail` does not, because search covers only the first 64 KB of a text.
+For a `CFFIXED_USER_HOME` profile, explicitly select
+`$CFFIXED_USER_HOME/Library/Application Support/dev.bybee.AnyDoor` instead.
+Take samples while captures are idle and note any concurrent maintenance or
+index rebuild. File traversal and the Settings refresh are not an atomic
+snapshot; repeat a changing sample before comparing the totals.
+
+**Long text.** Save a plain-text fixture, record its exact UTF-8 byte count,
+and take the baseline allocated-byte snapshot. Then copy the fixture:
+
+```bash
+CLIPBOARD_TEST_TEXT="$(mktemp -t anydoor-long-text)"
+{ printf 'zebrahead '; yes 'lorem ipsum dolor sit amet' | head -n 80000; printf 'quokkatail'; } > "$CLIPBOARD_TEST_TEXT"
+wc -c < "$CLIPBOARD_TEST_TEXT"
+pbcopy < "$CLIPBOARD_TEST_TEXT"
+```
+
+Record two distinct results:
+
+| Sample | When | Result to record |
+| --- | --- | --- |
+| Immediate | The new entry is visible and searchable, before a maintenance run | Database, WAL, shared-memory, and total allocated-byte deltas from baseline, elapsed time, and Settings usage |
+| Maintenance-after | A successful maintenance run has reclaimed free pages and truncated the WAL | The same measurements and evidence/timestamp of that maintenance; if it was not observed, mark this sample `BLOCKED` |
+
+Maintenance is scheduled on a 24-hour interval
+(`Sources/ClipboardHistory/ClipboardHistoryMaintenance.swift`); its reclaim
+step performs `wal_checkpoint(TRUNCATE)`
+(`Sources/ClipboardHistory/ClipboardHistoryOperations.swift`). Relaunch alone
+does not establish that maintenance completed. Keep the entry and input file
+until both samples are recorded, then remove the fixture file.
+
+**Pass.** Preserve the existing immediate-growth acceptance: reported usage,
+including the WAL, grows by little more than the text's own size and **well
+under twice it**. Record the maintenance-after result separately; a later
+reduction does not turn an immediate over-budget result into a pass. Pasting
+returns the whole text, ending in `quokkatail`. Searching `zebrahead` finds the
+entry; `quokkatail` does not, because search covers only the first 64 KB.
+
+**Open product gate (known failing acceptance report).** The retest reported at
+`2026-10-01T17:46:52Z` on candidate `4a42721` observed immediate database-plus-WAL
+growth above the long-text expectation and attributed the extra space to WAL
+awaiting maintenance. That report used logical file lengths; an exact
+allocated-byte reproduction using the procedure above remains required. The
+earlier smoke prompt also used a stricter "just over 2 MB" expectation, so its
+`FAIL` and this plan's threshold are not interchangeable. Keep this gate open
+until the immediate and maintenance-after samples are reviewed against the
+PRD's storage contract. Either fix the behavior or explicitly approve a
+contract/acceptance change; do not silently weaken the numeric threshold or
+declare the earlier failure false. The historical observation is not a durable
+performance benchmark for another machine or candidate.
 
 ### 8.17 Launch impact
 

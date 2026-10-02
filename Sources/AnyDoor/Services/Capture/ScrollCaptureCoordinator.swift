@@ -53,7 +53,7 @@ final class ScrollCaptureCoordinator {
         // through `capture(region:)` — since both funnel through here.
         settings.setLastRegionRect(viewport)
         // Let any selection overlay fully clear before the session's first grab.
-        Task { @MainActor in
+        Task { @MainActor [self] in
             try? await Task.sleep(for: .milliseconds(140))
             ScrollCaptureSession.shared.start(viewport: viewport) { [weak self] in self?.finish() }
         }

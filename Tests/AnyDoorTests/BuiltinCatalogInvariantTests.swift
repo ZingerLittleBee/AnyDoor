@@ -53,74 +53,84 @@ struct BuiltinCatalogInvariantTests {
 
     /// The full production provider set: Core providers plus every plugin's.
     @MainActor
-    private static func allProviders() throws -> [any BuiltinProvider] {
-        let module = try makeClipboardHistoryModule()
-        return BuiltinProviderRegistry.makeAll(
-            clipboardProduction: ClipboardProductionAdapter(
-                module: module,
-                selfWrites: module.pasteboardSelfWrites,
-                admitsHistoryWrite: { true }
-            ),
-            clipboardHistoryLifecycle: ClipboardHistoryLifecycle(
-                module: module,
-                migrationRequest: nil
-            ),
-            onKeepAwakeChange: { _ in }
-        )
-            + (try makeProductionPlugins()).flatMap(\.providers)
-    }
-
-    private static func makeClipboardHistoryModule() throws
-        -> ClipboardHistoryModule
-    {
+    private static func withProviders<Result>(
+        _ operation: @MainActor ([any BuiltinProvider]) throws -> Result
+    ) async throws -> Result {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true
         )
-        return try ClipboardHistoryModule(
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let module = try ClipboardHistoryModule(
             testingDatabaseURL:
                 directory.appendingPathComponent("history.sqlite"),
             databaseKey: Data(repeating: 0x42, count: 32)
         )
+        do {
+            let providers = BuiltinProviderRegistry.makeAll(
+                clipboardProduction: ClipboardProductionAdapter(
+                    module: module,
+                    selfWrites: module.pasteboardSelfWrites,
+                    admitsHistoryWrite: { true }
+                ),
+                clipboardHistoryLifecycle: ClipboardHistoryLifecycle(
+                    module: module,
+                    migrationRequest: nil
+                ),
+                onKeepAwakeChange: { _ in }
+            ) + (try makeProductionPlugins()).flatMap(\.providers)
+            let result = try operation(providers)
+            try await module.closeStoreForTesting()
+            return result
+        } catch {
+            do {
+                try await module.closeStoreForTesting()
+            } catch let closeError {
+                Issue.record("Failed to close the clipboard fixture: \(closeError)")
+            }
+            throw error
+        }
     }
 
     @MainActor
-    private static func providersByItem() throws -> [BuiltinItem: any BuiltinProvider] {
+    private static func providersByItem(
+        _ providers: [any BuiltinProvider]
+    ) -> [BuiltinItem: any BuiltinProvider] {
         var byItem: [BuiltinItem: any BuiltinProvider] = [:]
-        for provider in try allProviders() {
+        for provider in providers {
             byItem[provider.itemKey] = provider
         }
         return byItem
     }
 
-    @Test @MainActor func providerItemKeysAreUnique() throws {
-        let keys = try Self.allProviders().map(\.itemKey)
+    @Test @MainActor func providerItemKeysAreUnique() async throws {
+        let keys = try await Self.withProviders { $0.map(\.itemKey) }
         #expect(keys.count == Set(keys).count, "duplicate provider registrations for the same BuiltinItem")
     }
 
-    @Test @MainActor func everyToggleItemHasAToggleProvider() throws {
-        let byItem = try Self.providersByItem()
+    @Test @MainActor func everyToggleItemHasAToggleProvider() async throws {
+        let byItem = try await Self.withProviders { Self.providersByItem($0) }
         for item in BuiltinItem.allCases where item.kind == .toggle {
             #expect(byItem[item] is any ToggleProvider,
                     "\(item) is toggle-kind but has no ToggleProvider registered")
         }
     }
 
-    @Test @MainActor func everyActionItemHasAnActionProvider() throws {
-        let byItem = try Self.providersByItem()
+    @Test @MainActor func everyActionItemHasAnActionProvider() async throws {
+        let byItem = try await Self.withProviders { Self.providersByItem($0) }
         for item in BuiltinItem.allCases where item.kind == .action {
             #expect(byItem[item] is any ActionProvider,
                     "\(item) is action-kind but has no ActionProvider registered")
         }
     }
 
-    @Test @MainActor func nonActionableKindsHaveNoProvider() throws {
+    @Test @MainActor func nonActionableKindsHaveNoProvider() async throws {
         // Submenus open popovers, brightnessControl has its own service, and
         // hiddenHotkey items dispatch directly — a provider registered for one
         // of these would be dead code the panel never invokes.
-        let byItem = try Self.providersByItem()
+        let byItem = try await Self.withProviders { Self.providersByItem($0) }
         for item in BuiltinItem.allCases
         where item.kind == .submenu || item.kind == .brightnessControl || item.kind == .hiddenHotkey {
             #expect(byItem[item] == nil, "\(item) (\(item.kind)) should not have a provider")

@@ -1,5 +1,10 @@
 # Translation history/favorites: recall instead of re-translate
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Date:** 2026-06-23
 **Status:** Approved design, pending implementation plan
 **Scope:** Translation feature — the in-window History + Favorites popover only

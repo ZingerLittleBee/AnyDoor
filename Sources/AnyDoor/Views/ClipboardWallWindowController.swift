@@ -693,7 +693,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// wall stays open behind it (windowDidResignKey exempts the text panel);
     /// key status returns to the wall when the editor closes.
     private func beginEdit(_ entry: ClipboardHistoryEntry) {
-        Task {
+        Task { [self] in
             guard let materialization =
                 await state.presentation.materialization(
                     for: entry.id,

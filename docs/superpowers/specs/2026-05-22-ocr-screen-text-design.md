@@ -1,5 +1,10 @@
 # OCR Screen Text — Design
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Date**: 2026-05-22
 **Status**: Approved (design phase)
 **Author**: Brainstorming session

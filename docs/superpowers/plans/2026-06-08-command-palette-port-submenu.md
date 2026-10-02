@@ -1,5 +1,10 @@
 # Command Palette Port Manager Submenu Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** Steps use checkbox (`- [ ]`) syntax for tracking. TDD: write the failing test, watch it fail, implement, watch it pass, commit.
 
 **Goal:** Make Port Manager a drill-in option parent in the command palette and remove the hidden numeric-only port search.

@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import AppKit
 @testable import ClipboardHistory
 import Foundation
@@ -65,9 +66,11 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
         let legacyFolder = ClipboardHistoryModule.legacyPayloadDirectory(
             in: root
         )
-        let olderRelease = ClipboardHistoryModule(
-            testingStoreRoot: legacyFolder,
-            keyStore: keyStore
+        let olderRelease = trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingStoreRoot: legacyFolder,
+                keyStore: keyStore
+            )
         )
         let olderStatus = await olderRelease.status()
         XCTAssertEqual(olderStatus.availability, .ready)
@@ -250,11 +253,13 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
         try writePreV2Payload(png, named: imageName, in: root)
         let key = Data(repeating: 0x5A, count: 32)
         let keyStore = RelocationLifecycleKeyStore(key: key)
-        let olderRelease = ClipboardHistoryModule(
-            testingStoreRoot: ClipboardHistoryModule.legacyPayloadDirectory(
-                in: root
-            ),
-            keyStore: keyStore
+        let olderRelease = trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingStoreRoot: ClipboardHistoryModule.legacyPayloadDirectory(
+                    in: root
+                ),
+                keyStore: keyStore
+            )
         )
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name(
@@ -339,9 +344,7 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
             at: root,
             withIntermediateDirectories: true
         )
-        addTeardownBlock {
-            try? FileManager.default.removeItem(at: top)
-        }
+        removeClipboardHistoryDirectoryAfterTest(top)
         return root
     }
 
@@ -354,12 +357,14 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
         in root: URL,
         keyStore: RelocationLifecycleKeyStore
     ) -> ClipboardHistoryModule {
-        ClipboardHistoryModule(
-            testingStoreRoot: storeRoot(in: root),
-            legacyStoreRoot: ClipboardHistoryModule.legacyPayloadDirectory(
-                in: root
-            ),
-            keyStore: keyStore
+        trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingStoreRoot: storeRoot(in: root),
+                legacyStoreRoot: ClipboardHistoryModule.legacyPayloadDirectory(
+                    in: root
+                ),
+                keyStore: keyStore
+            )
         )
     }
 
@@ -438,6 +443,10 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
             defaults: defaults,
             migrationPreparation: { .proceed }
         )
+        addTeardownBlock {
+            await lifecycle.awaitCurrentOperationForTesting()
+            await lifecycle.stop()
+        }
         lifecycle.start()
         await lifecycle.awaitCurrentOperationForTesting()
         return lifecycle

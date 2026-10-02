@@ -3,16 +3,17 @@ import Foundation
 import GRDB
 import os
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
 final class ClipboardHistorySearchTests: XCTestCase {
     func testSearchMatchesUnicodeExactPrefixAndSubstringForms() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let values = [
             "剪贴板历史",
             "Clipboard History",
@@ -88,11 +89,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     }
 
     func testOneAndTwoCodePointTermsReturnIndexedMatches() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await module.capture(
             ClipboardHistoryCaptureRequest(
                 source: .unknown,
@@ -108,11 +109,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     }
 
     func testSourceSummariesRemainAuthoritativeAcrossSearches() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let safari = ClipboardHistoryCaptureSource(
             bundleIdentifier: "com.apple.Safari",
             displayName: "Safari"
@@ -226,11 +227,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
     @MainActor
     func testMultiTermSearchCombinesFieldsAcrossOrderedItems() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: NSPasteboard.Name(
                 "dev.bybee.AnyDoor.search-tests.\(UUID().uuidString)"
@@ -274,11 +275,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testRankingPrefersCompleteMatchClassFieldPriorityAndPhrase()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await Self.capture("needle", in: module)
         _ = try await Self.capture("needle prefix", in: module)
         _ = try await Self.capture("a needle substring", in: module)
@@ -351,11 +352,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     }
 
     func testTypedFiltersCombineWithoutBecomingSearchText() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let source = ClipboardHistoryCaptureSource(
             bundleIdentifier: "dev.bybee.filtered",
             displayName: "Filtered"
@@ -413,11 +414,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testCandidateVerificationRejectsStaleLongAndShortIndexTokens()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await Self.capture("authoritative value", in: module)
         let database = try await module.requiredDatabase()
         try await database.write { database in
@@ -456,11 +457,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     }
 
     func testCommittedDeletionRemovesBothIndexCandidates() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let outcome = try await Self.capture(
             "delete 搜索 searchable",
             in: module
@@ -487,11 +488,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     }
 
     func testFTSTablesUseSecureDeleteAndIndexedMatchPlans() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await Self.capture("indexed 搜索 value", in: module)
         let database = try await module.requiredDatabase()
 
@@ -575,11 +576,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testKeysetPagesHaveNoCapDuplicatesAndRestartOnChangedInputs()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await module.awaitSearchIndexRebuildForTesting()
         let database = try await module.requiredDatabase()
         try await database.write { database in
@@ -703,11 +704,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     /// entries: a capture that bumps the index generation silently hands back
     /// the first page. The disposition is the only signal.
     func testBrowsePagesReportWhetherTheCursorWasHonored() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await module.awaitSearchIndexRebuildForTesting()
         let database = try await module.requiredDatabase()
         try await database.write { database in
@@ -791,11 +792,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testPrepareSearchIndexStateLeavesAHealthyReadyIndexUntouched()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let entry = try await Self.capture(
             "healthy integrity searchable",
             in: module
@@ -832,11 +833,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testReopeningAHealthyStoreKeepsSearchReadyWithoutRebuild()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let entry = try await Self.capture(
             "healthy reopen searchable",
             in: original
@@ -852,10 +853,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
         XCTAssertEqual(readyBeforeClose.entries.map(\.id), [entry])
         try await original.closeStoreForTesting()
 
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let status = await reopened.status()
         XCTAssertEqual(status.searchIndex, .ready)
         let page = try await reopened.page(
@@ -876,11 +877,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testIndexingStateKeepsBrowsingAndVersionMismatchRebuilds()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let entry = try await Self.capture("rebuild searchable", in: module)
         let database = try await module.requiredDatabase()
         let oldGeneration = try await database.read {
@@ -915,10 +916,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
         }
         try await module.closeStoreForTesting()
 
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await reopened.awaitSearchIndexRebuildForTesting()
         let rebuilt = try await reopened.page(
             ClipboardHistoryQuery(text: "rebuild")
@@ -935,11 +936,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testIndexOnlyCorruptionRebuildsFromAuthoritativeFields()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let entry = try await Self.capture(
             "authoritative rebuild value",
             in: module
@@ -974,10 +975,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
         XCTAssertFalse(isConsistent)
         try await module.closeStoreForTesting()
 
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await reopened.awaitSearchIndexRebuildForTesting()
         let authoritative = try await reopened.page(
             ClipboardHistoryQuery(text: "authoritative")
@@ -993,11 +994,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testRebuildFailurePersistsAndTheNextOpenRetriesIt()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let entry = try await Self.capture(
             "retry authoritative value",
             in: original
@@ -1017,13 +1018,13 @@ final class ClipboardHistorySearchTests: XCTestCase {
         }
         try await original.closeStoreForTesting()
 
-        let failing = try ClipboardHistoryModule(
+        let failing = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key,
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.searchRebuildBeforePublish]
             )
-        )
+        ))
         await failing.awaitSearchIndexRebuildForTesting()
 
         let failedSearch = try await failing.page(
@@ -1050,10 +1051,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
         // The cause is gone by the next launch, whose open retries the
         // rebuild without anyone asking.
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await reopened.awaitSearchIndexRebuildForTesting()
 
         let rebuilt = try await reopened.page(
@@ -1074,11 +1075,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testClosingDuringExplicitRetryWaitsForOneCompletePublication()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let entry = try await Self.capture("close retry value", in: original)
         let database = try await original.requiredDatabase()
         let originalGeneration = try await database.read {
@@ -1096,20 +1097,20 @@ final class ClipboardHistorySearchTests: XCTestCase {
         try await original.closeStoreForTesting()
         // With the automatic retries spent, opening leaves the index failed
         // and only the explicit retry below rebuilds it.
-        try await Self.spendSearchRebuildRetries(of: fixture)
+        try await spendSearchRebuildRetries(of: fixture)
 
-        let retrying = try ClipboardHistoryModule(
+        let retrying = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let retryState = try await retrying.retrySearchIndex()
         XCTAssertEqual(retryState, .indexing)
         try await retrying.closeStoreForTesting()
 
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await reopened.awaitSearchIndexRebuildForTesting()
         let page = try await reopened.page(
             ClipboardHistoryQuery(text: "close retry")
@@ -1131,8 +1132,8 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testOpensRetryAFailedRebuildOnlyUpToTheFailureLimit()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let entry = try await Self.makeStoreNeedingASearchRebuild(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let entry = try await makeStoreNeedingASearchRebuild(
             "retry limit value",
             fixture: fixture
         )
@@ -1141,7 +1142,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         // The first open rebuilds because the index is out of date, each
         // later one because the rebuild before it failed.
         for attempt in 1...limit {
-            let status = try await Self.openAndClose(
+            let status = try await openAndClose(
                 fixture,
                 faultInjector: rebuilds.faultInjector
             )
@@ -1149,11 +1150,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
             XCTAssertEqual(rebuilds.count, attempt)
         }
 
-        let spent = try ClipboardHistoryModule(
+        let spent = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key,
             faultInjector: rebuilds.faultInjector
-        )
+        ))
         await spent.awaitSearchIndexRebuildForTesting()
         XCTAssertEqual(rebuilds.count, limit)
         let failedSearch = try await spent.page(
@@ -1165,10 +1166,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
         try await spent.closeStoreForTesting()
 
         // Not even an open where the rebuild would succeed retries it.
-        let retrying = try ClipboardHistoryModule(
+        let retrying = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await retrying.awaitSearchIndexRebuildForTesting()
         let stillFailed = await retrying.status()
         XCTAssertEqual(stillFailed.searchIndex, .failed(.rebuildFailed))
@@ -1186,25 +1187,25 @@ final class ClipboardHistorySearchTests: XCTestCase {
     /// Publishing an index ends the run of failures, so a later run gets
     /// the whole budget again.
     func testAPublishedIndexRestartsTheRetryBudget() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        _ = try await Self.makeStoreNeedingASearchRebuild(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        _ = try await makeStoreNeedingASearchRebuild(
             "published budget value",
             fixture: fixture
         )
         let limit = ClipboardHistoryModule.searchIndexRebuildFailureLimit
         let rebuilds = SearchRebuildFailures()
         for _ in 1..<limit {
-            try await Self.openAndClose(
+            try await openAndClose(
                 fixture,
                 faultInjector: rebuilds.faultInjector
             )
         }
         XCTAssertEqual(rebuilds.count, limit - 1)
 
-        let recovered = try ClipboardHistoryModule(
+        let recovered = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         await recovered.awaitSearchIndexRebuildForTesting()
         let ready = await recovered.status()
         XCTAssertEqual(ready.searchIndex, .ready)
@@ -1212,7 +1213,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         try await recovered.closeStoreForTesting()
 
         for attempt in 1...limit {
-            let status = try await Self.openAndClose(
+            let status = try await openAndClose(
                 fixture,
                 faultInjector: rebuilds.faultInjector
             )
@@ -1224,25 +1225,25 @@ final class ClipboardHistorySearchTests: XCTestCase {
     /// An explicit retry starts the run over too: when it fails as well,
     /// the opens that follow retry again.
     func testAnExplicitRetryRestartsTheRetryBudget() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        _ = try await Self.makeStoreNeedingASearchRebuild(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        _ = try await makeStoreNeedingASearchRebuild(
             "explicit budget value",
             fixture: fixture
         )
         let limit = ClipboardHistoryModule.searchIndexRebuildFailureLimit
         let rebuilds = SearchRebuildFailures()
         for _ in 1...limit {
-            try await Self.openAndClose(
+            try await openAndClose(
                 fixture,
                 faultInjector: rebuilds.faultInjector
             )
         }
 
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key,
             faultInjector: rebuilds.faultInjector
-        )
+        ))
         await module.awaitSearchIndexRebuildForTesting()
         XCTAssertEqual(rebuilds.count, limit)
         let retryState = try await module.retrySearchIndex()
@@ -1253,7 +1254,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         XCTAssertEqual(failed.searchIndex, .failed(.rebuildFailed))
         try await module.closeStoreForTesting()
 
-        let status = try await Self.openAndClose(
+        let status = try await openAndClose(
             fixture,
             faultInjector: rebuilds.faultInjector
         )
@@ -1264,8 +1265,8 @@ final class ClipboardHistorySearchTests: XCTestCase {
     /// The budget belongs to one app build. An update gets all of it again,
     /// since it may have fixed whatever made every rebuild fail.
     func testANewAppBuildGetsTheWholeRetryBudgetAgain() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let entry = try await Self.makeStoreNeedingASearchRebuild(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let entry = try await makeStoreNeedingASearchRebuild(
             "app build budget value",
             fixture: fixture
         )
@@ -1275,14 +1276,14 @@ final class ClipboardHistorySearchTests: XCTestCase {
         let unfixed = "4.2.799"
         let fixed = "4.2.899"
         for _ in 1...limit {
-            try await Self.openAndClose(
+            try await openAndClose(
                 fixture,
                 faultInjector: rebuilds.faultInjector,
                 appBuild: installed
             )
         }
         // Spent for this build: opening it again rebuilds nothing.
-        try await Self.openAndClose(
+        try await openAndClose(
             fixture,
             faultInjector: rebuilds.faultInjector,
             appBuild: installed
@@ -1291,7 +1292,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
         // An update that did not fix the cause spends a budget of its own.
         for attempt in 1...limit {
-            let status = try await Self.openAndClose(
+            let status = try await openAndClose(
                 fixture,
                 faultInjector: rebuilds.faultInjector,
                 appBuild: unfixed
@@ -1300,7 +1301,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
             XCTAssertEqual(rebuilds.count, limit + attempt)
         }
         // Spent for this build: opening it again rebuilds nothing.
-        try await Self.openAndClose(
+        try await openAndClose(
             fixture,
             faultInjector: rebuilds.faultInjector,
             appBuild: unfixed
@@ -1308,11 +1309,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
         XCTAssertEqual(rebuilds.count, 2 * limit)
 
         // One that did recovers search on its first launch.
-        let updated = try ClipboardHistoryModule(
+        let updated = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key,
             appBuild: fixed
-        )
+        ))
         await updated.awaitSearchIndexRebuildForTesting()
         let page = try await updated.page(
             ClipboardHistoryQuery(text: "budget")
@@ -1330,11 +1331,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
         async throws
     {
         for reason in [nil, "unknownReason"] as [String?] {
-            let fixture = try SearchTemporaryDatabase()
-            let original = try ClipboardHistoryModule(
+            let fixture = try SearchTemporaryDatabase(in: self)
+            let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key
-            )
+            ))
             let entry = try await Self.capture(
                 "other reason value",
                 in: original
@@ -1346,10 +1347,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
             }
             try await original.closeStoreForTesting()
 
-            let reopened = try ClipboardHistoryModule(
+            let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key
-            )
+            ))
             await reopened.awaitSearchIndexRebuildForTesting()
             let status = await reopened.status()
             XCTAssertEqual(status.searchIndex, .failed(.stateUnavailable))
@@ -1378,15 +1379,17 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testAnotherWriterDuringAnOpenNeitherFailsNorSpendsTheIndex()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
+        let fixture = try SearchTemporaryDatabase(in: self)
         let opened = try ClipboardHistoryModule.openDatabase(
             at: fixture.url,
             databaseKey: fixture.key
         )
+        addTeardownBlock { try opened.close() }
         let other = try ClipboardHistoryModule.openDatabase(
             at: fixture.url,
             databaseKey: fixture.key
         )
+        addTeardownBlock { try other.close() }
 
         let readyRebuild = try Self.makeSearchIndexRebuildTask(
             for: opened,
@@ -1444,15 +1447,15 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testHistoryReadsStayServedWhileWritesWaitForAHeldRebuild()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let existing = try await Self.capture("existing entry", in: original)
         let hold = SearchRebuildHold()
         defer { hold.release() }
-        let module = try await Self.reopenWithHeldRebuild(
+        let module = try await reopenWithHeldRebuild(
             original,
             fixture: fixture,
             hold: hold
@@ -1507,16 +1510,16 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testWritesQueuedBehindAHeldRebuildCommitInArrivalOrder()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let entry = try await Self.capture("original text", in: original)
         _ = try await original.replaceTagDefinitions(with: ["first", "second"])
         let hold = SearchRebuildHold()
         defer { hold.release() }
-        let module = try await Self.reopenWithHeldRebuild(
+        let module = try await reopenWithHeldRebuild(
             original,
             fixture: fixture,
             hold: hold
@@ -1566,15 +1569,15 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testPassiveCaptureQueuedBehindAClearDuringARebuildIsDropped()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await Self.capture("cleared entry", in: original)
         let hold = SearchRebuildHold()
         defer { hold.release() }
-        let module = try await Self.reopenWithHeldRebuild(
+        let module = try await reopenWithHeldRebuild(
             original,
             fixture: fixture,
             hold: hold
@@ -1631,10 +1634,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testExplicitCaptureQueuedBeforeAResetStaysOutOfTheNewStore()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
+        let fixture = try SearchTemporaryDatabase(in: self)
         let hold = SearchRebuildHold()
         defer { hold.release() }
-        let module = try await Self.makeResettableModuleWithHeldRebuild(
+        let module = try await makeResettableModuleWithHeldRebuild(
             fixture: fixture,
             hold: hold
         )
@@ -1677,10 +1680,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testPassiveCaptureArrivingDuringAResetStaysOutOfTheNewStore()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
+        let fixture = try SearchTemporaryDatabase(in: self)
         let hold = SearchRebuildHold()
         defer { hold.release() }
-        let module = try await Self.makeResettableModuleWithHeldRebuild(
+        let module = try await makeResettableModuleWithHeldRebuild(
             fixture: fixture,
             hold: hold
         )
@@ -1732,11 +1735,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testThumbnailPreviewOfAFileEntryIsServedDuringAHeldRebuild()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let png = try Self.makePNG()
         let fileURL = fixture.directory.appendingPathComponent("image.png")
         try png.write(to: fileURL)
@@ -1764,7 +1767,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         )
         let hold = SearchRebuildHold()
         defer { hold.release() }
-        let module = try await Self.reopenWithHeldRebuild(
+        let module = try await reopenWithHeldRebuild(
             original,
             fixture: fixture,
             hold: hold
@@ -1803,15 +1806,15 @@ final class ClipboardHistorySearchTests: XCTestCase {
     func testMaintenanceCancelledBehindAHeldRebuildDoesNotRun()
         async throws
     {
-        let fixture = try SearchTemporaryDatabase()
-        let original = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let original = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         _ = try await Self.capture("existing entry", in: original)
         let hold = SearchRebuildHold()
         defer { hold.release() }
-        let module = try await Self.reopenWithHeldRebuild(
+        let module = try await reopenWithHeldRebuild(
             original,
             fixture: fixture,
             hold: hold
@@ -1876,12 +1879,12 @@ final class ClipboardHistorySearchTests: XCTestCase {
             .searchInsertAfterTrigram,
             .searchInsertAfterShortGrams,
         ] {
-            let fixture = try SearchTemporaryDatabase()
-            let module = try ClipboardHistoryModule(
+            let fixture = try SearchTemporaryDatabase(in: self)
+            let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key,
                 faultInjector: ClipboardHistoryFaultInjector(points: [point])
-            )
+            ))
             do {
                 _ = try await Self.capture("insert rollback", in: module)
                 XCTFail("Expected insert fault at \(point)")
@@ -1892,10 +1895,10 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 )
             }
             try await module.closeStoreForTesting()
-            let reopened = try ClipboardHistoryModule(
+            let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key
-            )
+            ))
             let rows = try await reopened.page(ClipboardHistoryQuery())
             XCTAssertEqual(rows.entries, [])
             try await Self.assertSearchIntegrity(reopened)
@@ -1908,11 +1911,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
             .searchUpdateAfterNewTrigram,
             .searchUpdateAfterNewShortGrams,
         ] {
-            let fixture = try SearchTemporaryDatabase()
-            let module = try ClipboardHistoryModule(
+            let fixture = try SearchTemporaryDatabase(in: self)
+            let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key
-            )
+            ))
             let entry = try await Self.capture(
                 "old 搜索 value",
                 in: module
@@ -1946,11 +1949,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
         }
 
         do {
-            let fixture = try SearchTemporaryDatabase()
-            let module = try ClipboardHistoryModule(
+            let fixture = try SearchTemporaryDatabase(in: self)
+            let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key
-            )
+            ))
             let entry = try await Self.capture(
                 "old committed 搜索",
                 in: module
@@ -1984,21 +1987,21 @@ final class ClipboardHistorySearchTests: XCTestCase {
             ClipboardHistoryFaultPoint.searchDeleteAfterTrigram,
             .searchDeleteAfterShortGrams,
         ] {
-            let fixture = try SearchTemporaryDatabase()
-            let writer = try ClipboardHistoryModule(
+            let fixture = try SearchTemporaryDatabase(in: self)
+            let writer = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key
-            )
+            ))
             let entry = try await Self.capture(
                 "delete 删除 rollback",
                 in: writer
             )
             try await writer.closeStoreForTesting()
-            let deleting = try ClipboardHistoryModule(
+            let deleting = try trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingDatabaseURL: fixture.url,
                 databaseKey: fixture.key,
                 faultInjector: ClipboardHistoryFaultInjector(points: [point])
-            )
+            ))
             await deleting.awaitSearchIndexRebuildForTesting()
             do {
                 _ = try await deleting.apply(.delete(entry))
@@ -2067,7 +2070,8 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
     /// Closes `original` with its search index marked stale and reopens the
     /// store, returning once the rebuild that triggers is held open.
-    private static func reopenWithHeldRebuild(
+    /// Keep fixture access and teardown registration on the caller's isolation.
+    private nonisolated(nonsending) func reopenWithHeldRebuild(
         _ original: ClipboardHistoryModule,
         fixture: SearchTemporaryDatabase,
         hold: SearchRebuildHold
@@ -2083,27 +2087,27 @@ final class ClipboardHistorySearchTests: XCTestCase {
             )
         }
         try await original.closeStoreForTesting()
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key,
             faultInjector: hold.faultInjector
-        )
+        ), beforeClosing: { hold.release() })
         await hold.waitUntilReached()
         return module
     }
 
     /// A module over a store it can reset, holding one entry, returned once
     /// a search index rebuild it started is held open.
-    private static func makeResettableModuleWithHeldRebuild(
+    private nonisolated(nonsending) func makeResettableModuleWithHeldRebuild(
         fixture: SearchTemporaryDatabase,
         hold: SearchRebuildHold
     ) async throws -> ClipboardHistoryModule {
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.directory,
             keyStore: SearchMasterKeyStore(),
             faultInjector: hold.faultInjector
-        )
-        _ = try await capture("entry before the reset", in: module)
+        ), beforeClosing: { hold.release() })
+        _ = try await Self.capture("entry before the reset", in: module)
         // The scheduler that capture started must be done. One still waiting
         // for a write turn would make the reset wait for it too, and a
         // capture queued behind it would then always go before the reset.
@@ -2126,16 +2130,16 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
     /// A store holding one entry with `text`, whose search index the next
     /// open rebuilds.
-    private static func makeStoreNeedingASearchRebuild(
+    private nonisolated(nonsending) func makeStoreNeedingASearchRebuild(
         _ text: String,
         fixture: SearchTemporaryDatabase
     ) async throws -> ClipboardHistoryEntryID {
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
-        let entry = try await capture(text, in: module)
-        try await markSearchIndexOutdated(in: module)
+        ))
+        let entry = try await Self.capture(text, in: module)
+        try await Self.markSearchIndexOutdated(in: module)
         try await module.closeStoreForTesting()
         return entry
     }
@@ -2160,18 +2164,18 @@ final class ClipboardHistorySearchTests: XCTestCase {
     /// Opens the store, waits for any search index rebuild the open started,
     /// and closes it again. Returns the search index status it left.
     @discardableResult
-    private static func openAndClose(
+    private nonisolated(nonsending) func openAndClose(
         _ fixture: SearchTemporaryDatabase,
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector(),
         appBuild: String = ClipboardHistoryModule.unversionedAppBuild
     ) async throws -> ClipboardHistorySearchIndexStatus? {
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key,
             faultInjector: faultInjector,
             appBuild: appBuild
-        )
+        ))
         await module.awaitSearchIndexRebuildForTesting()
         let status = await module.status()
         try await module.closeStoreForTesting()
@@ -2248,7 +2252,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
 
     /// Opens the store with every rebuild failing until no open retries
     /// one any more.
-    private static func spendSearchRebuildRetries(
+    private nonisolated(nonsending) func spendSearchRebuildRetries(
         of fixture: SearchTemporaryDatabase
     ) async throws {
         let failing = ClipboardHistoryFaultInjector(
@@ -2374,11 +2378,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     /// statements, so they can drift apart silently. Every existing count test
     /// passes an empty query, which never reaches the search path at all.
     func testCountAgreesWithPagedResultsForTextQueries() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let values = [
             "swift actor isolation",
             "swift concurrency",
@@ -2418,11 +2422,11 @@ final class ClipboardHistorySearchTests: XCTestCase {
     /// The count path applies the same typed filters as the page path; a
     /// filtered count that ignored them would read as a plausible number.
     func testCountRespectsFiltersAlongsideTheTextQuery() async throws {
-        let fixture = try SearchTemporaryDatabase()
-        let module = try ClipboardHistoryModule(
+        let fixture = try SearchTemporaryDatabase(in: self)
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
-        )
+        ))
         let favoriteID = try await Self.capture(
             "swift favorite entry",
             in: module
@@ -2540,7 +2544,7 @@ private final class SearchTemporaryDatabase {
     let url: URL
     let key = Data(repeating: 0x84, count: 32)
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-ClipboardHistorySearchTests-\(UUID().uuidString)"
@@ -2550,9 +2554,6 @@ private final class SearchTemporaryDatabase {
             withIntermediateDirectories: true
         )
         url = directory.appendingPathComponent("history.sqlite")
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: directory)
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
     }
 }

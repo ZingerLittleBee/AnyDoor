@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import GRDB
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
@@ -115,7 +116,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testALongTextIsSearchableByItsBeginningWhilePasteReturnsItWhole()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let module = try fixture.open()
         let text = Self.longText(head: "zqxheadmarker", tail: "zqxtailmarker")
         let entry = try await Self.capture(text, in: module)
@@ -146,7 +147,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     }
 
     func testEditingAnEntryToALongTextBoundsItsSearchField() async throws {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let module = try fixture.open()
         let entry = try await Self.capture("short zqxoriginal text", in: module)
         let edited = Self.longText(head: "zqxeditedhead", tail: "zqxeditedtail")
@@ -178,7 +179,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     /// bound applies to it as to copied text: explicit OCR and QR captures,
     /// and values the derived jobs recognize in a captured bitmap.
     func testRecognizedTextIsBoundedLikeCopiedText() async throws {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let recognizer = SearchBoundVisionRecognizer(
             results: [
                 .ocr: [Self.longText(head: "zqxdocrhead", tail: "zqxdocrtail")],
@@ -251,7 +252,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     /// fields, the rich ones derived from their documents. Each is bounded
     /// on its own, and the representations stay whole.
     func testARichTextCopyBoundsEachOfItsSearchFields() async throws {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let module = try fixture.open()
         let plain = Self.longText(head: "zqxplainhead", tail: "zqxplaintail")
         let html = Data(
@@ -317,7 +318,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     /// it costs about its own size plus the 64 KB fields and their index
     /// entries.
     func testALargeTextGrowsStorageByLittleMoreThanItsOwnSize() async throws {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let module = try fixture.open()
         await module.awaitDerivedJobsForTesting()
         _ = try await module.performMaintenance(orphanGracePeriod: 0)
@@ -351,7 +352,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testAVersionOneStoreWithOversizedFieldsIsBoundedByOneRebuild()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let writer = try fixture.open()
         var fixtures: [String: ClipboardHistoryEntryID] = [:]
         for value in [
@@ -470,7 +471,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testAVersionOneStoreWithoutOversizedFieldsIsStampedWithoutARebuild()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let writer = try fixture.open()
         let entry = try await Self.capture(
             "ordinary 剪贴板 zqxmarker entry",
@@ -500,7 +501,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testAFailedVersionOneIndexIsRebuiltRatherThanStamped()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let writer = try fixture.open()
         let entry = try await Self.capture("failed zqxmarker value", in: writer)
         try await Self.writeSearchIndexMetadata(
@@ -529,7 +530,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testAFailedVersionOneIndexOutOfRetriesStaysUnstampedUntilRetried()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let writer = try fixture.open()
         let entry = try await Self.capture("failed zqxmarker value", in: writer)
         try await Self.writeSearchIndexMetadata(
@@ -572,7 +573,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testAFailedUpgradeRebuildLeavesTheVersionOneStoreIntact()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let text = Self.longText(head: "zqxheadmarker", tail: "zqxtailmarker")
         let writer = try fixture.open()
         let long = try await Self.capture(text, in: writer)
@@ -614,7 +615,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testAVersionOneIndexLeftIndexingIsRebuiltRatherThanStamped()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let writer = try fixture.open()
         let entry = try await Self.capture("indexing zqxmarker value", in: writer)
         try await Self.writeSearchIndexMetadata(
@@ -641,7 +642,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testAStampedIndexThatFailsItsIntegrityCheckIsStillRebuilt()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let writer = try fixture.open()
         let entry = try await Self.capture(
             "authoritative zqxmarker value",
@@ -697,7 +698,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     func testBulkDeletionStaysConsistentBeforeDuringAndAfterTheUpgrade()
         async throws
     {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let text = Self.longText(head: "zqxheadmarker", tail: "zqxtailmarker")
         let writer = try fixture.open()
         let kept = try await Self.capture(text, in: writer)
@@ -741,7 +742,10 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         // bounded fields.
         let hold = SearchBoundRebuildHold()
         defer { hold.release() }
-        let during = try fixture.open(faultInjector: hold.faultInjector)
+        let during = try fixture.open(
+            faultInjector: hold.faultInjector,
+            beforeClosing: { hold.release() }
+        )
         await waitUntilHeld(hold)
         let preview = try await during.previewClearHistory(
             scope: .unprotectedOnly
@@ -795,7 +799,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
     /// Browsing must stay served meanwhile, with a capture waiting for its
     /// write turn rather than parking the module's actor on the writer.
     func testBrowsingIsServedWhileTheUpgradeRebuildIsHeld() async throws {
-        let fixture = try SearchBoundTemporaryDatabase()
+        let fixture = try SearchBoundTemporaryDatabase(in: self)
         let text = Self.longText(head: "zqxheadmarker", tail: "zqxtailmarker")
         let writer = try fixture.open()
         let long = try await Self.capture(text, in: writer)
@@ -804,7 +808,10 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
 
         let hold = SearchBoundRebuildHold()
         defer { hold.release() }
-        let module = try fixture.open(faultInjector: hold.faultInjector)
+        let module = try fixture.open(
+            faultInjector: hold.faultInjector,
+            beforeClosing: { hold.release() }
+        )
         await waitUntilHeld(hold)
 
         // Bounded, so a module stuck behind the rebuild fails the test
@@ -1484,11 +1491,13 @@ private actor SearchBoundVisionRecognizer: ClipboardHistoryVisionRecognizing {
 }
 
 private final class SearchBoundTemporaryDatabase {
+    private let testCase: XCTestCase
     let directory: URL
     let url: URL
     let key = Data(repeating: 0x89, count: 32)
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
+        self.testCase = testCase
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-ClipboardHistorySearchBoundTests-\(UUID().uuidString)"
@@ -1498,23 +1507,21 @@ private final class SearchBoundTemporaryDatabase {
             withIntermediateDirectories: true
         )
         url = directory.appendingPathComponent("history.sqlite")
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: directory)
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
     }
 
     func open(
         faultInjector: ClipboardHistoryFaultInjector =
             ClipboardHistoryFaultInjector(),
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
-            ClipboardHistoryVisionRecognizer()
+            ClipboardHistoryVisionRecognizer(),
+        beforeClosing: @escaping @Sendable () async -> Void = {}
     ) throws -> ClipboardHistoryModule {
-        try ClipboardHistoryModule(
+        try testCase.trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: url,
             databaseKey: key,
             faultInjector: faultInjector,
             visionRecognizer: visionRecognizer
-        )
+        ), beforeClosing: beforeClosing)
     }
 }

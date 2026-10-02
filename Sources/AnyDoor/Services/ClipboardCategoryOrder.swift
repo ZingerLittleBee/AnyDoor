@@ -1,7 +1,7 @@
 import Foundation
 
 /// Persists the clipboard wall's tab order. The user reorders tabs by
-/// ⌘-dragging the capsules; the result is stored as a JSON array of stable
+/// ⌥-dragging the capsules; the result is stored as a JSON array of stable
 /// category ids (`ClipboardWallCategory.persistentID`) under one UserDefaults
 /// key so it rides the settings backup (`SyncSettingsRegistry`) alongside the
 /// tag definitions it references.

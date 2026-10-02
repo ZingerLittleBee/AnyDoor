@@ -184,13 +184,20 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // Shared XCTest resource ownership. This target is a test dependency
+        // only; it never reaches the application or either release product.
+        .target(
+            name: "ClipboardHistoryTestSupport",
+            path: "Tests/ClipboardHistoryTestSupport",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "AnyDoorTests",
             dependencies: [
                 .product(name: "Clocks", package: "swift-clocks"),
                 .product(name: "GRDB", package: "GRDB.swift"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                "AnyDoor", "ClipboardHistory", "ImageCodec",
+                "AnyDoor", "ClipboardHistory", "ClipboardHistoryTestSupport", "ImageCodec",
                 "PluginInterface", "PluginSupport",
                 "ImageConversionPlugin", "HostsPlugin", "ScriptPluginRuntime",
             ],
@@ -204,6 +211,7 @@ let package = Package(
             dependencies: [
                 .product(name: "GRDB", package: "GRDB.swift"),
                 "ClipboardHistory",
+                "ClipboardHistoryTestSupport",
             ],
             resources: [.process("Fixtures")],
             swiftSettings: [

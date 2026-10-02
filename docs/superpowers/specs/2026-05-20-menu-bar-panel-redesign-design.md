@@ -1,5 +1,10 @@
 # 菜单栏面板重构 — 设计文档
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **日期**：2026-05-20
 **状态**：已通过 brainstorm，等待 writing-plans 编排实施
 **作者**：AnyDoor / 协作设计

@@ -1,12 +1,13 @@
 import AppKit
 import Foundation
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
 final class ClipboardHistoryMutationNotificationTests: XCTestCase {
     func testConfirmedEmptyClearDoesNotPublishMutation() async throws {
-        let fixture = try MutationNotificationStore()
+        let fixture = try MutationNotificationStore(in: self)
         let center = NotificationCenter()
         let recorder = ClipboardHistoryMutationRecorder(center: center)
         let module = fixture.makeModule(notificationCenter: center)
@@ -24,7 +25,7 @@ final class ClipboardHistoryMutationNotificationTests: XCTestCase {
     }
 
     func testCaptureAndApplyPublishOnlyCommittedChanges() async throws {
-        let fixture = try MutationNotificationStore()
+        let fixture = try MutationNotificationStore(in: self)
         let center = NotificationCenter()
         let recorder = ClipboardHistoryMutationRecorder(center: center)
         let failureSwitch = MutationFailureSwitch()
@@ -95,7 +96,7 @@ final class ClipboardHistoryMutationNotificationTests: XCTestCase {
     func testTagAndRetentionPublicationSkipsNoOpsAndStaleConfirmation()
         async throws
     {
-        let fixture = try MutationNotificationStore()
+        let fixture = try MutationNotificationStore(in: self)
         let center = NotificationCenter()
         let recorder = ClipboardHistoryMutationRecorder(center: center)
         let clock = MutationTestClock(
@@ -235,17 +236,16 @@ final class ClipboardHistoryMutationRecorder: @unchecked Sendable {
 }
 
 private final class MutationNotificationStore {
+    private let testCase: XCTestCase
     let root: URL
     private let keyStore = MutationNotificationKeyStore()
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
+        self.testCase = testCase
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "AnyDoor-ClipboardMutationNotification-\(UUID().uuidString)"
         )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: root)
+        testCase.removeClipboardHistoryDirectoryAfterTest(root)
     }
 
     func makeModule(
@@ -254,13 +254,13 @@ private final class MutationNotificationStore {
             ClipboardHistoryFaultInjector(),
         notificationCenter: NotificationCenter
     ) -> ClipboardHistoryModule {
-        ClipboardHistoryModule(
+        testCase.trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: root,
             keyStore: keyStore,
             faultInjector: faultInjector,
             now: { clock.now },
             notificationCenter: notificationCenter
-        )
+        ))
     }
 }
 

@@ -4,12 +4,13 @@ import GRDB
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
 final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testIdenticalExactTextCaptureReusesEntry() async throws {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let firstTime = Date(timeIntervalSince1970: 1_000)
         let secondTime = Date(timeIntervalSince1970: 2_000)
         let clock = TestCaptureClock(firstTime)
@@ -40,12 +41,12 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testForcedFingerprintCollisionStillCreatesIndependentEntry()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: DuplicateReuseMasterKeyStore(),
             fingerprintDigest: { _ in Data(repeating: 0xCC, count: 32) }
-        )
+        ))
 
         let first = try await module.capture(textRequest("alpha"))
         let second = try await module.capture(textRequest("bravo"))
@@ -57,7 +58,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
 
     @MainActor
     func testExactTextItemBoundariesAndOrderRemainDistinct() async throws {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
 
         let whitespace = try await module.capture(textRequest("line one\r\n "))
@@ -89,7 +90,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testRepresentationAdvertisementOrderDoesNotChangeIdentityButFormattingDoes()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
         let bold = Data("<b>same</b>".utf8)
         let italic = Data("<i>same</i>".utf8)
@@ -121,7 +122,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testEquivalentBitmapEncodingsReuseAuthenticatedCanonicalPayload()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
         let encodings = try makeEquivalentBitmapEncodings()
 
@@ -153,7 +154,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testCanonicalBitmapReuseIgnoresScreenshotProvenanceAndRefreshesLatestMetadata()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
         let bitmap = try makeEquivalentBitmapEncodings().png
 
@@ -197,7 +198,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testFileIdentityUsesStandardizedCapturePathsAndPreservesOrder()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let files = try DuplicateReuseFileFixture()
         let firstURL = try files.create("first.txt")
         let secondURL = try files.create("second.txt")
@@ -224,7 +225,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testURLAndColorUseTheirCanonicalRepresentationValues()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
 
         let firstURL = try await captureTypedText(
@@ -264,7 +265,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testReuseUpdatesOnlyCaptureMetadataAndRefreshesExistingBitmapJobs()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let firstTime = Date(timeIntervalSince1970: 10_000)
         let secondTime = Date(timeIntervalSince1970: 20_000)
         let editTime = Date(timeIntervalSince1970: 5_000)
@@ -382,15 +383,15 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testSeveralMatchingLegacyRowsReuseNewestWithoutMergingOthers()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let keyStore = DuplicateReuseMasterKeyStore()
         let clock = TestCaptureClock(Date(timeIntervalSince1970: 1_000))
-        let legacyWriter = ClipboardHistoryModule(
+        let legacyWriter = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore,
             now: { clock.now },
             duplicateReuseEnabled: false
-        )
+        ))
         let first = try await legacyWriter.capture(textRequest("legacy same"))
         clock.now = Date(timeIntervalSince1970: 2_000)
         let newest = try await legacyWriter.capture(textRequest("legacy same"))
@@ -398,11 +399,11 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
         try await legacyWriter.closeStoreForTesting()
 
         clock.now = Date(timeIntervalSince1970: 3_000)
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore,
             now: { clock.now }
-        )
+        ))
         let recaptured = try await module.capture(
             textRequest(
                 "legacy same",
@@ -428,14 +429,14 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     }
 
     func testReuseMetadataAndRetentionUpdateRollBackTogether() async throws {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let keyStore = DuplicateReuseMasterKeyStore()
         let clock = TestCaptureClock(Date(timeIntervalSince1970: 1_000))
-        let writer = ClipboardHistoryModule(
+        let writer = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore,
             now: { clock.now }
-        )
+        ))
         let original = try await writer.capture(
             textRequest(
                 "transactional reuse",
@@ -446,14 +447,14 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
         try await writer.closeStoreForTesting()
 
         clock.now = Date(timeIntervalSince1970: 2_000)
-        let failing = ClipboardHistoryModule(
+        let failing = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: keyStore,
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.databaseTransaction]
             ),
             now: { clock.now }
-        )
+        ))
         do {
             _ = try await failing.capture(
                 textRequest(
@@ -488,7 +489,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     }
 
     func testExpiredEntryOutsideLiveSetIsNeverReused() async throws {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
         let first = try await module.capture(textRequest("expired candidate"))
         try await module.markEntryExpiredForTesting(first.entryID)
@@ -501,7 +502,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     func testMaterializationDoesNotInvokeDuplicateReuseOrExtendRetention()
         async throws
     {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let clock = TestCaptureClock(Date(timeIntervalSince1970: 1_000))
         let module = makeDuplicateReuseModule(in: fixture, clock: clock)
         let capture = try await module.capture(textRequest("self write"))
@@ -526,7 +527,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     }
 
     func testMissingOwnedPayloadPreventsReuse() async throws {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
         let bitmap = try makeEquivalentBitmapEncodings().png
         let first = try await module.capture(bitmapRequest(bitmap))
@@ -539,7 +540,7 @@ final class ClipboardHistoryDuplicateReuseTests: XCTestCase {
     }
 
     func testUnauthenticatedOwnedPayloadPreventsReuse() async throws {
-        let fixture = try DuplicateReuseTemporaryStore()
+        let fixture = try DuplicateReuseTemporaryStore(in: self)
         let module = makeDuplicateReuseModule(in: fixture)
         let bitmap = try makeEquivalentBitmapEncodings().png
         let first = try await module.capture(bitmapRequest(bitmap))
@@ -705,15 +706,12 @@ extension ClipboardHistoryModule {
 private final class DuplicateReuseTemporaryStore {
     let url: URL
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
         url = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-ClipboardHistoryDuplicateTests-\(UUID().uuidString)"
             )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: url)
+        testCase.removeClipboardHistoryDirectoryAfterTest(url)
     }
 
     func payloadFiles() throws -> [URL] {
@@ -806,12 +804,12 @@ extension ClipboardHistoryDuplicateReuseTests {
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
             ClipboardHistoryVisionRecognizer()
     ) -> ClipboardHistoryModule {
-        ClipboardHistoryModule(
+        trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: DuplicateReuseMasterKeyStore(),
             now: { clock.now },
             visionRecognizer: visionRecognizer
-        )
+        ))
     }
 
     fileprivate func textRequest(

@@ -1,5 +1,10 @@
 # Command Palette Port-Kill Confirmation — Design
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Goal:** Guard the command palette's port-kill actions behind a Raycast-style in-palette confirmation card, so a stray Return can't terminate a process by accident.
 
 ## Background

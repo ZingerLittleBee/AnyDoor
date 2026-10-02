@@ -1,7 +1,9 @@
 name: Landing
 
-# Rebuild and deploy the marketing landing page only for a published Stable
-# release. Beta prereleases update the independent appcast route instead.
+# This Actions path deploys for published Stable releases or manual dispatch.
+# Cloudflare Workers Builds can independently deploy production-branch pushes;
+# inspect its live configuration before merging landing changes (docs/deployment.md).
+# Beta prereleases update the independent appcast route instead.
 #
 # A pull request that touches landing/ runs the same build without deploying, so
 # a broken site surfaces on the PR instead of during a release.

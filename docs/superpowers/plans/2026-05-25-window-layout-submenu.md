@@ -1,5 +1,10 @@
 # Window Layout Submenu Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Collapse the four `windowLeftHalf` / `windowRightHalf` / `windowMaximize` / `windowCenter` top-level rows into a single `windowLayout` submenu whose hover popover lists the four children, while preserving each child's individual hotkey and adding drag-reorder support inside Settings.

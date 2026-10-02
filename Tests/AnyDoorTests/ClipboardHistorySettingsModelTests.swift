@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import Foundation
 import XCTest
 
@@ -9,7 +10,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     func testClearDefaultsToUnprotectedAndRefreshesStaleCount()
         async throws
     {
-        let fixture = try SettingsFixture()
+        let fixture = try SettingsFixture(testCase: self)
         let first = try await fixture.module.capture(
             request("first")
         )
@@ -53,7 +54,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     func testClearIncludingProtectedPreservesTagDefinitions()
         async throws
     {
-        let fixture = try SettingsFixture()
+        let fixture = try SettingsFixture(testCase: self)
         let entry = try await fixture.module.capture(request("tagged"))
         let assignment = try await fixture.module.createTagDefinition(
             named: "Keep Definition",
@@ -74,7 +75,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     }
 
     func testRefreshReadsThirtyDayAndOCRDefaults() async throws {
-        let fixture = try SettingsFixture()
+        let fixture = try SettingsFixture(testCase: self)
 
         await fixture.model.refresh()
 
@@ -88,7 +89,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     func testFirstShowAndClipboardSelectedReopenRefreshFreshUsage()
         async throws
     {
-        let fixture = try SettingsFixture()
+        let fixture = try SettingsFixture(testCase: self)
         fixture.presentation.selectedTab = .clipboard
 
         fixture.presentation.recordShow()
@@ -124,6 +125,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     {
         let usageReader = ControlledStorageUsageReader()
         let fixture = try SettingsFixture(
+            testCase: self,
             refreshOperations: usageReader.operations
         )
 
@@ -158,6 +160,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
                 selectedTab: .clipboard
             )
             let fixture = try SettingsFixture(
+                testCase: self,
                 presentation: presentation,
                 refreshOperations: usageReader.operations
             )
@@ -203,6 +206,7 @@ final class ClipboardHistorySettingsModelTests: XCTestCase {
     {
         let presentation = SettingsPresentation(selectedTab: .clipboard)
         let fixture = try SettingsFixture(
+            testCase: self,
             presentation: presentation,
             refreshOperations: .alwaysFailing
         )
@@ -245,6 +249,7 @@ private struct SettingsFixture {
     let model: ClipboardHistorySettingsModel
 
     init(
+        testCase: XCTestCase,
         presentation: SettingsPresentation = SettingsPresentation(),
         refreshOperations: ClipboardHistorySettingsRefreshOperations? = nil
     ) throws {
@@ -254,10 +259,13 @@ private struct SettingsFixture {
             at: directory,
             withIntermediateDirectories: true
         )
-        module = try ClipboardHistoryModule(
-            testingDatabaseURL:
-                directory.appendingPathComponent("history.sqlite"),
-            databaseKey: Data(repeating: 0x31, count: 32)
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
+        module = try testCase.trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL:
+                    directory.appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x31, count: 32)
+            )
         )
         let suite = "ClipboardHistorySettingsModelTests-\(UUID())"
         defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -285,6 +293,11 @@ private struct SettingsFixture {
             defaults: defaults,
             refreshOperations: refreshOperations
         )
+        let lifecycle = self.lifecycle
+        testCase.addTeardownBlock {
+            await lifecycle.awaitCurrentOperationForTesting()
+            await lifecycle.stop()
+        }
     }
 }
 

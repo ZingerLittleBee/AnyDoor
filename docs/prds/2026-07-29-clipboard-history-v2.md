@@ -114,8 +114,10 @@ History tier or entitlement path.
 
 - Content facets are overlapping, not a primary enum: Text, Link, Email, Color,
   Image, Screenshot, Video, File, QR Code, and OCR.
-- The Facet Filter is single-select with All and a fixed order. One source, one
-  tag, and favorite-only are separate optional AND constraints.
+- The Facet Filter is single-select with All. Its default order is Screenshot,
+  Text, Link, Image, Video, File, Email, Color, OCR, QR Code; users can reorder
+  the chips by Option-dragging, and the order persists. One source, one tag,
+  and favorite-only are separate optional AND constraints.
 - Link, Email, and Color inference requires the complete trimmed derived text
   value. Embedded values remain searchable Text without broadening facets.
 - Link accepts HTTP(S), bare hosts, localhost, IP addresses, and valid
@@ -261,8 +263,10 @@ History tier or entitlement path.
   source metadata, favorite, valid tags, and available payload are preserved.
   Existing duplicates are not merged.
 - Legacy Text, Color, QR, OCR, Image, Screenshot, and File map according to
-  ADR-0020. Legacy standalone OCR becomes Text because its image relation cannot
-  be reconstructed.
+  ADR-0020 and the [OCR facet addendum](../adr/0019-model-content-types-as-overlapping-facets.md#addendum-2026-09-22-ocr-joins-the-closed-facet-set).
+  A legacy standalone OCR row migrated after that decision becomes Text and
+  OCR through its recorded capture kind. Previously published v2 rows that
+  lost that provenance cannot be reclassified by guessing their content.
 - Existing owned images and screenshots become encrypted payloads without OCR
   or QR backfill.
 - Legacy file manifests migrate member by member and may already mix copied
@@ -358,7 +362,9 @@ Dependency order:
 - Copying referenced files as backup or materializing file promises; the
   one-time migration retention of a legacy copy that cannot be proven
   redundant is the sole exception.
-- OCR backfill, QR backfill, or OCR/QR of referenced image files.
+- Automatic OCR or QR recognition backfill for old bitmaps, or OCR/QR of
+  referenced image files. The OCR provenance facet backfill in ADR-0019 is
+  separate from image recognition.
 - Heuristic classification of external images as screenshots.
 - Automatic third-party password-manager classification.
 

@@ -24,3 +24,7 @@ DerivedData/
 
 # Local Lefthook overrides
 lefthook-local.yml
+
+# Python navigation/check tooling
+__pycache__/
+*.py[cod]

@@ -1,5 +1,18 @@
 # Generated Clipboard History Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+>
+> **Clipboard History v1:** The storage and capture APIs named here have been
+> replaced by the [Clipboard History v2 product contract](../../prds/2026-07-29-clipboard-history-v2.md).
+> Use the current [storage boundary](../../adr/0011-isolate-clipboard-history-storage.md),
+> [content facets](../../adr/0019-model-content-types-as-overlapping-facets.md), and
+> [legacy migration](../../adr/0020-migrate-legacy-clipboard-history-through-a-staging-store.md)
+> decisions. The original UI proposals and implementation steps remain below
+> as historical context.
+
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a 7-day local history for AnyDoor-generated OCR text, color picks, QR payloads, and screenshots, shown from hover popovers on the existing action rows.

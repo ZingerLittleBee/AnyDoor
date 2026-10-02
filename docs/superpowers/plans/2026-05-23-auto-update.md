@@ -1,5 +1,10 @@
 # Auto-Update Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Ship in-app auto-updates for AnyDoor using Sparkle 2 with assets distributed via GitHub Releases, plus a local `make release` pipeline that signs and notarizes every artifact.

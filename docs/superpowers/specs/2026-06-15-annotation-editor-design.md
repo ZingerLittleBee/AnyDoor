@@ -1,5 +1,10 @@
 # Annotation Editor (Phase 1)
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Date:** 2026-06-15
 **Status:** Approved design (autonomous) — ready for implementation
 **Scope:** Phase 1 of the screenshot/recording suite — the real annotation editor

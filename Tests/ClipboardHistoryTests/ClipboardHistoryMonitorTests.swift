@@ -2,6 +2,7 @@ import AppKit
 import GRDB
 import os
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
@@ -335,11 +336,11 @@ final class ClipboardHistoryMonitorInstrumentationTests: XCTestCase {
     func testMonitoringDurationLeavesOutTimeTheMonitorWasStopped()
         async throws
     {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let uptime = OSAllocatedUnfairLock(initialState: Duration.seconds(100))
         let instrumentation = ClipboardHistoryMonitorInstrumentation(
             uptime: { uptime.withLock { $0 } }
@@ -352,6 +353,7 @@ final class ClipboardHistoryMonitorInstrumentationTests: XCTestCase {
             instrumentation: instrumentation,
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
 
         await monitor.setEnabled(true)
         uptime.withLock { $0 = .seconds(130) }
@@ -378,11 +380,11 @@ final class ClipboardHistoryMonitorInstrumentationTests: XCTestCase {
 
 final class ClipboardHistorySourcePersistenceTests: XCTestCase {
     func testCaptureAndDuplicateReusePersistLatestSourceProvenance() async throws {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let first = try await module.capture(
             ClipboardHistoryCaptureRequest(
                 source: .init(
@@ -458,11 +460,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     func testLockedKeychainSkipsEveryObservedGenerationBeforeCapture()
         async throws
     {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -474,6 +476,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             isKeychainUnlocked: { false },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         pasteboard.clearContents()
@@ -490,11 +493,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     /// list is the only place it survives verbatim.
     @MainActor
     func testALegacyNamedExclusionMarkerIsStillExcluded() async throws {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -504,6 +507,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             pasteboard: pasteboard,
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         pasteboard.declareTypes([marker, .string], owner: nil)
@@ -529,14 +533,14 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
 
     @MainActor
     func testConfirmedClearAdvancesTheActiveMonitorBaseline() async throws {
-        let fixture = try MonitorTemporaryStore()
+        let fixture = try MonitorTemporaryStore(in: self)
         let center = NotificationCenter()
         let recorder = ClipboardHistoryMutationRecorder(center: center)
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore(),
             notificationCenter: center
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -547,6 +551,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             pasteboard: pasteboard,
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
         await module.installCaptureMonitorForTesting(monitor)
 
@@ -578,11 +583,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
 
     @MainActor
     func testBaselineResumeAndSelfWritesNeverImportCurrentPasteboard() async throws {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -593,6 +598,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             pasteboard: pasteboard,
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
 
         await monitor.setEnabled(true)
         var page = try await module.page(.init())
@@ -629,11 +635,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
 
     @MainActor
     func testKeyWindowObservesConsecutiveCopiesWithSampledSource() async throws {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -648,6 +654,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             sourceProvider: { sampledSource },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         await monitor.keyHintForTesting()
@@ -682,11 +689,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
         // arrives. A user who switches apps immediately afterwards must still
         // see the app they copied *from* (contract 2.12/2.26.4), so the sampled
         // source has to beat every later reading of the frontmost app.
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -701,6 +708,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             sourceProvider: { switchedTo },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         await monitor.keyHintForTesting(
@@ -728,11 +736,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     @MainActor
     func testEventAssistedRapidCopiesRecordZeroPipelineLoss() async throws {
         let expectedCount = 100
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -744,6 +752,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             instrumentation: instrumentation,
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         for index in 0..<expectedCount {
@@ -769,11 +778,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
 
     @MainActor
     func testExpiredKeyHintUsesObservationSourceForNextChange() async throws {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -796,6 +805,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             now: { clock.now },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         await monitor.keyHintForTesting()
@@ -818,11 +828,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
 
     @MainActor
     func testExpiredKeyHintUsesUnknownWithoutObservationSource() async throws {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -842,6 +852,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             now: { clock.now },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         await monitor.keyHintForTesting()
@@ -859,11 +870,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     func testExplicitBaselineAdvanceSkipsUnchangedLivePasteboard()
         async throws
     {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -874,6 +885,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             pasteboard: pasteboard,
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
         pasteboard.clearContents()
         pasteboard.setString(
@@ -892,11 +904,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     func testGenerationChangeBeforeSnapshotRetriesWithoutMixingSourceAndContent()
         async throws
     {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -927,6 +939,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         writeMonitorPasteboard(
@@ -956,11 +969,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     func testGenerationChangeDuringSnapshotRetriesLatestStableGeneration()
         async throws
     {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -982,6 +995,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         let unstableItem = NSPasteboardItem()
@@ -1018,11 +1032,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     func testGenerationJumpCapturesOnlyLatestAndRecordsOverwrittenCount()
         async throws
     {
-        let fixture = try MonitorTemporaryStore()
-        let module = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -1042,6 +1056,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             instrumentation: instrumentation,
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         writeMonitorPasteboard(
@@ -1077,24 +1092,24 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
     func testDiskFullCapturePreservesHistoryAndRateLimitsFailureNotice()
         async throws
     {
-        let fixture = try MonitorTemporaryStore()
-        let seedModule = ClipboardHistoryModule(
+        let fixture = try MonitorTemporaryStore(in: self)
+        let seedModule = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore()
-        )
+        ))
         _ = try await seedModule.capture(
             ClipboardHistoryCaptureRequest(
                 source: .unknown,
                 content: .text("existing")
             )
         )
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.url,
             keyStore: MonitorMemoryKeyStore(),
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.diskFull]
             )
-        )
+        ))
         let pasteboard = NSPasteboard(
             name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
         )
@@ -1108,6 +1123,7 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             now: { clock.now },
             installsSystemObservers: false
         )
+        addTeardownBlock { await monitor.setEnabled(false) }
         await monitor.setEnabled(true)
 
         pasteboard.clearContents()
@@ -1178,7 +1194,7 @@ private final class MonitorChangingPasteboardDataProvider: NSObject,
 private final class MonitorTemporaryStore {
     let url: URL
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
         url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "AnyDoor-ClipboardMonitor-\(UUID().uuidString)",
             isDirectory: true
@@ -1187,10 +1203,7 @@ private final class MonitorTemporaryStore {
             at: url,
             withIntermediateDirectories: true
         )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: url)
+        testCase.removeClipboardHistoryDirectoryAfterTest(url)
     }
 }
 
