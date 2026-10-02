@@ -115,8 +115,15 @@ Sources/AnyDoor/
 │   │                crash note) / CaptureSettings / CaptureTypes / SelectionGeometry / OverlayPlacement /
 │   │                CaptureFilename / CaptureModeBarPolicy / WindowEnumerator (ScreenCapturePermission
 │   │                lives one level up at Services/). Scrolling capture (Phase 3):
-│   │                ScrollCaptureCoordinator + ScrollCaptureEngine (warp+scroll+grab loop) + ScrollStitcher
-│   │                (pure: ScrollStitch.detectOverlap row-signature alignment + ScrollCapturePolicy).
+│   │                ScrollCaptureCoordinator (permission + viewport from the toolbar hand-off or its own
+│   │                selection overlay, remembering the last region) → ScrollCaptureSession (@MainActor,
+│   │                interactive: grabs via LegacyScreenCapture.belowWindow on the user's real scroll
+│   │                events, below its own Views/Capture ScrollCaptureSessionWindow preview and the
+│   │                ScrollViewportOutlineWindow ordered above it; Done delivers through
+│   │                CaptureCoordinator, Cancel/Esc discard) → ScrollStitchAccumulator (live two-direction
+│   │                stitch + frame/height runaway caps). ScrollCaptureEngine holds only shared pure pixel
+│   │                helpers (rowSignatures / composite); ScrollStitcher (pure: ScrollStitch.detectOverlap
+│   │                row-signature alignment + ScrollCapturePolicy).
 │   │                Views/Capture: SelectionOverlayWindow / CaptureModeBarWindow / CaptureOverlayWindow /
 │   │                PinnedImageWindow
 │   ├── Annotation/   Annotation editor (Phase 1): AnnotationModel / AnnotationDocument (elements +
