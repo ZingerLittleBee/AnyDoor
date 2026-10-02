@@ -16,6 +16,9 @@ versioning.
   stopped the command palette's port search from refreshing until AnyDoor
   restarted. A scan that finished normally no longer shows a false "Refresh
   failed" timeout warning either.
+- Lock Screen now works on macOS versions that no longer ship the `CGSession`
+  tool, where it did nothing. When the lock request fails, a notice now says
+  so instead of the action failing silently.
 
 ## [4.2.6] - 2026-10-02
 

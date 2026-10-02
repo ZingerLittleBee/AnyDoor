@@ -12905,6 +12905,23 @@
         }
       }
     },
+    "toast.lockScreen.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't lock the screen"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法锁定屏幕"
+          }
+        }
+      }
+    },
     "toast.micMute.unsupported": {
       "extractionState": "manual",
       "localizations": {
