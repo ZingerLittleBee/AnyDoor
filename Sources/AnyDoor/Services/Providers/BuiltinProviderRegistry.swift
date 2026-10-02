@@ -24,7 +24,7 @@ enum BuiltinProviderRegistry {
             ShowHiddenFilesProvider(),
             MuteAudioProvider(),
             MicrophoneMuteProvider(),
-            DarkModeProvider(),
+            DarkModeProvider(automation: AutomationPermission.systemEvents),
             LockScreenProvider(),
             EmptyTrashProvider(),
             CaptureRegionProvider(),
