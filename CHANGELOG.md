@@ -29,7 +29,9 @@ versioning.
 - Clipboard History search no longer stays unavailable for good after one
   failed search index rebuild. Later launches retry the rebuild in the
   background, and after three failures in a row they wait for the next AnyDoor
-  update.
+  update. Meanwhile, searching in the clipboard wall says that search is
+  unavailable and browsing still works, instead of calling the whole history
+  unavailable and pointing to a retry in Settings that is not there.
 
 ## [4.2.6] - 2026-10-02
 

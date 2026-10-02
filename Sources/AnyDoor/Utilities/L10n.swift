@@ -114,6 +114,7 @@ enum L10n {
         case clipboardEmpty = "clipboard.empty"
         case clipboardEmptySearch = "clipboard.empty.search"
         case clipboardIndexing = "clipboard.indexing"
+        case clipboardSearchUnavailable = "clipboard.searchUnavailable"
         case clipboardEmptyFilter = "clipboard.empty.filter"
         case clipboardUnavailable = "clipboard.unavailable"
         case clipboardUnavailableKeychainLocked =

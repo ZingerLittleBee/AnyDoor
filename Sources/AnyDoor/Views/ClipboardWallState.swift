@@ -264,15 +264,31 @@ final class ClipboardWallState {
         return .clipboardEmpty
     }
 
-    /// Which line explains a store the wall cannot read. This used to reuse
-    /// the per-item "cannot preview" string, which reads as one broken entry
-    /// rather than a whole history sitting behind a key the app cannot reach —
-    /// and says nothing about where the retry and reset actions live. A locked
-    /// keychain stays its own line because it is the one case the user fixes
-    /// outside AnyDoor, and it resolves on its own once unlocked. A store that
-    /// could not move to its new folder gets its own line too: Settings offers
-    /// only a retry there, never a reset.
+    /// Whether the wall shows `unavailableStateKey` in place of its cards.
+    var showsUnavailableState: Bool {
+        switch presentation.contentState {
+        case .unavailable, .searchUnavailable:
+            true
+        case .loading, .content, .empty, .indexing:
+            false
+        }
+    }
+
+    /// Which line explains a store the wall cannot read, or a search it cannot
+    /// run. The store's line used to reuse the per-item "cannot preview"
+    /// string, which reads as one broken entry rather than a whole history
+    /// sitting behind a key the app cannot reach — and says nothing about
+    /// where the retry and reset actions live. A locked keychain stays its own
+    /// line because it is the one case the user fixes outside AnyDoor, and it
+    /// resolves on its own once unlocked. A store that could not move to its
+    /// new folder gets its own line too: Settings offers only a retry there,
+    /// never a reset. A failed search index leaves the store intact and has no
+    /// action in Settings, so its line names only search and says browsing
+    /// still works.
     var unavailableStateKey: L10n.Key {
+        if case .searchUnavailable = presentation.contentState {
+            return .clipboardSearchUnavailable
+        }
         guard case .unavailable(let reason) = presentation.contentState else {
             return .clipboardUnavailable
         }

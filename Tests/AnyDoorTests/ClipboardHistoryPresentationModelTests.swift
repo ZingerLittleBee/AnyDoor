@@ -196,6 +196,50 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertEqual(emptyModel.actionFailure, .storageFailure)
     }
 
+    /// A failed search index used to read as a whole unavailable store, plus
+    /// an action failure nothing ever showed. It is a state of its own: the
+    /// store is fine, and clearing the query browses the history again.
+    func testAFailedSearchIndexIsItsOwnStateAndBrowsingStillWorks() async {
+        for failure in [
+            ClipboardHistorySearchIndexFailure.rebuildFailed,
+            .stateUnavailable,
+        ] {
+            let browsed = entry(1)
+            let client = PresentationClientStub(
+                pages: [
+                    ClipboardHistoryPage(
+                        entries: [],
+                        nextCursor: nil,
+                        cursorDisposition: .initial,
+                        state: .failed(failure)
+                    ),
+                    ClipboardHistoryPage(
+                        entries: [browsed],
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    ),
+                ]
+            )
+            let model = ClipboardHistoryPresentationModel(
+                operations: client.operations
+            )
+
+            await model.setQuery(ClipboardHistoryQuery(text: "needle"))
+
+            XCTAssertEqual(model.contentState, .searchUnavailable(failure))
+            XCTAssertEqual(model.entries, [])
+            XCTAssertNil(model.selectedID)
+            XCTAssertNil(model.totalCount)
+            XCTAssertEqual(model.pagingState, .complete)
+            XCTAssertNil(model.actionFailure)
+
+            await model.setQuery(ClipboardHistoryQuery())
+
+            XCTAssertEqual(model.contentState, .content)
+            XCTAssertEqual(model.entries.map(\.id), [browsed.id])
+        }
+    }
+
     func testPlainTextOfferRequiresExactTextOnEveryItem() async {
         let id = entry(20).id
         let exact = ClipboardHistoryMaterialization(

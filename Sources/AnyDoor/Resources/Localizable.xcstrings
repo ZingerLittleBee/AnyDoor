@@ -3180,6 +3180,23 @@
         }
       }
     },
+    "clipboard.searchUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search is unavailable. Browsing your history still works."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索暂不可用，浏览历史不受影响。"
+          }
+        }
+      }
+    },
     "clipboard.source.all": {
       "extractionState": "manual",
       "localizations": {

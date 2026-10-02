@@ -125,6 +125,11 @@ struct ClipboardHistoryPopoverView: View {
             LocalizedText(.clipboardEmpty)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .searchUnavailable:
+            LocalizedText(.clipboardSearchUnavailable)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .unavailable:
             LocalizedText(.clipboardPreviewCannotRender)
                 .foregroundStyle(.secondary)

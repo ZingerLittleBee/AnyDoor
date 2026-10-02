@@ -368,6 +368,36 @@ final class ClipboardWallStateTests: XCTestCase {
         XCTAssertEqual(ready.unavailableStateKey, .clipboardUnavailable)
     }
 
+    /// A failed search index left the wall saying the whole history was
+    /// unavailable, and pointing at a Settings retry and reset that do not
+    /// exist for it. The store is intact, so the wall names only search.
+    func testAFailedSearchIndexNamesSearchRatherThanTheStore() async {
+        for failure in [
+            ClipboardHistorySearchIndexFailure.rebuildFailed,
+            .stateUnavailable,
+        ] {
+            let state = await makeState(
+                feed: ClipboardWallEntryFeed([], state: .failed(failure))
+            )
+            state.query = "needle"
+            await state.reload()
+
+            XCTAssertTrue(state.showsUnavailableState)
+            XCTAssertEqual(
+                state.unavailableStateKey,
+                .clipboardSearchUnavailable
+            )
+        }
+
+        let missingKey = await makeState(
+            availability: .unavailable,
+            reason: .missingKey
+        )
+        XCTAssertTrue(missingKey.showsUnavailableState)
+        let ready = await makeState(entries: entries(["a"]))
+        XCTAssertFalse(ready.showsUnavailableState)
+    }
+
     func testCategoryAndSearchAreHeld() async {
         let state = await makeState()
         state.category = .kind(.image)
@@ -660,12 +690,17 @@ final class ClipboardWallStateTests: XCTestCase {
 /// wall (a capture prepending an entry) between two loads.
 private actor ClipboardWallEntryFeed {
     private var entries: [ClipboardHistoryEntry]
+    private let state: ClipboardHistoryPageState
     /// Counted so a test can tell "the wall moved within what it has loaded"
     /// apart from "the wall asked the store for more".
     private(set) var pageRequestCount = 0
 
-    init(_ entries: [ClipboardHistoryEntry]) {
+    init(
+        _ entries: [ClipboardHistoryEntry],
+        state: ClipboardHistoryPageState = .ready
+    ) {
         self.entries = entries
+        self.state = state
     }
 
     func replace(with entries: [ClipboardHistoryEntry]) {
@@ -677,7 +712,8 @@ private actor ClipboardWallEntryFeed {
         return ClipboardHistoryPage(
             entries: entries,
             nextCursor: nil,
-            cursorDisposition: .initial
+            cursorDisposition: .initial,
+            state: state
         )
     }
 }
