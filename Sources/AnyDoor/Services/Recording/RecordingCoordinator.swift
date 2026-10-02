@@ -31,7 +31,8 @@ final class RecordingCoordinator {
         }
     }
 
-    /// Mode-bar entry point: record a selected region or the full display.
+    /// Record the display under the mouse, or, when `region` is true, a region
+    /// the user selects first.
     func record(region: Bool) {
         guard RecordingPolicy.canStart(state) else { return }
         guard ScreenCapturePermission.ensureGranted() else {
