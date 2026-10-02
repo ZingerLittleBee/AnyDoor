@@ -308,12 +308,15 @@ final class CommandPaletteWindowController: NSWindowController, NSWindowDelegate
         //      opened before the panel shows every toggle as off, so the on-state
         //      icon styling never appears.
         //   2. The installed-apps list, scanned OFF the main actor so the
-        //      `/Applications` walk never delays summoning the palette.
+        //      `/Applications` walk never delays summoning the palette. The
+        //      scan needs no provider state, so it starts before
+        //      `refreshAll()`, which can wait on a provider's Automation check.
         Task { [weak self, weak pickerState] in
-            await PanelStore.shared.refreshAll()
-            let apps = await Task.detached(priority: .userInitiated) {
+            let scan = Task.detached(priority: .userInitiated) {
                 InstalledAppsScanner.scan()
-            }.value
+            }
+            await PanelStore.shared.refreshAll()
+            let apps = await scan.value
             guard let self else { return }
             self.cachedApps = apps
             guard let pickerState, self.state === pickerState, self.window?.isVisible == true else { return }
