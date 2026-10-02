@@ -3,7 +3,6 @@ import ImageCodec
 import ImageIO
 import XCTest
 @testable import AnyDoor
-@testable import ImageConversionPlugin
 
 final class ImageConverterTests: XCTestCase {
     private func tempDirectory() throws -> URL {
@@ -75,7 +74,7 @@ final class ImageConverterTests: XCTestCase {
         try Data("not an image".utf8).write(to: input)
 
         XCTAssertThrowsError(
-            try ImageConverter().convertFile(at: input, to: output, format: .png)
+            try ImageEncoder().encode(fileAt: input, format: .png, quality: 0.85).write(to: output)
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
     }
@@ -88,7 +87,7 @@ final class ImageConverterTests: XCTestCase {
         let blue = makeImage(width: 8, height: 8, color: CGColor(red: 0, green: 0, blue: 1, alpha: 1))
         try writeAnimatedGIF([red, blue], to: input)
 
-        try ImageConverter().convertFile(at: input, to: output, format: .png)
+        try ImageEncoder().encode(fileAt: input, format: .png, quality: 0.85).write(to: output)
 
         let pixel = rgb(try decode(output))
         XCTAssertGreaterThan(pixel.r, 200)
@@ -108,7 +107,7 @@ final class ImageConverterTests: XCTestCase {
             to: input
         )
 
-        try ImageConverter().convertFile(at: input, to: output, format: .ico)
+        try ImageEncoder().encode(fileAt: input, format: .ico, quality: 0.85).write(to: output)
 
         let decoded = try decode(output)
         XCTAssertLessThanOrEqual(max(decoded.width, decoded.height), 256)
@@ -126,7 +125,7 @@ final class ImageConverterTests: XCTestCase {
             to: input
         )
 
-        try ImageConverter().convertFile(at: input, to: output, format: .pdf)
+        try ImageEncoder().encode(fileAt: input, format: .pdf, quality: 0.85).write(to: output)
 
         let document = try XCTUnwrap(CGPDFDocument(output as CFURL))
         XCTAssertEqual(document.numberOfPages, 1)

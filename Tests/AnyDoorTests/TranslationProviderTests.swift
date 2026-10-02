@@ -5,18 +5,15 @@ import XCTest
 /// contract: it either yields a single `.final` chunk or throws.
 private struct FakeProvider: TranslationProvider {
     let id: String
-    let kind: TranslationServiceKind
     let finalText: String?
     let failure: TranslationProviderError?
 
     init(
         id: String = "fake",
-        kind: TranslationServiceKind = .googleFree,
         finalText: String? = nil,
         failure: TranslationProviderError? = nil
     ) {
         self.id = id
-        self.kind = kind
         self.finalText = finalText
         self.failure = failure
     }
@@ -60,12 +57,6 @@ final class TranslationProviderTests: XCTestCase {
         } catch {
             XCTFail("expected TranslationProviderError, got: \(error)")
         }
-    }
-
-    func testProviderExposesKindAndID() {
-        let provider = FakeProvider(id: "abc", kind: .bingFree, finalText: "x")
-        XCTAssertEqual(provider.id, "abc")
-        XCTAssertEqual(provider.kind, .bingFree)
     }
 
     func testErrorEquatableCases() {

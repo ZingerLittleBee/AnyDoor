@@ -40,16 +40,4 @@ enum KeyCodeMap {
     static func name(for keyCode: Int) -> String {
         map[keyCode] ?? "Key(\(keyCode))"
     }
-
-    private static let reverseMap: [String: Int] = {
-        var result: [String: Int] = [:]
-        for (code, name) in map {
-            result[name] = code
-        }
-        return result
-    }()
-
-    static func keyCode(for name: String) -> Int? {
-        reverseMap[name]
-    }
 }

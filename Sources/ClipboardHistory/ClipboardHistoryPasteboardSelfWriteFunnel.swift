@@ -50,8 +50,4 @@ public final class ClipboardHistoryPasteboardSelfWriteFunnel: Sendable {
             pasteboard.setString(string, forType: .string)
         }
     }
-
-    public func consumesSuppressedGeneration(_ generation: Int) -> Bool {
-        suppression.shouldSuppress(generation: generation)
-    }
 }

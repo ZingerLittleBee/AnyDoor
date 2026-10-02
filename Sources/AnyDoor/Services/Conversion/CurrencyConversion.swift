@@ -24,7 +24,6 @@ enum CurrencyConversion {
         let number = Self.format(value)
         return [ConversionResult(
             kind: .currency,
-            value: value,
             display: "\(number) \(targetCode)",
             copyText: number,
             detail: rates.date,

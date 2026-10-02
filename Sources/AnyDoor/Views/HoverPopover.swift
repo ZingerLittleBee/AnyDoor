@@ -168,11 +168,6 @@ final class HoverPopover {
         }
     }
 
-    func keepOpen() {
-        hideTask?.cancel()
-        hideTask = nil
-    }
-
     func hide() {
         hideTask?.cancel()
         hideTask = nil

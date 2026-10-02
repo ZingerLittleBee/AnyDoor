@@ -15,10 +15,9 @@ final class BuiltinItemImageConversionTests: XCTestCase {
         XCTAssertEqual(BuiltinItem.imageConversion.symbol, "photo.on.rectangle")
         XCTAssertEqual(BuiltinItem.imageConversion.defaultOrder, 986)
         XCTAssertTrue(BuiltinItem.imageConversion.defaultVisibility)
-        XCTAssertFalse(BuiltinItem.imageConversion.requiresAutomation)
     }
 
     func testImageConversionStaysInGeneralCommandGroup() {
-        XCTAssertEqual(BuiltinGroup.group(for: .imageConversion), .general)
+        XCTAssertFalse(BuiltinGroup.themedDefaultOrder.contains(where: { $0.members.contains(.imageConversion) }))
     }
 }

@@ -68,9 +68,7 @@ History is already excluded from config backup, so `runID` does not affect backu
 - `record(...)` gains a `runID: String = ""` parameter (defaulted and placed so
   existing call sites — including the store's unit tests — keep compiling), written
   onto the new `TranslationRecord.runID`.
-- Add run-group mutators used by the history view (the existing single-record
-  `toggleFavorite(_:)` / `delete(_:)` are kept — the store's unit tests call them, so
-  they are not dead code; the two new methods overload on `[TranslationRecord]`):
+- Add run-group mutators used by the history view:
   - `setFavorite(_ records: [TranslationRecord], to value: Bool)` — sets every
     record's `isFavorite` to `value`, saves, bumps `revision`.
   - `delete(_ records: [TranslationRecord])` — deletes every record, saves, bumps

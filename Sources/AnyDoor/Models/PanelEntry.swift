@@ -7,10 +7,6 @@ struct HotkeyDescriptor: Hashable, Sendable {
     let keyCode: Int
     let modifierFlags: Int
 
-    /// No-arg form preserved for source compat with existing call sites and
-    /// `HotkeyDescriptorTests`. Equivalent to `displayParts(hyperFlags: 0)`.
-    var displayParts: [String] { displayParts(hyperFlags: 0) }
-
     var displayString: String { displayString(hyperFlags: 0) }
 
     /// Hyper-aware rendering. When `hyperFlags != 0` and the descriptor's

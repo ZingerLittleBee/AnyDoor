@@ -20,11 +20,8 @@ struct BluetoothBatteryDevice: Identifiable, Hashable, Sendable {
     /// True when the device reports the left/right/case triple (earbuds).
     var isEarbuds: Bool { left != nil || right != nil || caseLevel != nil }
 
-    /// All known readings, used for sorting and low-battery checks.
+    /// All known readings; empty when the device reports no battery.
     var levels: [Int] { [main, left, right, caseLevel].compactMap { $0 } }
-
-    /// The lowest reading across every populated slot, or `nil` if none.
-    var lowestLevel: Int? { levels.min() }
 
     /// SF Symbol representing the device category. Falls back to a generic
     /// Bluetooth glyph when the type is unknown or unrecognized.

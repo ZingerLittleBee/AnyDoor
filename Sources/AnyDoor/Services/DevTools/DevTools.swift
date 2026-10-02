@@ -5,13 +5,11 @@ import Foundation
 /// detection + conversion + formatting, mirroring `Calculator`. Never throws,
 /// never crashes; returns an empty array when nothing applies.
 ///
-/// `now` / `timeZone` are injected so timestamp rendering is deterministic in
-/// tests (default `.current` in production). `now` is reserved for a future
-/// `now`-keyword row and is currently unused.
+/// `timeZone` is injected so timestamp rendering is deterministic in
+/// tests (default `.current` in production).
 enum DevTools {
     static func detect(
         query: String,
-        now: Date? = nil,
         timeZone: TimeZone = .current
     ) -> [DevToolResult] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)

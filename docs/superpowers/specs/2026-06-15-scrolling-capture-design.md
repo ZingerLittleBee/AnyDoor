@@ -3,7 +3,9 @@
 **Goal:** Capture content taller than the screen by auto-scrolling a selected
 region and losslessly stitching the frames into one tall image.
 
-**Status:** design
+**Status:** superseded by
+[2026-06-15-interactive-scrolling-capture-design.md](2026-06-15-interactive-scrolling-capture-design.md);
+the auto-scroll loop and its scroll and stop tuning described here were removed.
 
 ## Summary
 

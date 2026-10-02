@@ -28,10 +28,6 @@ final class UpdateService {
         }
     }
 
-    var allowedChannels: Set<String> {
-        Self.allowedChannels(betaUpdatesEnabled: betaUpdatesEnabled)
-    }
-
     nonisolated static func allowedChannels(betaUpdatesEnabled: Bool) -> Set<String> {
         betaUpdatesEnabled ? ["beta"] : []
     }

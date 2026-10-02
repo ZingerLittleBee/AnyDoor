@@ -69,13 +69,8 @@ enum ScrollStitch {
     }
 }
 
-/// Tunable constants and the (pure) stop decision for the scroll loop.
+/// Tunable stitch-alignment constants and runaway-growth caps for scrolling capture.
 struct ScrollCapturePolicy {
-    /// Wheel "lines" posted per scroll step. Small enough that consecutive frames
-    /// always overlap comfortably.
-    var scrollLines: Int = 6
-    /// Delay after a scroll before grabbing, so the content has rendered.
-    var settleMillis: Int = 320
     /// Hard cap on captured frames (runaway guard).
     var maxFrames: Int = 60
     /// Stitched height is capped at `viewportHeight * maxTotalHeightFactor`.
@@ -84,20 +79,9 @@ struct ScrollCapturePolicy {
     var minOverlapRatio: Double = 0.25
     /// Minimum fraction of overlapping rows that must match to accept an alignment.
     var minMatchRatio: Double = 0.9
-    /// Consecutive no-progress frames (delta 0 / unmatched) before stopping.
-    var stableStopCount: Int = 2
 
     /// Required overlap in rows for a viewport of `viewportHeight` pixels.
     func minOverlapRows(viewportHeight: Int) -> Int {
         max(1, Int((Double(viewportHeight) * minOverlapRatio).rounded()))
-    }
-
-    /// Whether the loop should stop before capturing another frame.
-    func shouldStop(frameIndex: Int, delta: Int, totalHeight: Int,
-                    viewportHeight: Int, noProgressStreak: Int) -> Bool {
-        if frameIndex >= maxFrames { return true }
-        if totalHeight >= viewportHeight * maxTotalHeightFactor { return true }
-        if noProgressStreak >= stableStopCount { return true }
-        return false
     }
 }

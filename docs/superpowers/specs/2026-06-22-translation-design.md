@@ -152,7 +152,6 @@ enum TranslationChunk: Sendable {
 
 protocol TranslationProvider: Sendable {
     var id: String { get }              // stable per configured instance
-    var kind: TranslationServiceKind { get }
     func translate(_ req: TranslationRequest) -> AsyncThrowingStream<TranslationChunk, Error>
 }
 ```

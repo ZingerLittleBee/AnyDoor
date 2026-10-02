@@ -35,7 +35,7 @@ struct DevToolResult: Hashable, Sendable {
 }
 
 enum DevTools {             // pure, total — never throws, never crashes
-    static func detect(query: String, now: Date? = nil, timeZone: TimeZone = .current) -> [DevToolResult]
+    static func detect(query: String, timeZone: TimeZone = .current) -> [DevToolResult]
 }
 ```
 
@@ -50,7 +50,7 @@ in one file per family (`Base64Tool`, `URLCodecTool`, `JSONTool`, `HashTool`,
 `TimestampTool`) or as private static funcs in `DevTools.swift` — whichever keeps each
 under ~60 lines.
 
-`now`/`timeZone` are injected so timestamp rendering is deterministic in tests
+`timeZone` is injected so timestamp rendering is deterministic in tests
 (default `.current` in production).
 
 ## First-version tool set
@@ -143,7 +143,7 @@ translation, and `LocalizationCoverageTests` enforces key↔catalog parity.
 - Hashes: known vectors — `md5 abc` = `900150983cd24fb0d6963f7d28e17f72`, `sha256 abc`
   = `ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad`, `sha1 abc`
   = `a9993e364706816aba3e25717850c26c9cd0d89d`.
-- Timestamp: `detect("1700000000", now: nil, timeZone: TimeZone(identifier: "UTC")!)`
+- Timestamp: `detect("1700000000", timeZone: TimeZone(identifier: "UTC")!)`
   → utc row `2023-11-14 22:13:20` (or chosen format), iso row `2023-11-14T22:13:20Z`;
   13-digit `1700000000000` matches as milliseconds.
 - Negative gates: `hello`, `42`, `8080`, `git status` → empty array (no row).

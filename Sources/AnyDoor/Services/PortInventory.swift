@@ -32,7 +32,7 @@ final class PortInventory {
     private static let viewModeKey = "PortInventory.viewMode"
     private static let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "PortInventory")
 
-    // MARK: - Internal refresh state (Task 10)
+    // MARK: - Internal refresh state
 
     private var refreshGeneration: UInt64 = 0
     private var inflightCount: Int = 0
@@ -60,8 +60,6 @@ final class PortInventory {
         let raw = defaults.string(forKey: Self.viewModeKey)
         self.viewMode = raw.flatMap(ViewMode.init(rawValue:)) ?? .list
     }
-
-    // Placeholder methods — real implementations land in Task 10 and Task 11.
 
     func refresh(force: Bool = false) async {
         if !force, isCacheFresh {

@@ -5,7 +5,7 @@ import PluginSupport
 import SwiftUI
 
 /// Floating panel that previews (read-only) or edits (writable) the text of a
-/// text-bearing clipboard history item. Preview mirrors ScreenshotPreviewWindow:
+/// text-bearing clipboard history item. The preview panel is
 /// borderless, non-activating, never key — the wall keeps keyboard focus and
 /// drives it (Space/Esc close, arrows follow the selection). Edit mode swaps in
 /// a key-capable panel so the embedded NSTextView can take keystrokes; it closes
@@ -50,12 +50,6 @@ final class ClipboardTextWindow {
         let range = textView.selectedRange()
         guard range.length > 0 else { return nil }
         return (textView.string as NSString).substring(with: range)
-    }
-
-    /// Whether `window` is the floating text panel (the wall's scroll monitor
-    /// uses this to leave scroll events over the panel alone).
-    func owns(_ window: NSWindow?) -> Bool {
-        window != nil && window === panel
     }
 
     func showPreview(entry: ClipboardHistoryEntry, text: String) {

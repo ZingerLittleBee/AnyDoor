@@ -226,10 +226,9 @@ final class BingFreeTranslationProviderTests: XCTestCase {
         XCTAssertNil(BingTranslateHTTPStub.recorded.first?.authorization)
     }
 
-    func testProviderExposesKindAndID() {
+    func testProviderExposesID() {
         let provider = BingFreeTranslationProvider(id: "bingFree")
         XCTAssertEqual(provider.id, "bingFree")
-        XCTAssertEqual(provider.kind, .bingFree)
     }
 
     // MARK: - helpers

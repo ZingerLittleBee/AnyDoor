@@ -196,21 +196,9 @@ final class TargetSizePreferencesTests: XCTestCase {
         XCTAssertEqual(ImageConversionPreferences.transparencyBackgroundHex(defaults: defaults), "#123ABC")
     }
 
-    func testLowercaseHexIsStoredAndReadUppercase() {
-        ImageConversionPreferences.setTransparencyBackgroundHex("#a1b2c3", defaults: defaults)
-        XCTAssertEqual(
-            defaults.string(forKey: ImageConversionPreferences.transparencyBackgroundHexKey),
-            "#A1B2C3"
-        )
+    func testLowercaseHexIsReadUppercase() {
+        defaults.set("#a1b2c3", forKey: ImageConversionPreferences.transparencyBackgroundHexKey)
         XCTAssertEqual(ImageConversionPreferences.transparencyBackgroundHex(defaults: defaults), "#A1B2C3")
-    }
-
-    func testSetInvalidHexStoresDefault() {
-        ImageConversionPreferences.setTransparencyBackgroundHex("nope", defaults: defaults)
-        XCTAssertEqual(
-            defaults.string(forKey: ImageConversionPreferences.transparencyBackgroundHexKey),
-            "#FFFFFF"
-        )
     }
 
     // MARK: - Registry round-trip
@@ -218,7 +206,7 @@ final class TargetSizePreferencesTests: XCTestCase {
     func testRegistryCarriesAllTargetSizeKeys() {
         ImageConversionPreferences.setMode(.targetSize, defaults: defaults)
         ImageConversionPreferences.setTargetSizeLimit(TargetSizeLimit(bytes: 750_000, unit: .kb), defaults: defaults)
-        ImageConversionPreferences.setTransparencyBackgroundHex("#101010", defaults: defaults)
+        defaults.set("#101010", forKey: ImageConversionPreferences.transparencyBackgroundHexKey)
 
         let snapshot = SyncSettingsRegistry.read(from: defaults)
 

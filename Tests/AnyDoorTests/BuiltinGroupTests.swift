@@ -3,25 +3,12 @@ import Testing
 import PluginInterface
 @testable import AnyDoor
 
-/// `BuiltinGroup` is the single source of truth for command grouping, shared by
-/// the command palette and the Panel settings page. These tests pin totality
-/// (every BuiltinItem maps to exactly one group), disjointness of themed sets,
-/// and that the themed member sets still equal the command palette's prior
-/// hardcoded sets (regression guard so the palette is unchanged).
+/// `BuiltinGroup` is the single source of truth for command palette grouping.
+/// These tests pin disjointness of themed sets, that the themed member sets
+/// still equal the command palette's prior hardcoded sets (regression guard so
+/// the palette is unchanged), and which items stay in the general Commands
+/// section.
 struct BuiltinGroupTests {
-
-    @Test func everyItemMapsToExactlyOneGroup() {
-        for item in BuiltinItem.allCases {
-            let owning = BuiltinGroup.themedDefaultOrder.filter { $0.members.contains(item) }
-            #expect(owning.count <= 1, "\(item) is claimed by multiple themed groups: \(owning)")
-            let g = BuiltinGroup.group(for: item)
-            if owning.isEmpty {
-                #expect(g == .general)
-            } else {
-                #expect(g == owning[0])
-            }
-        }
-    }
 
     @Test func themedSetsAreDisjoint() {
         var seen = Set<BuiltinItem>()
@@ -49,17 +36,17 @@ struct BuiltinGroupTests {
         ])
     }
 
-    @Test func defaultOrderMatchesPaletteAndExcludesGeneral() {
+    @Test func defaultOrderMatchesPalette() {
         #expect(BuiltinGroup.themedDefaultOrder == [
             .togglesAppearance, .powerSession, .screenshot, .translation,
         ])
-        #expect(BuiltinGroup.general.titleKey == nil)
         #expect(BuiltinGroup.screenshot.titleKey == .commandPaletteSectionCapture)
     }
 
-    @Test func appShortcutsAndWindowLayoutFallIntoGeneral() {
-        #expect(BuiltinGroup.group(for: .appShortcuts) == .general)
-        #expect(BuiltinGroup.group(for: .windowLayout) == .general)
-        #expect(BuiltinGroup.group(for: .hostsManager) == .general)
+    @Test func appShortcutsWindowLayoutAndHostsStayOutOfThemedGroups() {
+        let themed = BuiltinGroup.themedDefaultOrder.reduce(into: Set<BuiltinItem>()) { $0.formUnion($1.members) }
+        #expect(!themed.contains(.appShortcuts))
+        #expect(!themed.contains(.windowLayout))
+        #expect(!themed.contains(.hostsManager))
     }
 }

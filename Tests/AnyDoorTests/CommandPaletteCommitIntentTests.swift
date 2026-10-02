@@ -137,7 +137,7 @@ final class CommandPaletteCommitIntentTests: XCTestCase {
             .copyToClipboard(text: "abc", toast: .generic)
         )
         let conversion = ConversionResult(
-            kind: .unit, value: 0.9144, display: "0.9144 m",
+            kind: .unit, display: "0.9144 m",
             copyText: "0.9144", detail: "3 ft", symbol: "ruler"
         )
         XCTAssertEqual(

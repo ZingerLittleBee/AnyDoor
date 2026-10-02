@@ -14,8 +14,6 @@ struct TranslationLanguage: Hashable, Codable, Sendable, Identifiable {
 
     var id: String { code }
 
-    var nlLanguage: NLLanguage? { nlLanguageRaw.map { NLLanguage(rawValue: $0) } }
-
     /// Localized language name for the given locale, falling back to `englishName`.
     func displayName(in locale: Locale = .current) -> String {
         locale.localizedString(forIdentifier: code) ?? englishName

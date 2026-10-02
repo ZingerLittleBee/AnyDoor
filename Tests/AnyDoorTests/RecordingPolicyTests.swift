@@ -39,7 +39,5 @@ final class RecordingPolicyTests: XCTestCase {
         XCTAssertEqual(RecordingFormat.mov.fileExtension, "mov")
         XCTAssertEqual(RecordingFormat.mp4.fileExtension, "mp4")
         XCTAssertEqual(RecordingFormat.gif.fileExtension, "gif")
-        XCTAssertFalse(RecordingFormat.mov.needsTranscode)
-        XCTAssertTrue(RecordingFormat.gif.needsTranscode)
     }
 }

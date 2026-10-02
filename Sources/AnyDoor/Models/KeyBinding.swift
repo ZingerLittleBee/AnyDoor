@@ -1,5 +1,5 @@
 import SwiftData
-import AppKit
+import Foundation
 
 @Model
 final class KeyBinding {
@@ -43,16 +43,5 @@ final class KeyBinding {
         self.isVisible = isVisible
         self.displayOrder = displayOrder
         self.createdAt = Date()
-    }
-
-    @Transient var displayKey: String {
-        var parts: [String] = []
-        let flags = NSEvent.ModifierFlags(rawValue: UInt(modifierFlags))
-        if flags.contains(.control) { parts.append("⌃") }
-        if flags.contains(.option) { parts.append("⌥") }
-        if flags.contains(.shift) { parts.append("⇧") }
-        if flags.contains(.command) { parts.append("⌘") }
-        parts.append(KeyCodeMap.name(for: keyCode))
-        return parts.joined()
     }
 }

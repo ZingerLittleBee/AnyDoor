@@ -15,11 +15,6 @@ enum QuicklinkDestination: Equatable {
     case searchTemplate(String)
     case unsupported(String)
 
-    var isSearchTemplate: Bool {
-        if case .searchTemplate = self { return true }
-        return false
-    }
-
     static func classify(link: String) -> QuicklinkDestination {
         classify(link: link, fileExists: fileExistence(atPath:))
     }

@@ -40,7 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 persistenceBootstrap.migrationPreparation
         )
     }()
-    @MainActor var localizationManager: LocalizationManager { LocalizationManager.shared }
     private var menuBarController: MenuBarController?
     private var defaultsObserver: NSObjectProtocol?
     private var updaterController: SPUStandardUpdaterController?
@@ -471,13 +470,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !menuBarIconVisible else { return false }
         // Icon hidden: only a genuine post-launch relaunch surfaces Settings.
         return secondsSinceLaunch >= reopenSettingsLaunchGrace
-    }
-
-    /// Hot-reload entry point used by views after data changes.
-    @MainActor
-    func refreshBindings() {
-        PanelStore.shared.rebuild()
-        HotkeyCoordinator.shared.refresh()
     }
 
     private static func requestRelaunch() async throws {

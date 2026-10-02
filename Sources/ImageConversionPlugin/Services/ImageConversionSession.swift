@@ -46,7 +46,7 @@ struct ImageConversionSession: Sendable {
     func convertAll(
         inputs: [ImageConversionInput],
         target: ImageConversionFormat,
-        quality: Double = ImageConverter.defaultQuality,
+        quality: Double,
         outputDirectory: URL? = nil,
         downloadsDirectory: URL,
         calendar: Calendar = .current,
@@ -68,20 +68,6 @@ struct ImageConversionSession: Sendable {
         } onCancel: {
             task.cancel()
         }
-    }
-
-    /// File-only convenience preserved for callers that never handle bitmaps.
-    func convertAll(
-        fileURLs: [URL],
-        target: ImageConversionFormat,
-        quality: Double = ImageConverter.defaultQuality
-    ) async -> ImageConversionSummary {
-        await convertAll(
-            inputs: fileURLs.map(ImageConversionInput.file),
-            target: target,
-            quality: quality,
-            downloadsDirectory: Self.defaultDownloadsDirectory
-        )
     }
 }
 

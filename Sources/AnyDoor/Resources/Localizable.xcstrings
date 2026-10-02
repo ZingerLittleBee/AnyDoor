@@ -2245,23 +2245,6 @@
         }
       }
     },
-    "capture.window.pickHint": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Click a window to capture it · Esc to cancel"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "点击窗口进行截图 · Esc 取消"
-          }
-        }
-      }
-    },
     "clipboard.action.addToTag": {
       "extractionState": "manual",
       "localizations": {
@@ -2598,23 +2581,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "没有匹配的结果"
-          }
-        }
-      }
-    },
-    "clipboard.file.count": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld files"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 个文件"
           }
         }
       }
@@ -3962,23 +3928,6 @@
         }
       }
     },
-    "commandPalette.builtinTag": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Built-in"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "内置"
-          }
-        }
-      }
-    },
     "commandPalette.confirm.cancel": {
       "extractionState": "manual",
       "localizations": {
@@ -5153,23 +5102,6 @@
         }
       }
     },
-    "imageConversion.convert": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Convert"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "转换"
-          }
-        }
-      }
-    },
     "imageConversion.convertAll": {
       "extractionState": "manual",
       "localizations": {
@@ -6292,23 +6224,6 @@
         }
       }
     },
-    "onboarding.capture.autoFeatures": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Auto-copy, auto-save, and history are built in."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "自动复制、自动保存和历史记录都已内置。"
-          }
-        }
-      }
-    },
     "onboarding.capture.demoCaption": {
       "extractionState": "manual",
       "localizations": {
@@ -6373,23 +6288,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "截图后立刻处理"
-          }
-        }
-      }
-    },
-    "onboarding.clipboard.hint": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Text, images, files, screenshots, OCR, QR codes, and picked colors."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "文本、图片、文件、截图、OCR、二维码和取色,全都记得住。"
           }
         }
       }
@@ -6666,23 +6564,6 @@
         }
       }
     },
-    "onboarding.hyperKey.recommended": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Recommended"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "推荐"
-          }
-        }
-      }
-    },
     "onboarding.hyperKey.subtitle": {
       "extractionState": "manual",
       "localizations": {
@@ -6853,23 +6734,6 @@
         }
       }
     },
-    "onboarding.palette.hint": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Apps, actions, math, conversions, ports, hosts, brightness, and more."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "应用、动作、计算、换算、端口、hosts、亮度等等。"
-          }
-        }
-      }
-    },
     "onboarding.permission.accessibility.desc": {
       "extractionState": "manual",
       "localizations": {
@@ -6900,23 +6764,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "用于深色模式、清空废纸篓、定时关机等系统动作。"
-          }
-        }
-      }
-    },
-    "onboarding.permission.needsAction": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Needs setup"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "待设置"
           }
         }
       }
@@ -8583,23 +8430,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "系统"
-          }
-        }
-      }
-    },
-    "settings.appPicker.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose Application"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择应用程序"
           }
         }
       }

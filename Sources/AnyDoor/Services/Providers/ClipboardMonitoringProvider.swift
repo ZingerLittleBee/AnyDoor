@@ -9,11 +9,11 @@ final class ClipboardMonitoringProvider: ToggleProvider {
     var permission: PermissionStatus { .notRequired }
 
     private let defaults: UserDefaults
-    private let lifecycle: ClipboardHistoryLifecycle?
+    private let lifecycle: ClipboardHistoryLifecycle
 
     init(
         defaults: UserDefaults = .standard,
-        lifecycle: ClipboardHistoryLifecycle? = nil
+        lifecycle: ClipboardHistoryLifecycle
     ) {
         self.defaults = defaults
         self.lifecycle = lifecycle
@@ -24,10 +24,6 @@ final class ClipboardMonitoringProvider: ToggleProvider {
     }
 
     func setState(_ enabled: Bool) async throws {
-        if let lifecycle {
-            await lifecycle.setMonitoringEnabled(enabled)
-        } else {
-            ClipboardPreferences.setMonitoringEnabled(enabled, in: defaults)
-        }
+        await lifecycle.setMonitoringEnabled(enabled)
     }
 }

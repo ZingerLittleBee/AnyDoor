@@ -24,19 +24,16 @@ final class PluginTranslatorTests: XCTestCase {
     /// because these tests build and consume it on the MainActor only.
     private final class StubProvider: TranslationProvider, @unchecked Sendable {
         let id: String
-        let kind: TranslationServiceKind
         private let chunks: [TranslationChunk]
         private let failure: TranslationProviderError?
         private(set) var requests: [TranslationRequest] = []
 
         init(
             id: String,
-            kind: TranslationServiceKind = .googleFree,
             chunks: [TranslationChunk],
             failure: TranslationProviderError? = nil
         ) {
             self.id = id
-            self.kind = kind
             self.chunks = chunks
             self.failure = failure
         }
@@ -110,7 +107,7 @@ final class PluginTranslatorTests: XCTestCase {
             service("google", enabled: false, order: 0),
             service("bing", kind: .bingFree, order: 1),
         ])
-        let bing = StubProvider(id: "bing", kind: .bingFree, chunks: [.final("译文")])
+        let bing = StubProvider(id: "bing", chunks: [.final("译文")])
         var asked: [String] = []
         _ = try await PluginTranslator.translate("hello", settings: settings) { config in
             asked.append(config.id)
@@ -142,7 +139,7 @@ final class PluginTranslatorTests: XCTestCase {
             service("bing", kind: .bingFree, order: 1),
         ])
         let google = StubProvider(id: "google", chunks: [], failure: .badResponse(500))
-        let bing = StubProvider(id: "bing", kind: .bingFree, chunks: [.final("译文")])
+        let bing = StubProvider(id: "bing", chunks: [.final("译文")])
         var asked: [String] = []
         do {
             _ = try await PluginTranslator.translate("hello", settings: settings) { config in

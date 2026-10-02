@@ -39,13 +39,4 @@ enum ClipboardHistoryKind: String, CaseIterable, Sendable {
         case .file:       return .file
         }
     }
-
-    /// Kinds whose payload is a plain string in `text` — the ones the floating
-    /// text panel can preview and edit.
-    var isTextBearing: Bool {
-        switch self {
-        case .text, .ocr, .qrcode: return true
-        case .color, .screenshot, .image, .video, .file: return false
-        }
-    }
 }

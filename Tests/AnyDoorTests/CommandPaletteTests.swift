@@ -709,7 +709,7 @@ final class CommandPaletteTests: XCTestCase {
     @MainActor
     func testConversionSourceMakesStableID() {
         let result = ConversionResult(
-            kind: .unit, value: 0.9144, display: "0.9144 m",
+            kind: .unit, display: "0.9144 m",
             copyText: "0.9144", detail: "3 ft", symbol: "ruler"
         )
         XCTAssertEqual(PanelEntry.id(for: .conversion(result)), "conversion:unit:0.9144:0.9144 m")

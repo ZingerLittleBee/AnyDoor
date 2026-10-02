@@ -118,13 +118,6 @@ struct OnboardingNavigation: Equatable {
     var isFirst: Bool { index <= 0 }
     var isLast: Bool { index >= stepCount - 1 }
 
-    /// 0...1 progress used by the rail. The first page reads as a non-zero sliver
-    /// so the bar never looks empty.
-    var progress: Double {
-        guard stepCount > 1 else { return 1 }
-        return Double(index) / Double(stepCount - 1)
-    }
-
     var current: OnboardingStep {
         OnboardingStep(rawValue: index) ?? .menuBar
     }
@@ -151,14 +144,8 @@ enum OnboardingPermissionKind: CaseIterable, Sendable {
     case automation
 }
 
-/// Display state for a single permission row.
-enum OnboardingPermissionState: Equatable, Sendable {
-    case granted
-    case needsAction
-}
-
-/// A snapshot of the three permission grants, with a pure mapping to per-row
-/// display state. Pure value type so the mapping is unit-testable without TCC.
+/// A snapshot of the three permission grants, with a pure per-kind lookup.
+/// Pure value type so the lookup is unit-testable without TCC.
 struct OnboardingPermissionSnapshot: Equatable, Sendable {
     var accessibility: Bool = false
     var screenRecording: Bool = false
@@ -170,17 +157,5 @@ struct OnboardingPermissionSnapshot: Equatable, Sendable {
         case .screenRecording: return screenRecording
         case .automation:      return automation
         }
-    }
-
-    func state(for kind: OnboardingPermissionKind) -> OnboardingPermissionState {
-        isGranted(kind) ? .granted : .needsAction
-    }
-
-    var grantedCount: Int {
-        [accessibility, screenRecording, automation].lazy.filter { $0 }.count
-    }
-
-    var allGranted: Bool {
-        accessibility && screenRecording && automation
     }
 }

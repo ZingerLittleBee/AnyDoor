@@ -368,10 +368,6 @@ final class ClipboardHistoryPresentationModel {
         self.operations = operations
     }
 
-    func load() async {
-        await loadFirstPage(preservingSelection: true)
-    }
-
     func reload() async {
         await loadFirstPage(preservingSelection: true)
     }
@@ -380,15 +376,6 @@ final class ClipboardHistoryPresentationModel {
         guard query != self.query else { return }
         self.query = query
         await loadFirstPage(preservingSelection: true)
-    }
-
-    func retry() async {
-        actionFailure = nil
-        await loadFirstPage(preservingSelection: true)
-    }
-
-    func clearActionFailure() {
-        actionFailure = nil
     }
 
     func legacyFileRestorePlan(

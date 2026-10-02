@@ -346,7 +346,7 @@ final class QuicklinkStoreTests: XCTestCase {
             ]
         )
 
-        store.setVisibility(id: visible.id, isVisible: false)
+        try store.update(id: visible.id, name: "AnyDoor 仓库", link: "~/Bee/AnyDoor", hotkey: nil, isVisible: false)
         XCTAssertEqual(store.paletteEntries().map(\.title), ["GitHub 搜索"])
         XCTAssertEqual(store.templateCandidates().map(\.id), [template.id])
         let storedIDs = store.quicklinks.map { $0.id }

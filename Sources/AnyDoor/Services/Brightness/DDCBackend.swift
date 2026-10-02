@@ -48,16 +48,6 @@ final class MockDDCBackend: DDCBackend, @unchecked Sendable {
         self._writeError = writeError
     }
 
-    func setReadResult(_ value: UInt16?, for displayID: CGDirectDisplayID) {
-        lock.lock(); defer { lock.unlock() }
-        _readResults[displayID] = value
-    }
-
-    func setWriteError(_ error: Error?) {
-        lock.lock(); defer { lock.unlock() }
-        _writeError = error
-    }
-
     func transportReady(displayID: CGDirectDisplayID) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return _transportSupported.contains(displayID)

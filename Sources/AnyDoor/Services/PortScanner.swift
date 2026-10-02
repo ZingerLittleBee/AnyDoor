@@ -33,10 +33,9 @@ protocol PortScanning: Sendable {
 enum PortScanError: Error, Equatable {
     case lsofTimeout
     case lsofFailed(exitCode: Int32, stderr: String)
-    case parseFailed(line: String)
 }
 
-// MARK: - PortScanner actor (skeleton — implemented across later tasks)
+// MARK: - PortScanner actor
 
 actor PortScanner: PortScanning {
     private let runner: any SubprocessRunning
@@ -65,7 +64,7 @@ actor PortScanner: PortScanning {
             throw PortScanError.lsofFailed(exitCode: result.exit, stderr: result.stderr)
         }
 
-        var records = try parseLsofOutput(result.stdout)
+        var records = parseLsofOutput(result.stdout)
         records = enrichWithProcArgs(records)
         return records
     }
@@ -172,7 +171,7 @@ private func readAll(_ handle: FileHandle) async -> Data {
 ///
 /// Each line is `<fieldChar><value>`. `p` starts a new process group; `f` starts
 /// a new file within the current process group.
-func parseLsofOutput(_ raw: String) throws -> [PortRecord] {
+func parseLsofOutput(_ raw: String) -> [PortRecord] {
     struct PartialFile {
         var family: AddressFamily?
         var name: String?

@@ -82,8 +82,8 @@ API:
 
 ## Filtering and category model
 
-- `ClipboardWallCategory` gains `.tag(String)` (the tag ID). `kindFilter`
-  returns nil for it. Title resolution branches: builtins keep their
+- `ClipboardWallCategory` gains `.tag(String)` (the tag ID). Title
+  resolution branches: builtins keep their
   `LocalizedText(titleKey)`; tag tabs render the registry name with plain
   `Text` (free-form names do not localize).
 - `ClipboardSearch.filter` gains `tagID: String? = nil`; when set, keeps rows

@@ -6,7 +6,6 @@ import Foundation
 /// chunk is yielded as `.delta`, and the accumulated text is yielded as `.final`.
 struct OpenAICompatibleProvider: TranslationProvider {
     let id: String
-    var kind: TranslationServiceKind { .openAICompatible }
 
     private let config: TranslationServiceConfig
     private let apiKey: String

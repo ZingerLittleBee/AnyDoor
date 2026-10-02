@@ -24,16 +24,6 @@ struct TargetSizeJobConfiguration: Hashable, Sendable {
         self.targetBytes = request.targetBytes
         self.transparencyBackgroundHex = request.transparencyBackgroundHex
     }
-
-    init(
-        format: ImageConversionFormat,
-        targetBytes: Int64,
-        transparencyBackgroundHex: String
-    ) {
-        self.format = format
-        self.targetBytes = targetBytes
-        self.transparencyBackgroundHex = transparencyBackgroundHex
-    }
 }
 
 /// One immutable prepared candidate: the exact artifact a matching run

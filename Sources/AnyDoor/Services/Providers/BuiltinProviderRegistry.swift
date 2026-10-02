@@ -15,7 +15,7 @@ import PluginInterface
 enum BuiltinProviderRegistry {
     static func makeAll(
         clipboardProduction: ClipboardProductionAdapter,
-        clipboardHistoryLifecycle: ClipboardHistoryLifecycle? = nil,
+        clipboardHistoryLifecycle: ClipboardHistoryLifecycle,
         onKeepAwakeChange: @escaping @MainActor @Sendable (KeepAwakeState) -> Void
     ) -> [any BuiltinProvider] {
         [

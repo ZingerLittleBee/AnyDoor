@@ -20,7 +20,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         )
         let model = ClipboardHistoryPresentationModel(operations: client.operations)
 
-        await model.load()
+        await model.reload()
 
         XCTAssertEqual(model.entries.map(\.id), [first.id, second.id])
         XCTAssertEqual(model.selectedID, first.id)
@@ -51,7 +51,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             ]
         )
         let model = ClipboardHistoryPresentationModel(operations: client.operations)
-        await model.load()
+        await model.reload()
 
         await model.prefetchIfNeeded(visibleID: firstPage[94].id)
         await model.prefetchIfNeeded(visibleID: firstPage[99].id)
@@ -86,7 +86,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             ]
         )
         let model = ClipboardHistoryPresentationModel(operations: client.operations)
-        await model.load()
+        await model.reload()
 
         await model.setQuery(
             ClipboardHistoryQuery(text: "needle")
@@ -132,7 +132,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             ]
         )
         let model = ClipboardHistoryPresentationModel(operations: client.operations)
-        await model.load()
+        await model.reload()
         model.select(selected.id)
 
         await model.reload()
@@ -153,7 +153,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let unavailableModel = ClipboardHistoryPresentationModel(
             operations: unavailableClient.operations
         )
-        await unavailableModel.load()
+        await unavailableModel.reload()
         XCTAssertEqual(
             unavailableModel.contentState,
             .unavailable(.missingKey)
@@ -172,7 +172,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let indexingModel = ClipboardHistoryPresentationModel(
             operations: indexingClient.operations
         )
-        await indexingModel.load()
+        await indexingModel.reload()
         XCTAssertEqual(indexingModel.contentState, .indexing)
 
         let emptyClient = PresentationClientStub(
@@ -188,7 +188,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let emptyModel = ClipboardHistoryPresentationModel(
             operations: emptyClient.operations
         )
-        await emptyModel.load()
+        await emptyModel.reload()
         XCTAssertEqual(emptyModel.contentState, .empty)
 
         await emptyModel.apply(.delete(entry(9).id))
@@ -289,7 +289,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         await model.setQuery(
             ClipboardHistoryQuery(
@@ -324,7 +324,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         let didCreate = await model.createTagDefinition(
             named: "Project",
@@ -375,7 +375,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         let didCreate = await model.createTagDefinition(
             named: "Project",
@@ -398,7 +398,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial Clipboard page request") {
             await client.requestCount == 1
         }
@@ -463,7 +463,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             let model = ClipboardHistoryPresentationModel(
                 operations: client.operations
             )
-            let initialLoad = Task { await model.load() }
+            let initialLoad = Task { await model.reload() }
             await waitUntil("initial filter page request \(index)") {
                 await client.requestCount == 1
             }
@@ -527,7 +527,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             )
         )
 
-        await model.load()
+        await model.reload()
 
         XCTAssertEqual(model.contentState, .unavailable(nil))
         XCTAssertEqual(model.pagingState, .complete)
@@ -553,7 +553,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial page request") {
             await client.requestCount == 1
         }
@@ -655,7 +655,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial page request") {
             await client.requestCount == 1
         }
@@ -786,7 +786,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
         await model.prefetchIfNeeded(visibleID: firstPage[99].id)
         XCTAssertEqual(model.entries.count, 101)
 
@@ -829,7 +829,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                 tagDefinitions: { [] }
             )
         )
-        await model.load()
+        await model.reload()
 
         for entry in entries.prefix(20) {
             _ = await model.materialization(for: entry.id, purpose: .preview)
@@ -885,7 +885,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
         XCTAssertEqual(model.pagingState, .moreAvailable)
 
         await model.loadNextPage()
@@ -923,7 +923,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial page request") {
             await client.requestCount == 1
         }
@@ -993,7 +993,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
         model.select(firstPage[1].id)
 
         await model.loadNextPage()
@@ -1041,7 +1041,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: counted.operations
         )
 
-        await countedModel.load()
+        await countedModel.reload()
 
         XCTAssertEqual(countedModel.totalCount, 42)
         XCTAssertEqual(countedModel.entries.count, 3)
@@ -1066,7 +1066,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: uncounted.operations
         )
 
-        await uncountedModel.load()
+        await uncountedModel.reload()
 
         XCTAssertNil(uncountedModel.totalCount)
         XCTAssertEqual(uncountedModel.entries.map(\.id), entries.map(\.id))
@@ -1112,7 +1112,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             module: module,
             loadsAggregates: false
         )
-        await popover.load()
+        await popover.reload()
 
         XCTAssertEqual(Set(popover.entries.map(\.id)), [notes, mail])
         XCTAssertEqual(popover.contentState, .content)
@@ -1122,7 +1122,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertEqual(popover.tags, [])
 
         let wall = ClipboardHistoryPresentationModel(module: module)
-        await wall.load()
+        await wall.reload()
 
         XCTAssertEqual(
             wall.entries.map(\.id),
@@ -1175,7 +1175,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial page request") {
             await client.requestCount == 1
         }
@@ -1333,7 +1333,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
         model.select(original[1].id)
 
         await model.loadNextPage()
@@ -1375,7 +1375,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial page request") {
             await client.requestCount == 1
         }
@@ -1475,7 +1475,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
         model.select(original[4].id)
 
         await model.loadNextPage()
@@ -1529,7 +1529,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
         XCTAssertEqual(model.totalCount, 12)
 
         await client.setStatus(
@@ -1561,7 +1561,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial page request") {
             await client.requestCount == 1
         }
@@ -1642,7 +1642,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
         model.select(firstPage[0].id)
 
         await model.moveTowardHistoryEnd()
@@ -1674,7 +1674,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         await model.moveTowardHistoryEnd()
         await model.moveTowardHistoryEnd()
@@ -1711,7 +1711,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         await model.moveTowardHistoryEnd()
         XCTAssertEqual(model.selectedID, firstPage[1].id)
@@ -1762,7 +1762,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         await model.moveTowardHistoryEnd()
         XCTAssertEqual(model.selectedID, firstPage[2].id)
@@ -1818,7 +1818,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         await model.moveTowardHistoryEnd()
         XCTAssertEqual(model.selectedID, firstPage[2].id)
@@ -1876,7 +1876,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         let model = ClipboardHistoryPresentationModel(
             operations: client.operations
         )
-        await model.load()
+        await model.reload()
 
         await model.moveTowardHistoryEnd()
         await model.moveTowardHistoryEnd()
@@ -1917,7 +1917,7 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             operations: client.operations
         )
 
-        let initialLoad = Task { await model.load() }
+        let initialLoad = Task { await model.reload() }
         await waitUntil("initial page request") {
             await client.requestCount == 1
         }
