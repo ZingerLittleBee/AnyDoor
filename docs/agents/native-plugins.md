@@ -396,7 +396,8 @@ named test, which is the point of them.
    Implement only the surfaces the feature has (defaults cover the rest);
    `deactivate` must be written consciously per the section-3 contract.
    Provide a test `init` seam if the plugin touches a system boundary
-   (Hosts' injected `HostsManager` + `MockHostsWriter` precedent).
+   (Hosts' injected `HostsManager` + `MockHostsWriter` precedent; the double
+   lives in the `AnyDoorTests` target, not in the plugin module).
 4. **Register once in `NativePluginCatalog`**: add one registration pairing
    `<Name>NativePlugin.pluginID`, `.modelSchemaTypes`, and its host-backed
    factory. Nothing else — AppDelegate schema construction, runtime creation,
@@ -445,7 +446,8 @@ named test, which is the point of them.
 
 (PRD Testing Decisions; the suite enforces them by example.)
 
-- **Sanctioned doubles only**: `MockHostsWriter` (the hosts-writer boundary),
+- **Sanctioned doubles only**: `MockHostsWriter` (the hosts-writer boundary,
+  defined in the `AnyDoorTests` target),
   in-memory `ModelContainer`s (`ModelConfiguration(isStoredInMemoryOnly:
   true)`), and the helper **readiness injection point** — a scripted
   `PrivilegedHelperAccess` inside a `PluginHostServices` test double

@@ -47,9 +47,9 @@ public final class HostsNativePlugin: NativePlugin {
         )
     }
 
-    /// Test entry point: inject a manager wired to the sanctioned writer
-    /// double (`MockHostsWriter`) so the lifecycle paths can be exercised
-    /// without touching the real system.
+    /// Test entry point: inject a manager wired to the test target's
+    /// sanctioned writer double (`MockHostsWriter`) so the lifecycle paths
+    /// can be exercised without touching the real system.
     init(host: any PluginHostServices, manager: HostsManager) {
         let hostContext = PluginHostContext(services: host)
         self.hostContext = hostContext

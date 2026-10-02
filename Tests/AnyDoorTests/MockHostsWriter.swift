@@ -1,4 +1,5 @@
 import Foundation
+@testable import HostsPlugin
 
 /// In-memory `HostsWriter` for unit tests. Records the last payload and can be
 /// configured to throw.

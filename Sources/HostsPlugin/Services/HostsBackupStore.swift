@@ -6,8 +6,6 @@ import Foundation
 struct HostsBackupStore {
     private let backupURL: URL
     private let readLiveHosts: () throws -> String
-    /// Test-only injection point: when non-nil, `ensureOriginalBackup()` throws this error instead.
-    var backupErrorOverride: Error?
 
     init(backupDirectory: URL, readLiveHosts: @escaping () throws -> String) {
         self.backupURL = backupDirectory.appendingPathComponent("original.hosts")
@@ -35,7 +33,6 @@ struct HostsBackupStore {
 
     /// Snapshot the current `/etc/hosts` exactly once. No-op if a backup exists.
     func ensureOriginalBackup() throws {
-        if let override = backupErrorOverride { throw override }
         guard !hasBackup else { return }
         let live = try readLiveHosts()
         try live.data(using: .utf8)?.write(to: backupURL)
