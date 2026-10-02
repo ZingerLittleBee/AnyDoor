@@ -472,9 +472,10 @@ named test, which is the point of them.
 - **Registry lifecycle tests use real plugin instances** with an isolated
   harness: a fresh `PluginRegistry` wired to private `PanelStore`,
   `CommandPaletteExtensions`, and `HotkeyCoordinator` instances, an in-memory
-  `ModelContainer`, a snapshot recorder instead of the real event tap, and an
-  isolated `UserDefaults(suiteName:)` with teardown. Assert published state,
-  not callback counts.
+  `ModelContainer`, a snapshot recorder instead of the real event tap, and a
+  temporary suite from `makeTemporaryDefaults()` (see
+  [preference suites](../testing/README.md#preference-suites)). Assert
+  published state, not callback counts.
 - **No view-layer tests.** Policies, models, stores, and descriptors only.
   The one end-to-end exception drives the real `PanelStore`
   (`PluginRegistryTests.testLifecycleTogglesPanelRowThroughRealSurfaces`),

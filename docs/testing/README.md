@@ -33,6 +33,13 @@ so the stores close before their backing files are removed. Keep an explicit
 mid-test close when a case intentionally reopens the same store.
 
 Register monitor/lifecycle shutdown after tracking its module so it stops first.
+Closing a tracked module also disables and releases a capture monitor installed
+in it, through `installCaptureMonitorForTesting` or `setMonitoring`, because the
+monitor holds its module strongly. A `setMonitoring` call during or after the
+close installs a new monitor that the close does not release, which is another
+reason the lifecycle must stop first. Only a monitor that was never installed
+needs its own `setEnabled(false)` teardown. A close after a completed close is a
+no-op; a close while another is still running throws `operationUnavailable`.
 For a test-controlled suspended recognizer, pass its release operation as
 `beforeClosing`; cancellation alone cannot resume an arbitrary test continuation.
 Teardown owns cleanup after early returns, failed assertions, and thrown errors.
@@ -48,3 +55,15 @@ is a failed test run. Inspect the process exit and crash report as well as the
 test count; past failures reached SQLCipher process shutdown with stores still
 open. This fixture prevents that lifetime gap rather than treating a successful
 assertion summary as completion.
+
+## Preference suites
+
+XCTest cases get a private `UserDefaults` from `makeTemporaryDefaults()`, or
+`makeTemporaryDefaultsSuite()` when they reopen it, in
+[TemporaryDefaults.swift](../../Tests/AnyDoorTests/TemporaryDefaults.swift).
+Teardown removes it. Swift Testing cases create a `TemporaryDefaultsSuite` and
+`defer` its `remove()`. Never create a bare `UserDefaults(suiteName:)` in a test:
+a named suite leaves a plist in `~/Library/Preferences` even after
+`removePersistentDomain(forName:)`, and a crashed run leaves its values there.
+The temporary suite is named by an absolute path inside its own temporary
+directory, so nothing reaches the user's preferences.
