@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import os
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
@@ -509,7 +510,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         let layout = try await makeHeadLayout()
         let loadsBefore = layout.keyStore.loadCount
 
-        let module = layout.sandbox.module(keyStore: layout.keyStore)
+        let module = layout.sandbox.module(in: self, keyStore: layout.keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -538,7 +539,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         let loadsBefore = layout.keyStore.loadCount
         XCTAssertEqual(chmod(sandbox.root.path, 0o500), 0)
 
-        let module = sandbox.module(keyStore: layout.keyStore)
+        let module = sandbox.module(in: self, keyStore: layout.keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .unavailable)
@@ -583,8 +584,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             let sandbox = layout.sandbox
             let loadsBefore = layout.keyStore.loadCount
 
-            let interrupted = sandbox.module(
-                keyStore: layout.keyStore,
+            let interrupted = sandbox.module(in: self, keyStore: layout.keyStore,
                 faults: ClipboardHistoryFaultInjector(points: [point])
             )
 
@@ -595,7 +595,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             XCTAssertFalse(exists(sandbox.target), label)
             assertNothingLost(layout, label)
 
-            let relaunched = sandbox.module(keyStore: layout.keyStore)
+            let relaunched = sandbox.module(in: self, keyStore: layout.keyStore)
             let relaunchedStatus = await relaunched.status()
             XCTAssertEqual(relaunchedStatus.availability, .ready, label)
             let count = try await entryCount(of: relaunched)
@@ -616,8 +616,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
     func testFailureAfterPublicationStillOpensTheMovedStore() async throws {
         let layout = try await makeHeadLayout()
 
-        let module = layout.sandbox.module(
-            keyStore: layout.keyStore,
+        let module = layout.sandbox.module(in: self, keyStore: layout.keyStore,
             faults: ClipboardHistoryFaultInjector(
                 points: [.storeRelocationAfterPublication]
             )
@@ -651,7 +650,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         defer { connection.close() }
         let legacyBefore = childNames(sandbox.legacy)
 
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -695,7 +694,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         let layout = try await makeAdoptionLayout()
         let loadsBefore = layout.keyStore.loadCount
 
-        let module = layout.sandbox.module(keyStore: layout.keyStore)
+        let module = layout.sandbox.module(in: self, keyStore: layout.keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -728,8 +727,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             let label = "\(point)"
             let layout = try await makeAdoptionLayout()
 
-            let interrupted = layout.sandbox.module(
-                keyStore: layout.keyStore,
+            let interrupted = layout.sandbox.module(in: self, keyStore: layout.keyStore,
                 faults: ClipboardHistoryFaultInjector(points: [point])
             )
 
@@ -775,7 +773,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             includeBitmap: false
         )
 
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -788,7 +786,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
     func testLockedKeychainPostponesAdoption() async throws {
         let layout = try await makeAdoptionLayout()
 
-        let locked = layout.sandbox.module(keyStore: LockedKeyStore())
+        let locked = layout.sandbox.module(in: self, keyStore: LockedKeyStore())
 
         let status = await locked.status()
         XCTAssertEqual(status.availability, .paused)
@@ -818,7 +816,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             texts: ["x", "y"]
         )
 
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
 
         let count = try await entryCount(of: module)
         XCTAssertEqual(count, 1)
@@ -859,7 +857,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             includeBitmap: false
         )
 
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -881,7 +879,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
                 ?? true
         )
 
-        let relaunched = sandbox.module(keyStore: keyStore)
+        let relaunched = sandbox.module(in: self, keyStore: keyStore)
         let relaunchedStatus = await relaunched.status()
         XCTAssertEqual(relaunchedStatus.availability, .ready)
         let relaunchedCount = try await entryCount(of: relaunched)
@@ -915,7 +913,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             includeBitmap: false
         )
 
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
 
         let count = try await entryCount(of: module)
         XCTAssertEqual(count, 1)
@@ -954,7 +952,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             includeBitmap: false
         )
 
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
 
         let count = try await entryCount(of: module)
         XCTAssertEqual(count, 1)
@@ -1002,7 +1000,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             of: sandbox.target.appendingPathComponent("history.sqlite")
         )
 
-        let module = sandbox.module(keyStore: layout.keyStore)
+        let module = sandbox.module(in: self, keyStore: layout.keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -1025,7 +1023,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
 
         // Nothing the other copy saved is lost, and now that the current
         // store holds history the displaced one is kept aside.
-        let relaunched = sandbox.module(keyStore: layout.keyStore)
+        let relaunched = sandbox.module(in: self, keyStore: layout.keyStore)
         let texts = try await entryTexts(of: relaunched)
         XCTAssertEqual(texts, ["captured by the other copy"])
         try await relaunched.closeStoreForTesting()
@@ -1082,7 +1080,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             holder.pid
         )
 
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
 
         let status = await module.status()
         XCTAssertEqual(status.availability, .ready)
@@ -1096,7 +1094,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
 
         try holder.captureAndQuit("captured while kept aside")
 
-        let relaunched = sandbox.module(keyStore: keyStore)
+        let relaunched = sandbox.module(in: self, keyStore: keyStore)
         let relaunchedCount = try await entryCount(of: relaunched)
         XCTAssertEqual(relaunchedCount, candidateCount + 1)
         let texts = try await entryTexts(of: relaunched)
@@ -1119,10 +1117,10 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         else {
             throw XCTSkip("Runs only as the child of StoreHolderProcess")
         }
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: URL(fileURLWithPath: path),
             keyStore: CountingKeyStore(key: masterKey)
-        )
+        ))
         let status = await module.status()
         guard status.availability == .ready else {
             return XCTFail("Store did not open: \(String(describing: status))")
@@ -1150,7 +1148,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         let sandbox = try makeSandbox()
         let keyStore = CountingKeyStore(key: masterKey)
         try await makeDisplacedStoreLayout(in: sandbox, keyStore: keyStore)
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
         await module.awaitSearchIndexRebuildForTesting()
         await module.awaitDerivedJobsForTesting()
         let displacedBytes = allocatedBytes(sandbox.displacedRoot)
@@ -1180,7 +1178,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         try await makeDisplacedStoreLayout(in: sandbox, keyStore: keyStore)
         let displacedPath = sandbox.displacedRoot.standardizedFileURL.path
         let refusals = OSAllocatedUnfairLock(initialState: 0)
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: sandbox.target,
             legacyStoreRoot: sandbox.legacy,
             keyStore: keyStore,
@@ -1193,7 +1191,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
                 refusals.withLock { $0 += 1 }
                 throw ClipboardHistoryStorageError.fileOperationFailed(EACCES)
             }
-        )
+        ))
         await module.awaitSearchIndexRebuildForTesting()
         await module.awaitDerivedJobsForTesting()
         XCTAssertGreaterThan(allocatedBytes(sandbox.displacedRoot), 0)
@@ -1215,7 +1213,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         let sandbox = try makeSandbox()
         let keyStore = CountingKeyStore(key: masterKey)
         try await makeDisplacedStoreLayout(in: sandbox, keyStore: keyStore)
-        let module = sandbox.module(keyStore: keyStore)
+        let module = sandbox.module(in: self, keyStore: keyStore)
         XCTAssertEqual(childNames(sandbox.displacedRoot).count, 1)
 
         try await module.reset(confirmation: .confirmed)
@@ -1244,8 +1242,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
             texts: ["older release"],
             includeBitmap: false
         )
-        let module = sandbox.module(
-            keyStore: keyStore,
+        let module = sandbox.module(in: self, keyStore: keyStore,
             faults: ClipboardHistoryFaultInjector(
                 points: [.storeRelocationAfterDetach]
             )
@@ -1307,16 +1304,17 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         }
 
         func module(
+            in testCase: XCTestCase,
             keyStore: any ClipboardHistoryMasterKeyStoring,
             faults: ClipboardHistoryFaultInjector =
                 ClipboardHistoryFaultInjector()
         ) -> ClipboardHistoryModule {
-            ClipboardHistoryModule(
+            testCase.trackClipboardHistoryModule(ClipboardHistoryModule(
                 testingStoreRoot: target,
                 legacyStoreRoot: legacy,
                 keyStore: keyStore,
                 faultInjector: faults
-            )
+            ))
         }
     }
 
@@ -1445,10 +1443,10 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         texts: [String],
         includeBitmap: Bool
     ) async throws -> ClipboardHistoryModule {
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: root,
             keyStore: keyStore
-        )
+        ))
         let status = await module.status()
         XCTAssertEqual(
             status.availability,
@@ -1544,10 +1542,10 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async throws {
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: root,
             keyStore: keyStore
-        )
+        ))
         let status = await module.status()
         XCTAssertEqual(
             status.availability,
@@ -1600,7 +1598,7 @@ final class ClipboardHistoryStoreRelocationTests: XCTestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) async throws {
-        let module = layout.sandbox.module(keyStore: layout.keyStore)
+        let module = layout.sandbox.module(in: self, keyStore: layout.keyStore)
         let status = await module.status()
         XCTAssertEqual(
             status.availability,

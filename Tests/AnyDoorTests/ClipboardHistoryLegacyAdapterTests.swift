@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 @testable import ClipboardHistory
 import Foundation
 import SwiftData
@@ -161,9 +162,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             at: root,
             withIntermediateDirectories: true
         )
-        defer {
-            try? FileManager.default.removeItem(at: root)
-        }
+        removeClipboardHistoryDirectoryAfterTest(root)
         let storeURL = root.appendingPathComponent("AnyDoor.store")
         let productionTypes: [any PersistentModel.Type] = [
             KeyBinding.self,
@@ -239,11 +238,13 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             .appendingPathComponent("v2", isDirectory: true)
             .appendingPathComponent("history.sqlite")
         let databaseKey = Data(repeating: 17, count: 32)
-        let publishingModule = try ClipboardHistoryModule(
-            testingDatabaseURL: databaseURL,
-            databaseKey: databaseKey,
-            faultInjector: ClipboardHistoryFaultInjector(
-                points: [.legacyMigrationAfterPublication]
+        let publishingModule = try trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL: databaseURL,
+                databaseKey: databaseKey,
+                faultInjector: ClipboardHistoryFaultInjector(
+                    points: [.legacyMigrationAfterPublication]
+                )
             )
         )
         do {
@@ -256,9 +257,11 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             )
         }
         try await publishingModule.closeStoreForTesting()
-        let module = try ClipboardHistoryModule(
-            testingDatabaseURL: databaseURL,
-            databaseKey: databaseKey
+        let module = try trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL: databaseURL,
+                databaseKey: databaseKey
+            )
         )
 
         let productionContainer = try ModelContainer(
@@ -307,6 +310,10 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             }
         )
 
+        addTeardownBlock {
+            await lifecycle.awaitCurrentOperationForTesting()
+            await lifecycle.stop()
+        }
         lifecycle.start()
         await lifecycle.awaitCurrentOperationForTesting()
 

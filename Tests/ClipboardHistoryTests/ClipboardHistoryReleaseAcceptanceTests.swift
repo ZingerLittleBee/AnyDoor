@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
@@ -13,7 +14,7 @@ final class ClipboardHistoryReleaseAcceptanceTests: XCTestCase {
                 "Set CLIPBOARD_HISTORY_REMOVE_GUI_FIXTURE=1 for explicit cleanup"
             )
         }
-        let module = ClipboardHistoryModule()
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule())
         let status = await module.status()
         guard status.availability == .ready else {
             print(
@@ -68,7 +69,7 @@ final class ClipboardHistoryReleaseAcceptanceTests: XCTestCase {
             ].flatMap(Int.init) ?? 256
         ) * 1_024 * 1_024
 
-        let fixture = try ReleaseAcceptanceStore()
+        let fixture = try ReleaseAcceptanceStore(in: self)
         let clock = ReleaseAcceptanceClock(
             Date(timeIntervalSince1970: 1_900_000_000)
         )
@@ -261,10 +262,12 @@ private extension JSONEncoder {
 }
 
 private final class ReleaseAcceptanceStore {
+    private let testCase: XCTestCase
     let url: URL
     private let keyStore = ReleaseAcceptanceKeyStore()
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
+        self.testCase = testCase
         url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "AnyDoor-ClipboardReleaseAcceptance-\(UUID().uuidString)",
             isDirectory: true
@@ -273,20 +276,17 @@ private final class ReleaseAcceptanceStore {
             at: url,
             withIntermediateDirectories: true
         )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: url)
+        testCase.removeClipboardHistoryDirectoryAfterTest(url)
     }
 
     func makeModule(
         clock: ReleaseAcceptanceClock
     ) -> ClipboardHistoryModule {
-        ClipboardHistoryModule(
+        testCase.trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: url,
             keyStore: keyStore,
             now: { clock.now }
-        )
+        ))
     }
 }
 

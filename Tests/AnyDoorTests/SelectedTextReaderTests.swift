@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import AppKit
 import XCTest
 @testable import AnyDoor
@@ -56,8 +57,7 @@ final class SelectedTextReaderTests: XCTestCase {
         pb.clearContents()
         pb.setString("ORIGINAL", forType: .string)
 
-        let (module, storeRoot) = try makeModule()
-        defer { try? FileManager.default.removeItem(at: storeRoot) }
+        let module = try makeModule()
         let funnel = module.pasteboardSelfWrites
         let monitor = ClipboardHistoryCaptureMonitor(
             module: module,
@@ -91,8 +91,7 @@ final class SelectedTextReaderTests: XCTestCase {
         pb.clearContents()
         pb.setString("ORIGINAL", forType: .string)
 
-        let (module, storeRoot) = try makeModule()
-        defer { try? FileManager.default.removeItem(at: storeRoot) }
+        let module = try makeModule()
         let funnel = module.pasteboardSelfWrites
         let monitor = ClipboardHistoryCaptureMonitor(
             module: module,
@@ -153,8 +152,7 @@ final class SelectedTextReaderTests: XCTestCase {
         pb.clearContents()
         pb.setString("ORIGINAL", forType: .string)
 
-        let (module, storeRoot) = try makeModule()
-        defer { try? FileManager.default.removeItem(at: storeRoot) }
+        let module = try makeModule()
         let funnel = module.pasteboardSelfWrites
         let monitor = ClipboardHistoryCaptureMonitor(
             module: module,
@@ -232,21 +230,19 @@ final class SelectedTextReaderTests: XCTestCase {
         XCTAssertNil(pb.string(forType: .string))
     }
 
-    private func makeModule() throws
-        -> (ClipboardHistoryModule, URL)
-    {
+    private func makeModule() throws -> ClipboardHistoryModule {
         let storeRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-SelectedText-\(UUID().uuidString)",
                 isDirectory: true
             )
-        return (
-            try ClipboardHistoryModule(
+        removeClipboardHistoryDirectoryAfterTest(storeRoot)
+        return try trackClipboardHistoryModule(
+            ClipboardHistoryModule(
                 testingDatabaseURL: storeRoot
                     .appendingPathComponent("history.sqlite"),
                 databaseKey: Data(repeating: 0x6B, count: 32)
-            ),
-            storeRoot
+            )
         )
     }
 }

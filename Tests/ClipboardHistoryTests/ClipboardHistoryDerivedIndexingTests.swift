@@ -3,6 +3,7 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
@@ -60,7 +61,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testOCRDefaultsOffAndEnablingOnlyAffectsLaterOwnedBitmapCaptures()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = DeterministicVisionRecognizer(
             results: [
                 .ocr: ["https://derived.example OCR"],
@@ -70,11 +71,11 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
                 ],
             ]
         )
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ))
 
         let first = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemRed))
@@ -171,13 +172,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testSuccessfulEmptyQRRecognitionCompletesWithoutRetryOrFacet()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = CountingVisionRecognizer(results: [.qr: []])
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ))
 
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemGreen))
@@ -201,13 +202,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testRecognitionFailureStopsSilentlyAfterExactlyThreeAttempts()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = FailingVisionRecognizer()
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ))
 
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemOrange))
@@ -230,15 +231,15 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testDuplicateRecaptureRefreshesOnlyCurrentlyEligibleBudgets()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = CountingVisionRecognizer(
             results: [.ocr: [], .qr: []]
         )
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ))
         let bitmap = try makeBitmap(color: .systemPurple)
 
         let first = try await module.capture(bitmapRequest(bitmap))
@@ -305,13 +306,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testDuplicateGenerationRejectsLateResultBeforePublishingFreshResult()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = RecaptureVisionRecognizer()
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseFirstCall() })
         let bitmap = try makeBitmap(color: .systemPurple)
         let first = try await module.capture(bitmapRequest(bitmap))
         await recognizer.waitUntilFirstCallStarts()
@@ -338,7 +339,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     }
 
     func testDisablingDoesNotCancelAlreadyEligibleOCRWork() async throws {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = GatedVisionRecognizer(
             blockedKind: .ocr,
             results: [
@@ -346,11 +347,11 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
                 .qr: [],
             ]
         )
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseAll() })
         try await module.setAutomaticImageTextIndexingEnabled(true)
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemYellow))
@@ -370,7 +371,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     }
 
     func testQRCodeIsIndexedBeforeItsOwnOCRJobStarts() async throws {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = GatedVisionRecognizer(
             blockedKind: .ocr,
             results: [
@@ -378,11 +379,11 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
                 .qr: ["anydoor://derived/qr/first"],
             ]
         )
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseAll() })
         try await module.setAutomaticImageTextIndexingEnabled(true)
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemRed))
@@ -412,16 +413,16 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     }
 
     func testPendingJobResumesAfterStoreReopen() async throws {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let blocking = GatedVisionRecognizer(
             blockedKind: .qr,
             results: [.qr: ["stale result"]]
         )
-        let first = try ClipboardHistoryModule(
+        let first = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: blocking
-        )
+        ), beforeClosing: { await blocking.releaseAll() })
         let capture = try await first.capture(
             bitmapRequest(try makeBitmap(color: .systemBrown))
         )
@@ -436,11 +437,11 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         let resumedRecognizer = CountingVisionRecognizer(
             results: [.qr: ["resumed QR value"]]
         )
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: resumedRecognizer
-        )
+        ))
         await reopened.awaitDerivedJobsForTesting()
 
         let resumedCallCount = await resumedRecognizer.callCount(for: .qr)
@@ -454,13 +455,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testPendingQRJobsAreClaimedBeforePendingOCRJobsAfterReopen()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let blocking = FirstCallGatedVisionRecognizer()
-        let first = try ClipboardHistoryModule(
+        let first = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: blocking
-        )
+        ), beforeClosing: { await blocking.releaseFirstCall() })
         try await first.setAutomaticImageTextIndexingEnabled(true)
         _ = try await first.capture(
             bitmapRequest(try makeBitmap(color: .systemRed))
@@ -477,11 +478,11 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         try await close.value
 
         let resumedRecognizer = CountingVisionRecognizer(results: [:])
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: resumedRecognizer
-        )
+        ))
         await reopened.awaitDerivedJobsForTesting()
 
         let claimOrder = await resumedRecognizer.callOrder()
@@ -493,19 +494,19 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     }
 
     func testRetriedQRJobIsClaimedBeforeFreshOCRJob() async throws {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         // A fixed clock makes the failed QR job due again at the exact
         // time it failed, independent of wall-clock adjustments.
         let clock = DerivedIndexingClock(
             Date(timeIntervalSince1970: 10_000)
         )
         let recognizer = FirstQRFailureVisionRecognizer()
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.directory,
             keyStore: DerivedIndexingMasterKeyStore(),
             now: { clock.now },
             visionRecognizer: recognizer
-        )
+        ))
         try await module.setAutomaticImageTextIndexingEnabled(true)
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemRed))
@@ -529,16 +530,16 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testDeletionCancelsRecognitionAndLateResultCannotResurrectData()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = GatedVisionRecognizer(
             blockedKind: .qr,
             results: [.qr: ["late QR value"]]
         )
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseAll() })
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemCyan))
         )
@@ -563,18 +564,18 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testDerivedPublicationRollsBackFieldsBothFTSAndFacetTogether()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = CountingVisionRecognizer(
             results: [.qr: ["transactional QR"]]
         )
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             faultInjector: ClipboardHistoryFaultInjector(
                 points: [.searchInsertAfterField]
             ),
             visionRecognizer: recognizer
-        )
+        ))
 
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemMint))
@@ -603,13 +604,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testExplicitQRTextUsesProvenanceWithoutBitmapAutoIndexing()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = CountingVisionRecognizer(results: [:])
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ))
 
         let capture = try await module.capture(
             ClipboardHistoryCaptureRequest(
@@ -641,13 +642,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testPersistedOCRSettingDoesNotCreateJobsForPreexistingBitmap()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let firstRecognizer = CountingVisionRecognizer(results: [.qr: []])
-        let first = try ClipboardHistoryModule(
+        let first = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: firstRecognizer
-        )
+        ))
         let capture = try await first.capture(
             bitmapRequest(try makeBitmap(color: .lightGray))
         )
@@ -656,11 +657,11 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
         try await first.closeStoreForTesting()
 
         let reopenedRecognizer = CountingVisionRecognizer(results: [:])
-        let reopened = try ClipboardHistoryModule(
+        let reopened = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: reopenedRecognizer
-        )
+        ))
         await reopened.awaitDerivedJobsForTesting()
 
         let persistedSetting =
@@ -678,13 +679,13 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
 
     @MainActor
     func testReferencedImageFileIsNeverSentToVision() async throws {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = CountingVisionRecognizer(results: [:])
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ))
         try await module.setAutomaticImageTextIndexingEnabled(true)
         let imageURL = fixture.directory.appendingPathComponent("reference.png")
         try makeBitmap(color: .systemIndigo).write(to: imageURL)
@@ -724,16 +725,16 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testClearHistoryCancelsRecognitionAndRejectsLatePublication()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = GatedVisionRecognizer(
             blockedKind: .qr,
             results: [.qr: ["late clear value"]]
         )
-        let module = try ClipboardHistoryModule(
+        let module = try trackClipboardHistoryModule(ClipboardHistoryModule(
             testingDatabaseURL: fixture.databaseURL,
             databaseKey: fixture.databaseKey,
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseAll() })
         _ = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemPink))
         )
@@ -754,7 +755,7 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testExpiryCancelsRecognitionAndRejectsLatePublication()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let clock = DerivedIndexingClock(
             Date(timeIntervalSince1970: 10_000)
         )
@@ -762,12 +763,12 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
             blockedKind: .qr,
             results: [.qr: ["late expiry value"]]
         )
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.directory,
             keyStore: DerivedIndexingMasterKeyStore(),
             now: { clock.now },
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseAll() })
         _ = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemTeal))
         )
@@ -783,16 +784,16 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     }
 
     func testRetryCancelsThenResumesPendingRecognition() async throws {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = GatedVisionRecognizer(
             blockedKind: .qr,
             results: [.qr: ["retry resumed value"]]
         )
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.directory,
             keyStore: DerivedIndexingMasterKeyStore(),
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseAll() })
         let capture = try await module.capture(
             bitmapRequest(try makeBitmap(color: .systemGray))
         )
@@ -815,16 +816,16 @@ final class ClipboardHistoryDerivedIndexingTests: XCTestCase {
     func testResetCancelsRecognitionAndStartsWithNoDerivedState()
         async throws
     {
-        let fixture = try DerivedIndexingTemporaryStore()
+        let fixture = try DerivedIndexingTemporaryStore(in: self)
         let recognizer = GatedVisionRecognizer(
             blockedKind: .qr,
             results: [.qr: ["reset stale value"]]
         )
-        let module = ClipboardHistoryModule(
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: fixture.directory,
             keyStore: DerivedIndexingMasterKeyStore(),
             visionRecognizer: recognizer
-        )
+        ), beforeClosing: { await recognizer.releaseAll() })
         _ = try await module.capture(
             bitmapRequest(try makeBitmap(color: .darkGray))
         )
@@ -994,6 +995,11 @@ private actor GatedVisionRecognizer: ClipboardHistoryVisionRecognizing {
         }
     }
 
+    func releaseAll() {
+        release(.ocr)
+        release(.qr)
+    }
+
     func release(_ kind: ClipboardHistoryDerivedJobKind) {
         releasedKinds.insert(kind)
         releaseWaiters.removeValue(forKey: kind)?.resume()
@@ -1023,6 +1029,7 @@ private actor RecaptureVisionRecognizer:
     private var firstCallStarted = false
     private var firstCallStartWaiters: [CheckedContinuation<Void, Never>] = []
     private var firstCallRelease: CheckedContinuation<Void, Never>?
+    private var firstCallReleased = false
 
     func recognize(
         _ kind: ClipboardHistoryDerivedJobKind,
@@ -1037,8 +1044,10 @@ private actor RecaptureVisionRecognizer:
                 waiter.resume()
             }
             firstCallStartWaiters = []
-            await withCheckedContinuation { continuation in
-                firstCallRelease = continuation
+            if !firstCallReleased {
+                await withCheckedContinuation { continuation in
+                    firstCallRelease = continuation
+                }
             }
             return ["stale generation value"]
         }
@@ -1053,6 +1062,7 @@ private actor RecaptureVisionRecognizer:
     }
 
     func releaseFirstCall() {
+        firstCallReleased = true
         firstCallRelease?.resume()
         firstCallRelease = nil
     }
@@ -1067,6 +1077,7 @@ private actor FirstCallGatedVisionRecognizer:
     private var firstCallStarted = false
     private var firstCallStartWaiters: [CheckedContinuation<Void, Never>] = []
     private var firstCallRelease: CheckedContinuation<Void, Never>?
+    private var firstCallReleased = false
     private var firstCallCancelled = false
     private var firstCallCancellationWaiters:
         [CheckedContinuation<Void, Never>] = []
@@ -1077,7 +1088,7 @@ private actor FirstCallGatedVisionRecognizer:
     ) async throws -> [String] {
         XCTAssertFalse(bitmaps.isEmpty)
         callCount += 1
-        guard callCount == 1 else { return [] }
+        guard callCount == 1, !firstCallReleased else { return [] }
         firstCallStarted = true
         for waiter in firstCallStartWaiters {
             waiter.resume()
@@ -1110,6 +1121,7 @@ private actor FirstCallGatedVisionRecognizer:
     }
 
     func releaseFirstCall() {
+        firstCallReleased = true
         firstCallRelease?.resume()
         firstCallRelease = nil
     }
@@ -1173,7 +1185,7 @@ private final class DerivedIndexingTemporaryStore {
     let databaseURL: URL
     let databaseKey = Data(repeating: 0x86, count: 32)
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "AnyDoor-DerivedIndexingTests-\(UUID().uuidString)"
         )
@@ -1182,10 +1194,7 @@ private final class DerivedIndexingTemporaryStore {
             withIntermediateDirectories: true
         )
         databaseURL = directory.appendingPathComponent("history.sqlite")
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: directory)
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
     }
 }
 

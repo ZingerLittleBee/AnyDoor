@@ -1,12 +1,13 @@
 import Foundation
 import Security
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
 final class ClipboardHistoryMigrationTests: XCTestCase {
     func testPublishedMigrationStateSurvivesModuleReopen() async throws {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let module = fixture.makeModule()
         let expectedReport = ClipboardHistoryLegacyMigrationReport(
             retainedEntryCount: 0,
@@ -36,7 +37,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testMigrationPreservesLegacyRowsAndMapsKindsWithoutDerivedBackfill()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let now = Date(timeIntervalSince1970: 2_000_000)
         let source = ClipboardHistoryCaptureSource(
             bundleIdentifier: "com.example.source",
@@ -183,7 +184,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testMigrationAppliesExpiryAndResetsRetentionForOrphanProtection()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let now = Date(timeIntervalSince1970: 5_000_000)
         let old = now.addingTimeInterval(-8 * 86_400)
         let expiredID = UUID()
@@ -265,7 +266,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testMissingOwnedImageDegradesTheRowWithoutFailingTheMigration()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let now = fixture.now
         let entries = [
             legacyEntry(
@@ -335,7 +336,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testCorruptOwnedImageNeverPublishesPartialStagingStore()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         try fixture.writeLegacyPayload(
             named: "corrupt.png",
             data: Data("not a png".utf8)
@@ -380,7 +381,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testMigrationPreservesLegacyRecencyOrderWhenTimestampsTie()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let ids = [
             UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
             UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
@@ -409,7 +410,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testFileMigrationClassifiesEveryMemberAndBlocksPartialPaste()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let originals = fixture.root.appendingPathComponent("Originals")
         try FileManager.default.createDirectory(
             at: originals,
@@ -551,7 +552,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testLegacyUnverifiedBookmarkStartsIdentityAtMigration()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let original = fixture.root.appendingPathComponent("unverified.txt")
         try Data("current bytes".utf8).write(to: original)
         let entryID = UUID()
@@ -602,7 +603,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testCopiesThatAreNotRegularFilesMigrateWithoutCapturedBytes()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let fileManager = FileManager.default
         let outside = fixture.root.appendingPathComponent(
             "Outside",
@@ -715,7 +716,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testUnreadableFileSidesFollowContractAndSingleOwnedRestore()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let readableCurrent = fixture.root.appendingPathComponent(
             "readable-current.txt"
         )
@@ -835,7 +836,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testOwnedFileRestoreCommitsAllMembersAndPreservesIdentity()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let firstOriginal = fixture.root.appendingPathComponent("first.txt")
         let secondOriginal = fixture.root.appendingPathComponent("second.txt")
         try fixture.writeLegacyPayload(
@@ -992,7 +993,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testOwnedFileRestoreRollsBackHistoryAndRetriesAfterFailure()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let firstOriginal = fixture.root.appendingPathComponent("first.txt")
         let secondOriginal = fixture.root.appendingPathComponent("second.txt")
         try fixture.writeLegacyPayload(
@@ -1108,7 +1109,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testOwnedFileRestoreRejectsAliasedDestinationsWithoutRetiringPayloads()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let firstOriginal = fixture.root.appendingPathComponent("first.txt")
         let secondOriginal = fixture.root.appendingPathComponent("second.txt")
         try fixture.writeLegacyPayload(
@@ -1198,7 +1199,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testOwnedFileRestoreHonorsCollisionCreatedAfterPreflight()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let original = fixture.root.appendingPathComponent("original.txt")
         try fixture.writeLegacyPayload(
             named: "captured-copy",
@@ -1276,7 +1277,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testOwnedFileRestoreRejectsParentAliasIntroducedBeforePublication()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let firstOriginal = fixture.root.appendingPathComponent("first.txt")
         let secondOriginal = fixture.root.appendingPathComponent("second.txt")
         try fixture.writeLegacyPayload(
@@ -1378,7 +1379,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testOwnedFileRestoreRejectsReplacementBeforeBookmarkCreation()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let original = fixture.root.appendingPathComponent("original.txt")
         try fixture.writeLegacyPayload(
             named: "captured-copy",
@@ -1460,7 +1461,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             ClipboardHistoryFaultPoint.legacyRestoreFileDurability,
             .legacyRestoreDirectoryDurability,
         ] {
-            let fixture = try LegacyMigrationFixture()
+            let fixture = try LegacyMigrationFixture(in: self)
             let original = fixture.root.appendingPathComponent("original.txt")
             try fixture.writeLegacyPayload(
                 named: "captured-copy",
@@ -1546,7 +1547,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             ClipboardHistoryFaultPoint.legacyMigrationBeforePublication,
             .legacyMigrationAfterPublication,
         ] {
-            let fixture = try LegacyMigrationFixture()
+            let fixture = try LegacyMigrationFixture(in: self)
             let entry = legacyEntry(
                 kind: .text,
                 text: "survives publication fault",
@@ -1599,7 +1600,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testAStoreWithEntriesRefusesTheMigrationWithItsCount()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let module = fixture.makeModule()
         let captured = try await fixture.captureBlockingEntries(into: module)
         let payloads = try fixture.storePayloadNames()
@@ -1638,7 +1639,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testAConfirmedDiscardReplacesTheEntriesWithTheMigratedHistory()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let module = fixture.makeModule()
         let captured = try await fixture.captureBlockingEntries(into: module)
         let legacyID = UUID()
@@ -1680,7 +1681,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testAStaleDiscardCountIsRefusedWithoutTouchingTheStore()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let module = fixture.makeModule()
         let captured = try await fixture.captureBlockingEntries(into: module)
         let payloads = try fixture.storePayloadNames()
@@ -1712,7 +1713,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testADiscardThatFailsBeforePublicationKeepsTheEntries()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let capturing = fixture.makeModule()
         let captured = try await fixture.captureBlockingEntries(
             into: capturing
@@ -1786,7 +1787,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testADiscardInterruptedPartwayIsRefusedAndConfirmedAgain()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let capturing = fixture.makeModule()
         let captured = try await fixture.captureBlockingEntries(
             into: capturing
@@ -1859,7 +1860,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
             ClipboardHistoryFaultPoint.legacyCleanupBeforeDelete,
             .legacyCleanupAfterDelete,
         ] {
-            let fixture = try LegacyMigrationFixture()
+            let fixture = try LegacyMigrationFixture(in: self)
             let payloadName = "owned-copy"
             try fixture.writeLegacyPayload(
                 named: payloadName,
@@ -1924,7 +1925,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testLegacyCleanupRetainsPlaintextWhenRedundancyProofDrifts()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let original = fixture.root.appendingPathComponent("equal.txt")
         let payloadName = "equal-copy"
         try Data("equal at migration".utf8).write(to: original)
@@ -1973,7 +1974,7 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
     func testPublishedCleanupProofSurvivesNewHistoryDeletion()
         async throws
     {
-        let fixture = try LegacyMigrationFixture()
+        let fixture = try LegacyMigrationFixture(in: self)
         let payloadName = "owned-copy"
         try fixture.writeLegacyPayload(
             named: payloadName,
@@ -2021,13 +2022,15 @@ final class ClipboardHistoryMigrationTests: XCTestCase {
 }
 
 private final class LegacyMigrationFixture {
+    private let testCase: XCTestCase
     let root: URL
     let storeRoot: URL
     let legacyPayloadRoot: URL
     let now = Date(timeIntervalSince1970: 8_000_000)
     private let keyStore = LegacyMigrationKeyStore()
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
+        self.testCase = testCase
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "AnyDoor-ClipboardLegacyMigration-\(UUID().uuidString)"
         )
@@ -2037,10 +2040,7 @@ private final class LegacyMigrationFixture {
             at: legacyPayloadRoot,
             withIntermediateDirectories: true
         )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: root)
+        testCase.removeClipboardHistoryDirectoryAfterTest(root)
     }
 
     func makeModule(
@@ -2050,13 +2050,13 @@ private final class LegacyMigrationFixture {
         notificationCenter: NotificationCenter = .default
     ) -> ClipboardHistoryModule {
         let currentDate = now ?? self.now
-        return ClipboardHistoryModule(
+        return testCase.trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: storeRoot,
             keyStore: keyStore,
             faultInjector: faultInjector,
             now: { currentDate },
             notificationCenter: notificationCenter
-        )
+        ))
     }
 
     func request(

@@ -2,12 +2,13 @@ import Darwin
 import Foundation
 import GRDB
 import XCTest
+import ClipboardHistoryTestSupport
 
 @testable import ClipboardHistory
 
 final class ClipboardHistoryRetentionTests: XCTestCase {
     func testTagDefinitionOperationsOwnNamesAndEntryMembership() async throws {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
         let first = try await module.capture(textRequest("first"))
         let second = try await module.capture(textRequest("second"))
@@ -54,7 +55,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 900_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         let captured = try await module.capture(textRequest("protected"))
         let created = try await module.createTagDefinition(
@@ -94,7 +95,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testRejectedTagDefinitionChangesLeaveModuleStateUnchanged()
         async throws
     {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
         do {
             _ = try await module.createTagDefinition(
@@ -158,7 +159,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     }
 
     func testRetentionOffersEveryPresetAndDefaultsToThirtyDays() async throws {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
 
         XCTAssertEqual(
@@ -185,7 +186,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 1_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         let captured = try await module.capture(textRequest("protected"))
 
@@ -230,7 +231,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 2_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         let captured = try await module.capture(textRequest("favorite"))
 
@@ -258,7 +259,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 3_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         let old = try await module.capture(textRequest("old"))
         clock.now = start.addingTimeInterval(10 * 86_400)
@@ -280,7 +281,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     }
 
     func testZeroImpactRetentionReductionAppliesImmediately() async throws {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
         _ = try await module.capture(textRequest("fresh"))
 
@@ -294,7 +295,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testClearHistoryScopesAndStalePreviewPreserveDefinitionsAndSettings()
         async throws
     {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
         _ = try await module.replaceTagDefinitions(with: ["saved"])
         let ordinary = try await module.capture(textRequest("ordinary"))
@@ -347,7 +348,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 4_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         _ = try await module.replaceTagDefinitions(with: ["saved"])
         let edited = try await module.capture(
@@ -422,7 +423,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testTextEditRejectsZeroLengthAndEntriesWithoutExactSingleItemText()
         async throws
     {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
         let text = try await module.capture(textRequest("editable"))
         let bitmap = try await module.capture(
@@ -471,7 +472,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 5_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         let original = try await module.capture(textRequest("expiry sentinel"))
 
@@ -516,7 +517,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testPaginationReevaluatesExpiryBetweenPages() async throws {
         let start = Date(timeIntervalSince1970: 6_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         for index in 0 ..< 101 {
             clock.now = start.addingTimeInterval(Double(index))
@@ -542,7 +543,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 7_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
 
         let unlimitedPreparation = try await module.prepareRetentionChange(
@@ -584,7 +585,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date()
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule(clock: clock)
         _ = try await module.capture(bitmapRequest())
         XCTAssertEqual(try fixture.payloadFiles().count, 2)
@@ -606,7 +607,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 9_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let firstScheduler = MaintenanceTestScheduler(now: start)
         let first = fixture.makeModule(
             clock: clock,
@@ -660,7 +661,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 10_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let fault = OneShotStorageTraversalFailure()
         let scheduler = MaintenanceTestScheduler(now: start)
         let module = fixture.makeModule(
@@ -718,7 +719,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 10_500_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let fault = OneShotStorageTraversalFailure()
         let module = fixture.makeModule(
             clock: clock,
@@ -764,7 +765,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 11_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let scheduler = MaintenanceTestScheduler(now: start)
         let module = fixture.makeModule(
             clock: clock,
@@ -806,7 +807,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testStorageUsageIncludesEveryOwnedArtifactAndDoesNotFollowSymlinks()
         async throws
     {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
         _ = try await module.capture(bitmapRequest())
         let staging = fixture.url
@@ -841,7 +842,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testStorageUsageFailsSafelyWhenDirectoryBecomesExternalSymlink()
         async throws
     {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let owned = fixture.url.appendingPathComponent("owned-nested")
         try FileManager.default.createDirectory(
             at: owned,
@@ -892,7 +893,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
             .logicalDeletionAfterEntries,
             .logicalDeletionAfterPayloadRows,
         ] {
-            let fixture = try RetentionTemporaryStore()
+            let fixture = try RetentionTemporaryStore(in: self)
             let writer = fixture.makeModule()
             let text = try await writer.capture(
                 textRequest("rollback \(point)")
@@ -937,7 +938,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     {
         let start = Date(timeIntervalSince1970: 8_000_000)
         let clock = RetentionTestClock(start)
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let writer = fixture.makeModule(clock: clock)
         let captured = try await writer.capture(textRequest("atomic"))
         clock.now = start.addingTimeInterval(10 * 86_400)
@@ -969,7 +970,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testWriteFailureRejectsOnlyEditAndNeverPrunesExistingHistory()
         async throws
     {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let writer = fixture.makeModule()
         let first = try await writer.capture(textRequest("preserved first"))
         let second = try await writer.capture(textRequest("preserved second"))
@@ -1010,7 +1011,7 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
     func testALargeTextIsPreviewedByABoundedPrefixWhileItsContentStaysWhole()
         async throws
     {
-        let fixture = try RetentionTemporaryStore()
+        let fixture = try RetentionTemporaryStore(in: self)
         let module = fixture.makeModule()
         let limit = ClipboardHistoryModule.previewTextCharacterLimit
         let captured = String(repeating: "a", count: limit * 3)
@@ -1118,17 +1119,16 @@ final class ClipboardHistoryRetentionTests: XCTestCase {
 }
 
 private final class RetentionTemporaryStore {
+    private let testCase: XCTestCase
     let url: URL
     private let keyStore = RetentionMasterKeyStore()
 
-    init() throws {
+    init(in testCase: XCTestCase) throws {
+        self.testCase = testCase
         url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "AnyDoor-ClipboardRetentionTests-\(UUID().uuidString)"
         )
-    }
-
-    deinit {
-        try? FileManager.default.removeItem(at: url)
+        testCase.removeClipboardHistoryDirectoryAfterTest(url)
     }
 
     func makeModule(
@@ -1140,7 +1140,7 @@ private final class RetentionTemporaryStore {
         storageTraversalHook:
             (@Sendable (URL) throws -> Void)? = nil
     ) -> ClipboardHistoryModule {
-        ClipboardHistoryModule(
+        testCase.trackClipboardHistoryModule(ClipboardHistoryModule(
             testingStoreRoot: url,
             keyStore: keyStore,
             faultInjector: faultInjector
@@ -1148,7 +1148,7 @@ private final class RetentionTemporaryStore {
             now: { clock.now },
             maintenanceScheduler: maintenanceScheduler,
             storageTraversalHook: storageTraversalHook
-        )
+        ))
     }
 
     func payloadFiles() throws -> [URL] {

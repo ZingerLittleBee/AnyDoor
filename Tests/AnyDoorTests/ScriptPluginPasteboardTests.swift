@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import AppKit
 import Foundation
 import XCTest
@@ -17,11 +18,13 @@ final class ScriptPluginPasteboardTests: XCTestCase {
                 "AnyDoor-ScriptClipboard-\(UUID().uuidString)",
                 isDirectory: true
             )
-        defer { try? FileManager.default.removeItem(at: storeRoot) }
-        let module = try ClipboardHistoryModule(
-            testingDatabaseURL: storeRoot
-                .appendingPathComponent("history.sqlite"),
-            databaseKey: Data(repeating: 0x5A, count: 32)
+        removeClipboardHistoryDirectoryAfterTest(storeRoot)
+        let module = try trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL: storeRoot
+                    .appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x5A, count: 32)
+            )
         )
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("AnyDoorScript-\(UUID().uuidString)"))
         let funnel = module.pasteboardSelfWrites

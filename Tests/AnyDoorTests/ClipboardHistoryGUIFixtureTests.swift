@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import Foundation
 import ClipboardHistory
 import SwiftData
@@ -35,7 +36,7 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
             payloadDirectory: ClipboardHistoryModule.legacyPayloadDirectory
         )
         let request = try legacySource.makeMigrationRequest()
-        let module = ClipboardHistoryModule()
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule())
         let outcome = try await module.migrateLegacy(request)
         let cleanup = try await module.cleanupLegacyPayloads(
             in: request.payloadDirectory

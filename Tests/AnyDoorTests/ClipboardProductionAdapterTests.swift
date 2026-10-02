@@ -1,3 +1,4 @@
+import ClipboardHistoryTestSupport
 import AppKit
 import Foundation
 import XCTest
@@ -10,8 +11,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
     func testExplicitProductionsWriteSemanticValuesAndAvoidPassiveDuplicates()
         async throws
     {
-        let fixture = try Fixture()
-        defer { fixture.removeStore() }
+        let fixture = try Fixture(testCase: self)
         let monitor = ClipboardHistoryCaptureMonitor(
             module: fixture.module,
             pasteboard: fixture.pasteboard,
@@ -80,8 +80,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
     }
 
     func testScreenshotCanRecordWithoutChangingPasteboard() async throws {
-        let fixture = try Fixture()
-        defer { fixture.removeStore() }
+        let fixture = try Fixture(testCase: self)
         fixture.pasteboard.clearContents()
         XCTAssertTrue(
             fixture.pasteboard.setString("keep me", forType: .string)
@@ -112,8 +111,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
     func testCaptureFailureIsThrownAndSuppressedWriteIsNotPassivelyCaptured()
         async throws
     {
-        let fixture = try Fixture(faults: [.databaseTransaction])
-        defer { fixture.removeStore() }
+        let fixture = try Fixture(testCase: self, faults: [.databaseTransaction])
         let monitor = ClipboardHistoryCaptureMonitor(
             module: fixture.module,
             pasteboard: fixture.pasteboard,
@@ -143,8 +141,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
     func testCopyingRecordedScreenshotSuppressesWithoutCreatingCapture()
         async throws
     {
-        let fixture = try Fixture()
-        defer { fixture.removeStore() }
+        let fixture = try Fixture(testCase: self)
         let monitor = ClipboardHistoryCaptureMonitor(
             module: fixture.module,
             pasteboard: fixture.pasteboard,
@@ -174,9 +171,9 @@ final class ClipboardProductionAdapterTests: XCTestCase {
             .migrationBlocked(entryCount: 1),
         ] {
             let fixture = try Fixture(
+                testCase: self,
                 admitsHistoryWrite: state.leavesExplicitCapturesToTheStore
             )
-            defer { fixture.removeStore() }
 
             let ocr = try await fixture.adapter.produceOCR("recognized text")
             XCTAssertEqual(
@@ -241,10 +238,12 @@ final class ClipboardProductionAdapterTests: XCTestCase {
                     "AnyDoor-ClipboardProductionClosed-\(UUID().uuidString)",
                     isDirectory: true
                 )
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let module = ClipboardHistoryModule(
-                testingStoreRoot: directory,
-                keyStore: FixedKeyStore(result: keyResult)
+            removeClipboardHistoryDirectoryAfterTest(directory)
+            let module = trackClipboardHistoryModule(
+                ClipboardHistoryModule(
+                    testingStoreRoot: directory,
+                    keyStore: FixedKeyStore(result: keyResult)
+                )
             )
             let pasteboard = NSPasteboard(
                 name: NSPasteboard.Name(
@@ -283,8 +282,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
     func testCaptureWhileTheMigrationFailedDoesNotBlockTheRetry()
         async throws
     {
-        let fixture = try Fixture()
-        defer { fixture.removeStore() }
+        let fixture = try Fixture(testCase: self)
         let legacyPayloads = FileManager.default.temporaryDirectory
             .appendingPathComponent(
                 "AnyDoor-ClipboardProductionLegacy-\(UUID().uuidString)",
@@ -294,7 +292,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
             at: legacyPayloads,
             withIntermediateDirectories: true
         )
-        defer { try? FileManager.default.removeItem(at: legacyPayloads) }
+        removeClipboardHistoryDirectoryAfterTest(legacyPayloads)
         let defaults = try makeDefaults()
         ClipboardPreferences.setMonitoringEnabled(false, in: defaults)
         let legacyID = UUID()
@@ -354,6 +352,10 @@ final class ClipboardProductionAdapterTests: XCTestCase {
             pasteboard: fixture.pasteboard
         )
 
+        addTeardownBlock {
+            await lifecycle.awaitCurrentOperationForTesting()
+            await lifecycle.stop()
+        }
         lifecycle.start()
         await lifecycle.awaitCurrentOperationForTesting()
         XCTAssertEqual(lifecycle.state, .migrationFailed)
@@ -405,6 +407,7 @@ private final class Fixture {
     let adapter: ClipboardProductionAdapter
 
     init(
+        testCase: XCTestCase,
         faults: Set<ClipboardHistoryFaultPoint> = [],
         admitsHistoryWrite: Bool = true
     ) throws {
@@ -417,11 +420,14 @@ private final class Fixture {
             at: directory,
             withIntermediateDirectories: true
         )
-        module = try ClipboardHistoryModule(
-            testingDatabaseURL: directory
-                .appendingPathComponent("history.sqlite"),
-            databaseKey: Data(repeating: 0x42, count: 32),
-            faultInjector: ClipboardHistoryFaultInjector(points: faults)
+        testCase.removeClipboardHistoryDirectoryAfterTest(directory)
+        module = try testCase.trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL: directory
+                    .appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x42, count: 32),
+                faultInjector: ClipboardHistoryFaultInjector(points: faults)
+            )
         )
         pasteboard = NSPasteboard(
             name: NSPasteboard.Name(
@@ -434,10 +440,6 @@ private final class Fixture {
             admitsHistoryWrite: { admitsHistoryWrite },
             pasteboard: pasteboard
         )
-    }
-
-    func removeStore() {
-        try? FileManager.default.removeItem(at: directory)
     }
 }
 
