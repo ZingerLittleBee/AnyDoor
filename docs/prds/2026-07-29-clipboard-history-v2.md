@@ -158,7 +158,8 @@ History tier or entitlement path.
   colors outrank OCR, which outranks file paths; recency and id are final ties.
 - Searchable data includes exact and rich-derived text, OCR, QR values,
   normalized colors, file names, and both capture-time and current paths.
-  Sources, tags, facets, dates, and display metadata remain filters.
+  Sources, tags, and facets remain filters rather than searchable text, and
+  dates and display metadata are not searchable either.
   *Amendment (2026-10-01, bounded search fields): each searchable value is
   searched by at most 64 KB (65,536 bytes) of its UTF-8 text, both as stored
   and once normalized, so a term that occurs only past that point does not
