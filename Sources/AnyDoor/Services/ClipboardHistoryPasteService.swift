@@ -7,8 +7,47 @@ enum ClipboardHistoryPasteServiceError: Error {
     case writeFailed
 }
 
+/// How `ClipboardHistoryPasteService.copyEntry` ended. The caller decides what
+/// a failure shows and what follows a copy.
+enum ClipboardHistoryCopyOutcome: Equatable {
+    case copied
+    /// Carries the presentation's `actionFailure` right after the attempt. A
+    /// reload that overtook the attempt drops its failure, so this can be
+    /// `nil`.
+    case materializationFailed(ClipboardHistoryActionFailure?)
+    case pasteboardWriteFailed
+}
+
 @MainActor
 enum ClipboardHistoryPasteService {
+    /// The one path from a history entry to the pasteboard, shared by the
+    /// menu-bar popover and the wall. The entry is materialized afresh, never
+    /// from the presentation's cache, and written through the self-write
+    /// funnel so history does not capture AnyDoor's own write. Nothing is
+    /// presented, closed or pasted here.
+    static func copyEntry(
+        _ entryID: ClipboardHistoryEntryID,
+        purpose: ClipboardHistoryMaterializationPurpose = .normalPaste,
+        from presentation: ClipboardHistoryPresentationModel,
+        to pasteboard: NSPasteboard = .general
+    ) async -> ClipboardHistoryCopyOutcome {
+        guard let materialization = await presentation.materialization(
+            for: entryID,
+            purpose: purpose,
+            usesCache: false
+        ) else {
+            return .materializationFailed(presentation.actionFailure)
+        }
+        do {
+            try ClipboardSelfWrites.perform(to: pasteboard) { pasteboard in
+                try write(materialization, to: pasteboard)
+            }
+        } catch {
+            return .pasteboardWriteFailed
+        }
+        return .copied
+    }
+
     static func write(
         _ materialization: ClipboardHistoryMaterialization,
         to pasteboard: NSPasteboard

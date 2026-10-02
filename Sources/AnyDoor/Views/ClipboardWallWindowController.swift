@@ -666,27 +666,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         plain: Bool
     ) {
         Task {
-            let purpose: ClipboardHistoryMaterializationPurpose =
-                plain ? .plainTextPaste : .normalPaste
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: purpose,
-                    usesCache: false
-                )
-            else {
-                presentActionFailure()
-                return
-            }
-            do {
-                try ClipboardSelfWrites.perform { pasteboard in
-                    try ClipboardHistoryPasteService.write(
-                        materialization,
-                        to: pasteboard
-                    )
-                }
-            } catch {
-                ClipboardHistoryActionFailurePresenter.present(.unknown)
+            let outcome = await ClipboardHistoryPasteService.copyEntry(
+                entry.id,
+                purpose: plain ? .plainTextPaste : .normalPaste,
+                from: state.presentation
+            )
+            guard outcome == .copied else {
+                presentCopyFailure(outcome)
                 return
             }
             // Slide out first; reactivating the prior app returns focus there,
@@ -735,29 +721,27 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// without pasting or dismissing the wall.
     private func copyWithoutPasting(_ entry: ClipboardHistoryEntry) {
         Task {
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: .normalPaste,
-                    usesCache: false
-                )
-            else {
-                presentActionFailure()
+            let outcome = await ClipboardHistoryPasteService.copyEntry(
+                entry.id,
+                from: state.presentation
+            )
+            guard outcome == .copied else {
+                presentCopyFailure(outcome)
                 return
             }
-            do {
-                try ClipboardSelfWrites.perform { pasteboard in
-                    try ClipboardHistoryPasteService.write(
-                        materialization,
-                        to: pasteboard
-                    )
-                }
-                ToastPresenter.shared.show(
-                    .success(L(.toastCopiedToClipboard))
-                )
-            } catch {
-                ClipboardHistoryActionFailurePresenter.present(.unknown)
-            }
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        }
+    }
+
+    /// A failed materialization goes through `presentActionFailure()` rather
+    /// than the popover's plain toast, so legacy owned files still get the
+    /// restore flow. That reads `actionFailure`, so call this right after
+    /// `copyEntry` returns, with no `await` in between.
+    private func presentCopyFailure(_ outcome: ClipboardHistoryCopyOutcome) {
+        if case .materializationFailed = outcome {
+            presentActionFailure()
+        } else {
+            ClipboardHistoryActionFailurePresenter.present(outcome)
         }
     }
 
