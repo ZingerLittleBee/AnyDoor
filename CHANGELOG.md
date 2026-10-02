@@ -26,6 +26,10 @@ versioning.
   and the wall's text preview and editor now appear while another app is
   frontmost. These windows leave that app active, which used to hide every
   tooltip in them.
+- Clipboard History search no longer stays unavailable for good after one
+  failed search index rebuild. Later launches retry the rebuild in the
+  background, and after three failures in a row they wait for the next AnyDoor
+  update.
 
 ## [4.2.6] - 2026-10-02
 

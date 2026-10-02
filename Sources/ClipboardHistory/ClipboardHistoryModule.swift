@@ -65,6 +65,10 @@ public actor ClipboardHistoryModule {
     let relocation: ClipboardHistoryStoreRelocation?
     let keyStore: (any ClipboardHistoryMasterKeyStoring)?
     let faultInjector: ClipboardHistoryFaultInjector
+    /// The app build failed search index rebuilds are counted against
+    /// (`CFBundleVersion` in production): a different build gets the whole
+    /// retry budget again (see `searchIndexRebuildFailureLimit`).
+    let appBuild: String
     let payloadReclaimer = ClipboardHistoryPayloadReclaimer()
     let now: @Sendable () -> Date
     let maintenanceScheduler:
@@ -92,6 +96,10 @@ public actor ClipboardHistoryModule {
     var derivedKeys: ClipboardHistoryDerivedKeys?
     var availability: ClipboardHistoryStatus.Availability
     var availabilityReason: ClipboardHistoryStatus.AvailabilityReason?
+
+    /// The `appBuild` of a build without a `CFBundleVersion` (`swift run`),
+    /// fixed so that relaunching one never resets the retry budget.
+    static let unversionedAppBuild = "unversioned"
 
     /// `captureNotices` receives passive capture notices. It is fixed at
     /// construction so no observed change can precede it.
@@ -121,6 +129,9 @@ public actor ClipboardHistoryModule {
             ClipboardHistoryKeychainStore()
         }
         let faultInjector = ClipboardHistoryFaultInjector()
+        let appBuild =
+            Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion")
+            as? String ?? Self.unversionedAppBuild
         let relocation = ClipboardHistoryStoreRelocation(
             legacyRoot: Self.legacyPayloadDirectory,
             storeRoot: root,
@@ -136,6 +147,7 @@ public actor ClipboardHistoryModule {
         self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector
+        self.appBuild = appBuild
         now = Date.init
         maintenanceScheduler = SystemClipboardHistoryMaintenanceScheduler()
         storageTraversalHook = nil
@@ -145,7 +157,8 @@ public actor ClipboardHistoryModule {
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
         derivedKeys = resolution.keys
         availability = resolution.availability
@@ -171,7 +184,8 @@ public actor ClipboardHistoryModule {
             ClipboardHistoryFaultInjector(),
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
             ClipboardHistoryVisionRecognizer(),
-        notificationCenter: NotificationCenter = .default
+        notificationCenter: NotificationCenter = .default,
+        appBuild: String = unversionedAppBuild
     ) throws {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -185,6 +199,7 @@ public actor ClipboardHistoryModule {
         relocation = nil
         keyStore = nil
         self.faultInjector = faultInjector
+        self.appBuild = appBuild
         now = Date.init
         maintenanceScheduler = nil
         storageTraversalHook = nil
@@ -198,7 +213,8 @@ public actor ClipboardHistoryModule {
         )
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
         let payloadKey =
             ClipboardHistoryKeyDerivation
@@ -239,7 +255,8 @@ public actor ClipboardHistoryModule {
         visionRecognizer: any ClipboardHistoryVisionRecognizing =
             ClipboardHistoryVisionRecognizer(),
         notificationCenter: NotificationCenter = .default,
-        captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil
+        captureNotices: ClipboardHistoryCaptureNoticeHandler? = nil,
+        appBuild: String = unversionedAppBuild
     ) {
         let suppression = ClipboardHistorySelfWriteSuppression()
         selfWriteSuppression = suppression
@@ -266,6 +283,7 @@ public actor ClipboardHistoryModule {
         self.relocation = relocation
         self.keyStore = keyStore
         self.faultInjector = faultInjector
+        self.appBuild = appBuild
         self.now = now
         self.maintenanceScheduler = maintenanceScheduler
         self.storageTraversalHook = storageTraversalHook
@@ -275,7 +293,8 @@ public actor ClipboardHistoryModule {
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
         derivedKeys = resolution.keys
         availability = resolution.availability
@@ -362,7 +381,8 @@ public actor ClipboardHistoryModule {
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
         derivedKeys = resolution.keys
         availability = resolution.availability
@@ -404,7 +424,8 @@ public actor ClipboardHistoryModule {
         }
         searchIndexRebuildTask = try Self.retrySearchIndexes(
             in: database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
         return .indexing
     }

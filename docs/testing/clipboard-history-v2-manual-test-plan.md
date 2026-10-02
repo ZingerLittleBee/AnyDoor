@@ -913,8 +913,8 @@ cause a user to wipe their own data.
 | # | Reason | Pass |
 | --- | --- | --- |
 | 12.13.1 | `rebuildFailed` | Reported as a search failure; browsing still works; **(must not)** fall back to a linear scan. |
-| 12.13.2 | `stateUnavailable` | Distinguished from a rebuild failure, with its own message. |
-| 12.13.3 | `retrySearchIndex()` | The retry affordance actually re-attempts and recovers when the cause is removed. |
+| 12.13.2 | `stateUnavailable` | Distinguished from a rebuild failure, with its own message. A relaunch does not retry an index marked failed with a missing or unknown reason; only an explicit `retrySearchIndex()` rebuilds it. An unrecognized state value is rebuilt at the next open instead. |
+| 12.13.3 | Retry on launch | A relaunch retries a `rebuildFailed` index in the background (search shows its indexing state) and recovers once the cause is removed. Three failed rebuilds in a row under one app build, the first one included, stop the retries, and search stays unavailable. Launching a different build starts the count over, as does any rebuild that publishes or an explicit `retrySearchIndex()`. |
 
 ---
 

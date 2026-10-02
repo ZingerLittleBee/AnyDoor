@@ -134,7 +134,8 @@ extension ClipboardHistoryModule {
             database = published
             searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
                 for: published,
-                faultInjector: faultInjector
+                faultInjector: faultInjector,
+                appBuild: appBuild
             )
             availability = .ready
             availabilityReason = nil
@@ -384,7 +385,8 @@ extension ClipboardHistoryModule {
         database = reopened
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: reopened,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
         availability = .ready
         availabilityReason = nil

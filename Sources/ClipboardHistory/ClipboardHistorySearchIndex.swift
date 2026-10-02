@@ -1,5 +1,11 @@
 import Foundation
 import GRDB
+import os
+
+private let logger = Logger(
+    subsystem: "dev.bybee.AnyDoor",
+    category: "clipboardHistory.search"
+)
 
 extension ClipboardHistoryModule {
     /// Version 2 bounds every search field to `searchFieldByteLimit`.
@@ -12,6 +18,12 @@ extension ClipboardHistoryModule {
     /// first 64 KB only. Its representations, and so its preview and paste,
     /// stay whole.
     static let searchFieldByteLimit = 65_536
+    /// Opening the store retries a failed rebuild only while fewer than this
+    /// many rebuilds have failed in a row for the running app build, so a
+    /// cause that persists costs a few background rebuilds rather than one
+    /// at every launch. A published index, an explicit retry and a different
+    /// app build each start the count over.
+    static let searchIndexRebuildFailureLimit = 3
     private static let searchIndexReadyState = "ready"
     private static let searchIndexIndexingState = "indexing"
     private static let searchIndexFailedState = "failed"
@@ -148,6 +160,8 @@ extension ClipboardHistoryModule {
             )
             let state = try maintenanceText("searchIndexState", in: database)
             if state == searchIndexFailedState {
+                // Neither stamped nor rebuilt here: whether to retry is up to
+                // `makeSearchIndexRebuildTask`, which keeps the retry budget.
                 return false
             }
             guard state == searchIndexReadyState else {
@@ -185,38 +199,82 @@ extension ClipboardHistoryModule {
         }
     }
 
+    /// Starts the rebuild an opened store needs: one left indexing, or one
+    /// that failed and still has a retry left for `appBuild` (see
+    /// `searchIndexRebuildFailureLimit`).
     static func makeSearchIndexRebuildTask(
         for database: DatabasePool?,
-        faultInjector: ClipboardHistoryFaultInjector
+        faultInjector: ClipboardHistoryFaultInjector,
+        appBuild: String
     ) -> Task<SearchIndexRebuildOutcome, Never>? {
         guard let database else {
             return nil
         }
-        let shouldRebuild: Bool
+        let state: String
         do {
-            shouldRebuild = try database.read {
-                try searchIndexState(in: $0) == searchIndexIndexingState
-            }
+            // A read, so that another process writing to the store cannot
+            // fail it: a write would fail at once (the pool sets no busy
+            // timeout), and the catch below would mark a healthy index
+            // failed.
+            state = try database.read { try searchIndexState(in: $0) }
         } catch {
+            let failure = error as NSError
+            logger.error(
+                "Clipboard History search index state is unavailable: \(failure.domain, privacy: .public) \(failure.code, privacy: .public)"
+            )
             return Task.detached(priority: .utility) {
                 do {
-                    try persistSearchIndexRebuildFailure(in: database)
+                    try persistSearchIndexRebuildFailure(
+                        in: database,
+                        appBuild: appBuild
+                    )
                     return .failed
                 } catch {
                     return .failureStateUnavailable
                 }
             }
         }
-        guard shouldRebuild else { return nil }
+        switch state {
+        case searchIndexIndexingState:
+            break
+        case searchIndexFailedState:
+            // Only a retry takes a write here, and it checks the index again
+            // inside it. When that write fails, the index stays failed and
+            // nothing is counted: no rebuild ran, so the next open decides
+            // again.
+            let claimed = try? database.write { database in
+                guard
+                    try searchIndexState(in: database)
+                        == searchIndexFailedState,
+                    try retriesFailedSearchIndexRebuild(
+                        in: database,
+                        appBuild: appBuild
+                    )
+                else {
+                    return false
+                }
+                try setSearchIndexState(
+                    searchIndexIndexingState,
+                    failureReason: nil,
+                    in: database
+                )
+                return true
+            }
+            guard claimed == true else { return nil }
+        default:
+            return nil
+        }
         return startSearchIndexRebuildTask(
             in: database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
     }
 
     private static func startSearchIndexRebuildTask(
         in database: DatabasePool,
-        faultInjector: ClipboardHistoryFaultInjector
+        faultInjector: ClipboardHistoryFaultInjector,
+        appBuild: String
     ) -> Task<SearchIndexRebuildOutcome, Never> {
         return Task.detached(priority: .utility) {
             let boundedFieldCount: Int
@@ -226,8 +284,15 @@ extension ClipboardHistoryModule {
                     faultInjector: faultInjector
                 )
             } catch {
+                let failure = error as NSError
+                logger.error(
+                    "Clipboard History search index rebuild failed: \(failure.domain, privacy: .public) \(failure.code, privacy: .public)"
+                )
                 do {
-                    try persistSearchIndexRebuildFailure(in: database)
+                    try persistSearchIndexRebuildFailure(
+                        in: database,
+                        appBuild: appBuild
+                    )
                     return .failed
                 } catch {
                     return .failureStateUnavailable
@@ -365,7 +430,8 @@ extension ClipboardHistoryModule {
 
     static func retrySearchIndexes(
         in database: DatabasePool,
-        faultInjector: ClipboardHistoryFaultInjector
+        faultInjector: ClipboardHistoryFaultInjector,
+        appBuild: String
     ) throws -> Task<SearchIndexRebuildOutcome, Never> {
         try database.write { database in
             try setSearchIndexState(
@@ -373,23 +439,96 @@ extension ClipboardHistoryModule {
                 failureReason: nil,
                 in: database
             )
+            // Should this rebuild fail too, later opens retry it again.
+            try clearSearchIndexRebuildFailures(in: database)
         }
         return startSearchIndexRebuildTask(
             in: database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
     }
 
+    /// Whether opening the store retries the rebuild that left its index
+    /// failed.
+    ///
+    /// Only a rebuild failure is retried. A failure reason this build does
+    /// not know (`.stateUnavailable`) was never written by it, so nothing
+    /// says a rebuild clears it; only an explicit retry rebuilds that one.
+    private static func retriesFailedSearchIndexRebuild(
+        in database: Database,
+        appBuild: String
+    ) throws -> Bool {
+        guard
+            try maintenanceText("searchIndexFailure", in: database)
+                == searchIndexRebuildFailedReason
+        else {
+            return false
+        }
+        return try searchIndexRebuildFailures(in: database, appBuild: appBuild)
+            < searchIndexRebuildFailureLimit
+    }
+
+    /// How many rebuilds in a row have failed for `appBuild`. Failures
+    /// counted for another build do not count against this one.
+    private static func searchIndexRebuildFailures(
+        in database: Database,
+        appBuild: String
+    ) throws -> Int {
+        guard
+            try maintenanceText(
+                "searchIndexRebuildFailureBuild",
+                in: database
+            ) == appBuild
+        else {
+            return 0
+        }
+        return try maintenanceInteger(
+            "searchIndexRebuildFailures",
+            in: database
+        ) ?? 0
+    }
+
+    /// Marks the index failed and counts the failure against `appBuild`.
     private static func persistSearchIndexRebuildFailure(
-        in database: DatabasePool
+        in database: DatabasePool,
+        appBuild: String
     ) throws {
         try database.write { database in
+            let failures = try searchIndexRebuildFailures(
+                in: database,
+                appBuild: appBuild
+            )
+            try setSearchMetadataInteger(
+                "searchIndexRebuildFailures",
+                failures + 1,
+                in: database
+            )
+            try setSearchMetadataText(
+                "searchIndexRebuildFailureBuild",
+                appBuild,
+                in: database
+            )
             try setSearchIndexState(
                 searchIndexFailedState,
                 failureReason: searchIndexRebuildFailedReason,
                 in: database
             )
         }
+    }
+
+    private static func clearSearchIndexRebuildFailures(
+        in database: Database
+    ) throws {
+        try database.execute(
+            sql: """
+                DELETE FROM clipboard_maintenance_metadata
+                WHERE key IN (
+                    'searchIndexRebuildFailures',
+                    'searchIndexRebuildFailureBuild'
+                )
+                """
+        )
     }
 
     static func createSearchVirtualTables(in database: Database) throws {
@@ -900,37 +1039,36 @@ extension ClipboardHistoryModule {
         )
     }
 
-    private static func setSearchIndexState(
-        _ state: String,
-        failureReason: String?,
+    private static func setSearchMetadataText(
+        _ key: String,
+        _ value: String,
         in database: Database
     ) throws {
         try database.execute(
             sql: """
                 INSERT INTO clipboard_maintenance_metadata(key, text_value)
-                VALUES ('searchIndexState', ?)
+                VALUES (?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     integer_value = NULL,
                     real_value = NULL,
                     text_value = excluded.text_value,
                     data_value = NULL
                 """,
-            arguments: [state]
+            arguments: [key, value]
         )
+    }
+
+    private static func setSearchIndexState(
+        _ state: String,
+        failureReason: String?,
+        in database: Database
+    ) throws {
+        try setSearchMetadataText("searchIndexState", state, in: database)
         if let failureReason {
-            try database.execute(
-                sql: """
-                    INSERT INTO clipboard_maintenance_metadata(
-                        key,
-                        text_value
-                    ) VALUES ('searchIndexFailure', ?)
-                    ON CONFLICT(key) DO UPDATE SET
-                        integer_value = NULL,
-                        real_value = NULL,
-                        text_value = excluded.text_value,
-                        data_value = NULL
-                    """,
-                arguments: [failureReason]
+            try setSearchMetadataText(
+                "searchIndexFailure",
+                failureReason,
+                in: database
             )
         } else {
             try database.execute(
@@ -939,6 +1077,10 @@ extension ClipboardHistoryModule {
                     WHERE key = 'searchIndexFailure'
                     """
             )
+        }
+        if state == searchIndexReadyState {
+            // A published index ends the run of failed rebuilds.
+            try clearSearchIndexRebuildFailures(in: database)
         }
     }
 

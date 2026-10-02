@@ -494,9 +494,10 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         try await Self.assertSearchIndexesAreConsistent(in: module)
     }
 
-    /// A failed index is never stamped or rebuilt on open, even when every
-    /// field fits the bound; only an explicit retry rebuilds it.
-    func testAFailedVersionOneIndexStaysFailedWithoutAStampUntilRetried()
+    /// A failed index is never stamped on open, even when every field fits
+    /// the bound. The open retries its rebuild instead, which publishes
+    /// version 2 as a new generation.
+    func testAFailedVersionOneIndexIsRebuiltRatherThanStamped()
         async throws
     {
         let fixture = try SearchBoundTemporaryDatabase()
@@ -510,6 +511,35 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         )
         let before = try await Self.storeMetrics(of: writer)
         try await writer.closeStoreForTesting()
+
+        let module = try fixture.open()
+        await module.awaitSearchIndexRebuildForTesting()
+        let after = try await Self.storeMetrics(of: module)
+        XCTAssertEqual(after.version, Self.upgradedVersion)
+        XCTAssertEqual(after.generation, before.generation + 1)
+        let status = await module.status()
+        XCTAssertEqual(status.searchIndex, .ready)
+        try await Self.assertSearch("zqxmarker", in: module, finds: [entry])
+        try await Self.assertSearchIndexesAreConsistent(in: module)
+    }
+
+    /// Once opens have spent their retries on a failed index, they leave it
+    /// failed and unstamped; only an explicit retry rebuilds it.
+    func testAFailedVersionOneIndexOutOfRetriesStaysUnstampedUntilRetried()
+        async throws
+    {
+        let fixture = try SearchBoundTemporaryDatabase()
+        let writer = try fixture.open()
+        let entry = try await Self.capture("failed zqxmarker value", in: writer)
+        try await Self.writeSearchIndexMetadata(
+            version: 1,
+            state: "failed",
+            failure: "rebuildFailed",
+            in: writer
+        )
+        let before = try await Self.storeMetrics(of: writer)
+        try await writer.closeStoreForTesting()
+        try await Self.spendRebuildRetries(of: fixture)
 
         let module = try fixture.open()
         await module.awaitSearchIndexRebuildForTesting()
@@ -536,7 +566,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
 
     /// A failed rebuild rolls its whole transaction back, bounding writes
     /// included: the store stays a consistent version 1 store, marked failed,
-    /// until a retry upgrades it.
+    /// until the next open retries the upgrade.
     func testAFailedUpgradeRebuildLeavesTheVersionOneStoreIntact()
         async throws
     {
@@ -565,17 +595,14 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
 
         let reopened = try fixture.open()
         await reopened.awaitSearchIndexRebuildForTesting()
-        let stillFailed = await reopened.status()
-        XCTAssertEqual(stillFailed.searchIndex, .failed(.rebuildFailed))
-        try await Self.assertStoredWhole(text, for: long, in: reopened)
-        let retry = try await reopened.retrySearchIndex()
-        XCTAssertEqual(retry, .indexing)
-        await reopened.awaitSearchIndexRebuildForTesting()
+        let status = await reopened.status()
+        XCTAssertEqual(status.searchIndex, .ready)
         let upgraded = try await Self.storeMetrics(of: reopened)
         XCTAssertEqual(
             upgraded.version,
             Self.upgradedVersion
         )
+        XCTAssertEqual(upgraded.generation, before.generation + 1)
         try await Self.assertStoredBounded(text, for: long, in: reopened)
         try await Self.assertSearch("zqxheadmarker", in: reopened, finds: [long])
         try await Self.assertSearch("zqxtailmarker", in: reopened, finds: [])
@@ -685,9 +712,10 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         )
         try await Self.insertUnprotectedEntries(520, in: writer)
         try await writer.closeStoreForTesting()
+        try await Self.spendRebuildRetries(of: fixture)
 
-        // Before: the failed version 1 index is left alone, and the clear
-        // indexes the surviving whole value again.
+        // Before: the failed version 1 index, out of automatic retries, is
+        // left alone, and the clear indexes the surviving whole value again.
         let before = try fixture.open()
         try await Self.clearUnprotectedEntries(expecting: 520, in: before)
         try await Self.assertStoredWhole(text, for: kept, in: before)
@@ -1156,6 +1184,22 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
                     in: database
                 )
             }
+        }
+    }
+
+    /// Opens the store with every rebuild failing until no open retries
+    /// one any more. Each failed rebuild leaves the store as it found it.
+    private static func spendRebuildRetries(
+        of fixture: SearchBoundTemporaryDatabase
+    ) async throws {
+        for _ in 0..<ClipboardHistoryModule.searchIndexRebuildFailureLimit {
+            let failing = try fixture.open(
+                faultInjector: ClipboardHistoryFaultInjector(
+                    points: [.searchRebuildBeforePublish]
+                )
+            )
+            await failing.awaitSearchIndexRebuildForTesting()
+            try await failing.closeStoreForTesting()
         }
     }
 
