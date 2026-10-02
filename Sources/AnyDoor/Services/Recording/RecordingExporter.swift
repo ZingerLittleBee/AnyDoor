@@ -26,7 +26,7 @@ enum RecordingExporter {
             Task { @MainActor in completion(nil) }
             return
         }
-        let out = mov.deletingPathExtension().appendingPathExtension("mp4")
+        let out = mov.deletingPathExtension().appendingPathExtension(RecordingFormat.mp4.fileExtension)
         try? FileManager.default.removeItem(at: out)
         export.outputURL = out
         export.outputFileType = .mp4
@@ -60,7 +60,7 @@ enum RecordingExporter {
             generator.requestedTimeToleranceBefore = CMTime(seconds: 0.2, preferredTimescale: 600)
             generator.requestedTimeToleranceAfter = CMTime(seconds: 0.2, preferredTimescale: 600)
 
-            let out = mov.deletingPathExtension().appendingPathExtension("gif")
+            let out = mov.deletingPathExtension().appendingPathExtension(RecordingFormat.gif.fileExtension)
             try? FileManager.default.removeItem(at: out)
             guard let dest = CGImageDestinationCreateWithURL(
                 out as CFURL, UTType.gif.identifier as CFString, frameCount, nil
