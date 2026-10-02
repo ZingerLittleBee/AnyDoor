@@ -1,5 +1,10 @@
 # Screenshot Capture Engine + Quick Access Overlay (Phase 0) Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a unified screenshot capture engine (region / window / fullscreen / timer) with a custom freeze-screen selection overlay and a quick-access overlay that follows the captured region, offering copy / save / edit-entry / pin / OCR / drag / re-capture / delete.

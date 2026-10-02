@@ -4,6 +4,32 @@ status: accepted
 
 # Migrate legacy Clipboard History through a staging store
 
+## Current decision
+
+Migration still builds and verifies an encrypted staging store before
+publication, preserving the legacy snapshot until verified cleanup. The
+amendments and [OCR facet addendum](0019-model-content-types-as-overlapping-facets.md#addendum-2026-09-22-ocr-joins-the-closed-facet-set)
+update the original decision below:
+
+- Legacy OCR rows migrated now retain Text and OCR through their first-party
+  capture kind. Already-published v2 rows that lost that provenance cannot be
+  recovered by content inference. Filter ordering follows the current
+  ADR-0019 contract, including persisted user reordering.
+- [Before the cutover](#amendment-copies-that-are-not-files-and-captures-before-the-cutover-2026-10-01),
+  passive monitoring stays paused and explicit captures skip history writes;
+  their pasteboard writes and saved files still work.
+- [A blocked migration](#amendment-discarding-the-entries-that-block-the-migration-2026-10-01)
+  offers Retry and a confirmed discard of the entries that block publication.
+  The count must still match, the staging store must already be verified, and
+  the Keychain key and displaced stores are retained. Reset is not this flow.
+
+The original kind mapping and fixed-filter wording remain below as decision
+history. Current implementation entry points are
+[`ClipboardHistoryLegacyMigration.swift`](../../Sources/ClipboardHistory/ClipboardHistoryLegacyMigration.swift)
+and [`ClipboardHistoryLifecycle.swift`](../../Sources/AnyDoor/Services/ClipboardHistoryLifecycle.swift).
+
+## Original decision
+
 The first release that removes `ClipboardHistoryItem` from the shared SwiftData
 schema performs a one-time migration before Clipboard History monitoring
 starts. It retains a read-only legacy schema long enough to extract the old

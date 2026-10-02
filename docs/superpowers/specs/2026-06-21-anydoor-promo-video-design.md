@@ -1,5 +1,10 @@
 # AnyDoor Promo Video — Design
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Date:** 2026-06-21
 **Status:** Approved (pending spec review)
 **Tooling:** [Remotion](https://www.remotion.dev/) (video-as-React), rendered locally on macOS.

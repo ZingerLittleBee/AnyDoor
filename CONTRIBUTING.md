@@ -15,20 +15,21 @@ a pull request merged.
 ### Requirements
 
 - macOS 14+
-- Swift 6.2 toolchain (Xcode 16.x or the matching command line tools)
+- The CI-pinned Xcode for verification; see `XCODE_APP` in
+  [ci.yml](.github/workflows/ci.yml) and [toolchain setup](docs/development.md).
 - [`watchexec`](https://github.com/watchexec/watchexec) (optional, for hot-reload development)
 
 ### Build and run
 
 ```bash
-# Build
-swift build
+# Build with the installed SDK's window appearance
+make build
 
-# Run (dev mode; the process has no Bundle ID identity)
-swift run AnyDoor
+# Build and test with the same warning gate as CI
+make check
 
-# Run tests
-swift test
+# Check documentation links and navigation tooling
+make docs-check
 
 # Hot-reload development (requires watchexec)
 make
@@ -40,8 +41,10 @@ make install
 Running requires the macOS **Accessibility** permission (System Settings →
 Privacy & Security → Accessibility). Note that the app started by `swift run`
 and the one installed by `make install` are two distinct process identities —
-each must be granted Accessibility separately. Use `swift run` for daily
+each must be granted Accessibility separately. Use `make` for hot-reload
 development; both share the same SwiftData store, so your data follows you.
+Bare `swift build` / `swift run` can render different window chrome on macOS
+26+. Use the [documented build and UI verification entries](docs/development.md).
 
 Some features need additional permissions when you exercise them (Screen
 Recording for capture, Automation for AppleScript-backed toggles, an
@@ -49,11 +52,11 @@ administrator prompt or the privileged helper for `/etc/hosts` writes).
 
 ### Project structure
 
-The codebase layout, architecture notes, and subsystem map live in
-[`AGENTS.md`](AGENTS.md) — read it before making non-trivial changes. It
-documents load-bearing invariants (the CGEvent tap timeout budget, the pinned
-SwiftData store path, PanelStore as the single write path, etc.) that are easy
-to break by accident.
+Read the short [agent entry points](AGENTS.md), then use the
+[task routes](docs/agents/navigation.md) for actual file paths and the
+[architecture reference](docs/agents/architecture.md) for subsystem invariants.
+The [documentation index](docs/README.md) identifies current contracts and
+historical references. Reviewers also read [review standards](CODING_STANDARDS.md).
 
 ## Code conventions
 
@@ -126,13 +129,20 @@ repository metadata; see `paths-ignore` in `.github/workflows/ci.yml`).
 A separate **Check commit attribution** workflow rejects attribution trailers
 and email addresses in commits and the PR title/description (see above).
 
+The lightweight **Documentation and navigation** workflow runs on every PR and
+`main` push, including docs-only changes. It checks repository-relative links and
+navigation tool behavior using `make docs-check`.
+
 A pull request that touches `landing/` also build-checks the marketing site.
+Cloudflare Git integration can deploy independently of GitHub workflows; read
+[deployment entry points](docs/deployment.md) before merging a landing change.
 
 ## Pull requests
 
 1. Fork the repository and create a branch from `main`.
 2. Make your change, keeping commits focused and conventional.
-3. Verify it builds and tests pass: `swift build && swift test`.
+3. Run `make check` and `make docs-check`; report the compiler and any explicit
+   toolchain mismatch. See [verification setup](docs/development.md).
 4. For behavior changes, describe how you verified them manually — much of
    AnyDoor (hotkeys, capture, menu-bar UI) can only be exercised by running
    the app.

@@ -1,5 +1,10 @@
 # Landing Page — Hyper Key Section Extension
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 ## Goal
 
 Add a Hyper Key narrative to the existing `HotkeyDemo` section on the marketing

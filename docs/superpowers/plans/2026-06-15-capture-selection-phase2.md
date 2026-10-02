@@ -1,5 +1,10 @@
 # Capture Selection — Phase 2 Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the "截图菜单" (`.captureModeBar`) entry — and the shared region entry — open the pre-shown selection directly with an attached SwiftUI toolbar below it that switches capture type (region / window / fullscreen), executing on the current selection; remove the standalone floating `CaptureModeBarWindow`.

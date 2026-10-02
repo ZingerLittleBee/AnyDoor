@@ -1,5 +1,10 @@
 # Config Sync Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let users back up and restore their AnyDoor configuration (app shortcuts, builtin preferences, whitelisted general settings) to/from a local JSON file, behind a pluggable backend abstraction so iCloud/Gist/S3 can be added later.

@@ -14,8 +14,8 @@
 <!-- Check all that apply and describe manual verification steps —
      hotkeys, capture, and menu-bar UI can only be exercised by running the app. -->
 
-- [ ] `swift build` passes
-- [ ] `swift test` passes
+- [ ] `make check` passes (report any explicit toolchain mismatch)
+- [ ] `make docs-check` passes
 - [ ] Manually verified:
 
 ## Checklist

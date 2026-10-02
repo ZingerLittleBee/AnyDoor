@@ -1,5 +1,10 @@
 # Screenshot Capture Engine + Quick Access Overlay (Phase 0)
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Date:** 2026-06-14
 **Status:** Approved design — ready for implementation planning
 **Scope:** Phase 0 of a larger screenshot/recording suite for AnyDoor

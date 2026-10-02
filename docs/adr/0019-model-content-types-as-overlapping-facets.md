@@ -4,6 +4,29 @@ status: accepted
 
 # Model content types as overlapping facets
 
+## Current decision
+
+The [2026-09-22 addendum](#addendum-2026-09-22-ocr-joins-the-closed-facet-set)
+changes the OCR and filter-order decisions recorded below:
+
+- The closed facet set is Text, Link, Email, Color, Image, Screenshot, Video,
+  File, QR Code, and OCR. AnyDoor screen text recognition grants Text and OCR
+  through first-party provenance; text indexed from a saved image remains
+  derived searchable data on that image.
+- The filter order is a persisted default that users can reorder by
+  Option-dragging. The default is Screenshot, Text, Link, Image, Video, File,
+  Email, Color, OCR, QR Code.
+- Existing v2 OCR history receives only a sound, partial backfill. Legacy OCR
+  rows migrated after the change retain their provenance; the addendum records
+  which previously published rows cannot be recovered.
+
+The original exclusions and fixed-order wording remain below as decision
+history. Use the addendum and the
+[Content Facet / Facet Filter glossary](../../CONTEXT.md#clipboard-history)
+for the current contract.
+
+## Original decision
+
 Clipboard History classifies content with a closed, non-exclusive Content Facet
 set:
 

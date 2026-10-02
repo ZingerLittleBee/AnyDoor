@@ -1,5 +1,10 @@
 # Auto-Update Design (Sparkle 2 + GitHub Releases)
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Status:** Approved (brainstorming complete, pending implementation plan)
 **Date:** 2026-05-23
 **Scope:** Implement in-app auto-update for AnyDoor using Sparkle 2, with assets distributed via GitHub Releases.

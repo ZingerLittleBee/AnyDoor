@@ -73,20 +73,7 @@ jobs:
             swiftpm-${{ runner.os }}-
 
       - name: Build (first-party warnings are errors)
-        run: |
-          set -o pipefail
-          swift build --build-tests 2>&1 | tee /tmp/build.log
-          # Match only compiler diagnostics anchored to a file in this package:
-          # dependency sources live under .build/checkouts and are not ours to
-          # fix, and SwiftPM's own bookkeeping warnings ("skipping cache due to
-          # an error") carry no source location at all.
-          warnings="$(grep -E '^/.+/(Sources|Tests|Plugins)/.+:[0-9]+:[0-9]+: warning: ' /tmp/build.log \
-            | grep -v '/\.build/' | sort -u || true)"
-          if [ -n "$warnings" ]; then
-            printf '%s\n' "$warnings"
-            echo "::error::first-party build warnings — new code must be warning-free (see CONTRIBUTING.md)"
-            exit 1
-          fi
+        run: bash scripts/check-swift.sh --build-only
 
       # TranslationKeychainStore's tests write real kSecClassGenericPassword
       # items to the default keychain. A headless runner's login keychain may be
@@ -101,7 +88,7 @@ jobs:
           security default-keychain -s ci.keychain
 
       - name: Test
-        run: swift test --skip-build
+        run: bash scripts/check-swift.sh --skip-build
 
   tooling:
     name: Script Plugin tooling

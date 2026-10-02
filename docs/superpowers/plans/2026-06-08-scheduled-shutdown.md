@@ -1,5 +1,10 @@
 # Scheduled Shutdown Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a one-shot "Scheduled Shutdown" (定时关机) quick action to the menu-bar panel: arm a countdown, see "将于 HH:mm 关机", get a cancelable warning, then shut down (graceful by default, optional forced via the privileged helper).

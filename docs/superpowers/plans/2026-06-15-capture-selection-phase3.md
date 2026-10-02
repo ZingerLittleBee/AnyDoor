@@ -1,5 +1,10 @@
 # Capture Selection — Phase 3 Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the attached capture toolbar's **scrolling** and **recording** buttons act on the *current selection* instead of starting their own separate selection — by adding optional pre-selected-region entries to `ScrollCaptureCoordinator` / `RecordingCoordinator`, extending `SelectionResult`, introducing `CaptureToolType`, and growing the toolbar from 3 to 5 buttons (region / window / fullscreen / scrolling / recording).

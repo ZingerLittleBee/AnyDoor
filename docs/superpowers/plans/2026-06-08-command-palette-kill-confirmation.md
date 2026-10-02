@@ -1,5 +1,10 @@
 # Command Palette Port-Kill Confirmation Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > TDD: failing test → watch fail → implement → watch pass → commit. Steps use `- [ ]`.
 
 **Goal:** Guard both command-palette port-kill paths behind an in-palette confirmation card.

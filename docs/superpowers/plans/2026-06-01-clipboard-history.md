@@ -1,5 +1,18 @@
 # Clipboard History (Paste-style) Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+>
+> **Clipboard History v1:** The storage and capture APIs named here have been
+> replaced by the [Clipboard History v2 product contract](../../prds/2026-07-29-clipboard-history-v2.md).
+> Use the current [storage boundary](../../adr/0011-isolate-clipboard-history-storage.md),
+> [content facets](../../adr/0019-model-content-types-as-overlapping-facets.md), and
+> [legacy migration](../../adr/0020-migrate-legacy-clipboard-history-through-a-staging-store.md)
+> decisions. The original UI proposals and implementation steps remain below
+> as historical context.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a Paste-style clipboard manager: a background watcher captures copied text/images/files, and a hotkey-summoned bottom card wall lets the user browse, search, favorite, and re-paste entries (Enter restores rich text, Option+Enter pastes plain).

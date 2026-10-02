@@ -4,6 +4,28 @@ status: accepted
 
 # Isolate Clipboard History storage
 
+## Current decision
+
+The [2026-10-01 amendment](#amendment-the-store-root-moves-to-clipboardhistoryv2-2026-10-01)
+changes the store location in the original decision below:
+
+- The encrypted store lives in
+  `~/Library/Application Support/dev.bybee.AnyDoor/ClipboardHistoryV2/`.
+  `ClipboardHistory/` holds only pre-v2 payloads awaiting migration.
+- Store opening finishes or resumes relocation before opening the database or
+  reading the key. If relocation fails with no current store, recovery offers
+  Retry without Reset; a current store can still open while relocation waits.
+- Displaced stores are retained separately, never merged, and count toward
+  History Storage Usage. They are adopted only into an empty current store
+  after validation, or kept until Reset can safely remove them.
+
+The original location is preserved below as decision history. Use the
+amendment for relocation and recovery details, and the
+[v2 product contract](../prds/2026-07-29-clipboard-history-v2.md) for current
+feature behavior.
+
+## Original decision
+
 AnyDoor will move Clipboard History out of the shared application data store
 into a device-local storage boundary that exclusively owns its entry records,
 search data, and owned payloads. Independently attributable files are

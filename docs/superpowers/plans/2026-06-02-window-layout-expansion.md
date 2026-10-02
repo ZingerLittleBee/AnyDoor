@@ -1,5 +1,10 @@
 # Window Layout Expansion Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add 13 new window-layout actions (top/bottom halves, four quarters, three thirds, two two-thirds, and next/previous-display moves) as discrete, hotkey-bindable items inside the existing Window Layout submenu.

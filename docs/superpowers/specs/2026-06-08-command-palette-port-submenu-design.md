@@ -1,5 +1,10 @@
 # Command Palette Port Manager Submenu — Design
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 **Goal:** Make Port Manager a first-class, browsable command in the command palette by drilling into a second-level list of listening ports, replacing the hidden numeric-only search path.
 
 ## Background

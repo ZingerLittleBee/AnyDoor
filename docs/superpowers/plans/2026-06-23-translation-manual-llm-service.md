@@ -1,5 +1,10 @@
 # Manual (collapsed-by-default) LLM translation services — Implementation Plan
 
+> **Historical reference.** This file records an earlier design or implementation
+> plan. Its original date and approval status describe that work, not the current
+> implementation. Start with the [documentation index](../../README.md) for
+> current contracts and code entry points before reusing its steps.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let an `openAICompatible` (LLM) translation service be configured to start collapsed and *not* auto-translate; it translates only when the user expands its card, and every new run resets it to collapsed.

@@ -86,7 +86,7 @@ For AnyDoor V1, the clean design is a two-stage, bounded search for lossy Image 
 
 Apple documents [`kCGImageDestinationLossyCompressionQuality`](https://developer.apple.com/documentation/imageio/kcgimagedestinationlossycompressionquality) as a `0.0...1.0` desired-quality value. Apple also exposes [`kCGImageDestinationImageMaxPixelSize`](https://developer.apple.com/documentation/imageio/cgimagedestination) for dimension limits and [`CGImageDestinationCreateWithData`](https://developer.apple.com/documentation/imageio/cgimagedestinationcreatewithdata(_:_:_:_:)) for encoding into memory. The documented destination controls do not include a target byte count. A target-size feature therefore requires application-level candidate generation and measurement.
 
-AnyDoor already writes through `CGImageDestinationAddImageFromSource` in [ImageConverter.swift](../../Sources/AnyDoor/Services/ImageConversion/ImageConverter.swift). Apple states that this call inherits source properties unless the properties dictionary modifies or removes them. Consequently, metadata is part of every candidate's measured size unless AnyDoor adopts a different explicit policy.
+At the time of this research, AnyDoor wrote through `CGImageDestinationAddImageFromSource` in its Core image converter. The extracted implementation now lives in [ImageConverter.swift](../../Sources/ImageConversionPlugin/Services/ImageConverter.swift). Apple states that this call inherits source properties unless the properties dictionary modifies or removes them. Consequently, metadata is part of every candidate's measured size unless AnyDoor adopts a different explicit policy.
 
 ### Lossless metadata-rewrite probe
 
