@@ -1,3 +1,4 @@
+import os
 import SwiftData
 import XCTest
 @testable import AnyDoor
@@ -5,7 +6,8 @@ import XCTest
 
 /// End-to-end engine tests: real in-memory SwiftData containers, real
 /// UserDefaults suites, and a real shared temp folder as the transport — two
-/// "devices" converging through actual state files, nothing mocked.
+/// "devices" converging through actual state files, nothing mocked. Only the
+/// unresponsive-folder tests stand in file calls that block like a hung mount.
 @MainActor
 final class SyncEngineTests: XCTestCase {
 
@@ -40,7 +42,7 @@ final class SyncEngineTests: XCTestCase {
         try? FileManager.default.removeItem(at: folder)
     }
 
-    private func makeDevice(_ id: String) throws -> Device {
+    private func makeDevice(_ id: String, transport: SyncFolderTransport? = nil) throws -> Device {
         let schema = Schema([KeyBinding.self, BuiltinPreference.self, Quicklink.self])
         let container = try ModelContainer(
             for: schema,
@@ -55,7 +57,7 @@ final class SyncEngineTests: XCTestCase {
             config: SyncEngine.Configuration(deviceID: id, deviceName: id),
             context: container.mainContext,
             defaults: defaults,
-            transport: SyncFolderTransport(folderURL: folder),
+            transport: transport ?? SyncFolderTransport(folderURL: folder),
             stateStore: SyncLocalStateStore(url: stateURL),
             appPathResolver: { _ in nil },
             reconcileRuntime: {},
@@ -305,5 +307,117 @@ final class SyncEngineTests: XCTestCase {
             wallNow: { a.wall.now }
         )
         XCTAssertEqual(relaunched.document.entries, a.engine.document.entries)
+    }
+
+    // MARK: - Unresponsive folder
+
+    private func folderTransport(
+        timeout: TimeInterval,
+        _ configure: (inout SyncFolderFileSystem) -> Void
+    ) -> SyncFolderTransport {
+        var fileSystem = SyncFolderFileSystem()
+        configure(&fileSystem)
+        return SyncFolderTransport(folderURL: folder, timeout: timeout, fileSystem: fileSystem)
+    }
+
+    /// Runs one tick that stalls in `call`, stops the engine while the call is
+    /// stalled, and only then lets the call return. Returns what the tick
+    /// reported.
+    private func tickStoppedWhileStalled(
+        _ device: Device,
+        in call: StalledFileCall
+    ) async throws -> [SyncEngineStatus] {
+        var reports: [SyncEngineStatus] = []
+        device.engine.onStatus = { reports.append($0) }
+        let engine = device.engine
+        let tick = Task { await engine.tick() }
+        await waitUntil("the tick to stall") { call.entries == 1 }
+        engine.stop()
+        call.release()
+        try await bounded(within: 5) { await tick.value }
+        return reports
+    }
+
+    func testTickReportsAnUnreachableFolderWhileItsListingHangs() async throws {
+        let listing = StalledFileCall.releasedAtTeardown(of: self)
+        let a = try makeDevice("device-a", transport: folderTransport(timeout: 0.2) { fileSystem in
+            fileSystem.listFileNames = { _ in listing.block(); return [] }
+        })
+        var reports: [SyncEngineStatus] = []
+        a.engine.onStatus = { reports.append($0) }
+        let engine = a.engine
+
+        try await bounded(within: 5) { await engine.tick() }
+        guard case .failed(_, .folderUnreachable)? = reports.last else {
+            return XCTFail("expected folderUnreachable, got \(reports)")
+        }
+        XCTAssertFalse(listing.didFinish, "the tick reported while the listing still hangs")
+
+        // The listing is still stuck, so the next tick reports without
+        // starting another listing.
+        try await bounded(within: 5) { await engine.tick() }
+        XCTAssertEqual(reports.count, 2)
+        XCTAssertEqual(listing.entries, 1)
+    }
+
+    func testStoppedEngineStaysSilentWhenItsStuckTickEnds() async throws {
+        // A peer change that a stopped engine must never apply.
+        var peer = SyncDocument(deviceID: "device-c", deviceName: "C")
+        peer.entries[.setting(key: "menuBar.iconName")] = SyncEntry(
+            payload: .setting(.string("peer-icon")),
+            clock: SyncTimestamp(wallMillis: 9_000, counter: 0, deviceID: "device-c")
+        )
+        try SyncStateCodec.encode(peer).write(
+            to: folder.appendingPathComponent(SyncStateFile.name(forDeviceID: "device-c")),
+            options: .atomic
+        )
+        // The long timeout keeps the read waiting until the test releases it,
+        // after stop().
+        let listing = StalledFileCall.releasedAtTeardown(of: self)
+        let a = try makeDevice("device-a", transport: folderTransport(timeout: 30) { fileSystem in
+            fileSystem.listFileNames = { folder in
+                listing.block()
+                return try FileManager.default.contentsOfDirectory(atPath: folder.path)
+            }
+        })
+
+        let reports = try await tickStoppedWhileStalled(a, in: listing)
+
+        XCTAssertTrue(reports.isEmpty, "a stopped engine reported \(reports)")
+        XCTAssertNil(a.defaults.string(forKey: "menuBar.iconName"), "a stopped engine applied a peer")
+        let ownFile = folder.appendingPathComponent(SyncStateFile.name(forDeviceID: "device-a"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: ownFile.path), "a stopped engine wrote")
+    }
+
+    func testStoppedEngineStaysSilentWhenItsStuckWriteEnds() async throws {
+        let write = StalledFileCall.releasedAtTeardown(of: self)
+        let a = try makeDevice("device-a", transport: folderTransport(timeout: 30) { fileSystem in
+            fileSystem.write = { data, url in
+                write.block()
+                try data.write(to: url, options: .atomic)
+            }
+        })
+
+        let reports = try await tickStoppedWhileStalled(a, in: write)
+
+        XCTAssertTrue(reports.isEmpty, "a stopped engine reported \(reports)")
+    }
+
+    func testStoppedEngineDoesNotTouchTheFolder() async throws {
+        let listings = OSAllocatedUnfairLock(initialState: 0)
+        let a = try makeDevice("device-a", transport: folderTransport(timeout: 5) { fileSystem in
+            fileSystem.listFileNames = { _ in
+                listings.withLock { $0 += 1 }
+                return []
+            }
+        })
+        var reports: [SyncEngineStatus] = []
+        a.engine.onStatus = { reports.append($0) }
+
+        a.engine.stop()
+        await a.engine.tick()
+
+        XCTAssertEqual(listings.withLock { $0 }, 0, "a stopped engine listed the folder")
+        XCTAssertTrue(reports.isEmpty, "a stopped engine reported \(reports)")
     }
 }
