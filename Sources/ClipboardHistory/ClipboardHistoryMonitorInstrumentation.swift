@@ -8,6 +8,12 @@ public struct ClipboardHistoryMonitorMetrics: Equatable, Sendable {
     public let observedChangeCount: Int
     public let capturedChangeCount: Int
     public let overwrittenGenerationCount: Int
+    /// How long the monitor's timer has run, summed over every start and
+    /// stop. Time while monitoring is off, the Mac sleeps, the screen is
+    /// locked, or a migration runs is left out. Idle and boosted polling both
+    /// count, so `idleTimerFireCount` divided by it is the idle fire rate only
+    /// in an idle trial.
+    public let monitoringDuration: Duration
 
     public init(
         keyHintCount: Int,
@@ -15,7 +21,8 @@ public struct ClipboardHistoryMonitorMetrics: Equatable, Sendable {
         boostedTimerFireCount: Int,
         observedChangeCount: Int,
         capturedChangeCount: Int,
-        overwrittenGenerationCount: Int
+        overwrittenGenerationCount: Int,
+        monitoringDuration: Duration
     ) {
         self.keyHintCount = keyHintCount
         self.idleTimerFireCount = idleTimerFireCount
@@ -23,6 +30,7 @@ public struct ClipboardHistoryMonitorMetrics: Equatable, Sendable {
         self.observedChangeCount = observedChangeCount
         self.capturedChangeCount = capturedChangeCount
         self.overwrittenGenerationCount = overwrittenGenerationCount
+        self.monitoringDuration = monitoringDuration
     }
 }
 
@@ -34,9 +42,21 @@ final class ClipboardHistoryMonitorInstrumentation: Sendable {
         var observedChangeCount = 0
         var capturedChangeCount = 0
         var overwrittenGenerationCount = 0
+        var completedMonitoringDuration = Duration.zero
+        var monitoringStartedAt: Duration?
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
+    private let uptime: @Sendable () -> Duration
+
+    /// `uptime` reads the system uptime, which stops while the Mac sleeps.
+    init(
+        uptime: @escaping @Sendable () -> Duration = {
+            .seconds(ProcessInfo.processInfo.systemUptime)
+        }
+    ) {
+        self.uptime = uptime
+    }
 
     func recordKeyHint() {
         state.withLock { $0.keyHintCount += 1 }
@@ -65,15 +85,35 @@ final class ClipboardHistoryMonitorInstrumentation: Sendable {
         state.withLock { $0.capturedChangeCount += 1 }
     }
 
+    /// Called whenever the monitor's timer starts or stops running.
+    func recordMonitoringActive(_ isActive: Bool) {
+        state.withLock { state in
+            let now = uptime()
+            if isActive {
+                if state.monitoringStartedAt == nil {
+                    state.monitoringStartedAt = now
+                }
+            } else if let startedAt = state.monitoringStartedAt {
+                state.completedMonitoringDuration += now - startedAt
+                state.monitoringStartedAt = nil
+            }
+        }
+    }
+
     func snapshot() -> ClipboardHistoryMonitorMetrics {
         state.withLock { state in
-            ClipboardHistoryMonitorMetrics(
+            let runningDuration = state.monitoringStartedAt.map {
+                uptime() - $0
+            } ?? .zero
+            return ClipboardHistoryMonitorMetrics(
                 keyHintCount: state.keyHintCount,
                 idleTimerFireCount: state.idleTimerFireCount,
                 boostedTimerFireCount: state.boostedTimerFireCount,
                 observedChangeCount: state.observedChangeCount,
                 capturedChangeCount: state.capturedChangeCount,
-                overwrittenGenerationCount: state.overwrittenGenerationCount
+                overwrittenGenerationCount: state.overwrittenGenerationCount,
+                monitoringDuration: state.completedMonitoringDuration
+                    + runningDuration
             )
         }
     }

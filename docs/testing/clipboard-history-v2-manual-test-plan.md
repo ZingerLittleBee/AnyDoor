@@ -641,9 +641,14 @@ Do 50 copies. Then repeat via menu Edit → Copy (fallback path only).
 | Event-assisted (⌘C) | Zero loss at 150ms spacing |
 | Fallback (menu copy) | Loss only where two copies fall inside one 500ms idle tick |
 
-`monitorMetrics().overwrittenGenerationCount` is the exact loss counter; see
-the probe note in 8.11. Compare against a `main` build to prove the hint path
-is an improvement rather than a wash.
+`overwrittenGenerationCount` in the monitor metrics (**Exact counts** in 8.11
+says how to read them) counts the changes overwritten before the monitor
+finished reading their metadata. A change overwritten during that read is
+counted in `observedChangeCount` as well. Neither counter is the exact loss: a
+change overwritten while its snapshot is being read is rejected as stale and
+counted only in `observedChangeCount`, so the landed entries stay the exact
+count. Compare against a `main` build to prove the hint path is an improvement
+rather than a wash.
 
 ### 8.10 Sustained copy load
 
@@ -685,10 +690,26 @@ gate, absolute numbers alone are not.
 **Exact counts.** `ClipboardHistoryModule.monitorMetrics()` returns
 `idleTimerFireCount`, `boostedTimerFireCount`, `observedChangeCount`,
 `capturedChangeCount`, and `overwrittenGenerationCount` — precisely what this
-gate needs. It has **no shipped surface**: nothing in the app or its logs reads
-it. Reaching it requires a temporary env-gated probe (the pattern already used
-for capture verification). Treat the absence of a surface as a finding, not a
-test-plan problem: this gate must be re-verifiable on a release build.
+gate needs. It also returns `keyHintCount` and how long the monitor ran
+(`monitoringDuration`, logged as `monitoringSeconds`). A release build logs
+them as one line when it quits, if it was launched with
+`ANYDOOR_CLIPBOARD_MONITOR_METRICS=1`:
+
+1. Quit AnyDoor if it is running (`open` passes the variable only to a new
+   instance), then run
+   `open --env ANYDOOR_CLIPBOARD_MONITOR_METRICS=1 /Applications/AnyDoor.app`.
+2. Run the trial, then quit AnyDoor.
+3. Read the line:
+
+   ```bash
+   log show --last 5m --predicate 'subsystem == "dev.bybee.AnyDoor" AND category == "clipboardHistory.monitor"'
+   ```
+
+`monitoringSeconds` counts only the time the monitor ran, leaving out time
+while monitoring was off, the Mac slept, the screen was locked, or a migration
+ran. In an idle trial, `idleTimerFireCount` divided by `monitoringSeconds` is
+the idle fire rate. The line holds counts only, never clipboard content.
+Without the variable nothing is logged and quitting does no extra work.
 
 **Boost windows.** After a ⌘C hint the scheduler polls at 50ms for 500ms; after
 an observed change, at 100ms for 500ms. Confirm both windows actually expire:
