@@ -357,14 +357,16 @@ final class ScriptPluginRegistryTests: XCTestCase {
         state.updateList(.loaded([
             PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
         ]), generation: generation)
-        XCTAssertTrue(state.isInList)
+        guard case .list(let list) = state.level else {
+            return XCTFail("expected the pushed list level before uninstall")
+        }
+        XCTAssertEqual(list.title, "Hot")
 
         try await registry.uninstall(id)
 
         // Uninstall recomposed the visible palette: the list drill-in is gone and
         // the plugin's rows have vanished entirely.
         XCTAssertTrue(state.isAtRoot)
-        XCTAssertFalse(state.isInList)
         XCTAssertNil(registry.rowSource(for: id))
         XCTAssertTrue(palette.rowSources.isEmpty)
         state.query = "Alpha"

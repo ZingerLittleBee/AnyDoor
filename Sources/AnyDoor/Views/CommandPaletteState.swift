@@ -143,18 +143,8 @@ final class CommandPaletteState {
     private var navigationStack: [NavigationFrame] = []
 
     var isAtRoot: Bool { level == .root }
-    var isInArgumentInput: Bool {
-        switch level {
-        case .argumentInput, .pluginArgumentInput: return true
-        default: return false
-        }
-    }
     var isInDetail: Bool {
         if case .detail = level { return true }
-        return false
-    }
-    var isInList: Bool {
-        if case .list = level { return true }
         return false
     }
     var listLevel: ListLevel? {

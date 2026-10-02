@@ -297,7 +297,6 @@ final class CommandPaletteTests: XCTestCase {
         )
 
         XCTAssertFalse(state.isAtRoot)
-        XCTAssertTrue(state.isInArgumentInput)
         XCTAssertEqual(state.argumentInputTitle, "GitHub 搜索")
         XCTAssertEqual(state.query, "")
         XCTAssertEqual(state.selectedIndex, 0)
@@ -355,7 +354,6 @@ final class CommandPaletteTests: XCTestCase {
         // A bare, case-insensitive keyword is absorbed into a badge; the body clears.
         state.query = "GH"
         XCTAssertTrue(state.tryAbsorbQuicklinkKeyword())
-        XCTAssertTrue(state.isInArgumentInput)
         XCTAssertEqual(state.argumentBadge, "gh")
         XCTAssertEqual(state.argumentInputTitle, "GitHub 搜索")
         XCTAssertEqual(state.query, "")
