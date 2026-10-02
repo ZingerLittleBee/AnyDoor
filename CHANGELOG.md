@@ -81,6 +81,17 @@ versioning.
   whether they run from the menu-bar panel, a hotkey or the command palette.
   The notice names the action, and says when Dark Mode needs Automation
   access.
+- Config Sync no longer stalls when the sync folder stops responding, for
+  example on a disconnected network drive or with a cloud file that won't
+  download. AnyDoor now stops waiting after five seconds: it skips another
+  Mac's stuck file, Settings reports a stuck folder as unreachable (or as not
+  writable when this Mac's own file is stuck) instead of showing the last
+  successful sync, and AnyDoor syncs the file again once it responds.
+- Installing a Script Plugin from a zip that is slow to unpack, such as one
+  on an unresponsive drive, no longer freezes AnyDoor, in Settings or through
+  an install link. The zip now unpacks in the background, with a spinner in
+  Settings, and one that takes more than 30 seconds to unpack is refused with
+  a message.
 
 ## [4.2.6] - 2026-10-02
 
