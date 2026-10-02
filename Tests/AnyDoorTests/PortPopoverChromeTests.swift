@@ -55,7 +55,7 @@ final class PortPopoverChromeTests: XCTestCase {
     }
 
     private func isolatedDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "PortPopoverChromeTests-\(UUID().uuidString)")!
+        makeTemporaryDefaults()
     }
 
     private func sampleRecords(count: Int) -> [PortRecord] {

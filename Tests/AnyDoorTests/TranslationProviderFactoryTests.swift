@@ -2,17 +2,16 @@ import XCTest
 @testable import AnyDoor
 
 final class TranslationProviderFactoryTests: XCTestCase {
-    private var defaultsSuite = ""
+    private var defaults: UserDefaults!
     private var keychainService = ""
 
     override func setUp() {
         super.setUp()
-        defaultsSuite = "translation.factory.tests.\(UUID().uuidString)"
+        defaults = makeTemporaryDefaults()
         keychainService = "dev.bybee.AnyDoor.translation.factory.tests.\(UUID().uuidString)"
     }
 
     override func tearDown() {
-        UserDefaults().removePersistentDomain(forName: defaultsSuite)
         let keychain = TranslationKeychainStore(service: keychainService)
         keychain.deleteAPIKey(for: "llm-keyed")
         keychain.deleteAPIKey(for: "llm-keyless")
@@ -45,8 +44,7 @@ final class TranslationProviderFactoryTests: XCTestCase {
 
     @MainActor
     private func makeSettings(_ configs: [TranslationServiceConfig]) -> TranslationSettings {
-        let d = UserDefaults(suiteName: defaultsSuite)!
-        let s = TranslationSettings(defaults: d)
+        let s = TranslationSettings(defaults: defaults)
         s.setServices(configs)
         return s
     }

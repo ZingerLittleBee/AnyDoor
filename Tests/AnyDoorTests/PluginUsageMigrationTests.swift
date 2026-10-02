@@ -57,12 +57,10 @@ final class PluginUsageMigrationTests: XCTestCase {
         let container: ModelContainer
         let context: ModelContext
         let defaults: UserDefaults
-        let teardown: () -> Void
     }
 
     private func makeFixture() throws -> Fixture {
-        let suiteName = "PluginUsageMigrationTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults()
 
         let container = try makePluginRegistryTestContainer(
             pluginModelTypes: HostsNativePlugin.modelSchemaTypes
@@ -92,8 +90,7 @@ final class PluginUsageMigrationTests: XCTestCase {
             hostsPlugin: hostsPlugin,
             container: container,
             context: container.mainContext,
-            defaults: defaults,
-            teardown: { defaults.removePersistentDomain(forName: suiteName) }
+            defaults: defaults
         )
     }
 
@@ -105,7 +102,6 @@ final class PluginUsageMigrationTests: XCTestCase {
 
     func testFreshStoreMigratesToBothUninstalled() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
 
         PluginUsageMigration.runIfNeeded(plugins: f.plugins, in: f.context, defaults: f.defaults)
 
@@ -116,7 +112,6 @@ final class PluginUsageMigrationTests: XCTestCase {
 
     func testHostProfileRowsInstallHosts() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         f.context.insert(HostProfile(name: "Dev"))
         try f.context.save()
 
@@ -127,7 +122,6 @@ final class PluginUsageMigrationTests: XCTestCase {
 
     func testRegisteredHelperAloneInstallsHosts() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         // No profile rows: the registered daemon alone must keep its managing UI.
         f.host.helper.readinessValue = .requiresApproval
 
@@ -138,7 +132,6 @@ final class PluginUsageMigrationTests: XCTestCase {
 
     func testConversionRecordsInstallImageConversion() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         f.context.insert(ImageConversionRecord(
             sourceName: "photo.png",
             sourceKind: .file,
@@ -157,7 +150,6 @@ final class PluginUsageMigrationTests: XCTestCase {
 
     func testSecondRunNeverChangesAMigratedSet() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
 
         PluginUsageMigration.runIfNeeded(plugins: f.plugins, in: f.context, defaults: f.defaults)
         XCTAssertEqual(installedSet(in: f.defaults), [])
@@ -176,7 +168,6 @@ final class PluginUsageMigrationTests: XCTestCase {
 
     func testPreexistingInstallStateWinsOverTraces() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         // Install state without the migration flag can only come from a
         // config-backup import on a not-yet-migrated launch; the explicit
         // selection beats the usage-trace inference.
@@ -194,7 +185,6 @@ final class PluginUsageMigrationTests: XCTestCase {
 
     func testMigratedInstalledSetActivatesThroughNormalBootstrap() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         f.host.helper.readinessValue = .requiresApproval
 
         // Launch sequence: migration first, then the registry bootstrap reads

@@ -14,17 +14,14 @@ final class CaptureModeBarMergeTests: XCTestCase {
     private let commandOption = 0x18_0000
     private let schema = Schema([KeyBinding.self, BuiltinPreference.self])
 
-    private var suiteName = ""
     private var defaults: UserDefaults!
 
     override func setUp() {
         super.setUp()
-        suiteName = "CaptureModeBarMergeTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        defaults = makeTemporaryDefaults()
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
         super.tearDown()
     }
@@ -111,9 +108,7 @@ final class CaptureModeBarMergeTests: XCTestCase {
         ]
         for (screenshotVisible, captureModeBarVisible, expected) in cases {
             let ctx = try makeInMemoryContext()
-            let suite = "\(suiteName).\(screenshotVisible).\(captureModeBarVisible)"
-            let caseDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-            defer { caseDefaults.removePersistentDomain(forName: suite) }
+            let caseDefaults = makeTemporaryDefaults()
             try insertPair(
                 in: ctx,
                 screenshot: BuiltinPreference(
@@ -150,9 +145,7 @@ final class CaptureModeBarMergeTests: XCTestCase {
         BuiltinPreferenceSeeder.applyCaptureModeBarMergeIfNeeded(in: ctx, defaults: defaults)
         BuiltinPreferenceSeeder.applyCaptureModeBarMergeIfNeeded(in: ctx, defaults: defaults)
         // Even without the flag, a second pass finds nothing left to merge.
-        let unflagged = "\(suiteName).unflagged"
-        let unflaggedDefaults = try XCTUnwrap(UserDefaults(suiteName: unflagged))
-        defer { unflaggedDefaults.removePersistentDomain(forName: unflagged) }
+        let unflaggedDefaults = makeTemporaryDefaults("unflagged")
         BuiltinPreferenceSeeder.applyCaptureModeBarMergeIfNeeded(in: ctx, defaults: unflaggedDefaults)
 
         var byKey = try rowsByKey(in: ctx)

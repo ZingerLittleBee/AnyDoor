@@ -50,9 +50,7 @@ final class HyperKeyServiceTests: XCTestCase {
         try await controller.apply(trigger: .capsLock, virtualKey: .f19)
         XCTAssertTrue(controller.hasPersistedSignatures)
 
-        let suite = "HyperKeyServiceTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+        let defaults = makeTemporaryDefaults()
         let service = HyperKeyService(defaults: defaults, controller: controller)
 
         let reload = Task { await service.reloadFromDefaults() }

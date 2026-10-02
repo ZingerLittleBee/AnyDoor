@@ -267,9 +267,7 @@ private struct SettingsFixture {
                 databaseKey: Data(repeating: 0x31, count: 32)
             )
         )
-        let suite = "ClipboardHistorySettingsModelTests-\(UUID())"
-        defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
+        defaults = testCase.makeTemporaryDefaults()
         lifecycle = ClipboardHistoryLifecycle(
             module: module,
             defaults: defaults,

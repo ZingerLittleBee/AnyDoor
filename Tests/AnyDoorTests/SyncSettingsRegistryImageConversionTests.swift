@@ -5,10 +5,7 @@ import XCTest
 final class SyncSettingsRegistryImageConversionTests: XCTestCase {
 
     private func makeDefaults() -> UserDefaults {
-        let suite = "SyncRegistryImageConversion.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        d.removePersistentDomain(forName: suite)
-        return d
+        makeTemporaryDefaults()
     }
 
     func testImageConversionKeysAreWhitelisted() {

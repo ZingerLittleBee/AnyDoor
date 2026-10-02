@@ -6,19 +6,14 @@ import XCTest
 
 final class TargetSizePreferencesTests: XCTestCase {
     private var defaults: UserDefaults!
-    private var suiteName: String!
 
     override func setUp() {
         super.setUp()
-        suiteName = "TargetSizePreferencesTests-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
+        defaults = makeTemporaryDefaults()
     }
 
     override func tearDown() {
-        defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
-        suiteName = nil
         super.tearDown()
     }
 
@@ -218,10 +213,7 @@ final class TargetSizePreferencesTests: XCTestCase {
         XCTAssertNil(snapshot["imageConversion.targetSize.targetFormat"])
         XCTAssertNil(snapshot["imageConversion.targetSize.allowResize"])
 
-        let destinationSuite = "TargetSizePreferencesTests-dest-\(UUID().uuidString)"
-        let destination = UserDefaults(suiteName: destinationSuite)!
-        destination.removePersistentDomain(forName: destinationSuite)
-        defer { destination.removePersistentDomain(forName: destinationSuite) }
+        let destination = makeTemporaryDefaults("destination")
 
         let applied = SyncSettingsRegistry.write(snapshot, to: destination)
         XCTAssertGreaterThanOrEqual(applied, 4)

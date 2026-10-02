@@ -10,10 +10,7 @@ import XCTest
 final class ScriptPluginBackupExclusionTests: XCTestCase {
 
     private func makeDefaults() -> UserDefaults {
-        let suite = "ScriptBackupExclusion.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        d.removePersistentDomain(forName: suite)
-        return d
+        makeTemporaryDefaults()
     }
 
     func testScriptInstallStateKeyIsNotWhitelisted() {

@@ -4,10 +4,7 @@ import XCTest
 final class SyncSettingsRegistryTranslationTests: XCTestCase {
 
     private func makeDefaults() -> UserDefaults {
-        let suite = "SyncRegistryTranslation.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        d.removePersistentDomain(forName: suite)
-        return d
+        makeTemporaryDefaults()
     }
 
     func testTranslationKeysAreWhitelisted() {

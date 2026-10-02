@@ -19,14 +19,12 @@ final class SyncEngineTests: XCTestCase {
         let id: String
         let container: ModelContainer
         let defaults: UserDefaults
-        let suiteName: String
         let engine: SyncEngine
         let wall: WallClock
         @MainActor var context: ModelContext { container.mainContext }
     }
 
     private var folder: URL!
-    private var suiteNames: [String] = []
 
     override func setUp() async throws {
         folder = FileManager.default.temporaryDirectory
@@ -35,10 +33,6 @@ final class SyncEngineTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        for name in suiteNames {
-            UserDefaults.standard.removePersistentDomain(forName: name)
-        }
-        suiteNames = []
         try? FileManager.default.removeItem(at: folder)
     }
 
@@ -48,9 +42,7 @@ final class SyncEngineTests: XCTestCase {
             for: schema,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let suiteName = "SyncEngineTests-\(id)-\(UUID().uuidString)"
-        suiteNames.append(suiteName)
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults("device-\(id)")
         let wall = WallClock()
         let stateURL = folder.appendingPathComponent("local-state-\(id).json")
         let engine = SyncEngine(
@@ -65,7 +57,7 @@ final class SyncEngineTests: XCTestCase {
         )
         return Device(
             id: id, container: container, defaults: defaults,
-            suiteName: suiteName, engine: engine, wall: wall
+            engine: engine, wall: wall
         )
     }
 

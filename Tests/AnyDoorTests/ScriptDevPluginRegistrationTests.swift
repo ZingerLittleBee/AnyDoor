@@ -20,8 +20,7 @@ final class ScriptDevPluginRegistrationTests: XCTestCase {
     }
 
     private func makeFixture() throws -> Fixture {
-        let suiteName = "ScriptDevPluginRegistrationTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults()
         let packagesDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("script-packages-\(UUID().uuidString)", isDirectory: true)
         let storeDirectory = ScriptPluginFixture.makeStoreDirectory()
@@ -45,7 +44,6 @@ final class ScriptDevPluginRegistrationTests: XCTestCase {
             packagesDirectory: packagesDirectory,
             defaults: defaults,
             teardown: {
-                defaults.removePersistentDomain(forName: suiteName)
                 try? FileManager.default.removeItem(at: packagesDirectory)
                 try? FileManager.default.removeItem(at: storeDirectory)
             }

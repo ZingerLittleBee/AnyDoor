@@ -7,16 +7,14 @@ import XCTest
 final class PanelGroupingStoreTests: XCTestCase {
 
     @MainActor
-    private func makeStore(_ name: String) -> (PanelGroupingStore, UserDefaults) {
-        let suite = "PanelGroupingStoreTests.\(name)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+    private func makeStore() -> (PanelGroupingStore, UserDefaults) {
+        let defaults = makeTemporaryDefaults()
         return (PanelGroupingStore(defaults: defaults), defaults)
     }
 
     @MainActor
     func testDefaultsToAllExpanded() {
-        let (store, _) = makeStore(#function)
+        let (store, _) = makeStore()
         XCTAssertTrue(store.collapsedParents.isEmpty)
         XCTAssertFalse(store.isParentCollapsed(.appShortcuts))
         XCTAssertFalse(store.isParentCollapsed(.windowLayout))
@@ -24,7 +22,7 @@ final class PanelGroupingStoreTests: XCTestCase {
 
     @MainActor
     func testParentCollapsePersists() {
-        let (store, defaults) = makeStore(#function)
+        let (store, defaults) = makeStore()
         store.setParentCollapsed(.appShortcuts, true)
         XCTAssertTrue(store.isParentCollapsed(.appShortcuts))
         XCTAssertFalse(store.isParentCollapsed(.windowLayout))

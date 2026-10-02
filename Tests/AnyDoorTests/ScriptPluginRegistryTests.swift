@@ -26,8 +26,7 @@ final class ScriptPluginRegistryTests: XCTestCase {
     }
 
     private func makeFixture() throws -> Fixture {
-        let suiteName = "ScriptPluginRegistryTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults()
         let packagesDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("script-packages-\(UUID().uuidString)", isDirectory: true)
         let storeDirectory = ScriptPluginFixture.makeStoreDirectory()
@@ -59,7 +58,6 @@ final class ScriptPluginRegistryTests: XCTestCase {
             defaults: defaults,
             paletteRefreshCount: { refreshCount },
             teardown: {
-                defaults.removePersistentDomain(forName: suiteName)
                 try? FileManager.default.removeItem(at: packagesDirectory)
                 try? FileManager.default.removeItem(at: storeDirectory)
             }
@@ -253,13 +251,11 @@ final class ScriptPluginRegistryTests: XCTestCase {
     // MARK: - Uninstall while a Detail is visible discards the drill-in
 
     func testUninstallWhileDetailVisibleDiscardsDrillInAndRemovesRows() async throws {
-        let suiteName = "ScriptPluginRegistryTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults()
         let packagesDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("script-packages-\(UUID().uuidString)", isDirectory: true)
         let storeDirectory = ScriptPluginFixture.makeStoreDirectory()
         defer {
-            defaults.removePersistentDomain(forName: suiteName)
             try? FileManager.default.removeItem(at: packagesDirectory)
             try? FileManager.default.removeItem(at: storeDirectory)
         }
@@ -315,13 +311,11 @@ final class ScriptPluginRegistryTests: XCTestCase {
     // MARK: - Uninstall while in a plugin's list discards the drill-in
 
     func testUninstallWhileListVisibleDiscardsDrillInAndRemovesRows() async throws {
-        let suiteName = "ScriptPluginRegistryTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults()
         let packagesDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("script-packages-\(UUID().uuidString)", isDirectory: true)
         let storeDirectory = ScriptPluginFixture.makeStoreDirectory()
         defer {
-            defaults.removePersistentDomain(forName: suiteName)
             try? FileManager.default.removeItem(at: packagesDirectory)
             try? FileManager.default.removeItem(at: storeDirectory)
         }

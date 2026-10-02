@@ -150,12 +150,6 @@ final class SyncWebDAVTransportTests: XCTestCase {
 
     func testTwoEnginesConvergeOverWebDAV() async throws {
         let server = FakeDAVServer()
-        var suiteNames: [String] = []
-        defer {
-            for name in suiteNames {
-                UserDefaults.standard.removePersistentDomain(forName: name)
-            }
-        }
         let stateDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("SyncWebDAVTransportTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
@@ -168,12 +162,10 @@ final class SyncWebDAVTransportTests: XCTestCase {
                 for: schema,
                 configurations: ModelConfiguration(isStoredInMemoryOnly: true)
             )
-            let suiteName = "SyncWebDAVTransportTests-\(id)-\(UUID().uuidString)"
-            suiteNames.append(suiteName)
             let engine = SyncEngine(
                 config: SyncEngine.Configuration(deviceID: id, deviceName: id),
                 context: container.mainContext,
-                defaults: UserDefaults(suiteName: suiteName)!,
+                defaults: makeTemporaryDefaults(id),
                 transport: makeTransport(server: server),
                 stateStore: SyncLocalStateStore(url: stateDir.appendingPathComponent("\(id).json")),
                 appPathResolver: { _ in nil },

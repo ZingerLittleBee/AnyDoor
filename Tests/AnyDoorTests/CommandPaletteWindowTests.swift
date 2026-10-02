@@ -16,9 +16,7 @@ final class CommandPaletteWindowTests: XCTestCase {
     private func withWindowPlacement(
         _ body: (CommandPaletteWindowPlacement) throws -> Void
     ) throws {
-        let suiteName = "CommandPaletteWindowPlacementTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         try body(CommandPaletteWindowPlacement(defaults: defaults))
     }
 

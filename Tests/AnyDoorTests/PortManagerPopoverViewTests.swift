@@ -71,7 +71,7 @@ final class PortManagerPopoverViewTests: XCTestCase {
     }
 
     private func isolatedDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "PortManagerPopoverViewTests-\(UUID().uuidString)")!
+        makeTemporaryDefaults()
     }
 
     private func sampleRecords(count: Int) -> [PortRecord] {

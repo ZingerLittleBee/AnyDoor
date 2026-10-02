@@ -20,8 +20,7 @@ final class ScriptPluginZipInstallTests: XCTestCase {
     }
 
     private func makeFixture() throws -> Fixture {
-        let suiteName = "ScriptPluginZipInstallTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults()
         let packagesDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("zip-install-packages-\(UUID().uuidString)", isDirectory: true)
         let storeDirectory = ScriptPluginFixture.makeStoreDirectory()
@@ -41,7 +40,6 @@ final class ScriptPluginZipInstallTests: XCTestCase {
         return Fixture(
             registry: registry,
             teardown: {
-                defaults.removePersistentDomain(forName: suiteName)
                 try? FileManager.default.removeItem(at: packagesDirectory)
                 try? FileManager.default.removeItem(at: storeDirectory)
             }

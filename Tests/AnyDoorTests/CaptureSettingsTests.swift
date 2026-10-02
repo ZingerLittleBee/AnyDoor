@@ -5,10 +5,7 @@ import CoreGraphics
 @MainActor
 final class CaptureSettingsTests: XCTestCase {
     private func makeDefaults() -> UserDefaults {
-        let suite = "capture.tests.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        d.removePersistentDomain(forName: suite)
-        return d
+        makeTemporaryDefaults()
     }
 
     func testDefaultsWhenUnset() {

@@ -99,9 +99,7 @@ private struct Fixture {
             withIntermediateDirectories: true
         )
         testCase.removeClipboardHistoryDirectoryAfterTest(directory)
-        let suite = "ClipboardHistoryPortableSettingsTests-\(UUID())"
-        defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
+        defaults = testCase.makeTemporaryDefaults()
         module = try testCase.trackClipboardHistoryModule(
             ClipboardHistoryModule(
                 testingDatabaseURL:

@@ -44,9 +44,7 @@ final class ImageConversionViewModelTests: XCTestCase {
 
     @MainActor
     func testTargetConfigurationChangeClearsPriorItemOutcomes() async throws {
-        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         let source = try writePNG()
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
 
@@ -84,9 +82,7 @@ final class ImageConversionViewModelTests: XCTestCase {
 
     @MainActor
     func testHidingWindowDeletesTheDisplayedPreviewArtifact() async throws {
-        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         let source = try writePNG()
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
 
@@ -137,9 +133,7 @@ final class ImageConversionViewModelTests: XCTestCase {
 
     @MainActor
     func testQualityModeProducesAnExactResultPreview() async throws {
-        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         let source = try writePNG()
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
 
@@ -180,9 +174,7 @@ final class ImageConversionViewModelTests: XCTestCase {
 
     @MainActor
     func testCancelActiveWorkStopsAnInFlightConversion() async throws {
-        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         // A large noisy source with an unattainable target keeps the search
         // busy long enough to observe the cancellation deterministically.
         let source = try writeNoisePNG(side: 2_048)
@@ -217,9 +209,7 @@ final class ImageConversionViewModelTests: XCTestCase {
 
     @MainActor
     func testCancelActiveWorkPreventsPendingPickerFromStartingConversion() async throws {
-        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         let source = try writePNG()
         defer { try? FileManager.default.removeItem(at: source.deletingLastPathComponent()) }
         let outputDirectory = source.deletingLastPathComponent()
@@ -255,9 +245,7 @@ final class ImageConversionViewModelTests: XCTestCase {
 
     @MainActor
     func testCancelActiveWorkStopsOutputPickerBeforeItsTaskStarts() async throws {
-        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         let model = ImageConversionViewModel(availableFormats: [.jpeg], defaults: defaults)
         model.addBitmap(Data([0x01]))
 
@@ -280,9 +268,7 @@ final class ImageConversionViewModelTests: XCTestCase {
 
     @MainActor
     func testCancelActiveWorkCancelsSaveAnywayBeforeCommit() async throws {
-        let suiteName = "ImageConversionViewModelTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         let source = try writePNG()
         let directory = source.deletingLastPathComponent()
         defer { try? FileManager.default.removeItem(at: directory) }

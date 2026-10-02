@@ -77,14 +77,12 @@ final class HostsPluginLifecycleTests: XCTestCase {
         let registry: PluginRegistry
         let palette: CommandPaletteExtensions
         let defaults: UserDefaults
-        let teardown: () -> Void
     }
 
     private func makeFixture(
         debounceInterval: Duration = .milliseconds(1)
     ) throws -> Fixture {
-        let suiteName = "HostsPluginLifecycleTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = makeTemporaryDefaults()
 
         let container = try makePluginRegistryTestContainer(
             pluginModelTypes: HostsNativePlugin.modelSchemaTypes
@@ -112,8 +110,7 @@ final class HostsPluginLifecycleTests: XCTestCase {
         )
         return Fixture(
             plugin: plugin, manager: manager, writer: writer, host: host,
-            registry: harness.registry, palette: harness.paletteExtensions, defaults: defaults,
-            teardown: { defaults.removePersistentDomain(forName: suiteName) }
+            registry: harness.registry, palette: harness.paletteExtensions, defaults: defaults
         )
     }
 
@@ -121,20 +118,17 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testEditorWindowDisablesStateRestoration() throws {
         let fixture = try makeFixture()
-        defer { fixture.teardown() }
         XCTAssertFalse(fixture.plugin.editorWindowController.window?.isRestorable ?? true)
     }
 
     func testConstructionDoesNotCreateEditorWindow() throws {
         let fixture = try makeFixture()
-        defer { fixture.teardown() }
 
         XCTAssertFalse(fixture.plugin.hasCreatedEditorWindowController)
     }
 
     func testClaimsAndContributions() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
 
         XCTAssertEqual(f.plugin.claimedCommands, [.hostsManager])
         XCTAssertTrue(f.plugin.providers.isEmpty, "submenu-kind commands have no provider")
@@ -152,7 +146,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testInstallActivatesManagerRegistersHelperAndPaletteSurfaces() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
 
         XCTAssertFalse(f.palette.isOptionParent(.hostsManager))
 
@@ -172,7 +165,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testUninstallLeavesActiveProfilesAndHostsFileUntouched() async throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
         await f.manager.setActive(f.manager.profiles[0], true)
@@ -200,7 +192,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testUninstallWithoutActiveProfilesNeverWrites() async throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
 
@@ -217,7 +208,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
         // uninstall below cannot lose a race with it: the claim under test is
         // that uninstall cancels a pending apply, not that it beats 100ms.
         let f = try makeFixture(debounceInterval: .seconds(5))
-        defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
         let profileID = f.manager.profiles[0].id
@@ -247,7 +237,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
     func testFailedHelperReleaseAbortsUninstallLeavingHostsUntouched() async throws {
         struct ReleaseFailure: Error {}
         let f = try makeFixture()
-        defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev.example.com")
         await f.manager.setActive(f.manager.profiles[0], true)
@@ -286,7 +275,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testReinstallShowsProfilesStillActiveWithAllSurfacesBack() async throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
         await f.manager.setActive(f.manager.profiles[0], true)
@@ -312,7 +300,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testPaletteOptionsListProfilesWithCheckmarkPlusEditRow() async throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         f.registry.install(f.plugin.id)
         f.manager.createProfile(name: "Dev", content: "1.2.3.4 dev")
         await f.manager.setActive(f.manager.profiles[0], true)
@@ -334,7 +321,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testImportInstallingHostsActivatesLikeHandsOnInstall() async throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         XCTAssertFalse(f.registry.isInstalled(f.plugin.id))
 
         // A backup exported from a machine with Hosts installed: the settings
@@ -351,7 +337,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testImportWithoutHostsNeverTouchesTheHelper() async throws {
         let f = try makeFixture()
-        defer { f.teardown() }
 
         f.defaults.set([String](), forKey: PluginRegistry.installStateKey)
         try await f.registry.reconcileAfterImport()
@@ -365,7 +350,6 @@ final class HostsPluginLifecycleTests: XCTestCase {
 
     func testUsageTraceSeesProfileRowsOrRegisteredHelper() throws {
         let f = try makeFixture()
-        defer { f.teardown() }
         let context = f.host.modelContainer.mainContext
 
         XCTAssertFalse(try f.plugin.hasUsageTrace(in: context))

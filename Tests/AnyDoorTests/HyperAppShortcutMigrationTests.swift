@@ -12,11 +12,9 @@ final class HyperAppShortcutMigrationTests: XCTestCase {
     private var shiftedFlags: Int { baseFlags | Int(CGEventFlags.maskShift.rawValue) }
 
     private func makeDefaults() throws -> UserDefaults {
-        let suite = "HyperAppShortcutMigrationTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = makeTemporaryDefaults()
         defaults.set("capsLock", forKey: "hyperKey.trigger")
         defaults.set(true, forKey: "hyperKey.includeShift")
-        addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         return defaults
     }
 

@@ -8,15 +8,13 @@ final class OnboardingTests: XCTestCase {
     // MARK: Completion / skip persistence
 
     func test_onboardingState_defaultsToIncomplete() {
-        let (defaults, suite) = makeEphemeralDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = makeTemporaryDefaults()
 
         XCTAssertFalse(OnboardingState.hasCompleted(in: defaults))
     }
 
     func test_onboardingState_persistsCompletion() {
-        let (defaults, suite) = makeEphemeralDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = makeTemporaryDefaults()
 
         OnboardingState.markCompleted(in: defaults)
         XCTAssertTrue(OnboardingState.hasCompleted(in: defaults))
@@ -142,14 +140,5 @@ final class OnboardingTests: XCTestCase {
         // Every step has a distinct title and sidebar label key.
         XCTAssertEqual(Set(steps.map(\.titleKey)).count, steps.count)
         XCTAssertEqual(Set(steps.map(\.sidebarTitleKey)).count, steps.count)
-    }
-
-    // MARK: Helpers
-
-    private func makeEphemeralDefaults() -> (UserDefaults, String) {
-        let suite = "test.onboarding.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return (defaults, suite)
     }
 }

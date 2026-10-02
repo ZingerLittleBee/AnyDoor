@@ -74,8 +74,7 @@ final class PortInventoryTests: XCTestCase {
     }
 
     private func isolatedDefaults() -> UserDefaults {
-        let suite = "PortInventoryTests-\(UUID().uuidString)"
-        return UserDefaults(suiteName: suite)!
+        makeTemporaryDefaults()
     }
 
     /// Scanner that lets the test resolve `scanTCPListening()` on demand.

@@ -991,7 +991,7 @@ final class CommandPaletteTests: XCTestCase {
     }
 
     private func isolatedDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "CommandPaletteTests-\(UUID().uuidString)")!
+        makeTemporaryDefaults()
     }
 
     private func quicklinkEntry(

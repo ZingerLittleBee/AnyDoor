@@ -6,10 +6,7 @@ import XCTest
 final class ImageConversionPreferencesTests: XCTestCase {
 
     private func makeDefaults() -> UserDefaults {
-        let suite = "ImageConversionPreferences.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        d.removePersistentDomain(forName: suite)
-        return d
+        makeTemporaryDefaults()
     }
 
     func testQualityDefaultsToEightyFiveWhenUnset() {

@@ -147,13 +147,6 @@ private final class FinderSelectionGate {
 final class PluginRegistryTests: XCTestCase {
 
     @MainActor
-    private func makeIsolatedDefaults() throws -> (UserDefaults, teardown: () -> Void) {
-        let suiteName = "PluginRegistryTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        return (defaults, { defaults.removePersistentDomain(forName: suiteName) })
-    }
-
-    @MainActor
     private func makeImageConversionPlugin() throws -> (
         plugin: ImageConversionNativePlugin,
         container: ModelContainer
@@ -179,8 +172,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testFreshRegistryStartsUninstalledAndHidesClaimedCommands() throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let (plugin, container) = try makeImageConversionPlugin()
         let harness = makePluginRegistryTestHarness()
         bootstrapPluginRegistryTestHarness(
@@ -201,8 +193,7 @@ final class PluginRegistryTests: XCTestCase {
     /// built just before an uninstall landed) never reaches the plugin.
     @MainActor
     func testClipboardActionsGateOnInstallState() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let plugin = ClipboardActionProbePlugin()
         let container = try makePluginRegistryTestContainer()
         let harness = makePluginRegistryTestHarness()
@@ -238,8 +229,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testInstallActivatesPersistsAndRegistersSurfaces() throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let (plugin, container) = try makeImageConversionPlugin()
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
         let itemKey = BuiltinItem.imageConversion.rawValue
@@ -356,8 +346,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testUninstallRevertsSurfacesAndPersists() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let (plugin, container) = try makeImageConversionPlugin()
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
         let harness = makePluginRegistryTestHarness()
@@ -385,8 +374,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testUninstallDrainsPendingWindowPresentationWithoutReopening() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let (plugin, container) = try makeImageConversionPlugin()
         let harness = makePluginRegistryTestHarness()
         bootstrapPluginRegistryTestHarness(
@@ -430,8 +418,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testThrowingDeactivateLeavesThePluginInstalled() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let plugin = ThrowingDeactivatePlugin()
         let container = try makePluginRegistryTestContainer()
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
@@ -466,8 +453,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testReconcileAfterImportInstallsFromImportedState() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let (plugin, container) = try makeImageConversionPlugin()
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
         let harness = makePluginRegistryTestHarness()
@@ -489,8 +475,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testReconcileAfterImportUninstallsRemovedPlugins() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let (plugin, container) = try makeImageConversionPlugin()
         BuiltinPreferenceSeeder.seedIfNeeded(in: container.mainContext)
         let harness = makePluginRegistryTestHarness()
@@ -512,8 +497,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testReconcileAfterImportFailedUninstallKeepsPluginAndRepersists() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let plugin = ThrowingDeactivatePlugin()
         let container = try makePluginRegistryTestContainer()
         let harness = makePluginRegistryTestHarness()
@@ -547,8 +531,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testReconcileAfterImportReportsAnUninstallAlreadyInProgress() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let plugin = SuspendingDeactivatePlugin()
         defer { plugin.resumeDeactivation() }
         let container = try makePluginRegistryTestContainer()
@@ -585,8 +568,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testReconcileAfterImportReportsATransitionStartedDuringAnotherRemoval() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let first = SuspendingDeactivatePlugin(id: "test.firstSuspendingDeactivate")
         let second = SuspendingDeactivatePlugin(id: "test.secondSuspendingDeactivate")
         defer {
@@ -649,8 +631,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testLifecycleTogglesPanelRowThroughRealSurfaces() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
 
         let container = try makePluginRegistryTestContainer(
             pluginModelTypes: ImageConversionNativePlugin.modelSchemaTypes
@@ -712,8 +693,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testColdLaunchActivatesBeforeEnteringInstalledAndPublishesAfterward() throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let container = try makePluginRegistryTestContainer()
         let harness = makePluginRegistryTestHarness()
         let id = NativePluginID(rawValue: "test.lifecycle")
@@ -742,8 +722,7 @@ final class PluginRegistryTests: XCTestCase {
 
     @MainActor
     func testImportRemovesPluginsBeforeInstallingAdditions() async throws {
-        let (defaults, teardown) = try makeIsolatedDefaults()
-        defer { teardown() }
+        let defaults = makeTemporaryDefaults()
         let container = try makePluginRegistryTestContainer()
         let harness = makePluginRegistryTestHarness()
         let oldID = NativePluginID(rawValue: "test.old")

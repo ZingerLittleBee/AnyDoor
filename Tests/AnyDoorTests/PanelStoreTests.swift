@@ -312,22 +312,18 @@ final class PanelStoreTests: XCTestCase {
 
     // MARK: - Helpers
 
-    /// A service with a mock executor and warning, a throwaway defaults suite
-    /// removed in teardown, and a fixed clock, so arming it never reaches a
-    /// real shutdown or the shared service. Tests that arm it end disarmed,
-    /// which also invalidates its warning timer.
+    /// A service with a mock executor and warning, a temporary defaults suite,
+    /// and a fixed clock, so arming it never reaches a real shutdown or the
+    /// shared service. Tests that arm it end disarmed, which also invalidates
+    /// its warning timer.
     @MainActor
     private func makeShutdownService(
         now: Date = Date(timeIntervalSince1970: 1_000_000)
     ) -> ScheduledShutdownService {
-        let suiteName = "test.shutdown.\(UUID().uuidString)"
-        addTeardownBlock {
-            UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
-        }
-        return ScheduledShutdownService(
+        ScheduledShutdownService(
             executor: MockShutdownExecutor(),
             warning: MockShutdownWarning(),
-            defaults: UserDefaults(suiteName: suiteName)!,
+            defaults: makeTemporaryDefaults(),
             now: { now }
         )
     }

@@ -73,10 +73,7 @@ final class ClipboardCategoryOrderTests: XCTestCase {
         )
         XCTAssertEqual(merged, Array(preUpgradeOrder) + [.kind(.video)])
 
-        let suite = "ClipboardCategoryOrderTests.video"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeTemporaryDefaults()
         let videoFirst: [ClipboardWallCategory] = [.kind(.video)] + Array(preUpgradeOrder)
         ClipboardCategoryOrder.save(videoFirst, to: defaults)
         XCTAssertEqual(ClipboardCategoryOrder.load(from: defaults).first, "kind:video")
@@ -84,10 +81,7 @@ final class ClipboardCategoryOrderTests: XCTestCase {
     }
 
     func testSaveLoadRoundTrip() throws {
-        let suite = "ClipboardCategoryOrderTests"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeTemporaryDefaults()
 
         XCTAssertEqual(ClipboardCategoryOrder.load(from: defaults), [])
         ClipboardCategoryOrder.save([.favorites, .tag("t1"), .all], to: defaults)
@@ -98,9 +92,7 @@ final class ClipboardCategoryOrderTests: XCTestCase {
     }
 
     func testCorruptJSONFallsBackToDefaultOrder() throws {
-        let suite = "ClipboardCategoryOrderTests.corrupt"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = makeTemporaryDefaults()
         defaults.set("not json", forKey: ClipboardCategoryOrder.defaultsKey)
 
         XCTAssertEqual(ClipboardCategoryOrder.load(from: defaults), [])

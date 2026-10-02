@@ -9,7 +9,7 @@ final class CurrencyRatesServiceTests: XCTestCase {
     )
 
     private func isolatedDefaults() -> UserDefaults {
-        UserDefaults(suiteName: "CurrencyRatesServiceTests-\(UUID().uuidString)")!
+        makeTemporaryDefaults()
     }
 
     func testRateTableCodableRoundTrip() throws {

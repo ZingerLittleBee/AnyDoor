@@ -17,7 +17,6 @@ final class SyncCoordinatorTests: XCTestCase {
     private var folder: URL!
     /// Stands in for the live `local-state.json`, which no test may touch.
     private var stateURL: URL!
-    private var suiteName: String!
     private var defaults: UserDefaults!
     private var container: ModelContainer!
 
@@ -27,8 +26,7 @@ final class SyncCoordinatorTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         stateURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("SyncCoordinatorTests-local-state-\(UUID().uuidString).json")
-        suiteName = "SyncCoordinatorTests-\(UUID().uuidString)"
-        defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults = makeTemporaryDefaults()
         let schema = Schema([KeyBinding.self, BuiltinPreference.self, Quicklink.self])
         container = try ModelContainer(
             for: schema,
@@ -37,7 +35,6 @@ final class SyncCoordinatorTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
         try? FileManager.default.removeItem(at: folder)
         try? FileManager.default.removeItem(at: stateURL)
     }
