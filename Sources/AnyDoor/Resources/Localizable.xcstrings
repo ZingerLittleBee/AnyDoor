@@ -7686,6 +7686,23 @@
         }
       }
     },
+    "plugins.sideload.error.unzipTimedOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extracting the plugin zip took too long."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "解压插件 zip 超时。"
+          }
+        }
+      }
+    },
     "plugins.sideload.error.noPackageInZip": {
       "extractionState": "manual",
       "localizations": {

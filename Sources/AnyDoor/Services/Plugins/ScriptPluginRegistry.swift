@@ -124,6 +124,9 @@ final class ScriptPluginRegistry {
     /// `devPluginManifests` list refreshes the Settings UI (the map itself is
     /// `@ObservationIgnored` because it holds live objects).
     private var activeDevPluginsObservationToken = 0
+    /// `sideload(fromZip:)` calls whose extraction is still running; observed
+    /// through `isInstallingZip`.
+    private var zipInstallsInFlight = 0
 
     @ObservationIgnored private let runtime: ScriptPluginRuntime
     @ObservationIgnored private let packagesDirectory: URL
@@ -283,14 +286,26 @@ final class ScriptPluginRegistry {
         return id
     }
 
+    /// Whether a `sideload(fromZip:)` install (Settings) is still extracting.
+    /// Install links extract in `ScriptPluginURLInstaller` and do not set it.
+    /// Settings disables its install button meanwhile; the state lives here
+    /// rather than in the view so it survives switching Settings panes.
+    var isInstallingZip: Bool {
+        zipInstallsInFlight > 0
+    }
+
     /// Sideload a package from a zip archive (the `plugin-*.zip` a release
     /// workflow attaches): extract to a temp directory, locate the package root
     /// (a single wrapper folder is unwrapped), and install through the directory
-    /// path. The temp extraction is always removed, so a refused zip changes
-    /// nothing on disk beyond its own transient extraction.
+    /// path. The extraction runs off the main actor; the duplicate check, copy,
+    /// and install then run in one main-actor turn, so a concurrent install of
+    /// the same id is still refused. The temp extraction is always removed, so a
+    /// refused zip changes nothing on disk beyond its own transient extraction.
     @discardableResult
-    func sideload(fromZip zip: URL) throws -> ScriptPluginID {
-        let (tempRoot, packageRoot) = try ScriptPluginArchive.extract(zipURL: zip)
+    func sideload(fromZip zip: URL) async throws -> ScriptPluginID {
+        zipInstallsInFlight += 1
+        defer { zipInstallsInFlight -= 1 }
+        let (tempRoot, packageRoot) = try await ScriptPluginArchive.extract(zipURL: zip)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
         return try sideload(fromDirectory: packageRoot)
     }
@@ -586,6 +601,8 @@ func scriptSideloadFailureMessage(_ error: any Error) -> String {
         return L(.pluginsSideloadErrorDuplicate)
     case ScriptPluginArchive.ArchiveError.extractionFailed:
         return L(.pluginsSideloadErrorUnzip)
+    case ScriptPluginArchive.ArchiveError.extractionTimedOut:
+        return L(.pluginsSideloadErrorUnzipTimedOut)
     case ScriptPluginArchive.ArchiveError.packageRootNotFound:
         return L(.pluginsSideloadErrorNoPackageInZip)
     default:

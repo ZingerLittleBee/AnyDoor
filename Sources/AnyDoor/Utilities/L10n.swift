@@ -202,6 +202,7 @@ enum L10n {
         case pluginsSideloadErrorUnknownCapability = "plugins.sideload.error.unknownCapability"
         case pluginsSideloadErrorDuplicate = "plugins.sideload.error.duplicate"
         case pluginsSideloadErrorUnzip = "plugins.sideload.error.unzip"
+        case pluginsSideloadErrorUnzipTimedOut = "plugins.sideload.error.unzipTimedOut"
         case pluginsSideloadErrorNoPackageInZip = "plugins.sideload.error.noPackageInZip"
         case pluginsUrlInstallInvalid = "plugins.urlInstall.invalid"
         case pluginsUrlInstallInsecure = "plugins.urlInstall.insecure"

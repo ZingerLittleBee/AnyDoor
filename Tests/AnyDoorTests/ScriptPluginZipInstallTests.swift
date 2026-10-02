@@ -121,28 +121,29 @@ final class ScriptPluginZipInstallTests: XCTestCase {
 
     // MARK: - Zip sideload end to end
 
-    func testSideloadFromZipWithContentsAtRootInstalls() throws {
+    func testSideloadFromZipWithContentsAtRootInstalls() async throws {
         let f = try makeFixture()
         defer { f.teardown() }
         let zip = try zipDirectory(try fixturePackage(id: "com.acme.zip-root"), contentsAtRoot: true)
         defer { try? FileManager.default.removeItem(at: zip) }
 
-        let id = try f.registry.sideload(fromZip: zip)
+        let id = try await f.registry.sideload(fromZip: zip)
         XCTAssertEqual(id.rawValue, "com.acme.zip-root")
         XCTAssertTrue(f.registry.isInstalled(id))
+        XCTAssertFalse(f.registry.isInstallingZip)
     }
 
-    func testSideloadFromZipWithWrapperDirectoryInstalls() throws {
+    func testSideloadFromZipWithWrapperDirectoryInstalls() async throws {
         let f = try makeFixture()
         defer { f.teardown() }
         let zip = try zipDirectory(try fixturePackage(id: "com.acme.zip-wrapped"), contentsAtRoot: false)
         defer { try? FileManager.default.removeItem(at: zip) }
 
-        let id = try f.registry.sideload(fromZip: zip)
+        let id = try await f.registry.sideload(fromZip: zip)
         XCTAssertTrue(f.registry.isInstalled(id))
     }
 
-    func testSideloadFromNonZipFileIsARefusalWithoutSideEffects() throws {
+    func testSideloadFromNonZipFileIsARefusalWithoutSideEffects() async throws {
         let f = try makeFixture()
         defer { f.teardown() }
         let notAZip = FileManager.default.temporaryDirectory
@@ -150,10 +151,120 @@ final class ScriptPluginZipInstallTests: XCTestCase {
         try Data("plain text".utf8).write(to: notAZip)
         defer { try? FileManager.default.removeItem(at: notAZip) }
 
-        XCTAssertThrowsError(try f.registry.sideload(fromZip: notAZip)) { error in
+        do {
+            try await f.registry.sideload(fromZip: notAZip)
+            XCTFail("expected extractionFailed")
+        } catch {
             XCTAssertEqual(error as? ScriptPluginArchive.ArchiveError, .extractionFailed)
         }
         XCTAssertTrue(f.registry.installedManifests.isEmpty)
+    }
+
+    // MARK: - Stuck extraction
+
+    /// A fresh directory that teardown removes.
+    private func makeWorkDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("zip-install-work-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory
+    }
+
+    /// A FIFO named like a zip, standing in for an archive on an unresponsive
+    /// volume: ditto blocks opening it until a writer opens it too.
+    /// Teardown releases a ditto still blocked on it before removing it, so a
+    /// regression cannot leave ditto blocked for good.
+    private func makeStuckZip(in directory: URL) throws -> URL {
+        let fifo = directory.appendingPathComponent("stuck.zip")
+        guard mkfifo(fifo.path, 0o600) == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        addTeardownBlock {
+            _ = ScriptPluginZipInstallTests.releaseReader(of: fifo)
+            try? FileManager.default.removeItem(at: fifo)
+        }
+        return fifo
+    }
+
+    /// Opens `fifo` for writing and closes it again, which lets a reader
+    /// blocked opening it go on to read an empty file. False, harmlessly, when
+    /// no reader is waiting.
+    private nonisolated static func releaseReader(of fifo: URL) -> Bool {
+        let descriptor = open(fifo.path, O_WRONLY | O_NONBLOCK)
+        guard descriptor >= 0 else { return false }
+        close(descriptor)
+        return true
+    }
+
+    private func contents(of directory: URL) throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: directory.path)
+    }
+
+    func testExtractionThatOutlivesItsTimeoutIsRefused() async throws {
+        let work = try makeWorkDirectory()
+        let stuckZip = try makeStuckZip(in: work)
+        let extractions = work.appendingPathComponent("extractions", isDirectory: true)
+
+        do {
+            _ = try await bounded(within: 10) {
+                try await ScriptPluginArchive.extract(
+                    zipURL: stuckZip, timeout: .milliseconds(300), temporaryDirectory: extractions
+                )
+            }
+            XCTFail("expected extractionTimedOut")
+        } catch {
+            XCTAssertEqual(error as? ScriptPluginArchive.ArchiveError, .extractionTimedOut)
+        }
+        XCTAssertEqual(try contents(of: extractions), [], "the refusal removed its temp root")
+        XCTAssertEqual(
+            scriptSideloadFailureMessage(ScriptPluginArchive.ArchiveError.extractionTimedOut),
+            L(.pluginsSideloadErrorUnzipTimedOut)
+        )
+    }
+
+    /// The cancel waits until the temp root exists, so it lands either before
+    /// ditto launches or while ditto is blocked; both must clean up.
+    func testCancelledExtractionLeavesNothingBehind() async throws {
+        let work = try makeWorkDirectory()
+        let stuckZip = try makeStuckZip(in: work)
+        let extractions = work.appendingPathComponent("extractions", isDirectory: true)
+        let extractionsPath = extractions.path
+
+        do {
+            _ = try await bounded(within: 10, cancelWhen: {
+                (try? FileManager.default.contentsOfDirectory(atPath: extractionsPath))?.isEmpty == false
+            }) {
+                try await ScriptPluginArchive.extract(zipURL: stuckZip, temporaryDirectory: extractions)
+            }
+            XCTFail("expected CancellationError")
+        } catch is CancellationError {
+            // expected
+        }
+        XCTAssertEqual(try contents(of: extractions), [], "the cancelled extraction removed its temp root")
+    }
+
+    /// Settings disables its install button while a zip extracts, from the
+    /// registry's state, and enables it again however the install ends.
+    func testZipInstallIsInFlightUntilItsExtractionEnds() async throws {
+        let f = try makeFixture()
+        defer { f.teardown() }
+        let stuckZip = try makeStuckZip(in: try makeWorkDirectory())
+        let registry = f.registry
+
+        let install = Task { try await registry.sideload(fromZip: stuckZip) }
+        await waitUntil("the zip install to start") { registry.isInstallingZip }
+        // Give the blocked ditto an empty archive, which it refuses.
+        await waitUntil("ditto to open the archive") {
+            ScriptPluginZipInstallTests.releaseReader(of: stuckZip)
+        }
+        do {
+            _ = try await bounded(within: 10) { try await install.value }
+            XCTFail("expected extractionFailed")
+        } catch {
+            XCTAssertEqual(error as? ScriptPluginArchive.ArchiveError, .extractionFailed)
+        }
+        XCTAssertFalse(registry.isInstallingZip)
     }
 
     // MARK: - Install-link classification

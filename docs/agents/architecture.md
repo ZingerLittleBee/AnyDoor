@@ -363,8 +363,9 @@ store, developer mode (`plugins.script.developerMode`), and dev directories
 (`plugins.script.devDirectories`) are all **machine-local and out of backup/sync entirely** — none
 is in `SyncSettingsRegistry`, so `reconcileLifecycleImport` is a no-op for this kind (Script
 packages exist only on the local machine). A package may also arrive as a **zip**
-(`sideload(fromZip:)` extracts via `ScriptPluginArchive` — ditto-based, unwraps a single wrapper
-folder, ignores `__MACOSX`/hidden files — into a temp dir and reuses the directory path) or via the
+(`sideload(fromZip:)` extracts via `ScriptPluginArchive` — `ditto` through `ProcessRunner`, off the
+main actor with a 30 s timeout, unwraps a single wrapper folder, ignores `__MACOSX`/hidden files —
+into a temp dir and reuses the directory path) or via the
 **`anydoor://install-plugin?url=` link** (`ScriptPluginURLInstaller`, wired from
 `AppDelegate.application(_:open:)`; scheme registered in `Info.plist` `CFBundleURLTypes`, so only
 the `.app` identity receives it): the pure `PluginInstallURLParse.classify` accepts only an https
