@@ -25,12 +25,14 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
             isDirectory: true
         )
         let storeURL = storeDirectory.appendingPathComponent("AnyDoor.store")
-        let legacySource = try XCTUnwrap(
-            ClipboardHistoryLegacySource.openIfNeeded(
-                applicationSupportDirectory: storeDirectory,
-                productionStoreURL: storeURL,
-                payloadDirectory: ClipboardHistoryModule.legacyPayloadDirectory
-            )
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: storeDirectory),
+            .incomplete
+        )
+        let legacySource = try ClipboardHistoryLegacySource.openForMigration(
+            applicationSupportDirectory: storeDirectory,
+            productionStoreURL: storeURL,
+            payloadDirectory: ClipboardHistoryModule.legacyPayloadDirectory
         )
         let request = try legacySource.makeMigrationRequest()
         let module = ClipboardHistoryModule()
@@ -39,7 +41,7 @@ final class ClipboardHistoryGUIFixtureTests: XCTestCase {
             in: request.payloadDirectory
         )
         XCTAssertTrue(cleanup.canDeleteLegacyRows)
-        try legacySource.finishMigration()
+        try ClipboardHistoryLegacySource.finishMigration(in: storeDirectory)
         let page = try await module.page(ClipboardHistoryQuery())
         XCTAssertEqual(page.entries.count, 100)
         print("CLIPBOARD_HISTORY_GUI_MIGRATION=\(outcome)")
