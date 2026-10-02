@@ -1,3 +1,5 @@
+import CoreServices
+import os
 import XCTest
 @testable import AnyDoor
 
@@ -88,6 +90,46 @@ final class OnboardingTests: XCTestCase {
     func test_permissionSnapshot_allKindsGranted() {
         let snap = OnboardingPermissionSnapshot(accessibility: true, screenRecording: true, automation: true)
         XCTAssertTrue(OnboardingPermissionKind.allCases.allSatisfy { snap.isGranted($0) })
+    }
+
+    /// The permissions step polls every second from the main actor. A check
+    /// on the main thread would freeze AnyDoor for as long as System Events
+    /// doesn't answer.
+    @MainActor
+    func test_permissionSnapshot_readKeepsChecksOffTheMainThread() async throws {
+        let mainThreadChecks = OSAllocatedUnfairLock(initialState: 0)
+        let systemEvents = ScriptedAutomationCheck(noErr)
+        addTeardownBlock { systemEvents.release(answering: noErr) }
+        let automation = AutomationPermissionCheck(
+            target: "test.systemevents",
+            timeout: .milliseconds(50),
+            determine: { systemEvents.determine() }
+        )
+        await automation.record(.granted)
+        systemEvents.stall()
+
+        let snapshot = try await bounded(within: 5) { @MainActor in
+            await OnboardingPermissionSnapshot.read(
+                accessibility: {
+                    if Thread.isMainThread { mainThreadChecks.withLock { $0 += 1 } }
+                    return true
+                },
+                screenRecording: {
+                    if Thread.isMainThread { mainThreadChecks.withLock { $0 += 1 } }
+                    return false
+                },
+                automation: automation
+            )
+        }
+
+        XCTAssertEqual(
+            snapshot,
+            OnboardingPermissionSnapshot(accessibility: true, screenRecording: false, automation: true),
+            "a System Events that doesn't answer leaves its last verdict"
+        )
+        XCTAssertEqual(mainThreadChecks.withLock { $0 }, 0, "no permission check runs on the main thread")
+        await waitUntil("the Automation check reaches System Events") { systemEvents.entries == 1 }
+        XCTAssertFalse(systemEvents.ranOnMainThread, "the Apple Event check must stay off the main thread")
     }
 
     // MARK: Step catalog sanity

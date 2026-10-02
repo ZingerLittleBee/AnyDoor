@@ -44,12 +44,16 @@ struct OnboardingPermissionsStep: View {
             .padding(16)
         }
         .task {
-            await AutomationPermission.activateSystemEvents()
             while !Task.isCancelled {
-                var next = OnboardingPermissionSnapshot()
-                next.accessibility = HotkeyService.hasAccessibilityPermission
-                next.screenRecording = ScreenCapturePermission.isGranted
-                next.automation = AutomationPermission.isGranted
+                // System Events quits when idle, and a check finds no verdict
+                // while it isn't running. Relaunching it (a no-op while it
+                // runs) keeps the Automation card live, revocations included.
+                await AutomationPermission.activateSystemEvents()
+                let next = await OnboardingPermissionSnapshot.read(
+                    accessibility: { AXIsProcessTrusted() },
+                    screenRecording: { ScreenCapturePermission.isGranted },
+                    automation: AutomationPermission.systemEvents
+                )
                 if next != snapshot {
                     if reduceMotion {
                         snapshot = next
@@ -153,5 +157,28 @@ struct OnboardingPermissionsStep: View {
             "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility")
         else { return }
         NSWorkspace.shared.open(url)
+    }
+}
+
+extension OnboardingPermissionSnapshot {
+    /// Reads the three grants with no check on the main thread: Accessibility
+    /// and Screen Recording on detached tasks, as Settings does, and Automation
+    /// through `automation`, whose bounded check reports the last verdict when
+    /// the target doesn't answer in time. A System Events that stops answering
+    /// therefore can't freeze AnyDoor while the step is open. The sources are
+    /// injected so tests never reach TCC.
+    static func read(
+        accessibility: @escaping @Sendable () -> Bool,
+        screenRecording: @escaping @Sendable () -> Bool,
+        automation: AutomationPermissionCheck
+    ) async -> OnboardingPermissionSnapshot {
+        let accessibilityGranted = await Task.detached { accessibility() }.value
+        let screenRecordingGranted = await Task.detached { screenRecording() }.value
+        let automationGranted = await automation.status == .granted
+        return OnboardingPermissionSnapshot(
+            accessibility: accessibilityGranted,
+            screenRecording: screenRecordingGranted,
+            automation: automationGranted
+        )
     }
 }
