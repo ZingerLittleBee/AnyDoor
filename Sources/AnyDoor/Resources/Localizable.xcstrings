@@ -13104,7 +13104,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "无法锁定屏幕"
+            "value": "锁定屏幕失败"
           }
         }
       }
