@@ -193,7 +193,12 @@ separately). **All writes must go through PanelStore's mutation methods** (`setB
 view state, and invoke the injected hotkey refresh — except `reorderAppShortcuts`, which only
 changes display order and intentionally skips the snapshot refresh. PanelStore additionally owns the
 provider registry and the activation paths (`toggle`, `run`, `setKeepAwakeDuration`) with per-item
-in-flight guards.
+in-flight guards. An error a provider throws out of them has not been reported yet (the contract on
+the protocols in `BuiltinProvider.swift`): PanelStore logs it with the item key and the error's case
+and code public (`CommandFailure.logSummary`; the full error stays private) and shows one failure
+notice naming the command (`CommandFailure.toast`). A provider that reports its own outcome returns
+normally instead, and `refreshAll` never shows a notice. After a failed toggle PanelStore re-reads
+the row's permission, so an open panel asks for a permission the failure revealed as missing.
 
 ### HotkeyAction dispatch & snapshot compilation
 

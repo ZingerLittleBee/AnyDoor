@@ -12820,6 +12820,57 @@
         }
       }
     },
+    "toast.command.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\"%@\" failed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」失败"
+          }
+        }
+      }
+    },
+    "toast.command.needsAutomation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Automation to use \"%@\""
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请授予自动化权限以使用「%@」"
+          }
+        }
+      }
+    },
+    "toast.command.toggleFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't toggle \"%@\""
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换「%@」失败"
+          }
+        }
+      }
+    },
     "toast.copiedToClipboard": {
       "extractionState": "manual",
       "localizations": {

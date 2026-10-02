@@ -80,7 +80,15 @@ final class PanelStore {
     /// (used by tests) cancels the previous loop instead of stacking another.
     private var languageObservationTask: Task<Void, Never>?
 
-    init() {}
+    /// Shows the notice for a command whose provider threw. Injected so tests
+    /// record notices instead of opening the toast window.
+    private let presentToast: @MainActor (ToastStyle) -> Void
+
+    init(
+        presentToast: @escaping @MainActor (ToastStyle) -> Void = { ToastPresenter.shared.show($0) }
+    ) {
+        self.presentToast = presentToast
+    }
 
     func bootstrap(
         modelContainer: ModelContainer,
@@ -255,7 +263,9 @@ final class PanelStore {
         return formatter.string(from: fireDate)
     }
 
-    /// Refresh every toggle provider's state. Called from MenuBarView.onAppear.
+    /// Refresh every toggle's state and every row's permission. Called when the
+    /// menu-bar panel appears and when the command palette opens. A failing
+    /// `readState` keeps the row's last state and shows no notice.
     func refreshAll() async {
         for (item, provider) in providers {
             if let toggle = provider as? any ToggleProvider {
@@ -276,7 +286,8 @@ final class PanelStore {
         rebuild()
     }
 
-    /// Toggle a built-in. Reads current state and flips it.
+    /// Toggle a built-in. Reads current state and flips it. A provider error is
+    /// logged and shown once as a failure notice (`reportFailure`).
     ///
     /// Guarded against overlapping calls: a second invocation while the first is mid-flight
     /// is dropped, preventing two reads from observing the same stale state and double-flipping.
@@ -293,7 +304,10 @@ final class PanelStore {
             togglesInFlight.insert(item)
             defer { togglesInFlight.remove(item) }
             let current = await provider.currentState
-            await setKeepAwakeDuration(current.isOn ? nil : .indefinite)
+            await setKeepAwakeDuration(
+                current.isOn ? nil : .indefinite,
+                attempt: .toggle
+            )
             return
         }
 
@@ -321,7 +335,13 @@ final class PanelStore {
             toggleStates[item] = !current
             rebuild()
         } catch {
-            logger.error("Toggle \(item.rawValue) failed: \(error)")
+            reportFailure(error, of: .toggle, item: item)
+            // The failure may come from a revoked permission (Dark Mode caches
+            // `.denied` on -1743). Re-read it while the in-flight guard still
+            // holds, so an open panel's row asks for the permission instead of
+            // offering the same failing switch again.
+            permissionStates[item] = await provider.permission
+            rebuild()
         }
     }
 
@@ -329,13 +349,17 @@ final class PanelStore {
     /// expiration callback will subsequently push the `.off` transition back
     /// through `onKeepAwakeStateChange`, but we also cache eagerly here so
     /// the panel doesn't render a stale frame between this call and the hop
-    /// back to MainActor.
-    func setKeepAwakeDuration(_ duration: KeepAwakeDuration?) async {
+    /// back to MainActor. `attempt` words the failure notice: the duration
+    /// menus keep the default, and `toggle` passes `.toggle`.
+    func setKeepAwakeDuration(
+        _ duration: KeepAwakeDuration?,
+        attempt: CommandFailure.Attempt = .applyDuration
+    ) async {
         guard let provider = providers[.keepAwake] as? KeepAwakeProvider else { return }
         do {
             try await provider.apply(duration)
         } catch {
-            logger.error("Keep Awake apply failed: \(error)")
+            reportFailure(error, of: attempt, item: .keepAwake)
             // Fall through — the same resync block runs on success and
             // failure, so the cached row state always reflects whatever the
             // provider actually holds rather than what we optimistically
@@ -382,7 +406,9 @@ final class PanelStore {
         rebuild()
     }
 
-    /// Run a one-shot action.
+    /// Run a one-shot action. A provider error is logged and shown once as a
+    /// failure notice (`reportFailure`); a provider that reports its own
+    /// outcome returns normally instead.
     ///
     /// Guarded against overlapping calls: a second invocation for the same item while the
     /// first is mid-flight is dropped. Actor isolation alone does not serialize runs — an
@@ -395,7 +421,29 @@ final class PanelStore {
         do {
             try await provider.run()
         } catch {
-            logger.error("Run \(item.rawValue) failed: \(error)")
+            reportFailure(error, of: .run, item: item)
+        }
+    }
+
+    /// Logs an error a provider threw out of `run`, `toggle` or
+    /// `setKeepAwakeDuration`, then shows its notice, if any. The attempt, the
+    /// item key and the error's case and code are public, so a release build's
+    /// log still says what failed; the full error, which can carry tool output
+    /// or a script message, stays private.
+    private func reportFailure(
+        _ error: any Error,
+        of attempt: CommandFailure.Attempt,
+        item: BuiltinItem
+    ) {
+        logger.error(
+            """
+            \(attempt.rawValue, privacy: .public) \(item.rawValue, privacy: .public) failed: \
+            \(CommandFailure.logSummary(of: error), privacy: .public) \
+            \(String(describing: error), privacy: .private)
+            """
+        )
+        if let toast = CommandFailure.toast(for: error, command: item, attempt: attempt) {
+            presentToast(toast)
         }
     }
 

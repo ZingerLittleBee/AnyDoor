@@ -75,6 +75,12 @@ versioning.
   covers, Dark Mode and scheduled shutdown, and says that Empty Trash asks to
   control Finder the first time you use it. It used to list Empty Trash, whose
   Finder access it never requested.
+- Panel actions that fail now show a notice instead of failing silently. This
+  covers Display Sleep, System Sleep, Flush DNS, Restart Finder and Restart
+  Dock, and switches such as Dark Mode, Mute, Hide Dock and Keep Awake,
+  whether they run from the menu-bar panel, a hotkey or the command palette.
+  The notice names the action, and says when Dark Mode needs Automation
+  access.
 
 ## [4.2.6] - 2026-10-02
 

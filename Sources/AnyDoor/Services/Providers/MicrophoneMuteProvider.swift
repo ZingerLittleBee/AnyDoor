@@ -7,8 +7,9 @@ import PluginInterface
 /// Mirrors `MuteAudioProvider` but acts on the default **input** device with
 /// `kAudioDevicePropertyScopeInput`. Not every input device exposes a settable
 /// mute (built-in mics and AirPods commonly don't), so `setState` prechecks
-/// `AudioObjectIsPropertySettable`, surfaces a toast, and throws
-/// `BuiltinError.muteUnsupported` rather than silently no-op-ing.
+/// `AudioObjectIsPropertySettable` and throws `BuiltinError.muteUnsupported`
+/// rather than silently no-op-ing; `PanelStore` shows the "can't be muted"
+/// notice for that error (`CommandFailure`).
 actor MicrophoneMuteProvider: ToggleProvider {
     let itemKey: BuiltinItem = .microphoneMute
     var permission: PermissionStatus { .notRequired }
@@ -16,8 +17,9 @@ actor MicrophoneMuteProvider: ToggleProvider {
     func readState() async throws -> Bool {
         let deviceID = try currentInputDevice()
         var address = muteAddress
-        // Passive refresh: when the device has no mute property at all, report
-        // "not muted" silently instead of toasting on every panel rebuild.
+        // When the device has no mute property at all, report "not muted", so
+        // the row renders off and a toggle reaches setState's settable
+        // precheck, whose `muteUnsupported` gets the specific notice.
         guard AudioObjectHasProperty(deviceID, &address) else { return false }
         var muted: UInt32 = 0
         var size = UInt32(MemoryLayout<UInt32>.size)
@@ -34,12 +36,12 @@ actor MicrophoneMuteProvider: ToggleProvider {
 
         // Capability precheck: an active toggle on a device with no settable
         // mute should tell the user, not fail invisibly. Throwing here keeps
-        // PanelStore from optimistically flipping the row's cached state.
+        // PanelStore from optimistically flipping the row's cached state and
+        // makes it show the "can't be muted" notice, the only one this
+        // failure gets.
         var settable: DarwinBoolean = false
         let settableStatus = AudioObjectIsPropertySettable(deviceID, &address, &settable)
         guard settableStatus == noErr, settable.boolValue else {
-            let msg = await MainActor.run { L(.toastMicMuteUnsupported) }
-            await ToastPresenter.shared.show(.failure(msg))
             throw BuiltinError.muteUnsupported
         }
 
