@@ -23,8 +23,16 @@ private enum HoverPopoverTarget: Hashable {
 
 struct MenuBarView: View {
     /// Invoked when a row action needs the controller to dismiss the panel
-    /// (e.g. before opening another window or completing a clipboard copy).
+    /// (e.g. before opening another window).
     let onRequestClose: () -> Void
+    /// Whether the panel showing this view is still up. Esc, a click
+    /// elsewhere, or a newer panel ends it; the popover hiding on hover-out
+    /// does not.
+    var isPanelCurrent: @MainActor () -> Bool = { false }
+    /// Closes the panel showing this view and returns true, or does nothing
+    /// and returns false once that panel is gone, so a slow clipboard copy
+    /// can never close a newer panel.
+    var closePanelIfCurrent: @MainActor () -> Bool = { false }
     var clipboardHistoryModule: ClipboardHistoryModule? = nil
     /// Snapshot at panel opening: its AppKit host measures content only once.
     var isSecureInputEnabled = false
@@ -465,11 +473,21 @@ struct MenuBarView: View {
                         gate.reset()
                         popover.hide()
                     },
-                    onCopyAndClosePanel: {
-                        gate.reset()
-                        popover.hide()
-                        onRequestClose()
-                    }
+                    panel: ClipboardHistoryCommitSurface(
+                        isOpen: isPanelCurrent,
+                        close: { then in
+                            // A commit that outlived its panel leaves the
+                            // newer one alone, and this view's state too.
+                            guard isPanelCurrent() else { return }
+                            gate.reset()
+                            popover.hide()
+                            guard closePanelIfCurrent() else { return }
+                            // Both panels ordered out synchronously, and the
+                            // panel never activated AnyDoor, so the app below
+                            // has keyboard focus again.
+                            then()
+                        }
+                    )
                 )
             }
             anchorPopover(popover, to: .history(item))

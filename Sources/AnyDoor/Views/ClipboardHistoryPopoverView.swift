@@ -13,9 +13,13 @@ struct ClipboardHistoryPopoverView: View {
     let titleKey: L10n.Key
     let onHoverChange: @MainActor (Bool) -> Void
     let onDismissPopover: () -> Void
-    let onCopyAndClosePanel: () -> Void
+    /// The menu panel this popover belongs to. A commit closes it, popover
+    /// included, and then pastes into the app below it.
+    let panel: ClipboardHistoryCommitSurface
 
     @State private var selection = ClipboardHistorySelectionModel()
+    /// Whether Return copies without pasting. The hint follows Settings live.
+    @AppStorage(ClipboardPreferences.copyOnlyKey) private var copyOnly = false
 
     private var entries: [ClipboardHistoryEntry] {
         presentation.entries
@@ -61,7 +65,7 @@ struct ClipboardHistoryPopoverView: View {
             KeyboardMonitor(
                 selection: selection,
                 entries: entries,
-                onCommit: { copyAndClose($0) },
+                onCommit: { commit($0, plain: $1) },
                 onDismissPopover: onDismissPopover
             )
         )
@@ -78,7 +82,10 @@ struct ClipboardHistoryPopoverView: View {
                 HStack(spacing: 6) {
                     hintChip("↑↓", labelKey: .clipboardHintSelect)
                     hintChip("Space", labelKey: .clipboardHintPreview)
-                    hintChip("⏎", labelKey: .clipboardHintCopy)
+                    hintChip(
+                        "⏎",
+                        labelKey: copyOnly ? .clipboardHintCopy : .clipboardHintPaste
+                    )
                 }
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -148,7 +155,7 @@ struct ClipboardHistoryPopoverView: View {
                             }
                         }
                         .onTapGesture {
-                            copyAndClose(entry)
+                            commit(entry, plain: false)
                         }
                         .task {
                             await presentation.prefetchIfNeeded(
@@ -164,19 +171,21 @@ struct ClipboardHistoryPopoverView: View {
         }
     }
 
-    /// A click and Return both commit here. A failure leaves the popover and
-    /// the panel open behind its toast.
-    private func copyAndClose(_ entry: ClipboardHistoryEntry) {
+    /// A click, Return and keypad Enter commit here, ⌥ for plain text. The
+    /// paste service closes the menu panel and pastes into the app below it,
+    /// unless Copy only is on. A failure leaves the popover and the panel
+    /// open behind its toast.
+    private func commit(_ entry: ClipboardHistoryEntry, plain: Bool) {
+        let presentation = presentation
+        let panel = panel
         Task {
-            let outcome = await ClipboardHistoryPasteService.copyEntry(
+            await ClipboardHistoryPasteService.commit(
                 entry.id,
-                from: presentation
+                plain: plain,
+                from: presentation,
+                surface: panel,
+                presentFailure: { ClipboardHistoryActionFailurePresenter.present($0) }
             )
-            guard outcome == .copied else {
-                ClipboardHistoryActionFailurePresenter.present(outcome)
-                return
-            }
-            onCopyAndClosePanel()
         }
     }
 
@@ -261,10 +270,38 @@ struct ClipboardHistoryPopoverView: View {
     }
 }
 
+/// What a key press means in a history popover. Kept apart from the view so
+/// the mapping can be tested without a window.
+enum ClipboardHistoryPopoverKey: Equatable {
+    case moveUp
+    case moveDown
+    case togglePreview
+    /// Return or keypad Enter; with ⌥ held, the entry pastes as plain text.
+    case commit(plain: Bool)
+    case escape
+
+    init?(keyCode: Int, modifierFlags: NSEvent.ModifierFlags) {
+        switch keyCode {
+        case kVK_UpArrow:
+            self = .moveUp
+        case kVK_DownArrow:
+            self = .moveDown
+        case kVK_Space:
+            self = .togglePreview
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            self = .commit(plain: modifierFlags.contains(.option))
+        case kVK_Escape:
+            self = .escape
+        default:
+            return nil
+        }
+    }
+}
+
 private struct KeyboardMonitor: NSViewRepresentable {
     let selection: ClipboardHistorySelectionModel
     let entries: [ClipboardHistoryEntry]
-    let onCommit: (ClipboardHistoryEntry) -> Void
+    let onCommit: (ClipboardHistoryEntry, _ plain: Bool) -> Void
     let onDismissPopover: () -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -278,8 +315,8 @@ private struct KeyboardMonitor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> KeyHandlerView {
         let view = KeyHandlerView()
-        view.onKeyDown = { [weak coordinator = context.coordinator] code in
-            coordinator?.handle(keyCode: code) ?? false
+        view.onKeyDown = { [weak coordinator = context.coordinator] code, flags in
+            coordinator?.handle(keyCode: code, modifierFlags: flags) ?? false
         }
         DispatchQueue.main.async { [weak view] in
             guard let view, let window = view.window else { return }
@@ -307,13 +344,13 @@ private struct KeyboardMonitor: NSViewRepresentable {
         /// Refreshed on every update. The menu bar remounts this view with a
         /// new presentation per history row while the coordinator lives on,
         /// so Return must not keep acting through the first mount's model.
-        var onCommit: (ClipboardHistoryEntry) -> Void
+        var onCommit: (ClipboardHistoryEntry, _ plain: Bool) -> Void
         var onDismissPopover: () -> Void
 
         init(
             selection: ClipboardHistorySelectionModel,
             entries: [ClipboardHistoryEntry],
-            onCommit: @escaping (ClipboardHistoryEntry) -> Void,
+            onCommit: @escaping (ClipboardHistoryEntry, _ plain: Bool) -> Void,
             onDismissPopover: @escaping () -> Void
         ) {
             self.selection = selection
@@ -322,25 +359,32 @@ private struct KeyboardMonitor: NSViewRepresentable {
             self.onDismissPopover = onDismissPopover
         }
 
-        func handle(keyCode: Int) -> Bool {
-            switch keyCode {
-            case kVK_UpArrow:
+        func handle(
+            keyCode: Int,
+            modifierFlags: NSEvent.ModifierFlags
+        ) -> Bool {
+            guard let key = ClipboardHistoryPopoverKey(
+                keyCode: keyCode,
+                modifierFlags: modifierFlags
+            ) else {
+                return false
+            }
+            switch key {
+            case .moveUp:
                 selection.moveUp()
-            case kVK_DownArrow:
+            case .moveDown:
                 selection.moveDown()
-            case kVK_Space:
+            case .togglePreview:
                 selection.togglePreview()
-            case kVK_Return:
+            case .commit(let plain):
                 guard let entry = selectedEntry else { return true }
-                onCommit(entry)
-            case kVK_Escape:
+                onCommit(entry, plain)
+            case .escape:
                 if selection.previewedID != nil {
                     selection.closePreview()
                 } else {
                     onDismissPopover()
                 }
-            default:
-                return false
             }
             return true
         }
@@ -353,13 +397,14 @@ private struct KeyboardMonitor: NSViewRepresentable {
 }
 
 final class KeyHandlerView: NSView {
-    var onKeyDown: ((Int) -> Bool)?
+    /// The key code and the modifiers held with it; ⌥ picks plain text.
+    var onKeyDown: ((Int, NSEvent.ModifierFlags) -> Bool)?
 
     override var acceptsFirstResponder: Bool { true }
     override var canBecomeKeyView: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        if onKeyDown?(Int(event.keyCode)) == true {
+        if onKeyDown?(Int(event.keyCode), event.modifierFlags) == true {
             return
         }
         super.keyDown(with: event)

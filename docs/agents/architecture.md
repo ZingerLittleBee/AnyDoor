@@ -110,13 +110,13 @@ own write as a bogus history entry, including a throwing partial write.
 `SelectedTextReader.readViaClipboard` uses the same scoped token across its synthesized-⌘C awaits
 and final restoration. A Clipboard History entry reaches the pasteboard only through
 `ClipboardHistoryPasteService.copyEntry` (an uncached materialization written through the funnel,
-reported as a `ClipboardHistoryCopyOutcome`), which the menu-bar popover and the wall share. The
-wall commits through `ClipboardHistoryPasteService.commit`. The latest commit wins: a superseded one
-writes nothing and shows nothing, and one whose surface closed meanwhile writes only while the
-pasteboard is unchanged since it started, and never pastes. Once the wall has closed, it pastes
-through `ClipboardHistoryPasteService.pasteAfterClosing` unless Copy only is on. Each caller keeps
-its own failure presentation, and the wall sends a materialization failure through
-`presentActionFailure()` so legacy owned files still get the restore flow.
+reported as a `ClipboardHistoryCopyOutcome`), which the menu-bar popover and the wall share through
+`ClipboardHistoryPasteService.commit`. The latest commit wins: a superseded one writes nothing and
+shows nothing, and one whose surface closed meanwhile writes only while the pasteboard is unchanged
+since it started, and never pastes. Once its panel has closed, each surface pastes through
+`ClipboardHistoryPasteService.pasteAfterClosing` unless Copy only is on. Each caller keeps its own
+failure presentation, and the wall sends a materialization failure through `presentActionFailure()`
+so legacy owned files still get the restore flow.
 
 ## Hotkeys and panel
 

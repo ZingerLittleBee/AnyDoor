@@ -21,9 +21,15 @@ versioning.
   only from the start of a word, so `rec` finds Record Screen but `ding` does
   not, and a command or app whose own name starts with your search still
   comes first.
-- The Return hint in the clipboard wall now says Paste (粘贴), or Copy (复制)
-  when Copy only (仅复制，不自动粘贴) is on in Settings → Clipboard. Its ⌥↵ hint
-  says Copy plain (纯文本复制) then.
+- Choosing an entry in a menu-bar history popover now pastes it into the app
+  you were using, as the clipboard wall does, unless Copy only (仅复制，不自动粘贴)
+  is on in Settings → Clipboard. Keypad Enter works there too, and ⌥↵ pastes
+  plain text, or says that the entry has no plain-text version and leaves the
+  popover open. Without Accessibility access, the popover copies the entry and
+  says that pasting needs it.
+- The Return hint in the clipboard wall and the history popovers now says Paste
+  (粘贴), or Copy (复制) when Copy only is on. The wall's ⌥↵ hint says Copy plain
+  (纯文本复制) then.
 
 ### Removed
 

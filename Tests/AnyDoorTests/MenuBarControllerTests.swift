@@ -1,6 +1,9 @@
 import AppKit
+import ClipboardHistoryTestSupport
+import SwiftData
 import XCTest
 @testable import AnyDoor
+@testable import ClipboardHistory
 
 final class MenuBarControllerTests: XCTestCase {
     @MainActor
@@ -143,5 +146,94 @@ final class MenuBarControllerTests: XCTestCase {
         XCTAssertFalse(scrollView.automaticallyAdjustsContentInsets)
         XCTAssertNil(scrollView.verticalScroller)
         XCTAssertNil(scrollView.horizontalScroller)
+    }
+
+    /// A history copy that finishes after its panel closed, or after the
+    /// panel was opened again, must neither close nor paste from the newer
+    /// showing.
+    func testPanelSessionEndsWithItsShowing() {
+        var sessions = MenuBarPanelSessions()
+        let first = sessions.begin()
+        XCTAssertTrue(sessions.isCurrent(first))
+
+        sessions.end()
+        XCTAssertFalse(sessions.isCurrent(first))
+
+        let second = sessions.begin()
+        XCTAssertNotEqual(first, second)
+        XCTAssertFalse(sessions.isCurrent(first))
+        XCTAssertTrue(sessions.isCurrent(second))
+
+        let third = sessions.begin()
+        XCTAssertFalse(sessions.isCurrent(second))
+        XCTAssertTrue(sessions.isCurrent(third))
+    }
+
+    /// `closePanelIfCurrent` from a panel that Esc or a click elsewhere
+    /// already closed returns false and leaves the newer panel open.
+    func testAStalePanelSessionNeverClosesANewerPanel() {
+        var sessions = MenuBarPanelSessions()
+        let stale = sessions.begin()
+        sessions.end()
+        let newer = sessions.begin()
+
+        XCTAssertFalse(sessions.endIfCurrent(stale))
+        XCTAssertTrue(sessions.isCurrent(newer))
+
+        XCTAssertTrue(sessions.endIfCurrent(newer))
+        XCTAssertFalse(sessions.isCurrent(newer))
+        XCTAssertFalse(sessions.endIfCurrent(newer))
+    }
+
+    /// The controller's wiring of the sessions: Esc or a click elsewhere
+    /// ends the panel's session, so a commit from it neither closes the next
+    /// panel nor counts as coming from an open one.
+    @MainActor
+    func testHidingThePanelEndsTheSessionThatAStaleCommitHolds() throws {
+        _ = NSApplication.shared
+        let controller = try makeController()
+        let stale = controller.beginPanelSessionForTesting()
+        XCTAssertTrue(controller.isPanelCurrent(stale))
+
+        controller.hidePanelForTesting()
+        XCTAssertFalse(controller.isPanelCurrent(stale))
+        XCTAssertFalse(controller.closePanel(ifCurrent: stale))
+
+        let newer = controller.beginPanelSessionForTesting()
+        XCTAssertFalse(controller.closePanel(ifCurrent: stale))
+        XCTAssertFalse(controller.isPanelCurrent(stale))
+        XCTAssertTrue(controller.isPanelCurrent(newer))
+
+        XCTAssertTrue(controller.closePanel(ifCurrent: newer))
+        XCTAssertFalse(controller.isPanelCurrent(newer))
+    }
+
+    @MainActor
+    private func makeController() throws -> MenuBarController {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "AnyDoor-MenuBarController-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        removeClipboardHistoryDirectoryAfterTest(directory)
+        let module = try trackClipboardHistoryModule(
+            ClipboardHistoryModule(
+                testingDatabaseURL: directory
+                    .appendingPathComponent("history.sqlite"),
+                databaseKey: Data(repeating: 0x42, count: 32)
+            )
+        )
+        let container = try ModelContainer(
+            for: KeyBinding.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        return MenuBarController(
+            modelContainer: container,
+            clipboardHistoryModule: module
+        )
     }
 }
