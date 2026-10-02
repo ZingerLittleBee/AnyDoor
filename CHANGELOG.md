@@ -19,6 +19,9 @@ versioning.
 - Lock Screen now works on macOS versions that no longer ship the `CGSession`
   tool, where it did nothing. When the lock request fails, a notice now says
   so instead of the action failing silently.
+- Empty Trash no longer keeps asking for Automation permission after you grant
+  it. Its menu-bar panel row now checks Finder access each time the panel opens,
+  so it stops sending you to System Settings once access is granted.
 
 ## [4.2.6] - 2026-10-02
 
