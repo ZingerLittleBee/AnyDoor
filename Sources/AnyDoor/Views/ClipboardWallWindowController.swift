@@ -70,6 +70,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         panel.isReleasedWhenClosed = false
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        // The wall becomes key without activating AnyDoor, so AppKit would
+        // suppress its `.help` tooltips while the previous app stays frontmost.
+        panel.allowsToolTipsWhenApplicationIsInactive = true
         // Become key as soon as shown so keyboard nav / search work without
         // waiting for a control to demand it.
         panel.becomesKeyOnlyIfNeeded = false

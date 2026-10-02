@@ -20,6 +20,21 @@ final class HoverPopoverTests: XCTestCase {
         XCTAssertTrue(hostingView.sizingOptions.isEmpty)
     }
 
+    @MainActor
+    func testPopoverShowsTooltipsWhileAnotherAppIsFrontmost() throws {
+        let popover = HoverPopover {
+            Text("Popover")
+        }
+
+        let panel = try XCTUnwrap(
+            Mirror(reflecting: popover).children.first { $0.label == "panel" }?.value as? KeyableHoverPanel
+        )
+        // The popover never activates AnyDoor, so its `.help` tooltips only
+        // appear over another frontmost app when the panel opts in.
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+        XCTAssertTrue(panel.allowsToolTipsWhenApplicationIsInactive)
+    }
+
     // MARK: - Anchor geometry
 
     private let screen = NSRect(x: 0, y: 0, width: 1920, height: 1050)

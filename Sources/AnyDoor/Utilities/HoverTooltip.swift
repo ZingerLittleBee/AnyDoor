@@ -4,12 +4,16 @@ import SwiftUI
 extension View {
     /// Hover tooltip rendered in a separate floating panel.
     ///
-    /// SwiftUI's `.help(_:)` doesn't render in our hand-built panels, and an
-    /// in-view bubble can't escape the window's bounds (so a control near an edge
-    /// would be clipped). This shows the bubble in its own borderless, non-key
-    /// panel positioned in screen space above the control — overflowing the host
-    /// window freely, flipping below and clamping horizontally when the screen
-    /// edge is in the way. Appears after a short hover delay.
+    /// An in-view bubble can't escape the window's bounds (so a control near an
+    /// edge would be clipped). This shows the bubble in its own borderless,
+    /// non-key panel positioned in screen space above the control — overflowing
+    /// the host window freely, flipping below and clamping horizontally when the
+    /// screen edge is in the way. Appears after a short hover delay.
+    ///
+    /// Like SwiftUI's `.help(_:)`, it stays hidden while another app is active
+    /// unless opted in: here with `activeAlways`, for `.help` with the host
+    /// window's `allowsToolTipsWhenApplicationIsInactive` (see
+    /// `MenuBarController.showPanel`).
     func hoverTooltip(_ text: String, activeAlways: Bool = false) -> some View {
         overlay(TooltipAnchor(text: text, activeAlways: activeAlways))
     }

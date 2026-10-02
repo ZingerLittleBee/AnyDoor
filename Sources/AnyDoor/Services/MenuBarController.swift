@@ -208,6 +208,10 @@ final class MenuBarController {
         panel.level = .floating
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
+        // The panel never activates AnyDoor, and AppKit shows a window's
+        // tooltips only while its app is active unless this is set, so the
+        // panel's `.help` texts would never appear over another frontmost app.
+        panel.allowsToolTipsWhenApplicationIsInactive = true
         panel.isReleasedWhenClosed = false
         self.panel = panel
         self.hostingView = hostingView

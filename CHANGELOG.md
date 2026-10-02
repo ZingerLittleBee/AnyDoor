@@ -22,6 +22,10 @@ versioning.
 - Empty Trash no longer keeps asking for Automation permission after you grant
   it. Its menu-bar panel row now checks Finder access each time the panel opens,
   so it stops sending you to System Settings once access is granted.
+- Hover tooltips in the menu-bar panel and its popovers, the clipboard wall,
+  and the wall's text preview and editor now appear while another app is
+  frontmost. These windows leave that app active, which used to hide every
+  tooltip in them.
 
 ## [4.2.6] - 2026-10-02
 

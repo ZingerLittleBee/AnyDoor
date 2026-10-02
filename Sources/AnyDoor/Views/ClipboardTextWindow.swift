@@ -163,6 +163,9 @@ final class ClipboardTextWindow {
         p.hasShadow = true
         p.isMovableByWindowBackground = true
         p.hidesOnDeactivate = false
+        // Neither mode activates AnyDoor, so AppKit would suppress the header
+        // buttons' `.help` tooltips while the previous app stays frontmost.
+        p.allowsToolTipsWhenApplicationIsInactive = true
         p.isReleasedWhenClosed = false
         p.collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace]
 
