@@ -545,10 +545,11 @@ Glossary of domain terms for AnyDoor. Terms here are canonical: code, UI copy
   Clipboard History query: copied text, text extracted from rich content or
   images, QR-code content, color values, file names, and file paths. Both
   capture-time and bookmark-resolved current paths are included.
-  Source apps, tags, content kinds, dates, and display-only metadata remain
-  explicit filters rather than searchable text. Each searchable text counts
-  only up to its first 64 KB (65,536 bytes of UTF-8, both as stored and once
-  normalized); the entry, its preview, and its paste keep the whole text.
+  Source apps, tags, and content kinds remain explicit filters rather than
+  searchable text, and dates and display-only metadata are not searchable text
+  either. Each searchable text counts only up to its first 64 KB (65,536 bytes
+  of UTF-8, both as stored and once normalized); the entry, its preview, and
+  its paste keep the whole text.
   _Avoid_: Search Metadata, Search Everything.
 - **Automatic Image Text Indexing** (图片文字自动索引) — An opt-in Clipboard
   History setting, disabled by default. Only images and screenshots captured

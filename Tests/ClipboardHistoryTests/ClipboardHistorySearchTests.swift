@@ -376,10 +376,6 @@ final class ClipboardHistorySearchTests: XCTestCase {
             )
         )
         await module.awaitSearchIndexRebuildForTesting()
-        let allEntries = try await module.page(ClipboardHistoryQuery()).entries
-        let captured = try XCTUnwrap(
-            allEntries.first { $0.id == wanted.entryID }
-        )
         let database = try await module.requiredDatabase()
         try await database.write { database in
             let id = wanted.entryID.value.uuidString.lowercased()
@@ -403,9 +399,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 facet: .link,
                 sourceID: .application("dev.bybee.filtered"),
                 tagID: "important",
-                favoritesOnly: true,
-                capturedAfter: captured.capturedAt.addingTimeInterval(-1),
-                capturedBefore: captured.capturedAt.addingTimeInterval(1)
+                favoritesOnly: true
             )
         )
 

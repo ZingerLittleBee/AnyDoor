@@ -494,12 +494,6 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
             ),
             ClipboardHistoryQuery(tagID: "work"),
             ClipboardHistoryQuery(favoritesOnly: true),
-            ClipboardHistoryQuery(
-                capturedAfter: Date(timeIntervalSince1970: 100)
-            ),
-            ClipboardHistoryQuery(
-                capturedBefore: Date(timeIntervalSince1970: 200)
-            ),
         ]
 
         for (index, filter) in filters.enumerated() {
