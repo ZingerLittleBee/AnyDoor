@@ -73,7 +73,9 @@ Sources/AnyDoor/
 │   ├── Core         HotkeyService / HotkeyCoordinator / PanelStore / AppSwitcher / MenuBarController /
 │   │                SettingsOpener / RegularWindowCoordinator / LaunchAtLogin / LocalizationManager
 │   ├── Seeding      BuiltinPreferenceSeeder / KeyBindingOrderBackfill (idempotent launch-time migrations)
-│   ├── Runners      AppleScriptRunner / ShellRunner / CommandRunner / AutomationPermission
+│   ├── Runners      AppleScriptRunner / ShellRunner / AutomationPermission / Subprocess
+│   │                (SubprocessRunning + ProcessRunner, the shared child-process runner: separate
+│   │                stdout/stderr, optional watchdog, cancelling the calling task terminates the child)
 │   ├── Providers/   ToggleProvider/ActionProvider types (BuiltinProvider.swift holds the protocols,
 │   │                BuiltinProviderRegistry builds the full production set);
 │   │                most are their own actor (see Architecture Notes)

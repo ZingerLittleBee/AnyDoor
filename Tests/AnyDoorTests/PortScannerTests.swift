@@ -78,7 +78,7 @@ final class PortScannerTests: XCTestCase {
     // Stub runner used to exercise scanner branches without spawning lsof.
     private struct StubRunner: SubprocessRunning {
         let result: SubprocessResult
-        func run(path: String, args: [String], timeout: Duration) async throws -> SubprocessResult {
+        func run(_ executableURL: URL, arguments: [String], timeout: Duration?) async throws -> SubprocessResult {
             result
         }
     }

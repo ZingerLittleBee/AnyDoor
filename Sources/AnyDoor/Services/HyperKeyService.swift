@@ -12,6 +12,7 @@ final class HyperKeyService {
     static let shared = HyperKeyService()
 
     private let defaults: UserDefaults
+    private let controller: HyperKeyController
     private let remapAppShortcuts: @MainActor (Int, Int) throws -> Void
     private let reportShortcutError: @MainActor (String) -> Void
     private let triggerKey = "hyperKey.trigger"
@@ -49,6 +50,7 @@ final class HyperKeyService {
 
     init(
         defaults: UserDefaults = .standard,
+        controller: HyperKeyController = .shared,
         remapAppShortcuts: @escaping @MainActor (Int, Int) throws -> Void = {
             try PanelStore.shared.remapHyperAppShortcuts(
                 from: $0, to: $1, paletteHotkey: CommandPaletteService.shared.hotkey
@@ -59,6 +61,7 @@ final class HyperKeyService {
         }
     ) {
         self.defaults = defaults
+        self.controller = controller
         self.remapAppShortcuts = remapAppShortcuts
         self.reportShortcutError = reportShortcutError
         let raw = defaults.string(forKey: triggerKey) ?? HyperKeyTrigger.none.rawValue
@@ -127,7 +130,11 @@ final class HyperKeyService {
         let qpRaw = defaults.string(forKey: quickPressKey) ?? HyperKeyQuickPress.doesNothing.rawValue
         quickPress = HyperKeyQuickPress(rawValue: qpRaw) ?? .doesNothing
         includeShift = defaults.object(forKey: includeShiftKey) as? Bool ?? true
-        await applyCurrent()
+        // Config Sync calls this from a periodic tick that stopping sync
+        // cancels. Re-apply in a task of its own so that cancellation cannot
+        // terminate hidutil midway: drive() would take the CancellationError
+        // for a hidutil failure and reset the user's trigger.
+        await Task { await applyCurrent() }.value
     }
 
     private func drive(token: UInt64) async {
@@ -137,7 +144,7 @@ final class HyperKeyService {
         switch trigger {
         case .none:
             do {
-                try await HyperKeyController.shared.clear()
+                try await controller.clear()
                 guard token == mutationToken else { return }
                 isActive = false
                 lastError = nil
@@ -162,7 +169,7 @@ final class HyperKeyService {
                 return
             }
             do {
-                _ = try await HyperKeyController.shared.apply(trigger: trigger, virtualKey: .f19)
+                _ = try await controller.apply(trigger: trigger, virtualKey: .f19)
                 guard token == mutationToken else { return }
                 isActive = true
                 lastError = nil
@@ -218,7 +225,7 @@ final class HyperKeyService {
                 mutationToken &+= 1
                 let myToken = mutationToken
                 Task { @MainActor in
-                    try? await HyperKeyController.shared.clear()
+                    try? await controller.clear()
                     guard myToken == mutationToken else { return }
                     isActive = false
                     lastError = .tapNotRunning
