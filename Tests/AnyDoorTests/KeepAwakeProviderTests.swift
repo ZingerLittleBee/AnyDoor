@@ -213,7 +213,8 @@ final class KeepAwakeProviderTests: XCTestCase {
         let backend = MockKeepAwakeBackend()
         let provider = KeepAwakeProvider(backend: backend)
 
-        // Mirrors the hotkey path: PanelStore.toggle → setState(true/false).
+        // PanelStore.toggle bypasses setState (it calls apply through
+        // setKeepAwakeDuration), so this pins the conformance on its own.
         try await provider.setState(true)
         var state = await provider.currentState
         XCTAssertEqual(state, .indefinite)

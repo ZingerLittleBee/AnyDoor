@@ -66,7 +66,7 @@ final class ScheduledShutdownService {
     var forced: Bool { defaults.object(forKey: Self.forcedKey) as? Bool ?? false }
     /// Seconds before `fireDate` to show the cancelable warning.
     var warningLeadSeconds: Int { defaults.object(forKey: Self.warningLeadKey) as? Int ?? 60 }
-    /// Duration the hotkey/`setState(true)` path arms.
+    /// Countdown length, in minutes, that `setArmed(true)` arms.
     var defaultMinutes: Int { defaults.object(forKey: Self.defaultMinutesKey) as? Int ?? 30 }
 
     // MARK: - Arm / cancel
@@ -93,6 +93,17 @@ final class ScheduledShutdownService {
         state = .off
         defaults.removeObject(forKey: Self.fireDateKey)
         notify()
+    }
+
+    /// The on/off policy behind the panel row and its global hotkey: `true`
+    /// arms a `defaultMinutes` countdown from now, replacing any armed
+    /// schedule as `arm(_:)` does; `false` cancels.
+    func setArmed(_ armed: Bool) {
+        if armed {
+            arm(.minutes(defaultMinutes))
+        } else {
+            cancel()
+        }
     }
 
     // MARK: - Lifecycle

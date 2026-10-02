@@ -109,10 +109,12 @@ actor KeepAwakeProvider: ToggleProvider {
 
     func readState() async throws -> Bool { state.isOn }
 
-    /// Boolean conformance used by the global hotkey path. Enabling defaults
-    /// to `.indefinite` (the conservative choice — the user pressed a hotkey,
-    /// they expect a simple on/off semantics, not a duration prompt).
-    /// Disabling cancels any timed mode and any pending expiration task.
+    /// Boolean conformance. The panel row and global hotkey don't call it:
+    /// `PanelStore.toggle` special-cases Keep Awake and drives `apply(_:)`
+    /// through `setKeepAwakeDuration`. Enabling defaults to `.indefinite`,
+    /// the same choice that path makes (an on/off switch carries no
+    /// duration); disabling cancels any timed mode and any pending
+    /// expiration task.
     func setState(_ enabled: Bool) async throws {
         try await apply(enabled ? .indefinite : nil)
     }
