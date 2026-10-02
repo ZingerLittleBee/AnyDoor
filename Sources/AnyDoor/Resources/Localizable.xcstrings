@@ -840,13 +840,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Screenshot to Clipboard"
+            "value": "Screenshot"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "截图到剪贴板"
+            "value": "截图"
           }
         }
       }

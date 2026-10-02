@@ -6,13 +6,21 @@ versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Screenshot to Clipboard (截图到剪贴板) is now called Screenshot (截图). It
+  copies a capture only when Auto-copy after capture is on in Settings →
+  Screenshot, so the old name did not always fit. In the English UI, typing
+  `screenshot` in the command palette and pressing Return now opens AnyDoor's
+  Screenshot instead of the macOS Screenshot app.
+
 ### Removed
 
 - The Capture Menu (截图菜单) action is gone from the menu-bar panel and command
-  palette, because it did the same as Screenshot to Clipboard (截图到剪贴板).
-  Its hotkey moves to Screenshot to Clipboard unless that action already has
-  one, and if Capture Menu was shown, Screenshot to Clipboard is shown too.
-  Restoring a backup made before this change does the same.
+  palette, because it did the same as Screenshot (截图). Its hotkey moves to
+  Screenshot unless that action already has one, and if Capture Menu was
+  shown, Screenshot is shown too. Restoring a backup made before this change
+  does the same.
 
 ### Fixed
 
