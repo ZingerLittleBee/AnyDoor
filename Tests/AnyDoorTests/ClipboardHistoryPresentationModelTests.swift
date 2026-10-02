@@ -1,4 +1,5 @@
 import ClipboardHistoryTestSupport
+import GRDB
 import XCTest
 
 @testable import AnyDoor
@@ -296,6 +297,309 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         )
 
         XCTAssertFalse(mixedModel.supportsPlainTextPaste(for: id))
+    }
+
+    /// The ⌥↵ hint used to read the bounded materialization cache, which the
+    /// wall's mounted cards churn: a few cards later the hint was gone for an
+    /// entry that still pastes as plain text.
+    func testPlainTextEligibilityOutlivesTheMaterializationCache() async {
+        let id = entry(20).id
+        let model = materializationModel(returning: exactText())
+
+        _ = await model.materialization(for: id, purpose: .hostAction)
+        for index in 100..<120 {
+            _ = await model.materialization(
+                for: entry(index).id,
+                purpose: .preview
+            )
+        }
+
+        XCTAssertNil(model.cachedMaterialization(for: id, purpose: .hostAction))
+        XCTAssertTrue(model.supportsPlainTextPaste(for: id))
+    }
+
+    /// A card loads its entry once. A query change that lands meanwhile
+    /// keeps the value out of the cache, but the card keeps showing it, so
+    /// the hint has to know it too.
+    func testPlainTextEligibilitySurvivesAQueryChangeMidLoad() async throws {
+        let shown = entry(1)
+        let materialization = exactText()
+        let gate = AsyncGate()
+        addTeardownBlock { await gate.open() }
+        let model = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: { readyHistoryStatus },
+                page: { _, _ in
+                    ClipboardHistoryPage(
+                        entries: [shown],
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    )
+                },
+                apply: { _ in .notFound },
+                materialize: { request in
+                    if request.purpose == .hostAction {
+                        await gate.wait()
+                    }
+                    return materialization
+                },
+                tagDefinitions: { [] }
+            )
+        )
+        await model.reload()
+        let load = Task {
+            await model.materialization(for: shown.id, purpose: .hostAction)
+        }
+        await waitUntil("the card's load is running") {
+            await gate.waiterCount == 1
+        }
+
+        await model.setQuery(ClipboardHistoryQuery(text: "Entry"))
+        await gate.open()
+        let loaded = try await bounded(within: 5) { await load.value }
+
+        XCTAssertNotNil(loaded)
+        XCTAssertEqual(model.entries.map(\.id), [shown.id])
+        XCTAssertNil(
+            model.cachedMaterialization(for: shown.id, purpose: .hostAction)
+        )
+        XCTAssertTrue(model.supportsPlainTextPaste(for: shown.id))
+    }
+
+    /// An edit or a delete changes what an entry pastes, and a restore brings
+    /// its files back, so each forgets the entry's eligibility. A favorite or
+    /// a tag leaves the payload alone and keeps it.
+    func testOnlyPayloadChangesForgetPlainTextEligibility() async {
+        let shown = (1...5).map(entry)
+        let byID = Dictionary(uniqueKeysWithValues: shown.map { ($0.id, $0) })
+        let materialization = exactText()
+        let model = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: { readyHistoryStatus },
+                page: { _, _ in
+                    ClipboardHistoryPage(
+                        entries: shown,
+                        nextCursor: nil,
+                        cursorDisposition: .initial
+                    )
+                },
+                apply: { mutation in
+                    switch mutation {
+                    case .delete:
+                        return .deleted
+                    case .setFavorite(let id, _), .setTags(let id, _),
+                        .editText(let id, _):
+                        guard let updated = byID[id] else { return .notFound }
+                        return .updated(updated)
+                    }
+                },
+                materialize: { _ in materialization },
+                tagDefinitions: { [] },
+                restoreLegacyOwnedFiles: { _ in .restored(memberCount: 1) }
+            )
+        )
+        await model.reload()
+        for entry in shown {
+            _ = await model.materialization(for: entry.id, purpose: .hostAction)
+            XCTAssertTrue(model.supportsPlainTextPaste(for: entry.id))
+        }
+
+        await model.apply(.setFavorite(shown[0].id, true))
+        await model.apply(.setTags(shown[1].id, ["work"]))
+        await model.apply(.editText(shown[2].id, "edited"))
+        await model.apply(.delete(shown[3].id))
+        let restored = await model.restoreLegacyOwnedFiles(
+            ClipboardHistoryLegacyFileRestoreRequest(
+                entryID: shown[4].id,
+                destinations: []
+            )
+        )
+
+        XCTAssertTrue(restored)
+        XCTAssertNil(model.actionFailure)
+        XCTAssertTrue(model.supportsPlainTextPaste(for: shown[0].id))
+        XCTAssertTrue(model.supportsPlainTextPaste(for: shown[1].id))
+        XCTAssertFalse(model.supportsPlainTextPaste(for: shown[2].id))
+        XCTAssertFalse(model.supportsPlainTextPaste(for: shown[3].id))
+        XCTAssertFalse(model.supportsPlainTextPaste(for: shown[4].id))
+    }
+
+    /// A first page that no longer holds an entry forgets its eligibility
+    /// along with everything else loaded for it.
+    func testAFirstPageWithoutTheEntryForgetsItsEligibility() async {
+        let first = entry(1)
+        let second = entry(2)
+        let client = PresentationClientStub(
+            pages: [
+                ClipboardHistoryPage(
+                    entries: [first],
+                    nextCursor: nil,
+                    cursorDisposition: .initial
+                ),
+                ClipboardHistoryPage(
+                    entries: [second],
+                    nextCursor: nil,
+                    cursorDisposition: .initial
+                ),
+            ]
+        )
+        let pages = client.operations
+        let materialization = exactText()
+        let model = ClipboardHistoryPresentationModel(
+            operations: ClipboardHistoryPresentationOperations(
+                status: pages.status,
+                page: pages.page,
+                apply: pages.apply,
+                materialize: { _ in materialization },
+                tagDefinitions: { [] }
+            )
+        )
+        await model.reload()
+        _ = await model.materialization(for: first.id, purpose: .hostAction)
+        XCTAssertTrue(model.supportsPlainTextPaste(for: first.id))
+
+        await model.reload()
+
+        XCTAssertEqual(model.entries.map(\.id), [second.id])
+        XCTAssertFalse(model.supportsPlainTextPaste(for: first.id))
+    }
+
+    /// The wall's Rebuild Search Index button: the module starts a rebuild,
+    /// and the query runs again, so it waits on the rebuild instead of
+    /// showing the failure.
+    func testRetryingTheSearchIndexStartsARebuildAndRunsTheQueryAgain()
+        async
+    {
+        let store = SearchIndexStoreStub(index: .failed(.rebuildFailed))
+        let model = ClipboardHistoryPresentationModel(
+            operations: store.operations
+        )
+        await model.setQuery(ClipboardHistoryQuery(text: "needle"))
+        XCTAssertEqual(model.contentState, .searchUnavailable(.rebuildFailed))
+
+        let started = await model.retrySearchIndex()
+
+        XCTAssertTrue(started)
+        XCTAssertFalse(model.isRetryingSearchIndex)
+        XCTAssertEqual(model.contentState, .indexing)
+        let retries = await store.retryCount
+        XCTAssertEqual(retries, 1)
+        let status = await model.searchIndexStatus()
+        XCTAssertEqual(status, .indexing)
+    }
+
+    /// A start the module refuses changes nothing: the failure stays on
+    /// screen with its button, and no query runs.
+    func testARefusedRetryKeepsTheFailureAndRunsNoQuery() async {
+        let store = SearchIndexStoreStub(
+            index: .failed(.stateUnavailable),
+            retryStarts: false
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: store.operations
+        )
+        await model.setQuery(ClipboardHistoryQuery(text: "needle"))
+        let pagesBefore = await store.pageRequestCount
+
+        let started = await model.retrySearchIndex()
+
+        XCTAssertFalse(started)
+        XCTAssertFalse(model.isRetryingSearchIndex)
+        XCTAssertEqual(
+            model.contentState,
+            .searchUnavailable(.stateUnavailable)
+        )
+        let pagesAfter = await store.pageRequestCount
+        XCTAssertEqual(pagesAfter, pagesBefore)
+    }
+
+    /// A second press while the first is still starting the rebuild starts
+    /// nothing more.
+    func testRetryingTheSearchIndexIsSingleFlight() async throws {
+        let gate = AsyncGate()
+        addTeardownBlock { await gate.open() }
+        let store = SearchIndexStoreStub(
+            index: .failed(.rebuildFailed),
+            retryGate: gate
+        )
+        let model = ClipboardHistoryPresentationModel(
+            operations: store.operations
+        )
+        await model.setQuery(ClipboardHistoryQuery(text: "needle"))
+
+        let first = Task { await model.retrySearchIndex() }
+        await waitUntil("the first retry is starting the rebuild") {
+            await gate.waiterCount == 1
+        }
+        XCTAssertTrue(model.isRetryingSearchIndex)
+        let second = try await bounded(within: 5) {
+            await model.retrySearchIndex()
+        }
+        XCTAssertTrue(second)
+
+        await gate.open()
+        let firstStarted = try await bounded(within: 5) { await first.value }
+
+        XCTAssertTrue(firstStarted)
+        XCTAssertFalse(model.isRetryingSearchIndex)
+        XCTAssertEqual(model.contentState, .indexing)
+        let retries = await store.retryCount
+        XCTAssertEqual(retries, 1)
+    }
+
+    /// End to end through the module: an index marked failed for a reason
+    /// this build cannot read stays failed until the retry rebuilds it, and
+    /// the same query then finds the entry.
+    func testRetryingAFailedSearchIndexRebuildsItInTheStore() async throws {
+        let store = try TemporaryHistoryStore(testCase: self)
+        let module = store.module
+        let captured = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: ClipboardHistoryCaptureSource(
+                    bundleIdentifier: "com.example.notes",
+                    displayName: "Notes"
+                ),
+                content: .text("rebuilt needle")
+            )
+        ).entryID
+        // A derived job still waiting for its write turn would run after
+        // the failure is marked below.
+        await module.awaitDerivedJobsForTesting()
+        let database = try await module.requiredDatabase()
+        try await database.write { database in
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_maintenance_metadata
+                    SET text_value = 'failed'
+                    WHERE key = 'searchIndexState'
+                    """
+            )
+            try database.execute(
+                sql: """
+                    DELETE FROM clipboard_maintenance_metadata
+                    WHERE key = 'searchIndexFailure'
+                    """
+            )
+        }
+        let model = ClipboardHistoryPresentationModel(module: module)
+        await model.setQuery(ClipboardHistoryQuery(text: "needle"))
+        XCTAssertEqual(
+            model.contentState,
+            .searchUnavailable(.stateUnavailable)
+        )
+
+        let started = await model.retrySearchIndex()
+        XCTAssertTrue(started)
+        try await bounded(within: 10) {
+            await module.awaitSearchIndexRebuildForTesting()
+        }
+        let status = await model.searchIndexStatus()
+        XCTAssertEqual(status, .ready)
+        await model.reload()
+
+        XCTAssertEqual(model.contentState, .content)
+        XCTAssertEqual(model.entries.map(\.id), [captured])
+        try await module.closeStoreForTesting()
     }
 
     func testSourceCatalogDoesNotCollapseWhileSourceFilterIsActive() async {
@@ -2048,6 +2352,112 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
                 tagDefinitions: { [] }
             )
         )
+    }
+
+    /// One item with exact text, so the entry pastes as plain text.
+    private func exactText() -> ClipboardHistoryMaterialization {
+        ClipboardHistoryMaterialization(
+            items: [
+                ClipboardHistoryMaterializedItem(
+                    representations: [
+                        .text(
+                            typeIdentifier: "public.utf8-plain-text",
+                            value: "text"
+                        )
+                    ]
+                )
+            ]
+        )
+    }
+}
+
+private let readyHistoryStatus = ClipboardHistoryStatus(
+    availability: .ready,
+    isMonitoring: true,
+    searchIndex: .ready
+)
+
+/// A store whose search index is ready, rebuilding or failed, as a test
+/// sets it. A search answers by that state, and browsing always works,
+/// like the module. A retry starts a rebuild of a failed index, unless
+/// `retryStarts` is false, and can be held at `retryGate`.
+actor SearchIndexStoreStub {
+    private var index: ClipboardHistorySearchIndexStatus
+    private let entries: [ClipboardHistoryEntry]
+    private let retryStarts: Bool
+    private let retryGate: AsyncGate?
+    private(set) var statusRequestCount = 0
+    private(set) var pageRequestCount = 0
+    private(set) var retryCount = 0
+
+    init(
+        index: ClipboardHistorySearchIndexStatus,
+        entries: [ClipboardHistoryEntry] = [],
+        retryStarts: Bool = true,
+        retryGate: AsyncGate? = nil
+    ) {
+        self.index = index
+        self.entries = entries
+        self.retryStarts = retryStarts
+        self.retryGate = retryGate
+    }
+
+    nonisolated var operations: ClipboardHistoryPresentationOperations {
+        ClipboardHistoryPresentationOperations(
+            status: { await self.status() },
+            page: { query, _ in await self.page(for: query) },
+            apply: { _ in .notFound },
+            materialize: { _ in ClipboardHistoryMaterialization(items: []) },
+            tagDefinitions: { [] },
+            retrySearchIndex: { try await self.retry() }
+        )
+    }
+
+    func setIndex(_ index: ClipboardHistorySearchIndexStatus) {
+        self.index = index
+    }
+
+    private func status() -> ClipboardHistoryStatus {
+        statusRequestCount += 1
+        return ClipboardHistoryStatus(
+            availability: .ready,
+            isMonitoring: true,
+            searchIndex: index
+        )
+    }
+
+    private func page(for query: ClipboardHistoryQuery) -> ClipboardHistoryPage {
+        pageRequestCount += 1
+        var state = ClipboardHistoryPageState.ready
+        if !query.text.isEmpty {
+            switch index {
+            case .ready:
+                break
+            case .indexing:
+                state = .indexing
+            case .failed(let failure):
+                state = .failed(failure)
+            }
+        }
+        return ClipboardHistoryPage(
+            entries: state == .ready ? entries : [],
+            nextCursor: nil,
+            cursorDisposition: .initial,
+            state: state
+        )
+    }
+
+    private func retry() async throws -> ClipboardHistorySearchIndexStatus {
+        retryCount += 1
+        if let retryGate {
+            await retryGate.wait()
+        }
+        guard case .failed = index else { return index }
+        guard retryStarts else {
+            throw ClipboardHistoryModuleError.operationUnavailable
+        }
+        index = .indexing
+        return .indexing
     }
 }
 

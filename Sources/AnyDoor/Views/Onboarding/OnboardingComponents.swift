@@ -177,7 +177,7 @@ struct OnboardingModifierBadge: View {
 
 // MARK: - Chip / pill
 
-/// A small selectable pill used for mode bars and demo example switches.
+/// A small selectable pill used by the onboarding demos.
 struct OnboardingChip: View {
     let title: String
     var symbol: String? = nil

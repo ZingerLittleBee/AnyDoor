@@ -244,17 +244,23 @@ struct GeneralSettingsView: View {
             hyperKey.refreshSecureInputStatus()
             // Read launch-at-login + permission status OFF the main thread. These
             // are nonisolated `static` calls but each blocks for tens-to-hundreds
-            // of ms (SMAppService.status, the Apple Events automation probe,
-            // AXIsProcessTrusted, CGPreflight); running them on the MainActor here
-            // is what made every switch to this tab hitch (~200ms). Hopping the
-            // result back to the MainActor keeps the switch itself cheap.
+            // of ms (SMAppService.status, AXIsProcessTrusted, CGPreflight);
+            // running them on the MainActor here is what made every switch to
+            // this tab hitch (~200ms). Hopping the result back to the MainActor
+            // keeps the switch itself cheap. Automation comes from the shared
+            // System Events check, which runs on its own queue and waits at most
+            // a second, so a System Events that stops answering can't hold up
+            // the other badges.
             launchAtLogin = await Task.detached { LaunchAtLogin.isEnabled }.value
-            await AutomationPermission.activateSystemEvents()
             while !Task.isCancelled {
+                // System Events quits when idle, and a check finds no verdict
+                // while it isn't running. Relaunching it (a no-op while it runs)
+                // keeps the Automation badge live, revocations included.
+                await AutomationPermission.activateSystemEvents()
                 // Call the underlying API directly; the HotkeyService wrapper is
                 // MainActor-isolated and can't be reached from a detached task.
                 let access = await Task.detached { AXIsProcessTrusted() }.value
-                let automation = await Task.detached { AutomationPermission.isGranted }.value
+                let automation = await AutomationPermission.systemEvents.status == .granted
                 let capture = await Task.detached { ScreenCapturePermission.isGranted }.value
                 accessibilityGranted = access
                 automationGranted = automation

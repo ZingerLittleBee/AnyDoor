@@ -96,9 +96,7 @@ final class PluginLocalizationTests: XCTestCase {
     /// register an observation that fires when the language preference
     /// changes, so SwiftUI re-renders plugin views on a switch.
     func testBundleReadIsInvalidatedByLanguageSwitch() throws {
-        let suiteName = "PluginLocalizationTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
         let manager = LocalizationManager(defaults: defaults)
         manager.preference = .en
 

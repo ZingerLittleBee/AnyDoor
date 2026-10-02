@@ -11,7 +11,10 @@ import ImageConversionPlugin
 /// Pins the implicit contracts a new `BuiltinItem` case must satisfy. Each of
 /// these used to be convention-only, with a silent failure mode:
 /// - a toggle/action item without a registered provider renders a panel row
-///   and binds a hotkey that do nothing (`PanelStore.toggle/run` guard-return);
+///   and binds a hotkey that do nothing (`PanelStore.toggle/run` guard-return).
+///   Scheduled Shutdown is the one item `PanelStore` drives without its
+///   provider (it calls `ScheduledShutdownService` directly); the provider
+///   stays registered so this rule has no exception;
 /// - a duplicate `defaultOrder` makes first-launch seeding order ambiguous;
 /// - a window-layout child missing from `PanelStore.windowLayoutChildKeys`
 ///   leaks into the top-level panel instead of the window-layout popover;
@@ -153,9 +156,9 @@ struct BuiltinCatalogInvariantTests {
         // The registry derives availability from the same claims; pin the
         // wiring: an uninstalled plugin's claims are exactly the commands the
         // fresh registry reports unavailable.
-        let suiteName = "BuiltinCatalogInvariantTests-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let suite = TemporaryDefaultsSuite()
+        defer { suite.remove() }
+        let defaults = suite.makeDefaults()
         let container = try makePluginRegistryTestContainer()
         let harness = makePluginRegistryTestHarness()
         bootstrapPluginRegistryTestHarness(

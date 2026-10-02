@@ -43,20 +43,20 @@ final class MockShutdownWarning: ShutdownWarningPresenting {
     func dismiss() { dismissCount += 1 }
 }
 
-@MainActor
-private func makeService(
-    now: Date,
-    executor: MockShutdownExecutor = MockShutdownExecutor(),
-    warning: MockShutdownWarning = MockShutdownWarning()
-) -> (ScheduledShutdownService, MockShutdownExecutor, MockShutdownWarning, UserDefaults) {
-    let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
-    let service = ScheduledShutdownService(
-        executor: executor, warning: warning, defaults: suite, now: { now }
-    )
-    return (service, executor, warning, suite)
-}
-
 extension ScheduledShutdownServiceTests {
+    @MainActor
+    private func makeService(
+        now: Date,
+        executor: MockShutdownExecutor = MockShutdownExecutor(),
+        warning: MockShutdownWarning = MockShutdownWarning()
+    ) -> (ScheduledShutdownService, MockShutdownExecutor, MockShutdownWarning, UserDefaults) {
+        let suite = makeTemporaryDefaults()
+        let service = ScheduledShutdownService(
+            executor: executor, warning: warning, defaults: suite, now: { now }
+        )
+        return (service, executor, warning, suite)
+    }
+
     @MainActor
     func testArmPersistsFireDateAndSetsState() {
         let now = Date(timeIntervalSince1970: 1_000_000)
@@ -115,7 +115,7 @@ extension ScheduledShutdownServiceTests {
     @MainActor
     func testBootstrapReArmsFutureFireDate() {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let suite = makeTemporaryDefaults()
         suite.set(now.timeIntervalSince1970 + 600, forKey: "scheduledShutdown.fireDate")
         let service = ScheduledShutdownService(
             executor: MockShutdownExecutor(), warning: MockShutdownWarning(),
@@ -131,7 +131,7 @@ extension ScheduledShutdownServiceTests {
     @MainActor
     func testBootstrapCancelsMissedFireDateWithoutFiring() {
         let now = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let suite = makeTemporaryDefaults()
         suite.set(now.timeIntervalSince1970 - 600, forKey: "scheduledShutdown.fireDate") // past
         let executor = MockShutdownExecutor()
         let service = ScheduledShutdownService(
@@ -150,7 +150,7 @@ extension ScheduledShutdownServiceTests {
         // The deadline lapsed while the Mac slept. The shutdown must NOT fire
         // instantly with no warning — it must re-anchor a short cancelable grace.
         var current = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let suite = makeTemporaryDefaults()
         let executor = MockShutdownExecutor()
         let warning = MockShutdownWarning()
         let service = ScheduledShutdownService(
@@ -171,7 +171,7 @@ extension ScheduledShutdownServiceTests {
     @MainActor
     func testHandleWakeOverdueGraceWarningIsCancelable() {
         var current = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let suite = makeTemporaryDefaults()
         let executor = MockShutdownExecutor()
         let warning = MockShutdownWarning()
         let service = ScheduledShutdownService(
@@ -193,7 +193,7 @@ extension ScheduledShutdownServiceTests {
         // The re-anchored grace target must be pushed through onChange so the panel
         // subtitle reflects the live time, not the original (now past) deadline.
         var current = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let suite = makeTemporaryDefaults()
         let service = ScheduledShutdownService(
             executor: MockShutdownExecutor(), warning: MockShutdownWarning(), defaults: suite, now: { current }
         )
@@ -286,7 +286,7 @@ extension ScheduledShutdownServiceTests {
     @MainActor
     func testSetArmedTrueRestartsAnArmedCountdownFromNow() {
         var current = Date(timeIntervalSince1970: 1_000_000)
-        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let suite = makeTemporaryDefaults()
         let service = ScheduledShutdownService(
             executor: MockShutdownExecutor(), warning: MockShutdownWarning(), defaults: suite, now: { current }
         )

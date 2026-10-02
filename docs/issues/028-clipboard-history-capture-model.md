@@ -2,7 +2,7 @@
 id: 028
 github: 81
 title: "Clipboard History v2: complete capture model and standard representations"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

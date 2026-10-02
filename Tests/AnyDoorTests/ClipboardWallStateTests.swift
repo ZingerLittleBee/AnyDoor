@@ -60,6 +60,24 @@ final class ClipboardWallStateTests: XCTestCase {
         return ClipboardWallState(presentation: presentation, clock: clock)
     }
 
+    /// A wall searching `store` for "needle", whose toasts go to `toasts`.
+    private func makeSearchState(
+        _ store: SearchIndexStoreStub,
+        clock: any Clock<Duration> = ContinuousClock(),
+        toasts: ToastLog
+    ) async -> ClipboardWallState {
+        let state = ClipboardWallState(
+            presentation: ClipboardHistoryPresentationModel(
+                operations: store.operations
+            ),
+            clock: clock,
+            notify: { toasts.record($0) }
+        )
+        state.query = "needle"
+        await state.reload()
+        return state
+    }
+
     func testSelectionClampsAndMoves() async {
         let items = entries(["a", "b", "c"])
         let state = await makeState(entries: items)
@@ -370,12 +388,15 @@ final class ClipboardWallStateTests: XCTestCase {
 
     /// A failed search index left the wall saying the whole history was
     /// unavailable, and pointing at a Settings retry and reset that do not
-    /// exist for it. The store is intact, so the wall names only search.
+    /// exist for it. The store is intact, so the wall names only search and
+    /// offers the rebuild itself. An index whose state this build cannot
+    /// read asks for that rebuild, since no launch retries it.
     func testAFailedSearchIndexNamesSearchRatherThanTheStore() async {
-        for failure in [
-            ClipboardHistorySearchIndexFailure.rebuildFailed,
-            .stateUnavailable,
-        ] {
+        let lines: [(ClipboardHistorySearchIndexFailure, L10n.Key)] = [
+            (.rebuildFailed, .clipboardSearchUnavailable),
+            (.stateUnavailable, .clipboardSearchUnavailableNeedsRebuild),
+        ]
+        for (failure, line) in lines {
             let state = await makeState(
                 feed: ClipboardWallEntryFeed([], state: .failed(failure))
             )
@@ -383,19 +404,196 @@ final class ClipboardWallStateTests: XCTestCase {
             await state.reload()
 
             XCTAssertTrue(state.showsUnavailableState)
-            XCTAssertEqual(
-                state.unavailableStateKey,
-                .clipboardSearchUnavailable
-            )
+            XCTAssertEqual(state.unavailableStateKey, line)
+            XCTAssertTrue(state.offersSearchIndexRebuild)
         }
 
+        // A store the wall cannot read has its actions in Settings.
         let missingKey = await makeState(
             availability: .unavailable,
             reason: .missingKey
         )
         XCTAssertTrue(missingKey.showsUnavailableState)
+        XCTAssertFalse(missingKey.offersSearchIndexRebuild)
         let ready = await makeState(entries: entries(["a"]))
         XCTAssertFalse(ready.showsUnavailableState)
+        XCTAssertFalse(ready.offersSearchIndexRebuild)
+    }
+
+    /// A rebuild used to leave an open wall on its indexing line until the
+    /// query changed. The wall now rereads the index status while it waits,
+    /// runs no search for that, and shows the results once the rebuild ends.
+    func testTheRebuildButtonStartsARebuildThatTheOpenWallFollows()
+        async throws
+    {
+        let clock = TestClock()
+        let store = SearchIndexStoreStub(
+            index: .failed(.rebuildFailed),
+            entries: entries(["needle"])
+        )
+        let toasts = ToastLog()
+        let state = await makeSearchState(store, clock: clock, toasts: toasts)
+        XCTAssertEqual(
+            state.presentation.contentState,
+            .searchUnavailable(.rebuildFailed)
+        )
+
+        await state.rebuildSearchIndex()
+
+        XCTAssertTrue(state.isWaitingForSearchIndex)
+        XCTAssertFalse(state.offersSearchIndexRebuild)
+        let retries = await store.retryCount
+        XCTAssertEqual(retries, 1)
+        let follow = Task { await state.followSearchIndexRebuild() }
+        await waitUntil("the wall waits on the rebuild") {
+            await clock.hasSleeper()
+        }
+        let statusRequests = await store.statusRequestCount
+        let pageRequests = await store.pageRequestCount
+
+        await clock.advance(by: ClipboardWallState.searchIndexPollInterval)
+        await waitUntil("the wall rereads the index status") {
+            await store.statusRequestCount == statusRequests + 1
+        }
+        await waitUntil("the wall waits again") { await clock.hasSleeper() }
+        let pagesWhileIndexing = await store.pageRequestCount
+        XCTAssertEqual(
+            pagesWhileIndexing,
+            pageRequests,
+            "a rebuild still running costs no search"
+        )
+        XCTAssertTrue(state.isWaitingForSearchIndex)
+
+        await store.setIndex(.ready)
+        await clock.advance(by: ClipboardWallState.searchIndexPollInterval)
+        try await bounded(within: 5) { await follow.value }
+
+        XCTAssertEqual(state.presentation.contentState, .content)
+        XCTAssertEqual(state.items.map(\.previewText), ["needle"])
+        XCTAssertEqual(toasts.failures, [])
+        XCTAssertEqual(toasts.others, [])
+    }
+
+    /// The wall's view cancels the follow as the wall closes. From then on
+    /// it reads no status and runs no search.
+    func testFollowingARebuildStopsWhenItIsCancelled() async throws {
+        let clock = TestClock()
+        let store = SearchIndexStoreStub(index: .indexing)
+        let toasts = ToastLog()
+        let state = await makeSearchState(store, clock: clock, toasts: toasts)
+        XCTAssertTrue(state.isWaitingForSearchIndex)
+        let follow = Task { await state.followSearchIndexRebuild() }
+        await waitUntil("the wall waits on the rebuild") {
+            await clock.hasSleeper()
+        }
+        let statusRequests = await store.statusRequestCount
+        let pageRequests = await store.pageRequestCount
+
+        follow.cancel()
+        try await bounded(within: 5) { await follow.value }
+        await store.setIndex(.ready)
+        await clock.advance(by: .seconds(5))
+
+        let statusAfter = await store.statusRequestCount
+        let pagesAfter = await store.pageRequestCount
+        XCTAssertEqual(statusAfter, statusRequests)
+        XCTAssertEqual(pagesAfter, pageRequests)
+        XCTAssertTrue(state.isWaitingForSearchIndex)
+        XCTAssertEqual(toasts.failures, [])
+    }
+
+    /// A rebuild the store refuses to start says so, and the notice keeps
+    /// its button for another try.
+    func testARefusedRebuildSaysSoAndKeepsTheNotice() async {
+        let store = SearchIndexStoreStub(
+            index: .failed(.stateUnavailable),
+            retryStarts: false
+        )
+        let toasts = ToastLog()
+        let state = await makeSearchState(store, toasts: toasts)
+
+        await state.rebuildSearchIndex()
+
+        XCTAssertEqual(toasts.failures, [L(.clipboardToastSearchRebuildFailed)])
+        XCTAssertTrue(state.offersSearchIndexRebuild)
+        XCTAssertEqual(
+            state.unavailableStateKey,
+            .clipboardSearchUnavailableNeedsRebuild
+        )
+        XCTAssertFalse(state.presentation.isRetryingSearchIndex)
+    }
+
+    /// A rebuild started from the wall that fails again while the wall
+    /// follows it says so once, and the notice comes back with its button.
+    func testARebuildThatFailsAgainSaysSo() async throws {
+        let clock = TestClock()
+        let store = SearchIndexStoreStub(index: .failed(.rebuildFailed))
+        let toasts = ToastLog()
+        let state = await makeSearchState(store, clock: clock, toasts: toasts)
+        await state.rebuildSearchIndex()
+        let follow = Task { await state.followSearchIndexRebuild() }
+        await waitUntil("the wall waits on the rebuild") {
+            await clock.hasSleeper()
+        }
+
+        await store.setIndex(.failed(.rebuildFailed))
+        await clock.advance(by: ClipboardWallState.searchIndexPollInterval)
+        try await bounded(within: 5) { await follow.value }
+
+        XCTAssertEqual(
+            state.presentation.contentState,
+            .searchUnavailable(.rebuildFailed)
+        )
+        XCTAssertTrue(state.offersSearchIndexRebuild)
+        XCTAssertEqual(toasts.failures, [L(.clipboardToastSearchRebuildFailed)])
+    }
+
+    /// A rebuild the store started on its own fails into the notice
+    /// without a toast: nobody asked the wall for it.
+    func testARebuildTheStoreStartedFailsQuietly() async throws {
+        let clock = TestClock()
+        let store = SearchIndexStoreStub(index: .indexing)
+        let toasts = ToastLog()
+        let state = await makeSearchState(store, clock: clock, toasts: toasts)
+        let follow = Task { await state.followSearchIndexRebuild() }
+        await waitUntil("the wall waits on the rebuild") {
+            await clock.hasSleeper()
+        }
+
+        await store.setIndex(.failed(.rebuildFailed))
+        await clock.advance(by: ClipboardWallState.searchIndexPollInterval)
+        try await bounded(within: 5) { await follow.value }
+
+        XCTAssertEqual(
+            state.presentation.contentState,
+            .searchUnavailable(.rebuildFailed)
+        )
+        XCTAssertEqual(toasts.failures, [])
+    }
+
+    /// The wall opening again forgets a rebuild an earlier session started,
+    /// so its failure lands quietly in the notice too.
+    func testANewWallSessionForgetsAnEarlierRebuild() async throws {
+        let clock = TestClock()
+        let store = SearchIndexStoreStub(index: .failed(.rebuildFailed))
+        let toasts = ToastLog()
+        let state = await makeSearchState(store, clock: clock, toasts: toasts)
+        await state.rebuildSearchIndex()
+
+        state.forgetUserRebuild()
+        let follow = Task { await state.followSearchIndexRebuild() }
+        await waitUntil("the wall waits on the rebuild") {
+            await clock.hasSleeper()
+        }
+        await store.setIndex(.failed(.rebuildFailed))
+        await clock.advance(by: ClipboardWallState.searchIndexPollInterval)
+        try await bounded(within: 5) { await follow.value }
+
+        XCTAssertEqual(
+            state.presentation.contentState,
+            .searchUnavailable(.rebuildFailed)
+        )
+        XCTAssertEqual(toasts.failures, [])
     }
 
     func testCategoryAndSearchAreHeld() async {
@@ -715,6 +913,21 @@ private actor ClipboardWallEntryFeed {
             cursorDisposition: .initial,
             state: state
         )
+    }
+}
+
+/// The toasts a wall showed, failures apart from the rest.
+@MainActor
+private final class ToastLog {
+    private(set) var failures: [String] = []
+    private(set) var others: [String] = []
+
+    func record(_ style: ToastStyle) {
+        if case .failure(let message) = style {
+            failures.append(message)
+        } else {
+            others.append(style.message)
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import os
 import OSLog
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "sync")
@@ -64,22 +65,26 @@ enum SyncStateCodec {
 /// everyone else's; the cloud client moves the bytes.
 ///
 /// File Provider defense: any call can hang on a dataless file or a stalled
-/// mount, so every filesystem touch races a timeout. A timed-out or corrupt
-/// peer file is skipped — that only delays convergence, it never corrupts it.
+/// mount, so every filesystem touch goes through `SyncFolderCalls`, which
+/// stops waiting after `timeout`. A timed-out or corrupt peer file is skipped
+/// — that only delays convergence, it never corrupts it.
 struct SyncFolderTransport: SyncTransport {
     let folderURL: URL
     var timeout: TimeInterval = 5
+    var fileSystem = SyncFolderFileSystem()
 
     var watchableDirectory: URL? { folderURL }
 
     /// Read every peer document currently in the folder. Per-file tolerant:
     /// unreadable, timed-out, corrupt, or wrong-schema files are logged and
-    /// skipped. Throws only when the folder itself cannot be listed (missing,
-    /// unmounted, hung) — the one condition worth surfacing in the UI.
+    /// skipped. Throws only when the folder itself cannot be listed in time
+    /// (missing, unmounted, hung) — the one condition worth surfacing in the
+    /// UI — or when the caller is cancelled.
     func readPeerDocuments(excludingDeviceID own: String) async throws -> [SyncDocument] {
         let folder = folderURL
-        let names = try await Self.withTimeout(timeout) {
-            try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        let fileSystem = fileSystem
+        let names = try await SyncFolderCalls.run(on: folder, timeout: timeout) {
+            try fileSystem.listFileNames(folder)
         }
 
         var documents: [SyncDocument] = []
@@ -87,13 +92,18 @@ struct SyncFolderTransport: SyncTransport {
             guard let deviceID = SyncStateFile.deviceID(fromFileName: name), deviceID != own else { continue }
             let url = folder.appendingPathComponent(name)
             do {
-                let data = try await Self.withTimeout(timeout) { try Data(contentsOf: url) }
+                let data = try await SyncFolderCalls.run(on: url, timeout: timeout) {
+                    try fileSystem.read(url)
+                }
                 let document = try SyncStateCodec.decode(SyncDocument.self, from: data)
                 guard document.schemaVersion == SyncDocument.currentSchemaVersion else {
                     logger.warning("skipping \(name): schema \(document.schemaVersion)")
                     continue
                 }
                 documents.append(document)
+            } catch let cancellation as CancellationError {
+                // A cancelled caller is not a bad peer file.
+                throw cancellation
             } catch {
                 logger.warning("skipping unreadable peer state \(name): \(error)")
             }
@@ -103,30 +113,166 @@ struct SyncFolderTransport: SyncTransport {
 
     func writeOwnDocument(_ data: Data, deviceID: String) async throws {
         let url = folderURL.appendingPathComponent(SyncStateFile.name(forDeviceID: deviceID))
-        try await Self.withTimeout(timeout) {
-            try data.write(to: url, options: .atomic)
+        let fileSystem = fileSystem
+        try await SyncFolderCalls.run(on: url, timeout: timeout) {
+            try fileSystem.write(data, url)
+        }
+    }
+}
+
+/// The folder transport's blocking file calls. Production uses Foundation;
+/// tests stand in calls that block the way a hung mount does.
+struct SyncFolderFileSystem: Sendable {
+    var listFileNames: @Sendable (URL) throws -> [String] = { folder in
+        try FileManager.default.contentsOfDirectory(atPath: folder.path)
+    }
+    var read: @Sendable (URL) throws -> Data = { url in
+        try Data(contentsOf: url)
+    }
+    var write: @Sendable (Data, URL) throws -> Void = { data, url in
+        try data.write(to: url, options: .atomic)
+    }
+}
+
+/// Runs the folder transport's blocking file calls so that a stuck call can't
+/// hold its caller.
+///
+/// A call into a File Provider mount can block for minutes on a dataless file
+/// or a stalled mount, and nothing can interrupt it. Each call therefore runs
+/// on a GCD thread, never on the Swift cooperative pool: a stuck call strands
+/// that one thread instead of starving the pool all async work shares. Its
+/// caller waits at most `timeout`: a GCD timer then resumes it with
+/// `SyncTransportError.timedOut`, and cancelling the caller resumes it at once
+/// with `CancellationError`. A started call cannot be interrupted; it runs to
+/// its end and its result is dropped.
+///
+/// A call claims its file path for the whole process, across transports and
+/// engine restarts, so a path that stays hung holds at most one thread and a
+/// write that lands late can never overwrite a newer one. A call that finds
+/// its path claimed waits, without holding a thread, for the earlier call to
+/// return, at most until its own deadline. A claim held for longer than its
+/// call's `timeout` is known to be stuck, so a new call on its path fails at
+/// once with `.timedOut` instead of waiting for it again. The caller's
+/// deadline is fixed when it arrives and covers both its wait and its call.
+enum SyncFolderCalls {
+    /// The call in flight on one path.
+    private struct Claim {
+        /// One `timeout` after the call claimed the path; a claim held past
+        /// it is stuck.
+        let stuckAt: DispatchTime
+        /// Calls waiting for the path to free up.
+        var waiters: [FirstOutcome<Void>] = []
+    }
+
+    private static let claims = OSAllocatedUnfairLock<[String: Claim]>(initialState: [:])
+
+    static func run<T: Sendable>(
+        on url: URL,
+        timeout: TimeInterval,
+        _ work: @escaping @Sendable () throws -> T
+    ) async throws -> T {
+        let path = url.path
+        let deadline = DispatchTime.now() + timeout
+        try await claim(path, timeout: timeout, until: deadline)
+
+        let outcome = FirstOutcome<T>()
+        DispatchQueue.global(qos: .utility).async {
+            let result = Result { try work() }
+            SyncFolderCalls.release(path)
+            outcome.resolve(result)
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: deadline) {
+            outcome.resolve(.failure(SyncTransportError.timedOut))
+        }
+        return try await outcome.value()
+    }
+
+    /// How many calls wait for `url`'s path to free up. A test seam: nothing
+    /// else can tell a waiting call from one that has not arrived yet.
+    static func waitingCallCountForTesting(on url: URL) -> Int {
+        claims.withLock { $0[url.path]?.waiters.count ?? 0 }
+    }
+
+    /// Claims `path` for a call that may take `timeout` and whose caller gives
+    /// up at `deadline`, after the path's earlier call returns if one is in
+    /// flight. A cancelled caller never claims.
+    private static func claim(
+        _ path: String,
+        timeout: TimeInterval,
+        until deadline: DispatchTime
+    ) async throws {
+        while true {
+            try Task.checkCancellation()
+            let waiter = FirstOutcome<Void>()
+            let claimed = try claims.withLock { held -> Bool in
+                guard let holder = held[path] else {
+                    held[path] = Claim(stuckAt: DispatchTime.now() + timeout)
+                    return true
+                }
+                guard DispatchTime.now() < holder.stuckAt else {
+                    throw SyncTransportError.timedOut
+                }
+                held[path]?.waiters.append(waiter)
+                return false
+            }
+            if claimed { return }
+
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: deadline) {
+                waiter.resolve(.failure(SyncTransportError.timedOut))
+            }
+            do {
+                try await waiter.value()
+            } catch {
+                claims.withLock { $0[path]?.waiters.removeAll { $0 === waiter } }
+                throw error
+            }
         }
     }
 
-    /// Race blocking file I/O against a wall-clock timeout. The blocking work
-    /// cannot be cancelled — on timeout it is abandoned on its pool thread and
-    /// the caller moves on; the next tick simply tries again.
-    private static func withTimeout<T: Sendable>(
-        _ seconds: TimeInterval,
-        _ work: @escaping @Sendable () throws -> T
-    ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
-            group.addTask { try work() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw SyncTransportError.timedOut
-            }
-            guard let first = try await group.next() else {
-                throw SyncTransportError.timedOut
-            }
-            group.cancelAll()
-            return first
+    /// Frees `path` once its call returns, and wakes the calls waiting for it.
+    private static func release(_ path: String) {
+        let waiters = claims.withLock { $0.removeValue(forKey: path)?.waiters ?? [] }
+        for waiter in waiters {
+            waiter.resolve(.success(()))
         }
+    }
+}
+
+/// The first outcome of a wait, delivered to its waiter exactly once. An
+/// outcome that arrives before the waiter starts waiting is kept for it.
+private final class FirstOutcome<T: Sendable>: Sendable {
+    private struct State {
+        var outcome: Result<T, any Error>?
+        var continuation: CheckedContinuation<T, any Error>?
+    }
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    /// Waits for the first outcome. Cancelling the waiting task settles the
+    /// wait with `CancellationError`.
+    func value() async throws -> T {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let ready = state.withLock { state -> Result<T, any Error>? in
+                    if state.outcome == nil { state.continuation = continuation }
+                    return state.outcome
+                }
+                if let ready { continuation.resume(with: ready) }
+            }
+        } onCancel: {
+            resolve(.failure(CancellationError()))
+        }
+    }
+
+    /// Settles the wait with `outcome`, unless an earlier outcome already did.
+    func resolve(_ outcome: Result<T, any Error>) {
+        let waiting = state.withLock { state -> CheckedContinuation<T, any Error>? in
+            guard state.outcome == nil else { return nil }
+            state.outcome = outcome
+            defer { state.continuation = nil }
+            return state.continuation
+        }
+        waiting?.resume(with: outcome)
     }
 }
 

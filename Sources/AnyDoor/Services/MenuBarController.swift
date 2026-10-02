@@ -19,6 +19,7 @@ final class MenuBarController {
 
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
+    private var panelSessions = MenuBarPanelSessions()
     private var hostingView: NSHostingView<AnyView>?
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
@@ -118,6 +119,7 @@ final class MenuBarController {
     private func showPanel() {
         guard let button = statusItem?.button else { return }
         HyperKeyService.shared.refreshSecureInputStatus()
+        let session = panelSessions.begin()
 
         // `\.locale` is captured at show time, not reactively rebound. That's
         // OK in practice because the panel auto-dismisses when the Settings
@@ -131,6 +133,12 @@ final class MenuBarController {
             rootView: AnyView(
                 MenuBarView(
                     onRequestClose: { [weak self] in self?.hidePanel() },
+                    isPanelCurrent: { [weak self] in
+                        self?.isPanelCurrent(session) ?? false
+                    },
+                    closePanelIfCurrent: { [weak self] in
+                        self?.closePanel(ifCurrent: session) ?? false
+                    },
                     clipboardHistoryModule: clipboardHistoryModule,
                     isSecureInputEnabled: HyperKeyService.shared.isSecureInputEnabled,
                     secureInputHolder: HyperKeyService.shared.secureInputHolder
@@ -223,7 +231,31 @@ final class MenuBarController {
         installKeyMonitors()
     }
 
+    /// Whether the panel that `session` showed is still up.
+    func isPanelCurrent(_ session: Int) -> Bool {
+        panelSessions.isCurrent(session)
+    }
+
+    /// Closes the panel only while it is still the showing that `session`
+    /// started, and returns whether it did.
+    func closePanel(ifCurrent session: Int) -> Bool {
+        guard panelSessions.endIfCurrent(session) else { return false }
+        hidePanel()
+        return true
+    }
+
+    /// Starts a panel session as `showPanel()` does, without a status item.
+    func beginPanelSessionForTesting() -> Int {
+        panelSessions.begin()
+    }
+
+    /// Closes the panel as Esc or a click elsewhere does.
+    func hidePanelForTesting() {
+        hidePanel()
+    }
+
     private func hidePanel() {
+        panelSessions.end()
         removeClickMonitors()
         removeKeyMonitors()
         statusItem?.button?.highlight(false)
@@ -376,5 +408,38 @@ final class MenuBarController {
         let image = NSImage(systemSymbolName: name, accessibilityDescription: "AnyDoor")
         image?.isTemplate = true
         return image
+    }
+}
+
+/// Numbers each showing of the menu-bar panel, so work that outlives one
+/// showing (a slow clipboard copy) can tell that its panel is gone and never
+/// closes a newer one.
+struct MenuBarPanelSessions {
+    private var latest = 0
+    private var showing: Int?
+
+    /// A new panel is showing; any earlier showing is over.
+    mutating func begin() -> Int {
+        latest += 1
+        showing = latest
+        return latest
+    }
+
+    /// The panel closed.
+    mutating func end() {
+        showing = nil
+    }
+
+    /// Ends `session` if it is the panel showing now, and returns whether
+    /// it was. An earlier session ends nothing, so it never closes a newer
+    /// panel.
+    mutating func endIfCurrent(_ session: Int) -> Bool {
+        guard isCurrent(session) else { return false }
+        end()
+        return true
+    }
+
+    func isCurrent(_ session: Int) -> Bool {
+        showing == session
     }
 }

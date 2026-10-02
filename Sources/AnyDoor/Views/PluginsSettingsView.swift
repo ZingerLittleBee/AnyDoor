@@ -39,10 +39,17 @@ struct PluginsSettingsView: View {
                 ForEach(scriptRegistry.installedManifests, id: \.id) { manifest in
                     scriptRow(for: manifest)
                 }
-                Button {
-                    sideload()
-                } label: {
-                    LocalizedText(.pluginsSideload)
+                HStack(spacing: 8) {
+                    Button {
+                        sideload()
+                    } label: {
+                        LocalizedText(.pluginsSideload)
+                    }
+                    .disabled(scriptRegistry.isInstallingZip)
+                    if scriptRegistry.isInstallingZip {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                 }
             } header: {
                 LocalizedText(.pluginsSectionScript)
@@ -294,7 +301,9 @@ struct PluginsSettingsView: View {
     /// Present a picker accepting a package folder or a `plugin-*.zip`, then
     /// Sideload the chosen package. A refusal (invalid manifest, unknown
     /// apiVersion, duplicate id, bad archive) surfaces a clear localized message
-    /// and changes nothing.
+    /// and changes nothing. A zip extracts off the main actor while the install
+    /// button shows a spinner; the install finishes, or its refusal shows, even
+    /// if Settings closes meanwhile.
     private func sideload() {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -302,17 +311,27 @@ struct PluginsSettingsView: View {
         panel.allowedContentTypes = [.zip]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let picked = panel.url else { return }
-        do {
-            if picked.pathExtension.lowercased() == "zip" {
-                try scriptRegistry.sideload(fromZip: picked)
-            } else {
+        guard picked.pathExtension.lowercased() == "zip" else {
+            do {
                 try scriptRegistry.sideload(fromDirectory: picked)
+            } catch {
+                showSideloadFailure(error)
             }
-        } catch {
-            ToastPresenter.shared.show(
-                .failure(L(.pluginsSideloadFailed, scriptSideloadFailureMessage(error)))
-            )
+            return
         }
+        Task {
+            do {
+                try await scriptRegistry.sideload(fromZip: picked)
+            } catch {
+                showSideloadFailure(error)
+            }
+        }
+    }
+
+    private func showSideloadFailure(_ error: any Error) {
+        ToastPresenter.shared.show(
+            .failure(L(.pluginsSideloadFailed, scriptSideloadFailureMessage(error)))
+        )
     }
 
     private func uninstallScript(_ id: ScriptPluginID) {

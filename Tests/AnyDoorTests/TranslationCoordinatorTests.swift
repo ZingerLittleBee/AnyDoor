@@ -57,10 +57,8 @@ final class TranslationCoordinatorTests: XCTestCase {
         }
     }
 
-    private func makeCoordinator(_ providers: [any TranslationProvider],
-                                 defaultsSuite: String = "translation.coord.\(UUID().uuidString)")
-    -> TranslationCoordinator {
-        let d = UserDefaults(suiteName: defaultsSuite)!
+    private func makeCoordinator(_ providers: [any TranslationProvider]) -> TranslationCoordinator {
+        let d = makeTemporaryDefaults()
         let settings = TranslationSettings(defaults: d)
         return TranslationCoordinator(settings: settings, makeProviders: { providers })
     }
@@ -69,7 +67,7 @@ final class TranslationCoordinatorTests: XCTestCase {
     /// single-provider builder returns `scripted` for that id.
     private func makeManualCoordinator(scripted: ScriptedProvider)
     -> TranslationCoordinator {
-        let d = UserDefaults(suiteName: "translation.coord.\(UUID().uuidString)")!
+        let d = makeTemporaryDefaults()
         let settings = TranslationSettings(defaults: d)
         var manual = TranslationServiceConfig(
             id: scripted.id, kind: .openAICompatible, displayName: "LLM", iconName: "brain",

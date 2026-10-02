@@ -513,10 +513,7 @@ final class ClipboardHistoryStoreRelocationLifecycleTests: XCTestCase {
     }
 
     private func makeDefaults() throws -> UserDefaults {
-        let suiteName = "ClipboardHistoryStoreRelocationLifecycleTests-\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        return defaults
+        makeTemporaryDefaults()
     }
 }
 

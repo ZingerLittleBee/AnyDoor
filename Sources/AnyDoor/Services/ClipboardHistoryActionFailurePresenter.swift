@@ -26,10 +26,16 @@ struct ClipboardHistoryActionFailureNotice: Equatable {
             let unavailableCount
         ):
             titleKey = .clipboardToastCopyFailed
-            details = [
-                .legacyOwned(count: ownedCount),
-                .unavailable(count: unavailableCount),
-            ]
+            // Either count can be zero, and a detail of zero files explains
+            // nothing.
+            var restoreDetails: [Detail] = []
+            if ownedCount > 0 {
+                restoreDetails.append(.legacyOwned(count: ownedCount))
+            }
+            if unavailableCount > 0 {
+                restoreDetails.append(.unavailable(count: unavailableCount))
+            }
+            details = restoreDetails
         default:
             titleKey = .clipboardToastCopyFailed
             details = []
@@ -60,14 +66,28 @@ enum ClipboardHistoryActionFailurePresenter {
     }
 
     /// A successful copy shows nothing here; the caller gives its own feedback.
+    /// Neither does a discarded one, which nobody wants anymore.
     static func present(_ outcome: ClipboardHistoryCopyOutcome) {
+        guard let message = failureMessage(for: outcome) else { return }
+        ToastPresenter.shared.show(.failure(message))
+    }
+
+    /// What a copy that ended with `outcome` reports, or nil when it reports
+    /// nothing.
+    static func failureMessage(
+        for outcome: ClipboardHistoryCopyOutcome
+    ) -> String? {
         switch outcome {
-        case .copied:
-            break
+        case .copied, .discarded:
+            nil
         case .materializationFailed(let failure):
-            present(failure)
+            ClipboardHistoryActionFailureNotice(failure ?? .unknown).message
+        case .plainTextUnavailable:
+            // Not "Copy failed": nothing is wrong with the entry, it just
+            // has no plain text to paste.
+            L(.clipboardToastPlainTextUnavailable)
         case .pasteboardWriteFailed:
-            present(.unknown)
+            ClipboardHistoryActionFailureNotice(.unknown).message
         }
     }
 }

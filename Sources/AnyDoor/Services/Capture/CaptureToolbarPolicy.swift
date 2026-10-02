@@ -1,8 +1,7 @@
 import Foundation
 
-/// Pure description of the attached capture toolbar's buttons. Phase 2 shows
-/// region / window / fullscreen (each is exactly a `CaptureMode`). Scrolling and
-/// recording join in Phase 3 via a richer tool-type enum.
+/// Pure description of the attached capture toolbar's buttons: which tools it
+/// shows, in order, and each tool's symbol and label.
 enum CaptureToolbarPolicy {
     /// Buttons rendered, left to right.
     static let tools: [CaptureToolType] = [.region, .window, .fullscreen, .timer, .scrolling, .recording]
@@ -19,15 +18,15 @@ enum CaptureToolbarPolicy {
         }
     }
 
-    /// Localized label key (reuses the existing mode-bar strings).
+    /// Localized label key for each toolbar button.
     static func labelKey(for tool: CaptureToolType) -> L10n.Key {
         switch tool {
-        case .region:     return .captureModeBarRegion
-        case .window:     return .captureModeBarWindow
-        case .fullscreen: return .captureModeBarFullscreen
-        case .timer:      return .captureModeBarTimer
-        case .scrolling:  return .captureModeBarScrolling
-        case .recording:  return .captureModeBarRecording
+        case .region:     return .captureToolbarRegion
+        case .window:     return .captureToolbarWindow
+        case .fullscreen: return .captureToolbarFullscreen
+        case .timer:      return .captureToolbarTimer
+        case .scrolling:  return .captureToolbarScrolling
+        case .recording:  return .captureToolbarRecording
         }
     }
 }

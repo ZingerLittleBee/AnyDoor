@@ -78,9 +78,7 @@ final class PluginTranslatorTests: XCTestCase {
         services: [TranslationServiceConfig],
         target: TranslationLanguage = .simplifiedChinese
     ) -> TranslationSettings {
-        let suite = "plugin-translator.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = makeTemporaryDefaults()
         let settings = TranslationSettings(defaults: defaults)
         settings.setServices(services)
         settings.setTargetLanguageCode(target.code)

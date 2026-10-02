@@ -10,7 +10,9 @@ import PluginInterface
 /// BuiltinItem case registered here with the wrong protocol, or not registered
 /// at all, is caught by `BuiltinCatalogInvariantTests` instead of silently
 /// doing nothing when its panel row or hotkey fires (`PanelStore.toggle/run`
-/// guard-return when no matching provider exists).
+/// guard-return when no matching provider exists). Scheduled Shutdown is the
+/// exception: `PanelStore` drives `ScheduledShutdownService` directly, and
+/// `ScheduledShutdownProvider` is registered only to keep that rule whole.
 @MainActor
 enum BuiltinProviderRegistry {
     static func makeAll(
@@ -24,7 +26,7 @@ enum BuiltinProviderRegistry {
             ShowHiddenFilesProvider(),
             MuteAudioProvider(),
             MicrophoneMuteProvider(),
-            DarkModeProvider(),
+            DarkModeProvider(automation: AutomationPermission.systemEvents),
             LockScreenProvider(),
             EmptyTrashProvider(),
             CaptureRegionProvider(),

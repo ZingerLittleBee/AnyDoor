@@ -47,7 +47,10 @@ final class ClipboardHistoryPopoverRemountTests: XCTestCase {
                 titleKey: .clipboardKindOcr,
                 onHoverChange: { _ in },
                 onDismissPopover: {},
-                onCopyAndClosePanel: {}
+                panel: ClipboardHistoryCommitSurface(
+                    isOpen: { false },
+                    close: { _ in }
+                )
             )
         }
         popover.show(anchoredTo: NSRect(x: 200, y: 400, width: 240, height: 36))

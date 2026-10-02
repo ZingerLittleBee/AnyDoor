@@ -53,6 +53,50 @@ final class CommandPaletteMatchTests: XCTestCase {
         XCTAssertLessThan(prefixHit!, aliasHit!)
     }
 
+    func testWordStartAliasMatchesOnlyAtTheStartOfAWord() {
+        // Record Screen in the Chinese UI: its title lacks every query here.
+        func aliasRank(_ query: String) -> CommandPaletteQueryMatch.Rank? {
+            CommandPaletteQueryMatch.rank(
+                titles: ["录制屏幕"],
+                wordStartAliases: ["screen recording"],
+                query: query
+            )
+        }
+        XCTAssertEqual(aliasRank("rec"), .other)
+        XCTAssertEqual(aliasRank("recording"), .other)
+        XCTAssertEqual(aliasRank("RECORDING"), .other)
+        XCTAssertEqual(aliasRank("screen rec"), .other)
+        XCTAssertEqual(aliasRank("screen recording"), .other, "an alias never ranks as an exact title")
+        XCTAssertNil(aliasRank("ding"))
+        XCTAssertNil(aliasRank("cording"))
+        XCTAssertNil(aliasRank("en rec"))
+    }
+
+    func testWordStartAliasRejectsAHitInsideItsOnlyWord() {
+        // "sho" sits inside "screenshot" but starts none of its words.
+        func aliasRank(_ query: String) -> CommandPaletteQueryMatch.Rank? {
+            CommandPaletteQueryMatch.rank(
+                titles: ["截图"],
+                wordStartAliases: ["screenshot"],
+                query: query
+            )
+        }
+        XCTAssertNil(aliasRank("sho"))
+        XCTAssertNil(aliasRank("shot"))
+        XCTAssertEqual(aliasRank("scr"), .other)
+    }
+
+    func testSecondaryAliasStillMatchesInsideAWord() {
+        // App aliases keep substring matching: a Chinese-UI user finds 微信
+        // by typing "chat", through its English name.
+        let rank = CommandPaletteQueryMatch.rank(
+            titles: ["微信"],
+            secondary: ["WeChat"],
+            query: "chat"
+        )
+        XCTAssertEqual(rank, .other)
+    }
+
     func testNonCandidateReturnsNil() {
         XCTAssertNil(rank(title: "Finder", query: "wa"))
         XCTAssertNil(CommandPaletteQueryMatch.rank(titles: ["Warp"], query: "   "))

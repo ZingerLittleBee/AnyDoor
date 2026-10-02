@@ -2,11 +2,21 @@ import SwiftData
 import XCTest
 @testable import AnyDoor
 
+/// Reads no peers and drops every write, so the WebDAV paths never reach a
+/// server.
+private struct OfflineSyncTransport: SyncTransport {
+    var watchableDirectory: URL? { nil }
+
+    func readPeerDocuments(excludingDeviceID: String) async throws -> [SyncDocument] { [] }
+    func writeOwnDocument(_ data: Data, deviceID: String) async throws {}
+}
+
 @MainActor
 final class SyncCoordinatorTests: XCTestCase {
 
     private var folder: URL!
-    private var suiteName: String!
+    /// Stands in for the live `local-state.json`, which no test may touch.
+    private var stateURL: URL!
     private var defaults: UserDefaults!
     private var container: ModelContainer!
 
@@ -14,8 +24,9 @@ final class SyncCoordinatorTests: XCTestCase {
         folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("SyncCoordinatorTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        suiteName = "SyncCoordinatorTests-\(UUID().uuidString)"
-        defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        stateURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SyncCoordinatorTests-local-state-\(UUID().uuidString).json")
+        defaults = makeTemporaryDefaults()
         let schema = Schema([KeyBinding.self, BuiltinPreference.self, Quicklink.self])
         container = try ModelContainer(
             for: schema,
@@ -24,12 +35,23 @@ final class SyncCoordinatorTests: XCTestCase {
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removePersistentDomain(forName: suiteName)
         try? FileManager.default.removeItem(at: folder)
+        try? FileManager.default.removeItem(at: stateURL)
+    }
+
+    private func makeCoordinator(
+        credentialStore: SyncWebDAVCredentialStore = SyncWebDAVCredentialStore()
+    ) -> SyncCoordinator {
+        SyncCoordinator(
+            defaults: defaults,
+            credentialStore: credentialStore,
+            localStateURL: stateURL,
+            webDAVTransportFactory: { _ in OfflineSyncTransport() }
+        )
     }
 
     func testEnableDisableLifecycle() async throws {
-        let coordinator = SyncCoordinator(defaults: defaults)
+        let coordinator = makeCoordinator()
         coordinator.bootstrap(modelContainer: container)
         XCTAssertFalse(coordinator.isEnabled)
         XCTAssertNil(coordinator.engine)
@@ -41,6 +63,11 @@ final class SyncCoordinatorTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: SyncDefaultsKeys.folderPath), folder.path)
         XCTAssertNotNil(coordinator.engine)
         XCTAssertNotEqual(coordinator.status, .idle)
+        await waitUntil("the first sync") { coordinator.hasSynced }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: stateURL.path),
+            "the engine keeps its local state in the injected file"
+        )
 
         coordinator.disable()
         XCTAssertFalse(coordinator.isEnabled)
@@ -55,7 +82,7 @@ final class SyncCoordinatorTests: XCTestCase {
         let service = "SyncCoordinatorTests-\(UUID().uuidString)"
         let credentials = SyncWebDAVCredentialStore(service: service)
         defer { credentials.deletePassword() }
-        let coordinator = SyncCoordinator(defaults: defaults, credentialStore: credentials)
+        let coordinator = makeCoordinator(credentialStore: credentials)
         coordinator.bootstrap(modelContainer: container)
 
         // Non-loopback http and empty usernames are rejected without
@@ -117,7 +144,7 @@ final class SyncCoordinatorTests: XCTestCase {
         defaults.set(true, forKey: SyncDefaultsKeys.enabled)
         defaults.set(folder.path + "-gone", forKey: SyncDefaultsKeys.folderPath)
 
-        let coordinator = SyncCoordinator(defaults: defaults)
+        let coordinator = makeCoordinator()
         coordinator.bootstrap(modelContainer: container)
 
         XCTAssertTrue(coordinator.isEnabled)
@@ -133,5 +160,10 @@ private extension SyncCoordinator {
         case .synced(let date), .failed(let date, _): return date
         case .idle, .waitingFirstSync: return nil
         }
+    }
+
+    var hasSynced: Bool {
+        if case .synced = status { return true }
+        return false
     }
 }

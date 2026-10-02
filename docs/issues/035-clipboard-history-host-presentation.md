@@ -2,7 +2,7 @@
 id: 035
 github: 88
 title: "Clipboard History v2: paged host presentation, preview, and paste actions"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

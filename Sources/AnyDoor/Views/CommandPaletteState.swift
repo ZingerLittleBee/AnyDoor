@@ -899,6 +899,7 @@ final class CommandPaletteState {
         CommandPaletteQueryMatch.rank(
             titles: [entry.localizedTitle(), entry.title],
             secondary: entry.searchAliases,
+            wordStartAliases: entry.wordStartAliases,
             query: query
         )
     }

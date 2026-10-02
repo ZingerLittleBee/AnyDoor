@@ -1,11 +1,11 @@
 import PluginInterface
 import SwiftUI
 
-/// Attached capture-type toolbar shown directly below the selection rectangle.
-/// A horizontal material pill of type buttons (region / window / fullscreen /
-/// scrolling / recording). Emits the chosen `CaptureToolType`; the hosting overlay
-/// executes it on the current selection. Sized to fit so the host can place it via
-/// `OverlayPlacement`.
+/// Attached capture-type toolbar shown below the selection rectangle (above it
+/// when there is no room). A horizontal material pill with one button per
+/// `CaptureToolbarPolicy.tools` entry. Emits the chosen `CaptureToolType`; the
+/// hosting overlay executes it on the current selection. Sized to fit so the host
+/// can place it via `OverlayPlacement`.
 struct CaptureSelectionToolbar: View {
     /// Highlighted button (the current/active type).
     let active: CaptureToolType
@@ -25,7 +25,7 @@ struct CaptureSelectionToolbar: View {
         .focusEffectDisabled()
     }
 
-    /// One mode button. The whole padded icon+label area is the hit target (a plain
+    /// One tool button. The whole padded icon+label area is the hit target (a plain
     /// button only hit-tests its opaque glyphs, so the label text and gaps would
     /// otherwise be dead zones), with a subtle hover highlight for affordance.
     private struct ToolButton: View {

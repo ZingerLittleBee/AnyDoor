@@ -30,6 +30,9 @@ final class SyncCoordinator {
 
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let credentialStore: SyncWebDAVCredentialStore
+    /// Where every engine keeps this machine's own document and clock.
+    @ObservationIgnored private let localStateURL: URL
+    @ObservationIgnored private let webDAVTransportFactory: (SyncWebDAVConfiguration) -> any SyncTransport
     @ObservationIgnored private var modelContainer: ModelContainer?
     @ObservationIgnored private(set) var engine: SyncEngine?
 
@@ -40,12 +43,20 @@ final class SyncCoordinator {
     private(set) var webdavURLString: String?
     private(set) var webdavUsername: String?
 
+    /// `localStateURL` and `webDAVTransportFactory` are seams for tests, which
+    /// must touch neither the live state file nor a real server.
     init(
         defaults: UserDefaults = .standard,
-        credentialStore: SyncWebDAVCredentialStore = SyncWebDAVCredentialStore()
+        credentialStore: SyncWebDAVCredentialStore = SyncWebDAVCredentialStore(),
+        localStateURL: URL = SyncLocalStateStore.defaultURL(),
+        webDAVTransportFactory: @escaping (SyncWebDAVConfiguration) -> any SyncTransport = {
+            SyncWebDAVTransport(config: $0)
+        }
     ) {
         self.defaults = defaults
         self.credentialStore = credentialStore
+        self.localStateURL = localStateURL
+        self.webDAVTransportFactory = webDAVTransportFactory
         isEnabled = defaults.bool(forKey: SyncDefaultsKeys.enabled)
         transportKind = defaults.string(forKey: SyncDefaultsKeys.transport)
             .flatMap(SyncTransportKind.init) ?? .folder
@@ -141,7 +152,7 @@ final class SyncCoordinator {
             context: modelContainer.mainContext,
             defaults: defaults,
             transport: built.transport,
-            stateStore: SyncLocalStateStore(url: SyncLocalStateStore.defaultURL())
+            stateStore: SyncLocalStateStore(url: localStateURL)
         )
         engine.onStatus = { [weak self] engineStatus in
             switch engineStatus {
@@ -192,8 +203,8 @@ final class SyncCoordinator {
             status = .failed(Date(), .invalidConfiguration)
             return nil
         }
-        return SyncWebDAVTransport(
-            config: SyncWebDAVConfiguration(baseURL: url, username: username, password: password)
+        return webDAVTransportFactory(
+            SyncWebDAVConfiguration(baseURL: url, username: username, password: password)
         )
     }
 

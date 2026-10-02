@@ -111,6 +111,18 @@ next trigger retries. Unreadable or corrupt peer files are skipped
 per-file. Detailed logs: Console.app, subsystem `dev.bybee.AnyDoor`,
 category `sync`.
 
+While sync runs, a folder or file that stops responding — a stalled
+network mount, a cloud file that won't download — does not stall it.
+AnyDoor waits at most five seconds for each folder listing, read or write:
+a peer file that does not answer is skipped, a folder that cannot be
+listed in time is reported as unreachable, and this Mac's own state file,
+if it cannot be written in time, as not writable. While a folder or file
+is still stuck, later syncs skip it or report it at once instead of
+waiting again; one that is merely slow is waited for, within the same five
+seconds. Turning sync on, choosing a folder, or launching AnyDoor while
+the folder does not respond can still freeze AnyDoor until the folder
+answers.
+
 Disabling sync stops the engine but keeps your local configuration, the
 machine's state file in the folder, and its local document — re-enabling
 resumes where it left off.

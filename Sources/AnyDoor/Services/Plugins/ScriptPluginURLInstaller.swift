@@ -131,7 +131,7 @@ final class ScriptPluginURLInstaller {
         }
 
         do {
-            let (tempRoot, packageRoot) = try ScriptPluginArchive.extract(zipURL: archive)
+            let (tempRoot, packageRoot) = try await ScriptPluginArchive.extract(zipURL: archive)
             defer { try? FileManager.default.removeItem(at: tempRoot) }
 
             // Validate before prompting, so the dialog only ever describes a

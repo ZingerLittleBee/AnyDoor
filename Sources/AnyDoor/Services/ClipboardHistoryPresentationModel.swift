@@ -51,6 +51,11 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         @Sendable (
             ClipboardHistoryLegacyFileRestoreRequest
         ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome
+    /// Starts rebuilding a failed search index. Returns the index's status
+    /// afterwards: indexing once a rebuild started, or the current status
+    /// when the index had not failed.
+    let retrySearchIndex:
+        @Sendable () async throws -> ClipboardHistorySearchIndexStatus
 
     /// - Parameter loadsAggregates: Whether to fetch what only the wall
     ///   shows: the total for the query, the source summaries, and the tag
@@ -118,6 +123,9 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         restoreLegacyOwnedFiles = { request in
             try await module.restoreLegacyOwnedFiles(request)
         }
+        retrySearchIndex = {
+            try await module.retrySearchIndex()
+        }
     }
 
     init(
@@ -178,7 +186,12 @@ struct ClipboardHistoryPresentationOperations: Sendable {
                 ClipboardHistoryLegacyFileRestoreRequest
             ) async throws -> ClipboardHistoryLegacyFileRestoreOutcome = { _ in
                 throw ClipboardHistoryModuleError.operationUnavailable
-            }
+            },
+        retrySearchIndex:
+            @escaping @Sendable () async throws
+                -> ClipboardHistorySearchIndexStatus = {
+                    throw ClipboardHistoryModuleError.operationUnavailable
+                }
     ) {
         self.status = status
         self.page = page
@@ -192,6 +205,7 @@ struct ClipboardHistoryPresentationOperations: Sendable {
         self.deleteTagDefinition = deleteTagDefinition
         self.legacyFileRestorePlan = legacyFileRestorePlan
         self.restoreLegacyOwnedFiles = restoreLegacyOwnedFiles
+        self.retrySearchIndex = retrySearchIndex
     }
 }
 
@@ -339,6 +353,13 @@ final class ClipboardHistoryPresentationModel {
     /// Least-recently-used first. Kept in step with `materializationCache` by
     /// `cacheMaterialization` / `pruneMaterializations`.
     private var materializationOrder: [MaterializationKey] = []
+    /// Whether an entry's host-action materialization had exact text on every
+    /// item, which is what the ⌥↵ hint offers. Kept apart from the bounded
+    /// cache, which the wall's mounted cards churn, and recorded whatever
+    /// the request's revision, because the cards keep that value too. It is
+    /// cleared with the cache on an edit, a delete, a restore and a page
+    /// pruning; a favorite or a tag leaves the payload alone and keeps it.
+    private var plainTextEligibility: [ClipboardHistoryEntryID: Bool] = [:]
     private(set) var entries: [ClipboardHistoryEntry] = []
     private(set) var query = ClipboardHistoryQuery()
     private(set) var selectedID: ClipboardHistoryEntryID?
@@ -351,6 +372,8 @@ final class ClipboardHistoryPresentationModel {
     /// unknown. It is refreshed whenever a new generation of the prefix is
     /// published; a failed count only clears it and never disturbs the entries.
     private(set) var totalCount: Int?
+    /// True while `retrySearchIndex()` is starting a rebuild and reloading.
+    private(set) var isRetryingSearchIndex = false
 
     var selectedEntry: ClipboardHistoryEntry? {
         guard let selectedID else { return nil }
@@ -782,7 +805,7 @@ final class ClipboardHistoryPresentationModel {
         contentState = entries.isEmpty ? .empty : .content
         reconcileSelection(preferredID: selectedID)
         let currentIDs = Set(entries.map(\.id))
-        pruneMaterializations { currentIDs.contains($0.entryID) }
+        pruneMaterializations { currentIDs.contains($0) }
     }
 
     /// How many continuation fetches a rebase may spend: roughly one walk of
@@ -854,7 +877,10 @@ final class ClipboardHistoryPresentationModel {
                 if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                     entries[index] = entry
                 }
-                invalidateMaterializations(for: entry.id)
+                invalidateMaterializations(
+                    for: entry.id,
+                    payloadChanged: mutation.changesPayload
+                )
                 if Self.requiresRefetch(for: mutation, query: query) {
                     await loadFirstPage(preservingSelection: true)
                 }
@@ -920,6 +946,12 @@ final class ClipboardHistoryPresentationModel {
             if usesCache, requestRevision == revision {
                 cacheMaterialization(value, for: key)
             }
+            if purpose == .hostAction {
+                let isEligible = Self.supportsPlainTextPaste(value)
+                if plainTextEligibility[entryID] != isEligible {
+                    plainTextEligibility[entryID] = isEligible
+                }
+            }
             return value
         } catch {
             if recordsFailure, requestRevision == revision {
@@ -938,17 +970,43 @@ final class ClipboardHistoryPresentationModel {
         ]
     }
 
+    /// Whether the entry is known to paste as plain text: its host-action
+    /// materialization had exact text on every item. False until one loaded.
     func supportsPlainTextPaste(
         for entryID: ClipboardHistoryEntryID
     ) -> Bool {
-        guard let materialization = cachedMaterialization(
-            for: entryID,
-            purpose: .hostAction
-        ), let texts = materialization.exactTexts else {
-            return false
-        }
+        plainTextEligibility[entryID] ?? false
+    }
+
+    private static func supportsPlainTextPaste(
+        _ materialization: ClipboardHistoryMaterialization
+    ) -> Bool {
+        guard let texts = materialization.exactTexts else { return false }
         return !materialization.items.isEmpty
             && texts.count == materialization.items.count
+    }
+
+    /// The search index's state, read without running a query.
+    func searchIndexStatus() async -> ClipboardHistorySearchIndexStatus? {
+        await operations.status().searchIndex
+    }
+
+    /// Starts rebuilding a failed search index, then runs the current query
+    /// again so it follows the rebuild instead of the failure. Returns false
+    /// when the module refused to start, which leaves the state as it was.
+    /// Single flight: a call while one is in progress returns true at once.
+    @discardableResult
+    func retrySearchIndex() async -> Bool {
+        guard !isRetryingSearchIndex else { return true }
+        isRetryingSearchIndex = true
+        defer { isRetryingSearchIndex = false }
+        do {
+            _ = try await operations.retrySearchIndex()
+        } catch {
+            return false
+        }
+        await loadFirstPage(preservingSelection: true)
+        return true
     }
 
     private func loadFirstPage(preservingSelection: Bool) async {
@@ -1043,7 +1101,7 @@ final class ClipboardHistoryPresentationModel {
                 contentState = entries.isEmpty ? .empty : .content
                 reconcileSelection(preferredID: preferredSelection)
                 let currentIDs = Set(entries.map(\.id))
-                pruneMaterializations { currentIDs.contains($0.entryID) }
+                pruneMaterializations { currentIDs.contains($0) }
             case .indexing:
                 entries = []
                 selectedID = nil
@@ -1094,10 +1152,15 @@ final class ClipboardHistoryPresentationModel {
         }
     }
 
+    /// Drops what is cached for `entryID`. Its plain-text eligibility goes
+    /// too, unless the change left the payload alone.
     private func invalidateMaterializations(
-        for entryID: ClipboardHistoryEntryID
+        for entryID: ClipboardHistoryEntryID,
+        payloadChanged: Bool = true
     ) {
-        pruneMaterializations { $0.entryID != entryID }
+        pruneMaterializations(keepsEligibility: !payloadChanged) {
+            $0 != entryID
+        }
     }
 
     private func cacheMaterialization(
@@ -1122,11 +1185,18 @@ final class ClipboardHistoryPresentationModel {
         materializationOrder.append(materializationOrder.remove(at: index))
     }
 
+    /// Keeps what is cached for the entries `isKept` accepts and drops the
+    /// rest, along with their plain-text eligibility unless `keepsEligibility`.
     private func pruneMaterializations(
-        keeping isKept: (MaterializationKey) -> Bool
+        keepsEligibility: Bool = false,
+        keeping isKept: (ClipboardHistoryEntryID) -> Bool
     ) {
-        materializationCache = materializationCache.filter { isKept($0.key) }
-        materializationOrder.removeAll { !isKept($0) }
+        materializationCache = materializationCache.filter {
+            isKept($0.key.entryID)
+        }
+        materializationOrder.removeAll { !isKept($0.entryID) }
+        guard !keepsEligibility else { return }
+        plainTextEligibility = plainTextEligibility.filter { isKept($0.key) }
     }
 
     private func upsertTagDefinition(
@@ -1148,7 +1218,8 @@ final class ClipboardHistoryPresentationModel {
             return
         }
         entries[index] = entry
-        invalidateMaterializations(for: entry.id)
+        // Only tag creation replaces an entry, and a tag is no payload.
+        invalidateMaterializations(for: entry.id, payloadChanged: false)
     }
 
     private static func sourceName(
@@ -1239,6 +1310,17 @@ private extension ClipboardHistoryMutation {
              .setTags(let entryID, _),
              .editText(let entryID, _):
             entryID
+        }
+    }
+
+    /// Whether the mutation can change what the entry pastes. A favorite or
+    /// a tag cannot.
+    var changesPayload: Bool {
+        switch self {
+        case .delete, .editText:
+            true
+        case .setFavorite, .setTags:
+            false
         }
     }
 }

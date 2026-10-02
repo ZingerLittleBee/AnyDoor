@@ -60,10 +60,11 @@ when you need them.
 
 ### Screen capture
 
-- One capture menu, one selection: a hotkey freezes the screen and shows a
+- One selection, one toolbar: a hotkey freezes the screen and shows a
   pre-adjustable selection (resize handles, move, re-drag; restored from the
   last selection) with an attached toolbar that switches tool on the fly —
-  **region**, **window**, **fullscreen**, **scrolling**, and **recording**.
+  **region**, **window**, **fullscreen**, **timer**, **scrolling**, and
+  **recording**.
 - Region, window, fullscreen, and timed capture — each also bindable to its
   own hotkey — over a freeze-screen overlay with a crosshair, live dimensions,
   a magnifier loupe, and arrow-key nudge/resize across every connected display.

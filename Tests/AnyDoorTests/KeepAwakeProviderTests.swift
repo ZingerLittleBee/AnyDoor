@@ -255,6 +255,7 @@ final class KeepAwakeProviderTests: XCTestCase {
         // Bootstrap a fresh PanelStore with a throwing provider so we can
         // assert the catch path pulls the provider's real state into the
         // cache instead of leaving an optimistically-written value behind.
+        // The store records its notice instead of opening the toast window.
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: KeyBinding.self, BuiltinPreference.self,
@@ -264,7 +265,8 @@ final class KeepAwakeProviderTests: XCTestCase {
 
         let backend = ThrowingKeepAwakeBackend(failuresBeforeSuccess: 1)
         let provider = KeepAwakeProvider(backend: backend)
-        let store = PanelStore.shared
+        var toasts: [ToastStyle] = []
+        let store = PanelStore(presentToast: { toasts.append($0) })
         store.bootstrap(modelContainer: container, providers: [provider])
 
         // Drive a failing turn-on through the public mutation path.
@@ -278,6 +280,30 @@ final class KeepAwakeProviderTests: XCTestCase {
         }
         XCTAssertEqual(keepAwakeEntry?.toggleState, false,
                        "panel row must not render as on after a rejected acquire")
+
+        // A duration choice reports the failure once, naming the command.
+        guard toasts.count == 1, case .failure(let message) = toasts.first else {
+            return XCTFail("expected exactly one failure notice, got \(toasts.map(\.message))")
+        }
+        XCTAssertEqual(message, L(.toastCommandFailed, L(.builtinKeepAwake)))
+    }
+
+    @MainActor
+    func testPanelStoreToggleTurnsKeepAwakeOnIndefinitelyAndOff() async throws {
+        // Behavior preservation: the row and its hotkey switch Keep Awake on
+        // with the same `switchOnDuration` as `setState`
+        // (testToggleProviderConformanceUsesIndefiniteOnEnable).
+        let backend = MockKeepAwakeBackend()
+        let provider = KeepAwakeProvider(backend: backend)
+        let store = try makePanelLaneTestStore(rows: [.keepAwake], providers: [provider])
+
+        await store.toggle(.keepAwake)
+        XCTAssertEqual(store.keepAwakeState, .indefinite)
+        XCTAssertTrue(backend.isHeld)
+
+        await store.toggle(.keepAwake)
+        XCTAssertEqual(store.keepAwakeState, .off)
+        XCTAssertFalse(backend.isHeld)
     }
 
     func testSwitchingFromTimedToIndefiniteThenExpirationNoOp() async throws {

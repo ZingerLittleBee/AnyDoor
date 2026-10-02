@@ -6,13 +6,38 @@ versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Screenshot to Clipboard (截图到剪贴板) is now called Screenshot (截图). It
+  copies a capture only when Auto-copy after capture is on in Settings →
+  Screenshot, so the old name did not always fit. In the English UI, typing
+  `screenshot` in the command palette and pressing Return now opens AnyDoor's
+  Screenshot instead of the macOS Screenshot app.
+- The command palette finds several commands by more names, in either app
+  language: Screenshot (截图) by capture, screenshot, region, 截图, 截屏, or
+  区域截图; Screen Text Recognition (屏幕取词) by OCR; Record Screen (录制屏幕)
+  by screen recording or 录屏; Timed Capture (定时截图) by timer or 延时; and
+  Recognize QR Code (识别二维码) by scan, QR, 扫描, or 二维码. These names match
+  only from the start of a word, so `rec` finds Record Screen but `ding` does
+  not, and a command or app whose own name starts with your search still
+  comes first.
+- Choosing an entry in a menu-bar history popover now pastes it into the app
+  you were using, as the clipboard wall does, unless Copy only (仅复制，不自动粘贴)
+  is on in Settings → Clipboard. Keypad Enter works there too, and ⌥↵ pastes
+  plain text, or says that the entry has no plain-text version and leaves the
+  popover open. Without Accessibility access, the popover copies the entry and
+  says that pasting needs it.
+- The Return hint in the clipboard wall and the history popovers now says Paste
+  (粘贴), or Copy (复制) when Copy only is on. The wall's ⌥↵ hint says Copy plain
+  (纯文本复制) then.
+
 ### Removed
 
 - The Capture Menu (截图菜单) action is gone from the menu-bar panel and command
-  palette, because it did the same as Screenshot to Clipboard (截图到剪贴板).
-  Its hotkey moves to Screenshot to Clipboard unless that action already has
-  one, and if Capture Menu was shown, Screenshot to Clipboard is shown too.
-  Restoring a backup made before this change does the same.
+  palette, because it did the same as Screenshot (截图). Its hotkey moves to
+  Screenshot unless that action already has one, and if Capture Menu was
+  shown, Screenshot is shown too. Restoring a backup made before this change
+  does the same.
 
 ### Fixed
 
@@ -36,15 +61,66 @@ versioning.
   tooltip in them.
 - Clipboard History search no longer stays unavailable for good after one
   failed search index rebuild. Later launches retry the rebuild in the
-  background, and after three failures in a row they wait for the next AnyDoor
-  update. Meanwhile, searching in the clipboard wall says that search is
-  unavailable and browsing still works, instead of calling the whole history
-  unavailable and pointing to a retry in Settings that is not there.
+  background, and after three failures in a row they stop retrying until the
+  next AnyDoor update. Meanwhile, searching in the clipboard wall says that
+  search is unavailable and browsing still works, instead of calling the whole
+  history unavailable and pointing to a retry in Settings that is not there.
+  The notice now has a Rebuild Search Index (重建搜索索引) button that starts a
+  rebuild at once.
+- An open clipboard wall now shows the search results once a search index
+  rebuild finishes, instead of showing the rebuilding notice until the query
+  changed.
+- ⌥↵ on a clipboard entry without a plain-text version now says so and leaves
+  the clipboard wall open, instead of showing "Copy failed" (复制失败).
+- A copy that fails on a file collection no longer lists a count of zero, such
+  as "Files requiring restore: 0" (待恢复文件：0).
+- Pressing Return twice, or double-clicking an entry twice, in quick succession
+  no longer copies or pastes it twice, and a slow copy that finishes after you
+  closed the wall no longer overwrites what you copied since. Return pressed
+  while the clipboard wall is still opening now pastes into the previous app
+  instead of into the wall, and Esc, a click elsewhere, or switching apps
+  during the opening closes the wall once it is open. Keys pressed while the
+  wall slides closed no longer act on it, so ⌫ pressed then no longer deletes
+  the entry being pasted.
+- When AnyDoor lacks Accessibility access, choosing an entry in the clipboard
+  wall now copies it and says that pasting needs Accessibility, instead of
+  closing silently.
 - The downloaded app can now ask for Automation permission. Its signature
   lacked the Apple Events entitlement, without which macOS does not let an app
   ask, so actions that control Finder or System Events (Dark Mode, Empty
   Trash, a graceful Scheduled Shutdown, and Image Conversion picking up the
   Finder selection) could fail without ever asking for access.
+- The Dark Mode switch now reads the appearance from macOS instead of asking
+  System Events for it. A System Events that stopped responding could hold up
+  the menu-bar panel's switches and the command palette's app list for up to
+  two minutes; the panel and palette now wait at most about a second for
+  System Events' permission answer.
+- The Getting Started permissions step used to check Automation on the main
+  thread every second, so a System Events that stopped responding could freeze
+  AnyDoor while that step was open. The step now checks permissions in the
+  background, and both it and Settings → General → Permissions wait at most
+  about a second for System Events, so the other permissions keep updating.
+- The Automation card in Getting Started now names only what that permission
+  covers, Dark Mode and scheduled shutdown, and says that Empty Trash asks to
+  control Finder the first time you use it. It used to list Empty Trash, whose
+  Finder access it never requested.
+- Panel actions that fail now show a notice instead of failing silently. This
+  covers Display Sleep, System Sleep, Flush DNS, Restart Finder and Restart
+  Dock, and switches such as Dark Mode, Mute, Hide Dock and Keep Awake,
+  whether they run from the menu-bar panel, a hotkey or the command palette.
+  The notice names the action, and says when Dark Mode needs Automation
+  access.
+- Config Sync no longer stalls when the sync folder stops responding, for
+  example on a disconnected network drive or with a cloud file that won't
+  download. AnyDoor now stops waiting after five seconds: it skips another
+  Mac's stuck file, Settings reports a stuck folder as unreachable (or as not
+  writable when this Mac's own file is stuck) instead of showing the last
+  successful sync, and AnyDoor syncs the file again once it responds.
+- Installing a Script Plugin from a zip that is slow to unpack, such as one
+  on an unresponsive drive, no longer freezes AnyDoor, in Settings or through
+  an install link. The zip now unpacks in the background, with a spinner in
+  Settings, and one that takes more than 30 seconds to unpack is refused with
+  a message.
 
 ## [4.2.6] - 2026-10-02
 

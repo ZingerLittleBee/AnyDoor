@@ -144,9 +144,7 @@ final class PluginPaletteContributionTests: XCTestCase {
 
     @MainActor
     func testInstallAndUninstallPublishPaletteContributions() async throws {
-        let suiteName = "PluginPaletteContributionTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
 
         let plugin = FixturePlugin()
         let container = try makePluginRegistryTestContainer()
@@ -169,9 +167,7 @@ final class PluginPaletteContributionTests: XCTestCase {
 
     @MainActor
     func testPanelPopoverLookupOnlyAnswersWhileInstalled() throws {
-        let suiteName = "PluginPaletteContributionTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = makeTemporaryDefaults()
 
         let plugin = FixturePlugin()
         let container = try makePluginRegistryTestContainer()

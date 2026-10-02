@@ -2,9 +2,14 @@
 id: 031
 github: 84
 title: "Clipboard History v2: encrypted substring search, ranking, and cursor pages"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
+
+> **Superseded in part (2026-10-02).** The date constraint in What to build and
+> the date-filter acceptance criterion below were superseded: no surface ever
+> offered a date filter, so the history query's capture-date bounds were
+> removed. See the [PRD amendment](../prds/2026-07-29-clipboard-history-v2.md#search).
 
 ## Parent
 

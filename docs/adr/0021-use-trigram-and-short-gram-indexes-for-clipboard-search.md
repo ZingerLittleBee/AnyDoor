@@ -202,3 +202,32 @@ written together with the rebuild-failed reason, so an index marked failed for
 any other reason was marked by a different build, and nothing says a rebuild
 clears it: it waits for an explicit retry. Each failed rebuild logs its error
 domain and code, and never any content.
+
+## Amendment: rebuilding from the wall (2026-10-03)
+
+The wall now offers the explicit retry. While a query cannot run because the
+index failed, for either reason, the wall's notice carries a Rebuild Search
+Index button that calls `retrySearchIndex()` through the presentation model.
+The call is single flight, and the button is disabled while it starts the
+rebuild. A store that is unavailable as a whole gets no button: its actions
+stay in Settings.
+
+An index whose state this build cannot read gets a line of its own, which says
+that search needs its index rebuilt. When that index is marked failed for a
+reason this build does not know, nothing but the button rebuilds it, because
+opening the store retries only a rebuild failure. An unrecognized state value
+shows the same line, and the next open still rebuilds it as well.
+
+The rebuild runs in the background like any other: search reports that it is
+indexing, and browsing stays available. The module still announces nothing
+when a rebuild ends, so an open wall rereads the index status every second
+while its query waits on one, and runs the query again once the rebuild has
+ended, instead of waiting for the query to change. A rebuild that fails again
+brings the notice and its button back. When the user started it from the wall
+that is still open, a toast says that the rebuild failed, as it does when the
+module refuses to start one.
+
+An explicit retry is not budgeted. The button rebuilds after any number of
+failures in a row, and, as before, the retry starts that count over. Like any
+rebuild, it holds the store's writer until it ends, about a minute on a large
+store, so captures and copies of file entries wait for it meanwhile.

@@ -110,9 +110,13 @@ own write as a bogus history entry, including a throwing partial write.
 `SelectedTextReader.readViaClipboard` uses the same scoped token across its synthesized-⌘C awaits
 and final restoration. A Clipboard History entry reaches the pasteboard only through
 `ClipboardHistoryPasteService.copyEntry` (an uncached materialization written through the funnel,
-reported as a `ClipboardHistoryCopyOutcome`), which the menu-bar popover and the wall share; each
-caller keeps its own success step and failure presentation, and the wall sends a materialization
-failure through `presentActionFailure()` so legacy owned files still get the restore flow.
+reported as a `ClipboardHistoryCopyOutcome`), which the menu-bar popover and the wall share through
+`ClipboardHistoryPasteService.commit`. The latest commit wins: a superseded one writes nothing and
+shows nothing, and one whose surface closed meanwhile writes only while the pasteboard is unchanged
+since it started, and never pastes. Once its panel has closed, each surface pastes through
+`ClipboardHistoryPasteService.pasteAfterClosing` unless Copy only is on. Each caller keeps its own
+failure presentation, and the wall sends a materialization failure through `presentActionFailure()`
+so legacy owned files still get the restore flow.
 
 ## Hotkeys and panel
 
@@ -193,7 +197,12 @@ separately). **All writes must go through PanelStore's mutation methods** (`setB
 view state, and invoke the injected hotkey refresh — except `reorderAppShortcuts`, which only
 changes display order and intentionally skips the snapshot refresh. PanelStore additionally owns the
 provider registry and the activation paths (`toggle`, `run`, `setKeepAwakeDuration`) with per-item
-in-flight guards.
+in-flight guards. An error a provider throws out of them has not been reported yet (the contract on
+the protocols in `BuiltinProvider.swift`): PanelStore logs it with the item key and the error's case
+and code public (`CommandFailure.logSummary`; the full error stays private) and shows one failure
+notice naming the command (`CommandFailure.toast`). A provider that reports its own outcome returns
+normally instead, and `refreshAll` never shows a notice. After a failed toggle PanelStore re-reads
+the row's permission, so an open panel asks for a permission the failure revealed as missing.
 
 ### HotkeyAction dispatch & snapshot compilation
 
@@ -358,8 +367,9 @@ store, developer mode (`plugins.script.developerMode`), and dev directories
 (`plugins.script.devDirectories`) are all **machine-local and out of backup/sync entirely** — none
 is in `SyncSettingsRegistry`, so `reconcileLifecycleImport` is a no-op for this kind (Script
 packages exist only on the local machine). A package may also arrive as a **zip**
-(`sideload(fromZip:)` extracts via `ScriptPluginArchive` — ditto-based, unwraps a single wrapper
-folder, ignores `__MACOSX`/hidden files — into a temp dir and reuses the directory path) or via the
+(`sideload(fromZip:)` extracts via `ScriptPluginArchive` — `ditto` through `ProcessRunner`, off the
+main actor with a 30 s timeout, unwraps a single wrapper folder, ignores `__MACOSX`/hidden files —
+into a temp dir and reuses the directory path) or via the
 **`anydoor://install-plugin?url=` link** (`ScriptPluginURLInstaller`, wired from
 `AppDelegate.application(_:open:)`; scheme registered in `Info.plist` `CFBundleURLTypes`, so only
 the `.app` identity receives it): the pure `PluginInstallURLParse.classify` accepts only an https
@@ -481,6 +491,20 @@ when the committed JSON is stale — so a contract change that lands on only one
 not a plugin author.
 
 ## Command palette
+
+### Command palette root search
+
+Root entries rank through `CommandPaletteQueryMatch.rank` (`CommandPaletteState.rootRank`): the
+active-language title ranks exact, prefix, or other, and every alias hit ranks `.other`, so an alias
+never outranks a title prefix. Within a tier, `rankedByGlobalTiers` keeps section order, and every
+builtin section precedes Applications. Installed-app aliases and Quicklink Keywords
+(`PanelEntry.searchAliases`) match anywhere in the alias, which lets a Chinese-UI user find 微信 by
+typing "chat". Builtin entries carry Core-side bilingual aliases instead: `BuiltinItem.paletteAliases`
+(in `BuiltinItem+Core.swift`, not `PluginInterface`), which `PanelStore.rebuild()` copies into
+`PanelEntry.wordStartAliases`. They are match data rather than catalog strings, so either language's
+terms work in either UI; they are never shown; and they match only at the start of the alias or of one
+of its whitespace-separated words. Substring matching there would let "ding" or "co" put Record
+Screen ("screen recording") above an app that a Chinese-UI user opens by its English name.
 
 ### Command palette second-level menu
 
@@ -684,9 +708,13 @@ service also owns the on/off policy: `setArmed(_:)` arms the configured `default
 or cancels. The panel row and its global hotkey reach it through `PanelStore.toggle`, which
 special-cases the item and calls `setArmed` on the service directly, so the read and the write share
 one MainActor turn; the thin `ScheduledShutdownProvider` (`ToggleProvider`) exists to satisfy the
-catalog invariant, and its `setState`, which no production path calls, forwards to `setArmed`.
+catalog invariant, and no production path calls its `readState` or `setState`.
 `PanelStore` mirrors its Keep Awake plumbing (`scheduledShutdownState`,
-`setScheduledShutdownDuration` for the duration presets, `onScheduledShutdownStateChange`).
+`setScheduledShutdownDuration` for the duration presets, `onScheduledShutdownStateChange`). The
+service's `onChange`, which `PanelStore.bootstrap` subscribes before `bootstrapOnLaunch` runs and
+which the service calls synchronously on every transition, is the only path that carries the
+service's transitions into the cache; `refreshAll` also re-reads the state when the panel or palette
+opens.
 Execution goes through `ShutdownExecuting`: graceful via `AppleScriptRunner` (System Events,
 Automation permission), forced via the privileged helper. Config
 (`forced`/`warningLeadSeconds`/`defaultMinutes`) is portable via `SyncSettingsRegistry`; the live

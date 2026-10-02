@@ -814,13 +814,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         )
         try context.save()
 
-        let suiteName = "ClipboardHistoryLegacyAdapterTests-\(UUID())"
-        let defaults = try XCTUnwrap(
-            UserDefaults(suiteName: suiteName)
-        )
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let defaults = makeTemporaryDefaults()
         let tags = [
             ClipboardTag(id: "work", name: "Work"),
             ClipboardTag(id: "later", name: "Later"),
@@ -1013,11 +1007,6 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
     }
 
     private func makeDefaults() throws -> UserDefaults {
-        let suiteName = "ClipboardHistoryLegacySourceTests-\(UUID())"
-        let defaults = try XCTUnwrap(
-            UserDefaults(suiteName: suiteName)
-        )
-        defaults.removePersistentDomain(forName: suiteName)
-        return defaults
+        makeTemporaryDefaults()
     }
 }

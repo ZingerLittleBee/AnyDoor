@@ -84,8 +84,13 @@ final class SyncEngine {
     private var watcher: DirectoryWatcher?
     private var periodicTask: Task<Void, Never>?
 
-    /// Set by the owner before `start()`; called after every tick.
+    /// Set by the owner before `start()`; called after every tick until
+    /// `stop()`.
     var onStatus: @MainActor (SyncEngineStatus) -> Void = { _ in }
+    /// Set for good by `stop()`. A tick still waiting on the transport then
+    /// ends without applying peer changes, starting a write or reporting, and
+    /// no new tick starts.
+    private var isStopped = false
 
     init(
         config: Configuration,
@@ -163,7 +168,10 @@ final class SyncEngine {
         tickSoon()
     }
 
+    /// Unregister every trigger and stop for good; the owner builds a new
+    /// engine to sync again.
     func stop() {
+        isStopped = true
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
@@ -197,6 +205,7 @@ final class SyncEngine {
     // MARK: - Tick pipeline
 
     func tick() async {
+        guard !isStopped else { return }
         if tickInFlight {
             tickPending = true
             return
@@ -223,6 +232,9 @@ final class SyncEngine {
             failure = (error as? SyncTransportError) == .unauthorized
                 ? .unauthorized : .folderUnreachable
         }
+        // Sync may have been turned off or re-pointed while the read waited,
+        // up to the transport's timeout on an unresponsive folder.
+        guard !isStopped else { return }
         var merged = document
         for peer in peers {
             merged = merged.merged(with: peer)
@@ -251,6 +263,7 @@ final class SyncEngine {
         if let writeFailure = await writeOwnDocumentIfNeeded() {
             failure = failure ?? writeFailure
         }
+        guard !isStopped else { return }
         onStatus(failure.map { .failed(Date(), $0) } ?? .synced(Date()))
     }
 

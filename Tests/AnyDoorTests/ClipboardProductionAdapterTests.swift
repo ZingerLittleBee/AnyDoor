@@ -383,10 +383,7 @@ final class ClipboardProductionAdapterTests: XCTestCase {
     }
 
     private func makeDefaults() throws -> UserDefaults {
-        let suiteName = "ClipboardProductionAdapterTests-\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
-        defaults.removePersistentDomain(forName: suiteName)
-        return defaults
+        makeTemporaryDefaults()
     }
 
     private static func makeImage() throws -> (NSImage, Data) {

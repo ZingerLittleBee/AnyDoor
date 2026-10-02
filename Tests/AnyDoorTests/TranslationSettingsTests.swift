@@ -4,10 +4,7 @@ import XCTest
 @MainActor
 final class TranslationSettingsTests: XCTestCase {
     private func makeDefaults() -> UserDefaults {
-        let suite = "translation.tests.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        d.removePersistentDomain(forName: suite)
-        return d
+        makeTemporaryDefaults()
     }
 
     func testDefaultsWhenUnset() {

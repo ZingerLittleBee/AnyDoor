@@ -2,10 +2,12 @@ import Foundation
 
 /// Membership and ranking for a command-palette text query.
 ///
-/// A candidate is the same set `localizedCaseInsensitiveContains` already
-/// produced: ranking only orders those survivors so a title that starts with
-/// the query outranks a later or fuzzier hit. Query normalization is a
-/// whitespace trim, matching the palette's existing filter.
+/// A title or secondary field is a candidate when it contains the query
+/// (`localizedCaseInsensitiveContains`); a word-start alias only when the
+/// query starts it or one of its words. Ranking then orders those survivors
+/// so a title that starts with the query outranks a later or fuzzier hit.
+/// Query normalization is a whitespace trim, matching the palette's existing
+/// filter.
 enum CommandPaletteQueryMatch {
     /// Lower is better. Exact titles stay ahead of a mere prefix; a prefix
     /// stays ahead of substring, word-later, alias, or subtitle hits.
@@ -46,10 +48,18 @@ enum CommandPaletteQueryMatch {
     }
 
     /// Best rank across `titles` (exact / prefix / later-in-text). `secondary`
-    /// fields (aliases, subtitles) can only contribute `.other`, so they never
-    /// outrank a real title prefix. `nil` means the candidate set excludes
-    /// this item — the same membership as today's contains checks.
-    static func rank(titles: [String], secondary: [String] = [], query: String) -> Rank? {
+    /// fields (aliases, subtitles) and `wordStartAliases` can only contribute
+    /// `.other`, so they never outrank a real title prefix. A `secondary`
+    /// field hits anywhere it contains the query; a word-start alias only
+    /// where the query starts the alias or one of its whitespace-separated
+    /// words, so "rec" finds "screen recording" and "ding" does not. `nil`
+    /// means the candidate set excludes this item.
+    static func rank(
+        titles: [String],
+        secondary: [String] = [],
+        wordStartAliases: [String] = [],
+        query: String
+    ) -> Rank? {
         let needle = normalizedQuery(query)
         guard !needle.isEmpty else { return nil }
 
@@ -63,7 +73,8 @@ enum CommandPaletteQueryMatch {
             if best == .exact { return .exact }
         }
         if let best { return best }
-        if secondary.contains(where: { $0.localizedCaseInsensitiveContains(needle) }) {
+        if secondary.contains(where: { $0.localizedCaseInsensitiveContains(needle) })
+            || wordStartAliases.contains(where: { matchesAtWordStart($0, needle: needle) }) {
             return .other
         }
         return nil
@@ -107,17 +118,38 @@ enum CommandPaletteQueryMatch {
         if title.localizedCaseInsensitiveCompare(needle) == .orderedSame {
             return .exact
         }
-        // Same comparison family as `localizedCaseInsensitiveContains`:
-        // current-locale, case-insensitive, including Unicode equivalence.
-        // Do not drop the locale — a nil-locale `.anchored` range can refuse
-        // prefix rank to a candidate the contains check already accepted.
-        if title.range(
-            of: needle,
-            options: [.caseInsensitive, .anchored],
-            locale: .current
-        ) != nil {
+        if starts(title, with: needle, at: title.startIndex) {
             return .prefix
         }
         return .other
+    }
+
+    private static func matchesAtWordStart(_ alias: String, needle: String) -> Bool {
+        var atWordStart = true
+        for index in alias.indices {
+            if alias[index].isWhitespace {
+                atWordStart = true
+                continue
+            }
+            if atWordStart, starts(alias, with: needle, at: index) {
+                return true
+            }
+            atWordStart = false
+        }
+        return false
+    }
+
+    /// Whether `text` from `start` begins with `needle`, in the same
+    /// comparison family as `localizedCaseInsensitiveContains`:
+    /// current-locale, case-insensitive, including Unicode equivalence.
+    /// Do not drop the locale — a nil-locale `.anchored` range can refuse
+    /// prefix rank to a candidate the contains check already accepted.
+    private static func starts(_ text: String, with needle: String, at start: String.Index) -> Bool {
+        text.range(
+            of: needle,
+            options: [.caseInsensitive, .anchored],
+            range: start..<text.endIndex,
+            locale: .current
+        ) != nil
     }
 }

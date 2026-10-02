@@ -1055,10 +1055,7 @@ final class ClipboardHistoryLifecycleTests: XCTestCase {
     }
 
     private func makeDefaults() -> UserDefaults {
-        let suite = "ClipboardHistoryLifecycleTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
+        makeTemporaryDefaults()
     }
 
     private static func emptyMigrationRequest()
