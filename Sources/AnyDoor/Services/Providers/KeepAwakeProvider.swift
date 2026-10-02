@@ -107,16 +107,20 @@ actor KeepAwakeProvider: ToggleProvider {
 
     // MARK: - ToggleProvider conformance
 
+    /// What an on/off switch turns Keep Awake on with: the panel row and its
+    /// hotkey (`PanelStore.toggle`) and `setState` carry no duration, so they
+    /// hold the assertion until it is switched off.
+    static let switchOnDuration: KeepAwakeDuration = .indefinite
+
     func readState() async throws -> Bool { state.isOn }
 
     /// Boolean conformance. The panel row and global hotkey don't call it:
     /// `PanelStore.toggle` special-cases Keep Awake and drives `apply(_:)`
-    /// through `setKeepAwakeDuration`. Enabling defaults to `.indefinite`,
-    /// the same choice that path makes (an on/off switch carries no
-    /// duration); disabling cancels any timed mode and any pending
+    /// through `setKeepAwakeDuration`. Enabling applies `switchOnDuration`,
+    /// as that path does; disabling cancels any timed mode and any pending
     /// expiration task.
     func setState(_ enabled: Bool) async throws {
-        try await apply(enabled ? .indefinite : nil)
+        try await apply(enabled ? Self.switchOnDuration : nil)
     }
 
     // MARK: - Duration-aware API

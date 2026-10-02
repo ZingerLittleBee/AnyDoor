@@ -703,9 +703,13 @@ service also owns the on/off policy: `setArmed(_:)` arms the configured `default
 or cancels. The panel row and its global hotkey reach it through `PanelStore.toggle`, which
 special-cases the item and calls `setArmed` on the service directly, so the read and the write share
 one MainActor turn; the thin `ScheduledShutdownProvider` (`ToggleProvider`) exists to satisfy the
-catalog invariant, and its `setState`, which no production path calls, forwards to `setArmed`.
+catalog invariant, and no production path calls its `readState` or `setState`.
 `PanelStore` mirrors its Keep Awake plumbing (`scheduledShutdownState`,
-`setScheduledShutdownDuration` for the duration presets, `onScheduledShutdownStateChange`).
+`setScheduledShutdownDuration` for the duration presets, `onScheduledShutdownStateChange`). The
+service's `onChange`, which `PanelStore.bootstrap` subscribes before `bootstrapOnLaunch` runs and
+which the service calls synchronously on every transition, is the only path that carries the
+service's transitions into the cache; `refreshAll` also re-reads the state when the panel or palette
+opens.
 Execution goes through `ShutdownExecuting`: graceful via `AppleScriptRunner` (System Events,
 Automation permission), forced via the privileged helper. Config
 (`forced`/`warningLeadSeconds`/`defaultMinutes`) is portable via `SyncSettingsRegistry`; the live

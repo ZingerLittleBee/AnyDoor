@@ -65,9 +65,10 @@ final class PanelStore {
     private(set) var keepAwakeState: KeepAwakeState = .off
 
     /// Current Scheduled Shutdown state. Owns the `.armed(fireDate:)` value used
-    /// by the subtitle. Pushed in via `onScheduledShutdownStateChange` from the
-    /// service and read back after explicit mutations (`toggle`,
-    /// `setScheduledShutdownDuration`).
+    /// by the subtitle. Pushed in via `onScheduledShutdownStateChange` on every
+    /// service transition, including the ones `toggle` and
+    /// `setScheduledShutdownDuration` make (the service pushes synchronously),
+    /// and re-read by `refreshAll()`.
     private(set) var scheduledShutdownState: ScheduledShutdownState = .off
 
     /// Per-item in-flight guard preventing overlapping toggles from desynchronizing state.
@@ -80,13 +81,20 @@ final class PanelStore {
     /// (used by tests) cancels the previous loop instead of stacking another.
     private var languageObservationTask: Task<Void, Never>?
 
+    /// The service behind the Scheduled Shutdown row. `bootstrap` subscribes
+    /// this store to its `onChange`. Injected so tests drive a service with a
+    /// mock executor and warning instead of the shared one.
+    private let scheduledShutdown: ScheduledShutdownService
+
     /// Shows the notice for a command whose provider threw. Injected so tests
     /// record notices instead of opening the toast window.
     private let presentToast: @MainActor (ToastStyle) -> Void
 
     init(
+        scheduledShutdown: ScheduledShutdownService = .shared,
         presentToast: @escaping @MainActor (ToastStyle) -> Void = { ToastPresenter.shared.show($0) }
     ) {
+        self.scheduledShutdown = scheduledShutdown
         self.presentToast = presentToast
     }
 
@@ -102,6 +110,15 @@ final class PanelStore {
         self.providers = [:]
         for provider in providers {
             self.providers[provider.itemKey] = provider
+        }
+        // The only path that carries the service's transitions into the
+        // Scheduled Shutdown cache (`refreshAll` also re-reads its state when
+        // the panel or palette opens). The service pushes every transition
+        // synchronously, and launch bootstraps this store (through
+        // `PluginRegistry.bootstrap`) before the service's `bootstrapOnLaunch`,
+        // so a restored schedule reaches the row too.
+        scheduledShutdown.onChange = { [weak self] state in
+            self?.onScheduledShutdownStateChange(state)
         }
         rebuild()
         observeLanguageChanges()
@@ -263,25 +280,29 @@ final class PanelStore {
         return formatter.string(from: fireDate)
     }
 
+    /// Toggles whose full state `refreshAll` takes from their owners after the
+    /// provider loop (Keep Awake's `currentState`, the Scheduled Shutdown
+    /// service), so it skips their boolean `readState`.
+    private static let ownerStateToggles: Set<BuiltinItem> = [.keepAwake, .scheduledShutdown]
+
     /// Refresh every toggle's state and every row's permission. Called when the
     /// menu-bar panel appears and when the command palette opens. A failing
     /// `readState` keeps the row's last state and shows no notice.
     func refreshAll() async {
         for (item, provider) in providers {
-            if let toggle = provider as? any ToggleProvider {
-                if let state = try? await toggle.readState() {
-                    toggleStates[item] = state
-                }
+            if !Self.ownerStateToggles.contains(item),
+               let toggle = provider as? any ToggleProvider,
+               let state = try? await toggle.readState() {
+                toggleStates[item] = state
             }
             permissionStates[item] = await provider.permission
         }
-        // Pull the full Keep Awake state (incl. the timed end-date) so the
-        // subtitle reflects what the provider actually holds — `readState`
-        // above only restores the boolean.
+        // One snapshot drives both Keep Awake's switch and its timed subtitle.
         if let provider = providers[.keepAwake] as? KeepAwakeProvider {
             keepAwakeState = await provider.currentState
+            toggleStates[.keepAwake] = keepAwakeState.isOn
         }
-        scheduledShutdownState = ScheduledShutdownService.shared.state
+        scheduledShutdownState = scheduledShutdown.state
         toggleStates[.scheduledShutdown] = scheduledShutdownState.isArmed
         rebuild()
     }
@@ -305,7 +326,7 @@ final class PanelStore {
             defer { togglesInFlight.remove(item) }
             let current = await provider.currentState
             await setKeepAwakeDuration(
-                current.isOn ? nil : .indefinite,
+                current.isOn ? nil : KeepAwakeProvider.switchOnDuration,
                 attempt: .toggle
             )
             return
@@ -313,15 +334,14 @@ final class PanelStore {
 
         // Scheduled Shutdown's on/off policy lives in its MainActor service.
         // Calling it directly keeps the read and the write in one MainActor
-        // turn (no provider hop between them), and the cache takes the
-        // read-back state rather than an optimistic `!current`.
+        // turn (no provider hop between them). The service pushes its new
+        // state through `onChange` before `setArmed` returns, so the cache
+        // holds what the service did rather than an optimistic `!current`.
         if item == .scheduledShutdown {
             guard !togglesInFlight.contains(item) else { return }
             togglesInFlight.insert(item)
             defer { togglesInFlight.remove(item) }
-            let service = ScheduledShutdownService.shared
-            service.setArmed(!service.state.isArmed)
-            syncScheduledShutdownState()
+            scheduledShutdown.setArmed(!scheduledShutdown.state.isArmed)
             return
         }
 
@@ -380,26 +400,18 @@ final class PanelStore {
         rebuild()
     }
 
-    /// Apply a Scheduled Shutdown duration (or `nil` to cancel). Caches state
-    /// eagerly so the panel doesn't render a stale frame.
+    /// Apply a Scheduled Shutdown duration (or `nil` to cancel). The service
+    /// pushes the new state through `onChange` before returning, so the panel
+    /// never renders a stale frame.
     func setScheduledShutdownDuration(_ duration: ScheduledShutdownDuration?) async {
         if let duration {
-            ScheduledShutdownService.shared.arm(duration)
+            scheduledShutdown.arm(duration)
         } else {
-            ScheduledShutdownService.shared.cancel()
+            scheduledShutdown.cancel()
         }
-        syncScheduledShutdownState()
     }
 
-    /// Read the service's state back into the cache and rebuild after an
-    /// explicit mutation (`toggle`, `setScheduledShutdownDuration`).
-    private func syncScheduledShutdownState() {
-        scheduledShutdownState = ScheduledShutdownService.shared.state
-        toggleStates[.scheduledShutdown] = scheduledShutdownState.isArmed
-        rebuild()
-    }
-
-    /// Callback target wired into `ScheduledShutdownService.onChange`.
+    /// Callback target that `bootstrap` subscribes to the service's `onChange`.
     func onScheduledShutdownStateChange(_ state: ScheduledShutdownState) {
         scheduledShutdownState = state
         toggleStates[.scheduledShutdown] = state.isArmed

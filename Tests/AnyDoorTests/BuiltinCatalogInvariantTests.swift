@@ -11,7 +11,10 @@ import ImageConversionPlugin
 /// Pins the implicit contracts a new `BuiltinItem` case must satisfy. Each of
 /// these used to be convention-only, with a silent failure mode:
 /// - a toggle/action item without a registered provider renders a panel row
-///   and binds a hotkey that do nothing (`PanelStore.toggle/run` guard-return);
+///   and binds a hotkey that do nothing (`PanelStore.toggle/run` guard-return).
+///   Scheduled Shutdown is the one item `PanelStore` drives without its
+///   provider (it calls `ScheduledShutdownService` directly); the provider
+///   stays registered so this rule has no exception;
 /// - a duplicate `defaultOrder` makes first-launch seeding order ambiguous;
 /// - a window-layout child missing from `PanelStore.windowLayoutChildKeys`
 ///   leaks into the top-level panel instead of the window-layout popover;

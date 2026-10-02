@@ -288,6 +288,24 @@ final class KeepAwakeProviderTests: XCTestCase {
         XCTAssertEqual(message, L(.toastCommandFailed, L(.builtinKeepAwake)))
     }
 
+    @MainActor
+    func testPanelStoreToggleTurnsKeepAwakeOnIndefinitelyAndOff() async throws {
+        // Behavior preservation: the row and its hotkey switch Keep Awake on
+        // with the same `switchOnDuration` as `setState`
+        // (testToggleProviderConformanceUsesIndefiniteOnEnable).
+        let backend = MockKeepAwakeBackend()
+        let provider = KeepAwakeProvider(backend: backend)
+        let store = try makePanelLaneTestStore(rows: [.keepAwake], providers: [provider])
+
+        await store.toggle(.keepAwake)
+        XCTAssertEqual(store.keepAwakeState, .indefinite)
+        XCTAssertTrue(backend.isHeld)
+
+        await store.toggle(.keepAwake)
+        XCTAssertEqual(store.keepAwakeState, .off)
+        XCTAssertFalse(backend.isHeld)
+    }
+
     func testSwitchingFromTimedToIndefiniteThenExpirationNoOp() async throws {
         let backend = MockKeepAwakeBackend()
         let provider = KeepAwakeProvider(backend: backend)

@@ -192,11 +192,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TranslationHistoryStore.shared.configure(modelContainer: modelContainer)
         TranslationCoordinator.shared.history = TranslationHistoryStore.shared
 
-        // Scheduled Shutdown: push state to the panel and re-arm any persisted
-        // schedule (or cancel a deadline missed while the app was quit).
-        ScheduledShutdownService.shared.onChange = { state in
-            PanelStore.shared.onScheduledShutdownStateChange(state)
-        }
+        // Scheduled Shutdown: re-arm any persisted schedule (or cancel a
+        // deadline missed while the app was quit). The registry bootstrap above
+        // already subscribed PanelStore to the service's state pushes, so the
+        // panel row shows a restored schedule.
         ScheduledShutdownService.shared.bootstrapOnLaunch()
 
         // Brightness control (external DDC/CI displays). Arch-selected backend.

@@ -21,6 +21,26 @@ actor ReentrantProbeProvider: ActionProvider {
     }
 }
 
+/// A switch that only counts its reads. Registered for the two items whose
+/// state `refreshAll` takes from their owners, it must never be read.
+private actor ReadCountingToggleProvider: ToggleProvider {
+    let itemKey: BuiltinItem
+    private(set) var readCount = 0
+
+    init(_ itemKey: BuiltinItem) {
+        self.itemKey = itemKey
+    }
+
+    var permission: PermissionStatus { .notRequired }
+
+    func readState() async throws -> Bool {
+        readCount += 1
+        return false
+    }
+
+    func setState(_ enabled: Bool) async throws {}
+}
+
 final class PanelStoreTests: XCTestCase {
 
     @MainActor
@@ -188,5 +208,132 @@ final class PanelStoreTests: XCTestCase {
         store.reorderTopLevel(by: reordered)
 
         XCTAssertEqual(topItems(), reordered, "top-level order must reflect the flat reorder")
+    }
+
+    // MARK: - Keep Awake and Scheduled Shutdown state
+
+    @MainActor
+    func testRefreshAllReadsNeitherKeepAwakeNorShutdownProvider() async throws {
+        // Both rows take their state from the owner after the provider loop,
+        // so their boolean `readState` is skipped.
+        let shutdown = makeShutdownService()
+        shutdown.arm(.minutes(30))   // before bootstrap, so only refreshAll reads it
+        defer { shutdown.cancel() }
+        let keepAwakeSpy = ReadCountingToggleProvider(.keepAwake)
+        let shutdownSpy = ReadCountingToggleProvider(.scheduledShutdown)
+        let store = try makePanelLaneTestStore(
+            rows: [.keepAwake, .scheduledShutdown],
+            providers: [keepAwakeSpy, shutdownSpy],
+            scheduledShutdown: shutdown
+        )
+
+        await store.refreshAll()
+
+        let keepAwakeReads = await keepAwakeSpy.readCount
+        let shutdownReads = await shutdownSpy.readCount
+        XCTAssertEqual(keepAwakeReads, 0)
+        XCTAssertEqual(shutdownReads, 0)
+        // Behavior preservation: the row still shows the service's schedule.
+        XCTAssertEqual(row(.scheduledShutdown, in: store)?.toggleState, true)
+        XCTAssertNotNil(row(.scheduledShutdown, in: store)?.subtitle)
+    }
+
+    @MainActor
+    func testRefreshAllShowsATimedKeepAwakeAsOnWithItsEndTime() async throws {
+        // Behavior preservation: the switch and the subtitle agree.
+        let provider = KeepAwakeProvider(backend: MockKeepAwakeBackend())
+        try await provider.apply(.minutes(30))
+        addTeardownBlock { try? await provider.apply(nil) }
+        let store = try makePanelLaneTestStore(rows: [.keepAwake], providers: [provider])
+
+        await store.refreshAll()
+
+        if case .timed = store.keepAwakeState {} else {
+            XCTFail("expected a timed state, got \(store.keepAwakeState)")
+        }
+        XCTAssertEqual(row(.keepAwake, in: store)?.toggleState, true)
+        XCTAssertNotNil(row(.keepAwake, in: store)?.subtitle)
+    }
+
+    @MainActor
+    func testScheduledShutdownToggleReachesTheRowThroughTheServicePush() async throws {
+        // Behavior preservation: with the read-back gone, the push that
+        // `bootstrap` subscribes is what updates the row.
+        let shutdown = makeShutdownService()
+        let store = try makePanelLaneTestStore(rows: [.scheduledShutdown], scheduledShutdown: shutdown)
+
+        await store.toggle(.scheduledShutdown)
+
+        XCTAssertTrue(shutdown.state.isArmed)
+        XCTAssertEqual(store.scheduledShutdownState, shutdown.state)
+        XCTAssertEqual(row(.scheduledShutdown, in: store)?.toggleState, true)
+        XCTAssertNotNil(row(.scheduledShutdown, in: store)?.subtitle)
+
+        await store.toggle(.scheduledShutdown)
+
+        XCTAssertEqual(shutdown.state, .off)
+        XCTAssertEqual(store.scheduledShutdownState, .off)
+        XCTAssertEqual(row(.scheduledShutdown, in: store)?.toggleState, false)
+        XCTAssertNil(row(.scheduledShutdown, in: store)?.subtitle)
+    }
+
+    @MainActor
+    func testScheduledShutdownDurationReachesTheRowThroughTheServicePush() async throws {
+        // Behavior preservation for the clock menu and palette presets.
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let shutdown = makeShutdownService(now: now)
+        let store = try makePanelLaneTestStore(rows: [.scheduledShutdown], scheduledShutdown: shutdown)
+
+        await store.setScheduledShutdownDuration(.minutes(15))
+
+        XCTAssertEqual(store.scheduledShutdownState, .armed(fireDate: now.addingTimeInterval(15 * 60)))
+        XCTAssertEqual(row(.scheduledShutdown, in: store)?.toggleState, true)
+
+        await store.setScheduledShutdownDuration(nil)
+
+        XCTAssertEqual(store.scheduledShutdownState, .off)
+        XCTAssertEqual(row(.scheduledShutdown, in: store)?.toggleState, false)
+    }
+
+    @MainActor
+    func testBootstrapSubscribesTheRowToServiceTransitions() async throws {
+        // Transitions PanelStore does not start (a fire, a wake re-anchor, the
+        // warning's Cancel, a backup reload) reach the row only through the
+        // `onChange` subscription that `bootstrap` makes.
+        let shutdown = makeShutdownService()
+        let store = try makePanelLaneTestStore(rows: [.scheduledShutdown], scheduledShutdown: shutdown)
+
+        shutdown.arm(.minutes(30))
+        XCTAssertEqual(row(.scheduledShutdown, in: store)?.toggleState, true)
+
+        shutdown.cancel()
+        XCTAssertEqual(row(.scheduledShutdown, in: store)?.toggleState, false)
+    }
+
+    // MARK: - Helpers
+
+    /// A service with a mock executor and warning, a throwaway defaults suite
+    /// removed in teardown, and a fixed clock, so arming it never reaches a
+    /// real shutdown or the shared service. Tests that arm it end disarmed,
+    /// which also invalidates its warning timer.
+    @MainActor
+    private func makeShutdownService(
+        now: Date = Date(timeIntervalSince1970: 1_000_000)
+    ) -> ScheduledShutdownService {
+        let suiteName = "test.shutdown.\(UUID().uuidString)"
+        addTeardownBlock {
+            UserDefaults(suiteName: suiteName)?.removePersistentDomain(forName: suiteName)
+        }
+        return ScheduledShutdownService(
+            executor: MockShutdownExecutor(),
+            warning: MockShutdownWarning(),
+            defaults: UserDefaults(suiteName: suiteName)!,
+            now: { now }
+        )
+    }
+
+    @MainActor
+    private func row(_ item: BuiltinItem, in store: PanelStore) -> PanelEntry? {
+        store.topLevelEntries.first { $0.source == .builtin(item) }
     }
 }

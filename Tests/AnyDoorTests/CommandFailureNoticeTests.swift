@@ -6,11 +6,13 @@ import PluginInterface
 /// A fresh `PanelStore` over an in-memory container holding a
 /// `BuiltinPreference` row for each of `rows`, so a test never touches
 /// `PanelStore.shared` or the seeder's defaults. Notices go to `presentToast`
-/// instead of the toast window.
+/// instead of the toast window. Scheduled Shutdown reads the shared service,
+/// which tests never arm, unless the test injects its own.
 @MainActor
 func makePanelLaneTestStore(
     rows: [BuiltinItem],
     providers: [any BuiltinProvider] = [],
+    scheduledShutdown: ScheduledShutdownService = .shared,
     presentToast: @escaping @MainActor (ToastStyle) -> Void = { _ in }
 ) throws -> PanelStore {
     let container = try ModelContainer(
@@ -21,7 +23,7 @@ func makePanelLaneTestStore(
         container.mainContext.insert(BuiltinPreference(itemKey: item.rawValue))
     }
     try container.mainContext.save()
-    let store = PanelStore(presentToast: presentToast)
+    let store = PanelStore(scheduledShutdown: scheduledShutdown, presentToast: presentToast)
     store.bootstrap(modelContainer: container, providers: providers)
     return store
 }
