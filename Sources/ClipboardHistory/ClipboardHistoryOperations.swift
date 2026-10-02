@@ -647,7 +647,8 @@ extension ClipboardHistoryModule {
         database = resolution.database
         searchIndexRebuildTask = Self.makeSearchIndexRebuildTask(
             for: resolution.database,
-            faultInjector: faultInjector
+            faultInjector: faultInjector,
+            appBuild: appBuild
         )
         derivedKeys = resolution.keys
         availability = resolution.availability

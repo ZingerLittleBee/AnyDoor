@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import GRDB
+import os
 import XCTest
 
 @testable import ClipboardHistory
@@ -375,10 +376,6 @@ final class ClipboardHistorySearchTests: XCTestCase {
             )
         )
         await module.awaitSearchIndexRebuildForTesting()
-        let allEntries = try await module.page(ClipboardHistoryQuery()).entries
-        let captured = try XCTUnwrap(
-            allEntries.first { $0.id == wanted.entryID }
-        )
         let database = try await module.requiredDatabase()
         try await database.write { database in
             let id = wanted.entryID.value.uuidString.lowercased()
@@ -402,9 +399,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
                 facet: .link,
                 sourceID: .application("dev.bybee.filtered"),
                 tagID: "important",
-                favoritesOnly: true,
-                capturedAfter: captured.capturedAt.addingTimeInterval(-1),
-                capturedBefore: captured.capturedAt.addingTimeInterval(1)
+                favoritesOnly: true
             )
         )
 
@@ -995,7 +990,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         try await Self.assertSearchIntegrity(reopened)
     }
 
-    func testRebuildFailurePersistsAndExplicitRetryPublishesReadyState()
+    func testRebuildFailurePersistsAndTheNextOpenRetriesIt()
         async throws
     {
         let fixture = try SearchTemporaryDatabase()
@@ -1053,25 +1048,12 @@ final class ClipboardHistorySearchTests: XCTestCase {
         XCTAssertEqual(failedGeneration, originalGeneration)
         try await failing.closeStoreForTesting()
 
+        // The cause is gone by the next launch, whose open retries the
+        // rebuild without anyone asking.
         let reopened = try ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
             databaseKey: fixture.key
         )
-        let persistedFailure = try await reopened.page(
-            ClipboardHistoryQuery(text: "authoritative")
-        )
-        XCTAssertEqual(
-            persistedFailure.state,
-            .failed(.rebuildFailed)
-        )
-        let reopenedFailedStatus = await reopened.status()
-        XCTAssertEqual(
-            reopenedFailedStatus.searchIndex,
-            .failed(.rebuildFailed)
-        )
-
-        let retryState = try await reopened.retrySearchIndex()
-        XCTAssertEqual(retryState, .indexing)
         await reopened.awaitSearchIndexRebuildForTesting()
 
         let rebuilt = try await reopened.page(
@@ -1086,6 +1068,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
             try ClipboardHistoryModule.searchIndexGeneration(in: $0)
         }
         XCTAssertGreaterThan(rebuiltGeneration, originalGeneration)
+        try await reopened.closeStoreForTesting()
     }
 
     func testClosingDuringExplicitRetryWaitsForOneCompletePublication()
@@ -1111,16 +1094,9 @@ final class ClipboardHistorySearchTests: XCTestCase {
             )
         }
         try await original.closeStoreForTesting()
-
-        let failing = try ClipboardHistoryModule(
-            testingDatabaseURL: fixture.url,
-            databaseKey: fixture.key,
-            faultInjector: ClipboardHistoryFaultInjector(
-                points: [.searchRebuildBeforePublish]
-            )
-        )
-        await failing.awaitSearchIndexRebuildForTesting()
-        try await failing.closeStoreForTesting()
+        // With the automatic retries spent, opening leaves the index failed
+        // and only the explicit retry below rebuilds it.
+        try await Self.spendSearchRebuildRetries(of: fixture)
 
         let retrying = try ClipboardHistoryModule(
             testingDatabaseURL: fixture.url,
@@ -1146,6 +1122,318 @@ final class ClipboardHistorySearchTests: XCTestCase {
         }
         XCTAssertGreaterThan(generation, originalGeneration)
         try await Self.assertSearchIntegrity(reopened)
+    }
+
+    /// Opens retry a failed rebuild, but only until
+    /// `searchIndexRebuildFailureLimit` rebuilds have failed in a row: a
+    /// cause that persists must not cost a full rebuild at every launch.
+    /// After that only an explicit retry rebuilds the index.
+    func testOpensRetryAFailedRebuildOnlyUpToTheFailureLimit()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let entry = try await Self.makeStoreNeedingASearchRebuild(
+            "retry limit value",
+            fixture: fixture
+        )
+        let limit = ClipboardHistoryModule.searchIndexRebuildFailureLimit
+        let rebuilds = SearchRebuildFailures()
+        // The first open rebuilds because the index is out of date, each
+        // later one because the rebuild before it failed.
+        for attempt in 1...limit {
+            let status = try await Self.openAndClose(
+                fixture,
+                faultInjector: rebuilds.faultInjector
+            )
+            XCTAssertEqual(status, .failed(.rebuildFailed))
+            XCTAssertEqual(rebuilds.count, attempt)
+        }
+
+        let spent = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key,
+            faultInjector: rebuilds.faultInjector
+        )
+        await spent.awaitSearchIndexRebuildForTesting()
+        XCTAssertEqual(rebuilds.count, limit)
+        let failedSearch = try await spent.page(
+            ClipboardHistoryQuery(text: "limit")
+        )
+        XCTAssertEqual(failedSearch.state, .failed(.rebuildFailed))
+        let browsing = try await spent.page(ClipboardHistoryQuery())
+        XCTAssertEqual(browsing.entries.map(\.id), [entry])
+        try await spent.closeStoreForTesting()
+
+        // Not even an open where the rebuild would succeed retries it.
+        let retrying = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        await retrying.awaitSearchIndexRebuildForTesting()
+        let stillFailed = await retrying.status()
+        XCTAssertEqual(stillFailed.searchIndex, .failed(.rebuildFailed))
+        let retryState = try await retrying.retrySearchIndex()
+        XCTAssertEqual(retryState, .indexing)
+        await retrying.awaitSearchIndexRebuildForTesting()
+        let rebuilt = try await retrying.page(
+            ClipboardHistoryQuery(text: "limit")
+        )
+        XCTAssertEqual(rebuilt.state, .ready)
+        XCTAssertEqual(rebuilt.entries.map(\.id), [entry])
+        try await retrying.closeStoreForTesting()
+    }
+
+    /// Publishing an index ends the run of failures, so a later run gets
+    /// the whole budget again.
+    func testAPublishedIndexRestartsTheRetryBudget() async throws {
+        let fixture = try SearchTemporaryDatabase()
+        _ = try await Self.makeStoreNeedingASearchRebuild(
+            "published budget value",
+            fixture: fixture
+        )
+        let limit = ClipboardHistoryModule.searchIndexRebuildFailureLimit
+        let rebuilds = SearchRebuildFailures()
+        for _ in 1..<limit {
+            try await Self.openAndClose(
+                fixture,
+                faultInjector: rebuilds.faultInjector
+            )
+        }
+        XCTAssertEqual(rebuilds.count, limit - 1)
+
+        let recovered = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        await recovered.awaitSearchIndexRebuildForTesting()
+        let ready = await recovered.status()
+        XCTAssertEqual(ready.searchIndex, .ready)
+        try await Self.markSearchIndexOutdated(in: recovered)
+        try await recovered.closeStoreForTesting()
+
+        for attempt in 1...limit {
+            let status = try await Self.openAndClose(
+                fixture,
+                faultInjector: rebuilds.faultInjector
+            )
+            XCTAssertEqual(status, .failed(.rebuildFailed))
+            XCTAssertEqual(rebuilds.count, limit - 1 + attempt)
+        }
+    }
+
+    /// An explicit retry starts the run over too: when it fails as well,
+    /// the opens that follow retry again.
+    func testAnExplicitRetryRestartsTheRetryBudget() async throws {
+        let fixture = try SearchTemporaryDatabase()
+        _ = try await Self.makeStoreNeedingASearchRebuild(
+            "explicit budget value",
+            fixture: fixture
+        )
+        let limit = ClipboardHistoryModule.searchIndexRebuildFailureLimit
+        let rebuilds = SearchRebuildFailures()
+        for _ in 1...limit {
+            try await Self.openAndClose(
+                fixture,
+                faultInjector: rebuilds.faultInjector
+            )
+        }
+
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key,
+            faultInjector: rebuilds.faultInjector
+        )
+        await module.awaitSearchIndexRebuildForTesting()
+        XCTAssertEqual(rebuilds.count, limit)
+        let retryState = try await module.retrySearchIndex()
+        XCTAssertEqual(retryState, .indexing)
+        await module.awaitSearchIndexRebuildForTesting()
+        XCTAssertEqual(rebuilds.count, limit + 1)
+        let failed = await module.status()
+        XCTAssertEqual(failed.searchIndex, .failed(.rebuildFailed))
+        try await module.closeStoreForTesting()
+
+        let status = try await Self.openAndClose(
+            fixture,
+            faultInjector: rebuilds.faultInjector
+        )
+        XCTAssertEqual(status, .failed(.rebuildFailed))
+        XCTAssertEqual(rebuilds.count, limit + 2)
+    }
+
+    /// The budget belongs to one app build. An update gets all of it again,
+    /// since it may have fixed whatever made every rebuild fail.
+    func testANewAppBuildGetsTheWholeRetryBudgetAgain() async throws {
+        let fixture = try SearchTemporaryDatabase()
+        let entry = try await Self.makeStoreNeedingASearchRebuild(
+            "app build budget value",
+            fixture: fixture
+        )
+        let limit = ClipboardHistoryModule.searchIndexRebuildFailureLimit
+        let rebuilds = SearchRebuildFailures()
+        let installed = "4.2.699"
+        let unfixed = "4.2.799"
+        let fixed = "4.2.899"
+        for _ in 1...limit {
+            try await Self.openAndClose(
+                fixture,
+                faultInjector: rebuilds.faultInjector,
+                appBuild: installed
+            )
+        }
+        // Spent for this build: opening it again rebuilds nothing.
+        try await Self.openAndClose(
+            fixture,
+            faultInjector: rebuilds.faultInjector,
+            appBuild: installed
+        )
+        XCTAssertEqual(rebuilds.count, limit)
+
+        // An update that did not fix the cause spends a budget of its own.
+        for attempt in 1...limit {
+            let status = try await Self.openAndClose(
+                fixture,
+                faultInjector: rebuilds.faultInjector,
+                appBuild: unfixed
+            )
+            XCTAssertEqual(status, .failed(.rebuildFailed))
+            XCTAssertEqual(rebuilds.count, limit + attempt)
+        }
+        // Spent for this build: opening it again rebuilds nothing.
+        try await Self.openAndClose(
+            fixture,
+            faultInjector: rebuilds.faultInjector,
+            appBuild: unfixed
+        )
+        XCTAssertEqual(rebuilds.count, 2 * limit)
+
+        // One that did recovers search on its first launch.
+        let updated = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key,
+            appBuild: fixed
+        )
+        await updated.awaitSearchIndexRebuildForTesting()
+        let page = try await updated.page(
+            ClipboardHistoryQuery(text: "budget")
+        )
+        XCTAssertEqual(page.state, .ready)
+        XCTAssertEqual(page.entries.map(\.id), [entry])
+        try await updated.closeStoreForTesting()
+    }
+
+    /// Opens retry only a rebuild failure. An index marked failed with no
+    /// reason, or one this build does not know, was marked by another build,
+    /// and nothing says a rebuild clears it, so only an explicit retry
+    /// rebuilds it.
+    func testOpensLeaveAnIndexFailedForAnotherReasonUntilRetried()
+        async throws
+    {
+        for reason in [nil, "unknownReason"] as [String?] {
+            let fixture = try SearchTemporaryDatabase()
+            let original = try ClipboardHistoryModule(
+                testingDatabaseURL: fixture.url,
+                databaseKey: fixture.key
+            )
+            let entry = try await Self.capture(
+                "other reason value",
+                in: original
+            )
+            let database = try await original.requiredDatabase()
+            try await Self.markSearchIndexFailed(reason: reason, in: database)
+            let generation = try await database.read {
+                try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+            }
+            try await original.closeStoreForTesting()
+
+            let reopened = try ClipboardHistoryModule(
+                testingDatabaseURL: fixture.url,
+                databaseKey: fixture.key
+            )
+            await reopened.awaitSearchIndexRebuildForTesting()
+            let status = await reopened.status()
+            XCTAssertEqual(status.searchIndex, .failed(.stateUnavailable))
+            let reopenedDatabase = try await reopened.requiredDatabase()
+            let untouched = try await reopenedDatabase.read {
+                try ClipboardHistoryModule.searchIndexGeneration(in: $0)
+            }
+            XCTAssertEqual(untouched, generation)
+
+            let retryState = try await reopened.retrySearchIndex()
+            XCTAssertEqual(retryState, .indexing)
+            await reopened.awaitSearchIndexRebuildForTesting()
+            let page = try await reopened.page(
+                ClipboardHistoryQuery(text: "reason")
+            )
+            XCTAssertEqual(page.state, .ready)
+            XCTAssertEqual(page.entries.map(\.id), [entry])
+            try await reopened.closeStoreForTesting()
+        }
+    }
+
+    /// Another process writing to the store while it opens costs search
+    /// nothing. Deciding whether to rebuild only reads a healthy index, so
+    /// it is not marked failed, and a retry the other writer keeps from
+    /// starting is neither counted nor lost: the next open starts it.
+    func testAnotherWriterDuringAnOpenNeitherFailsNorSpendsTheIndex()
+        async throws
+    {
+        let fixture = try SearchTemporaryDatabase()
+        let opened = try ClipboardHistoryModule.openDatabase(
+            at: fixture.url,
+            databaseKey: fixture.key
+        )
+        let other = try ClipboardHistoryModule.openDatabase(
+            at: fixture.url,
+            databaseKey: fixture.key
+        )
+
+        let readyRebuild = try Self.makeSearchIndexRebuildTask(
+            for: opened,
+            whileWritingOn: other
+        )
+        XCTAssertNil(readyRebuild)
+        let ready = try await opened.read {
+            try ClipboardHistoryModule.searchIndexStatus(in: $0)
+        }
+        XCTAssertEqual(ready, .ready)
+
+        try await Self.markSearchIndexFailed(
+            reason: "rebuildFailed",
+            in: opened
+        )
+        let blockedRetry = try Self.makeSearchIndexRebuildTask(
+            for: opened,
+            whileWritingOn: other
+        )
+        XCTAssertNil(blockedRetry)
+        let failed = try await opened.read {
+            try ClipboardHistoryModule.searchIndexStatus(in: $0)
+        }
+        XCTAssertEqual(failed, .failed(.rebuildFailed))
+        let failures = try await opened.read { database in
+            try Int.fetchOne(
+                database,
+                sql: """
+                    SELECT integer_value
+                    FROM clipboard_maintenance_metadata
+                    WHERE key = 'searchIndexRebuildFailures'
+                    """
+            )
+        }
+        XCTAssertNil(failures)
+
+        let retry = ClipboardHistoryModule.makeSearchIndexRebuildTask(
+            for: opened,
+            faultInjector: ClipboardHistoryFaultInjector(),
+            appBuild: ClipboardHistoryModule.unversionedAppBuild
+        )
+        let outcome = await retry?.value
+        XCTAssertEqual(outcome, .ready)
+        let rebuilt = try await opened.read {
+            try ClipboardHistoryModule.searchIndexStatus(in: $0)
+        }
+        XCTAssertEqual(rebuilt, .ready)
     }
 
     /// A rebuild holds the writer for one long transaction. Writes issued on
@@ -1836,6 +2124,141 @@ final class ClipboardHistorySearchTests: XCTestCase {
         return module
     }
 
+    /// A store holding one entry with `text`, whose search index the next
+    /// open rebuilds.
+    private static func makeStoreNeedingASearchRebuild(
+        _ text: String,
+        fixture: SearchTemporaryDatabase
+    ) async throws -> ClipboardHistoryEntryID {
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key
+        )
+        let entry = try await capture(text, in: module)
+        try await markSearchIndexOutdated(in: module)
+        try await module.closeStoreForTesting()
+        return entry
+    }
+
+    /// Marks the search index an older version, which the next open
+    /// rebuilds.
+    private static func markSearchIndexOutdated(
+        in module: ClipboardHistoryModule
+    ) async throws {
+        let database = try await module.requiredDatabase()
+        try await database.write { database in
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_maintenance_metadata
+                    SET integer_value = 0
+                    WHERE key = 'searchIndexVersion'
+                    """
+            )
+        }
+    }
+
+    /// Opens the store, waits for any search index rebuild the open started,
+    /// and closes it again. Returns the search index status it left.
+    @discardableResult
+    private static func openAndClose(
+        _ fixture: SearchTemporaryDatabase,
+        faultInjector: ClipboardHistoryFaultInjector =
+            ClipboardHistoryFaultInjector(),
+        appBuild: String = ClipboardHistoryModule.unversionedAppBuild
+    ) async throws -> ClipboardHistorySearchIndexStatus? {
+        let module = try ClipboardHistoryModule(
+            testingDatabaseURL: fixture.url,
+            databaseKey: fixture.key,
+            faultInjector: faultInjector,
+            appBuild: appBuild
+        )
+        await module.awaitSearchIndexRebuildForTesting()
+        let status = await module.status()
+        try await module.closeStoreForTesting()
+        return status.searchIndex
+    }
+
+    /// Marks the search index failed, for `reason` or for none.
+    private static func markSearchIndexFailed(
+        reason: String?,
+        in database: DatabasePool
+    ) async throws {
+        try await database.write { database in
+            try database.execute(
+                sql: """
+                    UPDATE clipboard_maintenance_metadata
+                    SET text_value = 'failed'
+                    WHERE key = 'searchIndexState'
+                    """
+            )
+            try database.execute(
+                sql: """
+                    DELETE FROM clipboard_maintenance_metadata
+                    WHERE key = 'searchIndexFailure'
+                    """
+            )
+            if let reason {
+                try database.execute(
+                    sql: """
+                        INSERT INTO clipboard_maintenance_metadata(
+                            key,
+                            text_value
+                        ) VALUES ('searchIndexFailure', ?)
+                        """,
+                    arguments: [reason]
+                )
+            }
+        }
+    }
+
+    /// What opening `database` starts for its search index while `other`,
+    /// a second connection to the same store as another process would hold,
+    /// keeps a write transaction open.
+    private static func makeSearchIndexRebuildTask(
+        for database: DatabasePool,
+        whileWritingOn other: DatabasePool
+    ) throws
+        -> Task<ClipboardHistoryModule.SearchIndexRebuildOutcome, Never>?
+    {
+        let writing = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async {
+            try? other.write { _ in
+                writing.signal()
+                release.wait()
+            }
+            finished.signal()
+        }
+        defer {
+            release.signal()
+            _ = finished.wait(timeout: .now() + 10)
+        }
+        // Bounded, so a writer that never starts fails the test instead of
+        // hanging it.
+        guard writing.wait(timeout: .now() + 10) == .success else {
+            throw ClipboardHistoryModuleError.storageFailure
+        }
+        return ClipboardHistoryModule.makeSearchIndexRebuildTask(
+            for: database,
+            faultInjector: ClipboardHistoryFaultInjector(),
+            appBuild: ClipboardHistoryModule.unversionedAppBuild
+        )
+    }
+
+    /// Opens the store with every rebuild failing until no open retries
+    /// one any more.
+    private static func spendSearchRebuildRetries(
+        of fixture: SearchTemporaryDatabase
+    ) async throws {
+        let failing = ClipboardHistoryFaultInjector(
+            points: [.searchRebuildBeforePublish]
+        )
+        for _ in 0..<ClipboardHistoryModule.searchIndexRebuildFailureLimit {
+            try await openAndClose(fixture, faultInjector: failing)
+        }
+    }
+
     private static func lastMaintenanceSuccess(
         in module: ClipboardHistoryModule
     ) async throws -> Double? {
@@ -2070,6 +2493,27 @@ private final class SearchRebuildHold: Sendable {
 
     func release() {
         gate.signal()
+    }
+}
+
+/// Fails every search index rebuild just before it publishes, and counts
+/// the rebuilds that got that far.
+private final class SearchRebuildFailures: Sendable {
+    private let attempts = OSAllocatedUnfairLock(initialState: 0)
+
+    var count: Int {
+        attempts.withLock { $0 }
+    }
+
+    /// Runs on the rebuild's thread.
+    var faultInjector: ClipboardHistoryFaultInjector {
+        ClipboardHistoryFaultInjector { [attempts] point in
+            guard point == .searchRebuildBeforePublish else {
+                return false
+            }
+            attempts.withLock { $0 += 1 }
+            return true
+        }
     }
 }
 

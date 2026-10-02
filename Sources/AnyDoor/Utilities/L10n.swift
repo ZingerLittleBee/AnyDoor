@@ -114,6 +114,7 @@ enum L10n {
         case clipboardEmpty = "clipboard.empty"
         case clipboardEmptySearch = "clipboard.empty.search"
         case clipboardIndexing = "clipboard.indexing"
+        case clipboardSearchUnavailable = "clipboard.searchUnavailable"
         case clipboardEmptyFilter = "clipboard.empty.filter"
         case clipboardUnavailable = "clipboard.unavailable"
         case clipboardUnavailableKeychainLocked =
@@ -544,6 +545,7 @@ enum L10n {
         case toastEmptyTrashFailed = "toast.emptyTrash.failed"
         case toastEmptyTrashPermissionDenied = "toast.emptyTrash.permissionDenied"
         case toastEmptyTrashSuccess = "toast.emptyTrash.success"
+        case toastLockScreenFailed = "toast.lockScreen.failed"
         case toastNoSelectedText = "toast.noSelectedText"
         case toastOcrNoText = "toast.ocr.noText"
         case toastPickColorFailed = "toast.pickColor.failed"
@@ -630,7 +632,6 @@ enum L10n {
         case builtinCaptureWindow = "builtin.captureWindow"
         case builtinCaptureFullscreen = "builtin.captureFullscreen"
         case builtinCaptureTimer = "builtin.captureTimer"
-        case builtinCaptureModeBar = "builtin.captureModeBar"
         case builtinRecordScreen = "builtin.recordScreen"
         case builtinCaptureScrolling = "builtin.captureScrolling"
         case recordingToastSaved = "recording.toast.saved"

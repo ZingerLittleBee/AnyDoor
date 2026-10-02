@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ClipboardHistory
+import PluginInterface
 import SwiftData
 
 /// Outcome of an import, surfaced to the UI.
@@ -70,7 +71,13 @@ final class BackupService {
         let prefs = try context.fetch(
             FetchDescriptor<BuiltinPreference>(sortBy: [SortDescriptor(\.displayOrder)])
         )
-        let preferences = prefs.map(BuiltinPreferenceDTO.init)
+        // The launch merge deletes the retired Capture Menu row, but a
+        // downgrade can seed it again. Import merges that key into Screenshot,
+        // so exporting the row would let restoring this backup change
+        // Screenshot.
+        let preferences = prefs
+            .filter { $0.itemKey != BuiltinPreferenceSeeder.captureModeBarItemKey }
+            .map(BuiltinPreferenceDTO.init)
 
         let quicklinkRows = try context.fetch(
             FetchDescriptor<Quicklink>(
@@ -155,13 +162,24 @@ final class BackupService {
             existingPrefs.map { ($0.itemKey, $0) },
             uniquingKeysWith: { first, _ in first }
         )
-        for dto in snapshot.builtinPreferences {
+        let captureModeBarKey = BuiltinPreferenceSeeder.captureModeBarItemKey
+        for dto in snapshot.builtinPreferences where dto.itemKey != captureModeBarKey {
             guard let existing = prefsByKey[dto.itemKey] else { continue }
             existing.isVisible = dto.isVisible
             existing.displayOrder = dto.displayOrder
             existing.keyCode = dto.keyCode
             existing.modifierFlags = dto.modifierFlags
             summary.preferencesUpdated += 1
+        }
+        // A backup taken before the Capture Menu built-in was retired still
+        // carries its entry. Merge it into Screenshot with the launch
+        // migration's rules, after Screenshot's own imported entry, so a
+        // hotkey bound there wins whatever the entry order.
+        if let screenshot = prefsByKey[BuiltinItem.screenshot.rawValue] {
+            for dto in snapshot.builtinPreferences where dto.itemKey == captureModeBarKey {
+                BuiltinPreferenceSeeder.mergeCaptureModeBar(dto, into: screenshot)
+                summary.preferencesUpdated += 1
+            }
         }
 
         // Quicklinks — match by stable row id. Imported rows own their keyword:

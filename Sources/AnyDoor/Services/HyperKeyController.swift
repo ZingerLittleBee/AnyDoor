@@ -8,11 +8,11 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "hyperKey.
 actor HyperKeyController {
     static let shared = HyperKeyController()
 
-    private let hidutilPath = "/usr/bin/hidutil"
-    private let runner: CommandRunner
+    private let hidutilURL = URL(fileURLWithPath: "/usr/bin/hidutil")
+    private let runner: any SubprocessRunning
     private let defaultsKey = "hyperKey.ownedSignatures"
 
-    init(runner: CommandRunner = DefaultCommandRunner()) {
+    init(runner: any SubprocessRunning = ProcessRunner()) {
         self.runner = runner
     }
 
@@ -43,10 +43,7 @@ actor HyperKeyController {
     /// callers can detect whether hidutil was mutated (SET was attempted) even
     /// when the method throws.
     private func readModifyWrite(removeAll: OwnedSignatures, add: MappingSignature?, didReachSet: inout Bool) async throws {
-        let getRes = try await runner.run(hidutilPath, args: ["property", "--get", "UserKeyMapping"], timeout: 2.0)
-        guard getRes.isSuccess else {
-            throw HyperKeyError.hidutilFailed(stderr: getRes.stderr)
-        }
+        let getRes = try await hidutil(["property", "--get", "UserKeyMapping"])
 
         var current = parseUserKeyMapping(getRes.stdout)
         current.removeAll { entry in removeAll.contains(MappingSignature(src: entry.src, dst: entry.dst)) }
@@ -54,16 +51,25 @@ actor HyperKeyController {
 
         let setArg = encodeUserKeyMapping(current)
         didReachSet = true // GET succeeded; SET is about to be invoked
-        let setRes = try await runner.run(hidutilPath, args: ["property", "--set", setArg], timeout: 2.0)
-        guard setRes.isSuccess else {
-            throw HyperKeyError.hidutilFailed(stderr: setRes.stderr)
-        }
+        _ = try await hidutil(["property", "--set", setArg])
     }
 
     /// Convenience overload for call sites that don't need to inspect the phase.
     private func readModifyWrite(removeAll: OwnedSignatures, add: MappingSignature?) async throws {
         var dummy = false
         try await readModifyWrite(removeAll: removeAll, add: add, didReachSet: &dummy)
+    }
+
+    /// Runs one hidutil call with a 2-second budget. A timeout throws `.timeout`
+    /// whatever status the terminated child left; any other non-zero exit
+    /// throws `.hidutilFailed` with hidutil's stderr.
+    private func hidutil(_ arguments: [String]) async throws -> SubprocessResult {
+        let result = try await runner.run(hidutilURL, arguments: arguments, timeout: .seconds(2))
+        if result.timedOut { throw HyperKeyError.timeout }
+        guard result.exit == 0 else {
+            throw HyperKeyError.hidutilFailed(stderr: result.stderr)
+        }
+        return result
     }
 
     struct ParsedEntry: Sendable { let src: UInt64; let dst: UInt64 }

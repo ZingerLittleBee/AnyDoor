@@ -211,4 +211,94 @@ extension ScheduledShutdownServiceTests {
                        current.timeIntervalSince1970 + ScheduledShutdownService.overdueGraceSeconds,
                        accuracy: 0.5)
     }
+
+    // MARK: - setArmed (panel row / hotkey on-off policy)
+
+    @MainActor
+    func testSetArmedTrueArmsTheDefaultCountdownAndNotifies() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let (service, executor, _, suite) = makeService(now: now)
+        var notified: [ScheduledShutdownState] = []
+        service.onChange = { notified.append($0) }
+
+        service.setArmed(true)
+
+        guard case .armed(let fireDate) = service.state else { return XCTFail("expected armed") }
+        // No configured default: falls back to 30 minutes.
+        XCTAssertEqual(fireDate.timeIntervalSince1970, now.timeIntervalSince1970 + 30 * 60, accuracy: 0.5)
+        XCTAssertEqual(suite.double(forKey: "scheduledShutdown.fireDate"),
+                       now.timeIntervalSince1970 + 30 * 60, accuracy: 0.5)
+        XCTAssertEqual(notified, [service.state], "setArmed must publish the transition through onChange")
+        XCTAssertEqual(executor.calls, [], "arming must not shut down")
+    }
+
+    @MainActor
+    func testSetArmedUsesTheConfiguredDefaultMinutes() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let (service, _, _, suite) = makeService(now: now)
+        // Written after the service exists, as the Settings picker does.
+        suite.set(45, forKey: "scheduledShutdown.defaultMinutes")
+
+        service.setArmed(true)
+
+        guard case .armed(let fireDate) = service.state else { return XCTFail("expected armed") }
+        XCTAssertEqual(fireDate.timeIntervalSince1970, now.timeIntervalSince1970 + 45 * 60, accuracy: 0.5)
+    }
+
+    @MainActor
+    func testSetArmedFalseCancelsAnArmedSchedule() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let (service, executor, warning, suite) = makeService(now: now)
+        service.arm(.minutes(120))   // e.g. picked from the duration menu
+        let dismissedBefore = warning.dismissCount
+
+        service.setArmed(false)
+
+        XCTAssertEqual(service.state, .off)
+        XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
+        XCTAssertGreaterThan(warning.dismissCount, dismissedBefore, "cancel must close any open warning")
+        XCTAssertEqual(executor.calls, [])
+    }
+
+    @MainActor
+    func testSetArmedSetsStateRatherThanToggling() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let (service, executor, _, suite) = makeService(now: now)
+
+        service.setArmed(true)
+        service.setArmed(true)
+
+        guard case .armed(let fireDate) = service.state else {
+            return XCTFail("repeating setArmed(true) must stay armed")
+        }
+        XCTAssertEqual(fireDate.timeIntervalSince1970, now.timeIntervalSince1970 + 30 * 60, accuracy: 0.5)
+        XCTAssertEqual(suite.double(forKey: "scheduledShutdown.fireDate"),
+                       now.timeIntervalSince1970 + 30 * 60, accuracy: 0.5)
+
+        service.setArmed(false)
+        service.setArmed(false)
+
+        XCTAssertEqual(service.state, .off, "repeating setArmed(false) must stay off")
+        XCTAssertNil(suite.object(forKey: "scheduledShutdown.fireDate"))
+        XCTAssertEqual(executor.calls, [])
+    }
+
+    @MainActor
+    func testSetArmedTrueRestartsAnArmedCountdownFromNow() {
+        var current = Date(timeIntervalSince1970: 1_000_000)
+        let suite = UserDefaults(suiteName: "test.shutdown.\(UUID().uuidString)")!
+        let service = ScheduledShutdownService(
+            executor: MockShutdownExecutor(), warning: MockShutdownWarning(), defaults: suite, now: { current }
+        )
+        service.setArmed(true)
+        current = current.addingTimeInterval(5 * 60)
+
+        service.setArmed(true)
+
+        guard case .armed(let fireDate) = service.state else { return XCTFail("expected armed") }
+        XCTAssertEqual(fireDate.timeIntervalSince1970, current.timeIntervalSince1970 + 30 * 60, accuracy: 0.5,
+                       "re-arming must start a fresh countdown, not keep the earlier target")
+        XCTAssertEqual(suite.double(forKey: "scheduledShutdown.fireDate"),
+                       current.timeIntervalSince1970 + 30 * 60, accuracy: 0.5)
+    }
 }

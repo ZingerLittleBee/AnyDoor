@@ -64,25 +64,19 @@ public struct ClipboardHistoryQuery: Equatable, Sendable {
     public var sourceID: ClipboardHistorySourceID?
     public var tagID: String?
     public var favoritesOnly: Bool
-    public var capturedAfter: Date?
-    public var capturedBefore: Date?
 
     public init(
         text: String = "",
         facet: ClipboardHistoryFacet? = nil,
         sourceID: ClipboardHistorySourceID? = nil,
         tagID: String? = nil,
-        favoritesOnly: Bool = false,
-        capturedAfter: Date? = nil,
-        capturedBefore: Date? = nil
+        favoritesOnly: Bool = false
     ) {
         self.text = text
         self.facet = facet
         self.sourceID = sourceID
         self.tagID = tagID
         self.favoritesOnly = favoritesOnly
-        self.capturedAfter = capturedAfter
-        self.capturedBefore = capturedBefore
     }
 }
 

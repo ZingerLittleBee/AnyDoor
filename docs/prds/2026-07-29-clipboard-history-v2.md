@@ -165,6 +165,9 @@ History tier or entitlement path.
   paste stay whole. Search index version 2 bounds existing fields once, in a
   background rebuild during which browsing stays available (ADR-0021,
   amendment of the same date).*
+  *Amendment (2026-10-02, no date filter): dates are not a filter. No surface
+  ever offered one, so the history query's unused capture-date bounds were
+  removed. Dates stay outside the searchable data.*
 - Encrypted FTS5 trigram candidates serve terms of three or more normalized
   Unicode code points. Encoded unigram and bigram FTS5 candidates serve shorter
   terms. Both tables are queried only with MATCH; candidate values are always

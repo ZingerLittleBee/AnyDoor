@@ -58,4 +58,16 @@ enum ClipboardHistoryActionFailurePresenter {
         )
         ToastPresenter.shared.show(.failure(notice.message))
     }
+
+    /// A successful copy shows nothing here; the caller gives its own feedback.
+    static func present(_ outcome: ClipboardHistoryCopyOutcome) {
+        switch outcome {
+        case .copied:
+            break
+        case .materializationFailed(let failure):
+            present(failure)
+        case .pasteboardWriteFailed:
+            present(.unknown)
+        }
+    }
 }

@@ -66,7 +66,8 @@ final class PanelStore {
 
     /// Current Scheduled Shutdown state. Owns the `.armed(fireDate:)` value used
     /// by the subtitle. Pushed in via `onScheduledShutdownStateChange` from the
-    /// service and from explicit mutations through `setScheduledShutdownDuration`.
+    /// service and read back after explicit mutations (`toggle`,
+    /// `setScheduledShutdownDuration`).
     private(set) var scheduledShutdownState: ScheduledShutdownState = .off
 
     /// Per-item in-flight guard preventing overlapping toggles from desynchronizing state.
@@ -295,14 +296,17 @@ final class PanelStore {
             return
         }
 
+        // Scheduled Shutdown's on/off policy lives in its MainActor service.
+        // Calling it directly keeps the read and the write in one MainActor
+        // turn (no provider hop between them), and the cache takes the
+        // read-back state rather than an optimistic `!current`.
         if item == .scheduledShutdown {
             guard !togglesInFlight.contains(item) else { return }
             togglesInFlight.insert(item)
             defer { togglesInFlight.remove(item) }
-            let armed = ScheduledShutdownService.shared.state.isArmed
-            await setScheduledShutdownDuration(
-                armed ? nil : .minutes(ScheduledShutdownService.shared.defaultMinutes)
-            )
+            let service = ScheduledShutdownService.shared
+            service.setArmed(!service.state.isArmed)
+            syncScheduledShutdownState()
             return
         }
 
@@ -359,6 +363,12 @@ final class PanelStore {
         } else {
             ScheduledShutdownService.shared.cancel()
         }
+        syncScheduledShutdownState()
+    }
+
+    /// Read the service's state back into the cache and rebuild after an
+    /// explicit mutation (`toggle`, `setScheduledShutdownDuration`).
+    private func syncScheduledShutdownState() {
         scheduledShutdownState = ScheduledShutdownService.shared.state
         toggleStates[.scheduledShutdown] = scheduledShutdownState.isArmed
         rebuild()

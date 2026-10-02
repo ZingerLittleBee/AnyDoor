@@ -61,8 +61,7 @@ struct ClipboardHistoryPopoverView: View {
             KeyboardMonitor(
                 selection: selection,
                 entries: entries,
-                presentation: presentation,
-                onCopyAndClosePanel: onCopyAndClosePanel,
+                onCommit: { copyAndClose($0) },
                 onDismissPopover: onDismissPopover
             )
         )
@@ -125,6 +124,11 @@ struct ClipboardHistoryPopoverView: View {
             LocalizedText(.clipboardEmpty)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .searchUnavailable:
+            LocalizedText(.clipboardSearchUnavailable)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .unavailable:
             LocalizedText(.clipboardPreviewCannotRender)
                 .foregroundStyle(.secondary)
@@ -160,29 +164,19 @@ struct ClipboardHistoryPopoverView: View {
         }
     }
 
+    /// A click and Return both commit here. A failure leaves the popover and
+    /// the panel open behind its toast.
     private func copyAndClose(_ entry: ClipboardHistoryEntry) {
         Task {
-            guard let materialization = await presentation.materialization(
-                for: entry.id,
-                purpose: .normalPaste,
-                usesCache: false
-            ) else {
-                ClipboardHistoryActionFailurePresenter.present(
-                    presentation.actionFailure
-                )
+            let outcome = await ClipboardHistoryPasteService.copyEntry(
+                entry.id,
+                from: presentation
+            )
+            guard outcome == .copied else {
+                ClipboardHistoryActionFailurePresenter.present(outcome)
                 return
             }
-            do {
-                try ClipboardSelfWrites.perform { pasteboard in
-                    try ClipboardHistoryPasteService.write(
-                        materialization,
-                        to: pasteboard
-                    )
-                }
-                onCopyAndClosePanel()
-            } catch {
-                ClipboardHistoryActionFailurePresenter.present(.unknown)
-            }
+            onCopyAndClosePanel()
         }
     }
 
@@ -270,16 +264,14 @@ struct ClipboardHistoryPopoverView: View {
 private struct KeyboardMonitor: NSViewRepresentable {
     let selection: ClipboardHistorySelectionModel
     let entries: [ClipboardHistoryEntry]
-    let presentation: ClipboardHistoryPresentationModel
-    let onCopyAndClosePanel: () -> Void
+    let onCommit: (ClipboardHistoryEntry) -> Void
     let onDismissPopover: () -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             selection: selection,
             entries: entries,
-            presentation: presentation,
-            onCopyAndClosePanel: onCopyAndClosePanel,
+            onCommit: onCommit,
             onDismissPopover: onDismissPopover
         )
     }
@@ -301,7 +293,7 @@ private struct KeyboardMonitor: NSViewRepresentable {
         context: Context
     ) {
         context.coordinator.entries = entries
-        context.coordinator.onCopyAndClosePanel = onCopyAndClosePanel
+        context.coordinator.onCommit = onCommit
         context.coordinator.onDismissPopover = onDismissPopover
         if let window = nsView.window, window.firstResponder !== nsView {
             window.makeFirstResponder(nsView)
@@ -312,21 +304,21 @@ private struct KeyboardMonitor: NSViewRepresentable {
     final class Coordinator {
         let selection: ClipboardHistorySelectionModel
         var entries: [ClipboardHistoryEntry]
-        let presentation: ClipboardHistoryPresentationModel
-        var onCopyAndClosePanel: () -> Void
+        /// Refreshed on every update. The menu bar remounts this view with a
+        /// new presentation per history row while the coordinator lives on,
+        /// so Return must not keep acting through the first mount's model.
+        var onCommit: (ClipboardHistoryEntry) -> Void
         var onDismissPopover: () -> Void
 
         init(
             selection: ClipboardHistorySelectionModel,
             entries: [ClipboardHistoryEntry],
-            presentation: ClipboardHistoryPresentationModel,
-            onCopyAndClosePanel: @escaping () -> Void,
+            onCommit: @escaping (ClipboardHistoryEntry) -> Void,
             onDismissPopover: @escaping () -> Void
         ) {
             self.selection = selection
             self.entries = entries
-            self.presentation = presentation
-            self.onCopyAndClosePanel = onCopyAndClosePanel
+            self.onCommit = onCommit
             self.onDismissPopover = onDismissPopover
         }
 
@@ -340,31 +332,7 @@ private struct KeyboardMonitor: NSViewRepresentable {
                 selection.togglePreview()
             case kVK_Return:
                 guard let entry = selectedEntry else { return true }
-                Task {
-                    guard let value = await presentation.materialization(
-                        for: entry.id,
-                        purpose: .normalPaste,
-                        usesCache: false
-                    ) else {
-                        ClipboardHistoryActionFailurePresenter.present(
-                            presentation.actionFailure
-                        )
-                        return
-                    }
-                    do {
-                        try ClipboardSelfWrites.perform { pasteboard in
-                            try ClipboardHistoryPasteService.write(
-                                value,
-                                to: pasteboard
-                            )
-                        }
-                        onCopyAndClosePanel()
-                    } catch {
-                        ClipboardHistoryActionFailurePresenter.present(
-                            .unknown
-                        )
-                    }
-                }
+                onCommit(entry)
             case kVK_Escape:
                 if selection.previewedID != nil {
                     selection.closePreview()

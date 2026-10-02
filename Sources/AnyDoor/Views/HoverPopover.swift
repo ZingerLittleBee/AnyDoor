@@ -80,6 +80,10 @@ final class HoverPopover {
         panel.contentView = containerView
         panel.becomesKeyOnlyIfNeeded = true
         panel.hidesOnDeactivate = false
+        // Even when it takes key focus the popover never activates AnyDoor, so
+        // AppKit would suppress its `.help` tooltips while another app is
+        // frontmost (see `MenuBarController.showPanel`).
+        panel.allowsToolTipsWhenApplicationIsInactive = true
         self.panel = panel
 
         // Track key state so MenuBarView can guard onDisappear.

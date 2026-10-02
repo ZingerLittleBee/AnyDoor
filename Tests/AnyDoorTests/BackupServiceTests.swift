@@ -422,6 +422,87 @@ final class BackupServiceTests: XCTestCase {
     }
 
     @MainActor
+    func testImportMergesRetiredCaptureModeBarEntryIntoScreenshot() async throws {
+        // The launch migration already moved the Capture Menu hotkey onto the
+        // local Screenshot row. A backup from before the removal must not wipe
+        // it with its own unbound, hidden Screenshot entry.
+        let context = try makeContext()
+        context.insert(BuiltinPreference(itemKey: "screenshot", isVisible: true,
+                                         displayOrder: 900, keyCode: 21, modifierFlags: 0x12_0000))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let summary = try await service.restore(snapshot(prefs: [
+            BuiltinPreferenceDTO(itemKey: "captureModeBar", isVisible: true,
+                                 displayOrder: 920, keyCode: 21, modifierFlags: 0x12_0000),
+            BuiltinPreferenceDTO(itemKey: "screenshot", isVisible: false,
+                                 displayOrder: 905, keyCode: nil, modifierFlags: nil),
+        ]))
+
+        XCTAssertEqual(summary.preferencesUpdated, 2)
+        let rows = try context.fetch(FetchDescriptor<BuiltinPreference>())
+        XCTAssertEqual(rows.map(\.itemKey), ["screenshot"], "the retired key is never inserted")
+        let screenshot = try XCTUnwrap(rows.first)
+        XCTAssertEqual(screenshot.keyCode, 21)
+        XCTAssertEqual(screenshot.modifierFlags, 0x12_0000)
+        XCTAssertTrue(screenshot.isVisible)
+        XCTAssertEqual(screenshot.displayOrder, 905)
+    }
+
+    @MainActor
+    func testImportedScreenshotHotkeyBeatsImportedCaptureModeBarHotkey() async throws {
+        let context = try makeContext()
+        context.insert(BuiltinPreference(itemKey: "screenshot", isVisible: true, displayOrder: 900))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        // Listed after Screenshot, so applying it as a plain Screenshot entry
+        // would let it win.
+        try await service.restore(snapshot(prefs: [
+            BuiltinPreferenceDTO(itemKey: "screenshot", isVisible: false,
+                                 displayOrder: 900, keyCode: 20, modifierFlags: 0x12_0000),
+            BuiltinPreferenceDTO(itemKey: "captureModeBar", isVisible: true,
+                                 displayOrder: 920, keyCode: 21, modifierFlags: 0x18_0000),
+        ]))
+
+        let screenshot = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<BuiltinPreference>()).first
+        )
+        XCTAssertEqual(screenshot.keyCode, 20)
+        XCTAssertEqual(screenshot.modifierFlags, 0x12_0000)
+        XCTAssertEqual(screenshot.displayOrder, 900)
+        XCTAssertTrue(screenshot.isVisible, "a visible Capture Menu still shows Screenshot")
+    }
+
+    @MainActor
+    func testExportLeavesOutALeftoverCaptureModeBarRow() async throws {
+        // A downgrade can seed the retired row again after the launch merge
+        // deleted it. Restoring a backup this build exported must leave
+        // Screenshot as it was.
+        let context = try makeContext()
+        context.insert(BuiltinPreference(itemKey: "screenshot", isVisible: false, displayOrder: 900))
+        context.insert(BuiltinPreference(itemKey: "captureModeBar", isVisible: true,
+                                         displayOrder: 6_100, keyCode: 21, modifierFlags: 0x12_0000))
+        try context.save()
+
+        let service = BackupService(context: context, defaults: makeDefaults(),
+                                    appPathResolver: { _ in nil }, reconcileRuntime: {})
+        let exported = try service.exportSnapshot()
+        XCTAssertEqual(exported.builtinPreferences.map(\.itemKey), ["screenshot"])
+
+        try await service.restore(exported)
+
+        let screenshot = try XCTUnwrap(
+            try context.fetch(FetchDescriptor<BuiltinPreference>())
+                .first(where: { $0.itemKey == "screenshot" })
+        )
+        XCTAssertFalse(screenshot.isVisible)
+        XCTAssertNil(screenshot.keyCode)
+    }
+
+    @MainActor
     func testImportUpdatesExistingQuicklinkByIDAndKeepsLocalOnlyRows() async throws {
         let context = try makeContext()
         let importedID = UUID()

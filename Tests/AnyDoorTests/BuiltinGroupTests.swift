@@ -29,7 +29,7 @@ struct BuiltinGroupTests {
         ])
         #expect(BuiltinGroup.screenshot.members == [
             .screenshot, .captureWindow, .captureFullscreen, .captureTimer,
-            .captureModeBar, .recordScreen, .captureScrolling,
+            .recordScreen, .captureScrolling,
         ])
         #expect(BuiltinGroup.translation.members == [
             .translate, .screenshotTranslate, .translateSelection,

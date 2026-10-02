@@ -6,12 +6,45 @@ versioning.
 
 ## [Unreleased]
 
+### Removed
+
+- The Capture Menu (截图菜单) action is gone from the menu-bar panel and command
+  palette, because it did the same as Screenshot to Clipboard (截图到剪贴板).
+  Its hotkey moves to Screenshot to Clipboard unless that action already has
+  one, and if Capture Menu was shown, Screenshot to Clipboard is shown too.
+  Restoring a backup made before this change does the same.
+
 ### Fixed
 
 - AnyDoor no longer opens or deletes `~/Library/Application Support/default.store`
   at launch. Non-sandboxed apps that use SwiftData keep their data in that file
   by default, and a leftover migration for pre-1.0 development builds could
   erase it every time AnyDoor started.
+- Port scans no longer hang. A stuck scan kept the Port Manager spinning and
+  stopped the command palette's port search from refreshing until AnyDoor
+  restarted. A scan that finished normally no longer shows a false "Refresh
+  failed" timeout warning either.
+- Lock Screen now works on macOS versions that no longer ship the `CGSession`
+  tool, where it did nothing. When the lock request fails, a notice now says
+  so instead of the action failing silently.
+- Empty Trash no longer keeps asking for Automation permission after you grant
+  it. Its menu-bar panel row now checks Finder access each time the panel opens,
+  so it stops sending you to System Settings once access is granted.
+- Hover tooltips in the menu-bar panel and its popovers, the clipboard wall,
+  and the wall's text preview and editor now appear while another app is
+  frontmost. These windows leave that app active, which used to hide every
+  tooltip in them.
+- Clipboard History search no longer stays unavailable for good after one
+  failed search index rebuild. Later launches retry the rebuild in the
+  background, and after three failures in a row they wait for the next AnyDoor
+  update. Meanwhile, searching in the clipboard wall says that search is
+  unavailable and browsing still works, instead of calling the whole history
+  unavailable and pointing to a retry in Settings that is not there.
+- The downloaded app can now ask for Automation permission. Its signature
+  lacked the Apple Events entitlement, without which macOS does not let an app
+  ask, so actions that control Finder or System Events (Dark Mode, Empty
+  Trash, a graceful Scheduled Shutdown, and Image Conversion picking up the
+  Finder selection) could fail without ever asking for access.
 
 ## [4.2.6] - 2026-10-02
 

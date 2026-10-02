@@ -78,7 +78,7 @@ final class PortScannerTests: XCTestCase {
     // Stub runner used to exercise scanner branches without spawning lsof.
     private struct StubRunner: SubprocessRunning {
         let result: SubprocessResult
-        func run(path: String, args: [String], timeout: Duration) async throws -> SubprocessResult {
+        func run(_ executableURL: URL, arguments: [String], timeout: Duration?) async throws -> SubprocessResult {
             result
         }
     }
@@ -114,24 +114,6 @@ final class PortScannerTests: XCTestCase {
             _ = try await scanner.scanTCPListening()
             XCTFail("expected lsofTimeout")
         } catch PortScanError.lsofTimeout {
-            // expected
-        } catch {
-            XCTFail("unexpected error: \(error)")
-        }
-    }
-
-    func testLsofRunnerThrowsCancellationInsteadOfExit15WhenTaskIsCancelled() async {
-        let runner = LsofRunner()
-        let task = Task {
-            try await runner.run(path: "/bin/sleep", args: ["5"], timeout: .seconds(10))
-        }
-        try? await Task.sleep(for: .milliseconds(100))
-        task.cancel()
-
-        do {
-            _ = try await task.value
-            XCTFail("expected CancellationError")
-        } catch is CancellationError {
             // expected
         } catch {
             XCTFail("unexpected error: \(error)")

@@ -97,9 +97,7 @@ struct ClipboardWallView: View {
                     .foregroundStyle(.secondary)
                 ProgressView()
                 Spacer()
-            } else if case .unavailable =
-                state.presentation.contentState
-            {
+            } else if state.showsUnavailableState {
                 Spacer()
                 LocalizedText(state.unavailableStateKey)
                     .foregroundStyle(.secondary)

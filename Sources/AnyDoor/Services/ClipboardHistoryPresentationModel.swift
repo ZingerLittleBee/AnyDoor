@@ -218,6 +218,9 @@ enum ClipboardHistoryContentState: Equatable {
     case content
     case empty
     case indexing
+    /// The store is fine, but its search index failed, so a query cannot
+    /// run. Browsing without one still works.
+    case searchUnavailable(ClipboardHistorySearchIndexFailure)
     case unavailable(ClipboardHistoryStatus.AvailabilityReason?)
 }
 
@@ -247,7 +250,6 @@ enum ClipboardHistoryActionFailure: Equatable {
     case invalidTagIDs
     case invalidTagDefinition
     case invalidTextEdit
-    case searchIndexFailed(ClipboardHistorySearchIndexFailure)
     case unknown
 
     init(_ error: any Error) {
@@ -1055,8 +1057,7 @@ final class ClipboardHistoryPresentationModel {
                 nextCursor = nil
                 pagingState = .complete
                 totalCount = nil
-                contentState = .unavailable(.searchIndexUnavailable)
-                actionFailure = .searchIndexFailed(failure)
+                contentState = .searchUnavailable(failure)
             }
         } catch {
             // Only a newer load cancels this one, and it bumps the revision

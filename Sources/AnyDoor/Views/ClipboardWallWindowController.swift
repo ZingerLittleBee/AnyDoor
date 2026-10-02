@@ -45,10 +45,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// navigation. Keep in sync with ClipboardWallView's layout.
     private static let topStripHeight: CGFloat = 48
 
-    /// The app that was frontmost when the wall opened. The wall activates
-    /// AnyDoor so its panel can become key (a background .accessory app's panel
-    /// won't otherwise receive keyboard events); focus is returned here on
-    /// paste/Esc so the net effect is no focus theft.
+    /// The app that was frontmost when the wall opened. The wall's panel
+    /// becomes key without activating AnyDoor, so this app normally stays
+    /// active; paste/Esc reactivate it only if something else took activation
+    /// while the wall was up.
     private weak var previousApp: NSRunningApplication?
 
     /// Guards against re-entrant show/dismiss while the slide animation runs.
@@ -70,6 +70,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         panel.isReleasedWhenClosed = false
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        // The wall becomes key without activating AnyDoor, so AppKit would
+        // suppress its `.help` tooltips while the previous app stays frontmost.
+        panel.allowsToolTipsWhenApplicationIsInactive = true
         // Become key as soon as shown so keyboard nav / search work without
         // waiting for a control to demand it.
         panel.becomesKeyOnlyIfNeeded = false
@@ -663,27 +666,13 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         plain: Bool
     ) {
         Task {
-            let purpose: ClipboardHistoryMaterializationPurpose =
-                plain ? .plainTextPaste : .normalPaste
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: purpose,
-                    usesCache: false
-                )
-            else {
-                presentActionFailure()
-                return
-            }
-            do {
-                try ClipboardSelfWrites.perform { pasteboard in
-                    try ClipboardHistoryPasteService.write(
-                        materialization,
-                        to: pasteboard
-                    )
-                }
-            } catch {
-                ClipboardHistoryActionFailurePresenter.present(.unknown)
+            let outcome = await ClipboardHistoryPasteService.copyEntry(
+                entry.id,
+                purpose: plain ? .plainTextPaste : .normalPaste,
+                from: state.presentation
+            )
+            guard outcome == .copied else {
+                presentCopyFailure(outcome)
                 return
             }
             // Slide out first; reactivating the prior app returns focus there,
@@ -732,29 +721,27 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// without pasting or dismissing the wall.
     private func copyWithoutPasting(_ entry: ClipboardHistoryEntry) {
         Task {
-            guard let materialization =
-                await state.presentation.materialization(
-                    for: entry.id,
-                    purpose: .normalPaste,
-                    usesCache: false
-                )
-            else {
-                presentActionFailure()
+            let outcome = await ClipboardHistoryPasteService.copyEntry(
+                entry.id,
+                from: state.presentation
+            )
+            guard outcome == .copied else {
+                presentCopyFailure(outcome)
                 return
             }
-            do {
-                try ClipboardSelfWrites.perform { pasteboard in
-                    try ClipboardHistoryPasteService.write(
-                        materialization,
-                        to: pasteboard
-                    )
-                }
-                ToastPresenter.shared.show(
-                    .success(L(.toastCopiedToClipboard))
-                )
-            } catch {
-                ClipboardHistoryActionFailurePresenter.present(.unknown)
-            }
+            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+        }
+    }
+
+    /// A failed materialization goes through `presentActionFailure()` rather
+    /// than the popover's plain toast, so legacy owned files still get the
+    /// restore flow. That reads `actionFailure`, so call this right after
+    /// `copyEntry` returns, with no `await` in between.
+    private func presentCopyFailure(_ outcome: ClipboardHistoryCopyOutcome) {
+        if case .materializationFailed = outcome {
+            presentActionFailure()
+        } else {
+            ClipboardHistoryActionFailurePresenter.present(outcome)
         }
     }
 

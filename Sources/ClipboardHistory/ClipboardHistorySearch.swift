@@ -155,8 +155,6 @@ extension ClipboardHistoryModule {
                 sourceID: query.sourceID,
                 tagID: query.tagID,
                 favoritesOnly: query.favoritesOnly,
-                capturedAfter: query.capturedAfter?.timeIntervalSince1970,
-                capturedBefore: query.capturedBefore?.timeIntervalSince1970,
                 indexGeneration: generation
             )
             let validCursor = cursor
@@ -653,14 +651,6 @@ extension ClipboardHistoryModule {
             )
             arguments += [facet.rawValue]
         }
-        if let capturedAfter = query.capturedAfter {
-            conditions.append("\(entryAlias).captured_at >= ?")
-            arguments += [capturedAfter.timeIntervalSince1970]
-        }
-        if let capturedBefore = query.capturedBefore {
-            conditions.append("\(entryAlias).captured_at <= ?")
-            arguments += [capturedBefore.timeIntervalSince1970]
-        }
     }
 
     static func entry(
@@ -768,8 +758,6 @@ private struct SearchCursorBinding: Codable, Equatable {
         sourceID: ClipboardHistorySourceID?,
         tagID: String?,
         favoritesOnly: Bool,
-        capturedAfter: Double?,
-        capturedBefore: Double?,
         indexGeneration: Int64
     ) throws {
         let input = SearchCursorInput(
@@ -778,8 +766,6 @@ private struct SearchCursorBinding: Codable, Equatable {
             sourceID: sourceID,
             tagID: tagID,
             favoritesOnly: favoritesOnly,
-            capturedAfter: capturedAfter,
-            capturedBefore: capturedBefore,
             indexGeneration: indexGeneration
         )
         let encoder = JSONEncoder()
@@ -794,8 +780,6 @@ private struct SearchCursorInput: Codable {
     let sourceID: ClipboardHistorySourceID?
     let tagID: String?
     let favoritesOnly: Bool
-    let capturedAfter: Double?
-    let capturedBefore: Double?
     let indexGeneration: Int64
 }
 

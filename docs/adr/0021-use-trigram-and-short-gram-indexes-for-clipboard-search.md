@@ -135,19 +135,20 @@ open, a ready version 1 index none of whose fields exceeds the bound is already
 a version 2 index: it is stamped in place, keeps its generation because its
 content is unchanged, and then gets the usual integrity check. A version 1
 index with an oversized field, or one left indexing, is rebuilt in the
-background; a failed one stays failed until it is retried. Inside the
-rebuild's single transaction, after both FTS tables are dropped and before
-they are created again, the rebuild rewrites every oversized field row to its
-bounded form. Payloads are still never rewritten. This is an explicit
-exception to the rule that field rows change only through the one
-transactional mutation path. That rule exists because a field and its index
-entries must change together. Once both tables are dropped, no index entry
-describes the old values, and both indexes are rebuilt from the rewritten rows
-before the same commit, so no reader ever sees the three representations
-disagree. A failed rebuild rolls the rewrite back with everything else and
-leaves the version 1 store intact for a retry. The rewrite fetches only a
-prefix of each oversized value, as many code points as the bound has bytes,
-which always covers the bound, so no huge text is copied into the app whole;
+background, and so is a failed one that still has a retry left (see the
+amendment on retrying a failed rebuild). Inside the rebuild's single
+transaction, after both FTS tables are dropped and before they are created
+again, the rebuild rewrites every oversized field row to its bounded form.
+Payloads are still never rewritten. This is an explicit exception to the rule
+that field rows change only through the one transactional mutation path. That
+rule exists because a field and its index entries must change together. Once
+both tables are dropped, no index entry describes the old values, and both
+indexes are rebuilt from the rewritten rows before the same commit, so no
+reader ever sees the three representations disagree. A failed rebuild rolls
+the rewrite back with everything else and leaves the version 1 store intact,
+so a later open can retry the upgrade. The rewrite fetches only a prefix of
+each oversized value, as many code points as the bound has bytes, which always
+covers the bound, so no huge text is copied into the app whole;
 SQLite still reads each such value once to cut the prefix. When any row was
 rewritten, the rebuild then returns the freed pages and truncates the WAL,
 outside the transaction and on a best-effort basis, so History Storage Usage
@@ -173,3 +174,31 @@ indexes once from the stored normalized values, so existing fields stay
 bounded and their entries stay searchable by their first 64 KB. Texts that the
 older build captures or edits are stored whole again; updating back bounds
 them with one more rebuild, or stamps the index in place when there are none.
+
+## Amendment: retrying a failed rebuild (2026-10-02)
+
+A failed rebuild used to leave the index failed for good. Opening the store
+left a failed index alone, and only an explicit retry rebuilt it, which nothing
+in the app offers, so one failure, even a transient one such as a full disk,
+turned search off permanently. Opening the store now retries the rebuild in the
+background while fewer than three rebuilds in a row have failed for the running
+app build. A cause that has gone away heals at a later launch, and one that
+persists costs a few background rebuilds rather than one at every launch. While
+a retry runs, search reports that it is indexing, as during any rebuild, and
+browsing by recency stays available throughout.
+
+The number of failures in a row, and the app build (`CFBundleVersion`) they
+were counted under, are kept with the index state in the maintenance metadata,
+and the transaction that marks the index failed also counts the failure.
+Opening still decides with a read, so another process writing to the store
+cannot fail a healthy index; only a retry takes a write, to mark the index
+indexing again. A retry that write cannot start is not counted, and the next
+open decides again. A published index, an explicit retry, and a different app
+build each start the count over. An update may fix the cause, so it gets
+attempts of its own; a build without a version, such as one started with
+`swift run`, counts under one fixed identity, so relaunching it never starts
+over. Only a rebuild failure is retried. The failed state has always been
+written together with the rebuild-failed reason, so an index marked failed for
+any other reason was marked by a different build, and nothing says a rebuild
+clears it: it waits for an explicit retry. Each failed rebuild logs its error
+domain and code, and never any content.

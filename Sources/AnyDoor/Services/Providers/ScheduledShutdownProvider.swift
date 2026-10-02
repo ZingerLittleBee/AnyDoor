@@ -1,9 +1,11 @@
 import Foundation
 import PluginInterface
 
-/// Thin adapter so the panel row + global hotkey route through the standard
-/// PanelStore toggle machinery. All real state lives in
-/// `ScheduledShutdownService` (the MainActor brain); this provider just bridges.
+/// Thin `ToggleProvider` adapter over `ScheduledShutdownService` (the MainActor
+/// brain, which owns all state and the on/off policy). The panel row and global
+/// hotkey don't route through it: `PanelStore.toggle` special-cases this item
+/// and calls `ScheduledShutdownService.setArmed` itself, keeping the read and
+/// the write in one MainActor turn.
 actor ScheduledShutdownProvider: ToggleProvider {
     let itemKey: BuiltinItem = .scheduledShutdown
     var permission: PermissionStatus { .notRequired }
@@ -13,14 +15,6 @@ actor ScheduledShutdownProvider: ToggleProvider {
     }
 
     func setState(_ enabled: Bool) async throws {
-        await MainActor.run {
-            if enabled {
-                ScheduledShutdownService.shared.arm(
-                    .minutes(ScheduledShutdownService.shared.defaultMinutes)
-                )
-            } else {
-                ScheduledShutdownService.shared.cancel()
-            }
-        }
+        await MainActor.run { ScheduledShutdownService.shared.setArmed(enabled) }
     }
 }

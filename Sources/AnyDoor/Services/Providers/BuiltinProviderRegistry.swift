@@ -31,7 +31,6 @@ enum BuiltinProviderRegistry {
             CaptureWindowProvider(),
             CaptureFullscreenProvider(),
             CaptureTimerProvider(),
-            CaptureModeBarProvider(),
             RecordScreenProvider(),
             CaptureScrollingProvider(),
             ClearClipboardProvider(),

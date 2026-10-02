@@ -341,7 +341,11 @@ final class ClipboardHistoryCaptureMonitor {
     }
 
     private func apply(_ plan: ClipboardHistoryMonitorScheduler.Plan) {
+        let wasActive = isActive
         isActive = plan.nextFire != nil
+        if isActive != wasActive {
+            instrumentation.recordMonitoringActive(isActive)
+        }
         if plan.copyEventWindowDeadline == nil {
             pendingCopyEventSource = nil
         }

@@ -325,9 +325,54 @@ final class ClipboardHistoryMonitorInstrumentationTests: XCTestCase {
                 boostedTimerFireCount: 1,
                 observedChangeCount: 1,
                 capturedChangeCount: 1,
-                overwrittenGenerationCount: 2
+                overwrittenGenerationCount: 2,
+                monitoringDuration: .zero
             )
         )
+    }
+
+    @MainActor
+    func testMonitoringDurationLeavesOutTimeTheMonitorWasStopped()
+        async throws
+    {
+        let fixture = try MonitorTemporaryStore()
+        let module = ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        )
+        let uptime = OSAllocatedUnfairLock(initialState: Duration.seconds(100))
+        let instrumentation = ClipboardHistoryMonitorInstrumentation(
+            uptime: { uptime.withLock { $0 } }
+        )
+        let monitor = ClipboardHistoryCaptureMonitor(
+            module: module,
+            pasteboard: NSPasteboard(
+                name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+            ),
+            instrumentation: instrumentation,
+            installsSystemObservers: false
+        )
+
+        await monitor.setEnabled(true)
+        uptime.withLock { $0 = .seconds(130) }
+        await monitor.handleLifecycle(.screenLocked)
+        uptime.withLock { $0 = .seconds(400) }
+        await monitor.handleLifecycle(.screenUnlocked)
+        uptime.withLock { $0 = .seconds(410) }
+
+        XCTAssertEqual(
+            instrumentation.snapshot().monitoringDuration,
+            .seconds(40)
+        )
+
+        await monitor.setEnabled(false)
+        uptime.withLock { $0 = .seconds(900) }
+
+        XCTAssertEqual(
+            instrumentation.snapshot().monitoringDuration,
+            .seconds(40)
+        )
+        try await module.closeStoreForTesting()
     }
 }
 
@@ -986,7 +1031,11 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
             text: "baseline",
             declaredSource: "dev.bybee.baseline"
         )
-        let instrumentation = ClipboardHistoryMonitorInstrumentation()
+        // A stopped clock keeps the running monitor's duration at zero, so
+        // the comparison below covers every counter exactly.
+        let instrumentation = ClipboardHistoryMonitorInstrumentation(
+            uptime: { .zero }
+        )
         let monitor = ClipboardHistoryCaptureMonitor(
             module: module,
             pasteboard: pasteboard,
@@ -1018,7 +1067,8 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
                 boostedTimerFireCount: 0,
                 observedChangeCount: 1,
                 capturedChangeCount: 1,
-                overwrittenGenerationCount: 1
+                overwrittenGenerationCount: 1,
+                monitoringDuration: .zero
             )
         )
     }

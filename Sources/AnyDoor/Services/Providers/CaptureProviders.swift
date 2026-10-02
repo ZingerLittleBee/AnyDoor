@@ -54,17 +54,6 @@ actor CaptureTimerProvider: ActionProvider {
     }
 }
 
-/// Open the unified capture overlay (pre-shown selection + attached type toolbar).
-actor CaptureModeBarProvider: ActionProvider {
-    let itemKey: BuiltinItem = .captureModeBar
-
-    var permission: PermissionStatus { .notRequired }
-
-    func run() async {
-        await MainActor.run { CaptureCoordinator.shared.capture(CaptureRequest(mode: .region)) }
-    }
-}
-
 /// Toggle screen recording on/off (fullscreen of the display under the cursor).
 actor RecordScreenProvider: ActionProvider {
     let itemKey: BuiltinItem = .recordScreen

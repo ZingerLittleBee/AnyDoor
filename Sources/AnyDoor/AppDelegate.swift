@@ -9,6 +9,10 @@ import ClipboardHistory
 import Sparkle
 
 private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "persistence")
+private let clipboardMonitorLogger = Logger(
+    subsystem: "dev.bybee.AnyDoor",
+    category: "clipboardHistory.monitor"
+)
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -358,8 +362,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let lifecycle = clipboardHistoryLifecycle
+        let module = clipboardHistoryModule
+        let logsClipboardMonitorMetrics = ProcessInfo.processInfo.environment[
+            "ANYDOOR_CLIPBOARD_MONITOR_METRICS"
+        ] == "1"
         Task { @MainActor in
             await lifecycle.stop()
+            if logsClipboardMonitorMetrics {
+                AppDelegate.logClipboardMonitorMetrics(
+                    await module.monitorMetrics()
+                )
+            }
             if HyperKeyController.shared.hasPersistedSignatures {
                 await withTaskGroup(of: Void.self) { group in
                     group.addTask {
@@ -375,6 +388,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    /// Opt-in through `ANYDOOR_CLIPBOARD_MONITOR_METRICS=1`, for the idle-cost
+    /// and loss-rate gates in the clipboard history manual test plan (8.9 and
+    /// 8.11). One line of counts at quit, never clipboard content, and no
+    /// added timer, so it cannot skew the wakeups it measures.
+    private nonisolated static func logClipboardMonitorMetrics(
+        _ metrics: ClipboardHistoryMonitorMetrics
+    ) {
+        let (seconds, attoseconds) = metrics.monitoringDuration.components
+        let monitoringSeconds = Double(seconds) + Double(attoseconds) / 1e18
+        clipboardMonitorLogger.notice(
+            """
+            Clipboard monitor metrics: \
+            monitoringSeconds=\(monitoringSeconds, format: .fixed(precision: 1), privacy: .public) \
+            keyHintCount=\(metrics.keyHintCount, privacy: .public) \
+            idleTimerFireCount=\(metrics.idleTimerFireCount, privacy: .public) \
+            boostedTimerFireCount=\(metrics.boostedTimerFireCount, privacy: .public) \
+            observedChangeCount=\(metrics.observedChangeCount, privacy: .public) \
+            capturedChangeCount=\(metrics.capturedChangeCount, privacy: .public) \
+            overwrittenGenerationCount=\(metrics.overwrittenGenerationCount, privacy: .public)
+            """
+        )
     }
 
     /// When the icon is hidden the menu bar item disappears and the app keeps

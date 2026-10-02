@@ -341,23 +341,6 @@
         }
       }
     },
-    "builtin.captureModeBar": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture Menu"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图菜单"
-          }
-        }
-      }
-    },
     "builtin.captureScrolling": {
       "extractionState": "manual",
       "localizations": {
@@ -3176,6 +3159,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜索…"
+          }
+        }
+      }
+    },
+    "clipboard.searchUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search is unavailable. Browsing your history still works."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索暂不可用，浏览历史不受影响。"
           }
         }
       }
@@ -12901,6 +12901,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "已清空废纸篓"
+          }
+        }
+      }
+    },
+    "toast.lockScreen.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't lock the screen"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法锁定屏幕"
           }
         }
       }
