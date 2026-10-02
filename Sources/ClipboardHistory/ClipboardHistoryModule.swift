@@ -541,11 +541,27 @@ extension ClipboardHistoryModule {
         }
     }
 
+    /// Test-only teardown: releases an installed capture monitor, stops
+    /// background work, waits for a search index rebuild and closes the pool.
+    /// A call after a completed close is a no-op, so a test that closes
+    /// mid-test can leave the final close to its teardown. A call while
+    /// another close is still running throws `operationUnavailable`.
     func closeStoreForTesting() async throws {
         guard !isClosingStore else {
             throw ClipboardHistoryModuleError.operationUnavailable
         }
         isClosingStore = true
+        // The monitor holds this module strongly. Drop it before the first
+        // suspension, so a reentrant caller cannot reuse a monitor that is
+        // being torn down. A setMonitoring call during or after the close
+        // installs a new monitor that this close does not release, so tests
+        // stop their lifecycle before closing the module.
+        if let monitor = captureMonitor {
+            captureMonitor = nil
+            monitoringEnabled = false
+            monitoringRequested = false
+            await monitor.setEnabled(false)
+        }
         await stopMaintenanceTask()
         await stopDerivedJobScheduler()
         let rebuildTask = searchIndexRebuildTask

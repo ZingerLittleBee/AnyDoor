@@ -581,6 +581,36 @@ final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
         XCTAssertEqual(recorder.count, 1)
     }
 
+    /// The monitor holds its module strongly, so a test store must drop an
+    /// installed monitor when it closes, or the pair outlives the test.
+    @MainActor
+    func testClosingTheStoreReleasesItsInstalledMonitor() async throws {
+        let fixture = try MonitorTemporaryStore(in: self)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore()
+        ))
+        weak var released: ClipboardHistoryCaptureMonitor?
+        do {
+            let monitor = ClipboardHistoryCaptureMonitor(
+                module: module,
+                pasteboard: NSPasteboard(
+                    name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+                ),
+                installsSystemObservers: false
+            )
+            released = monitor
+            await module.installCaptureMonitorForTesting(monitor)
+        }
+        XCTAssertNotNil(released, "the module should hold its installed monitor")
+
+        try await module.closeStoreForTesting()
+        XCTAssertNil(released, "closing the store should release the monitor")
+
+        // A sequential second close, like the tracked teardown's, is a no-op.
+        try await module.closeStoreForTesting()
+    }
+
     @MainActor
     func testBaselineResumeAndSelfWritesNeverImportCurrentPasteboard() async throws {
         let fixture = try MonitorTemporaryStore(in: self)
