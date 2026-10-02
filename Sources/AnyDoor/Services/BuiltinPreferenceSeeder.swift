@@ -11,12 +11,21 @@ private let logger = Logger(subsystem: "dev.bybee.AnyDoor", category: "seeder")
 /// - On later runs: diffs `BuiltinItem.allCases` against existing rows and appends new items
 ///   at the end (max displayOrder + 1).
 /// - Orphan rows (itemKey not in current `BuiltinItem`) are left in place; readers skip them
-///   via `BuiltinItem(rawValue:)`.
+///   via `BuiltinItem(rawValue:)`. The retired `captureModeBar` row is the exception: it is
+///   merged into `.screenshot` once and then deleted.
 enum BuiltinPreferenceSeeder {
     private static let windowLayoutBackfillFlag = "windowLayoutDefaultsApplied_v1"
     private static let windowLayoutBackfillV2Flag = "windowLayoutDefaultsApplied_v2"
     private static let clipboardWallHotkeyFlag = "clipboardWallDefaultHotkey_v1"
     private static let topLevelFlattenFlag = "panelTopLevelOrderFlattened_v1"
+    private static let captureModeBarMergeFlag = "captureModeBarMerged_v1"
+
+    /// Item key of the retired Capture Menu built-in. It ran the same region
+    /// capture as `.screenshot` in every release, so its preference row is
+    /// merged into Screenshot's: once at launch, and again whenever a backup
+    /// taken before the removal is imported. `BackupService` never exports
+    /// the key, so a row a downgrade seeds again stays out of new backups.
+    static let captureModeBarItemKey = "captureModeBar"
 
     @MainActor
     static func seedIfNeeded(in context: ModelContext) {
@@ -46,12 +55,65 @@ enum BuiltinPreferenceSeeder {
                 logger.info("Seeded \(added) BuiltinPreference row(s)")
             }
 
+            applyCaptureModeBarMergeIfNeeded(in: context)
             applyWindowLayoutBackfillIfNeeded(in: context)
             applyWindowLayoutBackfillV2IfNeeded(in: context)
             applyClipboardWallHotkeyIfNeeded(in: context)
             applyTopLevelFlattenIfNeeded(in: context)
         } catch {
             logger.error("BuiltinPreference seeding failed: \(error)")
+        }
+    }
+
+    /// One-shot merge of the retired Capture Menu row into Screenshot's (rules
+    /// in `mergeCaptureModeBar(_:into:)`), then deletion of that row so it no
+    /// longer rides along in backups. At launch this runs before the first
+    /// hotkey snapshot compiles, so a moved hotkey works right away. The flag
+    /// is set only after the save succeeds, so a failed save retries on the
+    /// next launch.
+    @MainActor
+    static func applyCaptureModeBarMergeIfNeeded(
+        in context: ModelContext,
+        defaults: UserDefaults = .standard
+    ) {
+        guard !defaults.bool(forKey: captureModeBarMergeFlag) else { return }
+
+        do {
+            let rows = try context.fetch(FetchDescriptor<BuiltinPreference>())
+            let legacyRows = rows.filter { $0.itemKey == captureModeBarItemKey }
+            if !legacyRows.isEmpty {
+                guard let screenshot = rows.first(where: {
+                    $0.itemKey == BuiltinItem.screenshot.rawValue
+                }) else { return }
+                for legacy in legacyRows {
+                    mergeCaptureModeBar(BuiltinPreferenceDTO(legacy), into: screenshot)
+                    context.delete(legacy)
+                }
+                try context.save()
+                logger.info("Merged the captureModeBar preference into screenshot")
+            }
+            defaults.set(true, forKey: captureModeBarMergeFlag)
+        } catch {
+            logger.error("captureModeBar merge failed: \(error)")
+        }
+    }
+
+    /// Merge rules for a retired Capture Menu preference: its hotkey moves to
+    /// Screenshot only when Screenshot has none (when both are bound,
+    /// Screenshot keeps its own), and a visible Capture Menu makes a hidden
+    /// Screenshot visible. Screenshot keeps its own display order.
+    static func mergeCaptureModeBar(
+        _ captureModeBar: BuiltinPreferenceDTO,
+        into screenshot: BuiltinPreference
+    ) {
+        if let keyCode = captureModeBar.keyCode,
+           let modifierFlags = captureModeBar.modifierFlags,
+           screenshot.keyCode == nil || screenshot.modifierFlags == nil {
+            screenshot.keyCode = keyCode
+            screenshot.modifierFlags = modifierFlags
+        }
+        if captureModeBar.isVisible, !screenshot.isVisible {
+            screenshot.isVisible = true
         }
     }
 

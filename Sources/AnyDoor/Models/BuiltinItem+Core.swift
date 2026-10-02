@@ -22,7 +22,6 @@ extension BuiltinItem {
         case .captureWindow:     return .builtinCaptureWindow
         case .captureFullscreen: return .builtinCaptureFullscreen
         case .captureTimer:      return .builtinCaptureTimer
-        case .captureModeBar:    return .builtinCaptureModeBar
         case .recordScreen:      return .builtinRecordScreen
         case .captureScrolling:  return .builtinCaptureScrolling
         case .clearClipboard:    return .builtinClearClipboard

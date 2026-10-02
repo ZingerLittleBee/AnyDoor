@@ -259,7 +259,8 @@ final class SyncEngine {
     /// Diff current local content against the document; stamp changes, and
     /// tombstone records that vanished locally. Only records this build can
     /// own are ever tombstoned — an entry from a newer app version (unknown
-    /// setting key, unknown builtin) is carried untouched, never deleted.
+    /// setting key, unknown builtin) or for a retired builtin is carried
+    /// untouched, never deleted.
     func captureLocalChanges() {
         let payloads = SyncSnapshotMapping.payloads(from: readLocalContent())
         var changed = false
@@ -369,8 +370,8 @@ final class SyncEngine {
         return dirty
     }
 
-    /// Preference rows are created by the seeder and never deleted; sync only
-    /// updates known rows.
+    /// Preference rows are created by the seeder, which deletes only retired
+    /// keys this build never owns; sync only updates known rows.
     private func applyBuiltinPreferences(_ target: [BuiltinPreferenceDTO]) throws -> Bool {
         var dirty = false
         let rows = try context.fetch(FetchDescriptor<BuiltinPreference>())

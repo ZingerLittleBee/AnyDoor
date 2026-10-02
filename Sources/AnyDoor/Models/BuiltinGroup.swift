@@ -37,7 +37,7 @@ enum BuiltinGroup: String, CaseIterable, Sendable, Hashable {
             return [.lockScreen, .displaySleep, .systemSleep, .scheduledShutdown, .keepAwake]
         case .screenshot:
             return [.screenshot, .captureWindow, .captureFullscreen, .captureTimer,
-                    .captureModeBar, .recordScreen, .captureScrolling]
+                    .recordScreen, .captureScrolling]
         case .translation:
             return [.translate, .screenshotTranslate, .translateSelection]
         }

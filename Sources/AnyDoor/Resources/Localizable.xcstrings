@@ -341,23 +341,6 @@
         }
       }
     },
-    "builtin.captureModeBar": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Capture Menu"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "截图菜单"
-          }
-        }
-      }
-    },
     "builtin.captureScrolling": {
       "extractionState": "manual",
       "localizations": {

@@ -16,7 +16,9 @@ import ImageConversionPlugin
 /// - a window-layout child missing from `PanelStore.windowLayoutChildKeys`
 ///   leaks into the top-level panel instead of the window-layout popover;
 /// - a new hiddenHotkey case not mapped in `HotkeyCoordinator.compile` accepts
-///   a recorded hotkey that never fires.
+///   a recorded hotkey that never fires;
+/// - a case reusing the retired `captureModeBar` raw value loses its preference
+///   row to the launch merge and its backup entries to Screenshot.
 struct BuiltinCatalogInvariantTests {
 
     /// The real production plugins, built against an in-memory container so
@@ -175,6 +177,13 @@ struct BuiltinCatalogInvariantTests {
         let orders = BuiltinItem.allCases.map(\.defaultOrder)
         #expect(orders.count == Set(orders).count,
                 "duplicate defaultOrder values make first-launch seeding order ambiguous")
+    }
+
+    @Test func noCaseReusesARetiredItemKey() {
+        // The launch migration deletes the retired Capture Menu row and backup
+        // import merges its entries into Screenshot, so a live case with that
+        // raw value would lose its preferences.
+        #expect(BuiltinItem(rawValue: BuiltinPreferenceSeeder.captureModeBarItemKey) == nil)
     }
 
     @Test @MainActor func windowLayoutChildKeysMatchWindowActionCases() {

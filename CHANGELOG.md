@@ -6,6 +6,14 @@ versioning.
 
 ## [Unreleased]
 
+### Removed
+
+- The Capture Menu (截图菜单) action is gone from the menu-bar panel and command
+  palette, because it did the same as Screenshot to Clipboard (截图到剪贴板).
+  Its hotkey moves to Screenshot to Clipboard unless that action already has
+  one, and if Capture Menu was shown, Screenshot to Clipboard is shown too.
+  Restoring a backup made before this change does the same.
+
 ### Fixed
 
 - AnyDoor no longer opens or deletes `~/Library/Application Support/default.store`

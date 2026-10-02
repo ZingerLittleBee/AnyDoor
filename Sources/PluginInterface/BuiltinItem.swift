@@ -20,7 +20,6 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
     case captureWindow
     case captureFullscreen
     case captureTimer
-    case captureModeBar
     case recordScreen
     case captureScrolling
     case clearClipboard
@@ -92,7 +91,7 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
              .windowLeftThird, .windowCenterThird, .windowRightThird,
              .windowLeftTwoThirds, .windowRightTwoThirds,
              .windowMoveNextDisplay, .windowMovePreviousDisplay,
-             .captureWindow, .captureFullscreen, .captureTimer, .captureModeBar, .recordScreen,
+             .captureWindow, .captureFullscreen, .captureTimer, .recordScreen,
              .captureScrolling,
              .translate, .screenshotTranslate, .translateSelection,
              .imageConversion: return .action
@@ -116,7 +115,6 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
         case .captureWindow:     return "macwindow"
         case .captureFullscreen: return "rectangle.dashed"
         case .captureTimer:      return "timer"
-        case .captureModeBar:    return "camera.on.rectangle"
         case .recordScreen:      return "record.circle"
         case .captureScrolling:  return "arrow.down.to.line"
         case .clearClipboard: return "clipboard"
@@ -183,7 +181,6 @@ public enum BuiltinItem: String, CaseIterable, Sendable {
         case .captureWindow:     return 905
         case .captureFullscreen: return 910
         case .captureTimer:      return 915
-        case .captureModeBar:    return 920
         case .recordScreen:      return 925
         case .captureScrolling:  return 930
         case .clearClipboard: return 940

@@ -632,7 +632,6 @@ enum L10n {
         case builtinCaptureWindow = "builtin.captureWindow"
         case builtinCaptureFullscreen = "builtin.captureFullscreen"
         case builtinCaptureTimer = "builtin.captureTimer"
-        case builtinCaptureModeBar = "builtin.captureModeBar"
         case builtinRecordScreen = "builtin.recordScreen"
         case builtinCaptureScrolling = "builtin.captureScrolling"
         case recordingToastSaved = "recording.toast.saved"
