@@ -61,6 +61,20 @@ versioning.
   ask, so actions that control Finder or System Events (Dark Mode, Empty
   Trash, a graceful Scheduled Shutdown, and Image Conversion picking up the
   Finder selection) could fail without ever asking for access.
+- The Dark Mode switch now reads the appearance from macOS instead of asking
+  System Events for it. A System Events that stopped responding could hold up
+  the menu-bar panel's switches and the command palette's app list for up to
+  two minutes; the panel and palette now wait at most about a second for
+  System Events' permission answer.
+- The Getting Started permissions step used to check Automation on the main
+  thread every second, so a System Events that stopped responding could freeze
+  AnyDoor while that step was open. The step now checks permissions in the
+  background, and both it and Settings → General → Permissions wait at most
+  about a second for System Events, so the other permissions keep updating.
+- The Automation card in Getting Started now names only what that permission
+  covers, Dark Mode and scheduled shutdown, and says that Empty Trash asks to
+  control Finder the first time you use it. It used to list Empty Trash, whose
+  Finder access it never requested.
 
 ## [4.2.6] - 2026-10-02
 
