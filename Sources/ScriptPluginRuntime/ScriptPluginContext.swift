@@ -21,7 +21,7 @@ final class ScriptPluginContext: @unchecked Sendable {
     private let package: ScriptPluginPackage
     private let declaredCapabilities: Set<ScriptCapability>
     private let capabilityHost: ScriptCapabilityHost
-    private let store: (any ScriptKeyValueStore)?
+    private let store: FileScriptKeyValueStore?
     private let timeout: TimeInterval
     private let diagnostics: any ScriptPluginDiagnostics
     private let queue: DispatchQueue
@@ -38,7 +38,7 @@ final class ScriptPluginContext: @unchecked Sendable {
         id: ScriptPluginID,
         package: ScriptPluginPackage,
         capabilityHost: ScriptCapabilityHost,
-        store: (any ScriptKeyValueStore)?,
+        store: FileScriptKeyValueStore?,
         timeout: TimeInterval,
         diagnostics: any ScriptPluginDiagnostics = NullScriptPluginDiagnostics()
     ) {

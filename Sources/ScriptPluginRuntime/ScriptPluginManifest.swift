@@ -148,7 +148,7 @@ public struct ScriptPluginManifest: Sendable, Equatable {
         }
         var capabilities: Set<ScriptCapability> = []
         for string in strings {
-            guard let capability = ScriptCapability(manifestKey: string) else {
+            guard let capability = ScriptCapability(rawValue: string) else {
                 throw ScriptManifestError.unknownCapability(string)
             }
             capabilities.insert(capability)

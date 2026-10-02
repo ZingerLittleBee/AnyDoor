@@ -138,3 +138,16 @@ enum ScriptRuntimeHarness {
         )
     }
 }
+
+/// Test convenience: validate a package directory and load it, returning its id.
+/// Production (ScriptPluginRegistry) loads the ScriptPluginPackage itself and
+/// calls load(_:).
+@MainActor
+extension ScriptPluginRuntime {
+    @discardableResult
+    func load(fromDirectory directory: URL) throws -> ScriptPluginID {
+        let package = try ScriptPluginPackage.load(fromDirectory: directory)
+        try load(package)
+        return package.id
+    }
+}

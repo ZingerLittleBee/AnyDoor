@@ -8,6 +8,11 @@ import Foundation
 /// Milestone A granted six; `translate` joined as the seventh (ADR-0009
 /// amendment). Refused (and therefore absent here): shell execution,
 /// AppleScript, filesystem access, and pasteboard *reading*.
+///
+/// Each case's raw value is the exact capability string authors write in
+/// `manifest.json` (the authoring package's `Capability` union), pinned against
+/// the TS list by `ScriptContractFixtureTests`, so renaming a case changes the
+/// wire format unless the case keeps an explicit raw value.
 public enum ScriptCapability: String, CaseIterable, Sendable, Hashable {
     /// Network access through the host transport (`anydoor.fetch`).
     case fetch
@@ -31,21 +36,4 @@ public enum ScriptCapability: String, CaseIterable, Sendable, Hashable {
     /// quota; the target language is always the user's setting — a plugin
     /// cannot choose the direction.
     case translate
-
-    /// The manifest string authors write. Distinct from `rawValue` only for
-    /// `openURL`, whose wire form keeps the conventional casing.
-    public var manifestKey: String {
-        switch self {
-        case .openURL: return "openURL"
-        default: return rawValue
-        }
-    }
-
-    /// Parse a manifest capability string, or `nil` if it names no known
-    /// capability (the loader turns that into a typed refusal).
-    public init?(manifestKey: String) {
-        guard let match = ScriptCapability.allCases.first(where: { $0.manifestKey == manifestKey })
-        else { return nil }
-        self = match
-    }
 }
