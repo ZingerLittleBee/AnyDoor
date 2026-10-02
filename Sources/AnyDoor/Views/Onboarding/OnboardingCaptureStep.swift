@@ -27,12 +27,12 @@ struct OnboardingCaptureStep: View {
         }
         var titleKey: L10n.Key {
             switch self {
-            case .region:     return .captureModeBarRegion
-            case .window:     return .captureModeBarWindow
-            case .fullscreen: return .captureModeBarFullscreen
-            case .timer:      return .captureModeBarTimer
-            case .recording:  return .captureModeBarRecording
-            case .scrolling:  return .captureModeBarScrolling
+            case .region:     return .captureToolbarRegion
+            case .window:     return .captureToolbarWindow
+            case .fullscreen: return .captureToolbarFullscreen
+            case .timer:      return .captureToolbarTimer
+            case .recording:  return .captureToolbarRecording
+            case .scrolling:  return .captureToolbarScrolling
             }
         }
     }
@@ -53,7 +53,7 @@ struct OnboardingCaptureStep: View {
     var body: some View {
         OnboardingDemoStage(tint: .orange) {
             VStack(spacing: 10) {
-                modeBar
+                captureToolbar
                 GeometryReader { geo in stage(in: geo.size) }
                 Label {
                     LocalizedText(.onboardingCaptureDemoCaption)
@@ -69,9 +69,9 @@ struct OnboardingCaptureStep: View {
         .task { await runLoop() }
     }
 
-    // MARK: Mode bar
+    // MARK: Capture toolbar
 
-    private var modeBar: some View {
+    private var captureToolbar: some View {
         // Horizontal scroll so the six mode chips never clip when the longer
         // English labels exceed the content width.
         ScrollView(.horizontal, showsIndicators: false) {

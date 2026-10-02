@@ -1803,7 +1803,7 @@
         }
       }
     },
-    "capture.modeBar.fullscreen": {
+    "capture.toolbar.fullscreen": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -1820,7 +1820,7 @@
         }
       }
     },
-    "capture.modeBar.recording": {
+    "capture.toolbar.recording": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -1837,7 +1837,7 @@
         }
       }
     },
-    "capture.modeBar.region": {
+    "capture.toolbar.region": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -1854,7 +1854,7 @@
         }
       }
     },
-    "capture.modeBar.scrolling": {
+    "capture.toolbar.scrolling": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -1871,7 +1871,7 @@
         }
       }
     },
-    "capture.modeBar.timer": {
+    "capture.toolbar.timer": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -1888,7 +1888,7 @@
         }
       }
     },
-    "capture.modeBar.window": {
+    "capture.toolbar.window": {
       "extractionState": "manual",
       "localizations": {
         "en": {
