@@ -356,10 +356,10 @@ final class PanelStore {
             rebuild()
         } catch {
             reportFailure(error, of: .toggle, item: item)
-            // The failure may come from a revoked permission (Dark Mode caches
-            // `.denied` on -1743). Re-read it while the in-flight guard still
-            // holds, so an open panel's row asks for the permission instead of
-            // offering the same failing switch again.
+            // The failure may come from a revoked permission (Dark Mode reports
+            // System Events' Automation verdict live). Re-read it while the
+            // in-flight guard still holds, so an open panel's row asks for the
+            // permission instead of offering the same failing switch again.
             permissionStates[item] = await provider.permission
             rebuild()
         }
