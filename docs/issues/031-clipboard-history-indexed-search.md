@@ -2,7 +2,7 @@
 id: 031
 github: 84
 title: "Clipboard History v2: encrypted substring search, ranking, and cursor pages"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

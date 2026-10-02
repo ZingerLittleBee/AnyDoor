@@ -2,7 +2,7 @@
 id: 036
 github: 89
 title: "Clipboard History v2: settings, migration UI, and production lifecycle"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

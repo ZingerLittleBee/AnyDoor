@@ -2,7 +2,7 @@
 id: 032
 github: 85
 title: "Clipboard History v2: retention, protection, mutations, and maintenance"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

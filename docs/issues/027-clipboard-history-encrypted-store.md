@@ -2,7 +2,7 @@
 id: 027
 github: 80
 title: "Clipboard History v2: encrypted store, schema, keys, and payload publication"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

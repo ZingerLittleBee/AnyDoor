@@ -2,7 +2,7 @@
 id: 030
 github: 83
 title: "Clipboard History v2: event-assisted pasteboard monitor and source policy"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

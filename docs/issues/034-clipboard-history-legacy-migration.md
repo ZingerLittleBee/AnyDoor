@@ -2,7 +2,7 @@
 id: 034
 github: 87
 title: "Clipboard History v2: staged legacy migration and owned-file restore"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

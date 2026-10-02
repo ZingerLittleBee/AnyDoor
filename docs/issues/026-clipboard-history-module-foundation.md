@@ -2,7 +2,7 @@
 id: 026
 github: 79
 title: "Clipboard History v2: establish the deep module and SQLCipher seam"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

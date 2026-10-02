@@ -2,7 +2,7 @@
 id: 033
 github: 86
 title: "Clipboard History v2: persisted OCR and QR indexing jobs"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 

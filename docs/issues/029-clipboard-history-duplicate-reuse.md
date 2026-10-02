@@ -2,7 +2,7 @@
 id: 029
 github: 82
 title: "Clipboard History v2: canonical fingerprint verification and duplicate reuse"
-status: todo
+status: done
 prd: docs/prds/2026-07-29-clipboard-history-v2.md
 ---
 
