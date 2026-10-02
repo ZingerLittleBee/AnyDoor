@@ -369,11 +369,18 @@ codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Frameworks/SQLCipher.framework"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/Resources/AnyDoor_AnyDoor.bundle"
 codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoorHostsHelper"
-codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoor"
-codesign --force --options=runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP"
+# Under the hardened runtime an app may ask the user for Automation permission
+# (Finder, System Events) only when its signature carries the Apple Events
+# entitlement.
+ENTITLEMENTS="Resources/AnyDoor.entitlements"
+codesign --force --options=runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP/Contents/MacOS/AnyDoor"
+codesign --force --options=runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$SIGNING_IDENTITY" "$APP"
 
 log "Verify codesign"
 codesign --verify --deep --strict --verbose=2 "$APP"
+signed_entitlements="$(codesign -d --entitlements - "$APP" 2>/dev/null)"
+[[ "$signed_entitlements" == *com.apple.security.automation.apple-events* ]] \
+  || die "$APP is missing the Apple Events entitlement"
 
 # --- 7. Notarize .app ----------------------------------------------------
 LAST_STEP=7

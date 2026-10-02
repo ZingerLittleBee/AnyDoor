@@ -40,6 +40,11 @@ versioning.
   update. Meanwhile, searching in the clipboard wall says that search is
   unavailable and browsing still works, instead of calling the whole history
   unavailable and pointing to a retry in Settings that is not there.
+- The downloaded app can now ask for Automation permission. Its signature
+  lacked the Apple Events entitlement, without which macOS does not let an app
+  ask, so actions that control Finder or System Events (Dark Mode, Empty
+  Trash, a graceful Scheduled Shutdown, and Image Conversion picking up the
+  Finder selection) could fail without ever asking for access.
 
 ## [4.2.6] - 2026-10-02
 
