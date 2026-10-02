@@ -156,7 +156,7 @@ export const SystemMontage: FC<SystemMontageProps> = ({frame, lang}) => {
       <BeatCard dataUi="screenshot-beat" frame={frame} range={[30, 100]}>
         <div style={{padding: 28}}>
           <div style={{fontSize: 30, fontWeight: 900, marginBottom: 22}}>
-            {headingFor(lang, '截图到剪贴板', 'Screenshot to Clipboard')}
+            {headingFor(lang, '截图', 'Screenshot')}
           </div>
           <div
             style={{

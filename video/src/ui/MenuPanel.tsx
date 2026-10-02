@@ -26,7 +26,7 @@ const panelRows: PanelRow[] = [
   {zh: '深色模式', en: 'Dark Mode', keys: ['⌥', 'D'], symbol: 'moon_fill'},
   {zh: '锁定屏幕', en: 'Lock Screen', keys: ['⌃', '⌘', 'Q'], symbol: 'lock_fill'},
   {zh: '清空废纸篓', en: 'Empty Trash', keys: ['⌘', '⌫'], symbol: 'trash_fill'},
-  {zh: '截图到剪贴板', en: 'Screenshot to Clipboard', keys: ['⌘', '⇧', '5'], symbol: 'camera_viewfinder'},
+  {zh: '截图', en: 'Screenshot', keys: ['⌘', '⇧', '5'], symbol: 'camera_viewfinder'},
   {zh: '剪贴板历史', en: 'Clipboard History', keys: [], symbol: 'doc_on_clipboard'},
   {zh: '显示器睡眠', en: 'Display Sleep', keys: ['⌥', 'S'], symbol: 'moon_zzz_fill'},
   {zh: '系统休眠', en: 'System Sleep', keys: ['⌃', '⌥', 'S'], symbol: 'powersleep'},
@@ -93,7 +93,7 @@ export const MenuPanel: FC<MenuPanelProps> = ({lang}) => (
 
     <div style={{display: 'flex', flexDirection: 'column', gap: 2}}>
       {panelRows.map((row, index) => {
-        const isCaptureRow = row.en === 'Screenshot to Clipboard' || row.en === 'Clipboard History';
+        const isCaptureRow = row.en === 'Screenshot' || row.en === 'Clipboard History';
         return (
           <div
             key={`${row.en}-${index}`}

@@ -22,7 +22,7 @@ export const panelItems: PanelItem[] = [
   { key: 'dark',         type: 'toggle',  icon: 'moon',       label: { zh: '深色模式', en: 'Dark Mode' } },
   { key: 'lock',         type: 'action',  icon: 'lock',       label: { zh: '锁定屏幕', en: 'Lock Screen' } },
   { key: 'trash',        type: 'action',  icon: 'trash',      label: { zh: '清空废纸篓', en: 'Empty Trash' } },
-  { key: 'screenshot',   type: 'action',  icon: 'camera',     label: { zh: '截图到剪贴板', en: 'Screenshot to Clipboard' } },
+  { key: 'screenshot',   type: 'action',  icon: 'camera',     label: { zh: '截图', en: 'Screenshot' } },
   { key: 'clipboardWall',type: 'action',  icon: 'clipboard',  label: { zh: '剪贴板历史', en: 'Clipboard History' }, hotkey: ['⌘', '⇧', 'V'] },
   { key: 'displaySleep', type: 'action',  icon: 'sleepZ',     label: { zh: '显示器睡眠', en: 'Display Sleep' } },
   { key: 'systemSleep',  type: 'action',  icon: 'moon',       label: { zh: '系统休眠', en: 'System Sleep' } },
