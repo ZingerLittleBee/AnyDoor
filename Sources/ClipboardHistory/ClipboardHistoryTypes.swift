@@ -460,7 +460,7 @@ public struct ClipboardHistoryMaterializationRequest: Equatable, Sendable {
     }
 }
 
-public enum ClipboardHistoryMaterializationPurpose: Equatable, Sendable {
+public enum ClipboardHistoryMaterializationPurpose: Hashable, Sendable {
     case normalPaste
     case plainTextPaste
     /// Card/list rendering: a bitmap entry answers with its stored thumbnail

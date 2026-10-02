@@ -1227,38 +1227,7 @@ private struct FirstPageResult: Sendable {
 
 private struct MaterializationKey: Hashable {
     let entryID: ClipboardHistoryEntryID
-    let purpose: MaterializationPurposeKey
-
-    init(
-        entryID: ClipboardHistoryEntryID,
-        purpose: ClipboardHistoryMaterializationPurpose
-    ) {
-        self.entryID = entryID
-        self.purpose = MaterializationPurposeKey(purpose)
-    }
-}
-
-private enum MaterializationPurposeKey: Hashable {
-    case normalPaste
-    case plainTextPaste
-    case preview
-    case fullPreview
-    case hostAction
-
-    init(_ purpose: ClipboardHistoryMaterializationPurpose) {
-        switch purpose {
-        case .normalPaste:
-            self = .normalPaste
-        case .plainTextPaste:
-            self = .plainTextPaste
-        case .preview:
-            self = .preview
-        case .fullPreview:
-            self = .fullPreview
-        case .hostAction:
-            self = .hostAction
-        }
-    }
+    let purpose: ClipboardHistoryMaterializationPurpose
 }
 
 private extension ClipboardHistoryMutation {

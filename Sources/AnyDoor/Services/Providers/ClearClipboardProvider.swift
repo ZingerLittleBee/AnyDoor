@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import PluginInterface
 
@@ -9,7 +10,7 @@ actor ClearClipboardProvider: ActionProvider {
 
     func run() async throws {
         await MainActor.run {
-            ClipboardSelfWrites.perform { ClipboardActions.clear($0) }
+            ClipboardSelfWrites.perform { $0.clearContents() }
             ToastPresenter.shared.show(.success(L(.toastClipboardCleared)))
         }
     }
