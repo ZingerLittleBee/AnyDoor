@@ -72,6 +72,24 @@ extension BuiltinItem {
         }
     }
 
+    /// Extra command-palette search terms in both app languages, so either UI
+    /// finds a command by the names people type for it. They are match data,
+    /// not catalog copy: never shown, and matched only where the query starts
+    /// a term or one of its words. A hit ranks `.other`, below any exact or
+    /// prefix title hit; section and display order break its tie with title
+    /// substring hits (`CommandPaletteQueryMatch`). Keep each list to names
+    /// the command's title lacks in at least one app language.
+    var paletteAliases: [String] {
+        switch self {
+        case .screenshot:   return ["capture", "screenshot", "region", "截图", "截屏", "区域截图"]
+        case .ocr:          return ["OCR"]
+        case .recordScreen: return ["screen recording", "录屏"]
+        case .captureTimer: return ["timer", "延时"]
+        case .qrcode:       return ["scan", "QR", "扫描", "二维码"]
+        default:            return []
+        }
+    }
+
     /// The clipboard history bucket this built-in writes into, if any.
     /// Non-history items (toggles, submenus, system actions) return nil.
     var historyKind: ClipboardHistoryKind? {

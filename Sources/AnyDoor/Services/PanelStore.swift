@@ -149,6 +149,7 @@ final class PanelStore {
                     hotkey: hotkey,
                     title: "",
                     subtitle: subtitle(for: item),
+                    wordStartAliases: item.paletteAliases,
                     symbol: item.symbol,
                     kind: item.kind,
                     toggleState: item.kind == .toggle ? toggleStates[item] : nil,

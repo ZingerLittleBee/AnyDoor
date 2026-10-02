@@ -57,6 +57,11 @@ struct PanelEntry: Identifiable, Hashable {
     let title: String
     let subtitle: String?
     let searchAliases: [String]
+    /// Search terms that, unlike `searchAliases`, match only where the query
+    /// starts the term or one of its whitespace-separated words. Builtins carry
+    /// their curated `BuiltinItem.paletteAliases` here, so "ding" does not
+    /// find Record Screen through "screen recording".
+    let wordStartAliases: [String]
     let symbol: String
     let quicklinkIcon: QuicklinkIconRequest?
     let kind: BuiltinItem.Kind
@@ -72,6 +77,7 @@ struct PanelEntry: Identifiable, Hashable {
         title: String,
         subtitle: String?,
         searchAliases: [String] = [],
+        wordStartAliases: [String] = [],
         symbol: String,
         quicklinkIcon: QuicklinkIconRequest? = nil,
         kind: BuiltinItem.Kind,
@@ -86,6 +92,7 @@ struct PanelEntry: Identifiable, Hashable {
         self.title = title
         self.subtitle = subtitle
         self.searchAliases = searchAliases
+        self.wordStartAliases = wordStartAliases
         self.symbol = symbol
         self.quicklinkIcon = quicklinkIcon
         self.kind = kind

@@ -482,6 +482,20 @@ not a plugin author.
 
 ## Command palette
 
+### Command palette root search
+
+Root entries rank through `CommandPaletteQueryMatch.rank` (`CommandPaletteState.rootRank`): the
+active-language title ranks exact, prefix, or other, and every alias hit ranks `.other`, so an alias
+never outranks a title prefix. Within a tier, `rankedByGlobalTiers` keeps section order, and every
+builtin section precedes Applications. Installed-app aliases and Quicklink Keywords
+(`PanelEntry.searchAliases`) match anywhere in the alias, which lets a Chinese-UI user find 微信 by
+typing "chat". Builtin entries carry Core-side bilingual aliases instead: `BuiltinItem.paletteAliases`
+(in `BuiltinItem+Core.swift`, not `PluginInterface`), which `PanelStore.rebuild()` copies into
+`PanelEntry.wordStartAliases`. They are match data rather than catalog strings, so either language's
+terms work in either UI; they are never shown; and they match only at the start of the alias or of one
+of its whitespace-separated words. Substring matching there would let "ding" or "co" put Record
+Screen ("screen recording") above an app that a Chinese-UI user opens by its English name.
+
 ### Command palette second-level menu
 
 Option-bearing commands drill into a second level instead of acting with a default.

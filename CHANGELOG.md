@@ -13,6 +13,14 @@ versioning.
   Screenshot, so the old name did not always fit. In the English UI, typing
   `screenshot` in the command palette and pressing Return now opens AnyDoor's
   Screenshot instead of the macOS Screenshot app.
+- The command palette finds several commands by more names, in either app
+  language: Screenshot (截图) by capture, screenshot, region, 截图, 截屏, or
+  区域截图; Screen Text Recognition (屏幕取词) by OCR; Record Screen (录制屏幕)
+  by screen recording or 录屏; Timed Capture (定时截图) by timer or 延时; and
+  Recognize QR Code (识别二维码) by scan, QR, 扫描, or 二维码. These names match
+  only from the start of a word, so `rec` finds Record Screen but `ding` does
+  not, and a command or app whose own name starts with your search still
+  comes first.
 
 ### Removed
 
