@@ -2636,6 +2636,23 @@
         }
       }
     },
+    "clipboard.hint.copyPlain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy plain"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "纯文本复制"
+          }
+        }
+      }
+    },
     "clipboard.hint.delete": {
       "extractionState": "manual",
       "localizations": {
@@ -2700,6 +2717,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "首/加载更多"
+          }
+        }
+      }
+    },
+    "clipboard.hint.paste": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "粘贴"
           }
         }
       }
@@ -3163,6 +3197,23 @@
         }
       }
     },
+    "clipboard.search.rebuildIndex": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Rebuild Search Index"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重建搜索索引"
+          }
+        }
+      }
+    },
     "clipboard.searchUnavailable": {
       "extractionState": "manual",
       "localizations": {
@@ -3176,6 +3227,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "搜索暂不可用，浏览历史不受影响。"
+          }
+        }
+      }
+    },
+    "clipboard.searchUnavailable.needsRebuild": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search needs its index rebuilt. Browsing your history still works."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "搜索索引需要重建，浏览历史不受影响。"
           }
         }
       }
@@ -3503,6 +3571,23 @@
         }
       }
     },
+    "clipboard.toast.pasteNeedsAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copied; enable Accessibility to paste automatically"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已复制，请开启辅助功能权限以自动粘贴"
+          }
+        }
+      }
+    },
     "clipboard.toast.payloadUnavailable": {
       "extractionState": "manual",
       "localizations": {
@@ -3516,6 +3601,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "内容已不可用，无法粘贴"
+          }
+        }
+      }
+    },
+    "clipboard.toast.plainTextUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This content has no plain-text version"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "此内容没有纯文本版本"
+          }
+        }
+      }
+    },
+    "clipboard.toast.searchRebuildFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn’t rebuild the search index"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未能重建搜索索引"
           }
         }
       }

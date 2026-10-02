@@ -51,8 +51,9 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// while the wall was up.
     private weak var previousApp: NSRunningApplication?
 
-    /// Guards against re-entrant show/dismiss while the slide animation runs.
-    private var isAnimating = false
+    /// Orders the slides, the dismissals asked for during them, and the work
+    /// that waits for the wall to be off screen.
+    private var lifecycle = ClipboardWallLifecycle()
     private static let panelHeight: CGFloat = 325
     private static let animationDuration: TimeInterval = 0.22
 
@@ -100,7 +101,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     }
 
     func toggle() {
-        guard configuredState != nil, !isAnimating else { return }
+        guard configuredState != nil, !lifecycle.isAnimating else { return }
         // The wall hotkey while the editor is up steps the editor down first
         // (dirty-checked) instead of silently tearing the whole stack down.
         if ClipboardTextWindow.shared.isEditing {
@@ -123,6 +124,8 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // Never resurface a stale tag dialog (it may pin a deleted item).
         state.tagDialog = nil
         state.tagDialogText = ""
+        // A rebuild started from an earlier session reports nothing here.
+        state.forgetUserRebuild()
         // Seed from the live flags: ⌥ may already be held when the wall opens,
         // and the monitor only reports subsequent changes.
         state.isReorderModifierHeld = NSEvent.modifierFlags.contains(.option)
@@ -169,6 +172,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         hostingView?.frame = NSRect(origin: .zero, size: onScreen.size)
         hostingView?.layoutSubtreeIfNeeded()
         window.setFrame(onScreen.offsetBy(dx: 0, dy: -Self.panelHeight), display: false)
+        // Opening starts before the panel takes key, so a dismissal that
+        // arrives from here on waits for the slide-in instead of racing it.
+        lifecycle.beginOpening()
+        let session = lifecycle.session
         // Make the panel key WITHOUT activating AnyDoor: ClipboardWallPanel
         // overrides canBecomeKey, and the .nonactivatingPanel style keeps the
         // previously active app active, so it doesn't visibly lose focus while
@@ -178,15 +185,23 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // search field through any path we didn't defeat above, take it back —
         // the field reports the resign so state ends up in card navigation.
         if window.firstResponder !== window { window.makeFirstResponder(nil) }
-        isAnimating = true
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Self.animationDuration
             ctx.timingFunction = CAMediaTimingFunction(name: .linear)
             window.animator().setFrame(onScreen, display: true)
         }, completionHandler: { [weak self] in
             MainThreadIsolation.run {
-                self?.isAnimating = false
-                self?.configuredState?.expandMountAfterOpening()
+                guard let self else { return }
+                switch self.lifecycle.finishOpening(session: session) {
+                case .open:
+                    self.configuredState?.expandMountAfterOpening()
+                case .dismiss(let restoreFocus):
+                    // Asked for during the slide-in: Esc, a click elsewhere,
+                    // lost key focus, or a commit closing the wall.
+                    self.dismiss(restoreFocus: restoreFocus)
+                case .stale:
+                    break
+                }
             }
         })
     }
@@ -195,14 +210,24 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// true the previously frontmost app is reactivated first (Esc / paste);
     /// for a click elsewhere it is false, since that click already moved focus.
     /// `completion` runs after the window has ordered out, so paste can post ⌘V
-    /// once focus has returned. No-op if already hidden or mid-animation.
-    private func dismiss(restoreFocus: Bool, completion: (@Sendable () -> Void)? = nil) {
+    /// once focus has returned. A dismissal during the slide-in starts once
+    /// the wall is open; one during the slide-out joins it.
+    private func dismiss(
+        restoreFocus: Bool,
+        completion: (@MainActor @Sendable () -> Void)? = nil
+    ) {
         // The floating panels have no life of their own once the wall goes away.
         closePreviews()
-        guard !isAnimating, let window, window.isVisible, let screen = NSScreen.main else {
-            completion?()
+        guard let window, window.isVisible, let screen = NSScreen.main else {
+            // Nothing on screen to slide out. Settling runs what was queued
+            // now, so none of it can run in a later session.
+            for pending in lifecycle.settle(adding: completion) { pending() }
             return
         }
+        guard case .start(let restoreFocus) = lifecycle.requestDismissal(
+            restoreFocus: restoreFocus,
+            completion: completion
+        ) else { return }
         if restoreFocus { restorePreviousApplicationFocus() }
         // Mounting more cards into a window that is sliding away is pure
         // cost; the next show re-arms the opening constraint anyway.
@@ -211,22 +236,25 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         let height = window.frame.height
         let offScreen = NSRect(x: bounds.minX, y: bounds.minY - height,
                                width: window.frame.width, height: height)
-        isAnimating = true
+        let session = lifecycle.session
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = Self.animationDuration
             ctx.timingFunction = CAMediaTimingFunction(name: .linear)
             window.animator().setFrame(offScreen, display: true)
         }, completionHandler: { [weak self] in
             MainThreadIsolation.run {
-                self?.isAnimating = false
-                self?.close()
+                guard let self else { return }
+                // Taken before close(): closing resigns key, and the
+                // dismissal that triggers has to find the wall closed.
+                let completions = self.lifecycle.finishClosing(session: session)
+                self.close()
                 // Tear the SwiftUI tree down now, after the slide-out: the
                 // next show installs a fresh hosting view anyway, and
                 // releasing the old one there would bill its whole-tree
                 // teardown to the open path.
-                self?.window?.contentView = nil
-                self?.hostingView = nil
-                completion?()
+                self.window?.contentView = nil
+                self.hostingView = nil
+                for completion in completions { completion() }
             }
         })
     }
@@ -289,6 +317,7 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
             onIgnoreSource: { [weak self] item in self?.ignoreSource(item) },
             onTagDialogCommit: { [weak self] in self?.commitTagDialog() },
             onTagDialogCancel: { [weak self] in self?.cancelTagDialog() },
+            onRebuildSearchIndex: { [weak self] in self?.rebuildSearchIndex() },
             registerSearchField: { [weak self] field in self?.searchField = field }
         )
         return AnyView(view)
@@ -356,7 +385,6 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
                       !ClipboardTextWindow.shared.isEditing,
                       ClipboardWallDismissalPolicy.shouldDismissAfterActivatingApplication(
                         hasQuickLook: ClipboardQuickLookWindow.shared.isVisible,
-                        isAnimating: self.isAnimating,
                         activatedProcessID: processID,
                         currentProcessID: NSRunningApplication.current.processIdentifier,
                         originalProcessID: self.previousApp?.processIdentifier,
@@ -428,6 +456,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// to the field).
     private func handle(_ event: NSEvent) -> Bool {
         guard let window, window.isVisible else { return false }
+        // Once the wall is closing, or a dismissal waits for the slide-in,
+        // keys no longer act on it: a quick ⌫ after Return must not delete
+        // the selected entry, and a second Return must not commit again.
+        guard lifecycle.acceptsInput else { return true }
         // While the tag dialog overlay is up it owns the keyboard: Return
         // commits, Esc cancels, everything else flows to its text field.
         // Checked before routeToTextWindow so a floating preview can't eat
@@ -661,30 +693,51 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         return characters.unicodeScalars.allSatisfy { !CharacterSet.controlCharacters.contains($0) }
     }
 
+    /// Return or a double click: copy the entry, close the wall, and paste
+    /// into the previous app. The paste service owns the commit rules: the
+    /// newest choice wins, and a choice whose wall closed meanwhile is
+    /// never pasted.
     private func paste(
         _ entry: ClipboardHistoryEntry,
         plain: Bool
     ) {
+        // A click can still land while the wall slides out.
+        guard lifecycle.acceptsInput else { return }
+        let session = lifecycle.session
+        let presentation = state.presentation
+        let surface = ClipboardHistoryCommitSurface(
+            isOpen: { [weak self] in
+                self?.lifecycle.isOpen(forSession: session) ?? false
+            },
+            close: { [weak self] then in
+                guard let self, lifecycle.session == session else { return }
+                // Slide out first; reactivating the prior app returns focus
+                // there, so the synthesized ⌘V lands in it rather than on
+                // the wall. `then` runs once the wall has ordered out.
+                dismiss(restoreFocus: true, completion: then)
+            },
+            isStillClosed: { [weak self] in
+                self?.lifecycle.isClosed(sinceSession: session) ?? true
+            }
+        )
+        let presentFailure = makeCopyFailurePresenter()
         Task {
-            let outcome = await ClipboardHistoryPasteService.copyEntry(
+            await ClipboardHistoryPasteService.commit(
                 entry.id,
-                purpose: plain ? .plainTextPaste : .normalPaste,
-                from: state.presentation
+                plain: plain,
+                from: presentation,
+                surface: surface,
+                presentFailure: presentFailure
             )
-            guard outcome == .copied else {
-                presentCopyFailure(outcome)
-                return
-            }
-            // Slide out first; reactivating the prior app returns focus there,
-            // so the synthesized Command-V lands in it rather than on our panel.
-            dismiss(restoreFocus: true) {
-                [copyOnly = ClipboardPreferences.copyOnly] in
-                guard !copyOnly else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                    ClipboardHistoryPasteService.synthesizePaste()
-                }
-            }
         }
+    }
+
+    /// Built outside the commit tasks: a `[weak self]` nested inside an
+    /// implicitly self-capturing `Task` trips `#ImplicitStrongCapture`.
+    private func makeCopyFailurePresenter()
+        -> @MainActor (ClipboardHistoryCopyOutcome) -> Void
+    {
+        { [weak self] outcome in self?.presentCopyFailure(outcome) }
     }
 
     // MARK: - Context-menu actions
@@ -718,18 +771,23 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     }
 
     /// "Copy" from a card's context menu: write the payload to the pasteboard
-    /// without pasting or dismissing the wall.
+    /// without pasting or dismissing the wall. It takes a commit too, so it
+    /// and a Return still copying never both write: the later one wins.
     private func copyWithoutPasting(_ entry: ClipboardHistoryEntry) {
+        guard lifecycle.acceptsInput else { return }
+        let session = lifecycle.session
+        let presentation = state.presentation
+        let isWallOpen: @MainActor () -> Bool = { [weak self] in
+            self?.lifecycle.isOpen(forSession: session) ?? false
+        }
+        let presentFailure = makeCopyFailurePresenter()
         Task {
-            let outcome = await ClipboardHistoryPasteService.copyEntry(
+            await ClipboardHistoryPasteService.copyWithoutPasting(
                 entry.id,
-                from: state.presentation
+                from: presentation,
+                surfaceIsOpen: isWallOpen,
+                presentFailure: presentFailure
             )
-            guard outcome == .copied else {
-                presentCopyFailure(outcome)
-                return
-            }
-            ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
         }
     }
 
@@ -758,6 +816,14 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         }
         ClipboardSelfWrites.write(string: selection)
         ToastPresenter.shared.show(.success(L(.toastCopiedToClipboard)))
+    }
+
+    /// The failed-search notice's Rebuild Search Index button. The state
+    /// starts the rebuild and reports a refusal, and the wall's view follows
+    /// the rebuild from there.
+    private func rebuildSearchIndex() {
+        let state = state
+        Task { await state.rebuildSearchIndex() }
     }
 
     /// `apply` already patches the loaded page (and refetches itself when the
@@ -1139,28 +1205,41 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         // The preview panel itself cannot become key, but its menus can move
         // focus away from the wall. Outside clicks and application switches
         // have their own dismissal paths; key loss alone is not enough here.
+        // During a slide the lifecycle decides: lost key focus while opening
+        // (⌘-Tab) closes the wall once it is open, and while closing it
+        // joins the slide-out.
         guard ClipboardWallDismissalPolicy.shouldDismissAfterResigningKey(
-            isAnimating: isAnimating,
             hasTextWindow: ClipboardTextWindow.shared.isVisible,
-            hasQuickLook: ClipboardQuickLookWindow.shared.isVisible
+            hasQuickLook: ClipboardQuickLookWindow.shared.isVisible,
+            isOpening: lifecycle.phase == .opening,
+            openedOverAnotherApp: previousApp != nil
         ) else { return }
         // A click elsewhere already moved focus; don't yank it back.
         dismiss(restoreFocus: false)
     }
 }
 
+/// Whether focus moving elsewhere dismisses the wall. When it happens is not
+/// decided here: `ClipboardWallLifecycle` defers a dismissal asked for during
+/// the slide-in and folds one asked for during the slide-out into it.
 enum ClipboardWallDismissalPolicy {
+    /// A wall opened over AnyDoor itself (from the command palette or
+    /// Settings) can lose key focus during the slide-in to the focus handoff
+    /// AnyDoor started on the way, which is not the user leaving, so that
+    /// loss is ignored as before. Over another app it is a switch away
+    /// (⌘-Tab), and the wall closes once it is open.
     static func shouldDismissAfterResigningKey(
-        isAnimating: Bool,
         hasTextWindow: Bool,
-        hasQuickLook: Bool
+        hasQuickLook: Bool,
+        isOpening: Bool,
+        openedOverAnotherApp: Bool
     ) -> Bool {
-        !isAnimating && !hasTextWindow && !hasQuickLook
+        if isOpening && !openedOverAnotherApp { return false }
+        return !hasTextWindow && !hasQuickLook
     }
 
     static func shouldDismissAfterActivatingApplication(
         hasQuickLook: Bool,
-        isAnimating: Bool,
         activatedProcessID: pid_t,
         currentProcessID: pid_t,
         originalProcessID: pid_t?,
@@ -1168,9 +1247,151 @@ enum ClipboardWallDismissalPolicy {
     ) -> Bool {
         // Returning from a preview helper to the original foreground app is
         // not a switch away from the clipboard workflow.
-        hasQuickLook && !isAnimating && activationPolicy == .regular
+        hasQuickLook && activationPolicy == .regular
             && activatedProcessID != currentProcessID
             && activatedProcessID != originalProcessID
+    }
+}
+
+/// The wall's open and close sequence, free of AppKit so its ordering rules
+/// can be tested. The controller drives it from `show()`, `dismiss()` and the
+/// two slide animations' completions.
+///
+/// - A dismissal asked for during the slide-in waits for it to end, and one
+///   asked for during the slide-out joins it.
+/// - Completions (a paste's ⌘V, a plugin's next window) run only after the
+///   slide-out, once the wall is off screen and no longer key.
+/// - Input reaches the wall only while it is open, or opening with no
+///   dismissal waiting.
+struct ClipboardWallLifecycle {
+    enum Phase: Equatable {
+        case closed
+        case opening
+        case open
+        case closing
+    }
+
+    /// What a dismissal asks of the controller.
+    enum DismissalStep: Equatable {
+        /// Slide the wall out now, reactivating the previous app first when
+        /// asked.
+        case start(restoreFocus: Bool)
+        /// A slide is running; the dismissal happens when it ends.
+        case wait
+    }
+
+    /// What the end of a slide-in asks of the controller.
+    enum OpeningEnd: Equatable {
+        /// The wall is open.
+        case open
+        /// A dismissal was asked for during the slide-in; start it now.
+        case dismiss(restoreFocus: Bool)
+        /// The slide-in belongs to an earlier session; nothing changes.
+        case stale
+    }
+
+    private(set) var phase: Phase = .closed
+    /// Bumped by every opening, so work from one session can tell that the
+    /// wall has reopened since.
+    private(set) var session = 0
+    /// The dismissal asked for during the slide-in, if any.
+    private(set) var deferredRestoreFocus: Bool?
+    /// Work waiting for the wall to be off screen, run in order.
+    private var completions: [@MainActor @Sendable () -> Void] = []
+
+    /// True while either slide runs.
+    var isAnimating: Bool {
+        phase == .opening || phase == .closing
+    }
+
+    /// Whether keys and choices act on the wall.
+    var acceptsInput: Bool {
+        switch phase {
+        case .opening:
+            deferredRestoreFocus == nil
+        case .open:
+            true
+        case .closed, .closing:
+            false
+        }
+    }
+
+    /// Whether the wall that `session` showed is still open to input, so a
+    /// commit from it may still close it and paste.
+    func isOpen(forSession session: Int) -> Bool {
+        session == self.session && acceptsInput
+    }
+
+    /// Whether the wall that `session` showed has closed and not opened
+    /// again since, so a paste after its slide-out still reaches the app
+    /// below it.
+    func isClosed(sinceSession session: Int) -> Bool {
+        session == self.session && phase == .closed
+    }
+
+    /// Starts a session clean: nothing queued from an earlier one survives.
+    mutating func beginOpening() {
+        session += 1
+        phase = .opening
+        deferredRestoreFocus = nil
+        completions = []
+    }
+
+    mutating func finishOpening(session: Int) -> OpeningEnd {
+        guard session == self.session, phase == .opening else {
+            return .stale
+        }
+        phase = .open
+        guard let restoreFocus = deferredRestoreFocus else { return .open }
+        deferredRestoreFocus = nil
+        return .dismiss(restoreFocus: restoreFocus)
+    }
+
+    /// Asks to close the wall, which must be on screen. `completion` runs
+    /// after the slide-out, whenever that starts.
+    mutating func requestDismissal(
+        restoreFocus: Bool,
+        completion: (@MainActor @Sendable () -> Void)?
+    ) -> DismissalStep {
+        if let completion { completions.append(completion) }
+        switch phase {
+        case .opening:
+            // Esc asks to give focus back and a click elsewhere does not;
+            // a commit's paste needs it, so any request for it wins.
+            deferredRestoreFocus = (deferredRestoreFocus ?? false) || restoreFocus
+            return .wait
+        case .closing:
+            return .wait
+        case .open, .closed:
+            phase = .closing
+            return .start(restoreFocus: restoreFocus)
+        }
+    }
+
+    /// The slide-out of `session` ended: the wall is closed, and the queued
+    /// completions come back to run, in order.
+    mutating func finishClosing(
+        session: Int
+    ) -> [@MainActor @Sendable () -> Void] {
+        guard session == self.session, phase == .closing else { return [] }
+        phase = .closed
+        defer { completions = [] }
+        return completions
+    }
+
+    /// The wall is not on screen, so there is nothing to slide out. Unless a
+    /// slide-out is running, which settles everything when it ends, the
+    /// wall closes and every queued completion comes back to run now,
+    /// `completion` last.
+    mutating func settle(
+        adding completion: (@MainActor @Sendable () -> Void)?
+    ) -> [@MainActor @Sendable () -> Void] {
+        if let completion { completions.append(completion) }
+        guard phase != .closing else { return [] }
+        phase = .closed
+        deferredRestoreFocus = nil
+        defer { completions = [] }
+        return completions
     }
 }
 

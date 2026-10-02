@@ -21,6 +21,9 @@ versioning.
   only from the start of a word, so `rec` finds Record Screen but `ding` does
   not, and a command or app whose own name starts with your search still
   comes first.
+- The Return hint in the clipboard wall now says Paste (粘贴), or Copy (复制)
+  when Copy only (仅复制，不自动粘贴) is on in Settings → Clipboard. Its ⌥↵ hint
+  says Copy plain (纯文本复制) then.
 
 ### Removed
 
@@ -52,10 +55,30 @@ versioning.
   tooltip in them.
 - Clipboard History search no longer stays unavailable for good after one
   failed search index rebuild. Later launches retry the rebuild in the
-  background, and after three failures in a row they wait for the next AnyDoor
-  update. Meanwhile, searching in the clipboard wall says that search is
-  unavailable and browsing still works, instead of calling the whole history
-  unavailable and pointing to a retry in Settings that is not there.
+  background, and after three failures in a row they stop retrying until the
+  next AnyDoor update. Meanwhile, searching in the clipboard wall says that
+  search is unavailable and browsing still works, instead of calling the whole
+  history unavailable and pointing to a retry in Settings that is not there.
+  The notice now has a Rebuild Search Index (重建搜索索引) button that starts a
+  rebuild at once.
+- An open clipboard wall now shows the search results once a search index
+  rebuild finishes, instead of showing the rebuilding notice until the query
+  changed.
+- ⌥↵ on a clipboard entry without a plain-text version now says so and leaves
+  the clipboard wall open, instead of showing "Copy failed" (复制失败).
+- A copy that fails on a file collection no longer lists a count of zero, such
+  as "Files requiring restore: 0" (待恢复文件：0).
+- Pressing Return twice, or double-clicking an entry twice, in quick succession
+  no longer copies or pastes it twice, and a slow copy that finishes after you
+  closed the wall no longer overwrites what you copied since. Return pressed
+  while the clipboard wall is still opening now pastes into the previous app
+  instead of into the wall, and Esc, a click elsewhere, or switching apps
+  during the opening closes the wall once it is open. Keys pressed while the
+  wall slides closed no longer act on it, so ⌫ pressed then no longer deletes
+  the entry being pasted.
+- When AnyDoor lacks Accessibility access, choosing an entry in the clipboard
+  wall now copies it and says that pasting needs Accessibility, instead of
+  closing silently.
 - The downloaded app can now ask for Automation permission. Its signature
   lacked the Apple Events entitlement, without which macOS does not let an app
   ask, so actions that control Finder or System Events (Dark Mode, Empty

@@ -26,9 +26,14 @@ struct ClipboardWallView: View {
     let onIgnoreSource: (ClipboardHistoryEntry) -> Void
     let onTagDialogCommit: () -> Void
     let onTagDialogCancel: () -> Void
+    /// The failed-search notice's Rebuild Search Index button.
+    let onRebuildSearchIndex: () -> Void
     /// Publishes the search field to the controller so type-to-focus can make it
     /// first responder synchronously. No-op by default for previews/tests.
     var registerSearchField: (NSTextField?) -> Void = { _ in }
+
+    /// Whether Return copies without pasting. The hints follow Settings live.
+    @AppStorage(ClipboardPreferences.copyOnlyKey) private var copyOnly = false
 
     /// The most recent single tap, used to detect a double-click manually so
     /// selection fires instantly instead of waiting out SwiftUI's count:2
@@ -102,6 +107,16 @@ struct ClipboardWallView: View {
                 LocalizedText(state.unavailableStateKey)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                if state.offersSearchIndexRebuild {
+                    // Mouse driven, like the paging sentinel's retry:
+                    // Return keeps its paste meaning.
+                    Button(action: onRebuildSearchIndex) {
+                        LocalizedText(.clipboardSearchRebuildIndex)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(state.presentation.isRetryingSearchIndex)
+                }
                 Spacer()
             } else if items.isEmpty {
                 Spacer()
@@ -128,6 +143,13 @@ struct ClipboardWallView: View {
                 )
             )
             await state.reload()
+        }
+        // The module announces nothing when a rebuild ends, so the wall
+        // checks while, and only while, its query waits on one. The task
+        // ends with the view, after the wall's slide-out.
+        .task(id: state.isWaitingForSearchIndex) {
+            guard state.isWaitingForSearchIndex else { return }
+            await state.followSearchIndexRebuild()
         }
         .onChange(of: state.presentation.tags) { _, newTags in
             state.setCategories(ClipboardCategoryOrder.apply(
@@ -883,13 +905,16 @@ struct ClipboardWallView: View {
             hint("⌘F", .clipboardHintSearch)
             hint("⌘K", .clipboardHintFilterSource)
             hint("⌥", .clipboardHintEditCategories)
-            hint("↵", .clipboardHintCopy)
+            hint("↵", copyOnly ? .clipboardHintCopy : .clipboardHintPaste)
             if let selectedID = state.presentation.selectedID,
                 state.presentation.supportsPlainTextPaste(
                     for: selectedID
                 )
             {
-                hint("⌥↵", .clipboardHintPastePlain)
+                hint(
+                    "⌥↵",
+                    copyOnly ? .clipboardHintCopyPlain : .clipboardHintPastePlain
+                )
             }
             hint("space", .clipboardHintPreview)
             hint("⌫", .clipboardHintDelete)

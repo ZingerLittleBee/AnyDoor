@@ -94,17 +94,31 @@ final class ClipboardWallState {
     /// swallow a burst of keystrokes, short enough not to read as lag.
     private static let searchDebounce = Duration.milliseconds(150)
 
+    /// How often an open wall rereads the search index's status while its
+    /// query waits on a rebuild. The module tells nobody when a rebuild ends,
+    /// and reading its status is one small query.
+    static let searchIndexPollInterval = Duration.seconds(1)
+
     /// Injected so tests can drive the debounce with a fake clock instead of
     /// sleeping for real. Production always gets `ContinuousClock`.
     private let clock: any Clock<Duration>
+    /// Shows the search-rebuild toasts. Injected so tests can read them.
+    private let notify: @MainActor (ToastStyle) -> Void
     private var searchTask: Task<Void, Never>?
+    /// Set while a rebuild the user started from the wall runs, so a
+    /// rebuild that fails again can say so once it settles.
+    @ObservationIgnored private var awaitsUserRebuild = false
 
     init(
         presentation: ClipboardHistoryPresentationModel,
-        clock: any Clock<Duration> = ContinuousClock()
+        clock: any Clock<Duration> = ContinuousClock(),
+        notify: @escaping @MainActor (ToastStyle) -> Void = {
+            ToastPresenter.shared.show($0)
+        }
     ) {
         self.presentation = presentation
         self.clock = clock
+        self.notify = notify
     }
 
     var items: [ClipboardHistoryEntry] {
@@ -282,12 +296,20 @@ final class ClipboardWallState {
     /// line because it is the one case the user fixes outside AnyDoor, and it
     /// resolves on its own once unlocked. A store that could not move to its
     /// new folder gets its own line too: Settings offers only a retry there,
-    /// never a reset. A failed search index leaves the store intact and has no
-    /// action in Settings, so its line names only search and says browsing
-    /// still works.
+    /// never a reset. A failed search index leaves the store intact, so its
+    /// line names only search and says browsing still works, and the notice
+    /// carries the Rebuild Search Index button (`offersSearchIndexRebuild`).
+    /// An index whose state this build cannot read gets a line that asks for
+    /// that rebuild: when it is marked failed for an unknown reason, no
+    /// launch retries it on its own.
     var unavailableStateKey: L10n.Key {
-        if case .searchUnavailable = presentation.contentState {
-            return .clipboardSearchUnavailable
+        if case .searchUnavailable(let failure) = presentation.contentState {
+            switch failure {
+            case .rebuildFailed:
+                return .clipboardSearchUnavailable
+            case .stateUnavailable:
+                return .clipboardSearchUnavailableNeedsRebuild
+            }
         }
         guard case .unavailable(let reason) = presentation.contentState else {
             return .clipboardUnavailable
@@ -299,6 +321,72 @@ final class ClipboardWallState {
             return .clipboardUnavailableRelocationFailed
         default:
             return .clipboardUnavailable
+        }
+    }
+
+    /// Whether the notice offers Rebuild Search Index: for a failed search
+    /// index only. A store the wall cannot read has its actions in Settings.
+    var offersSearchIndexRebuild: Bool {
+        if case .searchUnavailable = presentation.contentState { return true }
+        return false
+    }
+
+    /// Whether the query waits on a search index rebuild, which is when the
+    /// wall follows it (`followSearchIndexRebuild()`).
+    var isWaitingForSearchIndex: Bool {
+        presentation.contentState == .indexing
+    }
+
+    /// The Rebuild Search Index button. Starts the rebuild, which the query
+    /// then follows. A refused start shows a toast and keeps the notice, and
+    /// so does a rebuild that fails again while the wall follows it.
+    func rebuildSearchIndex() async {
+        guard !presentation.isRetryingSearchIndex else { return }
+        awaitsUserRebuild = true
+        guard await presentation.retrySearchIndex() else {
+            awaitsUserRebuild = false
+            notify(.failure(L(.clipboardToastSearchRebuildFailed)))
+            return
+        }
+        // Usually the query now waits on the rebuild, and following it
+        // settles this. Otherwise the rebuild has already ended.
+        if !isWaitingForSearchIndex { settleUserRebuild() }
+    }
+
+    /// Runs the query again once the rebuild it waits on ends (ready, failed,
+    /// or the store no longer readable), so an open wall shows the results
+    /// without the query having to change. Returns early when the task is
+    /// cancelled: the wall's view does that as it closes, and whenever the
+    /// query stops waiting.
+    func followSearchIndexRebuild() async {
+        while isWaitingForSearchIndex {
+            do {
+                try await clock.sleep(for: Self.searchIndexPollInterval)
+            } catch {
+                return
+            }
+            guard isWaitingForSearchIndex else { return }
+            guard await presentation.searchIndexStatus() != .indexing else {
+                continue
+            }
+            await reload()
+        }
+        settleUserRebuild()
+    }
+
+    /// The wall is opening: a rebuild started in an earlier session no
+    /// longer reports how it ended.
+    func forgetUserRebuild() {
+        awaitsUserRebuild = false
+    }
+
+    /// A rebuild the user started has ended. When search still cannot run,
+    /// it failed again and says so; otherwise the results say enough.
+    private func settleUserRebuild() {
+        guard awaitsUserRebuild else { return }
+        awaitsUserRebuild = false
+        if case .searchUnavailable = presentation.contentState {
+            notify(.failure(L(.clipboardToastSearchRebuildFailed)))
         }
     }
 

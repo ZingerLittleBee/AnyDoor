@@ -115,6 +115,8 @@ enum L10n {
         case clipboardEmptySearch = "clipboard.empty.search"
         case clipboardIndexing = "clipboard.indexing"
         case clipboardSearchUnavailable = "clipboard.searchUnavailable"
+        case clipboardSearchUnavailableNeedsRebuild =
+            "clipboard.searchUnavailable.needsRebuild"
         case clipboardEmptyFilter = "clipboard.empty.filter"
         case clipboardUnavailable = "clipboard.unavailable"
         case clipboardUnavailableKeychainLocked =
@@ -125,10 +127,12 @@ enum L10n {
         case clipboardHintCategory = "clipboard.hint.category"
         case clipboardHintClose = "clipboard.hint.close"
         case clipboardHintCopy = "clipboard.hint.copy"
+        case clipboardHintCopyPlain = "clipboard.hint.copyPlain"
         case clipboardHintEditCategories = "clipboard.hint.editCategories"
         case clipboardHintFilterSource = "clipboard.hint.filterSource"
         case clipboardHintJumpEnds = "clipboard.hint.jumpEnds"
         case clipboardHintDelete = "clipboard.hint.delete"
+        case clipboardHintPaste = "clipboard.hint.paste"
         case clipboardHintPastePlain = "clipboard.hint.pastePlain"
         case clipboardHintPreview = "clipboard.hint.preview"
         case clipboardHintSearch = "clipboard.hint.search"
@@ -141,6 +145,7 @@ enum L10n {
         case clipboardPagingRetry = "clipboard.paging.retry"
         case clipboardPagingRetryAction = "clipboard.paging.retryAction"
         case clipboardSearchPlaceholder = "clipboard.search.placeholder"
+        case clipboardSearchRebuildIndex = "clipboard.search.rebuildIndex"
         case clipboardSourceAll = "clipboard.source.all"
         case clipboardSourceFilterHelp = "clipboard.source.filterHelp"
         case clipboardSourceUniversal = "clipboard.source.universal"
@@ -172,8 +177,14 @@ enum L10n {
         case clipboardToastCopyFailed = "clipboard.toast.copyFailed"
         case clipboardToastFileMissing = "clipboard.toast.fileMissing"
         case clipboardToastLegacyOwnedCount = "clipboard.toast.legacyOwnedCount"
+        case clipboardToastPasteNeedsAccessibility =
+            "clipboard.toast.pasteNeedsAccessibility"
         case clipboardToastPayloadUnavailable =
             "clipboard.toast.payloadUnavailable"
+        case clipboardToastPlainTextUnavailable =
+            "clipboard.toast.plainTextUnavailable"
+        case clipboardToastSearchRebuildFailed =
+            "clipboard.toast.searchRebuildFailed"
         case clipboardToastSourceIgnored = "clipboard.toast.sourceIgnored"
         case clipboardToastUnavailableCount = "clipboard.toast.unavailableCount"
         case clipboardRestoreFile = "clipboard.restore.file"
