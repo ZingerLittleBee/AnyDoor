@@ -72,14 +72,6 @@ public final class ScriptPluginRuntime {
         packages[package.id] = package
     }
 
-    /// Load directly from a package directory (validates the manifest first).
-    @discardableResult
-    public func load(fromDirectory directory: URL) throws -> ScriptPluginID {
-        let package = try ScriptPluginPackage.load(fromDirectory: directory)
-        try load(package)
-        return package.id
-    }
-
     /// Unload a plugin and tear down its context. Its private key-value store on
     /// disk is untouched, so a later reload of the same id finds the data.
     public func unload(_ id: ScriptPluginID) {
@@ -231,7 +223,7 @@ public final class ScriptPluginRuntime {
         guard let package = packages[id] else {
             throw ScriptPluginError.notLoaded(id)
         }
-        let store: (any ScriptKeyValueStore)? = package.manifest.capabilities.contains(.store)
+        let store: FileScriptKeyValueStore? = package.manifest.capabilities.contains(.store)
             ? FileScriptKeyValueStore(id: id, directory: capabilityHost.storeDirectory)
             : nil
         let context = ScriptPluginContext(

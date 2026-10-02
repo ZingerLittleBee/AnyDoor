@@ -9,7 +9,7 @@ struct HelperApprovalBanner: View {
     @Environment(\.pluginHostContext) private var host
 
     var body: some View {
-        if host?.helperReadiness() == .requiresApproval {
+        if host?.helper.readiness() == .requiresApproval {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.shield")
                     .foregroundStyle(.orange)

@@ -2,9 +2,9 @@ import Foundation
 
 /// Pure vertical-stitch logic for scrolling capture. Operates on per-row
 /// fingerprints (`RowSig`) rather than pixels so the alignment math is fully
-/// unit-testable without real images. The engine turns each captured frame into
-/// `[RowSig]`, asks `detectOverlap` how far the content scrolled, then composites
-/// the newly revealed rows. No AppKit, no I/O.
+/// unit-testable without real images. `ScrollStitchAccumulator` turns each
+/// captured frame into `[RowSig]`, asks `detectOverlap` how far the content
+/// scrolled, then composites the newly revealed rows. No AppKit, no I/O.
 enum ScrollStitch {
     /// A compact fingerprint of one pixel row. Exact integer scrolling preserves
     /// a row's pixels, so identical rows produce identical signatures.

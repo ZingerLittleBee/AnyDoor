@@ -18,7 +18,7 @@ final class ScriptContractFixtureTests: XCTestCase {
 
     func testCapabilityListMatchesHost() throws {
         let contract = try loadContract()
-        let hostKeys = ScriptCapability.allCases.map(\.manifestKey)
+        let hostKeys = ScriptCapability.allCases.map(\.rawValue)
         XCTAssertEqual(Set(contract.capabilities), Set(hostKeys))
         XCTAssertEqual(contract.capabilities.count, hostKeys.count, "duplicate capability names")
     }

@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- AnyDoor no longer opens or deletes `~/Library/Application Support/default.store`
+  at launch. Non-sandboxed apps that use SwiftData keep their data in that file
+  by default, and a leftover migration for pre-1.0 development builds could
+  erase it every time AnyDoor started.
+
 ## [4.2.6] - 2026-10-02
 
 ### Added

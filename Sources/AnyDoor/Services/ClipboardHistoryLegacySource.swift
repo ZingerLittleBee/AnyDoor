@@ -29,37 +29,8 @@ final class ClipboardHistoryLegacySource {
         "ClipboardHistoryLegacyCutover-v1.complete"
 
     private let payloadDirectory: URL
-    private let snapshotDirectory: URL
     /// The copied v1 store, or nil when there was never one to migrate.
     private let snapshotStoreURL: URL?
-
-    /// Resolves the cutover before the legacy snapshot is opened.
-    ///
-    /// A completed marker is authoritative because `finishMigration()` makes
-    /// it durable only after publication and cleanup have succeeded. A
-    /// leftover snapshot is retried as a visible filesystem operation, never
-    /// a reason to reread the removed schema.
-    static func openIfNeeded(
-        applicationSupportDirectory: URL,
-        productionStoreURL: URL,
-        payloadDirectory: URL
-    ) throws -> ClipboardHistoryLegacySource? {
-        switch cleanupState(in: applicationSupportDirectory) {
-        case .completed:
-            return nil
-        case .snapshotDeletionPending:
-            try retrySnapshotDeletion(
-                in: applicationSupportDirectory
-            )
-            return nil
-        case .incomplete:
-            return try openForMigration(
-                applicationSupportDirectory: applicationSupportDirectory,
-                productionStoreURL: productionStoreURL,
-                payloadDirectory: payloadDirectory
-            )
-        }
-    }
 
     static func openForMigration(
         applicationSupportDirectory: URL,
@@ -83,7 +54,7 @@ final class ClipboardHistoryLegacySource {
         productionStoreURL: URL,
         payloadDirectory legacyPayloadDirectory: URL
     ) throws {
-        snapshotDirectory = applicationSupportDirectory
+        let snapshotDirectory = applicationSupportDirectory
             .appendingPathComponent(
                 Self.snapshotDirectoryName,
                 isDirectory: true
@@ -189,13 +160,6 @@ final class ClipboardHistoryLegacySource {
         )
     }
 
-    @MainActor
-    func finishMigration() throws {
-        try Self.finishMigration(
-            in: snapshotDirectory.deletingLastPathComponent()
-        )
-    }
-
     static func snapshotDirectory(
         in applicationSupportDirectory: URL
     ) -> URL {
@@ -231,6 +195,13 @@ final class ClipboardHistoryLegacySource {
         )
     }
 
+    /// Where the cutover stands; read before the legacy snapshot is opened.
+    ///
+    /// A completed marker is authoritative because `finishMigration(in:)`
+    /// makes it durable only after publication and cleanup have succeeded. A
+    /// leftover snapshot is retried as a visible filesystem operation
+    /// (`retrySnapshotDeletion(in:)`), never a reason to reread the removed
+    /// schema.
     static func cleanupState(
         in applicationSupportDirectory: URL
     ) -> ClipboardHistoryLegacyCleanupState {

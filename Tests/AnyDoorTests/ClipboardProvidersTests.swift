@@ -1,4 +1,3 @@
-import AppKit
 import ClipboardHistory
 import XCTest
 
@@ -63,18 +62,5 @@ final class ClipboardProvidersTests: XCTestCase {
         XCTAssertTrue(defaults.bool(forKey: ClipboardPreferences.monitoringKey))
         let enabled = try await provider.readState()
         XCTAssertTrue(enabled)
-    }
-
-    @MainActor
-    func testClearClipboardActionClearsPasteboardAndSuppressesWatcherCapture() {
-        let name = NSPasteboard.Name("AnyDoorClearClipboard-\(UUID().uuidString)")
-        let pasteboard = NSPasteboard(name: name)
-        pasteboard.clearContents()
-        pasteboard.setString("secret", forType: .string)
-
-        let changeCount = ClipboardActions.clear(pasteboard)
-
-        XCTAssertNil(pasteboard.string(forType: .string))
-        XCTAssertEqual(changeCount, pasteboard.changeCount)
     }
 }

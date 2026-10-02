@@ -107,18 +107,18 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             isDirectory: true
         )
         do {
-            let source = try XCTUnwrap(
-                ClipboardHistoryLegacySource.openIfNeeded(
-                    applicationSupportDirectory: root,
-                    productionStoreURL: storeURL,
-                    payloadDirectory: payloadDirectory
-                )
+            _ = try ClipboardHistoryLegacySource.openForMigration(
+                applicationSupportDirectory: root,
+                productionStoreURL: storeURL,
+                payloadDirectory: payloadDirectory
             )
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o500],
                 ofItemAtPath: root.path
             )
-            XCTAssertThrowsError(try source.finishMigration())
+            XCTAssertThrowsError(
+                try ClipboardHistoryLegacySource.finishMigration(in: root)
+            )
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o700],
                 ofItemAtPath: root.path
@@ -132,12 +132,14 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
                     .snapshotDirectory(in: root).path
             )
         )
-        let recovered = try XCTUnwrap(
-            ClipboardHistoryLegacySource.openIfNeeded(
-                applicationSupportDirectory: root,
-                productionStoreURL: storeURL,
-                payloadDirectory: payloadDirectory
-            )
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: root),
+            .incomplete
+        )
+        let recovered = try ClipboardHistoryLegacySource.openForMigration(
+            applicationSupportDirectory: root,
+            productionStoreURL: storeURL,
+            payloadDirectory: payloadDirectory
         )
         XCTAssertEqual(
             try recovered.makeMigrationRequest(
@@ -413,12 +415,10 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             isDirectory: true
         )
 
-        let firstLaunch = try XCTUnwrap(
-            ClipboardHistoryLegacySource.openIfNeeded(
-                applicationSupportDirectory: root,
-                productionStoreURL: storeURL,
-                payloadDirectory: payloadDirectory
-            )
+        let firstLaunch = try ClipboardHistoryLegacySource.openForMigration(
+            applicationSupportDirectory: root,
+            productionStoreURL: storeURL,
+            payloadDirectory: payloadDirectory
         )
         XCTAssertEqual(
             try firstLaunch.makeMigrationRequest(
@@ -431,15 +431,31 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             for: Schema(productionTypes),
             configurations: ModelConfiguration(url: storeURL)
         )
-        try firstLaunch.finishMigration()
+        try ClipboardHistoryLegacySource.finishMigration(in: root)
 
-        let secondLaunch = try ClipboardHistoryLegacySource.openIfNeeded(
+        try ClipboardHistoryLegacySource.prepareSnapshotIfNeeded(
             applicationSupportDirectory: root,
-            productionStoreURL: storeURL,
-            payloadDirectory: payloadDirectory
+            productionStoreURL: storeURL
         )
 
-        XCTAssertNil(secondLaunch)
+        XCTAssertEqual(
+            ClipboardHistoryLegacySource.cleanupState(in: root),
+            .completed
+        )
+        XCTAssertThrowsError(
+            try ClipboardHistoryLegacySource.openForMigration(
+                applicationSupportDirectory: root,
+                productionStoreURL: storeURL,
+                payloadDirectory: payloadDirectory
+            )
+        ) { error in
+            guard
+                case .cutoverAlreadyCompleted? =
+                    error as? ClipboardHistoryLegacySourceError
+            else {
+                return XCTFail("Expected a completed cutover, got \(error)")
+            }
+        }
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath:
@@ -574,7 +590,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
                 atPath: snapshotDirectory.path
             )
         )
-        try source.finishMigration()
+        try ClipboardHistoryLegacySource.finishMigration(in: root)
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: snapshotDirectory.path
@@ -648,7 +664,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
             productionStoreURL: storeURL
         )
 
-        let source = try ClipboardHistoryLegacySource.openForMigration(
+        _ = try ClipboardHistoryLegacySource.openForMigration(
             applicationSupportDirectory: root,
             productionStoreURL: storeURL,
             payloadDirectory: legacyFolder
@@ -712,7 +728,7 @@ final class ClipboardHistoryLegacyAdapterTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: collision), Data("newer".utf8))
         try fileManager.removeItem(at: collision)
 
-        try source.finishMigration()
+        try ClipboardHistoryLegacySource.finishMigration(in: root)
         XCTAssertFalse(
             fileManager.fileExists(
                 atPath: ClipboardHistoryLegacySource.snapshotDirectory(

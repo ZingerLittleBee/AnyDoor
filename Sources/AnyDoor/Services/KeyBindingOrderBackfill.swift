@@ -13,9 +13,10 @@ enum KeyBindingOrderBackfill {
             let rows = try context.fetch(FetchDescriptor<KeyBinding>(
                 sortBy: [SortDescriptor(\.createdAt)]
             ))
-            // If any row has a non-zero order, assume backfill is already done.
+            // Nothing to do unless some row still has the default zero order (an empty
+            // table returns here too). Rows that already have a non-zero order keep it;
+            // only zero-order rows are numbered below.
             guard rows.contains(where: { $0.displayOrder == 0 }) else { return }
-            guard !rows.allSatisfy({ $0.displayOrder != 0 }) else { return }
 
             var order: Double = 100
             for row in rows where row.displayOrder == 0 {

@@ -76,7 +76,8 @@ actor RecordScreenProvider: ActionProvider {
     }
 }
 
-/// Capture a scrollable area taller than the screen by auto-scrolling + stitching.
+/// Capture a scrollable area taller than the screen by stitching frames grabbed
+/// while the user scrolls.
 actor CaptureScrollingProvider: ActionProvider {
     let itemKey: BuiltinItem = .captureScrolling
 

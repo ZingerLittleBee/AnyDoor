@@ -366,7 +366,6 @@ final class CommandPalettePluginStateTests: XCTestCase {
 
         let generation = state.enterList(sourceKey: sourceKey, listID: "hot", title: "Hot Topics")
 
-        XCTAssertTrue(state.isInList)
         XCTAssertFalse(state.isAtRoot)
         XCTAssertEqual(state.listLevel?.title, "Hot Topics")
         XCTAssertEqual(state.listLevel?.listID, "hot")
@@ -628,7 +627,10 @@ final class CommandPalettePluginStateTests: XCTestCase {
         state.updateList(.loaded([
             PluginRowDescriptor(id: "1", title: "Alpha", symbol: "doc", commit: .pushDetail),
         ]), generation: generation)
-        XCTAssertTrue(state.isInList)
+        guard case .list(let list) = state.level else {
+            return XCTFail("expected the pushed list level")
+        }
+        XCTAssertEqual(list.title, "Hot")
 
         // list -> detail (drilled from a list row)
         state.enterDetail(sourceKey: sourceKey, rowID: "row", title: "Alpha")
@@ -636,7 +638,6 @@ final class CommandPalettePluginStateTests: XCTestCase {
 
         // Esc pops the Detail back to the LIST it came from, not the root.
         XCTAssertEqual(state.handleEscape(), .poppedToRoot)
-        XCTAssertTrue(state.isInList)
         XCTAssertEqual(state.listLevel?.title, "Hot")
         // The list's cached rows survive the round trip (no refetch needed).
         XCTAssertEqual(state.flatEntries.count, 1)
@@ -659,7 +660,10 @@ final class CommandPalettePluginStateTests: XCTestCase {
 
         state.query = "typed"
         XCTAssertEqual(state.handleEscape(), .clearedQuery)
-        XCTAssertTrue(state.isInList, "a non-empty query clears first, staying in the list")
+        guard case .list(let list) = state.level else {
+            return XCTFail("a non-empty query clears first, staying in the list")
+        }
+        XCTAssertEqual(list.title, "Hot")
         XCTAssertEqual(state.query, "")
 
         XCTAssertEqual(state.handleEscape(), .poppedToRoot)
@@ -677,12 +681,11 @@ final class CommandPalettePluginStateTests: XCTestCase {
         ]), generation: generation)
 
         state.enterPluginArgumentInput(sourceKey: sourceKey, rowID: "set", title: "Set Node")
-        XCTAssertTrue(state.isInArgumentInput)
+        XCTAssertEqual(state.argumentInputTitle, "Set Node")
 
         state.query = "swift"
         XCTAssertEqual(state.handleEscape(), .clearedQuery)
         XCTAssertEqual(state.handleEscape(), .poppedToRoot)
-        XCTAssertTrue(state.isInList)
         XCTAssertEqual(state.listLevel?.title, "Nodes")
     }
 
@@ -729,7 +732,6 @@ final class CommandPalettePluginStateTests: XCTestCase {
 
         state.enterPluginArgumentInput(sourceKey: sourceKey, rowID: "search", title: "Search")
 
-        XCTAssertTrue(state.isInArgumentInput)
         XCTAssertFalse(state.isAtRoot)
         XCTAssertEqual(state.argumentInputTitle, "Search")
         XCTAssertEqual(state.argumentBadge, "Search")
@@ -776,7 +778,7 @@ final class CommandPalettePluginStateTests: XCTestCase {
         state.query = "anydoor"
 
         XCTAssertEqual(state.handleEscape(), .clearedQuery)
-        XCTAssertTrue(state.isInArgumentInput)
+        XCTAssertEqual(state.argumentInputTitle, "Search")
         XCTAssertEqual(state.handleEscape(), .poppedToRoot)
         XCTAssertTrue(state.isAtRoot)
     }
@@ -1018,7 +1020,10 @@ final class CommandPalettePluginStateTests: XCTestCase {
 
         // Each pop restores the search the user had typed at that level.
         state.popLevel()
-        XCTAssertTrue(state.isInList)
+        guard case .list(let list) = state.level else {
+            return XCTFail("popping the Detail restores the list")
+        }
+        XCTAssertEqual(list.title, "Hot")
         XCTAssertEqual(state.query, "alpha")
         XCTAssertEqual(state.selectedIndex, 0)
 

@@ -21,7 +21,7 @@ final class HostsManager {
             makeWriter: {
                 // Re-evaluate on every write so the privileged helper is used as soon
                 // as the user approves it — without requiring an app relaunch.
-                if host.helperReadiness() == .enabled {
+                if host.helper.readiness() == .enabled {
                     return PrivilegedHostsWriter(host: host)
                 }
                 return AppleScriptWriter(host: host)
@@ -44,8 +44,7 @@ final class HostsManager {
 
     // MARK: - Writer factory (re-evaluated per write so helper approval takes effect immediately)
     private let makeWriter: () -> HostsWriter
-    // `var` so tests can inject backupErrorOverride on the value-type HostsBackupStore.
-    var backup: HostsBackupStore
+    private let backup: HostsBackupStore
     // Throwing: a failed read of `/etc/hosts` must abort composing/applying, never
     // fall back to an empty string (which would destroy the system's own entries).
     private let readLiveHosts: () throws -> String

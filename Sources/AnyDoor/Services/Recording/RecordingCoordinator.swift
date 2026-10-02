@@ -33,7 +33,7 @@ final class RecordingCoordinator {
 
     /// Mode-bar entry point: record a selected region or the full display.
     func record(region: Bool) {
-        guard state == .idle else { return }
+        guard RecordingPolicy.canStart(state) else { return }
         guard ScreenCapturePermission.ensureGranted() else {
             ToastPresenter.shared.show(.failure(L(.toastScreenCapturePermissionDenied)))
             ScreenCapturePermission.openSettings()
@@ -54,7 +54,7 @@ final class RecordingCoordinator {
     /// capture toolbar. Gates the same permissions as `record(region:)`, then starts
     /// recording without presenting its own selection.
     func record(rect: CGRect) {
-        guard state == .idle else { return }
+        guard RecordingPolicy.canStart(state) else { return }
         guard ScreenCapturePermission.ensureGranted() else {
             ToastPresenter.shared.show(.failure(L(.toastScreenCapturePermissionDenied)))
             ScreenCapturePermission.openSettings()
@@ -150,7 +150,7 @@ final class RecordingCoordinator {
     }
 
     private func togglePause() {
-        if state == .recording { pause() } else if state == .paused { resume() }
+        if RecordingPolicy.canPause(state) { pause() } else if RecordingPolicy.canResume(state) { resume() }
         RecordingControlsWindow.shared.setPaused(state == .paused)
     }
 
@@ -199,7 +199,7 @@ final class RecordingCoordinator {
         let dir = CaptureSettings.shared.saveDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let base = CaptureFilename.make(template: RecordingSettings.defaultNamingTemplate, date: Date(), calendar: .current)
-        let name = CaptureFilename.resolve(base: base, ext: "mov") {
+        let name = CaptureFilename.resolve(base: base, ext: RecordingFormat.mov.fileExtension) {
             FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
         }
         return dir.appendingPathComponent(name)

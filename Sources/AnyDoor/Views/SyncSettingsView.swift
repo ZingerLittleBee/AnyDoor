@@ -228,7 +228,9 @@ struct SyncSettingsView: View {
         do {
             let snapshot = try makeService().exportSnapshot()
             let data = try BackupCodec.encode(snapshot)
-            try LocalFileBackend(url: url).uploadSync(data)
+            // Synchronous on purpose: the modal panel already blocked the main
+            // thread, and the backup file is small.
+            try data.write(to: url, options: .atomic)
             statusMessage = L(.settingsSyncExportSuccess)
             isError = false
         } catch {
@@ -244,7 +246,14 @@ struct SyncSettingsView: View {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let data = try LocalFileBackend(url: url).downloadSync() ?? Data()
+            let data: Data
+            if FileManager.default.fileExists(atPath: url.path) {
+                data = try Data(contentsOf: url)
+            } else {
+                // A file gone since the panel closed reads as empty data, so the
+                // import fails with BackupCodec's decode error, not a file-read error.
+                data = Data()
+            }
             let snapshot = try BackupCodec.decode(data)
             let service = makeService()
             Task {

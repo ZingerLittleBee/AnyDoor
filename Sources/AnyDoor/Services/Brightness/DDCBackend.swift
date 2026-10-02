@@ -1,9 +1,9 @@
-import Foundation
 import CoreGraphics
 
 /// Abstract DDC/CI transport. Two production implementations exist
 /// (`IntelDDCBackend` and `Arm64DDCBackend`), selected per slice via
-/// `#if arch(arm64)` in the wiring code. `MockDDCBackend` is used by tests.
+/// `#if arch(arm64)` in the wiring code. `MockDDCBackend` (in the
+/// AnyDoorTests target) is used by tests.
 protocol DDCBackend: Sendable {
     /// Fast, side-effect-free check: is the I2C / IOAVService transport
     /// reachable for this display? Does NOT issue a VCP read.
@@ -23,48 +23,7 @@ protocol DDCBackend: Sendable {
 }
 
 extension DDCBackend {
-    /// Default no-op for backends that don't cache (Intel via DDC.swift
-    /// re-resolves per call; mocks have no transport).
+    /// Default no-op for backends that don't cache (Intel, via the vendored
+    /// MonitorControl `IntelDDC`, re-resolves per call; mocks have no transport).
     func invalidateCaches() {}
-}
-
-/// In-memory mock for unit tests. Scripted return values + recording of calls.
-final class MockDDCBackend: DDCBackend, @unchecked Sendable {
-    struct ReadCall: Equatable { let displayID: CGDirectDisplayID; let vcp: UInt8 }
-    struct WriteCall: Equatable { let displayID: CGDirectDisplayID; let vcp: UInt8; let value: UInt16 }
-
-    private let lock = NSLock()
-    private var _transportSupported: Set<CGDirectDisplayID>
-    private var _readResults: [CGDirectDisplayID: UInt16?]
-    private var _writeError: Error?
-    private(set) var readCalls: [ReadCall] = []
-    private(set) var writeCalls: [WriteCall] = []
-
-    init(transportSupported: Set<CGDirectDisplayID> = [],
-         readResults: [CGDirectDisplayID: UInt16?] = [:],
-         writeError: Error? = nil) {
-        self._transportSupported = transportSupported
-        self._readResults = readResults
-        self._writeError = writeError
-    }
-
-    func transportReady(displayID: CGDirectDisplayID) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return _transportSupported.contains(displayID)
-    }
-
-    func read(displayID: CGDirectDisplayID, vcp: UInt8) async -> UInt16? {
-        lock.withLock {
-            readCalls.append(ReadCall(displayID: displayID, vcp: vcp))
-            return _readResults[displayID] ?? nil
-        }
-    }
-
-    func write(displayID: CGDirectDisplayID, vcp: UInt8, value: UInt16) async throws {
-        let err: Error? = lock.withLock {
-            writeCalls.append(WriteCall(displayID: displayID, vcp: vcp, value: value))
-            return _writeError
-        }
-        if let err { throw err }
-    }
 }

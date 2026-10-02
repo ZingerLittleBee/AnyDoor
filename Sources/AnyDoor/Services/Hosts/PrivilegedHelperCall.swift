@@ -1,5 +1,6 @@
 import Foundation
 import HostsHelperShared
+import PluginInterface
 
 /// Drives a single request to the privileged helper over XPC with a hard
 /// timeout and connection invalidation/interruption handling.
@@ -15,6 +16,32 @@ import HostsHelperShared
 /// resume), and a timeout invalidates the connection so a wedged helper still
 /// surfaces an error instead of hanging.
 enum PrivilegedHelperCall {
+    enum ShutdownError: Error { case failed(String) }
+
+    /// Production write path for `/etc/hosts`: sends the composed content to
+    /// the root helper over XPC. Core infrastructure (amended ADR-0005) — the
+    /// Hosts plugin reaches it through `PluginHostServices.privilegedHelper`.
+    /// Throws `PrivilegedHelperCallError`.
+    static func writeHosts(_ content: String) async throws {
+        try await run(
+            makeError: { PrivilegedHelperCallError(message: $0) },
+            request: { proxy, finish in
+                proxy.writeHosts(content) { errorMessage in finish(errorMessage) }
+            }
+        )
+    }
+
+    /// Sends a forced-shutdown request to the root helper over XPC. Reused
+    /// approval: requires the same enabled LaunchDaemon as `writeHosts(_:)`.
+    static func shutDown() async throws {
+        try await run(
+            makeError: { ShutdownError.failed($0) },
+            request: { proxy, finish in
+                proxy.shutDown { errorMessage in finish(errorMessage) }
+            }
+        )
+    }
+
     /// Invoke `request` on the helper proxy. `request` must call its `finish`
     /// closure with nil on success or a message on failure. Throws the error
     /// built by `makeError` if the connection drops, no proxy can be created, or

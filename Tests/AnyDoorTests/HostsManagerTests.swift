@@ -336,16 +336,26 @@ final class HostsManagerTests: XCTestCase {
     // MARK: - Fix 3: backup failure surfaced but write proceeds
 
     func test_backupFailure_surfacedButWriteProceeds() async throws {
+        struct BackupReadError: Error {}
         let mock = MockHostsWriter()
-        let (mgr, _) = try makeManager(writer: mock, debounceInterval: .milliseconds(1))
+        let container = try makeContainer()
+        // Inject a backup failure: the backup store's snapshot read throws, while
+        // the manager's own live read (and so the compose + write) succeeds.
+        let failingBackupRead: () throws -> String = { throw BackupReadError() }
+        let mgr = HostsManager(
+            writer: mock,
+            backup: HostsBackupStore(backupDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString), readLiveHosts: failingBackupRead),
+            readLiveHosts: { "127.0.0.1 localhost\n" },
+            debounceInterval: .milliseconds(1))
+        mgr.bootstrap(modelContainer: container)
         mgr.createProfile(name: "Dev", content: "1.2.3.4 dev")
-        // Inject a backup failure.
-        mgr.backup.backupErrorOverride = HostsWriterError.writeFailed("backup dir unwritable")
         let profile = mgr.profiles[0]
         await mgr.setActive(profile, true)
         // Write should still have proceeded.
         XCTAssertEqual(mock.writeCount, 1, "Write must proceed even when backup creation fails")
         // lastError must surface the backup warning to the user.
-        XCTAssertNotNil(mgr.lastError, "lastError must be non-nil after backup failure")
+        XCTAssertEqual(mgr.lastError, HostsPlugin.L10n.Key.hostsErrorBackupFailed.rawValue,
+                       "lastError must be the backup warning after backup failure")
     }
 }
