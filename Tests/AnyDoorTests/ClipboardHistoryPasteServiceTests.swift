@@ -291,6 +291,7 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
         await monitor.observeForTesting()
         let page = try await module.page(.init())
         XCTAssertTrue(page.entries.isEmpty)
+        try await module.closeStoreForTesting()
     }
 
     func testMaterializationErrorsKeepExactUnavailableCounts() {

@@ -1068,6 +1068,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
             try ClipboardHistoryModule.searchIndexGeneration(in: $0)
         }
         XCTAssertGreaterThan(rebuiltGeneration, originalGeneration)
+        try await reopened.closeStoreForTesting()
     }
 
     func testClosingDuringExplicitRetryWaitsForOneCompletePublication()
@@ -1179,6 +1180,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         )
         XCTAssertEqual(rebuilt.state, .ready)
         XCTAssertEqual(rebuilt.entries.map(\.id), [entry])
+        try await retrying.closeStoreForTesting()
     }
 
     /// Publishing an index ends the run of failures, so a later run gets
@@ -1317,6 +1319,7 @@ final class ClipboardHistorySearchTests: XCTestCase {
         )
         XCTAssertEqual(page.state, .ready)
         XCTAssertEqual(page.entries.map(\.id), [entry])
+        try await updated.closeStoreForTesting()
     }
 
     /// Opens retry only a rebuild failure. An index marked failed with no

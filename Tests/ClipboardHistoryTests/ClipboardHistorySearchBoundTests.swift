@@ -521,6 +521,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         XCTAssertEqual(status.searchIndex, .ready)
         try await Self.assertSearch("zqxmarker", in: module, finds: [entry])
         try await Self.assertSearchIndexesAreConsistent(in: module)
+        try await module.closeStoreForTesting()
     }
 
     /// Once opens have spent their retries on a failed index, they leave it
@@ -562,6 +563,7 @@ final class ClipboardHistorySearchBoundTests: XCTestCase {
         )
         XCTAssertEqual(rebuilt.generation, before.generation + 1)
         try await Self.assertSearch("zqxmarker", in: module, finds: [entry])
+        try await module.closeStoreForTesting()
     }
 
     /// A failed rebuild rolls its whole transaction back, bounding writes

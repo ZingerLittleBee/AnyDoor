@@ -372,6 +372,7 @@ final class ClipboardHistoryMonitorInstrumentationTests: XCTestCase {
             instrumentation.snapshot().monitoringDuration,
             .seconds(40)
         )
+        try await module.closeStoreForTesting()
     }
 }
 
