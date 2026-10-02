@@ -45,10 +45,10 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
     /// navigation. Keep in sync with ClipboardWallView's layout.
     private static let topStripHeight: CGFloat = 48
 
-    /// The app that was frontmost when the wall opened. The wall activates
-    /// AnyDoor so its panel can become key (a background .accessory app's panel
-    /// won't otherwise receive keyboard events); focus is returned here on
-    /// paste/Esc so the net effect is no focus theft.
+    /// The app that was frontmost when the wall opened. The wall's panel
+    /// becomes key without activating AnyDoor, so this app normally stays
+    /// active; paste/Esc reactivate it only if something else took activation
+    /// while the wall was up.
     private weak var previousApp: NSRunningApplication?
 
     /// Guards against re-entrant show/dismiss while the slide animation runs.
