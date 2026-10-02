@@ -6757,13 +6757,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "System actions like Dark Mode, Empty Trash, and scheduled shutdown."
+            "value": "Dark Mode and scheduled shutdown. Empty Trash asks to control Finder the first time you use it."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "用于深色模式、清空废纸篓、定时关机等系统动作。"
+            "value": "用于深色模式和定时关机。清空废纸篓会在首次使用时请求控制访达。"
           }
         }
       }
