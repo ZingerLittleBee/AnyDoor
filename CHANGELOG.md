@@ -12,6 +12,10 @@ versioning.
   at launch. Non-sandboxed apps that use SwiftData keep their data in that file
   by default, and a leftover migration for pre-1.0 development builds could
   erase it every time AnyDoor started.
+- Port scans no longer hang. A stuck scan kept the Port Manager spinning and
+  stopped the command palette's port search from refreshing until AnyDoor
+  restarted. A scan that finished normally no longer shows a false "Refresh
+  failed" timeout warning either.
 
 ## [4.2.6] - 2026-10-02
 
