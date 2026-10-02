@@ -23,7 +23,7 @@ protocol DDCBackend: Sendable {
 }
 
 extension DDCBackend {
-    /// Default no-op for backends that don't cache (Intel via DDC.swift
-    /// re-resolves per call; mocks have no transport).
+    /// Default no-op for backends that don't cache (Intel, via the vendored
+    /// MonitorControl `IntelDDC`, re-resolves per call; mocks have no transport).
     func invalidateCaches() {}
 }
