@@ -103,13 +103,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             persistenceBootstrap = bootstrap
             modelContainer = bootstrap.modelContainer
-
-            let legacyURL = appSupport.appendingPathComponent("default.store")
-            if !bootstrap.isRecoveryMode,
-                FileManager.default.fileExists(atPath: legacyURL.path)
-            {
-                Self.migrateLegacyStore(from: legacyURL, into: modelContainer)
-            }
         } catch {
             fatalError("Failed to create ModelContainer: \(error)")
         }
@@ -515,54 +508,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             logger.error(
                 "Recovery preference seeding failed: \(error)"
             )
-        }
-    }
-
-    // MARK: - Legacy store migration (unchanged behavior, just preserved)
-
-    private static func migrateLegacyStore(from legacyURL: URL, into container: ModelContainer) {
-        do {
-            let legacyConfig = ModelConfiguration(url: legacyURL)
-            let legacyContainer = try ModelContainer(for: KeyBinding.self, configurations: legacyConfig)
-            let legacyContext = ModelContext(legacyContainer)
-
-            let legacyBindings = try legacyContext.fetch(FetchDescriptor<KeyBinding>())
-            guard !legacyBindings.isEmpty else {
-                removeLegacyFiles(at: legacyURL)
-                return
-            }
-
-            let targetContext = ModelContext(container)
-            let existingBindings = try targetContext.fetch(FetchDescriptor<KeyBinding>())
-            let existingIDs = Set(existingBindings.map(\.appBundleID))
-
-            var migrated = 0
-            for binding in legacyBindings {
-                guard !existingIDs.contains(binding.appBundleID) else { continue }
-                let copy = KeyBinding(
-                    keyCode: binding.keyCode,
-                    modifierFlags: binding.modifierFlags,
-                    appBundleID: binding.appBundleID,
-                    appName: binding.appName,
-                    appPath: binding.appPath,
-                    isEnabled: binding.isEnabled
-                )
-                targetContext.insert(copy)
-                migrated += 1
-            }
-            if migrated > 0 { try targetContext.save() }
-            logger.info("Migrated \(migrated) binding(s) from legacy store")
-
-            removeLegacyFiles(at: legacyURL)
-        } catch {
-            logger.error("Legacy store migration failed: \(error)")
-        }
-    }
-
-    private static func removeLegacyFiles(at url: URL) {
-        let fm = FileManager.default
-        for suffix in ["", "-shm", "-wal"] {
-            try? fm.removeItem(atPath: url.path + suffix)
         }
     }
 }
