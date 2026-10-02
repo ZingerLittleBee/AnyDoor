@@ -84,7 +84,7 @@ private final class CorePrivilegedHelper: PrivilegedHelperAccess {
     }
 
     func writeHostsFile(_ content: String) async throws {
-        try await PrivilegedHelperWriter().write(content)
+        try await PrivilegedHelperCall.writeHosts(content)
     }
 
     func releaseIfUnneeded() throws {

@@ -21,7 +21,7 @@ final class HostsManager {
             makeWriter: {
                 // Re-evaluate on every write so the privileged helper is used as soon
                 // as the user approves it — without requiring an app relaunch.
-                if host.helperReadiness() == .enabled {
+                if host.helper.readiness() == .enabled {
                     return PrivilegedHostsWriter(host: host)
                 }
                 return AppleScriptWriter(host: host)

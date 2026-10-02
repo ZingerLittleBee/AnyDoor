@@ -45,7 +45,7 @@ protocol ShutdownWarningPresenting: AnyObject {
 struct SystemShutdownExecutor: ShutdownExecuting {
     func shutDown(forced: Bool) async throws {
         if forced {
-            try await PrivilegedShutdownClient().shutDown()
+            try await PrivilegedHelperCall.shutDown()
         } else {
             _ = try await AppleScriptRunner.run(
                 "tell application \"System Events\" to shut down"

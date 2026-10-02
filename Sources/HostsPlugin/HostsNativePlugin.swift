@@ -137,7 +137,7 @@ public final class HostsNativePlugin: NativePlugin {
         if try context.fetchCount(FetchDescriptor<HostProfile>()) > 0 {
             return true
         }
-        return hostContext.helperReadiness() != .unavailable
+        return hostContext.helper.readiness() != .unavailable
     }
 
     // MARK: - Lifecycle

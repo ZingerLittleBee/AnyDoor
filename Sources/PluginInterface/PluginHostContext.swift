@@ -29,10 +29,6 @@ public final class PluginHostContext {
 
     public var helper: any PrivilegedHelperAccess { services.privilegedHelper }
 
-    public func helperReadiness() -> PrivilegedHelperReadiness {
-        services.privilegedHelper.readiness()
-    }
-
     public func writeHostsFileViaHelper(_ content: String) async throws {
         try await services.privilegedHelper.writeHostsFile(content)
     }
