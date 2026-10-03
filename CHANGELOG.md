@@ -6,6 +6,12 @@ versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- GitHub release notes no longer break lines in the middle of a sentence. The
+  notes are taken from CHANGELOG.md, whose wrapped lines GitHub showed as line
+  breaks; they are now joined into whole paragraphs before publishing.
+
 ## [4.2.7] - 2026-10-04
 
 ### Added
