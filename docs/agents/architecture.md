@@ -269,6 +269,17 @@ action (none / Escape / original key) via `QuickPressEmitter`, whose synthesized
 cleared on system power-off (`willPowerOffNotification`) and on termination (gated on
 `hasPersistedSignatures`).
 
+### Synthesized Command shortcuts
+
+The ⌘V auto-paste (`ClipboardHistoryPasteService.synthesizePaste`) and the ⌘C selection fallback
+(`SelectedTextReader`) post through `SyntheticKeyChord`, which sends the full keystroke: Command
+(keyCode 55) down, key down, key up, Command up, every event tagged with
+`kAnyDoorSynthesizedEventTag`. Posting only the letter with `.maskCommand` latches Command
+system-wide, because the window server takes modifier state from posted flags and nothing releases
+it; later clicks then arrive as ⌘-clicks (the menu-bar item stops opening the panel). A Command key
+the user physically holds is left to their own release, and the final Command-up restores any other
+held modifiers. Tests build the sequence with `commandShortcut` / `makeEvents` and never post.
+
 ## Native plugins
 
 ### Native Plugins (ADR-0005/0006/0007)

@@ -144,22 +144,12 @@ enum SelectedTextReader {
         return result
     }
 
-    /// Post a synthesized Cmd-C key-down/up pair to the focused app.
+    /// Post a synthesized Cmd-C to the focused app. The events are tagged, so
+    /// the HotkeyService tap passes them through instead of swallowing them
+    /// (e.g. when Cmd-C is a bound hotkey or while keyboard-lock is active).
     @MainActor
     private static func synthesizeCopy() {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        let cKeyCode: CGKeyCode = 8 // 'c'
-        let down = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: true)
-        down?.flags = .maskCommand
-        let up = CGEvent(keyboardEventSource: source, virtualKey: cKeyCode, keyDown: false)
-        up?.flags = .maskCommand
-        // Tag both events so the HotkeyService CGEvent tap passes our own
-        // emissions through instead of swallowing them (e.g. when Cmd-C is a
-        // bound hotkey or while keyboard-lock is active).
-        down?.setIntegerValueField(.eventSourceUserData, value: kAnyDoorSynthesizedEventTag)
-        up?.setIntegerValueField(.eventSourceUserData, value: kAnyDoorSynthesizedEventTag)
-        down?.post(tap: .cghidEventTap)
-        up?.post(tap: .cghidEventTap)
+        SyntheticKeyChord.postCommandShortcut(key: SyntheticKeyChord.cKeyCode)
     }
 
     private struct PasteboardSnapshot {

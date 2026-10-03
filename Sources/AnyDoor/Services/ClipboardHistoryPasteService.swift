@@ -325,24 +325,6 @@ enum ClipboardHistoryPasteService {
     }
 
     static func synthesizePaste() {
-        guard let source = CGEventSource(stateID: .hidSystemState) else {
-            return
-        }
-        let key: CGKeyCode = 9
-        for isDown in [true, false] {
-            guard let event = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: key,
-                keyDown: isDown
-            ) else {
-                continue
-            }
-            event.flags = .maskCommand
-            event.setIntegerValueField(
-                .eventSourceUserData,
-                value: kAnyDoorSynthesizedEventTag
-            )
-            event.post(tap: .cghidEventTap)
-        }
+        SyntheticKeyChord.postCommandShortcut(key: SyntheticKeyChord.vKeyCode)
     }
 }

@@ -109,6 +109,7 @@ enum HyperKeyError: Error, Sendable, Equatable {
 }
 
 /// Tag written to `CGEventField.eventSourceUserData` on every CGEvent we
-/// synthesize for Quick Press. The HotkeyService tap callback bypasses any
-/// event carrying this tag so we never match our own emissions.
+/// synthesize (Quick Press, and the ⌘V / ⌘C chords from `SyntheticKeyChord`).
+/// The HotkeyService tap callback bypasses any event carrying this tag so we
+/// never match our own emissions.
 let kAnyDoorSynthesizedEventTag: Int64 = 0x416E794400000001
