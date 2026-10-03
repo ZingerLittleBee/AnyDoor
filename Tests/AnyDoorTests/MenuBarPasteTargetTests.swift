@@ -3,8 +3,8 @@ import XCTest
 @testable import AnyDoor
 
 /// Which app a menu-bar history paste goes to, decided from the activations
-/// around the status-item click that opened the panel. Times are event-clock
-/// seconds; nothing here touches AppKit.
+/// around the status-item click that opened the panel. Times are seconds of
+/// system uptime; nothing here touches AppKit.
 final class MenuBarPasteTargetTests: XCTestCase {
     private let anyDoor: pid_t = 1
     private let textEdit: pid_t = 100
@@ -169,6 +169,34 @@ final class MenuBarPasteTargetTests: XCTestCase {
         // A mouse-down after the mouse-up belongs to some other click.
         let later = StatusItemClick(mouseDown: 8, mouseUp: 7)
         XCTAssertEqual(later.began, 7 - StatusItemClick.fallbackLead)
+    }
+
+    func testAClickEndingNowBeginsAtTheSessionsLastMouseDown() {
+        let click = StatusItemClick.endingNow(
+            uptime: 50,
+            secondsSinceMouseDown: 0.25
+        )
+        XCTAssertEqual(click.began, 49.75)
+        XCTAssertEqual(click.ended, 50)
+        // No mouse-down for ages, as when the action is not a click.
+        let unclicked = StatusItemClick.endingNow(
+            uptime: 50,
+            secondsSinceMouseDown: 1_000_000
+        )
+        XCTAssertEqual(unclicked.began, 50 - StatusItemClick.fallbackLead)
+    }
+
+    /// The status item's events reach AnyDoor only at mouse-up, after the
+    /// activation the mouse-down caused (seen on a real two-display setup:
+    /// activation 53 ms before the delivered "mouse-down"). Dating the click
+    /// from the session's last mouse-down still counts that activation.
+    func testAnActivationBeforeTheDeliveredEventsIsStillTheClicks() {
+        let activations = history((textEdit, 7_390.762), (chatGPT, 7_392.346))
+        let click = StatusItemClick.endingNow(
+            uptime: 7_392.399,
+            secondsSinceMouseDown: 0.110
+        )
+        XCTAssertEqual(target(activations, after: click), .application(textEdit))
     }
 
     func testAStaleMouseDownDoesNotWidenTheClick() {

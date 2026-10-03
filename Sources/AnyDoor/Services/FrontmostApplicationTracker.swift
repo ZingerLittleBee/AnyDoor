@@ -16,8 +16,8 @@ enum ClipboardHistoryPasteTarget: Equatable, Sendable {
     case unavailable
 }
 
-/// One click on the status item, in event time (`NSEvent.timestamp`, seconds
-/// of system uptime).
+/// One click on the status item, in seconds of system uptime, the clock
+/// `ApplicationActivationHistory` stamps activations with.
 struct StatusItemClick: Equatable, Sendable {
     /// How far before the mouse-up the click is assumed to begin when its
     /// mouse-down went unseen.
@@ -30,9 +30,30 @@ struct StatusItemClick: Equatable, Sendable {
     let began: TimeInterval
     let ended: TimeInterval
 
-    /// `mouseDown` is the latest mouse-down seen on the status item. The
-    /// button tracks the mouse from that mouse-down to this mouse-up, so one
-    /// shortly before `mouseUp` began this click.
+    /// The click whose action runs now.
+    ///
+    /// The status item's own events cannot date the press: AppKit hosts the
+    /// item in a system scene that hands the press over on mouse-up, so its
+    /// mouse-down and mouse-up both carry that late delivery time, after the
+    /// activation the mouse-down caused. The session's input state still
+    /// knows when the last left mouse-down happened.
+    static func endingNow(
+        uptime: TimeInterval = ProcessInfo.processInfo.systemUptime,
+        secondsSinceMouseDown: TimeInterval = CGEventSource
+            .secondsSinceLastEventType(
+                .combinedSessionState,
+                eventType: .leftMouseDown
+            )
+    ) -> StatusItemClick {
+        StatusItemClick(
+            mouseDown: uptime - secondsSinceMouseDown,
+            mouseUp: uptime
+        )
+    }
+
+    /// `mouseDown` is the latest left mouse-down. The button tracks the mouse
+    /// from that mouse-down to this mouse-up, so one shortly before `mouseUp`
+    /// began this click.
     init(mouseDown: TimeInterval?, mouseUp: TimeInterval) {
         if let mouseDown, mouseDown <= mouseUp,
             mouseUp - mouseDown <= Self.maximumHold

@@ -292,9 +292,12 @@ item's action runs on mouse-up, and the `didActivateApplicationNotification` can
 side of that action. A history popover pasting into "the frontmost app" would then paste there.
 
 `FrontmostApplicationTracker` (started by `MenuBarController.install()`) keeps a small
-`ApplicationActivationHistory` of activations stamped on arrival with system uptime, the clock of
-`NSEvent.timestamp`. A local monitor records the status item's left mouse-down, and each showing
-captures a `StatusItemClick` (mouse-down to mouse-up). At commit time
+`ApplicationActivationHistory` of activations stamped on arrival with system uptime. Each showing
+captures a `StatusItemClick` (mouse-down to mouse-up) on the same clock with
+`StatusItemClick.endingNow()`, which dates the mouse-down from
+`CGEventSource.secondsSinceLastEventType(.combinedSessionState, .leftMouseDown)`. The status item's
+own events cannot: AppKit hosts it in a system scene that delivers the press on mouse-up, so both
+events carry that late time, after the activation the mouse-down caused. At commit time
 `ApplicationActivationHistory.pasteTarget(after:selfProcessID:)` decides, as pure logic:
 
 - no activation of another app from the mouse-down to `lateActivationGrace` after the mouse-up, or

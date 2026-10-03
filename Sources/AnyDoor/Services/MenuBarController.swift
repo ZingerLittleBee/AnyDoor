@@ -21,9 +21,6 @@ final class MenuBarController {
     private var panel: NSPanel?
     private var panelSessions = MenuBarPanelSessions()
     private let activationTracker = FrontmostApplicationTracker()
-    /// Event time of the latest left mouse-down on the status item.
-    private var statusItemMouseDown: TimeInterval?
-    private var statusItemMouseDownMonitor: Any?
     private var hostingView: NSHostingView<AnyView>?
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
@@ -51,22 +48,6 @@ final class MenuBarController {
         item.isVisible = MenuBarIcon.isVisible
         statusItem = item
         activationTracker.start()
-        installStatusItemMouseDownMonitor()
-    }
-
-    /// Notes when a click on the status item begins. A click on another
-    /// display's menu bar activates that display's frontmost app from the
-    /// mouse-down on, before the action runs on mouse-up.
-    private func installStatusItemMouseDownMonitor() {
-        statusItemMouseDownMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: .leftMouseDown,
-            handler: MainThreadEventMonitor.localMouseDown { [weak self] windowNumber, timestamp in
-                guard let self,
-                      windowNumber == self.statusItem?.button?.window?.windowNumber
-                else { return }
-                self.statusItemMouseDown = timestamp
-            }
-        )
     }
 
     /// Re-read the icon preferences and update the status item. Cheap enough to
@@ -87,11 +68,7 @@ final class MenuBarController {
             showContextMenu()
             return
         }
-        let click = StatusItemClick(
-            mouseDown: statusItemMouseDown,
-            mouseUp: NSApp.currentEvent?.timestamp ?? ProcessInfo.processInfo.systemUptime
-        )
-        statusItemMouseDown = nil
+        let click = StatusItemClick.endingNow()
         if panel?.isVisible == true {
             hidePanel()
         } else {
