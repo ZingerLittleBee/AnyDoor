@@ -219,10 +219,9 @@ struct MenuBarView: View {
                 Text(durationMenuLabel(.keepAwakeDurationIndefinite, checked: state == .indefinite))
             }
             Divider()
-            keepAwakeDurationButton(.minutes(15), titleKey: .keepAwakeDuration15Min)
-            keepAwakeDurationButton(.minutes(30), titleKey: .keepAwakeDuration30Min)
-            keepAwakeDurationButton(.minutes(60), titleKey: .keepAwakeDuration1Hour)
-            keepAwakeDurationButton(.minutes(120), titleKey: .keepAwakeDuration2Hour)
+            ForEach(KeepAwakePreset.timed, id: \.minutes) { preset in
+                keepAwakeDurationButton(preset.duration, titleKey: preset.titleKey)
+            }
             if state.isOn {
                 Divider()
                 Button(role: .destructive) {

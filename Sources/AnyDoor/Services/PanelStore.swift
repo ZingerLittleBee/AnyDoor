@@ -243,7 +243,12 @@ final class PanelStore {
             case .indefinite:
                 return L(.panelSubtitleKeepAwakeIndefinite)
             case .timed(let endDate):
-                return L(.panelSubtitleKeepAwakeUntil, keepAwakeEndTimeString(endDate))
+                return Self.keepAwakeUntilSubtitle(
+                    endDate: endDate,
+                    now: Date(),
+                    calendar: .current,
+                    time: keepAwakeEndTimeString(endDate)
+                )
             }
         case .scheduledShutdown:
             switch scheduledShutdownState {
@@ -255,6 +260,21 @@ final class PanelStore {
         default:
             return nil
         }
+    }
+
+    /// "Awake until <time>", naming the next day when the end time falls
+    /// after midnight (an 8 or 12 hour preset started in the evening). Presets
+    /// stay under 24 hours, so a different day is always tomorrow. The panel
+    /// and palette rebuild this on open, so the hint follows the clock.
+    static func keepAwakeUntilSubtitle(
+        endDate: Date,
+        now: Date,
+        calendar: Calendar,
+        time: String
+    ) -> String {
+        calendar.isDate(endDate, inSameDayAs: now)
+            ? L(.panelSubtitleKeepAwakeUntil, time)
+            : L(.panelSubtitleKeepAwakeUntilTomorrow, time)
     }
 
     /// Renders an end-time using the app's currently selected language.

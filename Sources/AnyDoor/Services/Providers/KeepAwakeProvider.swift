@@ -18,6 +18,26 @@ enum KeepAwakeDuration: Hashable, Sendable {
     }
 }
 
+/// A countdown preset and its menu title. The menu-bar row's duration menu
+/// and the command palette's Keep Awake options both list `timed`, so the two
+/// surfaces offer the same presets in the same order.
+struct KeepAwakePreset: Hashable, Sendable {
+    let minutes: Int
+    let titleKey: L10n.Key
+
+    var duration: KeepAwakeDuration { .minutes(minutes) }
+
+    static let timed: [KeepAwakePreset] = [
+        KeepAwakePreset(minutes: 15, titleKey: .keepAwakeDuration15Min),
+        KeepAwakePreset(minutes: 30, titleKey: .keepAwakeDuration30Min),
+        KeepAwakePreset(minutes: 60, titleKey: .keepAwakeDuration1Hour),
+        KeepAwakePreset(minutes: 120, titleKey: .keepAwakeDuration2Hour),
+        KeepAwakePreset(minutes: 240, titleKey: .keepAwakeDuration4Hour),
+        KeepAwakePreset(minutes: 480, titleKey: .keepAwakeDuration8Hour),
+        KeepAwakePreset(minutes: 720, titleKey: .keepAwakeDuration12Hour),
+    ]
+}
+
 /// Public state exposed to PanelStore. Encodes both the on/off bit and the
 /// scheduled end-date so views can render a "Awake until HH:mm" subtitle
 /// without polling — the timed end-date is stable until the next mutation.

@@ -6,6 +6,13 @@ versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Keep Awake (保持唤醒) can now run for 4, 8, or 12 hours, in the menu-bar
+  panel's duration menu and in the command palette. When the end time falls
+  after midnight, the row says so, for example "Awake until 4:00 AM tomorrow"
+  (保持至明天 04:00).
+
 ### Changed
 
 - Screenshot to Clipboard (截图到剪贴板) is now called Screenshot (截图). It
