@@ -641,14 +641,13 @@ struct CommandPalettePicker: View {
 
     /// One row of the flattened root list: a section header or an entry. The
     /// list is deliberately built as a single `ForEach` over these instead of a
-    /// `ForEach` of sections each holding a nested `ForEach` of rows. A section
-    /// header can repeat once per rank tier, so an entry moves between sections
-    /// as the query changes (e.g. "MuseDAM" leaves the prefix tier for a new
-    /// exact tier on the final keystroke). Across that move SwiftUI kept the
-    /// entry's old rendering alive in the section it left, so the next
-    /// selection change repainted only the new instance and the stale one stayed
-    /// visibly selected — two highlighted rows. Flattening keeps every row in
-    /// one identity space, where the move is an ordinary reorder.
+    /// `ForEach` of sections each holding a nested `ForEach` of rows. Rows and
+    /// sections reorder as the query changes. With nested `ForEach`s, an entry
+    /// that moved between section containers (when headers still repeated once
+    /// per rank tier) kept its old rendering alive in the section it left, so
+    /// the next selection change repainted only the new instance and the stale
+    /// one stayed visibly selected — two highlighted rows. Flattening keeps
+    /// every row in one identity space, where any move is an ordinary reorder.
     enum CommandPaletteListItem: Identifiable {
         case header(sectionID: String, titleKey: String)
         case row(PanelEntry)

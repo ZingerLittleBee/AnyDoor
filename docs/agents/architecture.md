@@ -535,10 +535,12 @@ not a plugin author.
 
 Root entries rank through `CommandPaletteQueryMatch.rank` (`CommandPaletteState.rootRank`): the
 active-language title ranks exact, prefix, or other, and every alias hit ranks `.other`, so an alias
-never outranks a title prefix. Within a tier, `rankedByGlobalTiers` keeps section order, and every
-builtin section precedes Applications. Installed-app aliases and Quicklink Keywords
-(`PanelEntry.searchAliases`) match anywhere in the alias, which lets a Chinese-UI user find 微信 by
-typing "chat". Builtin entries carry Core-side bilingual aliases instead: `BuiltinItem.paletteAliases`
+never outranks a title prefix. `rankedBySection` shows each section header at most once: sections
+order by their best-ranked entry (ties keep section order, so every builtin section precedes
+Applications), and entries rank within their section, so the top row is always a best match but a
+section's weaker hits stay under its own header rather than interleaving. Installed-app aliases and
+Quicklink Keywords (`PanelEntry.searchAliases`) match anywhere in the alias, which lets a Chinese-UI
+user find 微信 by typing "chat". Builtin entries carry Core-side bilingual aliases instead: `BuiltinItem.paletteAliases`
 (in `BuiltinItem+Core.swift`, not `PluginInterface`), which `PanelStore.rebuild()` copies into
 `PanelEntry.wordStartAliases`. They are match data rather than catalog strings, so either language's
 terms work in either UI; they are never shown; and they match only at the start of the alias or of one

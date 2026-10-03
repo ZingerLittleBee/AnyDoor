@@ -1,10 +1,9 @@
 import XCTest
 @testable import AnyDoor
 
-/// The root list renders one flat `ForEach` over these items. A section header
-/// repeats once per rank tier, so the same entry moves between sections as the
-/// query changes; keeping every row in one identity space is what stops the
-/// row it left behind from staying painted as selected.
+/// The root list renders one flat `ForEach` over these items. Rows and sections
+/// reorder as the query changes; keeping every row in one identity space is
+/// what stops a moved row's old rendering from staying painted as selected.
 final class CommandPaletteListItemTests: XCTestCase {
     private func entry(_ bundleID: String, title: String) -> PanelEntry {
         PanelEntry.paletteRow(
@@ -19,40 +18,36 @@ final class CommandPaletteListItemTests: XCTestCase {
     func testFlattenEmitsHeaderThenItsRows() {
         let sections = [
             CommandPaletteSection(
-                rawTitleKey: "commandPalette.section.applications",
-                entries: [entry("cc.musedam.sync", title: "MuseDAM")],
-                identitySuffix: "exact"
+                rawTitleKey: "commandPalette.section.commands",
+                entries: [entry("cc.musedam.sync", title: "MuseDAM")]
             ),
             CommandPaletteSection(
                 rawTitleKey: "commandPalette.section.applications",
-                entries: [entry("com.electron.musedam-publisher", title: "MuseDAM Publisher")],
-                identitySuffix: "prefix"
+                entries: [entry("com.electron.musedam-publisher", title: "MuseDAM Publisher")]
             ),
         ]
 
         let items = CommandPalettePicker.CommandPaletteListItem.flatten(sections)
 
         XCTAssertEqual(items.map(\.id), [
-            "header:commandPalette.section.applications#exact",
+            "header:commandPalette.section.commands",
             "installedApp:cc.musedam.sync",
-            "header:commandPalette.section.applications#prefix",
+            "header:commandPalette.section.applications",
             "installedApp:com.electron.musedam-publisher",
         ])
     }
 
     /// Duplicate ids in the `ForEach` would put two rows in the same identity,
     /// which is the failure mode the flattening exists to avoid.
-    func testFlattenedIdentitiesAreUniqueAcrossRepeatedSectionTitles() {
+    func testFlattenedIdentitiesAreUniqueAcrossSections() {
         let sections = [
             CommandPaletteSection(
-                rawTitleKey: "commandPalette.section.applications",
-                entries: [entry("a", title: "A"), entry("b", title: "B")],
-                identitySuffix: "exact"
+                rawTitleKey: "commandPalette.section.commands",
+                entries: [entry("a", title: "A"), entry("b", title: "B")]
             ),
             CommandPaletteSection(
                 rawTitleKey: "commandPalette.section.applications",
-                entries: [entry("c", title: "C")],
-                identitySuffix: "prefix"
+                entries: [entry("c", title: "C")]
             ),
         ]
 

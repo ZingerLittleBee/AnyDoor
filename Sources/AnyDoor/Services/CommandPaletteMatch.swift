@@ -19,16 +19,6 @@ enum CommandPaletteQueryMatch {
         static func < (lhs: Rank, rhs: Rank) -> Bool {
             lhs.rawValue < rhs.rawValue
         }
-
-        /// Distinguishes a title-search slice when the same section header is
-        /// emitted once per rank tier.
-        var identitySuffix: String {
-            switch self {
-            case .exact: return "exact"
-            case .prefix: return "prefix"
-            case .other: return "other"
-            }
-        }
     }
 
     /// Stable sort key: rank first, then the item's original index so equal
@@ -90,28 +80,24 @@ enum CommandPaletteQueryMatch {
         .map { (item: $0.0, rank: $0.1) }
     }
 
-    /// Emits each section once per rank tier that has survivors, in tier order
-    /// then original section order. Flattened items are therefore globally
-    /// rank-correct; a section may appear more than once if it spans tiers.
-    static func rankedByGlobalTiers<Section, Item>(
+    /// Groups survivors by section so each section is emitted at most once.
+    /// Sections are ordered by their best item's rank, ties keeping the
+    /// original section order; items within a section are ordered by rank,
+    /// ties keeping their original order. The first flattened item is
+    /// therefore always a globally best match, but a section's weaker hits
+    /// stay under its header rather than interleaving with other sections.
+    static func rankedBySection<Section, Item>(
         _ sections: [Section],
         items: (Section) -> [Item],
         rank: (Item) -> Rank?
-    ) -> [(section: Section, items: [Item], rank: Rank)] {
-        let prepared = sections.map { section in
-            let scored = items(section).enumerated().compactMap { index, item -> (Item, Int, Rank)? in
-                guard let rank = rank(item) else { return nil }
-                return (item, index, rank)
-            }
-            return (section, scored)
+    ) -> [(section: Section, items: [Item])] {
+        sections.enumerated().compactMap { sectionIndex, section -> (Section, [Item], Key)? in
+            let survivors = ranked(items(section), rank: rank)
+            guard let best = survivors.first?.rank else { return nil }
+            return (section, survivors.map(\.item), Key(rank: best, index: sectionIndex))
         }
-        return Rank.allCases.flatMap { band in
-            prepared.compactMap { section, scored -> (Section, [Item], Rank)? in
-                let slice = scored.filter { $0.2 == band }.sorted { $0.1 < $1.1 }.map(\.0)
-                guard !slice.isEmpty else { return nil }
-                return (section, slice, band)
-            }
-        }
+        .sorted { $0.2 < $1.2 }
+        .map { (section: $0.0, items: $0.1) }
     }
 
     private static func rank(title: String, needle: String) -> Rank {
