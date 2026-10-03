@@ -200,6 +200,8 @@ git ls-remote --tags origin "v$VER" | grep -q . && die "tag v$VER already exists
 # don't commit yet; the commit happens after all artifacts are produced.
 
 # --- 3. Mutate CHANGELOG and emit release notes --------------------------
+# CHANGELOG.md wraps prose, but GitHub renders every newline in a Release body
+# as a line break, so the notes are unwrapped into whole paragraphs.
 LAST_STEP=3
 RECOVERY_HINT="git checkout -- Info.plist CHANGELOG.md"
 mkdir -p "$DIST"
@@ -215,7 +217,7 @@ text = re.sub(r"^## \[Unreleased\]", f"## [Unreleased]\n\n## [{ver}] - {today}",
 path.write_text(text)
 PY
 
-  python3 - "$VER" <<'PY' > "$DIST/release-notes.md"
+  python3 - "$VER" <<'PY' | scripts/unwrap-release-notes.py > "$DIST/release-notes.md"
 import re, sys, pathlib
 ver = sys.argv[1]
 text = pathlib.Path("CHANGELOG.md").read_text()
@@ -228,7 +230,7 @@ print(m.group(1).strip())
 PY
 else
   log "Snapshot [Unreleased] notes without cutting CHANGELOG"
-  printf '%s\n' "$notes_body" > "$DIST/release-notes.md"
+  printf '%s\n' "$notes_body" | scripts/unwrap-release-notes.py > "$DIST/release-notes.md"
 fi
 [[ -s "$DIST/release-notes.md" ]] || die "failed to extract release notes for $VER"
 

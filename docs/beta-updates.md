@@ -64,7 +64,10 @@ version. Both dry runs restore tracked release files and discard their isolated
 candidate artifacts on success, failure, or interruption.
 
 Beta releases snapshot `[Unreleased]` into their release notes without cutting
-the changelog. Stable releases perform the normal changelog cut.
+the changelog. Stable releases perform the normal changelog cut. Both pass the
+notes through `scripts/unwrap-release-notes.py`, which joins the changelog's
+wrapped lines into whole paragraphs, because GitHub renders every newline in a
+Release body as a line break.
 
 ## Beta release runbook
 
