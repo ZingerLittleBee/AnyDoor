@@ -33,6 +33,12 @@ struct MenuBarView: View {
     /// and returns false once that panel is gone, so a slow clipboard copy
     /// can never close a newer panel.
     var closePanelIfCurrent: @MainActor () -> Bool = { false }
+    /// Where a history popover's paste goes once the panel closes. The click
+    /// that opened the panel can activate another display's frontmost app,
+    /// so the controller resolves the app the user was working in.
+    var pasteTarget: @MainActor () -> ClipboardHistoryPasteTarget = {
+        .frontmost
+    }
     var clipboardHistoryModule: ClipboardHistoryModule? = nil
     /// Snapshot at panel opening: its AppKit host measures content only once.
     var isSecureInputEnabled = false
@@ -482,11 +488,13 @@ struct MenuBarView: View {
                             gate.reset()
                             popover.hide()
                             guard closePanelIfCurrent() else { return }
-                            // Both panels ordered out synchronously, and the
-                            // panel never activated AnyDoor, so the app below
-                            // has keyboard focus again.
+                            // Both panels ordered out synchronously and never
+                            // activated AnyDoor. `pasteTarget` brings back the
+                            // app the user was in when the opening click
+                            // activated another one.
                             then()
-                        }
+                        },
+                        pasteTarget: pasteTarget
                     )
                 )
             }

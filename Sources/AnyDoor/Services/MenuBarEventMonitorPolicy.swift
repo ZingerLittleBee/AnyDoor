@@ -72,6 +72,18 @@ enum MainThreadEventMonitor {
         }
     }
 
+    /// The mouse-down's window number and event time; the event passes on.
+    nonisolated static func localMouseDown(
+        _ action: @escaping @MainActor (_ windowNumber: Int, _ timestamp: TimeInterval) -> Void
+    ) -> (NSEvent) -> NSEvent? {
+        { event in
+            let windowNumber = event.windowNumber
+            let timestamp = event.timestamp
+            MainThreadIsolation.run { action(windowNumber, timestamp) }
+            return event
+        }
+    }
+
     nonisolated static func localKey(_ action: @escaping @MainActor (UInt16) -> Bool) -> (NSEvent) -> NSEvent? {
         { event in
             let keyCode = event.keyCode

@@ -49,6 +49,38 @@ struct ClipboardHistoryCommitSurface {
     /// paste asks again after its delay, so ⌘V never reaches a surface that
     /// was reopened meanwhile.
     var isStillClosed: @MainActor () -> Bool = { true }
+    /// Where ⌘V goes once the surface has closed. Asked once, just before
+    /// `close`. The wall reactivates its previous app itself, so only the
+    /// menu-bar panel, whose opening click can activate another app, names
+    /// one here.
+    var pasteTarget: @MainActor () -> ClipboardHistoryPasteTarget = {
+        .frontmost
+    }
+}
+
+/// How a paste brings its target app to the front and checks that it got
+/// there. Tests replace it; production uses `.workspace`.
+struct ClipboardHistoryPasteFocus: Sendable {
+    /// Whether the app with this process ID is frontmost.
+    let isFrontmost: @MainActor @Sendable (pid_t) -> Bool
+    /// Asks macOS to activate the app with this process ID, and returns
+    /// false when that app is gone.
+    let activate: @MainActor @Sendable (pid_t) -> Bool
+
+    static let workspace = ClipboardHistoryPasteFocus(
+        isFrontmost: { processID in
+            NSWorkspace.shared.frontmostApplication?.processIdentifier
+                == processID
+        },
+        activate: { processID in
+            guard
+                let app = NSRunningApplication(processIdentifier: processID),
+                !app.isTerminated
+            else { return false }
+            ApplicationReactivation.activate(app)
+            return true
+        }
+    )
 }
 
 @MainActor
@@ -56,6 +88,11 @@ enum ClipboardHistoryPasteService {
     /// How long a paste waits after its surface has closed, so keyboard focus
     /// is back in the app that receives ⌘V.
     static let pasteDelay: Duration = .milliseconds(50)
+    /// How often a paste checks whether its reactivated target is frontmost.
+    static let focusPollInterval: Duration = .milliseconds(20)
+    /// How long a paste waits for its reactivated target before giving up
+    /// on ⌘V. The entry stays copied either way.
+    static let focusTimeout: Duration = .seconds(1)
 
     private static var latestCommitNumber = 0
 
@@ -209,6 +246,7 @@ enum ClipboardHistoryPasteService {
         notify: @escaping @MainActor @Sendable (ToastStyle) -> Void = {
             ToastPresenter.shared.show($0)
         },
+        focus: ClipboardHistoryPasteFocus = .workspace,
         clock: any Clock<Duration> = ContinuousClock()
     ) async {
         let commit = beginCommit(on: pasteboard)
@@ -244,14 +282,17 @@ enum ClipboardHistoryPasteService {
             return
         }
         let isStillClosed = surface.isStillClosed
+        let target = surface.pasteTarget()
         surface.close {
             Task { @MainActor in
                 await pasteAfterClosing(
                     copyOnly: copyOnly,
                     trust: trust,
+                    target: target,
                     isCurrent: { isLatest(commit) && isStillClosed() },
                     paste: paste,
                     notify: notify,
+                    focus: focus,
                     clock: clock
                 )
             }
@@ -298,14 +339,22 @@ enum ClipboardHistoryPasteService {
     /// a toast when Accessibility is missing, since macOS then drops the
     /// synthesized event silently. Copy only does neither, and neither does
     /// a commit that is no longer current.
+    ///
+    /// A `.application` target is brought to the front first, and ⌘V waits
+    /// until it is frontmost. When it does not get there within
+    /// `focusTimeout`, or the target is `.unavailable`, nothing is pasted and
+    /// a "Copied" toast says the entry is on the pasteboard, so ⌘V never
+    /// lands in an app the user did not choose.
     static func pasteAfterClosing(
         copyOnly: Bool,
         trust: Task<Bool, Never>?,
+        target: ClipboardHistoryPasteTarget = .frontmost,
         isCurrent: @MainActor () -> Bool = { true },
         paste: @MainActor () -> Void = { synthesizePaste() },
         notify: @MainActor (ToastStyle) -> Void = {
             ToastPresenter.shared.show($0)
         },
+        focus: ClipboardHistoryPasteFocus = .workspace,
         clock: any Clock<Duration> = ContinuousClock()
     ) async {
         guard !copyOnly else { return }
@@ -315,13 +364,74 @@ enum ClipboardHistoryPasteService {
             notify(.failure(L(.clipboardToastPasteNeedsAccessibility)))
             return
         }
+        func copiedWithoutPasting() {
+            notify(.success(L(.toastCopiedToClipboard)))
+        }
+        switch target {
+        case .frontmost:
+            break
+        case .unavailable:
+            copiedWithoutPasting()
+            return
+        case .application(let processID):
+            switch await bringToFront(
+                processID,
+                focus: focus,
+                isCurrent: isCurrent,
+                clock: clock
+            ) {
+            case .frontmost:
+                break
+            case .failed:
+                copiedWithoutPasting()
+                return
+            case .superseded:
+                return
+            }
+        }
         do {
             try await clock.sleep(for: pasteDelay)
         } catch {
             return
         }
         guard isCurrent() else { return }
+        if case .application(let processID) = target,
+            !focus.isFrontmost(processID)
+        {
+            copiedWithoutPasting()
+            return
+        }
         paste()
+    }
+
+    private enum FocusOutcome {
+        case frontmost
+        case failed
+        case superseded
+    }
+
+    /// Activates the app unless it is already frontmost, then polls until it
+    /// is, for at most `focusTimeout`.
+    private static func bringToFront(
+        _ processID: pid_t,
+        focus: ClipboardHistoryPasteFocus,
+        isCurrent: @MainActor () -> Bool,
+        clock: any Clock<Duration>
+    ) async -> FocusOutcome {
+        if focus.isFrontmost(processID) { return .frontmost }
+        guard focus.activate(processID) else { return .failed }
+        var waited: Duration = .zero
+        while waited < focusTimeout {
+            do {
+                try await clock.sleep(for: focusPollInterval)
+            } catch {
+                return .superseded
+            }
+            waited += focusPollInterval
+            guard isCurrent() else { return .superseded }
+            if focus.isFrontmost(processID) { return .frontmost }
+        }
+        return .failed
     }
 
     static func synthesizePaste() {

@@ -259,23 +259,11 @@ final class ClipboardWallWindowController: NSWindowController, NSWindowDelegate 
         })
     }
 
-    /// Restore the app that owned keyboard focus before the wall opened.
-    /// `NSRunningApplication.activate()` is ignored in this situation on
-    /// macOS 14+, because AnyDoor is an accessory app. Launch Services is
-    /// allowed to honor the user-initiated focus transfer before we synthesize
-    /// Command-V.
+    /// Restore the app that owned keyboard focus before the wall opened, so
+    /// the synthesized Command-V reaches it.
     private func restorePreviousApplicationFocus() {
         guard let previousApp, !previousApp.isActive else { return }
-        guard let bundleURL = previousApp.bundleURL else {
-            previousApp.activate()
-            return
-        }
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        NSWorkspace.shared.openApplication(
-            at: bundleURL,
-            configuration: configuration
-        ) { _, _ in }
+        ApplicationReactivation.activate(previousApp)
     }
 
     private func makeWallView() -> AnyView {

@@ -114,7 +114,10 @@ reported as a `ClipboardHistoryCopyOutcome`), which the menu-bar popover and the
 `ClipboardHistoryPasteService.commit`. The latest commit wins: a superseded one writes nothing and
 shows nothing, and one whose surface closed meanwhile writes only while the pasteboard is unchanged
 since it started, and never pastes. Once its panel has closed, each surface pastes through
-`ClipboardHistoryPasteService.pasteAfterClosing` unless Copy only is on. Each caller keeps its own
+`ClipboardHistoryPasteService.pasteAfterClosing` unless Copy only is on, into the target its
+`ClipboardHistoryCommitSurface.pasteTarget` names (see
+[menu-bar paste target](#menu-bar-panel-paste-target)). A target that cannot be brought frontmost
+within `focusTimeout` gets no ⌘V, only a "Copied to clipboard" toast. Each caller keeps its own
 failure presentation, and the wall sends a materialization failure through `presentActionFailure()`
 so legacy owned files still get the restore flow.
 
@@ -279,6 +282,31 @@ system-wide, because the window server takes modifier state from posted flags an
 it; later clicks then arrive as ⌘-clicks (the menu-bar item stops opening the panel). A Command key
 the user physically holds is left to their own release, and the final Command-up restores any other
 held modifiers. Tests build the sequence with `commandShortcut` / `makeEvents` and never post.
+
+### Menu-bar panel paste target
+
+The menu-bar panel and its hover popovers are nonactivating, but that alone does not keep the user's
+app frontmost. With "Displays have separate Spaces", a click on the menu bar of a display other than
+the active one activates that display's frontmost app from the mouse-down on, before the status
+item's action runs on mouse-up, and the `didActivateApplicationNotification` can arrive on either
+side of that action. A history popover pasting into "the frontmost app" would then paste there.
+
+`FrontmostApplicationTracker` (started by `MenuBarController.install()`) keeps a small
+`ApplicationActivationHistory` of activations stamped on arrival with system uptime, the clock of
+`NSEvent.timestamp`. A local monitor records the status item's left mouse-down, and each showing
+captures a `StatusItemClick` (mouse-down to mouse-up). At commit time
+`ApplicationActivationHistory.pasteTarget(after:selfProcessID:)` decides, as pure logic:
+
+- no activation of another app from the mouse-down to `lateActivationGrace` after the mouse-up, or
+  one that ends on the app already active: `.frontmost`, the unchanged single-display path with no
+  extra activation;
+- otherwise `.application(pid)` of the app active before the mouse-down, which `pasteAfterClosing`
+  reactivates through `ApplicationReactivation` (Launch Services, shared with the wall) and pastes
+  into only once it is frontmost, re-checked after `pasteDelay`;
+- `.unavailable` when that prior app is unknown or is AnyDoor itself: copy without pasting.
+
+AnyDoor's own activations never count as the click's. The wall and the command palette record their
+previous app at open instead, because a hotkey opens them without a click.
 
 ## Native plugins
 

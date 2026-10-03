@@ -20,6 +20,10 @@ final class MenuBarController {
     private var statusItem: NSStatusItem?
     private var panel: NSPanel?
     private var panelSessions = MenuBarPanelSessions()
+    private let activationTracker = FrontmostApplicationTracker()
+    /// Event time of the latest left mouse-down on the status item.
+    private var statusItemMouseDown: TimeInterval?
+    private var statusItemMouseDownMonitor: Any?
     private var hostingView: NSHostingView<AnyView>?
     private var globalClickMonitor: Any?
     private var localClickMonitor: Any?
@@ -46,6 +50,23 @@ final class MenuBarController {
         }
         item.isVisible = MenuBarIcon.isVisible
         statusItem = item
+        activationTracker.start()
+        installStatusItemMouseDownMonitor()
+    }
+
+    /// Notes when a click on the status item begins. A click on another
+    /// display's menu bar activates that display's frontmost app from the
+    /// mouse-down on, before the action runs on mouse-up.
+    private func installStatusItemMouseDownMonitor() {
+        statusItemMouseDownMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: .leftMouseDown,
+            handler: MainThreadEventMonitor.localMouseDown { [weak self] windowNumber, timestamp in
+                guard let self,
+                      windowNumber == self.statusItem?.button?.window?.windowNumber
+                else { return }
+                self.statusItemMouseDown = timestamp
+            }
+        )
     }
 
     /// Re-read the icon preferences and update the status item. Cheap enough to
@@ -66,10 +87,15 @@ final class MenuBarController {
             showContextMenu()
             return
         }
+        let click = StatusItemClick(
+            mouseDown: statusItemMouseDown,
+            mouseUp: NSApp.currentEvent?.timestamp ?? ProcessInfo.processInfo.systemUptime
+        )
+        statusItemMouseDown = nil
         if panel?.isVisible == true {
             hidePanel()
         } else {
-            showPanel()
+            showPanel(openedBy: click)
         }
     }
 
@@ -116,7 +142,7 @@ final class MenuBarController {
         NSApplication.shared.terminate(nil)
     }
 
-    private func showPanel() {
+    private func showPanel(openedBy click: StatusItemClick) {
         guard let button = statusItem?.button else { return }
         HyperKeyService.shared.refreshSecureInputStatus()
         let session = panelSessions.begin()
@@ -138,6 +164,9 @@ final class MenuBarController {
                     },
                     closePanelIfCurrent: { [weak self] in
                         self?.closePanel(ifCurrent: session) ?? false
+                    },
+                    pasteTarget: { [weak self] in
+                        self?.pasteTarget(after: click) ?? .unavailable
                     },
                     clipboardHistoryModule: clipboardHistoryModule,
                     isSecureInputEnabled: HyperKeyService.shared.isSecureInputEnabled,
@@ -242,6 +271,15 @@ final class MenuBarController {
         guard panelSessions.endIfCurrent(session) else { return false }
         hidePanel()
         return true
+    }
+
+    /// Where a paste from the panel that `click` opened should go: the app
+    /// the user was working in before the click.
+    func pasteTarget(after click: StatusItemClick) -> ClipboardHistoryPasteTarget {
+        activationTracker.history.pasteTarget(
+            after: click,
+            selfProcessID: ProcessInfo.processInfo.processIdentifier
+        )
     }
 
     /// Starts a panel session as `showPanel()` does, without a status item.
