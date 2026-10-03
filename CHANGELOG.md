@@ -56,6 +56,19 @@ versioning.
   typing keep awake still finds it in the command palette. The Command menu-bar
   icon (Command 键) and the Hyper Key Quick Press setting (单独按下) are
   translated too.
+- Auto-paste no longer leaves Command held down. After pasting from the
+  clipboard wall or a menu-bar history popover, later clicks used to arrive as
+  ⌘-clicks, so clicking the menu-bar icon did not open the panel. Translation's
+  copy fallback had the same problem.
+- With two displays and "Displays have separate Spaces", a menu-bar history
+  popover pastes into the app you were using before clicking the menu-bar icon,
+  not the frontmost app of the display you clicked. If that app cannot come
+  back to the front, the entry is copied instead of pasted.
+- Closing the menu-bar panel now frees its hover popovers. Each panel opening
+  used to leave hidden windows behind.
+- The clipboard wall shows new entries while it stays open, so an image copied
+  just before opening it appears once it is saved. Image entries are also
+  stamped with the time they were copied rather than when processing finished.
 - AnyDoor no longer opens or deletes `~/Library/Application Support/default.store`
   at launch. Non-sandboxed apps that use SwiftData keep their data in that file
   by default, and a leftover migration for pre-1.0 development builds could
