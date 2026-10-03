@@ -608,7 +608,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Keep Awake"
+            "value": "保持唤醒"
           }
         }
       }
@@ -5816,6 +5816,23 @@
         }
       }
     },
+    "keepAwake.duration.12hour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "12 hours"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "12 小时"
+          }
+        }
+      }
+    },
     "keepAwake.duration.15min": {
       "extractionState": "manual",
       "localizations": {
@@ -5880,6 +5897,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "30 分钟"
+          }
+        }
+      }
+    },
+    "keepAwake.duration.4hour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4 hours"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "4 小时"
+          }
+        }
+      }
+    },
+    "keepAwake.duration.8hour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "8 hours"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "8 小时"
           }
         }
       }
@@ -6100,7 +6151,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Command"
+            "value": "Command 键"
           }
         }
       }
@@ -7342,6 +7393,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "保持至 %@"
+          }
+        }
+      }
+    },
+    "panel.subtitle.keepAwakeUntilTomorrow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Awake until %@ tomorrow"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "保持至明天 %@"
           }
         }
       }
@@ -12645,7 +12713,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quick Press"
+            "value": "单独按下"
           }
         }
       }

@@ -65,11 +65,7 @@ enum CommandPaletteOptions {
                 symbol: "infinity",
                 perform: { await PanelStore.shared.setKeepAwakeDuration(.indefinite) }
             ),
-            keepAwakeDuration(id: "keepAwake.15", minutes: 15, titleKey: .keepAwakeDuration15Min),
-            keepAwakeDuration(id: "keepAwake.30", minutes: 30, titleKey: .keepAwakeDuration30Min),
-            keepAwakeDuration(id: "keepAwake.60", minutes: 60, titleKey: .keepAwakeDuration1Hour),
-            keepAwakeDuration(id: "keepAwake.120", minutes: 120, titleKey: .keepAwakeDuration2Hour),
-        ]
+        ] + KeepAwakePreset.timed.map(keepAwakeDuration)
         if isOn {
             options.append(CommandPaletteOption(
                 id: "keepAwake.off", title: L(.keepAwakeDurationTurnOff),
@@ -80,10 +76,11 @@ enum CommandPaletteOptions {
         return options
     }
 
-    private static func keepAwakeDuration(id: String, minutes: Int, titleKey: L10n.Key) -> CommandPaletteOption {
-        CommandPaletteOption(
-            id: id, title: L(titleKey), symbol: "clock",
-            perform: { await PanelStore.shared.setKeepAwakeDuration(.minutes(minutes)) }
+    private static func keepAwakeDuration(_ preset: KeepAwakePreset) -> CommandPaletteOption {
+        let duration = preset.duration
+        return CommandPaletteOption(
+            id: "keepAwake.\(preset.minutes)", title: L(preset.titleKey), symbol: "clock",
+            perform: { await PanelStore.shared.setKeepAwakeDuration(duration) }
         )
     }
 

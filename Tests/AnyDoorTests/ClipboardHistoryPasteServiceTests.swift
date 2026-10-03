@@ -722,6 +722,248 @@ final class ClipboardHistoryPasteServiceTests: XCTestCase {
         )
     }
 
+    /// The opening click left the paste target frontmost: it gets ⌘V
+    /// without being activated again, so a single-display paste never
+    /// flickers.
+    func testPasteAfterClosingLeavesAFrontmostTargetAlone() async throws {
+        let probe = CommitProbe()
+        let focus = FocusProbe(frontmost: 100)
+
+        try await bounded(within: 5) {
+            await ClipboardHistoryPasteService.pasteAfterClosing(
+                copyOnly: false,
+                trust: Task { true },
+                target: .application(100),
+                paste: { probe.pasteCount += 1 },
+                notify: { probe.record($0) },
+                focus: focus.focus,
+                clock: ImmediateClock()
+            )
+        }
+
+        XCTAssertEqual(focus.activations, [])
+        XCTAssertEqual(probe.pasteCount, 1)
+        XCTAssertEqual(probe.toasts, [])
+    }
+
+    /// The opening click activated another display's app: the target is
+    /// activated, and ⌘V goes out only once it is frontmost.
+    func testPasteAfterClosingReactivatesTheTargetBeforePasting() async throws {
+        let probe = CommitProbe()
+        let focus = FocusProbe(frontmost: 200)
+        focus.checksUntilFrontmost = 3
+
+        try await bounded(within: 5) {
+            await ClipboardHistoryPasteService.pasteAfterClosing(
+                copyOnly: false,
+                trust: Task { true },
+                target: .application(100),
+                paste: {
+                    XCTAssertEqual(focus.frontmost, 100)
+                    probe.pasteCount += 1
+                },
+                notify: { probe.record($0) },
+                focus: focus.focus,
+                clock: ImmediateClock()
+            )
+        }
+
+        XCTAssertEqual(focus.activations, [100])
+        XCTAssertEqual(probe.pasteCount, 1)
+        XCTAssertEqual(probe.toasts, [])
+    }
+
+    /// No ⌘V goes out while the target is still on its way to the front,
+    /// and `pasteDelay` starts only once it is there.
+    func testPasteAfterClosingWaitsForTheTargetBeforeThePasteDelay()
+        async throws
+    {
+        let clock = TestClock()
+        let probe = CommitProbe()
+        let focus = FocusProbe(frontmost: 200)
+        focus.checksUntilFrontmost = 2
+        let pasting = Task {
+            await ClipboardHistoryPasteService.pasteAfterClosing(
+                copyOnly: false,
+                trust: Task { true },
+                target: .application(100),
+                paste: { probe.pasteCount += 1 },
+                notify: { probe.record($0) },
+                focus: focus.focus,
+                clock: clock
+            )
+        }
+
+        await waitUntil("the paste polls for its target") {
+            await clock.hasSleeper()
+        }
+        XCTAssertEqual(focus.activations, [100])
+        await clock.advance(by: ClipboardHistoryPasteService.focusPollInterval)
+        await waitUntil("the paste polls again") { focus.checks == 2 }
+        XCTAssertNotEqual(focus.frontmost, 100)
+        await waitUntil("the paste sleeps again") { await clock.hasSleeper() }
+        await clock.advance(by: ClipboardHistoryPasteService.focusPollInterval)
+        await waitUntil("the target came forward") { focus.frontmost == 100 }
+        await waitUntil("the paste waits out its delay") {
+            await clock.hasSleeper()
+        }
+        await clock.advance(
+            by: ClipboardHistoryPasteService.pasteDelay - .milliseconds(1)
+        )
+        XCTAssertEqual(probe.pasteCount, 0)
+        await clock.advance(by: .milliseconds(1))
+        try await bounded(within: 5) { await pasting.value }
+
+        XCTAssertEqual(probe.pasteCount, 1)
+        XCTAssertEqual(probe.toasts, [])
+    }
+
+    /// A target that never comes forward gets no ⌘V: the paste gives up
+    /// after `focusTimeout` and says the entry was copied.
+    func testPasteAfterClosingGivesUpOnATargetThatNeverComesForward()
+        async throws
+    {
+        let probe = CommitProbe()
+        let focus = FocusProbe(frontmost: 200)
+
+        try await bounded(within: 5) {
+            await ClipboardHistoryPasteService.pasteAfterClosing(
+                copyOnly: false,
+                trust: Task { true },
+                target: .application(100),
+                paste: { probe.pasteCount += 1 },
+                notify: { probe.record($0) },
+                focus: focus.focus,
+                clock: ImmediateClock()
+            )
+        }
+
+        XCTAssertEqual(focus.activations, [100])
+        XCTAssertEqual(probe.pasteCount, 0)
+        XCTAssertEqual(probe.toasts, [.success(L(.toastCopiedToClipboard))])
+        let polls = Int(
+            ClipboardHistoryPasteService.focusTimeout
+                / ClipboardHistoryPasteService.focusPollInterval
+        )
+        // One check before activating, then one per poll.
+        XCTAssertEqual(focus.checks, 1 + polls)
+    }
+
+    /// A target that quit meanwhile cannot be activated, so nothing is
+    /// pasted.
+    func testPasteAfterClosingDoesNotPasteForAGoneTarget() async throws {
+        let probe = CommitProbe()
+        let focus = FocusProbe(frontmost: 200)
+        focus.activationSucceeds = false
+
+        try await bounded(within: 5) {
+            await ClipboardHistoryPasteService.pasteAfterClosing(
+                copyOnly: false,
+                trust: Task { true },
+                target: .application(100),
+                paste: { probe.pasteCount += 1 },
+                notify: { probe.record($0) },
+                focus: focus.focus,
+                clock: ImmediateClock()
+            )
+        }
+
+        XCTAssertEqual(probe.pasteCount, 0)
+        XCTAssertEqual(probe.toasts, [.success(L(.toastCopiedToClipboard))])
+    }
+
+    /// The target lost the front again during `pasteDelay`: ⌘V would land
+    /// elsewhere, so none is posted.
+    func testPasteAfterClosingChecksTheTargetAgainBeforePasting()
+        async throws
+    {
+        let clock = TestClock()
+        let probe = CommitProbe()
+        let focus = FocusProbe(frontmost: 100)
+        let pasting = Task {
+            await ClipboardHistoryPasteService.pasteAfterClosing(
+                copyOnly: false,
+                trust: Task { true },
+                target: .application(100),
+                paste: { probe.pasteCount += 1 },
+                notify: { probe.record($0) },
+                focus: focus.focus,
+                clock: clock
+            )
+        }
+
+        await waitUntil("the paste waits out its delay") {
+            await clock.hasSleeper()
+        }
+        focus.frontmost = 200
+        await clock.advance(by: ClipboardHistoryPasteService.pasteDelay)
+        try await bounded(within: 5) { await pasting.value }
+
+        XCTAssertEqual(probe.pasteCount, 0)
+        XCTAssertEqual(probe.toasts, [.success(L(.toastCopiedToClipboard))])
+    }
+
+    /// A newer commit while the target comes forward ends this one
+    /// silently.
+    func testASupersededPasteStopsWaitingForItsTarget() async throws {
+        let probe = CommitProbe()
+        let focus = FocusProbe(frontmost: 200)
+        focus.onCheck = { probe.isOpen = false }
+
+        try await bounded(within: 5) {
+            await ClipboardHistoryPasteService.pasteAfterClosing(
+                copyOnly: false,
+                trust: Task { true },
+                target: .application(100),
+                isCurrent: { probe.isOpen },
+                paste: { probe.pasteCount += 1 },
+                notify: { probe.record($0) },
+                focus: focus.focus,
+                clock: ImmediateClock()
+            )
+        }
+
+        XCTAssertEqual(focus.activations, [100])
+        XCTAssertEqual(probe.pasteCount, 0)
+        XCTAssertEqual(probe.toasts, [])
+    }
+
+    /// The panel's opening click activated another app, and the app before
+    /// it is unknown: the entry is copied, never pasted, and nothing is
+    /// activated.
+    func testACommitWithAnUnavailableTargetCopiesWithoutPasting()
+        async throws
+    {
+        let pasteboard = makePasteboard()
+        defer { pasteboard.releaseGlobally() }
+        let presentation = makePresentation { _ in
+            textMaterialization("chosen")
+        }
+        let probe = CommitProbe()
+        let surface = ClipboardHistoryCommitSurface(
+            isOpen: { probe.isOpen },
+            close: { then in
+                probe.closeCount += 1
+                probe.isOpen = false
+                then()
+            },
+            pasteTarget: { .unavailable }
+        )
+
+        await probe.commit(
+            ClipboardHistoryEntryID(UUID()),
+            from: presentation,
+            to: pasteboard,
+            surface: surface
+        )
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "chosen")
+        XCTAssertEqual(probe.closeCount, 1)
+        await waitUntil("the paste reports the copy") { !probe.toasts.isEmpty }
+        XCTAssertEqual(probe.pasteCount, 0)
+        XCTAssertEqual(probe.toasts, [.success(L(.toastCopiedToClipboard))])
+    }
+
     /// The surface opened again before ⌘V went out, as when the wall hotkey
     /// lands right after the slide-out. ⌘V would reach the surface, so none
     /// is posted.
@@ -878,6 +1120,48 @@ final class CommitProbe {
             paste: { self.pasteCount += 1 },
             notify: { self.record($0) },
             clock: ImmediateClock()
+        )
+    }
+}
+
+/// The app activation a paste goes through, simulated. `frontmost` is the
+/// frontmost process; an activation brings its app forward on the
+/// `checksUntilFrontmost`th frontmost check after it.
+@MainActor
+final class FocusProbe {
+    var frontmost: pid_t?
+    var checksUntilFrontmost = Int.max
+    var activationSucceeds = true
+    var onCheck: () -> Void = {}
+    private(set) var activations: [pid_t] = []
+    private(set) var checks = 0
+    private var pending: (processID: pid_t, remaining: Int)?
+
+    init(frontmost: pid_t?) {
+        self.frontmost = frontmost
+    }
+
+    var focus: ClipboardHistoryPasteFocus {
+        ClipboardHistoryPasteFocus(
+            isFrontmost: { processID in
+                self.checks += 1
+                self.onCheck()
+                if let pending = self.pending {
+                    if pending.remaining <= 1 {
+                        self.frontmost = pending.processID
+                        self.pending = nil
+                    } else {
+                        self.pending = (pending.processID, pending.remaining - 1)
+                    }
+                }
+                return self.frontmost == processID
+            },
+            activate: { processID in
+                self.activations.append(processID)
+                guard self.activationSucceeds else { return false }
+                self.pending = (processID, self.checksUntilFrontmost)
+                return true
+            }
         )
     }
 }

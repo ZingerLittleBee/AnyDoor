@@ -9,18 +9,15 @@ struct CommandPaletteSection: Identifiable {
     /// string; Core sections keep the typed convenience initializer.
     let titleKey: String
     let entries: [PanelEntry]
-    /// `titleKey` plus an optional rank-tier suffix so a header can appear
-    /// once per tier without colliding in `ForEach`.
-    let id: String
+    var id: String { titleKey }
 
     init(titleKey: L10n.Key, entries: [PanelEntry]) {
         self.init(rawTitleKey: titleKey.rawValue, entries: entries)
     }
 
-    init(rawTitleKey: String, entries: [PanelEntry], identitySuffix: String? = nil) {
+    init(rawTitleKey: String, entries: [PanelEntry]) {
         self.titleKey = rawTitleKey
         self.entries = entries
-        self.id = identitySuffix.map { "\(rawTitleKey)#\($0)" } ?? rawTitleKey
     }
 }
 
@@ -863,22 +860,18 @@ final class CommandPaletteState {
         return sections
     }
 
-    /// Filter Core and plugin root sections and emit one slice per rank tier
-    /// so flattened order is globally rank-correct, including when a plugin
-    /// `.other` hit would otherwise sit above a Core title prefix. A section
-    /// that spans tiers is shown once per tier (same header). Equal ranks
-    /// keep the original section and entry order (plugin sources first,
-    /// then Core `allSections`).
+    /// Filter Core and plugin root sections, showing each section header at
+    /// most once. Sections are ordered by their best-ranked entry, so the top
+    /// row is always a best match and a plugin section with only `.other`
+    /// hits stays below a Core title prefix; entries rank within their
+    /// section. Equal ranks keep the original section and entry order
+    /// (plugin sources first, then Core `allSections`).
     private func rankedRootSections(query: String) -> [CommandPaletteSection] {
         let combined = pluginRowSections(matching: query) + allSections
-        return CommandPaletteQueryMatch.rankedByGlobalTiers(combined, items: \.entries) {
+        return CommandPaletteQueryMatch.rankedBySection(combined, items: \.entries) {
             rankedRootRank(of: $0, query: query)
-        }.map { section, entries, rank in
-            CommandPaletteSection(
-                rawTitleKey: section.titleKey,
-                entries: entries,
-                identitySuffix: rank.identitySuffix
-            )
+        }.map { section, entries in
+            CommandPaletteSection(rawTitleKey: section.titleKey, entries: entries)
         }
     }
 

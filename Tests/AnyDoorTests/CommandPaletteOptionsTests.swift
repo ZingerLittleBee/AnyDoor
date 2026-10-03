@@ -33,8 +33,17 @@ final class CommandPaletteOptionsTests: XCTestCase {
         let options = CommandPaletteOptions.keepAwakeOptions(isOn: false)
         XCTAssertEqual(options.map(\.id),
                        ["keepAwake.indefinite", "keepAwake.15", "keepAwake.30",
-                        "keepAwake.60", "keepAwake.120"])
+                        "keepAwake.60", "keepAwake.120", "keepAwake.240",
+                        "keepAwake.480", "keepAwake.720"])
         XCTAssertFalse(options.contains { $0.role == .destructive })
+    }
+
+    @MainActor
+    func testKeepAwakeOptionsListTheSharedPresetsInOrder() {
+        // The menu-bar duration menu lists the same `KeepAwakePreset.timed`.
+        let timed = CommandPaletteOptions.keepAwakeOptions(isOn: false).dropFirst()
+        XCTAssertEqual(timed.map(\.title), KeepAwakePreset.timed.map { L($0.titleKey) })
+        XCTAssertEqual(timed.map(\.id), KeepAwakePreset.timed.map { "keepAwake.\($0.minutes)" })
     }
 
     @MainActor
@@ -42,7 +51,7 @@ final class CommandPaletteOptionsTests: XCTestCase {
         let options = CommandPaletteOptions.keepAwakeOptions(isOn: true)
         XCTAssertEqual(options.last?.id, "keepAwake.off")
         XCTAssertEqual(options.last?.role, .destructive)
-        XCTAssertEqual(options.count, 6)
+        XCTAssertEqual(options.count, 9)
     }
 
     @MainActor

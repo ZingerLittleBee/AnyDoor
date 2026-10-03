@@ -13,14 +13,12 @@ import Observation
 /// - Trigger view installs `onHover` that arms the gate after 400ms.
 /// - Popover stays open while either trigger or popover is hovered (gate manages).
 /// - Closes 300ms after both lose hover, OR immediately via `hide()`.
+/// - Its owner calls `tearDown()` when it goes away for good. Mounted content
+///   routinely captures this popover and its owner's state, so without that
+///   the popover and its panel outlive the owner.
 @MainActor
 @Observable
 final class HoverPopover {
-    /// True while the underlying panel is keyWindow. Read by MenuBarView.onDisappear
-    /// to avoid hiding the popover when the menu bar panel collapses because we just
-    /// took key focus.
-    private(set) var isHoldingFocus: Bool = false
-
     private let panel: KeyableHoverPanel
     private let containerView: NSView
     private let hostingView: NSHostingView<AnyView>
@@ -32,9 +30,6 @@ final class HoverPopover {
     /// window-resize recursion (see `MenuBarController.showPanel`).
     private let measuringView: NSHostingView<AnyView>
     private var hideTask: Task<Void, Never>?
-    // nonisolated(unsafe) so deinit can remove observers without a MainActor hop.
-    @ObservationIgnored nonisolated(unsafe) private var keyObserver: NSObjectProtocol?
-    @ObservationIgnored nonisolated(unsafe) private var resignObserver: NSObjectProtocol?
 
     /// Set to `true` for popovers whose SwiftUI content needs first-responder focus
     /// (e.g. TextField). Leave `false` for read-only popovers — they keep the
@@ -85,23 +80,6 @@ final class HoverPopover {
         // frontmost (see `MenuBarController.showPanel`).
         panel.allowsToolTipsWhenApplicationIsInactive = true
         self.panel = panel
-
-        // Track key state so MenuBarView can guard onDisappear.
-        keyObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didBecomeKeyNotification, object: panel, queue: .main
-        ) { [weak self] _ in
-            MainThreadIsolation.run { self?.isHoldingFocus = true }
-        }
-        resignObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didResignKeyNotification, object: panel, queue: .main
-        ) { [weak self] _ in
-            MainThreadIsolation.run { self?.isHoldingFocus = false }
-        }
-    }
-
-    deinit {
-        if let keyObserver { NotificationCenter.default.removeObserver(keyObserver) }
-        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
     }
 
     func updateContent<Content: View>(@ViewBuilder content: () -> Content) {
@@ -176,6 +154,19 @@ final class HoverPopover {
         hideTask?.cancel()
         hideTask = nil
         panel.orderOut(nil)
+    }
+
+    /// Hides the popover and unmounts its content for good. The content's
+    /// closures (dismiss, hover, commit) capture this popover and its owner's
+    /// state, which in turn owns this popover; dropping them breaks that
+    /// cycle so the popover and its panel's window are freed with the owner.
+    func tearDown() {
+        hide()
+        let empty = AnyView(EmptyView())
+        hostingView.rootView = empty
+        measuringView.rootView = empty
+        hostingView.layoutSubtreeIfNeeded()
+        measuringView.layoutSubtreeIfNeeded()
     }
 
     private func resizePanel(to size: NSSize) {

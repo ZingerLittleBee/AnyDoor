@@ -139,17 +139,49 @@ final class CommandPaletteMatchTests: XCTestCase {
         )
     }
 
-    func testGlobalTiersLiftALaterSectionPrefixAboveAnEarlierOther() {
+    func testRankedBySectionEmitsEachSectionOnceWhenItSpansTiers() {
+        // Interleaving case: capture holds an exact and later hits, translation
+        // a prefix in between. Each header must appear once.
         let sections = [
-            (name: "commands", titles: ["Watch", "Keep Awake"]),
-            (name: "apps", titles: ["Warp"]),
+            (name: "capture", titles: ["截图", "窗口截图", "全屏截图"]),
+            (name: "translation", titles: ["截图翻译"]),
         ]
-        let ranked = CommandPaletteQueryMatch.rankedByGlobalTiers(sections, items: \.titles) {
+        let grouped = CommandPaletteQueryMatch.rankedBySection(sections, items: \.titles) {
+            CommandPaletteQueryMatch.rank(titles: [$0], query: "截图")
+        }
+        XCTAssertEqual(grouped.map(\.section.name), ["capture", "translation"])
+        XCTAssertEqual(grouped.flatMap(\.items), ["截图", "窗口截图", "全屏截图", "截图翻译"])
+    }
+
+    func testRankedBySectionOrdersSectionsByTheirBestItem() {
+        let sections = [
+            (name: "commands", titles: ["Keep Awake", "Always On"]),
+            (name: "translation", titles: ["Wa Translate"]),
+            (name: "apps", titles: ["Warp", "Wa"]),
+        ]
+        let grouped = CommandPaletteQueryMatch.rankedBySection(sections, items: \.titles) {
             CommandPaletteQueryMatch.rank(titles: [$0], query: "wa")
         }
-        XCTAssertEqual(ranked.map(\.section.name), ["commands", "apps", "commands"])
-        XCTAssertEqual(ranked.flatMap(\.items), ["Watch", "Warp", "Keep Awake"])
-        XCTAssertEqual(ranked.map(\.rank), [.prefix, .prefix, .other])
+        // apps (exact) > translation (prefix) > commands (other); within apps
+        // the exact "Wa" precedes the prefix "Warp".
+        XCTAssertEqual(grouped.map(\.section.name), ["apps", "translation", "commands"])
+        XCTAssertEqual(
+            grouped.flatMap(\.items),
+            ["Wa", "Warp", "Wa Translate", "Keep Awake", "Always On"]
+        )
+    }
+
+    func testRankedBySectionKeepsSectionOrderOnEqualBestRankAndDropsEmptySections() {
+        let sections = [
+            (name: "commands", titles: ["Watch", "Keep Awake"]),
+            (name: "empty", titles: ["Lock Screen"]),
+            (name: "apps", titles: ["Warp"]),
+        ]
+        let grouped = CommandPaletteQueryMatch.rankedBySection(sections, items: \.titles) {
+            CommandPaletteQueryMatch.rank(titles: [$0], query: "wa")
+        }
+        XCTAssertEqual(grouped.map(\.section.name), ["commands", "apps"])
+        XCTAssertEqual(grouped.flatMap(\.items), ["Watch", "Keep Awake", "Warp"])
     }
 
     private func rank(title: String, query: String) -> CommandPaletteQueryMatch.Rank? {

@@ -142,7 +142,18 @@ struct ClipboardWallView: View {
                     )
                 )
             )
+            // A capture can commit after the wall opened (a copied image is
+            // read, canonicalized, and published well after the copy), and the
+            // user can keep copying while it stays open. Subscribe before the
+            // first read so no change falls between the two, then follow the
+            // store while, and only while, the wall is up.
+            let changes = NotificationCenter.default.notifications(
+                named: .clipboardHistoryV2DidMutate
+            )
             await state.reload()
+            for await _ in changes {
+                await state.presentation.refreshForStoreChange()
+            }
         }
         // The module announces nothing when a rebuild ends, so the wall
         // checks while, and only while, its query waits on one. The task

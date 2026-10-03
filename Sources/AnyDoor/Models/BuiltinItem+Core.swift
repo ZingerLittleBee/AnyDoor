@@ -86,6 +86,7 @@ extension BuiltinItem {
         case .recordScreen: return ["screen recording", "录屏"]
         case .captureTimer: return ["timer", "延时"]
         case .qrcode:       return ["scan", "QR", "扫描", "二维码"]
+        case .keepAwake:    return ["keep awake", "保持唤醒"]
         default:            return []
         }
     }

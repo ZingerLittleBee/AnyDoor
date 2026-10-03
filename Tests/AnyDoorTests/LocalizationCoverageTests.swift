@@ -35,6 +35,53 @@ final class LocalizationCoverageTests: XCTestCase {
         )
     }
 
+    /// A zh-Hans value identical to English is usually a forgotten
+    /// translation (Keep Awake shipped that way). Names, formats, and
+    /// technical terms that stay English on purpose are listed here.
+    private static let intentionallyEnglishInChinese: Set<String> = [
+        "colorFormat.hsl",
+        "colorFormat.rgb",
+        "colorFormat.swiftUI",
+        "commandPalette.brightness.level",
+        "commandPalette.section.hosts",
+        "devTool.hash.md5",
+        "devTool.hash.sha1",
+        "devTool.hash.sha256",
+        "devTool.timestamp.iso",
+        "devTool.timestamp.utc",
+        "onboarding.demo.currencyResult",
+        "onboarding.demo.portResult",
+        "onboarding.sidebar.hyperKey",
+        "quicklink.template.chatgpt",
+        "settings.configSync.transportWebDAV",
+        "settings.general.languageOption.en",
+        "settings.general.languageOption.zh",
+        "settings.translation.serviceAPIKey",
+        "settings.translation.serviceBaseURL",
+        "settingsGeneral.hyperKey.label",
+        "settingsGeneral.hyperKey.quickPress.escape",
+        "settingsGeneral.hyperKey.section",
+    ]
+
+    func test_zhHansValuesAreTranslatedUnlessIntentionallyEnglish() throws {
+        let strings = try loadCatalog()["strings"] as? [String: Any] ?? [:]
+        var untranslated: [String] = []
+        for (key, entry) in strings {
+            let localizations = (entry as? [String: Any])?["localizations"] as? [String: Any]
+            func value(_ lang: String) -> String? {
+                ((localizations?[lang] as? [String: Any])?["stringUnit"] as? [String: Any])?["value"] as? String
+            }
+            guard let en = value("en"), en == value("zh-Hans"),
+                  !Self.intentionallyEnglishInChinese.contains(key) else { continue }
+            untranslated.append("\(key): \(en)")
+        }
+        XCTAssertTrue(
+            untranslated.isEmpty,
+            "zh-Hans equals English; translate it or allowlist an intentional term:\n"
+                + untranslated.sorted().joined(separator: "\n")
+        )
+    }
+
     private func loadCatalog() throws -> [String: Any] {
         // #filePath resolves to .../Tests/AnyDoorTests/LocalizationCoverageTests.swift.
         // Walk up to the package root, then into Sources/AnyDoor/Resources.

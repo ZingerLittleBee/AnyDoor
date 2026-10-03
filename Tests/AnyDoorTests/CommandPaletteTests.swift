@@ -873,7 +873,7 @@ final class CommandPaletteTests: XCTestCase {
     }
 
     @MainActor
-    func testPrefixOutranksLaterHitEvenWhenTheyShareASection() {
+    func testSectionHeaderAppearsOnceWhenItsEntriesSpanRankTiers() {
         let watch = titledEntry("Watch", bundleID: "watch")
         let keepAwake = titledEntry("Keep Awake", bundleID: "keep-awake")
         let warp = titledEntry("Warp", bundleID: "dev.warp.Warp")
@@ -893,21 +893,47 @@ final class CommandPaletteTests: XCTestCase {
         )
         state.query = "wa"
 
-        // Watch (prefix) must not drag Keep Awake (other) above Warp (prefix).
-        XCTAssertEqual(state.flatEntries.map(\.title), ["Watch", "Warp", "Keep Awake"])
+        // Keep Awake (other) stays under its own Commands header instead of
+        // repeating that header below Warp.
+        XCTAssertEqual(state.flatEntries.map(\.title), ["Watch", "Keep Awake", "Warp"])
         XCTAssertEqual(
             state.filteredSections.map(\.titleKey),
             [
                 L10n.Key.commandPaletteSectionCommands.rawValue,
                 L10n.Key.commandPaletteSectionApplications.rawValue,
-                L10n.Key.commandPaletteSectionCommands.rawValue,
             ]
         )
-        XCTAssertEqual(
-            Set(state.filteredSections.map(\.id)).count,
-            state.filteredSections.count,
-            "split rank-tier slices of the same header need distinct identities"
+    }
+
+    @MainActor
+    func testInterleavedTierHitsGroupUnderTheBestSectionFirst() {
+        // Mirrors the zh "截图" query: the capture group holds the exact title
+        // and later-in-title hits, the translation group a prefix hit.
+        let translate = titledEntry("截图翻译", bundleID: "capture-translate")
+        let screenshot = titledEntry("截图", bundleID: "screenshot")
+        let window = titledEntry("窗口截图", bundleID: "capture-window")
+        let fullscreen = titledEntry("全屏截图", bundleID: "capture-fullscreen")
+        let state = CommandPaletteState(
+            sections: [
+                CommandPaletteSection(titleKey: .commandPaletteSectionTranslation, entries: [translate]),
+                CommandPaletteSection(
+                    titleKey: .commandPaletteSectionCapture,
+                    entries: [window, screenshot, fullscreen]
+                ),
+            ],
+            hyperFlags: 0,
+            rowSources: []
         )
+        state.query = "截图"
+
+        XCTAssertEqual(state.flatEntries.map(\.title), ["截图", "窗口截图", "全屏截图", "截图翻译"])
+        let titleKeys = state.filteredSections.map(\.titleKey)
+        XCTAssertEqual(titleKeys, [
+            L10n.Key.commandPaletteSectionCapture.rawValue,
+            L10n.Key.commandPaletteSectionTranslation.rawValue,
+        ])
+        XCTAssertEqual(Set(titleKeys).count, titleKeys.count)
+        XCTAssertEqual(state.flatEntries[state.selectedIndex].title, "截图")
     }
 
     @MainActor

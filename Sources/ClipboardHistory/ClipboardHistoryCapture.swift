@@ -29,6 +29,8 @@ extension ClipboardHistoryModule {
     func captureExplicit(
         _ request: ClipboardHistoryCaptureRequest
     ) throws -> ClipboardHistoryCaptureOutcome {
+        // Stamped before a bitmap is canonicalized, like a pasteboard capture.
+        let capturedAt = now()
         let plainTextType = NSPasteboard.PasteboardType.string.rawValue
         let snapshot: PasteboardSnapshot
         let explicitSearchKind: String?
@@ -131,7 +133,8 @@ extension ClipboardHistoryModule {
         return try persist(
             snapshot,
             source: request.source,
-            explicitSearchKind: explicitSearchKind
+            explicitSearchKind: explicitSearchKind,
+            capturedAt: capturedAt
         )
     }
 
@@ -146,6 +149,11 @@ extension ClipboardHistoryModule {
         case .rejected(let rejection):
             return .skipped(rejection)
         case .snapshot(let candidate):
+            // The entry is stamped when its content was read, not when the
+            // work below finishes: canonicalizing a large image, fingerprinting
+            // it, and waiting for a write turn can take hundreds of
+            // milliseconds, and none of that is part of when the user copied.
+            let capturedAt = now()
             let snapshot: PasteboardSnapshot
             switch Self.canonicalizedSnapshot(from: candidate) {
             case .rejected(let rejection):
@@ -165,7 +173,11 @@ extension ClipboardHistoryModule {
             guard !isFinalizingClear, clearEpoch == epoch else {
                 return .skipped(.generationChanged)
             }
-            let outcome = try persist(snapshot, source: source)
+            let outcome = try persist(
+                snapshot,
+                source: source,
+                capturedAt: capturedAt
+            )
             publishMutation()
             return .captured(outcome)
         }
@@ -439,7 +451,8 @@ extension ClipboardHistoryModule {
     fileprivate func persist(
         _ snapshot: PasteboardSnapshot,
         source: ClipboardHistoryCaptureSource,
-        explicitSearchKind: String? = nil
+        explicitSearchKind: String? = nil,
+        capturedAt: Date
     ) throws -> ClipboardHistoryCaptureOutcome {
         let database = try requiredDatabase()
         do {
@@ -452,7 +465,6 @@ extension ClipboardHistoryModule {
             fingerprintDigest: fingerprintDigest
         )
         let entryID = ClipboardHistoryEntryID(UUID())
-        let capturedAt = now()
         let storedID = entryID.value.uuidString.lowercased()
         let previewText = snapshot.items.lazy
             .flatMap(\.representations)

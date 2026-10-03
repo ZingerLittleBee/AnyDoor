@@ -1,3 +1,4 @@
+import AppKit
 import ClipboardHistoryTestSupport
 import GRDB
 import XCTest
@@ -1500,6 +1501,125 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         }
     }
 
+    func testStoreChangeShowsACaptureThatCommittedAfterTheWallLoaded()
+        async throws
+    {
+        let store = try TemporaryHistoryStore(testCase: self)
+        let module = store.module
+        let older = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: .unknown,
+                content: .text("copied before the wall opened")
+            )
+        ).entryID
+        let wall = ClipboardHistoryPresentationModel(module: module)
+        await wall.reload()
+        XCTAssertEqual(wall.entries.map(\.id), [older])
+        XCTAssertEqual(wall.selectedID, older)
+
+        // The image copied right before opening the wall, which commits only
+        // once it has been canonicalized and published.
+        let image = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: .unknown,
+                content: .bitmap(try Self.makePNG(), provenance: .image)
+            )
+        ).entryID
+        XCTAssertEqual(wall.entries.map(\.id), [older])
+
+        await wall.refreshForStoreChange()
+
+        XCTAssertEqual(wall.entries.map(\.id), [image, older])
+        XCTAssertEqual(
+            wall.selectedID,
+            older,
+            "a capture landing under the open wall must not move the selection"
+        )
+        XCTAssertEqual(wall.totalCount, 2)
+        XCTAssertEqual(wall.contentState, .content)
+    }
+
+    func testStoreChangeRefreshKeepsTheLoadedDepthAndSelection() async {
+        let original = (0..<4).map(entry)
+        let captured = entry(100)
+        let client = ControlledPresentationClient()
+        await client.setCount(4)
+        let model = ClipboardHistoryPresentationModel(
+            operations: client.operations
+        )
+
+        let initialLoad = Task { await model.reload() }
+        await waitUntil("initial page request") {
+            await client.requestCount == 1
+        }
+        await client.release(
+            requestID: 0,
+            page: ClipboardHistoryPage(
+                entries: Array(original[0..<2]),
+                nextCursor: cursor("first"),
+                cursorDisposition: .initial
+            )
+        )
+        await initialLoad.value
+        let continuation = Task { await model.loadNextPage() }
+        await waitUntil("second page request") {
+            await client.requestCount == 2
+        }
+        await client.release(
+            requestID: 1,
+            page: ClipboardHistoryPage(
+                entries: Array(original[2..<4]),
+                nextCursor: cursor("old-tail"),
+                cursorDisposition: .continued
+            )
+        )
+        await continuation.value
+        model.select(original[1].id)
+
+        let refresh = Task { await model.refreshForStoreChange() }
+        await waitUntil("head request") {
+            await client.requestCount == 3
+        }
+        // Paging waits for the refresh instead of splicing into it.
+        await model.loadNextPage()
+        XCTAssertEqual(model.entries.map(\.id), original.map(\.id))
+        await client.setCount(5)
+        await client.release(
+            requestID: 2,
+            page: ClipboardHistoryPage(
+                entries: [captured, original[0]],
+                nextCursor: cursor("new-1"),
+                cursorDisposition: .initial
+            )
+        )
+        await waitUntil("continuation request") {
+            await client.requestCount == 4
+        }
+        await client.release(
+            requestID: 3,
+            page: ClipboardHistoryPage(
+                entries: [original[1], original[2]],
+                nextCursor: cursor("new-2"),
+                cursorDisposition: .continued
+            )
+        )
+        await refresh.value
+
+        XCTAssertEqual(
+            model.entries.map(\.id),
+            [captured.id] + Array(original[0..<3]).map(\.id),
+            "the refresh keeps the loaded depth instead of growing it"
+        )
+        XCTAssertEqual(model.selectedID, original[1].id)
+        XCTAssertEqual(model.totalCount, 5)
+        XCTAssertEqual(model.pagingState, .moreAvailable)
+        let requests = await client.requests
+        XCTAssertEqual(
+            requests.map(\.cursor),
+            [nil, cursor("first"), nil, cursor("new-1")]
+        )
+    }
+
     func testRestartedPageRebasesThePrefixInsteadOfAppendingIt() async {
         let original = (0..<4).map(entry)
         // The capture that bumped the index generation and invalidated the
@@ -2309,6 +2429,22 @@ final class ClipboardHistoryPresentationModelTests: XCTestCase {
         XCTAssertEqual(model.pagingState, .complete)
         let requests = await client.requests
         XCTAssertEqual(requests.map(\.cursor), [nil, firstCursor])
+    }
+
+    private static func makePNG() throws -> Data {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 32,
+            pixelsHigh: 32,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     }
 
     private func cursor(_ token: String) -> ClipboardHistoryCursor {

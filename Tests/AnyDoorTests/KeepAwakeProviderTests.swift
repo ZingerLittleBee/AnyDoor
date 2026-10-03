@@ -321,4 +321,69 @@ final class KeepAwakeProviderTests: XCTestCase {
         XCTAssertEqual(state, .indefinite)
         XCTAssertTrue(backend.isHeld, "indefinite assertion must survive a stale timer callback")
     }
+
+    // MARK: - Presets and the end-time subtitle
+
+    func testTimedPresetsRunFromFifteenMinutesToTwelveHours() {
+        XCTAssertEqual(KeepAwakePreset.timed.map(\.minutes), [15, 30, 60, 120, 240, 480, 720])
+        XCTAssertEqual(
+            Set(KeepAwakePreset.timed.map(\.titleKey)).count,
+            KeepAwakePreset.timed.count,
+            "each preset needs its own title"
+        )
+    }
+
+    func testTwelveHourPresetSchedulesEndDateTwelveHoursOut() async throws {
+        let backend = MockKeepAwakeBackend()
+        let provider = KeepAwakeProvider(backend: backend)
+        let preset = try XCTUnwrap(KeepAwakePreset.timed.last)
+
+        let before = Date()
+        try await provider.apply(preset.duration)
+        let after = Date()
+        addTeardownBlock { try? await provider.apply(nil) }
+
+        let state = await provider.currentState
+        guard case .timed(let endDate) = state else {
+            return XCTFail("expected .timed state, got \(state)")
+        }
+        XCTAssertGreaterThanOrEqual(endDate, before.addingTimeInterval(12 * 3600 - 2))
+        XCTAssertLessThanOrEqual(endDate, after.addingTimeInterval(12 * 3600 + 2))
+        XCTAssertTrue(backend.isHeld)
+    }
+
+    @MainActor
+    func testUntilSubtitleNamesTomorrowOnlyAfterMidnight() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let evening = try XCTUnwrap(calendar.date(from: DateComponents(
+            year: 2026, month: 10, day: 4, hour: 20
+        )))
+        let sameDay = evening.addingTimeInterval(2 * 3600)
+        let nextDay = evening.addingTimeInterval(8 * 3600)
+
+        let previous = LocalizationManager.shared.preference
+        defer { LocalizationManager.shared.preference = previous }
+        for language in [LanguagePreference.en, .zh] {
+            LocalizationManager.shared.preference = language
+            XCTAssertEqual(
+                PanelStore.keepAwakeUntilSubtitle(endDate: sameDay, now: evening, calendar: calendar, time: "T"),
+                L(.panelSubtitleKeepAwakeUntil, "T")
+            )
+            XCTAssertEqual(
+                PanelStore.keepAwakeUntilSubtitle(endDate: nextDay, now: evening, calendar: calendar, time: "T"),
+                L(.panelSubtitleKeepAwakeUntilTomorrow, "T")
+            )
+        }
+        LocalizationManager.shared.preference = .en
+        XCTAssertEqual(
+            PanelStore.keepAwakeUntilSubtitle(endDate: nextDay, now: evening, calendar: calendar, time: "4:00 AM"),
+            "Awake until 4:00 AM tomorrow"
+        )
+        LocalizationManager.shared.preference = .zh
+        XCTAssertEqual(
+            PanelStore.keepAwakeUntilSubtitle(endDate: nextDay, now: evening, calendar: calendar, time: "04:00"),
+            "保持至明天 04:00"
+        )
+    }
 }

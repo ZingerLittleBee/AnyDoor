@@ -1,6 +1,8 @@
 import AppKit
 import GRDB
+import ImageIO
 import os
+import UniformTypeIdentifiers
 import XCTest
 import ClipboardHistoryTestSupport
 
@@ -423,6 +425,61 @@ final class ClipboardHistorySourcePersistenceTests: XCTestCase {
 }
 
 final class ClipboardHistoryCaptureMonitorTests: XCTestCase {
+    /// Canonicalizing and fingerprinting a large image takes hundreds of
+    /// milliseconds. The fingerprint digest runs after canonicalization, so
+    /// advancing the clock there stands in for that processing time: it must
+    /// not leak into the capture time the entry is ordered and shown by.
+    @MainActor
+    func testImageCapturesAreStampedBeforeTheImageIsProcessed() async throws {
+        let fixture = try MonitorTemporaryStore(in: self)
+        let readAt = Date(timeIntervalSince1970: 1_000)
+        let clock = MonitorCaptureClock(readAt)
+        let module = trackClipboardHistoryModule(ClipboardHistoryModule(
+            testingStoreRoot: fixture.url,
+            keyStore: MonitorMemoryKeyStore(),
+            now: { clock.now },
+            fingerprintDigest: { data in
+                clock.advance(by: 5)
+                return ClipboardHistoryModule.CanonicalIdentity.sha256(data)
+            }
+        ))
+        let pasteboard = NSPasteboard(
+            name: .init("dev.bybee.AnyDoor.monitor.\(UUID().uuidString)")
+        )
+        defer { pasteboard.releaseGlobally() }
+        pasteboard.clearContents()
+        pasteboard.setData(try monitorTestPNG(side: 48), forType: .png)
+
+        let outcome = try await module.capture(
+            ClipboardHistoryPasteboardCaptureRequest(pasteboard: pasteboard),
+            source: .unknown
+        )
+        guard case .captured(let pasteboardCapture) = outcome else {
+            return XCTFail("Expected the image to be captured, got \(outcome)")
+        }
+
+        let screenshotReadAt = clock.now
+        let screenshot = try await module.capture(
+            ClipboardHistoryCaptureRequest(
+                source: .anyDoor,
+                content: .bitmap(
+                    try monitorTestPNG(side: 64),
+                    provenance: .anyDoorScreenshot
+                )
+            )
+        )
+
+        let entries = try await module.page(.init()).entries
+        XCTAssertEqual(
+            entries.first { $0.id == pasteboardCapture.entryID }?.capturedAt,
+            readAt
+        )
+        XCTAssertEqual(
+            entries.first { $0.id == screenshot.entryID }?.capturedAt,
+            screenshotReadAt
+        )
+    }
+
     @MainActor
     func testCopyEventHintReadsTheCachedActivationSource() throws {
         let initial = ClipboardHistoryApplicationSource(
@@ -1240,6 +1297,47 @@ private final class MonitorTemporaryStore {
 @MainActor
 private final class MonitorTestClock {
     var now = Duration.zero
+}
+
+private final class MonitorCaptureClock: Sendable {
+    private let state: OSAllocatedUnfairLock<Date>
+
+    init(_ now: Date) {
+        state = OSAllocatedUnfairLock(initialState: now)
+    }
+
+    var now: Date {
+        state.withLock { $0 }
+    }
+
+    func advance(by seconds: TimeInterval) {
+        state.withLock { $0 += seconds }
+    }
+}
+
+private func monitorTestPNG(side: Int) throws -> Data {
+    let context = try XCTUnwrap(CGContext(
+        data: nil,
+        width: side,
+        height: side,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ))
+    context.setFillColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: side, height: side))
+    let image = try XCTUnwrap(context.makeImage())
+    let output = NSMutableData()
+    let destination = try XCTUnwrap(CGImageDestinationCreateWithData(
+        output,
+        UTType.png.identifier as CFString,
+        1,
+        nil
+    ))
+    CGImageDestinationAddImage(destination, image, nil)
+    XCTAssertTrue(CGImageDestinationFinalize(destination))
+    return output as Data
 }
 
 @MainActor

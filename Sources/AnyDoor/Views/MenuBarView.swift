@@ -33,6 +33,12 @@ struct MenuBarView: View {
     /// and returns false once that panel is gone, so a slow clipboard copy
     /// can never close a newer panel.
     var closePanelIfCurrent: @MainActor () -> Bool = { false }
+    /// Where a history popover's paste goes once the panel closes. The click
+    /// that opened the panel can activate another display's frontmost app,
+    /// so the controller resolves the app the user was working in.
+    var pasteTarget: @MainActor () -> ClipboardHistoryPasteTarget = {
+        .frontmost
+    }
     var clipboardHistoryModule: ClipboardHistoryModule? = nil
     /// Snapshot at panel opening: its AppKit host measures content only once.
     var isSecureInputEnabled = false
@@ -94,9 +100,7 @@ struct MenuBarView: View {
             wireGate()
         }
         .onDisappear {
-            // Don't hide if the popover took key focus deliberately (port-manager
-            // search field). Otherwise hide as before.
-            if popover?.isHoldingFocus != true { popover?.hide() }
+            releasePopover()
         }
         .focusEffectDisabled()
     }
@@ -215,10 +219,9 @@ struct MenuBarView: View {
                 Text(durationMenuLabel(.keepAwakeDurationIndefinite, checked: state == .indefinite))
             }
             Divider()
-            keepAwakeDurationButton(.minutes(15), titleKey: .keepAwakeDuration15Min)
-            keepAwakeDurationButton(.minutes(30), titleKey: .keepAwakeDuration30Min)
-            keepAwakeDurationButton(.minutes(60), titleKey: .keepAwakeDuration1Hour)
-            keepAwakeDurationButton(.minutes(120), titleKey: .keepAwakeDuration2Hour)
+            ForEach(KeepAwakePreset.timed, id: \.minutes) { preset in
+                keepAwakeDurationButton(preset.duration, titleKey: preset.titleKey)
+            }
             if state.isOn {
                 Divider()
                 Button(role: .destructive) {
@@ -482,11 +485,13 @@ struct MenuBarView: View {
                             gate.reset()
                             popover.hide()
                             guard closePanelIfCurrent() else { return }
-                            // Both panels ordered out synchronously, and the
-                            // panel never activated AnyDoor, so the app below
-                            // has keyboard focus again.
+                            // Both panels ordered out synchronously and never
+                            // activated AnyDoor. `pasteTarget` brings back the
+                            // app the user was in when the opening click
+                            // activated another one.
                             then()
-                        }
+                        },
+                        pasteTarget: pasteTarget
                     )
                 )
             }
@@ -508,6 +513,22 @@ struct MenuBarView: View {
         let created = HoverPopover { EmptyView() }
         popover = created
         return created
+    }
+
+    /// The panel hosting this view is being torn down
+    /// (`MenuBarController.hidePanel` has already ordered every hover panel
+    /// out). The gate's callbacks and the mounted popover content capture this
+    /// view's state, which owns the gate and the popover, so release them here;
+    /// otherwise every showing of the panel leaks a `HoverPopover` and its
+    /// window. `onAppear` creates and wires fresh ones.
+    private func releasePopover() {
+        gate.onShow = {}
+        gate.onHide = {}
+        gate.reset()
+        popover?.tearDown()
+        popover = nil
+        activeHoverTarget = nil
+        mountedTarget = nil
     }
 
     /// The hover target's row frame in AppKit screen coordinates, or `nil` when

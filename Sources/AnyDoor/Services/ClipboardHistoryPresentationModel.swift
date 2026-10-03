@@ -346,6 +346,10 @@ final class ClipboardHistoryPresentationModel {
     private var nextCursor: ClipboardHistoryCursor?
     private var revision = 0
     private var isLoadingMore = false
+    private var isRefreshingForStoreChange = false
+    /// A store change arrived while a refresh was already running, or while
+    /// paging held the prefix; the refresh runs (again) once that settles.
+    private var storeChangePending = false
     private var firstPageTask: Task<FirstPageResult, any Error>?
     private var pagingTask: Task<ClipboardHistoryPage, any Error>?
     private var materializationCache:
@@ -395,6 +399,89 @@ final class ClipboardHistoryPresentationModel {
 
     func reload() async {
         await loadFirstPage(preservingSelection: true)
+    }
+
+    /// Brings a presented list up to date after the store announced a change
+    /// (`clipboardHistoryV2DidMutate`) — above all a capture that committed
+    /// after the list loaded. A copied image is read, canonicalized, and
+    /// published well after the copy itself, so a wall opened right after
+    /// copying it would otherwise keep showing history without it until it
+    /// was closed and opened again.
+    ///
+    /// The loaded prefix is rebuilt to the depth already on screen and
+    /// published in one step, keeping the selection by id. Changes that land
+    /// while a refresh runs coalesce into one more pass.
+    func refreshForStoreChange() async {
+        guard !isRefreshingForStoreChange else {
+            storeChangePending = true
+            return
+        }
+        isRefreshingForStoreChange = true
+        defer { isRefreshingForStoreChange = false }
+        repeat {
+            storeChangePending = false
+            await refreshLoadedPrefix()
+        } while storeChangePending && !isLoadingMore
+    }
+
+    private func refreshLoadedPrefix() async {
+        // A first load in flight may have read the store before the change
+        // committed, and with nothing on screen there is nothing to keep, so a
+        // fresh first page is the whole refresh.
+        guard firstPageTask == nil, contentState == .content else {
+            await loadFirstPage(preservingSelection: true)
+            return
+        }
+        // Paging owns the prefix and its cursor until it settles; it picks
+        // this refresh up when it does.
+        guard !isLoadingMore else {
+            storeChangePending = true
+            return
+        }
+        let requestRevision = revision
+        let requestQuery = query
+        isLoadingMore = true
+        defer {
+            if requestRevision == revision {
+                isLoadingMore = false
+                pagingTask = nil
+            }
+        }
+        let head: ClipboardHistoryPage
+        do {
+            head = try await fetchPage(query: requestQuery, cursor: nil)
+        } catch {
+            // A background refresh never disturbs what is on screen; the next
+            // change or the next open tries again.
+            return
+        }
+        guard requestRevision == revision, requestQuery == query,
+            case .ready = head.state
+        else {
+            return
+        }
+        // The loaded depth, not one page more like paging asks for, so a run
+        // of captures does not grow the prefix each time. New entries push as
+        // many off the loaded tail; a selection in the last page walks one
+        // page further so it is never pushed off and replaced.
+        let selectionIsInLastPage = selectedID.flatMap { id in
+            entries.firstIndex { $0.id == id }
+        }.map { $0 >= entries.count - head.entries.count } ?? false
+        let pagingStateBefore = pagingState
+        await rebase(
+            onto: head,
+            requestRevision: requestRevision,
+            requestQuery: requestQuery,
+            targetDepth: selectionIsInLastPage
+                ? entries.count
+                : max(0, entries.count - 1)
+        )
+        // A rebase that could not publish keeps the old prefix and reports a
+        // paging failure for the user to retry. Nobody asked this refresh to
+        // page, so the tail keeps the state it had.
+        if requestRevision == revision, pagingState == .failed {
+            pagingState = pagingStateBefore
+        }
     }
 
     func setQuery(_ query: ClipboardHistoryQuery) async {
@@ -578,6 +665,11 @@ final class ClipboardHistoryPresentationModel {
             if requestRevision == revision {
                 isLoadingMore = false
                 pagingTask = nil
+                if storeChangePending, !isRefreshingForStoreChange {
+                    Task { [weak self] in
+                        await self?.refreshForStoreChange()
+                    }
+                }
             }
         }
         do {
@@ -599,7 +691,8 @@ final class ClipboardHistoryPresentationModel {
                     await rebase(
                         onto: page,
                         requestRevision: requestRevision,
-                        requestQuery: requestQuery
+                        requestQuery: requestQuery,
+                        targetDepth: entries.count
                     )
                 } else {
                     appendPage(page)
@@ -657,17 +750,18 @@ final class ClipboardHistoryPresentationModel {
     ///
     /// `head` is the restarted page — the first page of the new generation. It
     /// is accumulated locally and the chain is followed until the accumulator
-    /// covers the depth the user had already loaded plus one more page, or the
-    /// chain ends. The entries currently on screen are untouched until that
-    /// succeeds, so the wall never shows a half-rebased array — and a recovery
+    /// holds more than `targetDepth` entries — for paging, the depth the user
+    /// had already loaded plus one more page — or the chain ends. The entries
+    /// currently on screen are untouched until that succeeds, so the wall
+    /// never shows a half-rebased array — and a recovery
     /// that cannot reach the old depth keeps the old prefix rather than
     /// shrinking what the user can see.
     private func rebase(
         onto head: ClipboardHistoryPage,
         requestRevision: Int,
-        requestQuery: ClipboardHistoryQuery
+        requestQuery: ClipboardHistoryQuery,
+        targetDepth: Int
     ) async {
-        let targetDepth = entries.count
         var restart = head
         var restartsRemaining = Self.rebaseRestartAllowance
 
@@ -1010,6 +1104,8 @@ final class ClipboardHistoryPresentationModel {
     }
 
     private func loadFirstPage(preservingSelection: Bool) async {
+        // This load reads the store after any change announced so far.
+        storeChangePending = false
         firstPageTask?.cancel()
         pagingTask?.cancel()
         pagingTask = nil
