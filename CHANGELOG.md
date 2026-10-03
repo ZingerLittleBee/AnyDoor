@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.7] - 2026-10-04
+
 ### Added
 
 - Keep Awake (保持唤醒) can now run for 4, 8, or 12 hours, in the menu-bar
