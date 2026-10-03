@@ -48,6 +48,14 @@ versioning.
 
 ### Fixed
 
+- The command palette shows each section header once. A search such as 截图
+  used to repeat a header, such as Screenshot (截图) or Applications (应用), when
+  that section had both strong and weaker matches. The best match still comes
+  first, and each section now lists all its matches under one header.
+- The Chinese UI now names Keep Awake 保持唤醒 instead of showing it in English;
+  typing keep awake still finds it in the command palette. The Command menu-bar
+  icon (Command 键) and the Hyper Key Quick Press setting (单独按下) are
+  translated too.
 - AnyDoor no longer opens or deletes `~/Library/Application Support/default.store`
   at launch. Non-sandboxed apps that use SwiftData keep their data in that file
   by default, and a leftover migration for pre-1.0 development builds could
