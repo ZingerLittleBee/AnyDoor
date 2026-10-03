@@ -297,10 +297,9 @@ final class MenuBarController {
         removeClickMonitors()
         removeKeyMonitors()
         statusItem?.button?.highlight(false)
-        // Authoritatively dismiss any hover popover too. A key-focus popover
-        // (Port Manager / clipboard history) makes the panel's `onDisappear`
-        // skip `popover.hide()`, which would otherwise orphan the
-        // `KeyableHoverPanel` as a zombie window once MenuBarView is torn down.
+        // Authoritatively dismiss any hover popover too, before the hosting
+        // view goes away. MenuBarView's `onDisappear` then tears its
+        // `HoverPopover` down so the `KeyableHoverPanel` is freed with it.
         for case let hoverPanel as KeyableHoverPanel in NSApp.windows where hoverPanel.isVisible {
             hoverPanel.orderOut(nil)
         }

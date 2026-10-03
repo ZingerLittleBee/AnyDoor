@@ -100,9 +100,7 @@ struct MenuBarView: View {
             wireGate()
         }
         .onDisappear {
-            // Don't hide if the popover took key focus deliberately (port-manager
-            // search field). Otherwise hide as before.
-            if popover?.isHoldingFocus != true { popover?.hide() }
+            releasePopover()
         }
         .focusEffectDisabled()
     }
@@ -516,6 +514,22 @@ struct MenuBarView: View {
         let created = HoverPopover { EmptyView() }
         popover = created
         return created
+    }
+
+    /// The panel hosting this view is being torn down
+    /// (`MenuBarController.hidePanel` has already ordered every hover panel
+    /// out). The gate's callbacks and the mounted popover content capture this
+    /// view's state, which owns the gate and the popover, so release them here;
+    /// otherwise every showing of the panel leaks a `HoverPopover` and its
+    /// window. `onAppear` creates and wires fresh ones.
+    private func releasePopover() {
+        gate.onShow = {}
+        gate.onHide = {}
+        gate.reset()
+        popover?.tearDown()
+        popover = nil
+        activeHoverTarget = nil
+        mountedTarget = nil
     }
 
     /// The hover target's row frame in AppKit screen coordinates, or `nil` when
