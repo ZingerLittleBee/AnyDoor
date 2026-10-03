@@ -66,6 +66,9 @@ final class CommandPaletteBuiltinAliasTests: XCTestCase {
             ("扫描", "builtin:qrcode"),
             ("qr", "builtin:qrcode"),
             ("二维码", "builtin:qrcode"),
+            ("keep awake", "builtin:keepAwake"),
+            ("awake", "builtin:keepAwake"),
+            ("保持唤醒", "builtin:keepAwake"),
         ]
         for language in [LanguagePreference.en, .zh] {
             try withLanguage(language) {

@@ -608,7 +608,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Keep Awake"
+            "value": "保持唤醒"
           }
         }
       }
@@ -6100,7 +6100,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Command"
+            "value": "Command 键"
           }
         }
       }
@@ -12645,7 +12645,7 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Quick Press"
+            "value": "单独按下"
           }
         }
       }
