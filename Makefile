@@ -122,12 +122,12 @@ sparkle-tools:
 #   make release 4.3.0               explicit Stable
 #   make release 4.3.0-beta.1        Beta, from release/4.3-beta
 #   make release-dryrun [VERSION]    print the plan, change nothing
-#   make release ... YES=1           skip the confirmation prompt
+#   make release ... YES=1           skip the confirmation prompt (only 1 counts)
 #
 # VERSION=... works as well as the positional form.
 RELEASE_GOAL := $(filter release release-dryrun,$(firstword $(MAKECMDGOALS)))
 RELEASE_VERSION := $(or $(VERSION),$(if $(RELEASE_GOAL),$(word 2,$(MAKECMDGOALS))))
-CUT_FLAGS := $(if $(RELEASE_VERSION),--version $(RELEASE_VERSION)) $(if $(YES),--yes)
+CUT_FLAGS := $(if $(RELEASE_VERSION),--version $(RELEASE_VERSION)) $(if $(filter 1,$(YES)),--yes)
 
 ifneq ($(RELEASE_GOAL),)
 ifneq ($(word 2,$(MAKECMDGOALS)),)
