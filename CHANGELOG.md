@@ -6,6 +6,8 @@ versioning.
 
 ## [Unreleased]
 
+## [4.2.8] - 2026-10-05
+
 ### Fixed
 
 - Clear Notifications (清除通知) now also clears notifications that have left
