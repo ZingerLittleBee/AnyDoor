@@ -305,7 +305,16 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.meta.outputs.tag }}
           RELEASE_ID: ${{ needs.publish.outputs.release_id }}
+        # A re-run of an older run's failed jobs must not move `latest` (and,
+        # through `landing`, the site) back once a newer Stable is published.
         run: |
+          newest="$(gh release list --exclude-drafts --exclude-pre-releases --limit 200 --json tagName --jq '
+            [.[].tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v") | split(".") | map(tonumber)]
+            | max | "v" + (map(tostring) | join("."))')"
+          if [[ "$newest" != "$TAG" ]]; then
+            echo "::error::$newest is a newer published Stable than $TAG; leaving latest and the site alone"
+            exit 1
+          fi
           gh api -X PATCH "repos/$GH_REPO/releases/$RELEASE_ID" -f make_latest=true --silent
           latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)"
           if [[ "$latest" != "$TAG" ]]; then

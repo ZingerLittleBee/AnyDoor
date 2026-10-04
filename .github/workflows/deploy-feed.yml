@@ -8,7 +8,8 @@ name: Update Feed
 #   and Beta, in the `feed-production` environment.
 # - workflow_dispatch redeploys an already published Release's feed from the
 #   default branch, in the reviewer-gated `feed-manual` environment: a repair
-#   after a failed deployment. There is no rollback: the next release seeds from
+#   after a failed deployment, or with `live-feed-down` after the endpoint
+#   itself broke. There is no rollback: the next release seeds from
 #   the newest Release's feed and requires it to be live, so a broken release is
 #   fixed by shipping the next version.
 # - A pull request that touches the worker or the feed checks validates the
@@ -30,6 +31,10 @@ on:
         description: 'Published release tag whose appcast.xml asset becomes the live feed (vX.Y.Z or vX.Y.Z-beta.N)'
         type: string
         required: true
+      live-feed-down:
+        description: 'The live feed returns an HTTP error: skip the rollback comparison (deploy the newest Release)'
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'feed/**'
@@ -151,11 +156,23 @@ jobs:
             "https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION/AnyDoor-$VERSION.zip" \
             > /dev/null
 
+      # `live-feed-down` (manual dispatch only) is the escape hatch for a feed
+      # endpoint that returns an HTTP error: it skips the comparison only when
+      # the live feed cannot be fetched, never when its content differs.
       - name: Guard the live feed against rollback
+        env:
+          LIVE_FEED_DOWN: ${{ github.event_name == 'workflow_dispatch' && inputs.live-feed-down }}
         run: |
-          curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
-            -H 'Cache-Control: no-cache' 'https://anydoor.dev/appcast.xml' \
-            -o "$RUNNER_TEMP/live-appcast.xml"
+          if ! curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
+              -H 'Cache-Control: no-cache' 'https://anydoor.dev/appcast.xml' \
+              -o "$RUNNER_TEMP/live-appcast.xml"; then
+            if [[ "$LIVE_FEED_DOWN" == true ]]; then
+              echo "::warning::The live feed is unreachable; deploying without the rollback comparison"
+              exit 0
+            fi
+            echo "::error::Cannot fetch the live feed; if its endpoint is down, dispatch Update Feed with live-feed-down"
+            exit 1
+          fi
           scripts/verify-feed-publication.py --live "$RUNNER_TEMP/live-appcast.xml" --candidate "$FEED"
 
       - name: Setup Bun
