@@ -146,6 +146,11 @@ jobs:
       id-token: write # package-signed: OIDC token for provenance signing
       attestations: write # package-signed: store the attestations
     uses: ./.github/workflows/release-build.yml
+    # A called job's environment secrets resolve to empty strings unless the
+    # caller passes `secrets: inherit` (actions/runner#4453), even though its
+    # environment variables resolve. The repository has no secrets of its own,
+    # so this passes nothing else; the same applies to `feed` and `landing`.
+    secrets: inherit
     with:
       mode: signed
       tag: ${{ needs.meta.outputs.tag }}
@@ -285,6 +290,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/deploy-feed.yml
+    secrets: inherit
     with:
       tag: ${{ needs.meta.outputs.tag }}
 
@@ -329,6 +335,7 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/deploy-landing.yml
+    secrets: inherit
     with:
       tag: ${{ needs.meta.outputs.tag }}
 
